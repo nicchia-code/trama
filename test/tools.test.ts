@@ -16,6 +16,7 @@ beforeEach(() => {
   p = projectAt(dir);
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
+const getProposalFile = () => join(getProposal(p, "1").dir, "proposal.md");
 
 test("no tool lets an agent make the developer's decisions", () => {
   const names = TOOLS.map((t) => t.name);
@@ -35,6 +36,14 @@ describe("callTool", () => {
     expect(bad.text).toContain('unknown State "Nowhere"');
     expect(readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8")).toBe(before);
     expect(getProposal(p, "1").data.status).toBe("open");
+  });
+
+  test("a write with malformed content is refused before the Proposal changes", () => {
+    callTool(p, "trama_proposal_new", { title: "x" });
+    const before = readFileSync(getProposalFile(), "utf8");
+    expect(callTool(p, "trama_proposal_write", { proposal: "1", path: "checkout/order.md", content: 42 })).toEqual({ text: '"content" must be a string', isError: true });
+    expect(readFileSync(getProposalFile(), "utf8")).toBe(before);
+    expect(existsSync(join(getProposal(p, "1").dir, "model"))).toBe(false);
   });
 
   test("paths outside the Model are refused", () => {
