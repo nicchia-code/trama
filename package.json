@@ -1,0 +1,24 @@
+{
+  "name": "trama",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build --compile src/cli/main.ts --outfile dist/trama",
+    "build:extension": "bun run scripts/build-extension.ts",
+    "harness": "bun run scripts/build-extension.ts && bun run scripts/harness.ts"
+  },
+  "dependencies": {
+    "cytoscape": "^3.34.3",
+    "elkjs": "^0.12.0",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/cytoscape": "^3.31.0",
+    "@types/vscode": "^1.138.0",
+    "typescript": "^7.0.2"
+  }
+}

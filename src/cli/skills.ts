@@ -1,0 +1,39 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import design from "../../skills/trama-design/SKILL.md" with { type: "text" };
+import designFormat from "../../skills/trama-design/FORMAT.md" with { type: "text" };
+import implement from "../../skills/trama-implement/SKILL.md" with { type: "text" };
+import scan from "../../skills/trama-scan/SKILL.md" with { type: "text" };
+import { writeFileEnsuringDir } from "../core/store";
+
+/** Skill files, embedded in the binary: path relative to the skills directory -> content. */
+export const SKILLS: Record<string, string> = {
+  "trama-design/SKILL.md": design,
+  "trama-design/FORMAT.md": designFormat,
+  "trama-scan/SKILL.md": scan,
+  "trama-implement/SKILL.md": implement,
+};
+
+/** Existing skill files under `dir` whose content differs from ours, i.e. what an install would destroy. */
+export function skillConflicts(dir: string): string[] {
+  return Object.entries(SKILLS)
+    .map(([rel, content]) => ({ path: join(dir, rel), content }))
+    .filter(({ path, content }) => existsSync(path) && readFileSync(path, "utf8") !== content)
+    .map(({ path }) => path);
+}
+
+/** Skill files of this version that are not under `dir` yet. */
+export function missingSkills(dir: string): string[] {
+  return Object.keys(SKILLS)
+    .map((rel) => join(dir, rel))
+    .filter((path) => !existsSync(path));
+}
+
+/** Writes the skills under `dir`, replacing any previous copy; returns the written paths. */
+export function installSkills(dir: string): string[] {
+  return Object.entries(SKILLS).map(([rel, content]) => {
+    const path = join(dir, rel);
+    writeFileEnsuringDir(path, content);
+    return path;
+  });
+}

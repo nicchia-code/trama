@@ -1,0 +1,91 @@
+import { parseArgs } from "node:util";
+import { TramaError, UsageError } from "../core/errors";
+import { arity, COMMANDS, type Command, makeContext, type Values } from "./commands";
+import type { Result } from "./result";
+
+const GROUPS = ["proposal", "task", "drift", "skills"];
+
+function help(): string {
+  const width = Math.max(...COMMANDS.map((c) => `${c.name} ${c.args}`.length));
+  const rows = COMMANDS.map((c) => `  ${`${c.name} ${c.args}`.trimEnd().padEnd(width)}  ${c.developerOnly ? "[developer only] " : ""}${c.summary}`);
+  return [
+    "trama [--json] [--root <dir>] <command> …",
+    "",
+    "Explore the Model and manage Proposals, Tasks and Drifts. Never reads your code.",
+    "",
+    ...rows,
+    "",
+    "Options: --json prints JSON instead of Markdown; --root <dir> uses <dir>/.trama.",
+    "Exit codes: 0 ok, 1 failure (validation errors, unknown element, stale Proposal), 2 usage.",
+  ].join("\n");
+}
+
+/** Pulls the global options out of argv, wherever they appear. */
+function splitGlobals(argv: string[]): { rest: string[]; json: boolean; root?: string } {
+  const rest: string[] = [];
+  let json = false;
+  let root: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i] as string;
+    if (a === "--json") json = true;
+    else if (a === "--root") {
+      root = argv[++i];
+      if (root === undefined) throw new UsageError("--root needs a directory");
+    } else if (a.startsWith("--root=")) root = a.slice("--root=".length);
+    else rest.push(a);
+  }
+  return { rest, json, root };
+}
+
+function pickCommand(rest: string[]): { command: Command; tail: string[] } {
+  const [first, second] = rest;
+  const name = first !== undefined && GROUPS.includes(first) ? `${first} ${second ?? ""}`.trim() : first;
+  const command = COMMANDS.find((c) => c.name === name);
+  if (!command) {
+    const hint = first !== undefined && GROUPS.includes(first) ? `Known "${first}" commands: ${COMMANDS.filter((c) => c.name.startsWith(`${first} `)).map((c) => c.name.slice(first.length + 1)).join(", ")}` : "Run trama --help";
+    throw new UsageError(`Unknown command "${name ?? ""}". ${hint}`);
+  }
+  return { command, tail: rest.slice(command.name.split(" ").length) };
+}
+
+/** Set by the Trama extension in every agent it launches. */
+export const AGENT_ENV = "TRAMA_AGENT";
+
+export function run(argv: string[], cwd: string, env: Record<string, string | undefined> = process.env): { out: string; exit: number } {
+  const { rest, json, root } = splitGlobals(argv);
+  if (rest.length === 0 || rest[0] === "--help" || rest[0] === "-h" || rest[0] === "help") return { out: help(), exit: rest.length === 0 ? 2 : 0 };
+
+  const { command, tail } = pickCommand(rest);
+  let parsed: { values: Values; positionals: string[] };
+  try {
+    parsed = parseArgs({ args: tail, options: command.options ?? {}, allowPositionals: true, strict: true }) as typeof parsed;
+  } catch (err) {
+    throw new UsageError(`trama ${command.name}: ${(err as Error).message}`);
+  }
+  const { min, max } = arity(command);
+  if (parsed.positionals.length < min || parsed.positionals.length > max)
+    throw new UsageError(`Usage: trama ${command.name} ${command.args}`.trimEnd());
+  if (command.developerOnly && env[AGENT_ENV])
+    throw new TramaError(`"trama ${command.name}" is the developer's decision and cannot be run by an agent (${AGENT_ENV} is set). Ask the developer to decide on the board.`);
+
+  const result: Result = command.run(makeContext(cwd, root), parsed.positionals, parsed.values);
+  return { out: json ? JSON.stringify(result.json, null, 2) : result.md.replace(/\n{3,}/g, "\n\n").trimEnd(), exit: result.exit ?? 0 };
+}
+
+if (import.meta.main) {
+  try {
+    const { out, exit } = run(process.argv.slice(2), process.cwd());
+    console.log(out);
+    process.exit(exit);
+  } catch (err) {
+    if (err instanceof UsageError) {
+      console.error(`error: ${err.message}`);
+      process.exit(2);
+    }
+    if (err instanceof TramaError) {
+      console.error(`error: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+}

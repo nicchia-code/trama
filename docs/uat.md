@@ -1,0 +1,557 @@
+# UAT: Trama VS Code extension
+
+Manual acceptance test, step by step. Every row is one action with one observable result. Expected values were read from the running views and from the CLI on the seeded demo, so they are exact. Mark the last column with ✓ (pass), ✗ (fail) or `~` (different from expected: write what you saw underneath).
+
+## Automated run
+
+A real VS Code (code-oss, same extension build, fish shell) was driven through the Chrome DevTools protocol, with the agent command replaced by a `printf >> file` so every launch could be counted and read back. The webview was also exercised in headless Chrome against the same bundle. Each result below says how it was obtained.
+
+**Passed, and how it was driven**
+
+| Area | Rows | Input used |
+|---|---|---|
+| Board text, badges, arrows, columns | E1 to E3 | Read from the DOM |
+| Navigation from the board to the Diagram | E4 | DOM `.click()` on chips and links |
+| Moving a Task | E5 (file results), E6 (name, move), E7 (nothing moved) | `DragEvent`s dispatched from script (synthetic), and a real Enter keypress. Native drag with a real mouse was verified only in headless Chrome: dropping on In progress posts `moveTask`, dropping on To decide posts nothing |
+| Pending state of a moved card | E6.2, E6.3 logic | Headless Chrome, real Enter key: `aria-busy="true"`, class `is-pending`, opacity 0.5, `draggable=false`; a second Enter and a click send no second `moveTask`; released after about 5 s when the host never answers. Not seen on screen in VS Code, where the host answers in about 300 ms |
+| Live updates and error banners | F1 to F7, F9, F10 | Files written from outside; DOM read. **F8 was not run** |
+| Developer decisions | G1 to G10 | Buttons activated with DOM `.click()`; input boxes typed with real key events; results read from the files on disk |
+| Agent launches | H1 to H19 | Buttons with DOM `.click()`; prompts read back from the log file |
+| Empty project | J1 to J10 | Notification and modal buttons with DOM `.click()` |
+| Keyboard focus rings | K4 | Real Tab key events, computed outline read |
+| Canvas interactions | B2.1, B2.3, B3.2, B5, B6.2, B6.3, B10.1 to B10.3, B10.5, B10.6, B11.1, D1, D2 | Real mouse and key events sent to the webview at node positions read from the Cytoscape instance |
+| Wheel zoom | B10.4 | In VS Code only a scripted `WheelEvent` (it moved the zoom by about 1 %). With a real wheel in headless Chrome the direction is right (3 ticks up: 1.200 to 1.242; 6 ticks down: 1.186), about 1.2 % per tick |
+
+Buttons were activated through the DOM, not clicked with the real mouse, so a button that is covered, clipped or too small to hit is not covered by this run.
+
+**Still to do by eye, or with a real agent:** B2.2, B4.6 (hover tooltips), B7.1 and B8.2 and C6.3 (how sub-States, the State level and a removed State look in VS Code; seen in Chrome only), B10.4 (does the wheel feel right), B10.9 and K3 (readability when wide or narrow), C4.2, D3.3, E5 and E7 with a real mouse in VS Code, how the pending card looks (E5.1, E6.2), F8, K1 for the Feature level in a light theme and the State level in both themes, a real-mouse click on each button, and all of part I.
+
+**Findings:** (1) deleting and recreating `.trama/` made VS Code's file watcher stop reporting changes in some subfolders, so the demo reset now updates files in place; (2) the last breadcrumb is a button with `aria-current="page"`, clicking it does nothing, so B9.3 means "marked as current".
+
+
+## 0. Conventions
+
+- **↻ reset** means: run the reset command (S1). It restores the seeded state in about a second. It deletes every change you made under `.trama/` of the demo and leaves `.vscode/` and `.agents/` alone.
+- **verification shell**: a normal terminal **outside** the Trama window, bash or zsh, with the two lines of S4 pasted. `j` points at this repo's build, so it never picks up an older `trama` from your PATH.
+- **"the board"** is the Board tab. **"the panel"** is the right-hand side panel of the Diagram tab.
+- Click means a single left click. Double-click means two quick clicks on the same node.
+- Tests marked 🪙 spend model tokens. Everything else is free.
+- Tests marked 🔍 are exploratory: the behaviour was never run, so note what you see even if it is not a failure.
+
+## 1. Setup
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| S1 | Run `cd /home/luca/Developer/Jasper && TRAMA_DEMO_DIR=/tmp/trama-demo/shop bun run scripts/harness.ts` | Prints `wrote extension/dist/harness.html`. No error | ☐ |
+| S2 | Run `printf '{\n  "trama.agentCommand": "echo {prompt}"\n}\n' > /tmp/trama-demo/shop/.vscode/settings.json` | File contains `"trama.agentCommand": "echo {prompt}"`. From now on the "agent" only prints its prompt | ☐ |
+| S3 | Run `code --extensionDevelopmentPath=/home/luca/Developer/Jasper/extension --new-window /tmp/trama-demo/shop` (skip if the window is already open) | A VS Code window titled `shop`. If a Welcome dialog appears, close it | ☐ |
+| S4 | In the verification shell paste: `j() { /home/luca/Developer/Jasper/dist/trama --root /tmp/trama-demo/shop "$@"; }` and `D=/tmp/trama-demo/shop/.trama` | No output. `j board` prints the board (see S5) | ☐ |
+| S5 | Run `j board` | `To decide`: Proposal 0001, Proposal 0002, Drift 0001, Drift 0002 (Proposal 0002). `To do`: 0001, 0002. `In progress`: 0003. `Done`: 0004 | ☐ |
+
+## 2. The seeded demo (reference)
+
+| Thing | Content |
+|---|---|
+| Actors | `courier` (1 Event: PICKED_UP), `stripe` (3: CHARGE_OK, CHARGE_FAILED, REFUND_DONE), `user` (3: ADD_ITEM, CHECKOUT, CANCEL), `warehouse` (1: PACKAGE_READY) |
+| Feature `checkout` | Machines `cart` (3 States), `order` (8), `payment` (6) |
+| `order` States | Draft (initial), Awaiting payment, Paid [Preparing (initial), Ready to ship], Refunding, Shipped (final), Cancelled (final) |
+| Proposal 0001 "Returns after shipping" | `actors/user.md` (+1), `checkout/order.md` (+2 ~2), `checkout/return.md` (+5, new Machine) |
+| Proposal 0002 "Orders can be lost in transit" | `checkout/payment.md` (+1: State `Written off (final)`) |
+| Drift 0001 | "Code refunds after the package is picked up", points at `order/Shipped`, no Proposal |
+| Drift 0002 | "Code has a Written off payment", points at `payment`, Proposal 0002 attached |
+| Task 0001 To do | "Implement refunds for prepared orders", refs `order/Refunding`, `order/Paid/user.CANCEL` |
+| Task 0002 To do | "Payment declined email", ref `order/Awaiting payment/payment.DECLINED` |
+| Task 0003 In progress | "Cart confirmation", ref `cart/Has items/user.CHECKOUT` |
+| Task 0004 Done | "Upgrade dependencies", technical |
+
+---
+
+## A. Opening the panel
+
+### A1. First open
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Four commands: **Trama: Open**, **Trama: Initialize Project**, **Trama: Design with Agent…**, **Trama: Scan System** | ☐ |
+| 2 | Run **Trama: Open** | One new editor tab titled `Trama`, in the editor area | ☐ |
+| 3 | Look at the tab header inside the panel | Two tabs: **Diagram** (selected, underlined) and **Board** with a grey badge `4` | ☐ |
+| 4 | Look under the tabs | No red banner | ☐ |
+| 5 | Look at the Diagram breadcrumb | Only `System` | ☐ |
+| 6 | Run **Developer: Open Webview Developer Tools** (palette) and open its Console tab | No red errors. A yellow `custom wheel sensitivity` warning from Cytoscape is expected and harmless. No `Content Security Policy` violation | ☐ |
+
+### A2. Open twice
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | With the panel open in another editor tab, run **Trama: Open** again | The existing `Trama` tab is brought to front. There is still exactly one `Trama` tab | ☐ |
+
+### A3. Close and reopen
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Close the `Trama` tab, run **Trama: Open** | A new tab opens at the System level with the current data | ☐ |
+
+### A4. State survives tab switching
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Diagram: drill to `checkout › order` (see B3–B5) and choose Proposal `0001` in the selector | Breadcrumb `System › checkout › order`, selector shows `0001 · Returns after shipping` | ☐ |
+| 2 | Click the **Board** tab, then the **Diagram** tab | Same breadcrumb, same selector value, same zoom and pan as before | ☐ |
+| 3 | Open another editor tab, come back to `Trama` | Same as above; the diagram is not blank or redrawn from the start | ☐ |
+
+### A5. Reload window 🔍
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | With the panel open, run **Developer: Reload Window** | Not specified. Note whether the panel comes back or disappears. If it disappears, **Trama: Open** must open it again with the right data | ☐ |
+
+---
+
+## B. Diagram: levels and navigation
+
+### B1. System level
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Open the Diagram at the System level, selector `None` | Four purple pill nodes on the left, top to bottom: `Courier · 1 event`, `Stripe · 3 events`, `User · 3 events`, `Warehouse · 1 event` | ☐ |
+| 2 | Look at the box on the right | `Checkout` with the text `3 machines · ⚠ 2 drifts inside`, a **red** outline, and a small ↗ icon at its right edge | ☐ |
+| 3 | Look at the edges | Four grey edges Actor → Checkout, labelled `1` (Courier), `3` (Stripe), `3` (User), `1` (Warehouse) | ☐ |
+| 4 | Look under Checkout | Two red dashed pill nodes `Drift 0001` and `Drift 0002`, each with a dashed red edge going up to Checkout | ☐ |
+| 5 | Look at the toolbar | Left: `System`. Right: `Proposal` selector, buttons `−`, `+`, `Fit`, `Design…`, `Scan` | ☐ |
+| 6 | Look at the panel | `SYSTEM`, `Shop`, `An online shop selling printed books to private customers.`, then `FEATURES` with the link `Checkout` and `3 machines` under it | ☐ |
+| 7 | Look at the bottom-left legend | `Legend` (collapsible, open) with six entries: Proposal adds it, Proposal removes it, Proposal changes it, Drift, Initial State, Final State | ☐ |
+| 8 | Click the `Legend` header | It collapses to its title; click again to expand | ☐ |
+
+### B2. Inspect a Feature
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Click the `Checkout` box once | The box gets a blue outline and a darker blue fill. The panel shows `FEATURE`, `Checkout`, `From a filled cart to a delivered order, including payment and cancellation.`, buttons **Drill in** and **Open file**, then `MACHINES`: `cart · 3 states`, `order · 8 states`, `payment · 6 states` | ☐ |
+| 2 | Hover the box | A tooltip with the description appears | ☐ |
+| 3 | Click an Actor node, for example `User` 🔍 | Not observed. By design the panel shows that Actor and its Events, and nothing is drilled into | ☐ |
+| 4 | Press Escape with the diagram focused | Selection is cleared; the panel goes back to the System description | ☐ |
+
+### B3. Three ways to drill in
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Select Checkout, click **Drill in** in the panel | Feature level. Breadcrumb `System › checkout` | ☐ |
+| 2 | Click `System` in the breadcrumb, then double-click the Checkout box | Same result | ☐ |
+| 3 | Click `System` in the breadcrumb, then click the ↗ icon on the Checkout box | Same result | ☐ |
+
+### B4. Feature level
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Look at the left border | Four **dimmed** Actor nodes: `User`, `Warehouse`, `Courier`, `Stripe`. Dimmed means they live outside this Feature | ☐ |
+| 2 | Look at the Machines | `Cart · 3 states`, `Payment · 6 states`, `Order · 8 states · ⚠ 1 drift inside`. Order and Payment have a **red** outline | ☐ |
+| 3 | Read all the edge labels | `ADD_ITEM, CHECKOUT` (User → Cart), `CONFIRM` (Cart → Order), `CANCEL` (User → Order), `PACKAGE_READY` (Warehouse → Order), `PICKED_UP` (Courier → Order), `CHARGE_OK, CHARGE_FAILED +1` (Stripe → Payment), `SUCCEEDED, DECLINED +1` (Payment → Order), `CONFIRMED, REFUND_REQUESTED` (Order → Payment). Eight edges, no overlapping labels | ☐ |
+| 4 | Look at the Drifts | `Drift 0001` is joined by a dashed red edge to Order; `Drift 0002` to Payment | ☐ |
+| 5 | Click `Order` once | Panel `MACHINE`, `Order`, description, **Drill in**, **Open file**, `STATES` (Draft initial, Awaiting payment, Paid, Refunding, Shipped final, Cancelled final), `EVENTS IT EMITS`: `CONFIRMED … received by payment/Idle` and `REFUND_REQUESTED … received by payment/Paid` | ☐ |
+| 6 | Hover `Order` | Tooltip listing the States and Events | ☐ |
+
+### B5. Machine level (`order`)
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | From Feature level double-click `Order` | Breadcrumb `System › checkout › order`. Panel `MACHINE`, `Order`, description, **Open file** | ☐ |
+| 2 | Look at the States | Left to right: a filled **dot** (initial) with an arrow into `Draft`; `Awaiting payment`; `Paid` with the text `2 sub-states`, a ▶ icon and a ↗ icon; `Refunding`; `Shipped`; `Cancelled` | ☐ |
+| 3 | Look at the final States | `Shipped` and `Cancelled` have a **double border** | ☐ |
+| 4 | Read the edge labels | `cart.CONFIRM`, `payment.SUCCEEDED`, `payment.DECLINED`, `user.CANCEL` (twice, from Paid: to Cancelled and to Refunding), `courier.PICKED_UP` (Paid → Shipped), `payment.REFUNDED` (Refunding → Cancelled). Seven edges | ☐ |
+| 5 | Look at Shipped | Red outline, with a red dashed `Drift 0001` ghost joined by a dashed red edge | ☐ |
+
+### B6. Inspect a State and a Transition
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Click `Draft` | Panel `STATE (INITIAL)`, `Draft`, `The customer is still choosing what to buy.`, **Open file**, `TRANSITIONS`: `cart.CONFIRM → Awaiting payment` with `only if the cart is not empty.` below | ☐ |
+| 2 | Click the edge label `cart.CONFIRM` | The edge turns blue. Panel `TRANSITION`, `Draft → Awaiting payment · cart.CONFIRM`, **Open file**, `cart.CONFIRM: Draft → Awaiting payment`, `only if the cart is not empty.` A tooltip with the same text shows | ☐ |
+| 3 | Click an empty area of the canvas | Selection clears, the panel goes back to the Machine | ☐ |
+
+### B7. Expand and collapse a State
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Click the ▶ icon on `Paid` | `Paid` becomes a large box titled `Paid` containing a dot, `Preparing`, an edge `warehouse.PACKAGE_READY`, and `Ready to ship`. The icon turns into ▼ | ☐ |
+| 2 | Look at the edges leaving Paid | They now start from the box or from `Ready to ship` (`courier.PICKED_UP` to Shipped); the two `user.CANCEL` edges still start from the Paid box | ☐ |
+| 3 | Click the ▼ icon | `Paid` collapses back to `2 sub-states` | ☐ |
+
+### B8. State level (`Paid`)
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Click the ↗ icon on `Paid` | Breadcrumb `System › checkout › order › Paid` | ☐ |
+| 2 | Look at the canvas | A dot → `Preparing` → edge `warehouse.PACKAGE_READY` → `Ready to ship` → edge `courier.PICKED_UP` → `Shipped`. `Shipped` is **dimmed**: it is outside this sub-machine | ☐ |
+| 3 | Look at the panel | `STATE`, `Paid`, **Open file**, `TRANSITIONS (APPLY TO EVERY SUB-STATE)`: `user.CANCEL → Cancelled` (`only if nothing has been prepared yet; refunds the customer.`) and `user.CANCEL → Refunding` (`once preparation has started.`) | ☐ |
+| 4 | The inherited `user.CANCEL` Transitions | They are listed in the panel only, **not drawn** on the canvas | ☐ |
+
+### B9. Breadcrumb
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | From the State level click `order` | Machine level of `order` | ☐ |
+| 2 | Click `checkout` | Feature level | ☐ |
+| 3 | Click `System` | System level. The last segment is bold and not clickable | ☐ |
+
+### B10. Zoom and pan
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | At the Machine level click `+` three times | The diagram gets larger each time, up to a maximum | ☐ |
+| 2 | Click `−` several times | Smaller each time, down to a minimum (it cannot vanish) | ☐ |
+| 3 | Click `Fit` | The whole diagram is framed again | ☐ |
+| 4 | Scroll the mouse wheel over the canvas | Zooms around the pointer | ☐ |
+| 5 | Drag the empty background | The diagram pans | ☐ |
+| 6 | Click the canvas to focus it, press `+`, `-`, `0` | Zoom in, zoom out, fit | ☐ |
+| 7 | Navigate to another level | It is framed with Fit automatically | ☐ |
+| 8 | Stay at the Machine level at a custom zoom and edit any file under `.trama/tasks/` (see F1) | The zoom and pan do **not** reset when the data refreshes | ☐ |
+| 9 | Zoom out at the Machine level of `order` | Labels on a wide graph get small. Note it (known flaw): readable after zooming in | ☐ |
+
+### B11. The Diagram is read-only
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Try to drag a State node | The node does **not** move (only the background pans) | ☐ |
+| 2 | Try to double-click a State label to rename it, right-click, drag from a node to create an edge | Nothing is created or renamed | ☐ |
+
+### B12. Open file buttons
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Machine level, **Open file** in the panel | `checkout/order.md` opens in a text editor beside the panel, showing `# Order` | ☐ |
+| 2 | Feature level, select Checkout, **Open file** | `checkout/feature.md` opens | ☐ |
+| 3 | System level, select an Actor, **Open file** 🔍 | By design `actors/<id>.md` opens. Not observed: note if the button is missing | ☐ |
+
+---
+
+## C. Proposals on the Diagram
+
+### C1. The selector
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Open the `Proposal` dropdown | `None`, `0001 · Returns after shipping`, `0002 · Orders can be lost in transit`. No warning marks | ☐ |
+| 2 | Choose `0001` | The diagram redraws with ghosts (see below) and the panel shows the Proposal | ☐ |
+| 3 | Choose `None` | All ghosts vanish; the panel shows the previous selection or the level | ☐ |
+
+### C2. Proposal 0001 at the System level
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | System level, choose `0001` | `User` now reads `4 events` and has a **solid blue** outline; the edge User → Checkout is blue and labelled `4`; `Courier → Checkout` is blue too (the new Machine `return` listens to `courier.PICKED_UP`); Checkout reads `4 machines` with a blue outline | ☐ |
+| 2 | Look at the panel | `ACTOR EVENTS CHANGED BY THE PROPOSAL`: `user.RETURN` with a small `added` label; below it the Proposal card | ☐ |
+
+### C3. Proposal 0001 at the Feature level
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Feature level, choose `0001` 🔍 | By design a **dashed blue** node `Return` appears and Order gets a solid blue outline. Not observed at this level: note what you see | ☐ |
+| 2 | Look at the new edges 🔍 | By design `user.RETURN` edges toward Return | ☐ |
+
+### C4. Proposal 0001 at the Machine level
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Machine level `order`, choose `0001` | `Returned` appears as a blue-tinted State (added) at the right of `Shipped`, joined to it by a dashed blue edge | ☐ |
+| 2 | Look at `Shipped` | Solid blue **and** red outline (changed by the Proposal, and Drift 0001 inside); it is no longer final (single border) | ☐ |
+| 3 | Look at the edges | A new dashed blue edge `user.RETURN` from Shipped to Returned; the edge `user.CANCEL` from Paid to Refunding is solid blue (changed) | ☐ |
+
+### C5. The Proposal card in the panel
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | With `0001` selected read the panel | Dashed-border card `PROPOSAL 0001`, title `Returns after shipping`, body `Customers may send a shipped order back.`, then `CHANGES` | ☐ |
+| 2 | Read the changes | `actors/user.md (modified)`: `+ Event RETURN`. `checkout/order.md (modified)`: `~ State Shipped: no longer final, description changed`, `+ State Returned (final)`, `~ Transition Paid \| user.CANCEL → Refunding: prose changed`, `+ Transition Shipped \| user.RETURN → Returned: within 30 days; refunds the customer.` `checkout/return.md (added)`: States Requested (initial), In transit, Received (final) and two Transitions | ☐ |
+| 3 | Look at the buttons | **Approve** (blue, enabled) and **Reject** | ☐ |
+
+### C6. A Proposal that removes things
+Setup: ↻ first (the new Proposal must get ID 0003). Then, in the verification shell (the panel refreshes by itself):
+```
+j proposal new "Drop refunds" --body "Refunds are out of scope." >/dev/null
+F=$(j proposal edit 3 checkout/order.md)
+sed -i '/^### Refunding/,/^### Shipped/{/^### Shipped/!d;}' "$F"; sed -i '/→ Refunding/d' "$F"
+j proposal show 3
+```
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Read the output of `j proposal show 3` | Status open; changes list `- State Refunding`, `- Transition Paid \| user.CANCEL → Refunding…`, `- Transition Refunding \| payment.REFUNDED → Cancelled`; `Valid.` | ☐ |
+| 2 | Board tab | A third Proposal card `Proposal 0003 · Drop refunds` with `checkout/order.md -3`; the Board badge is `5` | ☐ |
+| 3 | Diagram, Machine level `order`, choose `0003 · Drop refunds` | `Refunding` is **faded** with a dashed red border and the word `removed`; the edges into and out of it are dashed red | ☐ |
+| 4 | Look at the panel | `- State Refunding` and the two removed Transitions listed; **Approve** enabled | ☐ |
+| 5 | ↻ reset when done | Proposal 0003 is gone | ☐ |
+
+### C7. An invalid Proposal
+Setup: ↻ first (the new Proposal must get ID 0003). Then in the verification shell:
+```
+j proposal new "Drop the cart" >/dev/null
+j proposal delete 3 checkout/cart.md
+j validate --proposal 3        # exit code 1
+```
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Read the shell output | `The Model with Proposal 0003 applied has 1 error(s):` `checkout/order.md:9: Event reference to unknown owner "cart"` | ☐ |
+| 2 | Open the selector | The new entry reads `0003 · Drop the cart ⚠ invalid` | ☐ |
+| 3 | Choose it and read the panel | Red text `The Model with this Proposal applied is invalid` and the same error; `checkout/cart.md (removed)` with the removed States | ☐ |
+| 4 | Look at **Approve** | **Disabled**. Hover: tooltip `Stale or invalid Proposals cannot be approved` | ☐ |
+| 5 | Board tab | The card has a red `invalid` badge and a disabled **Approve**; **Reject** works | ☐ |
+| 6 | ↻ reset when done | | ☐ |
+
+---
+
+## D. Drifts on the Diagram
+
+### D1. A Drift without a Proposal
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Machine level `order`, click the red `Drift 0001` ghost | Panel `DRIFT 0001`, title `Code refunds after the package is picked up`, body `src/refund.ts refunds even when the courier already picked the package up.`, `POINTS AT` `order/Shipped` | ☐ |
+| 2 | Look at the buttons | **Fix code** and **Dismiss** only. There is no Accept Proposal | ☐ |
+
+### D2. A Drift with an attached Proposal
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | System level, click `Drift 0002` | Panel shows `DRIFT 0002`, `Code has a Written off payment`, `POINTS AT` `payment`, and three buttons **Fix code**, **Accept Proposal**, **Dismiss** | ☐ |
+| 2 | Look at the selector | It switched to `0002 · Orders can be lost in transit` | ☐ |
+| 3 | Go to `checkout › payment` | A dashed blue `Written off` final State is visible | ☐ |
+
+### D3. Drifts at other levels
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Feature level | A Drift ghost is attached to each of Order and Payment, and both have the red outline | ☐ |
+| 2 | Machine level `cart` | No Drift ghost (no Drift points at it) | ☐ |
+| 3 | Machine level `payment` 🔍 | Drift 0002 points at the Machine itself. Note how it is drawn (the code shows a ghost with no edge) | ☐ |
+
+---
+
+## E. Board
+
+### E1. Layout
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Click the **Board** tab | Toolbar: **Run all To do** (blue), **New technical task**, **Scan System**, **Design…** | ☐ |
+| 2 | Look at the columns | `TO DECIDE 4`, `TO DO 2`, `IN PROGRESS 1`, `DONE 1`, each with a count badge | ☐ |
+
+### E2. To decide
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Read the first card | `Proposal 0001`, `Returns after shipping`, rows `actors/user.md +1`, `checkout/order.md +2 ~2`, `checkout/return.md +5`, buttons **View on diagram**, **Approve** (blue), **Reject**; a blue left border | ☐ |
+| 2 | Read the second card | `Proposal 0002`, `Orders can be lost in transit`, `checkout/payment.md +1` | ☐ |
+| 3 | Read the third card | `Drift 0001`, title, body excerpt, chip `order/Shipped`, buttons **Fix code**, **Dismiss**, **View on diagram**; a red left border | ☐ |
+| 4 | Read the fourth card | `Drift 0002`, chip `payment`, a link `Proposal 0002 attached`, buttons **Fix code**, **Accept Proposal**, **Dismiss**, **View on diagram** | ☐ |
+
+### E3. Task cards
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Read `0001` in To do | Title `Implement refunds for prepared orders`, chips `order/Refunding` and `order/Paid/user.CANCEL`, an excerpt (`When a paid order is cancelled after preparation has started…`), buttons **Run** (blue) and **Open**, arrows ← (disabled) and → | ☐ |
+| 2 | Read `0004` in Done | Badge `technical`, no chips, only **Open**, arrow ← enabled and → disabled | ☐ |
+| 3 | Read `0003` in In progress | Chip `cart/Has items/user.CHECKOUT`, both arrows enabled | ☐ |
+
+### E4. Links into the Diagram
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Proposal 0001 card: **View on diagram** | The Diagram tab opens with `0001` selected in the selector | ☐ |
+| 2 | Board, Task 0001: click the chip `order/Refunding` 🔍 | By design the Diagram opens at `order`, breadcrumb `System › checkout › order`, and the State `Refunding` is selected. Not observed | ☐ |
+| 3 | Board, Drift 0002: click `Proposal 0002 attached` | Diagram opens with `0002` selected | ☐ |
+| 4 | Board, Drift 0001: **View on diagram** 🔍 | By design the Diagram opens at `order` with `Shipped` selected. Not observed | ☐ |
+| 5 | Board, Task 0001: click the chip `order/Paid/user.CANCEL` 🔍 | By design the Diagram opens at `order` with the Transition(s) of Paid on `user.CANCEL` selected. Not observed: note what you see | ☐ |
+
+### E5. Move a Task by dragging
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. Drag Task 0001 from To do and drop it on the In progress column | The card dims right away, then moves into In progress within about a second | ☐ |
+| 2 | In the verification shell run `grep column $D/tasks/0001-*.md` | `column: doing` | ☐ |
+| 3 | Drag it onto Done | Moves; file says `column: done` | ☐ |
+
+### E6. Move a Task with the keyboard
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. Tab until the → button of Task 0002 is focused; read its accessible name (hover title or screen reader) | `Move task 0002 to In progress` | ☐ |
+| 2 | Press Enter | The card dims, then moves to In progress; the focus stays on that card's buttons | ☐ |
+| 3 | Press Enter twice quickly on another arrow | The second press is ignored while the first is pending | ☐ |
+| 4 | `grep column $D/tasks/0002-*.md` | `column: doing` | ☐ |
+
+### E7. Refused drop
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Drag a Task over the To decide column | Red dashed outline on the column while hovering | ☐ |
+| 2 | Release | Nothing moves; no file changes | ☐ |
+
+### E8. Open a Task
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Task 0003: **Open** | `tasks/0003-cart-confirmation.md` opens beside the panel, front matter with `column: doing` | ☐ |
+
+### E9. Badges
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Do F4 (stale) and look at the Proposal 0001 card | Orange badge `stale`; **Approve** disabled; hover shows a tooltip naming `checkout/order.md` | ☐ |
+
+---
+
+## F. Live updates and errors
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| F1 | ↻. Open `tasks/0004-upgrade-dependencies.md` in any editor, change `column: done` to `column: todo`, save | Within about a second, Task 0004 moves to To do (To do now has 3 cards, Done is empty and shows its empty hint). No reload. The Board badge stays `4` | ☐ |
+| F2 | In the same file change `refs: []` to `refs: text`, save | A red banner appears under the tabs, naming `…/tasks/0004-upgrade-dependencies.md` and saying `"refs" must be a list of strings`. The board and diagram keep showing the last good data | ☐ |
+| F3 | Change it back to `refs: []`, save | The banner disappears by itself | ☐ |
+| F4 | ↻. In the verification shell run `echo >> $D/model/checkout/order.md` | Proposal 0001 gets the badge `stale`; **Approve** (Board and Diagram) is disabled. `j proposal list` prints `0001 [open, stale]` | ☐ |
+| F5 | ↻. Add a new file with `printf '%s\n' '---' 'column: todo' 'technical: true' 'refs: []' 'drift: null' '---' '# Rebuild CI cache' > $D/tasks/0005-rebuild-ci-cache.md` | A new Task `0005` appears in To do within a second with the badge `technical`; counts update | ☐ |
+| F6 | Delete that file | The card disappears | ☐ |
+| F7 | Trigger any error banner (F2) and click the `×` | The banner hides | ☐ |
+| F8 | ↻. In `model/checkout/order.md` remove the text ` (initial)` from `### Draft (initial)`, save 🔍 | No crash. The UI does **not** warn that the Model is invalid (no code shows Model errors). Note what you see. Run `j validate`: exit 1 with `The Machine must have exactly one (initial) State, found 0` | ☐ |
+| F9 | ↻. Edit `proposals/0001-*/proposal.md`, change `status: open` to `status: bogus`, save | Red banner naming that file with `"status" must be one of open, approved, rejected` | ☐ |
+| F10 | With the Trama tab hidden behind another tab, edit a Task file, then return to the Trama tab | The change is already shown | ☐ |
+
+---
+
+## G. Developer decisions (agent mode: echo, S2)
+
+For every G test, ↻ first, then open the panel and the "Trama agent" terminal panel.
+
+### G1. Approve a Proposal from the Board
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Board: **Approve** on Proposal 0001 | The card leaves To decide (count 3). No error banner | ☐ |
+| 2 | Look at the bottom panel | A terminal named **Trama agent** opens in the project folder | ☐ |
+| 3 | Read the terminal | Exactly **one** command was sent and one line printed: ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
+| 4 | Verification shell: `j validate` | `The Model is valid.` | ☐ |
+| 5 | `grep -c Returned $D/model/checkout/order.md` | `2` | ☐ |
+| 6 | `ls $D/model/checkout` | `cart.md feature.md order.md payment.md return.md` | ☐ |
+| 7 | `grep -n RETURN $D/model/actors/user.md` | A line `### RETURN` | ☐ |
+| 8 | `grep status $D/proposals/0001-*/proposal.md` | `status: approved` | ☐ |
+| 9 | Diagram, System level, selector `None` | User now has `4 events`; Checkout has `4 machines`; no ghosts for 0001 | ☐ |
+| 10 | Selector | `0001` is no longer listed | ☐ |
+
+### G2. Approve from the Diagram panel
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. Diagram, choose `0001`, click **Approve** in the panel | Same results as G1.1 to G1.10, with exactly one scan line in the terminal | ☐ |
+
+### G3. Reject with feedback
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. Board: **Reject** on Proposal 0001 | An input box titled `Reject Proposal 0001`, prompt `Feedback for the agent: what should the next Proposal do differently?` | ☐ |
+| 2 | Press Enter with the box empty | The box refuses: `Feedback is required` | ☐ |
+| 3 | Type `Split it by state`, press Enter | The card leaves To decide. No terminal is opened | ☐ |
+| 4 | `grep status $D/proposals/0001-*/proposal.md` | `status: rejected` | ☐ |
+| 5 | `tail -4 $D/proposals/0001-*/proposal.md` | A `## Feedback` heading followed by `Split it by state` | ☐ |
+| 6 | `j validate` | The Model is unchanged and valid (order.md has no `Returned`) | ☐ |
+
+### G4. Cancel the rejection
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. **Reject** on 0001, press Esc | Nothing changes; the Proposal is still open | ☐ |
+
+### G5. Accept a Drift's attached Proposal
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. Board: **Accept Proposal** on Drift 0002 | Both Drift 0002 and Proposal 0002 leave To decide (count 2) | ☐ |
+| 2 | Read the terminal | Exactly **one** line: ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
+| 3 | `grep -n 'Written off' $D/model/checkout/payment.md` | A line `### Written off (final)` | ☐ |
+| 4 | `sed -n 1,8p $D/drifts/0002-*.md` | `status: resolved`, `resolution: proposal`, `proposal: "0002"` | ☐ |
+| 5 | `grep status $D/proposals/0002-*/proposal.md` | `status: approved` | ☐ |
+
+### G6. Fix the code (Drift → Task)
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. Board: **Fix code** on Drift 0001 | Drift 0001 leaves To decide (count 3) | ☐ |
+| 2 | Look at To do | A new card `0005` `Fix code to match the Model: Code refunds after the package is picked up`, chip `order/Shipped`, text `from Drift 0001` | ☐ |
+| 3 | `ls $D/tasks` | Includes `0005-fix-code-to-match-the-model-code-refunds.md` | ☐ |
+| 4 | `sed -n 1,8p $D/tasks/0005-*.md` | `column: todo`, `technical: false`, refs `order/Shipped`, `drift: "0001"` | ☐ |
+| 5 | `sed -n 1,8p $D/drifts/0001-*.md` | `status: resolved`, `resolution: fix-code`, `task: "0005"` | ☐ |
+| 6 | Terminal | Nothing was launched | ☐ |
+
+### G7. Dismiss a Drift
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. Board: **Dismiss** on Drift 0001 | The card disappears; the Tasks do not change (still 4 files in `$D/tasks`) | ☐ |
+| 2 | `sed -n 1,8p $D/drifts/0001-*.md` | `status: resolved`, `resolution: dismissed`, `task: null` | ☐ |
+
+### G8. Accept a Drift whose Proposal was rejected 🔍
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. **Reject** Proposal 0002 with feedback `x` | Card leaves To decide | ☐ |
+| 2 | On Drift 0002 press **Accept Proposal** | Either the button is disabled with a tooltip, or a red banner appears: `Proposal 0002 is rejected; only open Proposals can be approved`. No crash, no terminal launch, the Drift stays open | ☐ |
+
+### G9. New technical task
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Board: **New technical task** | An input box titled `New Technical Task`, prompt `Title of the Technical Task (work that does not change the Model)` | ☐ |
+| 2 | Press Enter with the box empty | `A title is required` | ☐ |
+| 3 | Type `Rebuild CI cache`, Enter | A card `0005` appears in To do with a `technical` badge and no chips | ☐ |
+| 4 | `sed -n 1,6p $D/tasks/0005-*.md` | `column: todo`, `technical: true`, `refs: []` | ☐ |
+| 5 | Run it again, press Esc | Nothing is created | ☐ |
+
+### G10. Stale approval is refused
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. `echo >> $D/model/checkout/order.md`, then try **Approve** on 0001 (it is disabled; use `j proposal approve 1` to see the CLI refusal) | CLI: `error: Proposal 0001 is stale: the Model changed since it touched checkout/order.md. Write a new Proposal.`, exit 1. In the UI the button is disabled, no scan launched | ☐ |
+
+---
+
+## H. Launching the agent (echo mode, S2)
+
+Each launch sends one command to the terminal named **Trama agent** (cwd = the demo folder) and the shell prints the prompt.
+
+| # | Action | Expected in the terminal | ✓ |
+|---|---|---|---|
+| H1 | Board: **Scan System** | `Use the trama-scan skill on the whole System.` | ☐ |
+| H2 | Diagram, System level: **Scan** | `Use the trama-scan skill on the whole System.` | ☐ |
+| H3 | Diagram, Feature level `checkout`: **Scan** | ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
+| H4 | Diagram, Machine level `order`: **Scan** | Same as H3 (the current Feature) | ☐ |
+| H5 | Board: **Design…** | Input box titled `Design with Agent`, prompt `What should the agent design or change in the Model?`, placeholder `Add a cancelled state to orders…` | ☐ |
+| H6 | In H5 press Enter with the box empty | `Describe what to design` | ☐ |
+| H7 | In H5 type `Add refunds with $HOME and 'quotes'`, Enter | The printed line is exactly `Use the trama-design skill. Add refunds with $HOME and 'quotes'` (the `$HOME` is **not** expanded, the quotes survive) | ☐ |
+| H8 | Click **Design…** and press Esc | Nothing is printed | ☐ |
+| H9 | Diagram toolbar **Design…** | Same input box and result as H5–H7 | ☐ |
+| H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
+| H11 | Board: **Run all To do** | `Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Stop at the first Drift you file.` | ☐ |
+| H12 | Move Task 0001 and 0002 to In progress (E5), look at **Run all To do**, then ↻ | The button is **disabled** while To do is empty | ☐ |
+| H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
+| H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
+| H15 | Palette: **Trama: Design with Agent…** | Same input box as H5 | ☐ |
+| H16 | After H1 to H15, open the terminal dropdown | **One** terminal named `Trama agent`: each of these launches ended before the next, so every launch reused it. If an earlier command is still running (for example an agent), the next launch opens a new terminal instead | ☐ |
+| H17 | Set `printf '{"trama.agentCommand": "echo"}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (no `{prompt}`), click **Scan System** | The prompt is appended: `Use the trama-scan skill on the whole System.` | ☐ |
+| H18 | Set `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, click **Scan System** | An input box `Trama: agent command`, placeholder `claude {prompt}    or    codex {prompt}`. With empty text: `Enter the command that starts your agent`. **Press Esc**: nothing is launched. (Typing a command would save it in your *user* settings.) | ☐ |
+| H19 | Restore S2. Set `printf '{"trama.agentCommand": "echo {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, approve Proposal 0001 | The Proposal is approved (G1.1, G1.4–G1.8 hold) but **no** command is sent to the terminal | ☐ |
+| H20 | Restore S2 (settings back to `echo {prompt}`) | | ☐ |
+
+---
+
+## I. Real agent: omp 🪙
+
+Switch modes with the script, from the repo (it works from any shell, fish included, and keeps the other keys of `settings.json`): `cd /home/luca/Developer/Jasper && bun run scripts/demo-agent.ts <echo|path|omp>`. Stop an agent at any time with Ctrl+C. Quit omp between launches (I7).
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| I0 | No omp, no tokens. Run `bun run scripts/demo-agent.ts path`, then ↻ and Board: **Scan System** | The terminal shows, on two lines, `/home/luca/Developer/Jasper/dist/trama` and `Use the trama-scan skill on the whole System.`. This checks the PATH prefix and the quoting in your own shell. Verified by script in fish | ☐ |
+| I1 | `bun run scripts/demo-agent.ts omp`, ↻, then Board: **Scan System** | The terminal shows `PATH=/home/luca/Developer/Jasper/dist:$PATH omp 'Use the trama-scan skill on the whole System.'` and omp starts and starts working on the prompt. Reproduced by script in a real terminal in fish (banner, then `Working…`). If it fails for you, copy the exact text the terminal shows | ☐ |
+| I2 | In omp type `/skill:trama-scan` (or ask which skills are loaded) | The skill `trama-scan` is known. If not, omp does not read `.agents/skills/` of the project: report it | ☐ |
+| I3 | Interrupt omp and ask it to run `command -v trama` | `/home/luca/Developer/Jasper/dist/trama` | ☐ |
+| I4 | Ask it to run `trama board` | The same board as S5 | ☐ |
+| I5 | Let the scan finish. In the verification shell: `j board` | Tasks 0005 to 0008 were created (about four, one per Machine or group of States; the demo has no code, so everything not covered by Tasks 0001 to 0004 is missing) and **no Drift**. **Proposals 0001 and 0002 are still open**: the agent must not have run `proposal approve`, `proposal reject` or `drift resolve`. `j validate` is still valid and `.trama/model/` is unchanged. Ran against a real omp: passed | ☐ |
+| I6 | While the scan runs watch the board | The new Tasks appear in To do by themselves while the agent works (seen: 2 to 5 cards after about 27 s, 6 after 33 s). Ran against a real omp: passed | ☐ |
+| I7 | While omp is still running in the terminal, click **Scan System** again | A **new** terminal named `Trama agent` opens and runs the command there; the running omp receives nothing. (Before this was fixed the command line was typed into omp as a message.) Once every command has finished, the next launch reuses the last terminal instead of opening another. Reproduced the old bug twice and verified the fix with a slow command; not yet repeated with omp itself | ☐ |
+| I8 | Quit omp. **Design…** with `Orders can also be returned` | omp reads the `trama-design` skill and explores the Model. Because Proposal 0001 already covers part of this, it asks you with a menu (options such as replacing or extending 0001) and **waits for your answer**. Pick an option; omp then writes a Proposal that appears in To decide as soon as the file exists, with its changes listed. Ran against a real omp as far as the question; the answer and the new Proposal still need a human | ☐ |
+| I9 | ↻ (Task 0002 must be in To do: **Run** only exists on To do cards). Quit omp, then Board: **Run** on Task 0002 | The terminal shows `… omp 'Use the trama-implement skill on Task 0002.'`. omp reads the Task (`trama task show 0002`) and moves it to In progress. The demo has no code and no stack, so it asks you what to build with and, if you do not answer, puts the Task back in To do. Nothing is written in `.trama/model/`. Ran against a real omp: passed up to that point | ☐ |
+
+---
+
+## J. Empty project
+
+Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/Developer/Jasper/extension --new-window /tmp/trama-empty`
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| J1 | **Trama: Open** | An information message `This workspace has no Trama project yet.` with a button **Initialize Project** | ☐ |
+| J2 | Dismiss the message | No panel opens | ☐ |
+| J3 | Run it again, click **Initialize Project** | `.trama/model/system.md` and `.agents/skills/trama-{design,scan,implement}/SKILL.md` appear; the panel opens | ☐ |
+| J4 | Look at the Diagram 🔍 | Breadcrumb `System`. The code has the hint `The Model is empty. Use Design… to have an agent describe the System.` but it was not seen with a project that only has `system.md`: note what is shown. Board shows 0 in all columns and no badge | ☐ |
+| J5 | `cat /tmp/trama-empty/.trama/model/system.md` | `# Trama empty` heading and `Describe what this System is and who it is for.` | ☐ |
+| J6 | Remove `.trama` (`rm -r /tmp/trama-empty/.trama`), put the text `custom` into `.agents/skills/trama-scan/SKILL.md`, run **Trama: Initialize Project** | A **modal** warning `Trama did not initialize this project.` whose detail lists `…/trama-scan/SKILL.md`, with one button **Overwrite Skills and Initialize** | ☐ |
+| J7 | Press Esc/Cancel | Nothing is created; `custom` is still in the file | ☐ |
+| J8 | Repeat J6 and click the button | `.trama/` is created and the skill file is overwritten | ☐ |
+| J9 | In the demo window run **Trama: Initialize Project** (it already has `.trama/`) | Error `Trama: …/.trama already exists` | ☐ |
+| J10 | `mkdir -p /tmp/trama-empty2/.vscode && printf '{"trama.skillsDir": ".claude/skills"}\n' > /tmp/trama-empty2/.vscode/settings.json`, open that folder in a new window with the extension, **Trama: Open** → **Initialize Project** | Skills land in `.claude/skills/trama-*/SKILL.md` and `.agents/` is not created | ☐ |
+
+---
+
+## K. Appearance and accessibility
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| K1 | Switch to a light theme (Ctrl+K Ctrl+T) and look at the Board and each Diagram level | Text, edges, badges and ghost colours stay readable; no white text on white | ☐ |
+| K2 | Switch back to a dark theme | Same | ☐ |
+| K3 | Narrow the editor group to about 700 px | Board scrolls horizontally (columns keep a minimum width); the Diagram canvas is not hidden by the panel | ☐ |
+| K4 | Use only the keyboard on the Board (Tab, Shift+Tab, Enter) | Every button is reachable and shows a visible focus ring | ☐ |
+| K5 | Hover disabled buttons | Disabled **Approve** shows its reason; disabled → arrows do not react | ☐ |
+
+---
+
+## L. Defect log
+
+| Test ID | What you did | Expected | What happened | Severity |
+|---|---|---|---|---|
+| | | | | |
+
+## Not covered
+
+Licensing, the `.vsix` package and shipping the CLI binary with the extension do not exist yet. Removing a whole Feature or Actor through a Proposal has unit tests only.
