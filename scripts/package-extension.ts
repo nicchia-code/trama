@@ -3,8 +3,8 @@
 //   bun run scripts/package-extension.ts                 # the current platform
 //   bun run scripts/package-extension.ts darwin-arm64 linux-x64
 //
-// Output: dist/trama-<target>-<version>.vsix. Cross-compiled macOS binaries are not signed; release builds for
-// macOS come from the macOS runner in .github/workflows/release.yml, where Bun signs them ad hoc.
+// Output: dist/trama-<target>-<version>.vsix. macOS binaries are signed ad hoc only when packaging on a Mac; release
+// builds for macOS come from the macOS runner in .github/workflows/release.yml.
 import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { $ } from "bun";
 
@@ -28,6 +28,9 @@ for (const target of targets) {
   mkdirSync("extension/bin");
   await $`bun build --compile --target=${TARGETS[target]} src/cli/bin.ts --outfile extension/bin/trama`.quiet();
   chmodSync("extension/bin/trama", 0o755);
+  // Bun appends the app to its runtime after the runtime was signed, which leaves an invalid signature that macOS may
+  // refuse to run. Re-signing ad hoc needs codesign, so it only happens when packaging on a Mac.
+  if (target.startsWith("darwin") && process.platform === "darwin") await $`codesign --force --sign - extension/bin/trama`;
   const out = `../dist/trama-${target}-${version}.vsix`;
   await $`bunx @vscode/vsce package --target ${target} --no-dependencies --skip-license --allow-missing-repository -o ${out}`.cwd("extension");
   console.log(`packaged dist/trama-${target}-${version}.vsix`);
