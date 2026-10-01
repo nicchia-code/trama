@@ -162,9 +162,9 @@ export const TOOLS: ToolSpec[] = [
     writes: true,
     run: (p, i) => {
       const id = text(i, "proposal");
-      const file = editInProposal(p, id, text(i, "path"));
       const content = i["content"];
       if (typeof content !== "string") throw new UsageError('"content" must be a string');
+      const file = editInProposal(p, id, text(i, "path"));
       writeFileSync(file, content.endsWith("\n") ? content : `${content}\n`);
       const errors = validateProposal(p, getProposal(p, id));
       return errors.length === 0
