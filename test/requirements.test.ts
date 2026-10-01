@@ -9,7 +9,7 @@ import { loadProject, requirementsFor } from "../src/core/requirements";
 import { proposalScope } from "../src/core/scope";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
-import { newTask } from "../src/core/work";
+import { newDrift, newTask, resolveDrift } from "../src/core/work";
 
 let dir: string;
 let p: Project;
@@ -125,6 +125,14 @@ describe("Tasks and generated skills", () => {
     expect(newTask(p, { title: "Theme", refs: ["requirements/ui#General"], technical: true }).data.refs).toEqual(["requirements/ui#General"]);
     expect(() => newTask(p, { title: "Badge", refs: ["requirements/ui#order/Paid"], technical: false })).toThrow(/at least one Model element/);
     expect(() => newTask(p, { title: "Badge", refs: ["order/Paid", "requirements/ui#order/Lost"], technical: false })).toThrow(/no section "## order\/Lost"/);
+  });
+
+  test("fixing the code for a Drift against Requirements only creates a technical Task; with a Model element, an ordinary one", () => {
+    const theme = resolveDrift(p, newDrift(p, { title: "Uses Material 2", refs: ["requirements/ui#General"] }).id, "fix-code");
+    const badge = resolveDrift(p, newDrift(p, { title: "Red badge", refs: ["order/Paid", "requirements/ui#order/Paid"] }).id, "fix-code");
+    const show = (id: string | null) => JSON.parse(run(["--json", "task", "show", id ?? ""], dir, {}).out);
+    expect(show(theme.data.task)).toMatchObject({ technical: true, refs: ["requirements/ui#General"], drift: theme.id });
+    expect(show(badge.data.task)).toMatchObject({ technical: false, refs: ["order/Paid", "requirements/ui#order/Paid"], drift: badge.id });
   });
 
   test("task show quotes the Requirements attached to the referenced elements and points at the General ones", () => {

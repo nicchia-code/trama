@@ -153,10 +153,12 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
   const drift = getDrift(p, id);
   if (drift.data.status !== "open") throw new TramaError(`Drift ${drift.id} is already resolved`);
   if (how === "fix-code") {
+    // A Drift that only contradicts Requirements changes no behaviour, so its Task is technical.
+    const touchesModel = drift.data.refs.some((r) => parseRequirementRef(r) === null);
     const task = newTask(p, {
-      title: `Fix code to match the Model: ${drift.title}`,
+      title: `Fix code to match the ${touchesModel ? "Model" : "Requirements"}: ${drift.title}`,
       refs: drift.data.refs,
-      technical: false,
+      technical: !touchesModel,
       drift: drift.id,
       body: drift.body.replace(/^#\s+.+\n+/, ""),
     });

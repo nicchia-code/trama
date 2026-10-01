@@ -65,7 +65,7 @@ All exploring commands are read-only.
 | `drift new <title> --ref <ref>… [--proposal <id>] [--body <text>]` | Records an open Drift. The refs point to the Model elements or Requirements closest to where the code differs. |
 | `drift list [--all]` | Open Drifts (all of them with `--all`). |
 | `drift show <id>` | The Drift, its references inlined, the Requirements that apply, and its attached Proposal, if any. |
-| `drift resolve <id> --fix-code \| --accept-proposal \| --dismiss` | Developer only. `--fix-code` creates a Task referencing the same elements and links it to the Drift. `--accept-proposal` approves the attached Proposal. `--dismiss` closes the Drift without changes. |
+| `drift resolve <id> --fix-code \| --accept-proposal \| --dismiss` | Developer only. `--fix-code` creates a Task referencing the same elements and links it to the Drift; the Task is technical when the Drift references only Requirements. `--accept-proposal` approves the attached Proposal. `--dismiss` closes the Drift without changes. |
 
 ## Board
 
