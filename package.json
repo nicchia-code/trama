@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "build": "bun build --compile src/cli/bin.ts --outfile dist/trama",
     "build:extension": "bun run scripts/build-extension.ts",
-    "harness": "bun run scripts/build-extension.ts && bun run scripts/harness.ts"
+    "harness": "bun run scripts/build-extension.ts && bun run scripts/harness.ts",
+    "package": "bun run scripts/package-extension.ts"
   },
   "dependencies": {
     "cytoscape": "^3.34.3",

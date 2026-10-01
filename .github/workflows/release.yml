@@ -1,0 +1,58 @@
+name: Release
+
+# Builds the platform .vsix files on their own OS (so the macOS CLI is signed ad hoc by Bun on a Mac), runs the
+# tests there, and attaches the packages to a GitHub release when a `v*` tag is pushed.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: macos-14
+            target: darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit
+      - run: bun test
+      - run: bun run package ${{ matrix.target }}
+      - name: Smoke-test the packaged CLI
+        run: |
+          mkdir -p smoke && cd smoke
+          unzip -q ../dist/trama-${{ matrix.target }}-*.vsix 'extension/bin/trama'
+          ./extension/bin/trama --help | head -1
+          mkdir project && ./extension/bin/trama --root project init && ./extension/bin/trama --root project validate
+      - name: Check the macOS signature
+        if: runner.os == 'macOS'
+        run: codesign --verify --verbose smoke/extension/bin/trama
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trama-${{ matrix.target }}
+          path: dist/*.vsix
+
+  release:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" packages/*.vsix --repo "${{ github.repository }}" --title "Trama ${{ github.ref_name }}" --notes "Install with: code --install-extension trama-<platform>-<version>.vsix" --prerelease

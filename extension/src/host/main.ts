@@ -1,3 +1,4 @@
+import { delimiter, dirname } from "node:path";
 import * as vscode from "vscode";
 import { watchAgentTerminal } from "./agent";
 import { Controller, describeError } from "./controller";
@@ -47,6 +48,20 @@ export function activate(context: vscode.ExtensionContext): void {
     registerTramaTools(findProject),
   );
   setUpCursor(context.extensionPath);
+  exposeBundledCli(context);
+}
+
+/**
+ * Agents run `trama` in the editor's terminals (the "Trama agent" terminal, Copilot's terminal tool). When the
+ * package ships a binary for this platform, its folder is put first on those terminals' PATH.
+ */
+function exposeBundledCli(context: vscode.ExtensionContext): void {
+  const executable = tramaExecutable(context.extensionPath);
+  const env = context.environmentVariableCollection;
+  env.clear();
+  if (executable === "trama") return;
+  env.description = "Puts the trama CLI shipped with the Trama extension on the PATH, for agents.";
+  env.prepend("PATH", `${dirname(executable)}${delimiter}`);
 }
 
 export function deactivate(): void {
