@@ -1,15 +1,16 @@
-# Model file format (quick reference)
+# Model and Requirements file format (quick reference)
 
-Paths below are relative to `.trama/model/`. `trama validate --proposal <id>` checks all of this.
+Model paths below are relative to `.trama/model/`; Requirement files are `requirements/<area>.md` (in `.trama/requirements/`). `trama validate --proposal <id>` checks all of this.
 
 ```
 system.md              the System
 actors/<actor>.md      one file per Actor (only emits Events)
 <feature>/feature.md   one folder per Feature (no nesting)
 <feature>/<machine>.md one file per Machine
+requirements/<area>.md one file per Area of Requirements (no subfolders)
 ```
 
-- IDs are file or folder names, kebab-case (`order`, `payment-gateway`). Features, Machines and Actors share **one namespace**; `system`, `feature` and `actors` are reserved.
+- IDs are file or folder names, kebab-case (`order`, `payment-gateway`). Features, Machines and Actors share **one namespace**; `system`, `feature`, `actors` and `requirements` are reserved.
 - `system.md` and `feature.md`: an H1 with the display name, then prose.
 
 ## Actor
@@ -83,3 +84,27 @@ Emitted when the order leaves Draft.
 ## Element references (for `--ref` and CLI arguments)
 
 `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State, any depth), `order/Paid/user.CANCEL` (Transitions on that Event), `user.CANCEL` (Event).
+
+## Requirements (`requirements/<area>.md`)
+
+```markdown
+---
+description: Use when building or changing screens, layout, styling or texts.
+---
+# Interface
+
+## General
+- Material 3, light and dark theme following the system.
+
+## checkout
+- Every checkout screen shows the cart total at the bottom.
+
+## order/Paid
+- A green "Paid" badge next to the order number.
+```
+
+- Front matter with `description` (required): when an agent needs this Area. It becomes the description of the generated `trama-req-<area>` skill.
+- One H1 with the Area's title. Prose before the first `##` applies to the whole Area.
+- `## General`: applies everywhere. Every other `##` is titled with exactly one element reference (see above) and applies to that element and everything inside it (a Machine's sections apply to all its States; a Feature's to all its Machines).
+- A section must name an element that exists once the Proposal is applied, and appear once per file. Anything under it (lists, `###`, code) is free text.
+- Reference a Requirement from a Task or Drift with `requirements/<area>` or `requirements/<area>#<section>`, for example `requirements/ui#order/Paid` or `requirements/ui#General`.

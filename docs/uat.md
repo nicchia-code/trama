@@ -63,6 +63,7 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 | Task 0002 To do | "Payment declined email", ref `order/Awaiting payment/payment.DECLINED` |
 | Task 0003 In progress | "Cart confirmation", ref `cart/Has items/user.CHECKOUT` |
 | Task 0004 Done | "Upgrade dependencies", technical |
+| Requirement Areas | `data` (sections order, payment) and `ui` (General, checkout, order/Paid) |
 
 ---
 
@@ -267,7 +268,7 @@ j validate --proposal 3        # exit code 1
 ```
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Read the shell output | `The Model with Proposal 0003 applied has 1 error(s):` `checkout/order.md:9: Event reference to unknown owner "cart"` | ☐ |
+| 1 | Read the shell output | `The Model and its Requirements with Proposal 0003 applied have 1 error(s):` `checkout/order.md:9: Event reference to unknown owner "cart"` | ☐ |
 | 2 | Open the selector | The new entry reads `0003 · Drop the cart ⚠ invalid` | ☐ |
 | 3 | Choose it and read the panel | Red text `The Model with this Proposal applied is invalid` and the same error; `checkout/cart.md (removed)` with the removed States | ☐ |
 | 4 | Look at **Approve** | **Disabled**. Hover: tooltip `Stale or invalid Proposals cannot be approved` | ☐ |
@@ -392,7 +393,7 @@ For every G test, ↻ first, then open the panel and the "Trama agent" terminal 
 | 1 | Board: **Approve** on Proposal 0001 | The card leaves To decide (count 3). No error banner | ☐ |
 | 2 | Look at the bottom panel | A terminal named **Trama agent** opens in the project folder | ☐ |
 | 3 | Read the terminal | Exactly **one** command was sent and one line printed: ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
-| 4 | Verification shell: `j validate` | `The Model is valid.` | ☐ |
+| 4 | Verification shell: `j validate` | `The Model and its Requirements are valid.` | ☐ |
 | 5 | `grep -c Returned $D/model/checkout/order.md` | `2` | ☐ |
 | 6 | `ls $D/model/checkout` | `cart.md feature.md order.md payment.md return.md` | ☐ |
 | 7 | `grep -n RETURN $D/model/actors/user.md` | A line `### RETURN` | ☐ |
@@ -546,6 +547,24 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 ---
 
+## M. Requirements
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| M1 | Click the **Requirements** tab | Two Areas, **Data** (`requirements/data`) and **Interface** (`requirements/ui`), each with its italic "Use when…" line, its sections and **Open file**. The Proposal selector is disabled (no open Proposal touches Requirements) | ☐ |
+| M2 | Click the section title **order/Paid** | The Diagram opens on `order` with Paid selected; the panel ends with **Requirements → Interface** and the two Paid lines | ☐ |
+| M3 | In the panel, click **Interface** | The Requirements tab shows only `order/Paid`, with "Showing requirements/ui#order/Paid" and **Show all** | ☐ |
+| M4 | Verification shell: `j state order/Preparing` | Ends with `## Requirements`: `requirements/ui#order/Paid (via order/Paid)`, `requirements/data#order (via order)`, `requirements/ui#checkout (via checkout)` | ☐ |
+| M5 | `ls /tmp/trama-demo/shop/.agents/skills` after `j skills update` | `trama-req-data` and `trama-req-ui` next to the three Trama skills; `trama-req-ui/SKILL.md` has `description: Use when building or changing screens…` | ☐ |
+| M6 | Edit `.trama/requirements/ui.md` by hand: change "Mobile first" to "Mobile first, always" and save | Within a second `.agents/skills/trama-req-ui/SKILL.md` says "Mobile first, always". The Requirements tab shows the new text | ☐ |
+| M7 | Append `## order/Lost` and a line to `ui.md`, save | The yellow bar: "The Model or its Requirements have 1 validation error"; the link `requirements/ui.md:<line>` opens `ui.md`. Remove the section again: the bar disappears | ☐ |
+| M8 | `j proposal new "Blue badge"`, then `j proposal edit <id> requirements/ui.md` and change "green" to "blue" in the printed file | On the Board the Proposal card lists `requirements/ui.md ~1` and has **View requirements**, not **View on diagram** | ☐ |
+| M9 | Click **View requirements** | Requirements tab with the Proposal selected: `order/Paid` has a **changed** badge, the old text struck through above the new one | ☐ |
+| M10 | `j proposal edit <id> checkout/order.md`, delete the `### Paid` State and its sub-States in the printed file, then `j validate --proposal <id>` | Exit 1, among the errors: `requirements/ui.md: Section "## order/Paid" does not match the Model: Machine "order" has no State "Paid"`. **Approve** is disabled on the Board | ☐ |
+| M11 | Reject the Proposal from the Board | Card gone; `ui.md` and the skill unchanged | ☐ |
+
+---
+
 ## L. Defect log
 
 | Test ID | What you did | Expected | What happened | Severity |
@@ -554,4 +573,4 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 ## Not covered
 
-Licensing, the `.vsix` package and shipping the CLI binary with the extension do not exist yet. Removing a whole Feature or Actor through a Proposal has unit tests only.
+Licensing does not exist yet. Removing a whole Feature or Actor through a Proposal has unit tests only. The macOS `.vsix` has passed only CI checks, not a run on a real Mac.

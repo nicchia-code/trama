@@ -1,6 +1,6 @@
 # Model file format
 
-Everything Trama stores lives in `.trama/` at the root of the user's repository, as plain Markdown files versioned with git.
+Everything Trama stores lives in `.trama/` at the root of the user's repository, as plain Markdown files versioned with git. Requirements are described at the end of this file.
 
 ```
 .trama/
@@ -12,10 +12,13 @@ Everything Trama stores lives in `.trama/` at the root of the user's repository,
       feature.md
       order.md                 # one file per Machine
       payment.md
+  requirements/
+    ui.md                      # one file per Area of Requirements
   proposals/
     0007-refunds/
       proposal.md
       model/checkout/order.md  # full new version of every touched file
+      requirements/ui.md
   tasks/
     0012-cancel-refund.md
   drifts/
@@ -134,7 +137,7 @@ A list item directly under a State (before any sub-State heading) that **starts 
 
 ## Validation
 
-`trama validate` reports these as errors. It checks only the Model's internal consistency, never code (ADR 0002).
+`trama validate` reports these as errors. It checks only the internal consistency of the Model and its Requirements, never code (ADR 0002).
 
 | Rule |
 |---|
@@ -149,6 +152,8 @@ A list item directly under a State (before any sub-State heading) that **starts 
 | Transition to an unknown State |
 | Event reference to an unknown owner, or to an Event the owner does not declare |
 | Event name not `UPPER_SNAKE_CASE`, or duplicated within its owner |
+| Requirement file not at `requirements/<area>.md` with a kebab-case Area name |
+| Requirement Area without a `description` or an H1; a section title that is not `General` or a reference to an existing element; a duplicate section |
 
 `trama analyze` reports **warnings**, not errors:
 - States unreachable from the initial State;
@@ -163,7 +168,8 @@ A list item directly under a State (before any sub-State heading) that **starts 
 ---
 status: open            # open | approved | rejected
 base:
-  checkout/order.md: 3f2a…   # sha256 of the Model file when the Proposal first touched it
+  checkout/order.md: 3f2a…   # sha256 of the file when the Proposal first touched it
+  requirements/ui.md: 9b1c…  # Requirement Areas are touched the same way
   checkout/refund.md: new
 delete:
   - checkout/legacy.md
@@ -176,9 +182,9 @@ Why this change is needed, in prose.
 Written by the developer on rejection.
 ```
 
-- Next to `proposal.md`, a `model/` folder holds the **full new version** of every touched file, at the same path it has under `.trama/model/`.
+- Next to `proposal.md`, a `model/` folder holds the **full new version** of every touched Model file, at the same path it has under `.trama/model/`, and a `requirements/` folder does the same for touched Areas.
 - A Proposal is **stale** when any file's current hash differs from its `base` entry. Staleness is computed, never stored. A stale Proposal cannot be approved; the agent writes a new one.
-- **Approving** checks that the Proposal is not stale, validates the Model with the Proposal applied, copies the new files into `model/`, removes the `delete` entries and sets `status: approved`.
+- **Approving** checks that the Proposal is not stale, validates the Model and its Requirements with the Proposal applied, copies the new files into `model/` and `requirements/`, removes the `delete` entries, sets `status: approved` and regenerates the `trama-req-*` skills.
 - **Rejecting** sets `status: rejected` and appends `## Feedback`. The agent answers with a new Proposal.
 - Approved and rejected Proposals stay on disk as history.
 
@@ -192,6 +198,8 @@ Tasks, Drifts and the CLI point to parts of the Model with one syntax:
 | State | `order/Paid`, `order/Awaiting payment` |
 | Transition | `order/Paid/user.CANCEL` (every Transition from Paid on that Event) |
 | Event | `user.CANCEL` |
+| Requirement Area | `requirements/ui` |
+| Requirement section | `requirements/ui#order/Paid`, `requirements/ui#General` |
 
 ## Task
 
@@ -211,7 +219,7 @@ drift: "0003"           # optional: the Drift this Task resolves
 What to do, in prose.
 ```
 
-- A Task that is not technical has at least one entry in `refs`; a Technical Task has none.
+- A Task that is not technical references at least one Model element in `refs`, and may add Requirements. A Technical Task references no Model element; it may reference Requirements (for example `requirements/ui#General` for adopting a theme).
 - The board's **To decide** column is not a Task column: it shows open Proposals and open Drifts.
 
 ## Drift
@@ -233,6 +241,33 @@ What the code does, what the Model says, and where in the code this was found.
 ```
 
 A Drift is not part of the Model, so its prose may mention code paths.
+
+## Requirements
+
+`requirements/<area>.md`: how the System must be built, beside the Model (ADR 0007). `trama init` creates five empty Areas: `ui`, `tech`, `quality`, `data` and `rules`. Add, split or delete Areas freely.
+
+```markdown
+---
+description: Use when building or changing screens, layout, styling or texts.
+---
+# Interface
+
+Prose here applies to the whole Area.
+
+## General
+- Material 3, light and dark theme following the system.
+
+## checkout
+- Every checkout screen shows the cart total at the bottom.
+
+## order/Paid
+- A green "Paid" badge next to the order number.
+```
+
+- `description` (required) says when an agent needs this Area. It becomes the description of the generated skill.
+- `## General` applies everywhere. Any other `##` is titled with exactly one element reference and applies to that element and everything inside it: a Feature's sections to its Machines, a Machine's to its States, a State's to its sub-States. Content under a section is free Markdown.
+- Requirements change like the Model: an agent writes them only through a Proposal; the developer may also edit the files directly.
+- Trama writes one skill per Area that has content, `trama-req-<area>/SKILL.md`, into every skill folder holding Trama's skills (`.agents/skills`, `.claude/skills`, `.github/skills`, or the configured one). The skills are generated: commit them, never edit them. They are rewritten after an approval, by `trama skills update`, and by the extension whenever an Area file changes; Areas emptied or deleted lose their skill.
 
 ## Numbering
 

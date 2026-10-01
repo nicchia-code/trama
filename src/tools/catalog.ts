@@ -1,10 +1,12 @@
 import { writeFileSync } from "node:fs";
 import { analyzeView, eventView, featureView, machineView, pathsView, searchView, stateView, systemView, validateView } from "../cli/explore";
+import { requirementsView, withRequirements } from "../cli/requirements";
 import type { Result } from "../cli/result";
 import { boardView, driftShowView, proposalShowView, taskShowView } from "../cli/work";
 import { TramaError, UsageError } from "../core/errors";
 import { deleteInProposal, editInProposal, getProposal, newProposal, validateProposal } from "../core/proposals";
 import { resolveRef } from "../core/refs";
+import { loadProject } from "../core/requirements";
 import { loadModel, type Project } from "../core/store";
 import { getDrift, getTask, moveTask, newDrift, newTask } from "../core/work";
 import { formatDiagnostic } from "../core/model";
@@ -35,6 +37,8 @@ export interface ToolOutcome {
 const string = (description: string) => ({ type: "string", description });
 const stringList = (description: string) => ({ type: "array", items: { type: "string" }, description });
 const REF = "Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event).";
+const REQ_REF = "Requirements: `requirements/ui` (a whole Area) or `requirements/ui#order/Paid` (one section; `#General` for the general one).";
+const PATH = "Model file relative to `.trama/model/` (`checkout/order.md`, `actors/user.md`), or a Requirement Area `requirements/<area>.md`";
 
 function text(input: Record<string, unknown>, key: string): string {
   const v = input[key];
@@ -56,20 +60,23 @@ function texts(input: Record<string, unknown>, key: string): string[] {
 const md = (r: Result) => r.md.replace(/\n{3,}/g, "\n\n").trimEnd();
 
 function view(project: Project, ref: string | undefined): string {
-  const model = loadModel(project);
+  const pm = loadProject(project);
+  const model = pm.model;
   if (ref === undefined) return md(systemView(model));
+  if (ref === "requirements" || ref.startsWith("requirements/")) return md(requirementsView(pm, ref === "requirements" ? undefined : ref));
   const el = resolveRef(model, ref);
+  const attach = (r: Result) => md(withRequirements(r, pm, ref));
   switch (el.kind) {
     case "feature":
-      return md(featureView(model, el.feature.id));
+      return attach(featureView(model, el.feature.id));
     case "machine":
-      return md(machineView(model, el.machine.id));
+      return attach(machineView(model, el.machine.id));
     case "state":
-      return md(stateView(model, ref));
+      return attach(stateView(model, ref));
     case "transition":
-      return md(stateView(model, `${el.machine.id}/${el.state.name}`));
+      return attach(stateView(model, `${el.machine.id}/${el.state.name}`));
     case "event":
-      return md(eventView(model, ref));
+      return attach(eventView(model, ref));
     case "actor":
       return [`# ${el.actor.name} (actor \`${el.actor.id}\`)`, "", el.actor.description, "", ...el.actor.events.map((e) => md(eventView(model, `${el.actor.id}.${e.name}`)))].join("\n");
   }
@@ -78,9 +85,9 @@ function view(project: Project, ref: string | undefined): string {
 export const TOOLS: ToolSpec[] = [
   {
     name: "trama_view",
-    title: "View the Model",
-    description: `Shows part of the project's Trama Model, the source of truth for how the software behaves. Without \`ref\`: the System, its Actors and Features. With \`ref\`: that element with its States, Transitions (condition and consequence in prose), Events and who receives them. ${REF}`,
-    inputSchema: { type: "object", properties: { ref: string(REF) }, additionalProperties: false },
+    title: "View the Model and Requirements",
+    description: `Shows part of the project's Trama Model, the source of truth for how the software behaves, with the Requirements that say how it must be built. Without \`ref\`: the System, its Actors and Features. With \`ref\`: that element with its States, Transitions (condition and consequence in prose), Events, who receives them, and the Requirements attached to it. \`requirements\` lists the Requirement Areas; ${REQ_REF} ${REF}`,
+    inputSchema: { type: "object", properties: { ref: string(`${REF} Or \`requirements\`, or ${REQ_REF}`) }, additionalProperties: false },
     writes: false,
     run: (p, i) => view(p, optionalText(i, "ref")),
   },
@@ -111,11 +118,11 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     name: "trama_search",
-    title: "Search the Model",
-    description: "Case-insensitive search over names and prose of the whole Model; each hit with its element reference.",
+    title: "Search the Model and Requirements",
+    description: "Case-insensitive search over names and prose of the whole Model and its Requirements; each hit with its reference.",
     inputSchema: { type: "object", properties: { text: string("Text to look for") }, required: ["text"], additionalProperties: false },
     writes: false,
-    run: (p, i) => md(searchView(loadModel(p), text(i, "text"))),
+    run: (p, i) => md(searchView(loadProject(p), text(i, "text"))),
   },
   {
     name: "trama_board",
@@ -128,34 +135,34 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_validate",
     title: "Validate",
-    description: "Checks the Model's internal consistency, or the Model with an open Proposal applied. Never looks at code.",
+    description: "Checks the internal consistency of the Model and its Requirements (every Requirement section must name an existing element), or of both with an open Proposal applied. Never looks at code.",
     inputSchema: { type: "object", properties: { proposal: string("Proposal ID; omit to validate the current Model") }, additionalProperties: false },
     writes: false,
     run: (p, i) => {
       const id = optionalText(i, "proposal");
-      if (id === undefined) return md(validateView(loadModel(p).diagnostics, "The Model"));
+      if (id === undefined) return md(validateView(loadProject(p).diagnostics, "The Model and its Requirements"));
       const proposal = getProposal(p, id);
-      return md(validateView(validateProposal(p, proposal), `The Model with Proposal ${proposal.id} applied`));
+      return md(validateView(validateProposal(p, proposal), `The Model and its Requirements with Proposal ${proposal.id} applied`));
     },
   },
   {
     name: "trama_proposal_new",
     title: "Open a Proposal",
-    description: "Opens a new Proposal: the only way to change the Model. Then write each changed Model file with trama_proposal_write. Only the developer can approve it.",
+    description: "Opens a new Proposal: the only way to change the Model or its Requirements. Then write each changed Model or Requirement file with trama_proposal_write. Only the developer can approve it.",
     inputSchema: { type: "object", properties: { title: string("Short title"), body: string("Why the change is needed") }, required: ["title"], additionalProperties: false },
     writes: true,
     run: (p, i) => {
       const proposal = newProposal(p, text(i, "title"), optionalText(i, "body") ?? "");
-      return `Opened Proposal ${proposal.id}. Write each new or changed Model file with trama_proposal_write.`;
+      return `Opened Proposal ${proposal.id}. Write each new or changed Model or Requirement file with trama_proposal_write.`;
     },
   },
   {
     name: "trama_proposal_write",
-    title: "Write a Model file in a Proposal",
-    description: "Writes the complete new version of one Model file inside an open Proposal (the Model itself is untouched until the developer approves). `path` is relative to `.trama/model/`, e.g. `checkout/order.md` or `actors/user.md`. Returns the validation of the Model with the Proposal applied.",
+    title: "Write a Model or Requirement file in a Proposal",
+    description: `Writes the complete new version of one Model or Requirement file inside an open Proposal (nothing changes until the developer approves). \`path\`: ${PATH}. Returns the validation of the Model and Requirements with the Proposal applied; a Requirement section naming a State the Proposal removes or renames is an error, so update the Requirement file in the same Proposal.`,
     inputSchema: {
       type: "object",
-      properties: { proposal: string("Proposal ID"), path: string("Model file, relative to .trama/model/"), content: string("The complete file in the Trama Model format") },
+      properties: { proposal: string("Proposal ID"), path: string(PATH), content: string("The complete file in the Trama Model or Requirements format") },
       required: ["proposal", "path", "content"],
       additionalProperties: false,
     },
@@ -168,15 +175,15 @@ export const TOOLS: ToolSpec[] = [
       writeFileSync(file, content.endsWith("\n") ? content : `${content}\n`);
       const errors = validateProposal(p, getProposal(p, id));
       return errors.length === 0
-        ? `Wrote ${i["path"]} in Proposal ${id}. The Model with the Proposal applied is valid.`
-        : `Wrote ${i["path"]} in Proposal ${id}. The Model with the Proposal applied has ${errors.length} error(s):\n${errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n")}`;
+        ? `Wrote ${i["path"]} in Proposal ${id}. The Model and Requirements with the Proposal applied are valid.`
+        : `Wrote ${i["path"]} in Proposal ${id}. The Model and Requirements with the Proposal applied have ${errors.length} error(s):\n${errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n")}`;
     },
   },
   {
     name: "trama_proposal_delete_file",
-    title: "Delete a Model file in a Proposal",
-    description: "Marks a Model file for deletion in an open Proposal. `path` is relative to `.trama/model/`.",
-    inputSchema: { type: "object", properties: { proposal: string("Proposal ID"), path: string("Model file, relative to .trama/model/") }, required: ["proposal", "path"], additionalProperties: false },
+    title: "Delete a Model or Requirement file in a Proposal",
+    description: `Marks a Model or Requirement file for deletion in an open Proposal. \`path\`: ${PATH}.`,
+    inputSchema: { type: "object", properties: { proposal: string("Proposal ID"), path: string(PATH) }, required: ["proposal", "path"], additionalProperties: false },
     writes: true,
     run: (p, i) => {
       deleteInProposal(p, text(i, "proposal"), text(i, "path"));
@@ -194,13 +201,13 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_task_new",
     title: "Create a Task",
-    description: "Creates a Task in To do. A Task references the Model elements it implements in `refs`, unless it is technical (no behaviour change, no refs). The body says in domain words what must be true when done.",
+    description: "Creates a Task in To do. A Task references the Model elements it implements in `refs`, plus any Requirement it must satisfy. A technical Task (no behaviour change) references no Model element, only Requirements if any. The body says in domain words what must be true when done.",
     inputSchema: {
       type: "object",
       properties: {
         title: string("What to implement"),
-        refs: stringList(`Model elements the Task covers. ${REF}`),
-        technical: { type: "boolean", description: "True for work that changes no behaviour (refactor, dependencies); then refs must be empty" },
+        refs: stringList(`Model elements the Task covers, and Requirements it must satisfy. ${REF} ${REQ_REF}`),
+        technical: { type: "boolean", description: "True for work that changes no behaviour (refactor, dependencies, applying a Requirement); then refs may only name Requirements" },
         drift: string("ID of the Drift this Task resolves, if any"),
         body: string("What must be true when done, in domain words"),
       },
@@ -216,7 +223,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_task_show",
     title: "Show a Task",
-    description: "A Task with the current Model text of every element it references.",
+    description: "A Task with the current text of every Model element and Requirement it references, and the Requirements that apply to those elements.",
     inputSchema: { type: "object", properties: { task: string("Task ID") }, required: ["task"], additionalProperties: false },
     writes: false,
     run: (p, i) => md(taskShowView(p, getTask(p, text(i, "task")))),
@@ -224,7 +231,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_task_move",
     title: "Move a Task",
-    description: "Moves a Task to `todo`, `doing` or `done`. Move it to `doing` when you start and to `done` when the behaviour matches the Model.",
+    description: "Moves a Task to `todo`, `doing` or `done`. Move it to `doing` when you start and to `done` when the behaviour matches the Model and the code follows its Requirements.",
     inputSchema: { type: "object", properties: { task: string("Task ID"), column: { type: "string", enum: ["todo", "doing", "done"] } }, required: ["task", "column"], additionalProperties: false },
     writes: true,
     run: (p, i) => {
@@ -235,14 +242,14 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_drift_new",
     title: "Record a Drift",
-    description: "Records a Drift: the code differs from the Model in a way that would change the Diagram. File it exactly once. If the code handles an important case the Model forgot, first open a Proposal and pass its ID in `proposal`. Only the developer resolves Drifts.",
+    description: "Records a Drift: the code differs from the Model in a way that would change the Diagram, or contradicts a Requirement. File it exactly once. If the code handles an important case the Model forgot, first open a Proposal and pass its ID in `proposal`. Only the developer resolves Drifts.",
     inputSchema: {
       type: "object",
       properties: {
         title: string("Short title"),
-        refs: stringList(`The Model elements closest to the difference. ${REF}`),
+        refs: stringList(`The Model elements or Requirements closest to the difference. ${REF} ${REQ_REF}`),
         proposal: string("ID of a Proposal that would fix the Model, if the code is right"),
-        body: string("What the code does, what the Model says, where in the code"),
+        body: string("What the code does, what the Model or Requirement says, where in the code"),
       },
       required: ["title", "refs"],
       additionalProperties: false,
@@ -256,7 +263,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_drift_show",
     title: "Show a Drift",
-    description: "A Drift with its references and its attached Proposal, if any.",
+    description: "A Drift with its references, the Requirements that apply, and its attached Proposal, if any.",
     inputSchema: { type: "object", properties: { drift: string("Drift ID") }, required: ["drift"], additionalProperties: false },
     writes: false,
     run: (p, i) => md(driftShowView(p, getDrift(p, text(i, "drift")))),

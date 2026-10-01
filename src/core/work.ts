@@ -1,12 +1,11 @@
 import { join } from "node:path";
 import { TramaError } from "./errors";
 import { approveProposal, getProposal } from "./proposals";
-import { resolveRef } from "./refs";
+import { loadProject, parseRequirementRef, resolveProjectRef } from "./requirements";
 import { boolField, enumField, enumOrNull, idField, type Raw, stringList } from "./schema";
 import {
   findNumbered,
   listNumbered,
-  loadModel,
   nextId,
   type Project,
   readDocument,
@@ -59,8 +58,7 @@ function parseTask(raw: Raw, where: string): TaskData {
     refs: stringList(raw, "refs", where),
     drift: idField(raw, "drift", where),
   };
-  if (data.technical && data.refs.length > 0) throw new TramaError(`${where}: a Technical Task cannot have "refs"`);
-  if (!data.technical && data.refs.length === 0) throw new TramaError(`${where}: a Task needs at least one entry in "refs", or "technical: true"`);
+  checkTaskRefs(data.technical, data.refs, `${where}: `);
   return data;
 }
 
@@ -90,9 +88,18 @@ function create<D extends object>(dir: string, title: string, data: D, body: str
   return { id, name, path, data, title, body: text };
 }
 
+/** Model references, plus `requirements/<area>` or `requirements/<area>#<section>` for Requirements. */
 function checkRefs(p: Project, refs: string[]) {
-  const model = loadModel(p);
-  for (const ref of refs) resolveRef(model, ref);
+  const project = loadProject(p);
+  for (const ref of refs) resolveProjectRef(project, ref);
+}
+
+/** A Technical Task changes no behaviour, so it references no Model element, only Requirements if any; any other Task references at least one Model element. */
+function checkTaskRefs(technical: boolean, refs: string[], where = "") {
+  const modelRefs = refs.filter((r) => parseRequirementRef(r) === null);
+  if (technical && modelRefs.length > 0) throw new TramaError(`${where}a Technical Task cannot reference the Model (only Requirements): ${modelRefs.join(", ")}`);
+  if (!technical && modelRefs.length === 0)
+    throw new TramaError(`${where}a Task must reference at least one Model element in "refs", unless it is technical`);
 }
 
 export function listTasks(p: Project): Task[] {
@@ -107,9 +114,7 @@ export function newTask(
   p: Project,
   input: { title: string; refs: string[]; technical: boolean; drift?: string; body?: string },
 ): Task {
-  if (input.technical && input.refs.length > 0) throw new TramaError("A Technical Task cannot reference the Model");
-  if (!input.technical && input.refs.length === 0)
-    throw new TramaError("A Task must reference at least one Model element (refs), unless it is technical");
+  checkTaskRefs(input.technical, input.refs);
   checkRefs(p, input.refs);
   const drift = input.drift ? getDrift(p, input.drift).id : null;
   const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift };

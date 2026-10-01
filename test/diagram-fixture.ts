@@ -76,6 +76,7 @@ export function snapshotOf(files: FileMap): Snapshot {
     features: [...model.features.values()],
     machines: [...model.machines.values()],
     diagnostics: model.diagnostics,
+    areas: [],
     proposals: [],
     drifts: [],
     tasks: [],

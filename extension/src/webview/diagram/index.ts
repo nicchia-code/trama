@@ -2,13 +2,18 @@ import type { Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
 import type { MountView, View } from "../types";
 import { createCanvas } from "./canvas";
-import { detailOfSelection, tooltipOf } from "./details";
+import { type Detail, detailOfSelection, tooltipOf } from "./details";
 import { homeLevel, resolveElement, selectionFor, showsElement } from "./elements";
 import { type GraphSpec, type Level, sameLevel } from "./graph";
 import { breadcrumb, buildGraph, drillTarget, scanFeature, validLevel } from "./levels";
 import { createPanel } from "./panel";
 import { type Scene, buildScene, pathTo } from "./scene";
+import { viewOfRef } from "../requirements/logic";
 import css from "./diagram.css" with { type: "text" };
+
+/** The Model reference of what a level shows, for the Requirements attached to it. */
+const levelRef = (level: Level): string | null =>
+  level.kind === "feature" ? level.feature : level.kind === "machine" ? level.machine : level.kind === "state" ? `${level.machine}/${level.state}` : null;
 
 const TEMPLATE = `
   <div class="dg-toolbar">
@@ -66,7 +71,7 @@ export const mountDiagram: MountView = (root, context) => {
   const expanded = new Map<string, Set<string>>();
 
   const panel = createPanel($("aside.dg-panel"), {
-    jump: (ref) => navigateRef(ref),
+    jump: (ref) => (viewOfRef(ref) === "requirements" ? context.navigate("requirements", { ref }) : navigateRef(ref)),
     openFile: (path) => context.post({ type: "openModelFile", path }),
     drill: (target) => setLevel(target),
     toggle: (state) => toggleState(state),
@@ -125,7 +130,19 @@ export const mountDiagram: MountView = (root, context) => {
     const feature = scanFeature(scene, level);
     scan.title = feature ? `Ask an agent to scan the code against Feature ${feature}` : "Ask an agent to scan the code against the whole System";
     $("div.dg-empty").hidden = graph.nodes.length > 0;
-    panel.render(detailOfSelection(scene, graph, selected));
+    panel.render(currentDetail());
+  }
+
+  /** The detail of the selection, or of the level, with the Requirement sections written for that element. */
+  function currentDetail(): Detail {
+    const detail = detailOfSelection(scene as Scene, graph as GraphSpec, selected);
+    const node = graph?.nodes.find((n) => n.id === selected);
+    const ref = node?.ref ?? (selected === null ? levelRef(level) : null);
+    if (!ref || !snapshot) return detail;
+    const items = snapshot.areas.flatMap((a) =>
+      a.sections.filter((s) => s.ref !== null && s.text !== "" && s.ref.toLowerCase() === ref.toLowerCase()).map((s) => ({ text: a.title, note: s.text, change: "same" as const, ref: `requirements/${a.id}#${s.ref}` })),
+    );
+    return items.length === 0 ? detail : { ...detail, sections: [...detail.sections, { heading: "Requirements", items }] };
   }
 
   function draw(fit: boolean) {
@@ -153,7 +170,7 @@ export const mountDiagram: MountView = (root, context) => {
       return;
     }
     canvas.select(id);
-    if (scene && graph) panel.render(detailOfSelection(scene, graph, selected));
+    if (scene && graph) panel.render(currentDetail());
   }
 
   function toggleState(state: string) {

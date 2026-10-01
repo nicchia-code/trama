@@ -36,8 +36,8 @@ describe("malformed Task files give domain errors naming the file", () => {
     ["refs is a mapping", "refs:\n  a: b", /"refs" must be a list of strings/],
     ["unknown column", "column: blocked\nrefs: [order]", /"column" must be one of todo, doing, done/],
     ["technical is not a boolean", "technical: maybe\nrefs: [order]", /"technical" must be true or false/],
-    ["non-technical without refs", "column: todo", /needs at least one entry in "refs"/],
-    ["technical with refs", "technical: true\nrefs: [order]", /Technical Task cannot have "refs"/],
+    ["non-technical without refs", "column: todo", /must reference at least one Model element in "refs"/],
+    ["technical with refs", "technical: true\nrefs: [order]", /Technical Task cannot reference the Model/],
     ["drift is not numeric", "refs: [order]\ndrift: abc", /"drift" must be a numeric ID/],
     ["front matter is a list", "- a\n- b", /front matter must be a mapping, not a list/],
     ["front matter is a scalar", "just text", /front matter must be a mapping, not a string/],
@@ -75,7 +75,7 @@ describe("malformed Proposal files", () => {
     ["base is a list", "base:\n  - checkout/order.md", /"base" must map file paths to hashes/],
     ["base has a non-string hash", "base:\n  checkout/order.md: 5", /"base" must map file paths to hashes/],
     ["base path escapes the Model", 'base:\n  "../../secret.md": new', /must be relative to \.trama\/model\//],
-    ["delete path is not a Markdown file", "delete:\n  - checkout/order.txt", /not a Model file/],
+    ["delete path is not a Markdown file", "delete:\n  - checkout/order.txt", /not a Model or Requirement file/],
   ];
   for (const [name, front, expected] of cases) {
     test(name, () => {

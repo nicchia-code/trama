@@ -16,7 +16,7 @@ export type AgentAction =
 export type ToHost =
   | { type: "ready" }
   | { type: "launch"; action: AgentAction }
-  /** Path relative to `.trama/model/`. */
+  /** Tracked path: relative to `.trama/model/`, or `requirements/<area>.md`. */
   | { type: "openModelFile"; path: string }
   /** Path relative to `.trama/` (for example `tasks/0003-x.md`). */
   | { type: "openFile"; path: string }
@@ -28,7 +28,7 @@ export type ToHost =
   | { type: "rejectProposal"; id: string }
   | { type: "resolveDrift"; id: string; how: "fix-code" | "accept-proposal" | "dismiss" };
 
-export type ViewName = "diagram" | "board";
+export type ViewName = "diagram" | "board" | "requirements";
 
 export interface NavigateOptions {
   /** Element reference (`checkout`, `order`, `order/Paid`, `user.CANCEL`…): the Diagram shows it. */

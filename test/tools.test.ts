@@ -30,7 +30,7 @@ describe("callTool", () => {
     const before = readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8");
     expect(callTool(p, "trama_proposal_new", { title: "Lost parcels", body: "Couriers lose parcels." })).toEqual({ text: expect.stringContaining("Opened Proposal 0001"), isError: false });
     const good = before.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)");
-    expect(callTool(p, "trama_proposal_write", { proposal: "1", path: "checkout/order.md", content: good }).text).toContain("is valid");
+    expect(callTool(p, "trama_proposal_write", { proposal: "1", path: "checkout/order.md", content: good }).text).toContain("are valid");
     const bad = callTool(p, "trama_proposal_write", { proposal: "1", path: "checkout/order.md", content: good.replace("→ Paid", "→ Nowhere") });
     expect(bad.isError).toBe(false);
     expect(bad.text).toContain('unknown State "Nowhere"');

@@ -2,6 +2,7 @@
 import type { ViewContext } from "../types";
 import type { Badge, Card, DriftCard, ProposalCard, TaskCard } from "./logic";
 import { COLUMN_TITLES } from "./logic";
+import { viewOfRef } from "../requirements/logic";
 
 export interface CardEnv {
   context: ViewContext;
@@ -53,10 +54,11 @@ function chips(refs: string[], env: CardEnv): HTMLElement {
   const list = el("div", "board-chips");
   for (const ref of refs) {
     const chip = el("button", "board-chip", ref);
+    const view = viewOfRef(ref);
     chip.type = "button";
     chip.dataset["action"] = `ref:${ref}`;
-    chip.title = `Show ${ref} on the diagram`;
-    chip.addEventListener("click", () => env.context.navigate("diagram", { ref }));
+    chip.title = view === "requirements" ? `Show ${ref} in Requirements` : `Show ${ref} on the diagram`;
+    chip.addEventListener("click", () => env.context.navigate(view, { ref }));
     list.append(chip);
   }
   return list;
@@ -95,9 +97,15 @@ function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
     if (card.changes.more > 0) list.append(el("li", "board-change board-muted", `and ${card.changes.more} more ${card.changes.more === 1 ? "file" : "files"}`));
     node.append(list);
   }
+  const touches = card.touches;
+  const views: HTMLElement[] = [];
+  if (touches.model || !touches.requirements)
+    views.push(button({ label: "View on diagram", aria: `View ${card.heading} on diagram`, action: "view", onClick: () => env.context.navigate("diagram", { proposal: card.id }) }));
+  if (touches.requirements)
+    views.push(button({ label: "View requirements", aria: `View the Requirements ${card.heading} changes`, action: "view-requirements", onClick: () => env.context.navigate("requirements", { proposal: card.id }) }));
   node.append(
     actions(
-      button({ label: "View on diagram", aria: `View ${card.heading} on diagram`, action: "view", onClick: () => env.context.navigate("diagram", { proposal: card.id }) }),
+      ...views,
       button({ label: "Approve", aria: `Approve ${card.heading}`, action: "approve", primary: true, disabled: card.blocker ?? false, onClick: () => env.context.post({ type: "approveProposal", id: card.id }) }),
       button({ label: "Reject", aria: `Reject ${card.heading}`, action: "reject", onClick: () => env.context.post({ type: "rejectProposal", id: card.id }) }),
     ),
@@ -125,8 +133,11 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
   if (proposalId !== null)
     buttons.push(button({ label: "Accept Proposal", aria: `Accept Proposal ${proposalId} for ${card.heading}`, action: "accept-proposal", disabled: card.acceptBlocker ?? false, onClick: resolve("accept-proposal") }));
   buttons.push(button({ label: "Dismiss", aria: `Dismiss ${card.heading}`, action: "dismiss", onClick: resolve("dismiss") }));
-  if (firstRef !== undefined)
-    buttons.push(button({ label: "View on diagram", aria: `View ${card.heading} on diagram`, action: "view", onClick: () => env.context.navigate("diagram", { ref: firstRef }) }));
+  if (firstRef !== undefined) {
+    const view = viewOfRef(firstRef);
+    const label = view === "requirements" ? "View requirement" : "View on diagram";
+    buttons.push(button({ label, aria: `${label} for ${card.heading}`, action: "view", onClick: () => env.context.navigate(view, { ref: firstRef }) }));
+  }
   node.append(actions(...buttons));
   return node;
 }

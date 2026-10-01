@@ -42,20 +42,30 @@ _Avoid_: message, action, signal
 A Machine moving from one State to another in reaction to an Event, with its condition and consequence written as free prose.
 _Avoid_: arrow, edge
 
+### How it is built
+
+**Requirement**:
+A statement of how the System must be built rather than what it does: interface, technology and constraints, quality, data, business rules. Requirements live beside the Model, not in it, and can be attached to the System, a Feature, a Machine or a State.
+_Avoid_: spec, acceptance criterion, constraint (for the concept)
+
+**Area**:
+A named group of Requirements kept together, such as the interface or the data, with a sentence saying when an agent needs it.
+_Avoid_: category, section, topic
+
 ### Changing the Model
 
 **Proposal**:
-A change to the Model suggested by the agent, which has no effect until a developer approves it as a whole.
+A change to the Model and its Requirements suggested by the agent, which has no effect until a developer approves it as a whole.
 _Avoid_: suggestion, patch, draft
 
 **Drift**:
-A difference between code and Model large enough to change the Diagram, which the developer must resolve. By default the code is fixed; the agent attaches a Proposal only when the code handles a case the Model forgot.
+A difference between code and the Model large enough to change the Diagram, or code that contradicts a Requirement, which the developer must resolve. By default the code is fixed; the agent attaches a Proposal only when the code handles a case the Model forgot.
 _Avoid_: divergence, mismatch, bug
 
 ### Work
 
 **Scan**:
-The agent's comparison between the Model, explored through the CLI, and the existing code, producing Tasks and Drifts.
+The agent's comparison between the Model and its Requirements, explored through Trama, and the existing code, producing Tasks and Drifts.
 _Avoid_: audit, analysis, sync
 
 **Task**:

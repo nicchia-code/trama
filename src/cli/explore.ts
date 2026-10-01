@@ -2,6 +2,7 @@ import { TramaError } from "../core/errors";
 import { analyze, findPaths, lineage } from "../core/graph";
 import { flattenStates, formatDiagnostic } from "../core/model";
 import { receivers, resolveRef } from "../core/refs";
+import type { ProjectModel } from "../core/requirements";
 import type { Diagnostic, Machine, Model, State } from "../core/types";
 import { bullets, dash, eventKey, firstLine, marker, modelNote, prose, type Result } from "./result";
 
@@ -201,7 +202,8 @@ export function analyzeView(model: Model, machineId?: string): Result {
   return { md, json: { warnings } };
 }
 
-export function searchView(model: Model, query: string): Result {
+export function searchView(project: ProjectModel, query: string): Result {
+  const model = project.model;
   const q = query.toLowerCase();
   const hits: { ref: string; kind: string; text: string }[] = [];
   const check = (ref: string, kind: string, ...texts: string[]) => {
@@ -222,6 +224,10 @@ export function searchView(model: Model, query: string): Result {
       for (const t of s.transitions) check(`${m.id}/${s.name}/${eventKey(t)}`, "transition", t.prose, t.target);
     }
   }
+  for (const a of project.areas) {
+    check(`requirements/${a.id}`, "requirements", a.title, a.description, a.intro);
+    for (const s of a.sections) check(`requirements/${a.id}#${s.ref ?? "General"}`, "requirement", s.text);
+  }
   const md = [`# Search: ${query}`, "", bullets(hits.map((h) => `- \`${h.ref}\` (${h.kind})${dash(h.text)}`), "_No matches._")].join("\n");
   return { md, json: { query, hits } };
 }
@@ -232,6 +238,6 @@ function firstMatchingLine(text: string, q: string): string {
 
 export function validateView(diagnostics: Diagnostic[], subject: string): Result {
   const ok = diagnostics.length === 0;
-  const md = ok ? `${subject} is valid.` : [`${subject} has ${diagnostics.length} error(s):`, "", ...diagnostics.map((d) => `- ${formatDiagnostic(d)}`)].join("\n");
+  const md = ok ? `${subject} are valid.` : [`${subject} have ${diagnostics.length} error(s):`, "", ...diagnostics.map((d) => `- ${formatDiagnostic(d)}`)].join("\n");
   return { md, json: { valid: ok, errors: diagnostics }, exit: ok ? 0 : 1 };
 }

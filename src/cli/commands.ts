@@ -11,14 +11,18 @@ import {
   rejectProposal,
   validateProposal,
 } from "../core/proposals";
+import { createDefaultAreas, loadProject } from "../core/requirements";
+import { syncRequirementSkills } from "../core/requirement-skills";
 import {
   findProject,
   TRAMA_DIR,
   loadModel,
   type Project,
   projectAt,
+  requirementsDir,
   writeFileEnsuringDir,
 } from "../core/store";
+import type { Model } from "../core/types";
 import { getDrift, getTask, moveTask, newDrift, newTask, resolveDrift } from "../core/work";
 import {
   analyzeView,
@@ -31,6 +35,7 @@ import {
   systemView,
   validateView,
 } from "./explore";
+import { requirementsView, withRequirements } from "./requirements";
 import type { Result } from "./result";
 import {
   boardView,
@@ -63,6 +68,13 @@ export interface Command {
 }
 
 const ref: OptionSpec = { type: "string", multiple: true };
+
+/** An explore view of a Model element followed by the Requirements attached to it. */
+function explore(ctx: Context, target: string, view: (model: Model, ref: string) => Result): Result {
+  const project = loadProject(ctx.project());
+  return withRequirements(view(project.model, target), project, target);
+}
+
 const str = (v: Values[string]): string | undefined => (typeof v === "string" ? v : undefined);
 const list = (v: Values[string]): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
@@ -108,30 +120,44 @@ export const COMMANDS: Command[] = [
       }
       const name = basename(root).replace(/[-_]+/g, " ").replace(/^./, (c) => c.toUpperCase());
       writeFileEnsuringDir(join(project.dir, "model", "system.md"), `# ${name}\n\nDescribe what this System is and who it is for.\n`);
+      const areas = createDefaultAreas(project);
       const skills = installSkills(skillsDir);
-      return text(`Created ${project.dir}\nInstalled ${skills.length} skill files in ${skillsDir}`, { path: project.dir, skillsDir, skills });
+      syncRequirementSkills(project, [skillsDir]);
+      return text(`Created ${project.dir} with ${areas.length} Requirement Areas\nInstalled ${skills.length} skill files in ${skillsDir}`, { path: project.dir, skillsDir, skills, areas });
     },
   },
   {
     name: "skills update",
     args: "",
-    summary: "Install this version's agent skills into a project (--skills-dir, default .agents/skills), replacing older copies",
+    summary: "Install this version's agent skills into a project (--skills-dir, default .agents/skills), add the starting Requirement Areas if the project has none, and regenerate the trama-req-* skills",
     options: { "skills-dir": { type: "string" } },
     run(ctx, _a, o) {
       const project = ctx.project();
       const skillsDir = resolve(project.root, str(o["skills-dir"]) ?? ".agents/skills");
       const changed = skillConflicts(skillsDir).concat(missingSkills(skillsDir));
       installSkills(skillsDir);
-      const md = changed.length === 0 ? `Skills in ${skillsDir} are already up to date.` : `Updated ${changed.length} skill file(s) in ${skillsDir}:\n${changed.map((c) => `- ${c}`).join("\n")}`;
-      return text(md, { skillsDir, changed });
+      const areas = existsSync(requirementsDir(project)) ? [] : createDefaultAreas(project);
+      const generated = syncRequirementSkills(project, [skillsDir]);
+      const lines = [
+        changed.length === 0 ? `Skills in ${skillsDir} are already up to date.` : `Updated ${changed.length} skill file(s) in ${skillsDir}:\n${changed.map((c) => `- ${c}`).join("\n")}`,
+        areas.length > 0 ? `Created ${areas.length} Requirement Areas in ${requirementsDir(project)}: ${areas.join(", ")}` : "",
+        generated.length > 0 ? `Regenerated ${generated.length} Requirement skill(s):\n${generated.map((c) => `- ${c}`).join("\n")}` : "",
+      ];
+      return text(lines.filter(Boolean).join("\n"), { skillsDir, changed, areas, generated });
     },
   },
 
   { name: "system", args: "", summary: "System description, Actors and Features", run: (ctx) => systemView(loadModel(ctx.project())) },
-  { name: "feature", args: "<feature>", summary: "A Feature: its Machines and the Events reaching them", run: (ctx, a) => featureView(loadModel(ctx.project()), a[0] as string) },
-  { name: "machine", args: "<machine>", summary: "A Machine: State tree, Transitions, Events and who receives them", run: (ctx, a) => machineView(loadModel(ctx.project()), a[0] as string) },
-  { name: "state", args: "<machine/State>", summary: "A State: sub-States, outgoing (incl. inherited) and incoming Transitions", run: (ctx, a) => stateView(loadModel(ctx.project()), a[0] as string) },
+  { name: "feature", args: "<feature>", summary: "A Feature: its Machines, the Events reaching them and its Requirements", run: (ctx, a) => explore(ctx, a[0] as string, featureView) },
+  { name: "machine", args: "<machine>", summary: "A Machine: State tree, Transitions, Events, who receives them and its Requirements", run: (ctx, a) => explore(ctx, a[0] as string, machineView) },
+  { name: "state", args: "<machine/State>", summary: "A State: sub-States, outgoing (incl. inherited) and incoming Transitions, Requirements", run: (ctx, a) => explore(ctx, a[0] as string, stateView) },
   { name: "event", args: "<owner.EVENT>", summary: "An Event: owner and every Transition that reacts to it", run: (ctx, a) => eventView(loadModel(ctx.project()), a[0] as string) },
+  {
+    name: "requirements",
+    args: "[area|ref]",
+    summary: "Requirement Areas; one Area in full (ui or requirements/ui); or the Requirements that apply to a Model element (order/Paid)",
+    run: (ctx, a) => requirementsView(loadProject(ctx.project()), a[0]),
+  },
   {
     name: "paths",
     args: "<machine> <from> <to>",
@@ -145,18 +171,18 @@ export const COMMANDS: Command[] = [
     },
   },
   { name: "analyze", args: "[machine]", summary: "Warnings: unreachable States, dead ends, Events nobody receives", run: (ctx, a) => analyzeView(loadModel(ctx.project()), a[0]) },
-  { name: "search", args: "<text>", summary: "Search names and prose of the whole Model", run: (ctx, a) => searchView(loadModel(ctx.project()), a.join(" ")) },
+  { name: "search", args: "<text>", summary: "Search names and prose of the whole Model and its Requirements", run: (ctx, a) => searchView(loadProject(ctx.project()), a.join(" ")) },
   {
     name: "validate",
     args: "",
-    summary: "Check the Model's internal consistency (never the code)",
+    summary: "Check the Model's and Requirements' internal consistency (never the code)",
     options: { proposal: { type: "string" } },
     run(ctx, _a, o) {
       const project = ctx.project();
       const id = str(o["proposal"]);
-      if (id === undefined) return validateView(loadModel(project).diagnostics, "The Model");
+      if (id === undefined) return validateView(loadProject(project).diagnostics, "The Model and its Requirements");
       const proposal = getProposal(project, id);
-      return validateView(validateProposal(project, proposal), `The Model with Proposal ${proposal.id} applied`);
+      return validateView(validateProposal(project, proposal), `The Model and its Requirements with Proposal ${proposal.id} applied`);
     },
   },
 

@@ -1,8 +1,6 @@
 import { changes, health, listProposals, type Proposal, validateProposal } from "../core/proposals";
-import { resolveRef } from "../core/refs";
+import { hasContent, loadProject, parseRequirementRef, type ProjectModel, requirementsFor, resolveProjectRef } from "../core/requirements";
 import type { Project } from "../core/store";
-import { loadModel } from "../core/store";
-import type { Model } from "../core/types";
 import { formatDiagnostic } from "../core/model";
 import { COLUMNS, type Drift, listDrifts, listTasks, type Task } from "../core/work";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
@@ -41,7 +39,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
       "_No files touched._",
     ),
     "",
-    "## Model validation with the Proposal applied",
+    "## Validation of the Model and Requirements with the Proposal applied",
     errors.length === 0 ? "Valid." : errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n"),
   ].join("\n");
   return {
@@ -53,13 +51,13 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
 const taskSummary = (t: Task) => ({ id: t.id, title: t.title, column: t.data.column, technical: t.data.technical, refs: t.data.refs, drift: t.data.drift });
 const driftSummary = (d: Drift) => ({ id: d.id, title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task });
 
-/** The current Model text of an element, for inlining into a Task or Drift. */
-export function describeRef(model: Model, ref: string): string {
+/** The current text of a Model element or Requirement, for inlining into a Task or Drift. */
+export function describeRef(project: ProjectModel, ref: string): string {
   let el;
   try {
-    el = resolveRef(model, ref);
+    el = resolveProjectRef(project, ref);
   } catch {
-    return `_\`${ref}\` no longer resolves in the Model._`;
+    return `_\`${ref}\` no longer resolves in the Model or its Requirements._`;
   }
   switch (el.kind) {
     case "feature":
@@ -77,22 +75,51 @@ export function describeRef(model: Model, ref: string): string {
       return el.transitions.map((t) => `- ${el.state.name}: \`${eventKey(t)}\` → ${t.target}${prose(t)}`).join("\n");
     case "event":
       return `${ref}${dash(el.event.description)}`;
+    case "requirement":
+      if (el.section) return `${el.area.title}, ${el.section.ref ?? "General"}:\n${el.section.text || "_empty_"}`;
+      return `${el.area.title}: ${el.area.sections.filter((s) => s.text !== "").map((s) => s.ref ?? "General").join(", ") || "_empty_"}. Load the trama-req-${el.area.id} skill for the full text.`;
   }
 }
 
-function refsBlock(model: Model, refs: string[]): string {
-  return bullets(refs.map((r) => `- \`${r}\`\n${describeRef(model, r).split("\n").map((l) => `  > ${l}`).join("\n")}`), "_No references._");
+function refsBlock(project: ProjectModel, refs: string[]): string {
+  return bullets(refs.map((r) => `- \`${r}\`\n${describeRef(project, r).split("\n").map((l) => `  > ${l}`).join("\n")}`), "_No references._");
 }
 
+/**
+ * Requirements attached to the referenced Model elements or to what contains them, except those referenced
+ * directly, plus a pointer to the Areas' General Requirements, which apply to everything.
+ */
+export function requirementsBlock(project: ProjectModel, refs: string[]): string {
+  const explicit = new Set(refs.filter((r) => parseRequirementRef(r) !== null));
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const ref of refs) {
+    if (parseRequirementRef(ref) !== null) continue;
+    for (const r of requirementsFor(project, ref)) {
+      const key = `requirements/${r.area.id}#${r.section.ref}`;
+      if (seen.has(key) || explicit.has(key) || explicit.has(`requirements/${r.area.id}`)) continue;
+      seen.add(key);
+      lines.push(`- \`${key}\`\n${r.section.text.split("\n").map((l) => `  > ${l}`).join("\n")}`);
+    }
+  }
+  const general = project.areas.filter((a) => a.sections.some((s) => s.ref === null && s.text !== "") || a.intro !== "");
+  if (general.length > 0)
+    lines.push(`- General Requirements apply too: ${general.map((a) => `${a.title} (skill \`trama-req-${a.id}\`)`).join(", ")}.`);
+  return bullets(lines, "_No Requirements apply._");
+}
+
+const hasRequirements = (project: ProjectModel) => project.areas.some(hasContent);
+
 export function taskShowView(p: Project, task: Task): Result {
-  const model = loadModel(p);
+  const project = loadProject(p);
   const md = [
     `${task.body.trim()}`,
     "",
     `Column: **${task.data.column}**${task.data.technical ? " · technical" : ""}${task.data.drift ? ` · from Drift ${task.data.drift}` : ""}`,
     "",
-    "## Model references",
-    task.data.technical ? "_Technical Task: no references._" : refsBlock(model, task.data.refs),
+    "## References",
+    task.data.refs.length === 0 ? "_Technical Task: no references._" : refsBlock(project, task.data.refs),
+    ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, task.data.refs)] : []),
   ].join("\n");
   return { md, json: { ...taskSummary(task), body: task.body } };
 }
@@ -106,7 +133,7 @@ export function taskListView(p: Project, column?: string): Result {
 }
 
 export function driftShowView(p: Project, drift: Drift): Result {
-  const model = loadModel(p);
+  const project = loadProject(p);
   const md = [
     drift.body.trim(),
     "",
@@ -114,8 +141,9 @@ export function driftShowView(p: Project, drift: Drift): Result {
     drift.data.proposal ? `Attached Proposal: ${drift.data.proposal}` : "",
     drift.data.task ? `Task: ${drift.data.task}` : "",
     "",
-    "## Model references",
-    refsBlock(model, drift.data.refs),
+    "## References",
+    refsBlock(project, drift.data.refs),
+    ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, drift.data.refs)] : []),
   ].join("\n");
   return { md, json: { ...driftSummary(drift), body: drift.body } };
 }

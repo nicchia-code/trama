@@ -48,6 +48,28 @@ export const readModelFiles = (p: Project): FileMap => readTree(modelDir(p));
 
 export const loadModel = (p: Project): Model => buildModel(readModelFiles(p));
 
+/**
+ * Requirement files are tracked together with Model files: the same Proposal can change both. In a tracked file map
+ * Model paths are relative to `model/` (`checkout/order.md`) and Requirement paths start with `requirements/`
+ * (`requirements/ui.md`); `requirements` is a reserved ID, so the two never collide.
+ */
+export const REQUIREMENTS_PREFIX = "requirements/";
+
+export const requirementsDir = (p: Project) => join(p.dir, "requirements");
+
+/** Where a tracked path lives under a `.trama/` folder or a Proposal folder (both have `model/` and `requirements/`). */
+export const trackedLocation = (root: string, path: string): string =>
+  safeJoin(root, path.startsWith(REQUIREMENTS_PREFIX) ? path : `model/${path}`);
+
+/** Model and Requirement files under `root` (a `.trama/` or a Proposal folder), keyed as tracked paths. */
+export function readTracked(root: string): FileMap {
+  const files = readTree(join(root, "model"));
+  for (const [path, content] of readTree(join(root, "requirements"))) files.set(`${REQUIREMENTS_PREFIX}${path}`, content);
+  return files;
+}
+
+export const readTrackedFiles = (p: Project): FileMap => readTracked(p.dir);
+
 export const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
 
 export function writeFileEnsuringDir(path: string, content: string) {

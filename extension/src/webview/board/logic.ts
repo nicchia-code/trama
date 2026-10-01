@@ -3,6 +3,7 @@ import type { FileChange } from "../../../../src/core/diff";
 import { formatDiagnostic } from "../../../../src/core/model";
 import type { DriftView, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
 import type { Column } from "../../protocol";
+import { proposalTouches } from "../requirements/logic";
 
 export type ColumnId = "decide" | Column;
 
@@ -55,6 +56,8 @@ export interface ProposalCard {
   changes: ChangeSummary;
   /** Why Approve is disabled; null when the Proposal can be approved. */
   blocker: string | null;
+  /** Whether it changes the Model, its Requirements or both: which views can show it. */
+  touches: { model: boolean; requirements: boolean };
 }
 
 export interface DriftCard {
@@ -147,14 +150,14 @@ const listed = (items: string[]) => (items.length > MAX_TOOLTIP_ITEMS ? `${items
 export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors">): string | null {
   if (p.stale.length > 0) return "Stale: the Model changed since this Proposal touched it. Ask the agent for a new Proposal.";
   if (p.unbased.length > 0) return "Some files were never registered with the Proposal.";
-  if (p.errors.length > 0) return "Applying this Proposal would leave the Model invalid.";
+  if (p.errors.length > 0) return "Applying this Proposal would leave the Model or its Requirements invalid.";
   return null;
 }
 
 export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors">): Badge[] {
   const badges: Badge[] = [];
   if (p.stale.length > 0) badges.push({ label: "stale", tone: "warning", tooltip: `The Model changed since the Proposal touched:\n${listed(p.stale)}` });
-  if (p.errors.length > 0) badges.push({ label: "invalid", tone: "error", tooltip: `The Model would be invalid:\n${listed(p.errors.map(formatDiagnostic))}` });
+  if (p.errors.length > 0) badges.push({ label: "invalid", tone: "error", tooltip: `The Model or its Requirements would be invalid:\n${listed(p.errors.map(formatDiagnostic))}` });
   if (p.unbased.length > 0) badges.push({ label: "unregistered files", tone: "warning", tooltip: `Never registered with the Proposal:\n${listed(p.unbased)}` });
   return badges;
 }
@@ -169,6 +172,7 @@ export function proposalCard(p: ProposalView): ProposalCard {
     badges: proposalBadges(p),
     changes: summarizeChanges(p.changes),
     blocker: approveBlocker(p),
+    touches: proposalTouches(p),
   };
 }
 

@@ -1,11 +1,14 @@
 import { delimiter, dirname } from "node:path";
 import * as vscode from "vscode";
-import { watchAgentTerminal } from "./agent";
+import { syncRequirementSkills } from "../../../src/core/requirement-skills";
+import { watchAgentTerminal, settings } from "./agent";
 import { Controller, describeError } from "./controller";
 import { isCursor } from "./cursor";
 import { ensureCursorMcp, tramaExecutable } from "./mcp-config";
 import { findProject } from "./project";
 import { registerTramaTools } from "./tools";
+
+const SKILL_SYNC_DEBOUNCE_MS = 300;
 
 let controller: Controller | undefined;
 
@@ -46,9 +49,35 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("trama.updateSkills", guarded(async () => trama.updateSkills())),
     watchAgentTerminal(),
     registerTramaTools(findProject),
+    watchRequirements(),
   );
   setUpCursor(context.extensionPath);
   exposeBundledCli(context);
+}
+
+/**
+ * The developer edits Requirement files directly, so the generated `trama-req-*` skills are regenerated on every
+ * change under `.trama/requirements/`, also when the Trama panel is closed.
+ */
+function watchRequirements(): vscode.Disposable {
+  const watcher = vscode.workspace.createFileSystemWatcher("**/.trama/requirements/*.md");
+  let timer: NodeJS.Timeout | undefined;
+  const sync = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const project = findProject();
+      if (!project) return;
+      try {
+        syncRequirementSkills(project, [settings().get<string>("skillsDir", ".agents/skills").trim() || ".agents/skills"]);
+      } catch (err) {
+        void vscode.window.showErrorMessage(`Trama: could not regenerate the Requirement skills: ${describeError(err)}`);
+      }
+    }, SKILL_SYNC_DEBOUNCE_MS);
+  };
+  watcher.onDidCreate(sync);
+  watcher.onDidChange(sync);
+  watcher.onDidDelete(sync);
+  return { dispose: () => (clearTimeout(timer), watcher.dispose()) };
 }
 
 /**

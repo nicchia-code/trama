@@ -79,4 +79,4 @@ export type FileMap = Map<string, string>;
 
 export const ID_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 export const EVENT_NAME_PATTERN = /^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$/;
-export const RESERVED_IDS: Record<string, true> = { system: true, feature: true, actors: true };
+export const RESERVED_IDS: Record<string, true> = { system: true, feature: true, actors: true, requirements: true };

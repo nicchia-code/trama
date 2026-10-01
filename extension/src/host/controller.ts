@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { approveProposal, rejectProposal } from "../../../src/core/proposals";
 import { buildSnapshot } from "../../../src/core/snapshot";
-import { loadModel, modelDir, type Project } from "../../../src/core/store";
+import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { getDrift, getTask, moveTask, newTask, resolveDrift } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { agentReady, launchAgent, settings } from "./agent";
@@ -160,9 +160,11 @@ export class Controller implements vscode.Disposable {
       case "launch":
         await this.launchAction(project, message.action);
         return;
-      case "openModelFile":
-        await this.openFile(resolveMarkdownFile(modelDir(project), message.path));
+      case "openModelFile": {
+        const req = message.path.startsWith(REQUIREMENTS_PREFIX);
+        await this.openFile(req ? resolveMarkdownFile(requirementsDir(project), message.path.slice(REQUIREMENTS_PREFIX.length)) : resolveMarkdownFile(modelDir(project), message.path));
         return;
+      }
       case "openFile":
         await this.openFile(resolveMarkdownFile(project.dir, message.path));
         return;

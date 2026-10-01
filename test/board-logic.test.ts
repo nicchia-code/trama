@@ -13,11 +13,12 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   changes: [],
   machines: [],
   actors: [],
+  areas: [],
   ...over,
 });
 const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, file: "tasks/0012-refunds.md", ...over });
-const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], proposals: [], drifts: [], tasks: [], ...over });
+const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
 
 test("groups the snapshot into four columns, Proposals before Drifts in To decide", () => {

@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -81,11 +81,11 @@
     "languageModelTools": [
       {
         "name": "trama_view",
-        "displayName": "Trama: View the Model",
+        "displayName": "Trama: View the Model and Requirements",
         "toolReferenceName": "trama_view",
         "canBeReferencedInPrompt": true,
-        "userDescription": "View the Model",
-        "modelDescription": "Shows part of the project's Trama Model, the source of truth for how the software behaves. Without `ref`: the System, its Actors and Features. With `ref`: that element with its States, Transitions (condition and consequence in prose), Events and who receives them. Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event).",
+        "userDescription": "View the Model and Requirements",
+        "modelDescription": "Shows part of the project's Trama Model, the source of truth for how the software behaves, with the Requirements that say how it must be built. Without `ref`: the System, its Actors and Features. With `ref`: that element with its States, Transitions (condition and consequence in prose), Events, who receives them, and the Requirements attached to it. `requirements` lists the Requirement Areas; Requirements: `requirements/ui` (a whole Area) or `requirements/ui#order/Paid` (one section; `#General` for the general one). Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event).",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -95,7 +95,7 @@
           "properties": {
             "ref": {
               "type": "string",
-              "description": "Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event)."
+              "description": "Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event). Or `requirements`, or Requirements: `requirements/ui` (a whole Area) or `requirements/ui#order/Paid` (one section; `#General` for the general one)."
             }
           },
           "additionalProperties": false
@@ -165,11 +165,11 @@
       },
       {
         "name": "trama_search",
-        "displayName": "Trama: Search the Model",
+        "displayName": "Trama: Search the Model and Requirements",
         "toolReferenceName": "trama_search",
         "canBeReferencedInPrompt": true,
-        "userDescription": "Search the Model",
-        "modelDescription": "Case-insensitive search over names and prose of the whole Model; each hit with its element reference.",
+        "userDescription": "Search the Model and Requirements",
+        "modelDescription": "Case-insensitive search over names and prose of the whole Model and its Requirements; each hit with its reference.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -211,7 +211,7 @@
         "toolReferenceName": "trama_validate",
         "canBeReferencedInPrompt": true,
         "userDescription": "Validate",
-        "modelDescription": "Checks the Model's internal consistency, or the Model with an open Proposal applied. Never looks at code.",
+        "modelDescription": "Checks the internal consistency of the Model and its Requirements (every Requirement section must name an existing element), or of both with an open Proposal applied. Never looks at code.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -233,7 +233,7 @@
         "toolReferenceName": "trama_proposal_new",
         "canBeReferencedInPrompt": true,
         "userDescription": "Open a Proposal",
-        "modelDescription": "Opens a new Proposal: the only way to change the Model. Then write each changed Model file with trama_proposal_write. Only the developer can approve it.",
+        "modelDescription": "Opens a new Proposal: the only way to change the Model or its Requirements. Then write each changed Model or Requirement file with trama_proposal_write. Only the developer can approve it.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -258,11 +258,11 @@
       },
       {
         "name": "trama_proposal_write",
-        "displayName": "Trama: Write a Model file in a Proposal",
+        "displayName": "Trama: Write a Model or Requirement file in a Proposal",
         "toolReferenceName": "trama_proposal_write",
         "canBeReferencedInPrompt": true,
-        "userDescription": "Write a Model file in a Proposal",
-        "modelDescription": "Writes the complete new version of one Model file inside an open Proposal (the Model itself is untouched until the developer approves). `path` is relative to `.trama/model/`, e.g. `checkout/order.md` or `actors/user.md`. Returns the validation of the Model with the Proposal applied.",
+        "userDescription": "Write a Model or Requirement file in a Proposal",
+        "modelDescription": "Writes the complete new version of one Model or Requirement file inside an open Proposal (nothing changes until the developer approves). `path`: Model file relative to `.trama/model/` (`checkout/order.md`, `actors/user.md`), or a Requirement Area `requirements/<area>.md`. Returns the validation of the Model and Requirements with the Proposal applied; a Requirement section naming a State the Proposal removes or renames is an error, so update the Requirement file in the same Proposal.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -276,11 +276,11 @@
             },
             "path": {
               "type": "string",
-              "description": "Model file, relative to .trama/model/"
+              "description": "Model file relative to `.trama/model/` (`checkout/order.md`, `actors/user.md`), or a Requirement Area `requirements/<area>.md`"
             },
             "content": {
               "type": "string",
-              "description": "The complete file in the Trama Model format"
+              "description": "The complete file in the Trama Model or Requirements format"
             }
           },
           "required": [
@@ -293,11 +293,11 @@
       },
       {
         "name": "trama_proposal_delete_file",
-        "displayName": "Trama: Delete a Model file in a Proposal",
+        "displayName": "Trama: Delete a Model or Requirement file in a Proposal",
         "toolReferenceName": "trama_proposal_delete_file",
         "canBeReferencedInPrompt": true,
-        "userDescription": "Delete a Model file in a Proposal",
-        "modelDescription": "Marks a Model file for deletion in an open Proposal. `path` is relative to `.trama/model/`.",
+        "userDescription": "Delete a Model or Requirement file in a Proposal",
+        "modelDescription": "Marks a Model or Requirement file for deletion in an open Proposal. `path`: Model file relative to `.trama/model/` (`checkout/order.md`, `actors/user.md`), or a Requirement Area `requirements/<area>.md`.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -311,7 +311,7 @@
             },
             "path": {
               "type": "string",
-              "description": "Model file, relative to .trama/model/"
+              "description": "Model file relative to `.trama/model/` (`checkout/order.md`, `actors/user.md`), or a Requirement Area `requirements/<area>.md`"
             }
           },
           "required": [
@@ -352,7 +352,7 @@
         "toolReferenceName": "trama_task_new",
         "canBeReferencedInPrompt": true,
         "userDescription": "Create a Task",
-        "modelDescription": "Creates a Task in To do. A Task references the Model elements it implements in `refs`, unless it is technical (no behaviour change, no refs). The body says in domain words what must be true when done.",
+        "modelDescription": "Creates a Task in To do. A Task references the Model elements it implements in `refs`, plus any Requirement it must satisfy. A technical Task (no behaviour change) references no Model element, only Requirements if any. The body says in domain words what must be true when done.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -369,11 +369,11 @@
               "items": {
                 "type": "string"
               },
-              "description": "Model elements the Task covers. Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event)."
+              "description": "Model elements the Task covers, and Requirements it must satisfy. Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event). Requirements: `requirements/ui` (a whole Area) or `requirements/ui#order/Paid` (one section; `#General` for the general one)."
             },
             "technical": {
               "type": "boolean",
-              "description": "True for work that changes no behaviour (refactor, dependencies); then refs must be empty"
+              "description": "True for work that changes no behaviour (refactor, dependencies, applying a Requirement); then refs may only name Requirements"
             },
             "drift": {
               "type": "string",
@@ -396,7 +396,7 @@
         "toolReferenceName": "trama_task_show",
         "canBeReferencedInPrompt": true,
         "userDescription": "Show a Task",
-        "modelDescription": "A Task with the current Model text of every element it references.",
+        "modelDescription": "A Task with the current text of every Model element and Requirement it references, and the Requirements that apply to those elements.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -421,7 +421,7 @@
         "toolReferenceName": "trama_task_move",
         "canBeReferencedInPrompt": true,
         "userDescription": "Move a Task",
-        "modelDescription": "Moves a Task to `todo`, `doing` or `done`. Move it to `doing` when you start and to `done` when the behaviour matches the Model.",
+        "modelDescription": "Moves a Task to `todo`, `doing` or `done`. Move it to `doing` when you start and to `done` when the behaviour matches the Model and the code follows its Requirements.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -455,7 +455,7 @@
         "toolReferenceName": "trama_drift_new",
         "canBeReferencedInPrompt": true,
         "userDescription": "Record a Drift",
-        "modelDescription": "Records a Drift: the code differs from the Model in a way that would change the Diagram. File it exactly once. If the code handles an important case the Model forgot, first open a Proposal and pass its ID in `proposal`. Only the developer resolves Drifts.",
+        "modelDescription": "Records a Drift: the code differs from the Model in a way that would change the Diagram, or contradicts a Requirement. File it exactly once. If the code handles an important case the Model forgot, first open a Proposal and pass its ID in `proposal`. Only the developer resolves Drifts.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -472,7 +472,7 @@
               "items": {
                 "type": "string"
               },
-              "description": "The Model elements closest to the difference. Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event)."
+              "description": "The Model elements or Requirements closest to the difference. Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event). Requirements: `requirements/ui` (a whole Area) or `requirements/ui#order/Paid` (one section; `#General` for the general one)."
             },
             "proposal": {
               "type": "string",
@@ -480,7 +480,7 @@
             },
             "body": {
               "type": "string",
-              "description": "What the code does, what the Model says, where in the code"
+              "description": "What the code does, what the Model or Requirement says, where in the code"
             }
           },
           "required": [
@@ -496,7 +496,7 @@
         "toolReferenceName": "trama_drift_show",
         "canBeReferencedInPrompt": true,
         "userDescription": "Show a Drift",
-        "modelDescription": "A Drift with its references and its attached Proposal, if any.",
+        "modelDescription": "A Drift with its references, the Requirements that apply, and its attached Proposal, if any.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"

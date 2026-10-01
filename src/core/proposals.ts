@@ -2,20 +2,22 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { diffFile, type FileChange } from "./diff";
 import { TramaError } from "./errors";
-import { buildModel, formatDiagnostic } from "./model";
+import { formatDiagnostic } from "./model";
+import { buildProject } from "./requirements";
+import { syncRequirementSkills } from "./requirement-skills";
 import { enumField, type Raw, stringList, stringMap } from "./schema";
 import {
   findNumbered,
   listNumbered,
-  modelDir,
   nextId,
   type Project,
   readDocument,
-  readModelFiles,
-  readTree,
-  safeJoin,
+  readTracked,
+  readTrackedFiles,
+  REQUIREMENTS_PREFIX,
   sha256,
   slugify,
+  trackedLocation,
   writeDocument,
   writeFileEnsuringDir,
 } from "./store";
@@ -94,10 +96,13 @@ export function newProposal(p: Project, title: string, body = ""): Proposal {
   return proposal;
 }
 
+/** A tracked path: `checkout/order.md` for the Model, `requirements/ui.md` for an Area of Requirements. */
 function normalizeModelPath(path: string): string {
-  const clean = path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\.trama\/model\//, "");
-  if (!clean.endsWith(".md")) throw new TramaError(`"${path}" is not a Model file (expected a .md path under .trama/model/)`);
-  if (clean.split("/").includes("..") || clean.startsWith("/")) throw new TramaError(`"${path}" must be relative to .trama/model/`);
+  const clean = path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\.trama\/model\//, "").replace(/^\.trama\/requirements\//, REQUIREMENTS_PREFIX);
+  if (!clean.endsWith(".md")) throw new TramaError(`"${path}" is not a Model or Requirement file (expected a .md path under .trama/model/ or requirements/<area>.md)`);
+  if (clean.split("/").includes("..") || clean.startsWith("/")) throw new TramaError(`"${path}" must be relative to .trama/model/, or be requirements/<area>.md`);
+  if (clean.startsWith(REQUIREMENTS_PREFIX) && clean.slice(REQUIREMENTS_PREFIX.length).includes("/"))
+    throw new TramaError(`"${path}": Requirement files are requirements/<area>.md, without subfolders`);
   return clean;
 }
 
@@ -114,11 +119,11 @@ export function editInProposal(p: Project, id: string, modelPath: string): strin
   const proposal = getProposal(p, id);
   requireOpen(proposal, "edited");
   const rel = normalizeModelPath(modelPath);
-  const target = safeJoin(join(proposal.dir, "model"), rel);
+  const target = trackedLocation(proposal.dir, rel);
   if (proposal.data.delete.includes(rel)) throw new TramaError(`${rel} is marked for deletion in Proposal ${proposal.id}`);
   if (existsSync(target)) return target;
 
-  const current = safeJoin(modelDir(p), rel);
+  const current = trackedLocation(p.dir, rel);
   if (existsSync(current)) {
     const content = readFileSync(current, "utf8");
     proposal.data.base[rel] ??= sha256(content);
@@ -135,9 +140,9 @@ export function deleteInProposal(p: Project, id: string, modelPath: string) {
   const proposal = getProposal(p, id);
   requireOpen(proposal, "edited");
   const rel = normalizeModelPath(modelPath);
-  const current = safeJoin(modelDir(p), rel);
-  if (!existsSync(current)) throw new TramaError(`${rel} does not exist in the Model`);
-  if (existsSync(safeJoin(join(proposal.dir, "model"), rel)))
+  const current = trackedLocation(p.dir, rel);
+  if (!existsSync(current)) throw new TramaError(`${rel} does not exist in the Model or its Requirements`);
+  if (existsSync(trackedLocation(proposal.dir, rel)))
     throw new TramaError(`${rel} is already edited in Proposal ${proposal.id}; remove that copy first`);
   proposal.data.base[rel] ??= sha256(readFileSync(current, "utf8"));
   if (!proposal.data.delete.includes(rel)) proposal.data.delete.push(rel);
@@ -151,10 +156,10 @@ export interface ProposalHealth {
   unbased: string[];
 }
 
-const newFiles = (proposal: Proposal): FileMap => readTree(join(proposal.dir, "model"));
+const newFiles = (proposal: Proposal): FileMap => readTracked(proposal.dir);
 
 export function health(p: Project, proposal: Proposal): ProposalHealth {
-  const model = readModelFiles(p);
+  const model = readTrackedFiles(p);
   const touched = new Set([...newFiles(proposal).keys(), ...proposal.data.delete]);
   const stale: string[] = [];
   const unbased: string[] = [];
@@ -171,20 +176,21 @@ export function health(p: Project, proposal: Proposal): ProposalHealth {
   return { stale: stale.sort(), unbased: unbased.sort() };
 }
 
-/** The Model files as they would be once the Proposal is applied. */
+/** The Model and Requirement files (tracked paths) as they would be once the Proposal is applied. */
 export function applied(p: Project, proposal: Proposal): FileMap {
-  const files = readModelFiles(p);
+  const files = readTrackedFiles(p);
   for (const path of proposal.data.delete) files.delete(path);
   for (const [path, content] of newFiles(proposal)) files.set(path, content);
   return files;
 }
 
+/** Validation of the Model and its Requirements with the Proposal applied: a Requirement left pointing at a removed State is an error. */
 export function validateProposal(p: Project, proposal: Proposal): Diagnostic[] {
-  return buildModel(applied(p, proposal)).diagnostics;
+  return buildProject(applied(p, proposal)).diagnostics;
 }
 
 export function changes(p: Project, proposal: Proposal): FileChange[] {
-  const before = readModelFiles(p);
+  const before = readTrackedFiles(p);
   const after = applied(p, proposal);
   const paths = [...new Set([...newFiles(proposal).keys(), ...proposal.data.delete])].sort();
   return paths.map((path) => diffFile(path, before.get(path), after.get(path)));
@@ -202,10 +208,11 @@ export function approveProposal(p: Project, id: string): Proposal {
   if (errors.length > 0)
     throw new TramaError(`Proposal ${proposal.id} would leave the Model invalid:\n${errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n")}`);
 
-  for (const path of proposal.data.delete) rmSync(safeJoin(modelDir(p), path));
-  for (const [path, content] of newFiles(proposal)) writeFileEnsuringDir(safeJoin(modelDir(p), path), content);
+  for (const path of proposal.data.delete) rmSync(trackedLocation(p.dir, path));
+  for (const [path, content] of newFiles(proposal)) writeFileEnsuringDir(trackedLocation(p.dir, path), content);
   proposal.data.status = "approved";
   save(proposal);
+  syncRequirementSkills(p);
   return proposal;
 }
 

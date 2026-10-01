@@ -1,4 +1,6 @@
-import { flattenStates } from "./model";
+import { buildModel, flattenStates } from "./model";
+import { parseArea } from "./requirements";
+import { REQUIREMENTS_PREFIX } from "./store";
 import { parseActor, parseDocument, parseMachine } from "./parse";
 import type { Actor, Diagnostic, EventDecl, Machine } from "./types";
 
@@ -82,9 +84,32 @@ function diffMachines(before: Machine | undefined, after: Machine | undefined, o
   diffEvents(before?.events ?? [], after?.events ?? [], out);
 }
 
+/** Sections added, removed or changed between two versions of a Requirement Area. */
+function diffArea(path: string, before: string | undefined, after: string | undefined, out: string[]) {
+  const empty = buildModel(new Map());
+  const parse = (content: string | undefined) => (content === undefined ? undefined : parseArea("", path, content, empty, []));
+  const a = parse(before);
+  const b = parse(after);
+  const title = (ref: string | null) => ref ?? "General";
+  const was = new Map((a?.sections ?? []).map((s) => [title(s.ref).toLowerCase(), s]));
+  const is = new Map((b?.sections ?? []).map((s) => [title(s.ref).toLowerCase(), s]));
+  if (a && b && a.description !== b.description) out.push("~ description changed");
+  if (a && b && a.intro !== b.intro) out.push("~ text before the sections changed");
+  for (const [key, s] of is) {
+    const o = was.get(key);
+    if (!o) out.push(`+ Requirements for ${title(s.ref)}`);
+    else if (o.text !== s.text) out.push(`~ Requirements for ${title(s.ref)}`);
+  }
+  for (const [key, s] of was) if (!is.has(key)) out.push(`- Requirements for ${title(s.ref)}`);
+}
+
 export function diffFile(path: string, before: string | undefined, after: string | undefined): FileChange {
   const change = before === undefined ? "added" : after === undefined ? "removed" : "modified";
   const details: string[] = [];
+  if (path.startsWith(REQUIREMENTS_PREFIX)) {
+    diffArea(path, before, after, details);
+    return { path, change, details };
+  }
   const a = before === undefined ? undefined : parseFile(path, before);
   const b = after === undefined ? undefined : parseFile(path, after);
   const sample = b ?? a;
