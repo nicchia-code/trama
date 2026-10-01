@@ -1,3 +1,6 @@
+---
+status: superseded by ADR-0006
+---
 # Agents over ACP, with the terminal as a fallback
 
 Trama talks to coding agents through the Agent Client Protocol (ACP): the extension is the client, the agent (omp, Copilot CLI, Claude Code or Codex through their adapters, Gemini and others) runs as a separate process over stdio, and Trama shows the conversation, the agent's questions and its permission requests in an "Agent" tab next to the Diagram and the Board. Agents without ACP are still launched as a command in a terminal (`trama.agentCommand`). The editors' built-in chats (Copilot Chat, Cursor) are not ACP servers and have no stable API for receiving a prompt, so Trama does not drive them.

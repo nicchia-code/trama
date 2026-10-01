@@ -109,7 +109,7 @@ export function newTask(
 ): Task {
   if (input.technical && input.refs.length > 0) throw new TramaError("A Technical Task cannot reference the Model");
   if (!input.technical && input.refs.length === 0)
-    throw new TramaError("A Task must reference the Model with --ref, or be marked --technical");
+    throw new TramaError("A Task must reference at least one Model element (refs), unless it is technical");
   checkRefs(p, input.refs);
   const drift = input.drift ? getDrift(p, input.drift).id : null;
   const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift };

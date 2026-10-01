@@ -2,23 +2,48 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
   "engines": {
     "vscode": "^1.93.0"
   },
-  "categories": ["Visualization", "Other"],
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
   "main": "./dist/host.js",
-  "activationEvents": ["workspaceContains:.trama/model/system.md"],
+  "activationEvents": [
+    "workspaceContains:.trama/model/system.md"
+  ],
   "contributes": {
     "commands": [
-      { "command": "trama.open", "title": "Open", "category": "Trama" },
-      { "command": "trama.init", "title": "Initialize Project", "category": "Trama" },
-      { "command": "trama.design", "title": "Design with Agent…", "category": "Trama" },
-      { "command": "trama.scan", "title": "Scan System", "category": "Trama" },
-      { "command": "trama.updateSkills", "title": "Update Agent Skills", "category": "Trama" }
+      {
+        "command": "trama.open",
+        "title": "Open",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.init",
+        "title": "Initialize Project",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.design",
+        "title": "Design with Agent…",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.scan",
+        "title": "Scan System",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.updateSkills",
+        "title": "Update Agent Skills",
+        "category": "Trama"
+      }
     ],
     "configuration": {
       "title": "Trama",
@@ -30,7 +55,10 @@
         },
         "trama.agentLauncher": {
           "type": "string",
-          "enum": ["terminal", "chat"],
+          "enum": [
+            "terminal",
+            "chat"
+          ],
           "enumDescriptions": [
             "Run `#trama.agentCommand#` in a terminal (omp, claude, codex, copilot CLI, cursor-agent…).",
             "Send the prompt to the agent chat built into the editor (Copilot in VS Code). In Cursor, or if the chat is not available, the prompt is copied to the clipboard."
@@ -49,6 +77,444 @@
           "markdownDescription": "Folder, relative to the project root, where **Trama: Initialize Project** installs the agent skills. Use `.claude/skills` for Claude Code."
         }
       }
-    }
+    },
+    "languageModelTools": [
+      {
+        "name": "trama_view",
+        "displayName": "Trama: View the Model",
+        "toolReferenceName": "trama_view",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "View the Model",
+        "modelDescription": "Shows part of the project's Trama Model, the source of truth for how the software behaves. Without `ref`: the System, its Actors and Features. With `ref`: that element with its States, Transitions (condition and consequence in prose), Events and who receives them. Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event).",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "description": "Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event)."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_paths",
+        "displayName": "Trama: Paths between States",
+        "toolReferenceName": "trama_paths",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Paths between States",
+        "modelDescription": "Lists the simple paths between two States of one Machine, shortest first, with the Event and prose of each step.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "machine": {
+              "type": "string",
+              "description": "Machine ID, e.g. `order`"
+            },
+            "from": {
+              "type": "string",
+              "description": "State name"
+            },
+            "to": {
+              "type": "string",
+              "description": "State name"
+            },
+            "max": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Most paths to list (default 20)"
+            }
+          },
+          "required": [
+            "machine",
+            "from",
+            "to"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_analyze",
+        "displayName": "Trama: Analyze the Model",
+        "toolReferenceName": "trama_analyze",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Analyze the Model",
+        "modelDescription": "Warnings about the Model: unreachable States, non-final States with no way out, Events nobody receives. For one Machine or the whole System.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "machine": {
+              "type": "string",
+              "description": "Machine ID; omit for the whole System"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_search",
+        "displayName": "Trama: Search the Model",
+        "toolReferenceName": "trama_search",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Search the Model",
+        "modelDescription": "Case-insensitive search over names and prose of the whole Model; each hit with its element reference.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "Text to look for"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_board",
+        "displayName": "Trama: Board",
+        "toolReferenceName": "trama_board",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Board",
+        "modelDescription": "The work board: open Proposals and Drifts waiting for the developer's decision, then Tasks to do, in progress and done.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_validate",
+        "displayName": "Trama: Validate",
+        "toolReferenceName": "trama_validate",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Validate",
+        "modelDescription": "Checks the Model's internal consistency, or the Model with an open Proposal applied. Never looks at code.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "proposal": {
+              "type": "string",
+              "description": "Proposal ID; omit to validate the current Model"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_proposal_new",
+        "displayName": "Trama: Open a Proposal",
+        "toolReferenceName": "trama_proposal_new",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Open a Proposal",
+        "modelDescription": "Opens a new Proposal: the only way to change the Model. Then write each changed Model file with trama_proposal_write. Only the developer can approve it.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Short title"
+            },
+            "body": {
+              "type": "string",
+              "description": "Why the change is needed"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_proposal_write",
+        "displayName": "Trama: Write a Model file in a Proposal",
+        "toolReferenceName": "trama_proposal_write",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Write a Model file in a Proposal",
+        "modelDescription": "Writes the complete new version of one Model file inside an open Proposal (the Model itself is untouched until the developer approves). `path` is relative to `.trama/model/`, e.g. `checkout/order.md` or `actors/user.md`. Returns the validation of the Model with the Proposal applied.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "proposal": {
+              "type": "string",
+              "description": "Proposal ID"
+            },
+            "path": {
+              "type": "string",
+              "description": "Model file, relative to .trama/model/"
+            },
+            "content": {
+              "type": "string",
+              "description": "The complete file in the Trama Model format"
+            }
+          },
+          "required": [
+            "proposal",
+            "path",
+            "content"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_proposal_delete_file",
+        "displayName": "Trama: Delete a Model file in a Proposal",
+        "toolReferenceName": "trama_proposal_delete_file",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Delete a Model file in a Proposal",
+        "modelDescription": "Marks a Model file for deletion in an open Proposal. `path` is relative to `.trama/model/`.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "proposal": {
+              "type": "string",
+              "description": "Proposal ID"
+            },
+            "path": {
+              "type": "string",
+              "description": "Model file, relative to .trama/model/"
+            }
+          },
+          "required": [
+            "proposal",
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_proposal_show",
+        "displayName": "Trama: Show a Proposal",
+        "toolReferenceName": "trama_proposal_show",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Show a Proposal",
+        "modelDescription": "A Proposal: status, whether it is stale, its structural changes, validation, and the developer's feedback if it was rejected.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "proposal": {
+              "type": "string",
+              "description": "Proposal ID"
+            }
+          },
+          "required": [
+            "proposal"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_task_new",
+        "displayName": "Trama: Create a Task",
+        "toolReferenceName": "trama_task_new",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Create a Task",
+        "modelDescription": "Creates a Task in To do. A Task references the Model elements it implements in `refs`, unless it is technical (no behaviour change, no refs). The body says in domain words what must be true when done.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "What to implement"
+            },
+            "refs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Model elements the Task covers. Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event)."
+            },
+            "technical": {
+              "type": "boolean",
+              "description": "True for work that changes no behaviour (refactor, dependencies); then refs must be empty"
+            },
+            "drift": {
+              "type": "string",
+              "description": "ID of the Drift this Task resolves, if any"
+            },
+            "body": {
+              "type": "string",
+              "description": "What must be true when done, in domain words"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_task_show",
+        "displayName": "Trama: Show a Task",
+        "toolReferenceName": "trama_task_show",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Show a Task",
+        "modelDescription": "A Task with the current Model text of every element it references.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "Task ID"
+            }
+          },
+          "required": [
+            "task"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_task_move",
+        "displayName": "Trama: Move a Task",
+        "toolReferenceName": "trama_task_move",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Move a Task",
+        "modelDescription": "Moves a Task to `todo`, `doing` or `done`. Move it to `doing` when you start and to `done` when the behaviour matches the Model.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "Task ID"
+            },
+            "column": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "doing",
+                "done"
+              ]
+            }
+          },
+          "required": [
+            "task",
+            "column"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_drift_new",
+        "displayName": "Trama: Record a Drift",
+        "toolReferenceName": "trama_drift_new",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Record a Drift",
+        "modelDescription": "Records a Drift: the code differs from the Model in a way that would change the Diagram. File it exactly once. If the code handles an important case the Model forgot, first open a Proposal and pass its ID in `proposal`. Only the developer resolves Drifts.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Short title"
+            },
+            "refs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The Model elements closest to the difference. Element reference: `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State), `order/Paid/user.CANCEL` (Transitions on an Event), `user.CANCEL` (Event)."
+            },
+            "proposal": {
+              "type": "string",
+              "description": "ID of a Proposal that would fix the Model, if the code is right"
+            },
+            "body": {
+              "type": "string",
+              "description": "What the code does, what the Model says, where in the code"
+            }
+          },
+          "required": [
+            "title",
+            "refs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_drift_show",
+        "displayName": "Trama: Show a Drift",
+        "toolReferenceName": "trama_drift_show",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Show a Drift",
+        "modelDescription": "A Drift with its references and its attached Proposal, if any.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "drift": {
+              "type": "string",
+              "description": "Drift ID"
+            }
+          },
+          "required": [
+            "drift"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ]
   }
 }

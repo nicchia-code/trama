@@ -6,7 +6,13 @@ Vocabulary: [CONTEXT.md](./CONTEXT.md). Decisions: [docs/adr](./docs/adr). File 
 
 ## Status
 
-Implemented: Model format, validation, CLI (exploring, Proposals, Tasks, Drifts, board), and three agent skills in [skills/](./skills): `trama-design` (conversation → Proposal), `trama-scan` (Model vs code → Tasks and Drifts), `trama-implement` (Task → code, stops on a Drift). `trama init` installs them into `.agents/skills/` (Codex, Copilot, Cursor); use `--skills-dir .claude/skills` for Claude Code. The VS Code extension in [extension/](./extension): a Diagram (System → Feature → Machine → sub-States; Proposals as blue dashed ghosts, Drifts as red ghosts), a board (To decide | To do | In progress | Done) and buttons that launch your agent in a terminal (`trama.agentCommand`). Not done yet: licensing, packaging as a `.vsix`.
+Implemented:
+- Model format, validation and the `trama` CLI (exploring, Proposals, Tasks, Drifts, board).
+- Agent tools: native VS Code language-model tools for Copilot, and `trama mcp` for Cursor, Claude Code, Codex, omp and any MCP client (ADR 0006). No tool can approve, reject or resolve.
+- Three agent skills in [skills/](./skills): `trama-design` (conversation → Proposal), `trama-scan` (Model vs code → Tasks and Drifts), `trama-implement` (Task → code, stops on a Drift). `trama init` installs them into `.agents/skills/` (VS Code, Codex, Cursor); `--skills-dir .claude/skills` for Claude Code; `trama skills update` refreshes them.
+- The VS Code extension in [extension/](./extension): Diagram, board, and buttons that send prompts to the editor's agent chat or to a terminal agent (`trama.agentLauncher`).
+
+Not done yet: licensing, packaging as a `.vsix`.
 
 ## Develop
 
@@ -23,8 +29,8 @@ Try it on the example Model:
 
 ```sh
 cd examples/shop
-bun run ../../src/cli/main.ts machine order
-bun run ../../src/cli/main.ts paths order Draft Shipped
+bun run ../../src/cli/bin.ts machine order
+bun run ../../src/cli/bin.ts paths order Draft Shipped
 ```
 
 `src/core` has no dependency on Bun, so the extension reuses it. `src/cli` is the command line. To run the extension, open `extension/` in VS Code and press F5 after `bun run build:extension`.

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { isCursor } from "./cursor";
 import { agentCommandLine, shellFamily } from "./quote";
 
 const TERMINAL_NAME = "Trama agent";
@@ -19,7 +20,7 @@ export const agentReady = (): boolean => agentLauncher() === "chat" || configure
  * different panel: in those cases, or if the command fails, the prompt goes to the clipboard instead.
  */
 async function openChat(prompt: string): Promise<void> {
-  if (!vscode.env.appName.toLowerCase().includes("cursor")) {
+  if (!isCursor()) {
     try {
       await vscode.commands.executeCommand("workbench.action.chat.newChat");
       await vscode.commands.executeCommand("workbench.action.chat.open", { query: prompt, mode: "agent" });

@@ -1,12 +1,12 @@
 {
   "name": "trama",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "build": "bun build --compile src/cli/main.ts --outfile dist/trama",
+    "build": "bun build --compile src/cli/bin.ts --outfile dist/trama",
     "build:extension": "bun run scripts/build-extension.ts",
     "harness": "bun run scripts/build-extension.ts && bun run scripts/harness.ts"
   },

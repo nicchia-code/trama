@@ -71,3 +71,24 @@ All exploring commands are read-only.
 | Command | Output |
 |---|---|
 | `board` | **To decide** (open Proposals and Drifts), **To do**, **In progress**, **Done**: the same data the extension's board shows. |
+
+## Agent tools and MCP
+
+`trama mcp [--root <dir>]` serves the agent tools over MCP (stdio, newline-delimited JSON-RPC) until stdin closes. The same tools are registered natively in VS Code, so Copilot's agent mode can call them without the CLI (ADR 0006). Configure it in any MCP client, for example:
+
+```json
+{ "mcpServers": { "trama": { "command": "trama", "args": ["--root", "/path/to/project", "mcp"] } } }
+```
+
+In Cursor the extension writes this entry into `.cursor/mcp.json` itself.
+
+| Tool | Does |
+|---|---|
+| `trama_view` | Like `system`, `feature`, `machine`, `state`, `event`, chosen by `ref` |
+| `trama_paths`, `trama_analyze`, `trama_search`, `trama_validate`, `trama_board` | Like the commands of the same name |
+| `trama_proposal_new`, `trama_proposal_show`, `trama_proposal_delete_file` | Like `proposal new`, `show`, `delete` |
+| `trama_proposal_write` | `proposal edit` plus writing the complete new file; answers with the validation of the Model with the Proposal applied |
+| `trama_task_new`, `trama_task_show`, `trama_task_move` | Like `task new`, `show`, `move` |
+| `trama_drift_new`, `trama_drift_show` | Like `drift new`, `show` |
+
+There is no tool for `proposal approve`, `proposal reject` or `drift resolve`.

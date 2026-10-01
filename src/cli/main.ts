@@ -16,6 +16,7 @@ function help(): string {
     ...rows,
     "",
     "Options: --json prints JSON instead of Markdown; --root <dir> uses <dir>/.trama.",
+    "trama mcp [--root <dir>] serves the agent tools over MCP (stdio) until stdin closes.",
     "Exit codes: 0 ok, 1 failure (validation errors, unknown element, stale Proposal), 2 usage.",
   ].join("\n");
 }
@@ -72,20 +73,9 @@ export function run(argv: string[], cwd: string, env: Record<string, string | un
   return { out: json ? JSON.stringify(result.json, null, 2) : result.md.replace(/\n{3,}/g, "\n\n").trimEnd(), exit: result.exit ?? 0 };
 }
 
-if (import.meta.main) {
-  try {
-    const { out, exit } = run(process.argv.slice(2), process.cwd());
-    console.log(out);
-    process.exit(exit);
-  } catch (err) {
-    if (err instanceof UsageError) {
-      console.error(`error: ${err.message}`);
-      process.exit(2);
-    }
-    if (err instanceof TramaError) {
-      console.error(`error: ${err.message}`);
-      process.exit(1);
-    }
-    throw err;
-  }
+/** `trama mcp [--root <dir>]`: the long-running MCP server, the only command that does not print and exit. */
+export function mcpRoot(argv: string[]): { root?: string } | null {
+  const { rest, root } = splitGlobals(argv);
+  return rest.length === 1 && rest[0] === "mcp" ? { root } : null;
 }
+

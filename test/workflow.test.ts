@@ -98,7 +98,7 @@ describe("Proposals", () => {
 
 describe("Tasks and Drifts", () => {
   test("a Task needs Model references unless technical, and every reference must resolve", () => {
-    expect(() => newTask(p, { title: "x", refs: [], technical: false })).toThrow(/--technical/);
+    expect(() => newTask(p, { title: "x", refs: [], technical: false })).toThrow(/at least one Model element/);
     expect(() => newTask(p, { title: "x", refs: ["order"], technical: true })).toThrow(/Technical/);
     expect(() => newTask(p, { title: "x", refs: ["order/Nope"], technical: false })).toThrow(/no State "Nope"/);
     const ok = newTask(p, { title: "Cancel flow", refs: ["order/Paid/user.CANCEL", "user.CANCEL"], technical: false });

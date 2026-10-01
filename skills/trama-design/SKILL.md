@@ -7,6 +7,23 @@ description: Use when the user wants to add, change or think through behaviour o
 
 The **Model** in `.trama/model/` is the source of truth for how the System behaves. You change it only through a **Proposal** that the developer approves as a whole. You never write code in this skill.
 
+## Tools or CLI
+
+If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, …, offered by VS Code or by an MCP server), use them; otherwise run the `trama` CLI in a terminal. The steps below name the CLI command; this is the tool that does the same:
+
+| CLI | Tool |
+|---|---|
+| `trama system`, `trama feature <id>`, `trama machine <id>`, `trama state <ref>`, `trama event <ref>` | `trama_view` with `ref` (no `ref` for the System) |
+| `trama paths`, `trama analyze`, `trama search`, `trama validate` | `trama_paths`, `trama_analyze`, `trama_search`, `trama_validate` |
+| `trama board`, `trama task list`, `trama drift list`, `trama proposal list` | `trama_board` |
+| `trama proposal new` | `trama_proposal_new` |
+| `trama proposal edit`, then editing the printed file | `trama_proposal_write` with the complete new file |
+| `trama proposal delete`, `trama proposal show` | `trama_proposal_delete_file`, `trama_proposal_show` |
+| `trama task new`, `trama task show`, `trama task move` | `trama_task_new`, `trama_task_show`, `trama_task_move` |
+| `trama drift new`, `trama drift show` | `trama_drift_new`, `trama_drift_show` |
+
+There is no tool for approving, rejecting or resolving: those are the developer's decisions.
+
 ## Hard rules
 
 - NEVER edit `.trama/model/` directly. Every change goes through a Proposal, created with `trama proposal new`.
