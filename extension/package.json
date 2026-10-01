@@ -28,10 +28,20 @@
           "default": "",
           "markdownDescription": "Command that starts your coding agent in a terminal. `{prompt}` is replaced by the shell-quoted prompt; if it is missing, the prompt is appended. Examples: `claude {prompt}`, `codex {prompt}`. Trama never calls a model itself."
         },
+        "trama.agentLauncher": {
+          "type": "string",
+          "enum": ["terminal", "chat"],
+          "enumDescriptions": [
+            "Run `#trama.agentCommand#` in a terminal (omp, claude, codex, copilot CLI, cursor-agent…).",
+            "Send the prompt to the agent chat built into the editor (Copilot in VS Code). In Cursor, or if the chat is not available, the prompt is copied to the clipboard."
+          ],
+          "default": "terminal",
+          "markdownDescription": "Where the Design, Scan and Run buttons send their prompt."
+        },
         "trama.autoScan": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "After you approve a Proposal, launch the agent to Scan the Features it touched. Only applies when `#trama.agentCommand#` is set."
+          "markdownDescription": "After you approve a Proposal, launch the agent to Scan the Features it touched. With the terminal launcher it only applies when `#trama.agentCommand#` is set."
         },
         "trama.skillsDir": {
           "type": "string",

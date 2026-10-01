@@ -6,7 +6,7 @@ import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project } from "../../../src/core/store";
 import { getDrift, getTask, moveTask, newTask, resolveDrift } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
-import { configuredAgentCommand, launchAgent, settings } from "./agent";
+import { agentReady, launchAgent, settings } from "./agent";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { resolveMarkdownFile } from "./paths";
@@ -217,7 +217,7 @@ export class Controller implements vscode.Disposable {
     return {
       project,
       autoScan: settings().get<boolean>("autoScan", true),
-      agentConfigured: configuredAgentCommand() !== "",
+      agentConfigured: agentReady(),
       launchScan: (features) => launchAgent(project.root, buildScanPrompt(features)),
     };
   }
