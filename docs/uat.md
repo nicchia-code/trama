@@ -42,10 +42,10 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| S1 | Run `cd /home/luca/Developer/Jasper && TRAMA_DEMO_DIR=/tmp/trama-demo/shop bun run scripts/harness.ts` | Prints `wrote extension/dist/harness.html`. No error | ☐ |
+| S1 | Run `cd /home/luca/Developer/Trama && TRAMA_DEMO_DIR=/tmp/trama-demo/shop bun run scripts/harness.ts` | Prints `wrote extension/dist/harness.html`. No error | ☐ |
 | S2 | Run `printf '{\n  "trama.agentCommand": "echo {prompt}"\n}\n' > /tmp/trama-demo/shop/.vscode/settings.json` | File contains `"trama.agentCommand": "echo {prompt}"`. From now on the "agent" only prints its prompt | ☐ |
-| S3 | Run `code --extensionDevelopmentPath=/home/luca/Developer/Jasper/extension --new-window /tmp/trama-demo/shop` (skip if the window is already open) | A VS Code window titled `shop`. If a Welcome dialog appears, close it | ☐ |
-| S4 | In the verification shell paste: `j() { /home/luca/Developer/Jasper/dist/trama --root /tmp/trama-demo/shop "$@"; }` and `D=/tmp/trama-demo/shop/.trama` | No output. `j board` prints the board (see S5) | ☐ |
+| S3 | Run `code --extensionDevelopmentPath=/home/luca/Developer/Trama/extension --new-window /tmp/trama-demo/shop` (skip if the window is already open) | A VS Code window titled `shop`. If a Welcome dialog appears, close it | ☐ |
+| S4 | In the verification shell paste: `j() { /home/luca/Developer/Trama/dist/trama --root /tmp/trama-demo/shop "$@"; }` and `D=/tmp/trama-demo/shop/.trama` | No output. `j board` prints the board (see S5) | ☐ |
 | S5 | Run `j board` | `To decide`: Proposal 0001, Proposal 0002, Drift 0001, Drift 0002 (Proposal 0002). `To do`: 0001, 0002. `In progress`: 0003. `Done`: 0004 | ☐ |
 
 ## 2. The seeded demo (reference)
@@ -499,14 +499,14 @@ Each launch sends one command to the terminal named **Trama agent** (cwd = the d
 
 ## I. Real agent: omp 🪙
 
-Switch modes with the script, from the repo (it works from any shell, fish included, and keeps the other keys of `settings.json`): `cd /home/luca/Developer/Jasper && bun run scripts/demo-agent.ts <echo|path|omp>`. Stop an agent at any time with Ctrl+C. Quit omp between launches (I7).
+Switch modes with the script, from the repo (it works from any shell, fish included, and keeps the other keys of `settings.json`): `cd /home/luca/Developer/Trama && bun run scripts/demo-agent.ts <echo|path|omp>`. Stop an agent at any time with Ctrl+C. Quit omp between launches (I7).
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| I0 | No omp, no tokens. Run `bun run scripts/demo-agent.ts path`, then ↻ and Board: **Scan System** | The terminal shows, on two lines, `/home/luca/Developer/Jasper/dist/trama` and `Use the trama-scan skill on the whole System.`. This checks the PATH prefix and the quoting in your own shell. Verified by script in fish | ☐ |
-| I1 | `bun run scripts/demo-agent.ts omp`, ↻, then Board: **Scan System** | The terminal shows `PATH=/home/luca/Developer/Jasper/dist:$PATH omp 'Use the trama-scan skill on the whole System.'` and omp starts and starts working on the prompt. Reproduced by script in a real terminal in fish (banner, then `Working…`). If it fails for you, copy the exact text the terminal shows | ☐ |
+| I0 | No omp, no tokens. Run `bun run scripts/demo-agent.ts path`, then ↻ and Board: **Scan System** | The terminal shows, on two lines, `/home/luca/Developer/Trama/dist/trama` and `Use the trama-scan skill on the whole System.`. This checks the PATH prefix and the quoting in your own shell. Verified by script in fish | ☐ |
+| I1 | `bun run scripts/demo-agent.ts omp`, ↻, then Board: **Scan System** | The terminal shows `PATH=/home/luca/Developer/Trama/dist:$PATH omp 'Use the trama-scan skill on the whole System.'` and omp starts and starts working on the prompt. Reproduced by script in a real terminal in fish (banner, then `Working…`). If it fails for you, copy the exact text the terminal shows | ☐ |
 | I2 | In omp type `/skill:trama-scan` (or ask which skills are loaded) | The skill `trama-scan` is known. If not, omp does not read `.agents/skills/` of the project: report it | ☐ |
-| I3 | Interrupt omp and ask it to run `command -v trama` | `/home/luca/Developer/Jasper/dist/trama` | ☐ |
+| I3 | Interrupt omp and ask it to run `command -v trama` | `/home/luca/Developer/Trama/dist/trama` | ☐ |
 | I4 | Ask it to run `trama board` | The same board as S5 | ☐ |
 | I5 | Let the scan finish. In the verification shell: `j board` | Tasks 0005 to 0008 were created (about four, one per Machine or group of States; the demo has no code, so everything not covered by Tasks 0001 to 0004 is missing) and **no Drift**. **Proposals 0001 and 0002 are still open**: the agent must not have run `proposal approve`, `proposal reject` or `drift resolve`. `j validate` is still valid and `.trama/model/` is unchanged. Ran against a real omp: passed | ☐ |
 | I6 | While the scan runs watch the board | The new Tasks appear in To do by themselves while the agent works (seen: 2 to 5 cards after about 27 s, 6 after 33 s). Ran against a real omp: passed | ☐ |
@@ -518,7 +518,7 @@ Switch modes with the script, from the repo (it works from any shell, fish inclu
 
 ## J. Empty project
 
-Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/Developer/Jasper/extension --new-window /tmp/trama-empty`
+Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/Developer/Trama/extension --new-window /tmp/trama-empty`
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
