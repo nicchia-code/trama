@@ -183,7 +183,12 @@ export function buildSnapshot(p: Project): Snapshot {
         unbased: h.unbased,
         errors: afterProject.diagnostics,
         changes: touched,
-        machines: [...machineIds].sort().map((id) => mergeMachine(before.machines.get(id), after.machines.get(id))),
+        // A file the Model rejects (bad name, ID taken by a Feature or Actor) is a Machine on neither side; its errors are listed instead.
+        machines: [...machineIds].sort().flatMap((id) => {
+          const was = before.machines.get(id);
+          const is = after.machines.get(id);
+          return was || is ? [mergeMachine(was, is)] : [];
+        }),
         actors: [...actorIds].sort().map((id) => actorChange(id, before.actors.get(id), after.actors.get(id))),
         areas: [...areaIds].sort().flatMap((id) => {
           const was = areaOf(baseProject, id);

@@ -92,3 +92,12 @@ test("the Diagram draws a dependent Proposal over the Model with its requirement
   expect(view?.machines.map((m) => [m.id, m.change])).toEqual([["invoice", "added"]]);
   expect(buildSnapshot(p).proposals.find((x) => x.id === "0001")?.base).toBeNull();
 });
+
+test("a Proposal file that is no valid Machine leaves the snapshot readable and reports its errors", () => {
+  const prop = newProposal(p, "Clash");
+  writeFileSync(editInProposal(p, prop.id, "billing/user.md"), "# User\n\nx.\n\n## States\n\n### A (initial)\n");
+  writeFileSync(editInProposal(p, prop.id, "billing/Invoice_Item.md"), "# Item\n\nx.\n\n## States\n\n### A (initial)\n");
+  const view = buildSnapshot(p).proposals.find((x) => x.id === prop.id);
+  expect(view?.machines).toEqual([]);
+  expect(view?.errors.map((d) => d.file).sort()).toEqual(["billing/Invoice_Item.md", "billing/user.md"]);
+});
