@@ -73,6 +73,17 @@ test("Proposals that require each other are reported as a cycle, not followed fo
   expect(() => approveProposal(p, billing)).toThrow(/cycle/);
 });
 
+test("a cycle further down the chain also blocks the Proposals that require it", () => {
+  const a = newProposal(p, "A");
+  const b = newProposal(p, "B", "", { requires: [a.id] });
+  const c = newProposal(p, "C", "", { requires: [b.id] });
+  const file = join(getProposal(p, b.id).dir, "proposal.md");
+  writeFileSync(file, readFileSync(file, "utf8").replace(`  - "${a.id}"\n`, `  - "${c.id}"\n`));
+  const top = newProposal(p, "Top", "", { requires: [b.id] });
+  expect(health(p, getProposal(p, top.id)).requires.map((r) => [r.id, r.status])).toContainEqual([b.id, "cycle"]);
+  expect(() => approveProposal(p, top.id)).toThrow(/cycle/);
+});
+
 test("the Diagram draws a dependent Proposal over the Model with its requirements applied", () => {
   const { billing } = chain();
   const view = buildSnapshot(p).proposals.find((x) => x.id === billing);

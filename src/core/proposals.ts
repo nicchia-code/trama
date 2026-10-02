@@ -121,13 +121,15 @@ export function newProposal(p: Project, title: string, body = "", options: { req
  */
 export function requiredProposals(p: Project, proposal: Proposal): RequiredProposal[] {
   const out: RequiredProposal[] = [];
+  /** Proposals already explored; a cycle is a back edge to the current path, tracked apart so it is never hidden by `done`. */
   const done = new Set<string>();
+  const cycles = new Set<string>();
   const visit = (current: Proposal, path: string[]) => {
     for (const raw of current.data.requires) {
       const id = raw.padStart(4, "0");
       if (path.includes(id)) {
-        if (!done.has(id)) out.push({ id, title: "", status: "cycle" });
-        done.add(id);
+        if (!cycles.has(id)) out.push({ id, title: "", status: "cycle" });
+        cycles.add(id);
         continue;
       }
       if (done.has(id)) continue;
