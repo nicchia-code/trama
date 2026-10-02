@@ -91,6 +91,7 @@
 }
 .board-badge.warning { border-color: var(--board-warning); background: color-mix(in srgb, var(--board-warning) 22%, transparent); }
 .board-badge.error { border-color: var(--board-error); background: color-mix(in srgb, var(--board-error) 22%, transparent); }
+.board-badge.info { border-color: var(--board-blue); background: color-mix(in srgb, var(--board-blue) 18%, transparent); }
 
 .board-moves { margin-left: auto; display: inline-flex; gap: 2px; }
 button.board-move { padding: 0 6px; line-height: 18px; min-width: 24px; }

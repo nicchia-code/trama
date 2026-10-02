@@ -1,6 +1,7 @@
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
-import { applied, changes, health, listProposals } from "./proposals";
+import { applied, baseFiles, changes, health, listProposals, type ProposalKind } from "./proposals";
+import type { RequiredProposal } from "./required";
 import { type Area, buildProject, type ProjectModel } from "./requirements";
 import { type Project, readTrackedFiles, REQUIREMENTS_PREFIX } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
@@ -34,16 +35,34 @@ export interface AreaView {
   sections: SectionView[];
 }
 
+/** The Model and Requirements as the Diagram and the Requirements tab draw them. */
+export interface ModelView {
+  system: { name: string; description: string };
+  actors: Actor[];
+  features: Feature[];
+  machines: Machine[];
+  areas: AreaView[];
+}
+
 /** An open Proposal with everything the Diagram needs to draw it as a ghost over the current Model. */
 export interface ProposalView {
   id: string;
   title: string;
   body: string;
-  /** Touched files whose Model version changed since the Proposal recorded it. */
+  kind: ProposalKind;
+  /** Required Proposals not approved yet; Approve stays disabled while any is listed. */
+  requires: RequiredProposal[];
+  /**
+   * The Model with the open required Proposals applied, which this Proposal is drawn over; null when it requires
+   * none and is drawn over the current Model.
+   */
+  base: ModelView | null;
+  /** Touched files whose version changed since the Proposal recorded it. */
   stale: string[];
   unbased: string[];
   /** Validation errors of the Model and its Requirements with the Proposal applied. */
   errors: Diagnostic[];
+  /** What this Proposal itself changes, on top of the ones it requires. */
   changes: FileChange[];
   /** Every Machine the Proposal touches, before and after drawn as one. */
   machines: MergedMachine[];
@@ -73,13 +92,8 @@ export interface TaskView {
   file: string;
 }
 
-export interface Snapshot {
-  system: { name: string; description: string };
-  actors: Actor[];
-  features: Feature[];
-  machines: Machine[];
+export interface Snapshot extends ModelView {
   diagnostics: Diagnostic[];
-  areas: AreaView[];
   proposals: ProposalView[];
   drifts: DriftView[];
   tasks: TaskView[];
@@ -122,12 +136,17 @@ function areaView(shown: Area, before: Area | undefined, after: Area | undefined
   };
 }
 
-const currentAreas = (project: ProjectModel): AreaView[] => project.areas.map((a) => areaView(a, a, a));
+const modelView = (project: ProjectModel): ModelView => ({
+  system: { name: project.model.system.name, description: project.model.system.description },
+  actors: [...project.model.actors.values()],
+  features: [...project.model.features.values()],
+  machines: [...project.model.machines.values()],
+  areas: project.areas.map((a) => areaView(a, a, a)),
+});
 
 /** Everything the extension shows, as plain JSON. Malformed Task or Drift files throw, naming the file. */
 export function buildSnapshot(p: Project): Snapshot {
   const project = buildProject(readTrackedFiles(p));
-  const model = project.model;
 
   const proposals = listProposals(p)
     .filter((x) => x.data.status === "open")
@@ -135,6 +154,9 @@ export function buildSnapshot(p: Project): Snapshot {
       const afterProject = buildProject(applied(p, proposal));
       const after = afterProject.model;
       const h = health(p, proposal);
+      const pending = h.requires.some((r) => r.status === "open");
+      const baseProject = pending ? buildProject(baseFiles(p, proposal)) : project;
+      const before = baseProject.model;
       const touched = changes(p, proposal);
       const machineIds = new Set<string>();
       const actorIds = new Set<string>();
@@ -154,28 +176,27 @@ export function buildSnapshot(p: Project): Snapshot {
         id: proposal.id,
         title: proposal.title,
         body: stripTitle(proposal.body),
+        kind: proposal.data.kind,
+        requires: h.requires,
+        base: pending ? modelView(baseProject) : null,
         stale: h.stale,
         unbased: h.unbased,
         errors: afterProject.diagnostics,
         changes: touched,
-        machines: [...machineIds].sort().map((id) => mergeMachine(model.machines.get(id), after.machines.get(id))),
-        actors: [...actorIds].sort().map((id) => actorChange(id, model.actors.get(id), after.actors.get(id))),
+        machines: [...machineIds].sort().map((id) => mergeMachine(before.machines.get(id), after.machines.get(id))),
+        actors: [...actorIds].sort().map((id) => actorChange(id, before.actors.get(id), after.actors.get(id))),
         areas: [...areaIds].sort().flatMap((id) => {
-          const before = areaOf(project, id);
-          const afterArea = areaOf(afterProject, id);
-          const shown = afterArea ?? before;
-          return shown ? [areaView(shown, before, afterArea)] : [];
+          const was = areaOf(baseProject, id);
+          const is = areaOf(afterProject, id);
+          const shown = is ?? was;
+          return shown ? [areaView(shown, was, is)] : [];
         }),
       };
     });
 
   return {
-    system: { name: model.system.name, description: model.system.description },
-    actors: [...model.actors.values()],
-    features: [...model.features.values()],
-    machines: [...model.machines.values()],
+    ...modelView(project),
     diagnostics: project.diagnostics,
-    areas: currentAreas(project),
     proposals,
     drifts: listDrifts(p)
       .filter((d) => d.data.status === "open")

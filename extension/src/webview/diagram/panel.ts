@@ -1,4 +1,6 @@
+import { requiredReasons } from "../../../../src/core/required";
 import type { DriftView, ProposalView } from "../../../../src/core/snapshot";
+import { approveBlocker } from "../board/logic";
 import type { Detail, DetailItem } from "./details";
 import type { Level } from "./graph";
 
@@ -59,6 +61,10 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     const box = el("section", "dg-proposal");
     box.append(el("div", "dg-kind", `Proposal ${p.id}`), el("h3", "", p.title));
     if (p.body) box.append(el("p", "dg-body", p.body));
+    const open = p.requires.filter((r) => r.status === "open");
+    if (open.length > 0) box.append(el("div", "dg-note", `Drawn on top of ${open.map((r) => `Proposal ${r.id}`).join(", ")}, not yet approved: what they add is shown as if approved.`));
+    const unusable = p.requires.filter((r) => r.status !== "open");
+    if (unusable.length > 0) box.append(el("div", "dg-problem-head", "Requires Proposals that cannot be approved"), list("dg-problems", requiredReasons(unusable)));
     if (p.stale.length > 0) box.append(el("div", "dg-problem-head", "Stale: the Model changed since the Proposal was written"), list("dg-problems", p.stale));
     if (p.unbased.length > 0) box.append(el("div", "dg-problem-head", "Touches files it has no base for"), list("dg-problems", p.unbased));
     if (p.errors.length > 0) {
@@ -75,10 +81,10 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       }
       box.append(ul);
     }
-    const blocked = p.stale.length > 0 || p.unbased.length > 0 || p.errors.length > 0;
+    const blocker = approveBlocker(p);
     const row = el("div", "dg-actions");
     row.append(
-      button("Approve", () => actions.approve(p.id), { primary: true, disabled: blocked, title: blocked ? "Stale or invalid Proposals cannot be approved" : "Apply this Proposal to the Model" }),
+      button("Approve", () => actions.approve(p.id), { primary: true, disabled: blocker !== null, title: blocker ?? "Apply this Proposal to the Model" }),
       button("Reject", () => actions.reject(p.id), { title: "Reject this Proposal and give the agent feedback" }),
     );
     box.append(row);

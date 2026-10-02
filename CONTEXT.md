@@ -55,7 +55,7 @@ _Avoid_: category, section, topic
 ### Changing the Model
 
 **Proposal**:
-A change to the Model and its Requirements suggested by the agent, which has no effect until a developer approves it as a whole.
+A change to the Model and its Requirements suggested by the agent, which has no effect until a developer approves it as a whole. A Proposal may require earlier open Proposals: it is written on top of them and can be approved only after them.
 _Avoid_: suggestion, patch, draft
 
 **Drift**:
@@ -67,6 +67,10 @@ _Avoid_: divergence, mismatch, bug
 **Scan**:
 The agent's comparison between the Model and its Requirements, explored through Trama, and the existing code, producing Tasks and Drifts.
 _Avoid_: audit, analysis, sync
+
+**Import**:
+The agent describing existing code, as it is, through Proposals for the Model and its evident Requirements; what the documentation contradicts or the code seems to get wrong is recorded as a doubt, never corrected.
+_Avoid_: reverse engineering, sync, generation
 
 **Task**:
 A unit of work for the agent that the developer can see and edit on the board.

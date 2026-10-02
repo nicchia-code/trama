@@ -45,6 +45,15 @@ describe("one Scan after every approved Proposal", () => {
     expect(getProposal(p, id).data.status).toBe("approved");
   });
 
+  test("an import Proposal describes the code as it is, so approving it starts no Scan", async () => {
+    const prop = newProposal(p, "Import: checkout", "", { kind: "import" });
+    const file = editInProposal(p, prop.id, "checkout/order.md");
+    writeFileSync(file, orderChange(readFileSync(file, "utf8")));
+    await applyApprovedProposal(options(), prop.id, () => approveProposal(p, prop.id));
+    expect(scans).toEqual([]);
+    expect(getProposal(p, prop.id).data.status).toBe("approved");
+  });
+
   test("accepting a Drift's attached Proposal launches exactly one Scan", async () => {
     const id = proposalEditing("checkout/order.md", orderChange);
     const drift = newDrift(p, { title: "Code has Lost", refs: ["order"], proposal: id });

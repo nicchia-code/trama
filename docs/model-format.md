@@ -167,6 +167,9 @@ A list item directly under a State (before any sub-State heading) that **starts 
 ```markdown
 ---
 status: open            # open | approved | rejected
+kind: import            # optional: import (written by trama-import); absent means an ordinary change
+requires:               # optional: open or approved Proposals this one is written on top of
+  - "0006"
 base:
   checkout/order.md: 3f2a…   # sha256 of the file when the Proposal first touched it
   requirements/ui.md: 9b1c…  # Requirement Areas are touched the same way
@@ -183,8 +186,9 @@ Written by the developer on rejection.
 ```
 
 - Next to `proposal.md`, a `model/` folder holds the **full new version** of every touched Model file, at the same path it has under `.trama/model/`, and a `requirements/` folder does the same for touched Areas.
-- A Proposal is **stale** when any file's current hash differs from its `base` entry. Staleness is computed, never stored. A stale Proposal cannot be approved; the agent writes a new one.
-- **Approving** checks that the Proposal is not stale, validates the Model and its Requirements with the Proposal applied, copies the new files into `model/` and `requirements/`, removes the `delete` entries, sets `status: approved` and regenerates the `trama-req-*` skills.
+- **Requires**: a Proposal that lists `requires` is written, diffed and validated on top of the open Proposals it requires, directly or through them, applied in order. Its `base` hashes refer to that state, so approving a required Proposal does not make it stale. It cannot be approved while any required Proposal is open, rejected or missing, or while two Proposals require each other; a rejected requirement leaves it open and blocked. `trama proposal new` refuses to require a rejected Proposal.
+- A Proposal is **stale** when any file's current hash (on top of the Proposals it requires) differs from its `base` entry. Staleness is computed, never stored. A stale Proposal cannot be approved; the agent writes a new one.
+- **Approving** checks that every required Proposal is approved and that the Proposal is not stale, validates the Model and its Requirements with the Proposal applied, copies the new files into `model/` and `requirements/`, removes the `delete` entries, sets `status: approved` and regenerates the `trama-req-*` skills. The extension scans the affected Features afterwards, except for `kind: import` Proposals, whose Model already matches the code (ADR 0008).
 - **Rejecting** sets `status: rejected` and appends `## Feedback`. The agent answers with a new Proposal.
 - Approved and rejected Proposals stay on disk as history.
 

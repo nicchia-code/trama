@@ -257,6 +257,7 @@ export class Controller implements vscode.Disposable {
         await launchAgent(project.root, buildPrompt({ kind: "implement", task: getTask(project, action.task).id }));
         return;
       case "implement-all":
+      case "import":
         await launchAgent(project.root, buildPrompt(action));
         return;
     }

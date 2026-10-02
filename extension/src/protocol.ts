@@ -10,7 +10,9 @@ export type AgentAction =
   | { kind: "scan"; feature?: string }
   | { kind: "implement"; task: string }
   /** Every Task in "todo", in order; the agent stops at the first Drift. */
-  | { kind: "implement-all" };
+  | { kind: "implement-all" }
+  /** Describe the existing code as Proposals for the Model; the agent asks its own questions. */
+  | { kind: "import" };
 
 /** Webview -> host. The host validates everything: the webview is untrusted input. */
 export type ToHost =

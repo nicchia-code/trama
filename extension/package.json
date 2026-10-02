@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -37,6 +37,11 @@
       {
         "command": "trama.scan",
         "title": "Scan System",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.import",
+        "title": "Import from Code",
         "category": "Trama"
       },
       {
@@ -233,7 +238,7 @@
         "toolReferenceName": "trama_proposal_new",
         "canBeReferencedInPrompt": true,
         "userDescription": "Open a Proposal",
-        "modelDescription": "Opens a new Proposal: the only way to change the Model or its Requirements. Then write each changed Model or Requirement file with trama_proposal_write. Only the developer can approve it.",
+        "modelDescription": "Opens a new Proposal: the only way to change the Model or its Requirements. Then write each changed Model or Requirement file with trama_proposal_write. Only the developer can approve it. A large change can be split into Proposals that build on each other: list the earlier ones in `requires`; this one is then written and validated on top of them, and can only be approved after them.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -248,6 +253,17 @@
             "body": {
               "type": "string",
               "description": "Why the change is needed"
+            },
+            "requires": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "IDs of open or approved Proposals this one builds on"
+            },
+            "import": {
+              "type": "boolean",
+              "description": "True when the Proposal describes existing code (trama-import skill); approving it starts no Scan"
             }
           },
           "required": [

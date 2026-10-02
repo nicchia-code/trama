@@ -3,6 +3,7 @@ import type { FileChange } from "../../../../src/core/diff";
 import { formatDiagnostic } from "../../../../src/core/model";
 import type { DriftView, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
 import type { Column } from "../../protocol";
+import { requiredReasons } from "../../../../src/core/required";
 import { proposalTouches } from "../requirements/logic";
 
 export type ColumnId = "decide" | Column;
@@ -28,7 +29,7 @@ export const EMPTY_HINTS: Record<ColumnId, string> = {
 export interface Badge {
   label: string;
   tooltip: string;
-  tone: "warning" | "error";
+  tone: "info" | "warning" | "error";
 }
 
 export interface FileSummary {
@@ -147,15 +148,19 @@ export function summarizeChanges(changes: FileChange[], maxFiles = MAX_FILES): C
 const listed = (items: string[]) => (items.length > MAX_TOOLTIP_ITEMS ? `${items.slice(0, MAX_TOOLTIP_ITEMS).join("\n")}\nand ${items.length - MAX_TOOLTIP_ITEMS} more` : items.join("\n"));
 
 /** The reason a Proposal cannot be approved, or null. Mirrors what the host refuses. */
-export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors">): string | null {
+export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "requires">): string | null {
+  if (p.requires.length > 0) return `Approve the required Proposals first:\n${requiredReasons(p.requires).join("\n")}`;
   if (p.stale.length > 0) return "Stale: the Model changed since this Proposal touched it. Ask the agent for a new Proposal.";
   if (p.unbased.length > 0) return "Some files were never registered with the Proposal.";
   if (p.errors.length > 0) return "Applying this Proposal would leave the Model or its Requirements invalid.";
   return null;
 }
 
-export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors">): Badge[] {
+export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "requires" | "kind">): Badge[] {
   const badges: Badge[] = [];
+  if (p.kind === "import") badges.push({ label: "import", tone: "info", tooltip: "Describes existing code; approving it starts no Scan" });
+  for (const r of p.requires)
+    badges.push({ label: `requires ${r.id}`, tone: r.status === "open" ? "info" : "error", tooltip: requiredReasons([r]).join("") });
   if (p.stale.length > 0) badges.push({ label: "stale", tone: "warning", tooltip: `The Model changed since the Proposal touched:\n${listed(p.stale)}` });
   if (p.errors.length > 0) badges.push({ label: "invalid", tone: "error", tooltip: `The Model or its Requirements would be invalid:\n${listed(p.errors.map(formatDiagnostic))}` });
   if (p.unbased.length > 0) badges.push({ label: "unregistered files", tone: "warning", tooltip: `Never registered with the Proposal:\n${listed(p.unbased)}` });

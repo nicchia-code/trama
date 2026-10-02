@@ -4,6 +4,7 @@ Shows the Trama Model of your project (`.trama/model/`) as a read-only Diagram, 
 
 - **Trama: Open** opens the Diagram/Board/Requirements tab (offers **Initialize Project** when the workspace has no `.trama/`).
 - **Trama: Design with Agent…**, **Trama: Scan System** and the Design, Scan and Run buttons send a prompt to your agent.
+- **Trama: Import from Code** asks your agent to describe the existing code as Proposals (a first one for the System and its Actors, then one per Feature, each requiring the first). They describe the code as it is and list their doubts; approving them starts no Scan.
 - **Trama: Update Agent Skills** installs this version's skills into the project, adds the starting Requirement Areas to projects created before they existed, and regenerates the Requirement skills.
 
 Where the prompt goes is set by `trama.agentLauncher`:

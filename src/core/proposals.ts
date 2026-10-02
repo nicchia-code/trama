@@ -22,12 +22,19 @@ import {
   writeFileEnsuringDir,
 } from "./store";
 import type { Diagnostic, FileMap } from "./types";
+import { type RequiredProposal, requiredReasons } from "./required";
 
 export type ProposalStatus = "open" | "approved" | "rejected";
 
+/** `import`: written by the trama-import skill to describe existing code; approving it starts no Scan. */
+export type ProposalKind = "change" | "import";
+
 interface ProposalData {
   status: ProposalStatus;
-  /** Model path -> sha256 of the file when the Proposal first touched it, or "new". */
+  kind: ProposalKind;
+  /** IDs of Proposals that must be approved before this one; it is written and validated on top of them. */
+  requires: string[];
+  /** Tracked path -> sha256 of the file, or "new", when the Proposal first touched it (on top of `requires`). */
   base: Record<string, string>;
   delete: string[];
 }
@@ -44,13 +51,17 @@ export interface Proposal {
 const proposalsDir = (p: Project) => join(p.dir, "proposals");
 
 const STATUSES: readonly ProposalStatus[] = ["open", "approved", "rejected"];
+const KINDS: readonly ProposalKind[] = ["change", "import"];
 
 function parseData(raw: Raw, where: string): ProposalData {
   const data: ProposalData = {
     status: enumField(raw, "status", STATUSES, "open", where),
+    kind: enumField(raw, "kind", KINDS, "change", where),
+    requires: stringList(raw, "requires", where),
     base: stringMap(raw, "base", where),
     delete: stringList(raw, "delete", where),
   };
+  for (const id of data.requires) if (!/^\d+$/.test(id)) throw new TramaError(`${where}: "requires" lists Proposal IDs, not "${id}"`);
   for (const path of [...Object.keys(data.base), ...data.delete]) {
     try {
       normalizeModelPath(path);
@@ -70,7 +81,10 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
 }
 
 function save(proposal: Proposal) {
-  writeDocument(join(proposal.dir, "proposal.md"), proposal.data, proposal.body);
+  const { kind, requires, ...rest } = proposal.data;
+  // Defaults stay out of the file, so Proposals without dependencies look as they always did.
+  const data = { status: rest.status, ...(kind === "change" ? {} : { kind }), ...(requires.length === 0 ? {} : { requires }), base: rest.base, delete: rest.delete };
+  writeDocument(join(proposal.dir, "proposal.md"), data, proposal.body);
 }
 
 export function listProposals(p: Project): Proposal[] {
@@ -81,7 +95,12 @@ export function getProposal(p: Project, id: string): Proposal {
   return load(p, findNumbered(proposalsDir(p), id, "Proposal"));
 }
 
-export function newProposal(p: Project, title: string, body = ""): Proposal {
+export function newProposal(p: Project, title: string, body = "", options: { requires?: string[]; kind?: ProposalKind } = {}): Proposal {
+  const requires = (options.requires ?? []).map((r) => {
+    const required = getProposal(p, r);
+    if (required.data.status === "rejected") throw new TramaError(`Proposal ${required.id} was rejected; a new Proposal cannot require it`);
+    return required.id;
+  });
   const id = nextId(proposalsDir(p));
   const name = `${id}-${slugify(title)}`;
   const proposal: Proposal = {
@@ -89,11 +108,56 @@ export function newProposal(p: Project, title: string, body = ""): Proposal {
     name,
     dir: join(proposalsDir(p), name),
     title,
-    data: { status: "open", base: {}, delete: [] },
+    data: { status: "open", kind: options.kind ?? "change", requires: [...new Set(requires)], base: {}, delete: [] },
     body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
   };
   save(proposal);
   return proposal;
+}
+
+/**
+ * Every Proposal this one requires, directly or through others, that is not approved yet, in the order they
+ * apply (each after the ones it requires).
+ */
+export function requiredProposals(p: Project, proposal: Proposal): RequiredProposal[] {
+  const out: RequiredProposal[] = [];
+  const done = new Set<string>();
+  const visit = (current: Proposal, path: string[]) => {
+    for (const raw of current.data.requires) {
+      const id = raw.padStart(4, "0");
+      if (path.includes(id)) {
+        if (!done.has(id)) out.push({ id, title: "", status: "cycle" });
+        done.add(id);
+        continue;
+      }
+      if (done.has(id)) continue;
+      done.add(id);
+      let required: Proposal;
+      try {
+        required = getProposal(p, id);
+      } catch {
+        out.push({ id, title: "", status: "missing" });
+        continue;
+      }
+      if (required.data.status === "approved") continue;
+      visit(required, [...path, id]);
+      out.push({ id: required.id, title: required.title, status: required.data.status === "rejected" ? "rejected" : "open" });
+    }
+  };
+  visit(proposal, [proposal.id]);
+  return out;
+}
+
+/** The tracked files the Proposal is written on: the current ones with the open Proposals it requires applied. */
+export function baseFiles(p: Project, proposal: Proposal): FileMap {
+  const files = readTrackedFiles(p);
+  for (const r of requiredProposals(p, proposal)) {
+    if (r.status !== "open") continue;
+    const required = getProposal(p, r.id);
+    for (const path of required.data.delete) files.delete(path);
+    for (const [path, content] of newFiles(required)) files.set(path, content);
+  }
+  return files;
 }
 
 /** A tracked path: `checkout/order.md` for the Model, `requirements/ui.md` for an Area of Requirements. */
@@ -123,9 +187,8 @@ export function editInProposal(p: Project, id: string, modelPath: string): strin
   if (proposal.data.delete.includes(rel)) throw new TramaError(`${rel} is marked for deletion in Proposal ${proposal.id}`);
   if (existsSync(target)) return target;
 
-  const current = trackedLocation(p.dir, rel);
-  if (existsSync(current)) {
-    const content = readFileSync(current, "utf8");
+  const content = baseFiles(p, proposal).get(rel);
+  if (content !== undefined) {
     proposal.data.base[rel] ??= sha256(content);
     writeFileEnsuringDir(target, content);
   } else {
@@ -140,45 +203,47 @@ export function deleteInProposal(p: Project, id: string, modelPath: string) {
   const proposal = getProposal(p, id);
   requireOpen(proposal, "edited");
   const rel = normalizeModelPath(modelPath);
-  const current = trackedLocation(p.dir, rel);
-  if (!existsSync(current)) throw new TramaError(`${rel} does not exist in the Model or its Requirements`);
+  const content = baseFiles(p, proposal).get(rel);
+  if (content === undefined) throw new TramaError(`${rel} does not exist in the Model or its Requirements`);
   if (existsSync(trackedLocation(proposal.dir, rel)))
     throw new TramaError(`${rel} is already edited in Proposal ${proposal.id}; remove that copy first`);
-  proposal.data.base[rel] ??= sha256(readFileSync(current, "utf8"));
+  proposal.data.base[rel] ??= sha256(content);
   if (!proposal.data.delete.includes(rel)) proposal.data.delete.push(rel);
   save(proposal);
 }
 
 export interface ProposalHealth {
-  /** Touched files whose Model version changed since the Proposal recorded it. */
+  /** Touched files whose version changed since the Proposal recorded it (on top of the Proposals it requires). */
   stale: string[];
   /** Files in the Proposal with no recorded base; `proposal edit` records it. */
   unbased: string[];
+  /** Required Proposals not approved yet: while any is listed, this one cannot be approved. */
+  requires: RequiredProposal[];
 }
 
 const newFiles = (proposal: Proposal): FileMap => readTracked(proposal.dir);
 
 export function health(p: Project, proposal: Proposal): ProposalHealth {
-  const model = readTrackedFiles(p);
+  const base = baseFiles(p, proposal);
   const touched = new Set([...newFiles(proposal).keys(), ...proposal.data.delete]);
   const stale: string[] = [];
   const unbased: string[] = [];
   for (const path of touched) {
-    const base = proposal.data.base[path];
-    if (base === undefined) {
+    const recorded = proposal.data.base[path];
+    if (recorded === undefined) {
       unbased.push(path);
       continue;
     }
-    const now = model.get(path);
-    const changed = base === "new" ? now !== undefined : now === undefined || sha256(now) !== base;
+    const now = base.get(path);
+    const changed = recorded === "new" ? now !== undefined : now === undefined || sha256(now) !== recorded;
     if (changed) stale.push(path);
   }
-  return { stale: stale.sort(), unbased: unbased.sort() };
+  return { stale: stale.sort(), unbased: unbased.sort(), requires: requiredProposals(p, proposal) };
 }
 
-/** The Model and Requirement files (tracked paths) as they would be once the Proposal is applied. */
+/** The Model and Requirement files (tracked paths) as they would be once the Proposal, and those it requires, are applied. */
 export function applied(p: Project, proposal: Proposal): FileMap {
-  const files = readTrackedFiles(p);
+  const files = baseFiles(p, proposal);
   for (const path of proposal.data.delete) files.delete(path);
   for (const [path, content] of newFiles(proposal)) files.set(path, content);
   return files;
@@ -189,8 +254,9 @@ export function validateProposal(p: Project, proposal: Proposal): Diagnostic[] {
   return buildProject(applied(p, proposal)).diagnostics;
 }
 
+/** What this Proposal itself changes, on top of the Proposals it requires. */
 export function changes(p: Project, proposal: Proposal): FileChange[] {
-  const before = readTrackedFiles(p);
+  const before = baseFiles(p, proposal);
   const after = applied(p, proposal);
   const paths = [...new Set([...newFiles(proposal).keys(), ...proposal.data.delete])].sort();
   return paths.map((path) => diffFile(path, before.get(path), after.get(path)));
@@ -200,6 +266,8 @@ export function approveProposal(p: Project, id: string): Proposal {
   const proposal = getProposal(p, id);
   requireOpen(proposal, "approved");
   const h = health(p, proposal);
+  if (h.requires.length > 0)
+    throw new TramaError(`Proposal ${proposal.id} requires other Proposals first:\n${requiredReasons(h.requires).map((r) => `- ${r}`).join("\n")}`);
   if (h.stale.length > 0)
     throw new TramaError(`Proposal ${proposal.id} is stale: the Model changed since it touched ${h.stale.join(", ")}. Write a new Proposal.`);
   if (h.unbased.length > 0)

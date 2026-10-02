@@ -20,12 +20,13 @@ export function sectionMatches(sectionRef: string | null, target: string): boole
   return sectionRef.toLowerCase() === target.toLowerCase();
 }
 
-/** The Areas as they are, with those the Proposal touches replaced by their before-and-after view. */
+/** The Areas as they are (or as the Proposals it requires leave them), with those the Proposal touches replaced by their before-and-after view. */
 export function areasWith(snapshot: Snapshot, proposal: ProposalView | undefined): AreaView[] {
   if (!proposal) return snapshot.areas;
+  const current = proposal.base?.areas ?? snapshot.areas;
   const touched = new Map(proposal.areas.map((a) => [a.id, a]));
-  const shown = snapshot.areas.map((a) => touched.get(a.id) ?? a);
-  for (const a of proposal.areas) if (!snapshot.areas.some((x) => x.id === a.id)) shown.push(a);
+  const shown = current.map((a) => touched.get(a.id) ?? a);
+  for (const a of proposal.areas) if (!current.some((x) => x.id === a.id)) shown.push(a);
   return shown.sort((a, b) => a.id.localeCompare(b.id));
 }
 

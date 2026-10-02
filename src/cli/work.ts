@@ -1,4 +1,5 @@
 import { changes, health, listProposals, type Proposal, validateProposal } from "../core/proposals";
+import { requiredReasons } from "../core/required";
 import { hasContent, loadProject, parseRequirementRef, type ProjectModel, requirementsFor, resolveProjectRef } from "../core/requirements";
 import type { Project } from "../core/store";
 import { formatDiagnostic } from "../core/model";
@@ -7,29 +8,33 @@ import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 
 /** One-line summary of a Proposal for lists and the board. */
 export function proposalSummary(p: Project, proposal: Proposal) {
-  const h = proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [] };
-  return { id: proposal.id, title: proposal.title, status: proposal.data.status, stale: h.stale.length > 0 };
+  const h = proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
+  return { id: proposal.id, title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, stale: h.stale.length > 0, requires: h.requires.map((r) => r.id) };
 }
 
 export function proposalListView(p: Project, all: boolean): Result {
   const items = listProposals(p)
     .filter((x) => all || x.data.status === "open")
     .map((x) => proposalSummary(p, x));
+  const flags = (i: (typeof items)[number]) =>
+    [i.status, i.kind === "import" ? "import" : "", i.stale ? "stale" : "", i.requires.length > 0 ? `requires ${i.requires.join(", ")}` : ""].filter(Boolean).join(", ");
   const md = bullets(
-    items.map((i) => `- ${i.id} [${i.status}${i.stale ? ", stale" : ""}] ${i.title}`),
+    items.map((i) => `- ${i.id} [${flags(i)}] ${i.title}`),
     "_No Proposals._",
   );
   return { md: `# Proposals\n\n${md}`, json: { proposals: items } };
 }
 
 export function proposalShowView(p: Project, proposal: Proposal): Result {
-  const h = proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [] };
+  const h = proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
   const fileChanges = changes(p, proposal);
   const errors = proposal.data.status === "open" ? validateProposal(p, proposal) : [];
   const md = [
     proposal.body.trim(),
     "",
-    `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}`,
+    `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}${proposal.data.kind === "import" ? " · import" : ""}`,
+    proposal.data.requires.length > 0 ? `Requires: ${proposal.data.requires.join(", ")}. Changes and validation below are on top of them.` : "",
+    h.requires.length > 0 ? `\nCannot be approved yet:\n${requiredReasons(h.requires).map((r) => `- ${r}`).join("\n")}` : "",
     h.stale.length > 0 ? `\nStale: the Model changed since the Proposal touched ${h.stale.join(", ")}. It cannot be approved; write a new Proposal.` : "",
     h.unbased.length > 0 ? `\nFiles never registered with \`trama proposal edit\`: ${h.unbased.join(", ")}` : "",
     "",
@@ -44,7 +49,18 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
   ].join("\n");
   return {
     md,
-    json: { id: proposal.id, title: proposal.title, status: proposal.data.status, stale: h.stale, unbased: h.unbased, changes: fileChanges, errors },
+    json: {
+      id: proposal.id,
+      title: proposal.title,
+      status: proposal.data.status,
+      kind: proposal.data.kind,
+      requires: proposal.data.requires,
+      blockedBy: h.requires,
+      stale: h.stale,
+      unbased: h.unbased,
+      changes: fileChanges,
+      errors,
+    },
   };
 }
 

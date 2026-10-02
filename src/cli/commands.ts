@@ -186,8 +186,8 @@ export const COMMANDS: Command[] = [
     },
   },
 
-  { name: "proposal new", args: "<title>", summary: "Open a new Proposal", options: { body: { type: "string" } }, run(ctx, a, o) {
-      const p = newProposal(ctx.project(), a[0] as string, str(o["body"]));
+  { name: "proposal new", args: "<title>", summary: "Open a new Proposal (--requires <id> for each Proposal it builds on; --import when it describes existing code)", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" } }, run(ctx, a, o) {
+      const p = newProposal(ctx.project(), a[0] as string, str(o["body"]), { requires: list(o["requires"]), kind: o["import"] === true ? "import" : "change" });
       return text(`Created Proposal ${p.id} at ${p.dir}`, { id: p.id, path: p.dir });
     } },
   { name: "proposal edit", args: "<id> <model-path>", summary: "Make a Model file editable inside a Proposal; prints the path to edit", run(ctx, a) {

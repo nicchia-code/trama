@@ -148,12 +148,22 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_proposal_new",
     title: "Open a Proposal",
-    description: "Opens a new Proposal: the only way to change the Model or its Requirements. Then write each changed Model or Requirement file with trama_proposal_write. Only the developer can approve it.",
-    inputSchema: { type: "object", properties: { title: string("Short title"), body: string("Why the change is needed") }, required: ["title"], additionalProperties: false },
+    description: "Opens a new Proposal: the only way to change the Model or its Requirements. Then write each changed Model or Requirement file with trama_proposal_write. Only the developer can approve it. A large change can be split into Proposals that build on each other: list the earlier ones in `requires`; this one is then written and validated on top of them, and can only be approved after them.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: string("Short title"),
+        body: string("Why the change is needed"),
+        requires: stringList("IDs of open or approved Proposals this one builds on"),
+        import: { type: "boolean", description: "True when the Proposal describes existing code (trama-import skill); approving it starts no Scan" },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
     writes: true,
     run: (p, i) => {
-      const proposal = newProposal(p, text(i, "title"), optionalText(i, "body") ?? "");
-      return `Opened Proposal ${proposal.id}. Write each new or changed Model or Requirement file with trama_proposal_write.`;
+      const proposal = newProposal(p, text(i, "title"), optionalText(i, "body") ?? "", { requires: texts(i, "requires"), kind: i["import"] === true ? "import" : "change" });
+      return `Opened Proposal ${proposal.id}${proposal.data.requires.length > 0 ? ` on top of ${proposal.data.requires.join(", ")}` : ""}. Write each new or changed Model or Requirement file with trama_proposal_write.`;
     },
   },
   {

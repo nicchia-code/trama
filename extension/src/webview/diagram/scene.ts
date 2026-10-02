@@ -66,11 +66,13 @@ export function toMerged(m: Machine): MergedMachine {
 
 export function buildScene(snapshot: Snapshot, proposalId: string | null): Scene {
   const proposal = snapshot.proposals.find((p) => p.id === proposalId) ?? null;
+  // A Proposal that requires open ones is drawn over the Model with those applied, as if already approved.
+  const model = proposal?.base ?? snapshot;
 
-  const machines = new Map<string, MergedMachine>(snapshot.machines.map((m) => [m.id, toMerged(m)]));
+  const machines = new Map<string, MergedMachine>(model.machines.map((m) => [m.id, toMerged(m)]));
   for (const m of proposal?.machines ?? []) machines.set(m.id, m);
 
-  const actors: SceneActor[] = snapshot.actors.map((a) => ({
+  const actors: SceneActor[] = model.actors.map((a) => ({
     id: a.id,
     name: a.name,
     description: a.description,
@@ -91,10 +93,10 @@ export function buildScene(snapshot: Snapshot, proposalId: string | null): Scene
     }
   }
 
-  const ids = new Set<string>(snapshot.features.map((f) => f.id));
+  const ids = new Set<string>(model.features.map((f) => f.id));
   for (const m of machines.values()) ids.add(m.feature);
   const features: SceneFeature[] = [...ids].sort().map((id) => {
-    const known = snapshot.features.find((f) => f.id === id);
+    const known = model.features.find((f) => f.id === id);
     const own = [...machines.values()].filter((m) => m.feature === id);
     const gone = own.length > 0 && own.every((m) => m.change === "removed");
     return {
@@ -107,14 +109,14 @@ export function buildScene(snapshot: Snapshot, proposalId: string | null): Scene
   });
 
   return {
-    system: snapshot.system,
+    system: model.system,
     features,
     actors,
     machines: [...machines.values()],
     feature: new Map(features.map((f) => [f.id, f])),
     actor: new Map(actors.map((a) => [a.id, a])),
     machine: machines,
-    files: new Map(snapshot.machines.map((m) => [m.id, m.file])),
+    files: new Map(model.machines.map((m) => [m.id, m.file])),
     proposal,
     drifts: snapshot.drifts,
   };
