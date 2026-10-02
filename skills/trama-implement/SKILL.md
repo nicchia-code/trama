@@ -52,7 +52,7 @@ Stop at once and file a Drift when any of these is true:
 
 Then:
 
-1. Decide which case applies. If the code is right and the Model forgot a case, first create a Proposal with the `trama-design` skill. Otherwise there is no Proposal.
+1. Decide which case applies. If the code is right and the Model forgot a case, first create a Proposal with the `trama-design` skill, without its interview (list your choices in the Proposal body). Otherwise there is no Proposal.
 2. File the Drift **once**: `trama drift new "<title>" --ref <nearest Model element or Requirement> --body "<what the Model or Requirement says, why it cannot be followed, what you would do instead, where in the code>"`, adding `--proposal <id>` only in the first case. `trama drift new` always creates a new card, so never run it twice for the same problem.
 3. Leave the Task in `doing`. Report the Drift ID and stop. The developer decides whether the code or the Model changes.
 

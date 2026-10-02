@@ -34,12 +34,34 @@ There is no tool for approving, rejecting or resolving: those are the developer'
 
 ## Steps
 
-1. **Explore before proposing.** `trama system`, then `trama search <word>` for what already exists (it searches the Requirements too), then `trama feature <id>`, `trama machine <id>`, `trama state <machine/State>`, `trama event <owner.EVENT>`, and `trama requirements` for the Areas. Reuse existing Machines, Actors and Events instead of duplicating them. Add `--json` if you need structured data.
-2. **Find the gaps with the developer.** Ask short, concrete questions about what the conversation leaves open: what if it fails, is cancelled, times out, happens twice, arrives out of order? Use `trama paths <machine> <from> <to>` to show the routes that already exist. Then ask how it must be built where it matters: what the screens look like, what data each thing holds, which rules and limits apply, which technology is required. Do not invent behaviour or Requirements the developer has not confirmed.
-3. **Open a Proposal** for one coherent change, which may touch several Machines, Features and Areas: `trama proposal new "<title>" --body "<why>"`.
-4. **Edit files through it.** For each Model file: `trama proposal edit <id> <model-path>` (for example `checkout/order.md`) prints the path to edit. For an Area: `trama proposal edit <id> requirements/<area>.md`. An existing file arrives pre-filled; a new file arrives empty. To remove a file: `trama proposal delete <id> <path>`. Write files as described in [FORMAT.md](./FORMAT.md). Always write the **complete** new version of a file. Put the Requirements the developer gave you in the same Proposal as the behaviour they belong to.
-5. **Validate until clean.** `trama validate --proposal <id>` must report no errors. A Requirement section titled with a State you removed or renamed is an error: update or remove that section in the same Proposal. Then `trama proposal show <id>` and read the changes: they must match what you meant, and nothing else.
-6. **Hand over.** Summarise the Proposal in a few lines: what States, Transitions and Events are added or changed, which Requirements, and any question you left open. Tell the developer to review it on the board or with `trama proposal show <id>`, and stop.
+1. **Explore before asking.** `trama system`, then `trama search <word>` for what already exists (it searches the Requirements too), then `trama feature <id>`, `trama machine <id>`, `trama state <machine/State>`, `trama event <owner.EVENT>`, and `trama requirements` for the Areas. Reuse existing Machines, Actors and Events instead of duplicating them. Add `--json` if you need structured data. Facts are your job: never ask the developer anything the Model, the Requirements or the code can tell you.
+2. **Interview the developer in rounds** until every decision about the change is settled (see "The interview" below). Do not open a Proposal before that.
+3. **Confirm the shared understanding.** Summarise what you will propose: the States, Transitions and Events added or changed, and the Requirements per Area. Ask the developer to confirm, and wait. A correction goes back to step 2.
+4. **Open a Proposal** for one coherent change, which may touch several Machines, Features and Areas: `trama proposal new "<title>" --body "<why>"`.
+5. **Edit files through it.** For each Model file: `trama proposal edit <id> <model-path>` (for example `checkout/order.md`) prints the path to edit. For an Area: `trama proposal edit <id> requirements/<area>.md`. An existing file arrives pre-filled; a new file arrives empty. To remove a file: `trama proposal delete <id> <path>`. Write files as described in [FORMAT.md](./FORMAT.md). Always write the **complete** new version of a file. Put the Requirements the developer gave you in the same Proposal as the behaviour they belong to.
+6. **Validate until clean.** `trama validate --proposal <id>` must report no errors. A Requirement section titled with a State you removed or renamed is an error: update or remove that section in the same Proposal. Then `trama proposal show <id>` and read the changes: they must match what was agreed, and nothing else.
+7. **Hand over.** Summarise the Proposal in a few lines and tell the developer to review it on the board or with `trama proposal show <id>`, and stop.
+
+## The interview
+
+Treat the change as a tree of decisions: each answer opens the decisions that hang off it. Work it in rounds.
+
+- **One round = every open decision whose prerequisites are settled.** Ask them all at once, not one per message. A question whose meaning depends on another answer of the same round ("if you pick 1b…") belongs to a later round: leave it out.
+- **Every question offers 2 to 5 concrete, materially different options**, each with its tradeoff in a few words, and **your recommendation**. Put the whole round in **one** call of your question tool (see "Asking" below), then stop and wait for the answers.
+- **Cover behaviour first:** what starts it, what if it fails, is cancelled, times out, happens twice or out of order, who is told. Use `trama paths <machine> <from> <to>` to show the routes that already exist.
+- **Then how it is built, Area by Area,** where the change touches it: what the screens look like (`ui`), what each thing holds (`data`), which limits and formulas apply (`rules`), required technology (`tech`), quality goals (`quality`). Skip Areas the change does not touch.
+- **After each round** recompute what is open; answers often settle or remove other questions. The interview ends when nothing is left open or silently assumed.
+- Never invent behaviour or Requirements the developer has not confirmed.
+
+Skip the interview only when the developer says so ("don't ask, decide"), or when another Trama skill sends you here to attach a Proposal to a Drift. Then make reasonable choices and list each one, in the Proposal body and in your hand-over, as a decision for the developer to check.
+
+### Asking
+
+Use the question tool of the agent you are running in:
+
+- **omp:** the `ask` tool. One entry in `questions` per decision: a short `id`, the `question`, `options` as `{label, description}` with the tradeoff in `description`, and `recommended` set to the index of your recommended option. Set `multi: true` only when several answers can genuinely hold together. Do not add an "Other" option: omp adds one.
+- **VS Code agent (Copilot):** the `vscode_askQuestions` tool ("Ask Clarifying Questions", `#tool:vscode/askQuestions` in prompts). One entry in `questions` per decision: a unique `header` of at most 50 characters, a `question` of at most 200 characters, `options` as `{label, description}` with the tradeoff in `description`, and `recommended: true` on your recommended option. Set `multiSelect: true` only when several answers can hold together. Leave free-form answers allowed.
+- **No question tool** (another agent, or a non-interactive run): write the round as a numbered list. Each question has its options as `a)`, `b)`, … with their tradeoffs, then a line `➡️ <your recommendation and why>`. End the message there.
 
 ## When a Proposal comes back
 

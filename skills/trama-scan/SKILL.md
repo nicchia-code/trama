@@ -54,7 +54,7 @@ There is no tool for approving, rejecting or resolving: those are the developer'
    The body says *what*, in domain words, not which files to touch.
 6. **File each Drift exactly once, in one of two ways.** `trama drift new` always creates a new card, so decide which way applies before running it.
    - **Ordinary Drift** (the default): `trama drift new "<title>" --ref <nearest Model element or Requirement> --body "<what the code does, what the Model or Requirement says, where in the code you saw it>"`. Code paths belong here, and only here. Do not choose the resolution.
-   - **Drift with a Proposal**, only when the code handles an important case the Model forgot: first create the Proposal by following the `trama-design` skill (`trama proposal new`, `edit`, `validate --proposal`), then run `trama drift new … --proposal <id>` once, with the same body. Never run `drift new` a second time for the same difference.
+   - **Drift with a Proposal**, only when the code handles an important case the Model forgot: first create the Proposal by following the `trama-design` skill without its interview (`trama proposal new`, `edit`, `validate --proposal`; list your choices in the Proposal body), then run `trama drift new … --proposal <id>` once, with the same body. Never run `drift new` a second time for the same difference.
 
    Do not open a Proposal for small differences: the default is that the code gets fixed.
 7. **Report.** List the Tasks and Drifts you created with their IDs, Machines you could not find any code for, and Model warnings from `analyze`. Say which Drifts need a decision. Then stop.
