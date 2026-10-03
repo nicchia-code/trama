@@ -114,6 +114,11 @@
 @keyframes board-working-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .3; transform: scale(.7); } }
 @media (prefers-reduced-motion: reduce) { .board-working-dot { animation: none; } }
 
+/* A blocked Task: the badge is a link; its text names the Drift or the fix Task, so colour is never the only signal. */
+button.board-blocked { font: inherit; font-size: 11px; cursor: pointer; border-color: var(--board-error); background: color-mix(in srgb, var(--board-error) 18%, transparent); }
+button.board-blocked:hover { background: color-mix(in srgb, var(--board-error) 32%, transparent); }
+button.board-blocked:focus-visible { outline: 1px solid var(--vscode-focusBorder, currentColor); outline-offset: 1px; }
+
 .board-moves { margin-left: auto; display: inline-flex; gap: 2px; }
 button.board-move { padding: 0 6px; line-height: 18px; min-width: 24px; }
 

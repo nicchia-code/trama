@@ -1,6 +1,7 @@
 // Pure logic of the Board: no DOM. Turns a Snapshot into columns of cards.
 import type { FileChange } from "../../../../src/core/diff";
 import { formatDiagnostic } from "../../../../src/core/model";
+import type { Blocker } from "../../../../src/core/blocking";
 import type { DriftView, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
 import type { Column } from "../../protocol";
 import { designColumn, placeTasks, takenBlocker } from "../../../../src/core/design";
@@ -26,6 +27,20 @@ export const EMPTY_HINTS: Record<ColumnId, string> = {
   doing: "Nothing in progress",
   done: "Nothing done yet",
 };
+
+/** The badge of one blocker: "blocked 0003" goes to the Drift on the Diagram, "waiting 0004" to the card of the fix Task. */
+export interface BlockBadge {
+  label: string;
+  /** Tooltip and accessible name: why the Task is blocked, and where the badge leads. */
+  tooltip: string;
+  target: { kind: "drift" | "task"; id: string };
+}
+
+export function blockBadge(b: Blocker): BlockBadge {
+  return b.kind === "drift"
+    ? { label: `blocked ${b.drift}`, tooltip: `Blocked by Drift ${b.drift}: ${b.title}. Show it on the diagram.`, target: { kind: "drift", id: b.drift } }
+    : { label: `waiting ${b.task}`, tooltip: `Waiting for Task ${b.task}: ${b.title}, which fixes the code for Drift ${b.drift}. Go to its card.`, target: { kind: "task", id: b.task } };
+}
 
 export interface Badge {
   label: string;
@@ -87,6 +102,8 @@ export interface TaskCard {
   proposal: string | null;
   /** True while the agent has taken the Task. */
   agent: boolean;
+  /** One badge per thing that blocks the Task; empty when it is free. */
+  blocks: BlockBadge[];
   excerpt: string;
   /** Path relative to `.trama/`. */
   file: string;
@@ -239,6 +256,7 @@ export function taskCard(t: TaskView): TaskCard {
     drift: t.drift,
     proposal: t.proposal,
     agent: t.agent,
+    blocks: t.blockedBy.map(blockBadge),
     excerpt: excerpt(t.body),
     file: t.file,
     column: t.column,

@@ -171,7 +171,7 @@ export function resolveProjectRef(project: ProjectModel, ref: string): ProjectEl
 }
 
 /** The Model elements that contain `element` (itself first): a State's parent States, its Machine and Feature. */
-function lineageRefs(model: Model, element: Element): string[] {
+export function lineageRefs(model: Model, element: Element): string[] {
   const machineChain = (machine: Machine, state: State | null): string[] => {
     const refs: string[] = [];
     for (let s: State | undefined = state ?? undefined; s; s = s.parent ? findState(machine, s.parent) : undefined) refs.push(`${machine.id}/${s.name}`);

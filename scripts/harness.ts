@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { editInProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { projectAt } from "../src/core/store";
-import { moveTask, newDrift, newTask } from "../src/core/work";
+import { moveTask, newDrift, newTask, resolveDrift } from "../src/core/work";
 
 // TRAMA_DEMO_DIR=<dir>: also write the demo `.trama/` into <dir>, to open in VS Code. Rerunning resets it to
 // the seeded state and leaves everything else in <dir> (.vscode, .agents, …) alone.
@@ -76,9 +76,15 @@ moveTask(p, done.id, "done", "developer");
 moveTask(p, newTask(p, { title: "Refund after pickup", refs: ["order/Refunding"], technical: false }).id, "doing", "agent");
 const returns = newProposal(p, "Returns after shipping");
 submitProposal(p, returns.id);
-const returnTask = (title: string) => newTask(p, { title, refs: ["order/Shipped"], technical: false, proposal: returns.id }).id;
+const returnTask = (title: string) => newTask(p, { title, refs: ["order/Cancelled"], technical: false, proposal: returns.id }).id;
 returnTask("Return request");
 moveTask(p, returnTask("Refund on return"), "doing", "agent");
+
+// An open Drift blocks the Tasks that concern the same thing, alone or inside the design (filed after the agent took them, which a blocked Task would refuse); a Drift fixed in the code makes its origin wait.
+newDrift(p, { title: "Code never closes a return", refs: ["order/Cancelled"], body: "src/return.ts leaves a returned order open." });
+const origin = newTask(p, { title: "Order confirmation email", refs: ["cart/Has items/user.CHECKOUT"], technical: false });
+moveTask(p, origin.id, "doing", "developer");
+resolveDrift(p, newDrift(p, { title: "Code sends the email twice", refs: ["cart/Has items/user.CHECKOUT"], origin: origin.id }).id, "fix-code");
 
 // A draft still being written, shown separately from what awaits the developer.
 const draft = newProposal(p, "Inventory checks", "The agent is still writing this change.");

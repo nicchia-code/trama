@@ -182,8 +182,8 @@ export const mountDiagram: MountView = (root, context) => {
     draw(true);
   }
 
-  /** Goes to the level that shows the element and selects it. Does nothing for references that resolve to nothing. */
-  function navigateRef(ref: string) {
+  /** Goes to the level that shows the element and selects it, or the ghost of `drift` when it is drawn there. Does nothing for references that resolve to nothing. */
+  function navigateRef(ref: string, drift?: string) {
     compute();
     if (!scene || !graph) return;
     const element = resolveElement(scene, ref);
@@ -198,13 +198,24 @@ export const mountDiagram: MountView = (root, context) => {
     }
     compute();
     if (!graph) return;
-    selected = selectionFor(graph, element);
+    selected = drift !== undefined && graph.nodes.some((n) => n.id === `d:${drift}`) ? `d:${drift}` : selectionFor(graph, element);
     draw(true);
+  }
+
+  /** Goes to where the open Drift is drawn (the level of its first reference that resolves) and selects it. */
+  function navigateDrift(id: string) {
+    compute();
+    const drift = scene?.drifts.find((d) => d.id === id);
+    if (!scene || !drift) return draw(false);
+    const ref = drift.refs.find((r) => resolveElement(scene as Scene, r) !== null);
+    if (ref) navigateRef(ref, id);
+    else draw(false);
   }
 
   function apply(options: NavigateOptions) {
     if (options.proposal && snapshot?.proposals.some((p) => p.id === options.proposal)) proposalId = options.proposal;
-    if (options.ref) navigateRef(options.ref);
+    if (options.drift) navigateDrift(options.drift);
+    else if (options.ref) navigateRef(options.ref);
     else draw(false);
   }
 
@@ -245,10 +256,10 @@ export const mountDiagram: MountView = (root, context) => {
     },
     show(options) {
       if (!snapshot) {
-        if (options.ref || options.proposal) pending = options;
+        if (options.ref || options.proposal || options.drift) pending = options;
         return;
       }
-      if (options.ref || options.proposal) apply(options);
+      if (options.ref || options.proposal || options.drift) apply(options);
       canvas.resize();
     },
   };

@@ -144,6 +144,58 @@ describe("Tasks and Drifts", () => {
     expect(moveTask(p, id, "done", "developer").data.column).toBe("done");
   });
 
+  test("the agent cannot start a blocked Task, from any column; the developer and the agent's other moves are free", async () => {
+    const id = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
+    const drift = newDrift(p, { title: "Refunds differ", refs: ["order"], origin: id });
+    const agent = (column: string) => run(["--root", dir, "task", "move", id, column], process.cwd(), { TRAMA_AGENT: "1" });
+
+    expect(() => moveTask(p, id, "doing", "agent")).toThrow(new RegExp(`Drift ${drift.id} "Refunds differ".*developer must decide`));
+    expect(() => agent("doing")).toThrow(/Drift .* "Refunds differ"/);
+    const viaTool = await callTool(p, "trama_task_move", { task: id, column: "doing" });
+    expect(viaTool.isError).toBe(true);
+    expect(viaTool.text).toContain(`Drift ${drift.id} "Refunds differ"`);
+    expect(getTask(p, id).data).toMatchObject({ column: "todo", agent: false });
+
+    expect(moveTask(p, id, "doing", "developer").data).toMatchObject({ column: "doing", agent: false });
+    expect(() => moveTask(p, id, "doing", "agent")).toThrow(/blocked/);
+    expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: false });
+    expect(moveTask(p, id, "done", "agent").data.column).toBe("done");
+    expect(moveTask(p, id, "doing", "agent").data).toMatchObject({ column: "doing", agent: true });
+    expect(moveTask(p, id, "todo", "agent").data.column).toBe("todo");
+
+    resolveDrift(p, drift.id, "fix-code");
+    const fix = getDrift(p, drift.id).data.task as string;
+    expect(() => moveTask(p, id, "doing", "agent")).toThrow(new RegExp(`Task ${fix} .*fixes the code for Drift ${drift.id}`));
+  });
+
+  test("fixing the code of a Drift sends its origin Task back to To do, waiting for the fix; other resolutions leave it", () => {
+    const origin = (column: "doing" | "done") => {
+      const id = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
+      moveTask(p, id, column, "agent");
+      return id;
+    };
+    const drift = (id: string | undefined) => newDrift(p, { title: "Refunds differ", refs: ["order"], origin: id }).id;
+
+    const working = origin("doing");
+    const fixed = resolveDrift(p, drift(working), "fix-code");
+    expect(getTask(p, working).data).toMatchObject({ column: "todo", agent: false });
+    expect(() => moveTask(p, working, "doing", "agent")).toThrow(new RegExp(`Task ${fixed.data.task} `));
+    moveTask(p, fixed.data.task as string, "done", "developer");
+    expect(moveTask(p, working, "doing", "agent").data.agent).toBe(true);
+
+    const finished = origin("done");
+    resolveDrift(p, drift(finished), "fix-code");
+    expect(getTask(p, finished).data.column).toBe("done");
+
+    const dismissedOrigin = origin("doing");
+    resolveDrift(p, drift(dismissedOrigin), "dismiss");
+    expect(getTask(p, dismissedOrigin).data).toMatchObject({ column: "doing", agent: true });
+
+    const noOrigin = origin("doing");
+    resolveDrift(p, drift(undefined), "fix-code");
+    expect(getTask(p, noOrigin).data).toMatchObject({ column: "doing", agent: true });
+  });
+
   test("taking back clears the mark, keeps the Task In progress, and is the developer's command", () => {
     const id = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
     expect(() => takeBackTask(p, id)).toThrow(/has not taken/);
@@ -192,6 +244,38 @@ describe("Tasks and Drifts", () => {
     expect((await callTool(p, "trama_board", {})).text).toContain(`${taken} Taken (agent working)`);
     expect((await callTool(p, "trama_task_show", { task: taken })).text).toContain("(agent working)");
     expect(JSON.parse(run(["--root", dir, "--json", "task", "list"], process.cwd(), {}).out).tasks.find((t: { id: string }) => t.id === taken).agent).toBe(true);
+  });
+
+  test("a blocked Task is marked in the board, the task list, task show and the agent tools, with every blocker; Drift views list no Tasks", async () => {
+    const blockedTask = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
+    const waiting = newTask(p, { title: "Waiting flow", refs: ["cart"], technical: false }).id;
+    const free = newTask(p, { title: "Free flow", refs: ["payment"], technical: false }).id;
+    const d1 = newDrift(p, { title: "Refunds differ", refs: ["order"] });
+    const d2 = newDrift(p, { title: "Cancel differs", refs: ["order/Paid"] });
+    const d3 = newDrift(p, { title: "Waiting origin", refs: ["cart"], origin: waiting });
+    resolveDrift(p, d3.id, "fix-code");
+    const fix = getDrift(p, d3.id).data.task as string;
+    const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
+
+    const marks = ` (blocked by Drift ${d1.id}) (blocked by Drift ${d2.id})`;
+    expect(cli("board").out).toContain(`- ${blockedTask} Return flow${marks}\n`);
+    expect(cli("board").out).toContain(`- ${waiting} Waiting flow (waiting for Task ${fix})\n`);
+    expect(cli("board").out).toContain(`- ${free} Free flow\n`);
+    expect(cli("task", "list").out).toContain(`- ${blockedTask} Return flow${marks}`);
+    const shown = cli("task", "show", blockedTask).out;
+    expect(shown).toContain(`${marks}\nBlocked by Drift ${d1.id}: Refunds differ\nBlocked by Drift ${d2.id}: Cancel differs`);
+    expect(cli("task", "show", waiting).out).toContain(`Waiting for Task ${fix}: Fix code to match the Model: Waiting origin`);
+    expect(cli("task", "show", free).out).not.toContain("locked");
+    expect((await callTool(p, "trama_board", {})).text).toContain(`${blockedTask} Return flow${marks}`);
+    expect((await callTool(p, "trama_task_show", { task: blockedTask })).text).toContain(`Blocked by Drift ${d1.id}: Refunds differ`);
+    const json = JSON.parse(cli("--json", "task", "list").out).tasks.find((t: { id: string }) => t.id === blockedTask);
+    expect(json.blockedBy.map((b: { drift: string }) => b.drift)).toEqual([d1.id, d2.id]);
+
+    moveTask(p, blockedTask, "done", "developer");
+    expect(cli("task", "list").out).not.toContain(`${blockedTask} Return flow (blocked`);
+    const driftView = cli("drift", "show", d1.id).out;
+    expect(driftView).not.toContain(blockedTask);
+    expect(driftView).not.toContain("locked");
   });
 
   test("the command line takes the Task only inside the terminal Trama started, and the agent tools always do", async () => {
@@ -257,6 +341,28 @@ describe("Tasks and Drifts", () => {
     const drift = newDrift(p, { title: "Plain", refs: ["order"] });
     expect(() => resolveDrift(p, drift.id, "accept-proposal")).toThrow(/no attached Proposal/);
     expect(getDrift(p, drift.id).data.status).toBe("open");
+  });
+
+  test("a Drift remembers the Task it was filed from, which must exist; Drifts without one still load", async () => {
+    const task = newTask(p, { title: "Cancel flow", refs: ["order"], technical: false });
+    expect(() => newDrift(p, { title: "x", refs: ["order"], origin: "42" })).toThrow(/No Task/);
+    const viaCore = newDrift(p, { title: "Core", refs: ["order"], origin: task.id });
+    expect(getDrift(p, viaCore.id).data.origin).toBe(task.id);
+
+    const viaCli = run(["--root", dir, "drift", "new", "Cli", "--ref", "order", "--task", task.id], process.cwd());
+    const cliId = /Created Drift (\d+)/.exec(viaCli.out)?.[1] ?? "";
+    expect(getDrift(p, cliId).data.origin).toBe(task.id);
+
+    const viaTool = await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], task: task.id });
+    expect(viaTool.isError).toBe(false);
+    const toolId = /Recorded Drift (\d+)/.exec(viaTool.text)?.[1] ?? "";
+    expect(getDrift(p, toolId).data.origin).toBe(task.id);
+    expect((await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], task: "42" })).isError).toBe(true);
+
+    const scanned = newDrift(p, { title: "From a scan", refs: ["order"] });
+    expect(getDrift(p, scanned.id).data.origin).toBeNull();
+    writeFileSync(scanned.path, readFileSync(scanned.path, "utf8").replace(/^origin:.*\n/m, ""));
+    expect(getDrift(p, scanned.id).data.origin).toBeNull();
   });
 });
 

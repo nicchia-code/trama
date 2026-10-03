@@ -376,11 +376,26 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 4 | In that row click → again | Badge `1/3 done`, the row's dot is `Done`; the card stays in In progress (a mix of To do and Done) | ☐ |
 | 5 | Edit any file under `$D/tasks/` from outside (see F1) | The card stays open and in place after the refresh | ☐ |
 | 6 | Try to drag the card onto another column | It cannot be dragged; nothing moves | ☐ |
-| 7 | **Run this design** | The launch prints `Use the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column, in order, one after the other. Stop at the first Drift you file.` | ☐ |
+| 7 | **Run this design** | The launch prints `Use the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column, in order, one after the other. Skip the Tasks that are blocked and go on with the others, also after you file a Drift; at the end list the Tasks you skipped with the Drift that blocks each.` | ☐ |
 | 8 | Move the other two Tasks to Done (→ twice each) | The card moves to Done, badge `3/3 done`, **Run this design** is disabled with the tooltip `No Task of this design is in To do` | ☐ |
 | 9 | Close the panel and open it again | The card is closed again | ☐ |
 | 10 | `trama --root $D board` and `trama --root $D task list` | `board` lists `Proposal 0001 "Returns after shipping" (3/3 done)` once, in Done, with the three Tasks under it and their columns; `task list` lists the three Tasks flat, each with `(Proposal 0001)` | ☐ |
 | 11 | Create a fourth Task with `--proposal 2` only (a second Proposal) | A design of one Task stays a plain card | ☐ |
+
+### E11. Blocked Tasks
+↻ first. Seed it from the verification shell: `j drift new "Refund amount differs" --ref order/Refunding --task 1`, then `j drift new "Cancel differs" --ref order/Paid`. The harness seed already has blocked Tasks too (Tasks inside the design card, Task `0008` waiting for the fix Task `0009`); the new Drifts are 0006 and 0007. Task `0005`, taken by the agent, also gets the badge `blocked 0006`: blocking does not release it.
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Look at Task `0001` on the Board | Red badges `blocked 0006` (the Drift filed with `--task 1`) and `blocked 0007` (it refs `order/Paid/user.CANCEL`, inside `order/Paid`); both arrows and **Run** stay enabled | ☐ |
+| 2 | Hover a badge, and read its accessible name | The tooltip says `Blocked by Drift 0006: Refund amount differs. Show it on the diagram.` | ☐ |
+| 3 | Click `blocked 0006` | The Diagram tab opens at the `order` Machine with the red ghost `Drift 0006` selected and its panel shown | ☐ |
+| 4 | Back on the Board, move `0001` with → | It moves to In progress and keeps its badges: the developer is never refused | ☐ |
+| 5 | `j task move 1 doing`, and the same with `TRAMA_AGENT=1 j task move 1 doing` | The first prints `Task 0001 is now doing`; the second is refused naming `Drift 0006 "Refund amount differs"` and `Drift 0007`, saying the developer must decide; the Task is unchanged | ☐ |
+| 6 | `j board`, `j task list`, `j task show 1` | `(blocked by Drift 0006) (blocked by Drift 0007)` after the title; `task show` also lists `Blocked by Drift 0006: Refund amount differs` and the same for 0007 | ☐ |
+| 7 | `j drift show 6` | It does not list Task 0001 | ☐ |
+| 8 | Click **Fix code** on Drift 0006 | Task `0001` goes back to To do and its badges become `waiting 0010` and `blocked 0007`; clicking `waiting 0010` scrolls to the fix Task's card and focuses it | ☐ |
+| 9 | Move the fix Task `0010` to Done and dismiss Drift 0007 | Task `0001` has no badge any more | ☐ |
+| 10 | `j --json drift show 7`, then `j drift new "x" --ref order --task 99` | The first has `"origin": null` (filed without `--task`); the second fails with `No Task with ID "99"` and creates nothing | ☐ |
 
 ---
 
@@ -503,7 +518,7 @@ Each launch sends one command to the terminal named **Trama agent** (cwd = the d
 | H8 | Click **Design…** and press Esc | Nothing is printed | ☐ |
 | H9 | Diagram toolbar **Design…** | Same input box and result as H5–H7 | ☐ |
 | H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
-| H11 | Board: **Run all To do** | `Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Stop at the first Drift you file.` | ☐ |
+| H11 | Board: **Run all To do** | `Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Skip the Tasks that are blocked and go on with the others, also after you file a Drift; at the end list the Tasks you skipped with the Drift that blocks each.` | ☐ |
 | H12 | Move Task 0001 and 0002 to In progress (E5), look at **Run all To do**, then ↻ | The button is **disabled** while To do is empty | ☐ |
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |

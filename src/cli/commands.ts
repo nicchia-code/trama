@@ -241,8 +241,8 @@ export const COMMANDS: Command[] = [
       return text(`Task ${t.id} is yours again (still ${t.data.column})`, { id: t.id, column: t.data.column, agent: t.data.agent });
     } },
 
-  { name: "drift new", args: "<title>", summary: "Record an open Drift", options: { ref, proposal: { type: "string" }, body: { type: "string" } }, run(ctx, a, o) {
-      const d = newDrift(ctx.project(), { title: a[0] as string, refs: list(o["ref"]), proposal: str(o["proposal"]), body: str(o["body"]) });
+  { name: "drift new", args: "<title>", summary: "Record an open Drift (--task <id> names the Task you were implementing when you found it)", options: { ref, proposal: { type: "string" }, task: { type: "string" }, body: { type: "string" } }, run(ctx, a, o) {
+      const d = newDrift(ctx.project(), { title: a[0] as string, refs: list(o["ref"]), proposal: str(o["proposal"]), origin: str(o["task"]), body: str(o["body"]) });
       return text(`Created Drift ${d.id} at ${d.path}`, { id: d.id, path: d.path });
     } },
   { name: "drift list", args: "", summary: "Open Drifts (--all for every one)", options: { all: { type: "boolean" } }, run: (ctx, _a, o) => driftListView(ctx.project(), o["all"] === true) },

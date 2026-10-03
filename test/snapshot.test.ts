@@ -8,7 +8,7 @@ import { editInProposal, newProposal } from "../src/core/proposals";
 import { handOver } from "./handover";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
-import { newDrift, newTask } from "../src/core/work";
+import { moveTask, newDrift, newTask } from "../src/core/work";
 import type { FileMap, Machine } from "../src/core/types";
 
 const ACTOR = "# U\n\n## Events\n\n### GO\nx\n\n### STOP\nx\n";
@@ -108,4 +108,14 @@ test("a Proposal that would leave the Model invalid reports the errors instead o
   handOver(p, prop.id);
   const view = buildSnapshot(p).proposals[0];
   expect(view?.errors.map((e) => e.message)).toEqual([expect.stringContaining('unknown State "Nowhere"')]);
+});
+
+test("a Task's blockers travel in the snapshot: the open Drifts that concern it, and none once it is Done", () => {
+  const task = newTask(p, { title: "Cart flow", refs: ["cart"], technical: false });
+  const other = newTask(p, { title: "Payment flow", refs: ["payment"], technical: false });
+  const drift = newDrift(p, { title: "Cart differs", refs: ["cart"] });
+  const blockers = () => Object.fromEntries(buildSnapshot(p).tasks.map((t) => [t.id, t.blockedBy]));
+  expect(blockers()).toEqual({ [task.id]: [{ kind: "drift", drift: drift.id, title: "Cart differs" }], [other.id]: [] });
+  moveTask(p, task.id, "done", "developer");
+  expect(blockers()[task.id]).toEqual([]);
 });

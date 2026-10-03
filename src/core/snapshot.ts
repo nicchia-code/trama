@@ -5,6 +5,7 @@ import { appliesUnder, type RequiredProposal } from "./required";
 import { type Area, buildProject, type ProjectModel } from "./requirements";
 import { type Project, readTrackedFiles, REQUIREMENTS_PREFIX } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
+import { type Blocker, computeBlocked } from "./blocking";
 import { type Column, listDrifts, listTasks } from "./work";
 
 export interface ActorChange {
@@ -96,6 +97,8 @@ export interface TaskView {
   proposalTitle: string | null;
   /** True while the agent has taken the Task: the developer cannot move it. */
   agent: boolean;
+  /** Why the Task is blocked, if it is: the open Drifts, or the Task that fixes the code of its Drift. Empty when it is free. */
+  blockedBy: Blocker[];
   /** Path relative to `.trama/`, for opening the file. */
   file: string;
 }
@@ -157,6 +160,9 @@ const modelView = (project: ProjectModel): ModelView => ({
 /** Everything the extension shows, as plain JSON. Malformed Task or Drift files throw, naming the file. */
 export function buildSnapshot(p: Project): Snapshot {
   const project = buildProject(readTrackedFiles(p));
+
+  const tasks = listTasks(p);
+  const blocked = computeBlocked(project, tasks, listDrifts(p));
 
   const allProposals = listProposals(p);
   const proposals = allProposals
@@ -226,7 +232,7 @@ export function buildSnapshot(p: Project): Snapshot {
           : `Proposal ${d.data.proposal} is ${status}.`;
         return { id: d.id, title: d.title, body: stripTitle(d.body), refs: d.data.refs, proposal: d.data.proposal, proposalBlocker };
       }),
-    tasks: listTasks(p).map((t) => ({
+    tasks: tasks.map((t) => ({
       id: t.id,
       title: t.title,
       body: stripTitle(t.body),
@@ -237,6 +243,7 @@ export function buildSnapshot(p: Project): Snapshot {
       proposal: t.data.proposal,
       proposalTitle: (t.data.proposal !== null && proposalById.get(t.data.proposal)?.title) || null,
       agent: t.data.agent,
+      blockedBy: blocked.get(t.id) ?? [],
       file: `tasks/${t.name}`,
     })),
   };

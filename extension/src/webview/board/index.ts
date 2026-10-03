@@ -68,6 +68,11 @@ export const mountBoard: MountView = (root, context) => {
       if (open) expanded.add(key);
       else expanded.delete(key);
     },
+    showTask: (id) => {
+      const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === `task:${id}`);
+      card?.scrollIntoView({ block: "nearest" });
+      card?.focus();
+    },
     moveTask: (card, column) => {
       if (card.agent || pending.has(card.id)) return;
       context.post({ type: "moveTask", id: card.id, column });

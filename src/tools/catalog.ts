@@ -267,7 +267,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_task_show",
     title: "Show a Task",
-    description: "A Task with the current text of every Model element and Requirement it references, and the Requirements that apply to those elements.",
+    description: "A Task with the current text of every Model element and Requirement it references, and the Requirements that apply to those elements. Says which Drifts, or which fix Task, block it.",
     inputSchema: { type: "object", properties: { task: string("Task ID") }, required: ["task"], additionalProperties: false },
     writes: false,
     run: (p, i) => md(taskShowView(p, getTask(p, text(i, "task")))),
@@ -275,7 +275,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_task_move",
     title: "Move a Task",
-    description: "Moves a Task to `todo`, `doing` or `done`. Moving it to `doing` takes it: the developer cannot move it until the Task leaves `doing` or the developer takes it back. Move it to `doing` when you start and to `done` when the behaviour matches the Model and the code follows its Requirements.",
+    description: "Moves a Task to `todo`, `doing` or `done`. Moving it to `doing` takes it: the developer cannot move it until the Task leaves `doing` or the developer takes it back. A blocked Task (an open Drift blocks it, or it waits for the Task that fixes its Drift) cannot be moved to `doing` by you: the move is refused and the Drift or Task is named. Move it to `doing` when you start and to `done` when the behaviour matches the Model and the code follows its Requirements.",
     inputSchema: { type: "object", properties: { task: string("Task ID"), column: { type: "string", enum: ["todo", "doing", "done"] } }, required: ["task", "column"], additionalProperties: false },
     writes: true,
     run: (p, i) => {
@@ -293,6 +293,7 @@ export const TOOLS: ToolSpec[] = [
         title: string("Short title"),
         refs: stringList(`The Model elements or Requirements closest to the difference. ${REF} ${REQ_REF}`),
         proposal: string("ID of a Proposal that would fix the Model, if the code is right"),
+        task: string("ID of the Task you were implementing when you found the difference; leave out for a Scan or a Fix"),
         body: string("What the code does, what the Model or Requirement says, where in the code"),
       },
       required: ["title", "refs"],
@@ -300,7 +301,7 @@ export const TOOLS: ToolSpec[] = [
     },
     writes: true,
     run: (p, i) => {
-      const d = newDrift(p, { title: text(i, "title"), refs: texts(i, "refs"), proposal: optionalText(i, "proposal"), body: optionalText(i, "body") });
+      const d = newDrift(p, { title: text(i, "title"), refs: texts(i, "refs"), proposal: optionalText(i, "proposal"), origin: optionalText(i, "task"), body: optionalText(i, "body") });
       return `Recorded Drift ${d.id}. The developer will decide on it.`;
     },
   },

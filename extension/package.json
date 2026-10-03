@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -525,7 +525,7 @@
         "toolReferenceName": "trama_task_show",
         "canBeReferencedInPrompt": true,
         "userDescription": "Show a Task",
-        "modelDescription": "A Task with the current text of every Model element and Requirement it references, and the Requirements that apply to those elements.",
+        "modelDescription": "A Task with the current text of every Model element and Requirement it references, and the Requirements that apply to those elements. Says which Drifts, or which fix Task, block it.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -550,7 +550,7 @@
         "toolReferenceName": "trama_task_move",
         "canBeReferencedInPrompt": true,
         "userDescription": "Move a Task",
-        "modelDescription": "Moves a Task to `todo`, `doing` or `done`. Moving it to `doing` takes it: the developer cannot move it until the Task leaves `doing` or the developer takes it back. Move it to `doing` when you start and to `done` when the behaviour matches the Model and the code follows its Requirements.",
+        "modelDescription": "Moves a Task to `todo`, `doing` or `done`. Moving it to `doing` takes it: the developer cannot move it until the Task leaves `doing` or the developer takes it back. A blocked Task (an open Drift blocks it, or it waits for the Task that fixes its Drift) cannot be moved to `doing` by you: the move is refused and the Drift or Task is named. Move it to `doing` when you start and to `done` when the behaviour matches the Model and the code follows its Requirements.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -606,6 +606,10 @@
             "proposal": {
               "type": "string",
               "description": "ID of a Proposal that would fix the Model, if the code is right"
+            },
+            "task": {
+              "type": "string",
+              "description": "ID of the Task you were implementing when you found the difference; leave out for a Scan or a Fix"
             },
             "body": {
               "type": "string",

@@ -4,7 +4,8 @@ import { hasContent, loadProject, parseRequirementRef, type ProjectModel, requir
 import type { Project } from "../core/store";
 import { formatDiagnostic } from "../core/model";
 import { placeTasks } from "../core/design";
-import { COLUMNS, type Drift, listDrifts, listTasks, type Task } from "../core/work";
+import type { Blocker } from "../core/blocking";
+import { blockedTasks, COLUMNS, type Drift, listDrifts, listTasks, type Task } from "../core/work";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 
 /** One-line summary of a Proposal for lists and the board. */
@@ -79,13 +80,18 @@ export interface TaskSummary {
   proposal: string | null;
   /** True while the agent has taken the Task. */
   agent: boolean;
+  /** Why the Task is blocked, if it is: the open Drifts, or the Task that fixes the code of its Drift. */
+  blockedBy: Blocker[];
 }
 
 /** Appended to a Task's line in the textual views while the agent has taken it. */
 const WORKING = " (agent working)";
 
-const taskSummary = (t: Task): TaskSummary => ({ id: t.id, title: t.title, column: t.data.column, technical: t.data.technical, refs: t.data.refs, drift: t.data.drift, proposal: t.data.proposal, agent: t.data.agent });
-const driftSummary = (d: Drift) => ({ id: d.id, title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task });
+/** Appended to a Task's line in the textual views for each thing that blocks it. */
+const blockedMarks = (blockers: Blocker[]) => blockers.map((b) => (b.kind === "drift" ? ` (blocked by Drift ${b.drift})` : ` (waiting for Task ${b.task})`)).join("");
+
+const taskSummary = (t: Task, blocked: Map<string, Blocker[]>): TaskSummary => ({ id: t.id, title: t.title, column: t.data.column, technical: t.data.technical, refs: t.data.refs, drift: t.data.drift, proposal: t.data.proposal, agent: t.data.agent, blockedBy: blocked.get(t.id) ?? [] });
+const driftSummary = (d: Drift) => ({ id: d.id, title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin });
 
 /** The current text of a Model element or Requirement, for inlining into a Task or Drift. */
 export function describeRef(project: ProjectModel, ref: string): string {
@@ -148,24 +154,28 @@ const hasRequirements = (project: ProjectModel) => project.areas.some(hasContent
 
 export function taskShowView(p: Project, task: Task): Result {
   const project = loadProject(p);
+  const blocked = blockedTasks(p);
+  const blockedBy = blocked.get(task.id) ?? [];
   const md = [
     `${task.body.trim()}`,
     "",
-    `Column: **${task.data.column}**${task.data.technical ? " · technical" : ""}${task.data.drift ? ` · from Drift ${task.data.drift}` : ""}${task.data.proposal ? ` · from Proposal ${task.data.proposal}` : ""}${task.data.agent ? WORKING : ""}`,
+    `Column: **${task.data.column}**${task.data.technical ? " · technical" : ""}${task.data.drift ? ` · from Drift ${task.data.drift}` : ""}${task.data.proposal ? ` · from Proposal ${task.data.proposal}` : ""}${task.data.agent ? WORKING : ""}${blockedMarks(blockedBy)}`,
+    ...blockedBy.map((b) => (b.kind === "drift" ? `Blocked by Drift ${b.drift}: ${b.title}` : `Waiting for Task ${b.task}: ${b.title} (fixes the code for Drift ${b.drift})`)),
     "",
     "## References",
     task.data.refs.length === 0 ? "_Technical Task: no references._" : refsBlock(project, task.data.refs),
     ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, task.data.refs)] : []),
   ].join("\n");
-  return { md, json: { ...taskSummary(task), body: task.body } };
+  return { md, json: { ...taskSummary(task, blocked), body: task.body } };
 }
 
 export function taskListView(p: Project, column?: string): Result {
+  const blocked = blockedTasks(p);
   const tasks = listTasks(p).filter((t) => !column || t.data.column === column);
   const md = COLUMNS.filter((c) => !column || c === column)
-    .map((c) => `## ${c}\n${bullets(tasks.filter((t) => t.data.column === c).map((t) => `- ${t.id} ${t.title}${t.data.technical ? " (technical)" : ""}${t.data.proposal ? ` (Proposal ${t.data.proposal})` : ""}${t.data.agent ? WORKING : ""}`))}`)
+    .map((c) => `## ${c}\n${bullets(tasks.filter((t) => t.data.column === c).map((t) => `- ${t.id} ${t.title}${t.data.technical ? " (technical)" : ""}${t.data.proposal ? ` (Proposal ${t.data.proposal})` : ""}${t.data.agent ? WORKING : ""}${blockedMarks(blocked.get(t.id) ?? [])}`))}`)
     .join("\n\n");
-  return { md: `# Tasks\n\n${md}`, json: { tasks: tasks.map(taskSummary) } };
+  return { md: `# Tasks\n\n${md}`, json: { tasks: tasks.map((t) => taskSummary(t, blocked)) } };
 }
 
 export function driftShowView(p: Project, drift: Drift): Result {
@@ -203,8 +213,9 @@ export function boardView(p: Project): Result {
   const drafts = allProposals.filter((x) => x.data.status === "draft").map((x) => proposalSummary(p, x));
   const titles = new Map(allProposals.map((x) => [x.id, x.title]));
   const drifts = listDrifts(p).filter((d) => d.data.status === "open");
-  const placed = placeTasks(listTasks(p).map(taskSummary));
-  const line = (t: TaskSummary) => `${t.id} ${t.title}${t.technical ? " (technical)" : ""}${t.agent ? WORKING : ""}`;
+  const blocked = blockedTasks(p);
+  const placed = placeTasks(listTasks(p).map((t) => taskSummary(t, blocked)));
+  const line = (t: TaskSummary) => `${t.id} ${t.title}${t.technical ? " (technical)" : ""}${t.agent ? WORKING : ""}${blockedMarks(t.blockedBy)}`;
   const entries = (column: string) =>
     placed
       .filter((x) => x.column === column)

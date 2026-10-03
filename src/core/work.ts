@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { type Blocker, computeBlocked, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
 import { approveProposal, getProposal } from "./proposals";
 import { loadProject, parseRequirementRef, resolveProjectRef } from "./requirements";
@@ -44,6 +45,8 @@ interface DriftData {
   refs: string[];
   proposal: string | null;
   task: string | null;
+  /** The Task the agent was implementing when it filed the Drift; none for a Scan or a Fix, and absent in Drifts written before the field existed. */
+  origin: string | null;
 }
 
 export type Task = Item<TaskData>;
@@ -75,6 +78,7 @@ function parseDrift(raw: Raw, where: string): DriftData {
     refs: stringList(raw, "refs", where),
     proposal: idField(raw, "proposal", where),
     task: idField(raw, "task", where),
+    origin: idField(raw, "origin", where),
   };
 }
 
@@ -128,12 +132,16 @@ export function newTask(
   return create(tasksDir(p), input.title, data, input.body ?? "");
 }
 
+/** The blocked Tasks and why, by Task ID, worked out from the Drifts and Tasks as they are now. */
+export const blockedTasks = (p: Project): Map<string, Blocker[]> => computeBlocked(loadProject(p), listTasks(p), listDrifts(p));
+
 /** Who moves a Task: the agent (through its tools, or the command line in the terminal Trama started) or the developer. */
 export type Mover = "agent" | "developer";
 
 /**
  * Moves a Task. The agent takes it by moving it to In progress (and keeps it when it does so again); moving it to
  * To do or Done clears the mark. The developer never takes a Task and cannot move one the agent has taken.
+ * The agent cannot start a blocked Task, from any column, nor keep one In progress; nothing changes then.
  */
 export function moveTask(p: Project, id: string, column: string, by: Mover): Task {
   if (!COLUMNS.includes(column as Column))
@@ -141,6 +149,10 @@ export function moveTask(p: Project, id: string, column: string, by: Mover): Tas
   const task = getTask(p, id);
   if (by === "developer" && task.data.agent)
     throw new TramaError(`The agent is working on Task ${task.id}, so it cannot be moved. Take it back first ("trama task take-back ${task.id}", or the Take back button on its card).`);
+  if (by === "agent" && column === "doing") {
+    const blockers = blockedTasks(p).get(task.id);
+    if (blockers) throw new TramaError(refusalFor(task, blockers));
+  }
   task.data.column = column as Column;
   if (by === "agent") task.data.agent = column === "doing";
   writeDocument(task.path, task.data, task.body);
@@ -176,12 +188,13 @@ export function getDrift(p: Project, id: string): Drift {
 
 export function newDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; body?: string },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; body?: string },
 ): Drift {
   if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with --ref");
   checkRefs(p, input.refs);
   const proposal = input.proposal ? getProposal(p, input.proposal).id : null;
-  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null };
+  const origin = input.origin ? getTask(p, input.origin).id : null;
+  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin };
   return create(driftsDir(p), input.title, data, input.body ?? "");
 }
 
@@ -200,6 +213,15 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
     });
     drift.data.task = task.id;
     drift.data.resolution = "fix-code";
+    // The Task the Drift came from goes back to To do and, until the fix Task is Done, is blocked (see computeBlocked).
+    if (drift.data.origin) {
+      const origin = getTask(p, drift.data.origin);
+      if (origin.data.column !== "done") {
+        origin.data.column = "todo";
+        origin.data.agent = false;
+        writeDocument(origin.path, origin.data, origin.body);
+      }
+    }
   } else if (how === "accept-proposal") {
     if (!drift.data.proposal) throw new TramaError(`Drift ${drift.id} has no attached Proposal`);
     approveProposal(p, drift.data.proposal);

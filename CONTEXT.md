@@ -60,6 +60,7 @@ _Avoid_: suggestion, patch, draft
 
 **Drift**:
 A difference between code and the Model large enough to change the Diagram, or code that contradicts a Requirement, which the developer must resolve. By default the code is fixed; the agent attaches a Proposal only when the code handles a case the Model forgot.
+An open Drift **blocks** its origin Task (the one the agent was implementing when it filed it) and every unfinished Task that concerns the same thing; the agent cannot start a blocked Task, and the developer can still move it.
 _Avoid_: divergence, mismatch, bug
 
 ### Work

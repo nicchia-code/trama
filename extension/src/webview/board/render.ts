@@ -1,6 +1,6 @@
 // DOM builders for Board cards. Every piece of data goes in through textContent, never innerHTML.
 import type { ViewContext } from "../types";
-import type { Badge, Card, DesignCard, DriftCard, ProposalCard, TaskCard } from "./logic";
+import type { Badge, BlockBadge, Card, DesignCard, DriftCard, ProposalCard, TaskCard } from "./logic";
 import { AGENT_WORKING, COLUMN_TITLES, designRunBlocker } from "./logic";
 import { viewOfRef } from "../requirements/logic";
 
@@ -13,6 +13,8 @@ export interface CardEnv {
   /** Whether a design card was left open; kept for the session, so a refresh does not close it. */
   isExpanded(key: string): boolean;
   setExpanded(key: string, expanded: boolean): void;
+  /** Scrolls to the card of a Task and focuses it. */
+  showTask(id: string): void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -63,6 +65,17 @@ function workingBadge(): HTMLElement {
   const indicator = el("span", "board-working-dot");
   indicator.setAttribute("aria-hidden", "true");
   node.append(indicator, "agent working");
+  return node;
+}
+
+/** "blocked 0003" / "waiting 0004": a link to the Drift on the Diagram or to the fix Task's card. It disables nothing. */
+function blockBadgeLink(b: BlockBadge, env: CardEnv): HTMLElement {
+  const node = el("button", "board-badge board-blocked", b.label);
+  node.type = "button";
+  node.dataset["action"] = `blocked:${b.target.kind}:${b.target.id}`;
+  node.title = b.tooltip;
+  node.setAttribute("aria-label", b.tooltip);
+  node.addEventListener("click", () => (b.target.kind === "drift" ? env.context.navigate("diagram", { drift: b.target.id }) : env.showTask(b.target.id)));
   return node;
 }
 
@@ -201,7 +214,7 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
     env.drag(null);
   });
 
-  const badges = [...(card.technical && card.refs.length === 0 ? [badge({ label: "technical" })] : []), ...(card.agent ? [workingBadge()] : [])];
+  const badges = [...(card.technical && card.refs.length === 0 ? [badge({ label: "technical" })] : []), ...(card.agent ? [workingBadge()] : []), ...card.blocks.map((b) => blockBadgeLink(b, env))];
   node.append(head(card.id, ...badges, moveButtons(card, env)), el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
   if (card.drift !== null) node.append(el("p", "board-muted board-origin", `from Drift ${card.drift}`));
@@ -257,6 +270,7 @@ function design(card: DesignCard, env: CardEnv): HTMLElement {
     item.dataset["task"] = t.id;
     item.append(statusDot(t.column), el("span", "board-card-kind", t.id), el("span", "board-design-title", t.title));
     if (t.agent) item.append(workingBadge(), takeBack(t, env));
+    item.append(...t.blocks.map((b) => blockBadgeLink(b, env)));
     item.append(moveButtons(t, env));
     list.append(item);
   }

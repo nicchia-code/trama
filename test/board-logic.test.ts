@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { DriftView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { approveBlocker, buildBoard, designRunBlocker, dropTarget, excerpt, formatCounts, neighbour, proposalBadges, runAllBlocker, summarizeChanges, summarizeFile } from "../extension/src/webview/board/logic";
+import { approveBlocker, blockBadge, buildBoard, designRunBlocker, dropTarget, excerpt, formatCounts, neighbour, proposalBadges, runAllBlocker, summarizeChanges, summarizeFile } from "../extension/src/webview/board/logic";
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "0007",
@@ -20,7 +20,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   ...over,
 });
 const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, proposalBlocker: null, ...over });
-const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, file: "tasks/0012-refunds.md", ...over });
+const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drafts: [], drifts: [], tasks: [], ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
 
@@ -193,4 +193,21 @@ test("Run all To do and Run this design are unavailable while a Task is taken, n
   expect(card([t("0001", "todo"), t("0002", "doing")])).toBeNull();
   expect(card([t("0001", "todo"), t("0002", "doing", true)])).toBe("An agent is working on Task 0002");
   expect(card([t("0001", "done"), t("0002", "doing")])).toMatch(/No Task of this design is in To do/);
+});
+
+test("a blocked Task, alone or inside a design, gets one badge per blocker that says why and where it leads", () => {
+  const blockedBy: TaskView["blockedBy"] = [
+    { kind: "drift", drift: "0003", title: "Refunds differ" },
+    { kind: "fix", task: "0009", title: "Fix refunds", drift: "0004" },
+  ];
+  const card = buildBoard(snapshot({ tasks: [task({ blockedBy })] }))[1]?.cards[0];
+  expect(card?.kind === "task" && card.blocks).toEqual([
+    { label: "blocked 0003", tooltip: "Blocked by Drift 0003: Refunds differ. Show it on the diagram.", target: { kind: "drift", id: "0003" } },
+    { label: "waiting 0009", tooltip: "Waiting for Task 0009: Fix refunds, which fixes the code for Drift 0004. Go to its card.", target: { kind: "task", id: "0009" } },
+  ]);
+  const inDesign = buildBoard(snapshot({ tasks: [design("0001", "todo"), { ...design("0002", "todo"), blockedBy: [blockedBy[0] as TaskView["blockedBy"][number]] }] }))[1]?.cards[0];
+  expect(inDesign?.kind === "design" && inDesign.tasks.map((t) => t.blocks.map((b) => b.label))).toEqual([[], ["blocked 0003"]]);
+  expect(blockBadge(blockedBy[0] as TaskView["blockedBy"][number]).target.kind).toBe("drift");
+  // Blocking disables nothing: the move arrows follow the column only.
+  expect(card?.kind === "task" && [card.left, card.right]).toEqual([null, "doing"]);
 });

@@ -11,9 +11,9 @@ export type AgentAction =
   /** `feature` absent: the whole System. */
   | { kind: "scan"; feature?: string }
   | { kind: "implement"; task: string }
-  /** Every Task in "todo", in order; the agent stops at the first Drift. */
+  /** Every Task in "todo", in order; the agent skips the Tasks that are blocked and goes on after a Drift. */
   | { kind: "implement-all" }
-  /** The Tasks of one design (Proposal) still in "todo", in order; the agent stops at the first Drift. */
+  /** The Tasks of one design (Proposal) still in "todo", in order; the agent skips the Tasks that are blocked and goes on after a Drift. */
   | { kind: "implement-design"; proposal: string }
   /** Describe the existing code as Proposals for the Model; the agent asks its own questions. */
   | { kind: "import" };
@@ -43,6 +43,8 @@ export interface NavigateOptions {
   ref?: string;
   /** Open Proposal to draw over the Model. */
   proposal?: string;
+  /** Open Drift: the Diagram goes to where it is drawn and selects it. */
+  drift?: string;
 }
 
 /** Host -> webview. */

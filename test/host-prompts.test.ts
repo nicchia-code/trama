@@ -8,10 +8,10 @@ test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "scan", feature: "checkout" })).toBe("Use the trama-scan skill on the Feature `checkout`.");
   expect(buildPrompt({ kind: "implement", task: "0012" })).toBe("Use the trama-implement skill on Task 0012.");
   expect(buildPrompt({ kind: "implement-all" })).toBe(
-    'Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Stop at the first Drift you file.',
+    'Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Skip the Tasks that are blocked and go on with the others, also after you file a Drift; at the end list the Tasks you skipped with the Drift that blocks each.',
   );
   expect(buildPrompt({ kind: "implement-design", proposal: "0007" })).toBe(
-    'Use the trama-implement skill on every Task of Proposal 0007 that is in the "todo" column, in order, one after the other. Stop at the first Drift you file.',
+    'Use the trama-implement skill on every Task of Proposal 0007 that is in the "todo" column, in order, one after the other. Skip the Tasks that are blocked and go on with the others, also after you file a Drift; at the end list the Tasks you skipped with the Drift that blocks each.',
   );
 });
 

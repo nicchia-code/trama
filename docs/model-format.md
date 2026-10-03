@@ -247,6 +247,7 @@ refs:
   - order/Shipped
 proposal: "0008"        # optional: attached when the code handles a case the Model forgot
 task: null              # set when resolved as fix-code
+origin: "0012"          # optional: the Task the agent was implementing when it filed the Drift
 ---
 # Code refunds orders after shipping
 
@@ -254,6 +255,10 @@ What the code does, what the Model says, and where in the code this was found.
 ```
 
 A Drift is not part of the Model, so its prose may mention code paths.
+
+- `origin` is the Task the agent was implementing when it filed the Drift (`drift new --task`). It must name an existing Task. A Drift filed by a Scan or a Fix has none, and Drifts written before the field existed have none.
+- Whether a Task is **blocked** is never stored: it is worked out from the Drifts, the Tasks and their `refs` whenever it is asked. An open Drift blocks its origin Task and every Task that is not Done and concerns the same thing, that is, when a reference of one is the same as, or inside, a reference of the other (a Machine contains its States and Transitions, a Feature its Machines; a Requirement section of an element counts as that element; the General section of an Area only equals itself). A Drift resolved as `fix-code` leaves its origin Task, if not Done, waiting for the fix Task (the Drift's `task`) until that Task is Done. A Done Task is never blocked.
+- The agent cannot move a blocked Task to `doing`; the developer can move it, and a blocked Task already in `doing` stays there.
 
 ## Requirements
 

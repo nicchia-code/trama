@@ -56,19 +56,19 @@ All exploring commands are read-only.
 | Command | Effect |
 |---|---|
 | `task new <title> (--ref <ref>… \| --technical [--ref <requirement>…]) [--drift <id>] [--proposal <id>] [--body <text>]` | Creates a Task in `todo`. A Task references at least one Model element and may add Requirements (`requirements/ui#order/Paid`); a Technical Task may reference only Requirements. `--proposal` links the Task to the Proposal (the design) it comes from; the Proposal must exist, in any status. The Scan files its Tasks with it after an approval. Fails if a reference or the Proposal does not resolve. |
-| `task list [--column todo\|doing\|done]` | Tasks grouped by column, flat: every Task is listed, with its Proposal ID when it has one, so the agent can always find the Tasks in `todo`. A Task the agent has taken is marked `(agent working)`, here and in `task show`, `board` and the agent tools. |
-| `task show <id>` | The Task, with the current text of each reference inlined, then the Requirements attached to the referenced elements (or to what contains them) and the Areas whose General Requirements apply. |
-| `task move <id> <todo\|doing\|done>` | Moves the Task to another column. Run in the agent terminal (`TRAMA_AGENT` set), a move to `doing` takes the Task for the agent and a move to `todo` or `done` clears that; run without it, the move is refused while the agent has the Task. |
+| `task list [--column todo\|doing\|done]` | Tasks grouped by column, flat: every Task is listed, with its Proposal ID when it has one, so the agent can always find the Tasks in `todo`. A Task the agent has taken is marked `(agent working)`, here and in `task show`, `board` and the agent tools. A blocked Task is marked `(blocked by Drift <id>)` once for each Drift that blocks it, or `(waiting for Task <id>)` when it waits for the Task that fixes its Drift, in the same places. |
+| `task show <id>` | The Task, with the blocked and `(agent working)` marks, a line `Blocked by Drift <id>: <title>` or `Waiting for Task <id>: <title>` for each blocker, the current text of each reference inlined, then the Requirements attached to the referenced elements (or to what contains them) and the Areas whose General Requirements apply. |
+| `task move <id> <todo\|doing\|done>` | Moves the Task to another column. Run in the agent terminal (`TRAMA_AGENT` set), a move to `doing` takes the Task for the agent and a move to `todo` or `done` clears that; run without it, the move is refused while the agent has the Task. A move to `doing` by the agent is refused, and changes nothing, when the Task is blocked (also when it is already in `doing`): the refusal names each blocking Drift (ID and title) or the fix Task, and says the developer must decide. Moves of the developer, and of the agent to `todo` or `done`, are never refused for that reason. |
 | `task take-back <id>` | Developer only. Clears the agent's mark on a Task it has taken; the Task stays in `doing` and the developer can move it again. Refused when the Task is not taken. |
 
 ## Drifts
 
 | Command | Effect |
 |---|---|
-| `drift new <title> --ref <ref>… [--proposal <id>] [--body <text>]` | Records an open Drift. The refs point to the Model elements or Requirements closest to where the code differs. |
+| `drift new <title> --ref <ref>… [--proposal <id>] [--task <id>] [--body <text>]` | Records an open Drift. The refs point to the Model elements or Requirements closest to where the code differs. `--task` is the Task the agent was implementing when it found the difference, the Drift's origin; it must exist. The Drift blocks its origin and every Task that is not Done and concerns the same thing (a reference of one is the other's or inside it). Drifts filed by a Scan or a Fix have no origin. |
 | `drift list [--all]` | Open Drifts (all of them with `--all`). |
 | `drift show <id>` | The Drift, its references inlined, the Requirements that apply, and its attached Proposal, if any. |
-| `drift resolve <id> --fix-code \| --accept-proposal \| --dismiss` | Developer only. `--fix-code` creates a Task referencing the same elements and links it to the Drift; the Task is technical when the Drift references only Requirements. `--accept-proposal` approves the attached Proposal. `--dismiss` closes the Drift without changes. |
+| `drift resolve <id> --fix-code \| --accept-proposal \| --dismiss` | Developer only. `--fix-code` creates a Task referencing the same elements and links it to the Drift; the Task is technical when the Drift references only Requirements. If the Drift has an origin Task that is not Done, that Task goes back to `todo` (its agent mark cleared) and stays blocked, `(waiting for Task <id>)`, until the fix Task is Done. Every resolution ends the Drift's blocking of the other Tasks. `--accept-proposal` approves the attached Proposal. `--dismiss` closes the Drift without changes. |
 
 ## Board
 
@@ -132,6 +132,6 @@ In Cursor the extension writes this entry into `.cursor/mcp.json` itself.
 | `trama_proposal_write` | `proposal edit` plus writing the complete new Model or Requirement file; answers with the validation of the Model and Requirements with the Proposal applied |
 | `trama_proposal_submit` | Validates and hands a finished Draft over to the developer; new, write and delete tools leave it Draft until this succeeds |
 | `trama_task_new`, `trama_task_show`, `trama_task_move` | Like `task new`, `show`, `move` |
-| `trama_drift_new`, `trama_drift_show` | Like `drift new`, `show` |
+| `trama_drift_new`, `trama_drift_show` | Like `drift new` (the origin Task is `task`), `show` |
 
 There is no tool for `proposal approve`, `proposal reject`, `proposal discard`, `drift resolve` or `task take-back`.
