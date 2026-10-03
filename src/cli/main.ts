@@ -69,7 +69,7 @@ export function run(argv: string[], cwd: string, env: Record<string, string | un
   if (command.developerOnly && env[AGENT_ENV])
     throw new TramaError(`"trama ${command.name}" is the developer's decision and cannot be run by an agent (${AGENT_ENV} is set). Ask the developer to decide on the board.`);
 
-  const result: Result = command.run(makeContext(cwd, root), parsed.positionals, parsed.values);
+  const result: Result = command.run(makeContext(cwd, root, Boolean(env[AGENT_ENV])), parsed.positionals, parsed.values);
   return { out: json ? JSON.stringify(result.json, null, 2) : result.md.replace(/\n{3,}/g, "\n\n").trimEnd(), exit: result.exit ?? 0 };
 }
 

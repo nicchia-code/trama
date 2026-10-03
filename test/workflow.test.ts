@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { run } from "../src/cli/main";
 import { approveProposal, editInProposal, getProposal, health, newProposal, rejectProposal } from "../src/core/proposals";
 import { loadModel, type Project, projectAt } from "../src/core/store";
-import { getDrift, getTask, newDrift, newTask, resolveDrift } from "../src/core/work";
+import { callTool } from "../src/tools/catalog";
+import { getDrift, getTask, moveTask, newDrift, newTask, releaseTasks, resolveDrift, takeBackTask } from "../src/core/work";
 
 let dir: string;
 let p: Project;
@@ -103,6 +104,127 @@ describe("Tasks and Drifts", () => {
     expect(() => newTask(p, { title: "x", refs: ["order/Nope"], technical: false })).toThrow(/no State "Nope"/);
     const ok = newTask(p, { title: "Cancel flow", refs: ["order/Paid/user.CANCEL", "user.CANCEL"], technical: false });
     expect(getTask(p, ok.id).data.refs).toHaveLength(2);
+  });
+
+  test("a Task can come from a Proposal, which must exist; Tasks without the link still load", () => {
+    expect(() => newTask(p, { title: "x", refs: ["order"], technical: false, proposal: "42" })).toThrow(/No Proposal/);
+    const prop = newProposal(p, "Returns");
+    const linked = newTask(p, { title: "Return flow", refs: ["order"], technical: false, proposal: prop.id });
+    expect(getTask(p, linked.id).data.proposal).toBe(prop.id);
+    expect(run(["--root", dir, "task", "show", linked.id], process.cwd()).out).toContain(`from Proposal ${prop.id}`);
+
+    const plain = newTask(p, { title: "Plain", refs: ["order"], technical: false });
+    const text = readFileSync(plain.path, "utf8").replace(/^proposal:.*\n/m, "");
+    writeFileSync(plain.path, text);
+    expect(getTask(p, plain.id).data.proposal).toBeNull();
+  });
+
+  test("the agent takes a Task by moving it to In progress; the developer cannot move it until it is released", () => {
+    const task = (): string => newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
+    const id = task();
+    expect(moveTask(p, id, "doing", "developer").data.agent).toBe(false);
+    moveTask(p, id, "todo", "developer");
+
+    expect(moveTask(p, id, "doing", "agent").data).toMatchObject({ column: "doing", agent: true });
+    expect(getTask(p, id).data.agent).toBe(true);
+    for (const column of ["todo", "doing", "done"]) expect(() => moveTask(p, id, column, "developer")).toThrow(/agent is working on Task .*take-back/);
+    expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: true });
+
+    expect(moveTask(p, id, "doing", "agent").data.agent).toBe(true);
+    expect(moveTask(p, id, "done", "agent").data).toMatchObject({ column: "done", agent: false });
+    expect(moveTask(p, id, "doing", "agent").data.agent).toBe(true);
+    expect(moveTask(p, id, "todo", "agent").data).toMatchObject({ column: "todo", agent: false });
+    expect(moveTask(p, id, "done", "developer").data.column).toBe("done");
+  });
+
+  test("taking back clears the mark, keeps the Task In progress, and is the developer's command", () => {
+    const id = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
+    expect(() => takeBackTask(p, id)).toThrow(/has not taken/);
+    moveTask(p, id, "doing", "agent");
+    const cli = (env: Record<string, string>) => run(["--root", dir, "task", "take-back", id], process.cwd(), env);
+
+    expect(() => cli({ TRAMA_AGENT: "1" })).toThrow(/developer's decision.*TRAMA_AGENT/);
+    expect(getTask(p, id).data.agent).toBe(true);
+    cli({});
+    expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: false });
+    expect(moveTask(p, id, "done", "developer").data.column).toBe("done");
+  });
+
+  test("releasing frees every taken Task and leaves each one where it is", () => {
+    const [a, b, c] = [1, 2, 3].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string];
+    moveTask(p, a, "doing", "agent");
+    moveTask(p, b, "doing", "developer");
+    expect(releaseTasks(p).map((t) => t.id)).toEqual([a]);
+    expect([a, b, c].map((id) => getTask(p, id).data)).toMatchObject([
+      { column: "doing", agent: false },
+      { column: "doing", agent: false },
+      { column: "todo", agent: false },
+    ]);
+    expect(moveTask(p, a, "done", "developer").data.column).toBe("done");
+    expect(releaseTasks(p)).toEqual([]);
+  });
+
+  test("a taken Task is marked (agent working) in the board, the task list, task show and the agent tools", () => {
+    const prop = newProposal(p, "Returns");
+    const mk = (title: string, proposal?: string) => newTask(p, { title, refs: ["order"], technical: false, proposal }).id;
+    const [taken, free, a, b] = [mk("Taken"), mk("Free"), mk("In design", prop.id), mk("Other in design", prop.id)] as [string, string, string, string];
+    for (const id of [taken, a]) moveTask(p, id, "doing", "agent");
+    moveTask(p, free, "doing", "developer");
+    moveTask(p, b, "doing", "developer");
+    const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {}).out;
+
+    const board = cli("board");
+    expect(board).toContain(`- ${taken} Taken (agent working)\n`);
+    expect(board).toContain(`  - ${a} In design (agent working) [doing]`);
+    expect(board).toContain(`- ${free} Free\n`);
+    expect(board).not.toContain(`${b} Other in design (agent working)`);
+    expect(cli("task", "list")).toContain(`- ${taken} Taken (agent working)`);
+    expect(cli("task", "list")).not.toContain(`${free} Free (agent working)`);
+    expect(cli("task", "show", taken)).toContain("(agent working)");
+    expect(cli("task", "show", free)).not.toContain("(agent working)");
+    expect(callTool(p, "trama_board", {}).text).toContain(`${taken} Taken (agent working)`);
+    expect(callTool(p, "trama_task_show", { task: taken }).text).toContain("(agent working)");
+    expect(JSON.parse(run(["--root", dir, "--json", "task", "list"], process.cwd(), {}).out).tasks.find((t: { id: string }) => t.id === taken).agent).toBe(true);
+  });
+
+  test("the command line takes the Task only inside the terminal Trama started, and the agent tools always do", () => {
+    const run2 = (env: Record<string, string>, ...args: string[]) => run(["--root", dir, "task", "move", ...args], process.cwd(), env);
+    const [a, b, c] = [1, 2, 3].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string];
+
+    run2({}, a, "doing");
+    expect(getTask(p, a).data.agent).toBe(false);
+
+    run2({ TRAMA_AGENT: "1" }, b, "doing");
+    expect(getTask(p, b).data.agent).toBe(true);
+    expect(() => run2({}, b, "done")).toThrow(/agent is working on Task/);
+    run2({ TRAMA_AGENT: "1" }, b, "done");
+    expect(getTask(p, b).data).toMatchObject({ column: "done", agent: false });
+
+    expect(callTool(p, "trama_task_move", { task: c, column: "doing" }).isError).toBe(false);
+    expect(getTask(p, c).data.agent).toBe(true);
+  });
+
+  test("the textual board shows a design once with its Tasks, while task list stays flat", () => {
+    const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd());
+    const prop = newProposal(p, "Returns");
+    const mk = (title: string, proposal?: string) => newTask(p, { title, refs: ["order"], technical: false, proposal }).id;
+    const [a, b, c] = [mk("Return request", prop.id), mk("Refund on return", prop.id), mk("Return label", prop.id)];
+    mk("Alone");
+    const single = newProposal(p, "Lonely");
+    mk("Only one", single.id);
+    cli("task", "move", a as string, "done");
+    cli("task", "move", b as string, "doing");
+
+    const board = cli("board").out;
+    expect(board).toContain(`## In progress\n- Proposal ${prop.id} "Returns" (1/3 done)\n  - ${a} Return request [done]\n  - ${b} Refund on return [doing]\n  - ${c} Return label [todo]`);
+    expect(board.match(new RegExp(`Proposal ${prop.id} "Returns"`, "g"))).toHaveLength(1);
+    expect(board).toMatch(/## To do\n- \d+ Alone\n- \d+ Only one\n/);
+
+    const list = cli("task", "list", "--column", "todo").out;
+    expect(list).toContain(`- ${c} Return label (Proposal ${prop.id})`);
+    expect(list).not.toContain("Refund on return");
+    const json = JSON.parse(cli("--json", "board").out) as { doing: { kind: string; total?: number }[] };
+    expect(json.doing[0]).toMatchObject({ kind: "design", total: 3 });
   });
 
   test("resolving a Drift with fix-code creates a linked Task with the same references", () => {

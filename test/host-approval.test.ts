@@ -10,11 +10,13 @@ import { newDrift, resolveDrift } from "../src/core/work";
 let dir: string;
 let p: Project;
 let scans: string[][];
+let scanned: string[];
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-approval-"));
   cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
   p = projectAt(dir);
   scans = [];
+  scanned = [];
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -22,8 +24,9 @@ const options = (over: Partial<ApprovalOptions> = {}): ApprovalOptions => ({
   project: p,
   autoScan: true,
   agentConfigured: true,
-  launchScan: async (features) => {
+  launchScan: async (features, proposal) => {
     scans.push(features);
+    scanned.push(proposal);
   },
   ...over,
 });
@@ -42,6 +45,7 @@ describe("one Scan after every approved Proposal", () => {
     const id = proposalEditing("checkout/order.md", orderChange);
     await applyApprovedProposal(options(), id, () => approveProposal(p, id));
     expect(scans).toEqual([["checkout"]]);
+    expect(scanned).toEqual([id]);
     expect(getProposal(p, id).data.status).toBe("approved");
   });
 
@@ -59,6 +63,7 @@ describe("one Scan after every approved Proposal", () => {
     const drift = newDrift(p, { title: "Code has Lost", refs: ["order"], proposal: id });
     await applyApprovedProposal(options(), id, () => resolveDrift(p, drift.id, "accept-proposal"));
     expect(scans).toEqual([["checkout"]]);
+    expect(scanned).toEqual([id]);
     expect(getProposal(p, id).data.status).toBe("approved");
   });
 

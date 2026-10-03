@@ -35,7 +35,7 @@ export const mountRequirements: MountView = (root, context) => {
   select.setAttribute("aria-label", "Proposal to draw over the Requirements");
   label.append(select);
   const filterBox = el("span", "rq-filter");
-  toolbar.append(label, filterBox, el("span", "rq-spacer"), button("Design…", "trama-btn", "Ask an agent to design a change", () => context.post({ type: "launch", action: { kind: "design" } })));
+  toolbar.append(label, filterBox, el("span", "rq-spacer"), button("Design…", "trama-btn", "Ask an agent to design a change", () => context.post({ type: "launch", action: { kind: "design" } })), button("Fix…", "trama-btn", "Describe a problem; an agent turns it into Tasks", () => context.post({ type: "launch", action: { kind: "fix" } })));
   const list = el("div", "rq-list");
   page.append(toolbar, list);
   root.append(page);

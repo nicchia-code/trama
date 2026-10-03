@@ -30,6 +30,10 @@ interface TaskData {
   technical: boolean;
   refs: string[];
   drift: string | null;
+  /** The Proposal (the design) the Task comes from; absent in Tasks written before the link existed. */
+  proposal: string | null;
+  /** True while the agent has taken the Task (it is working on it); absent in Tasks written before the mark existed, which are free. */
+  agent: boolean;
 }
 
 export type DriftResolution = "fix-code" | "proposal" | "dismissed";
@@ -57,6 +61,8 @@ function parseTask(raw: Raw, where: string): TaskData {
     technical: boolField(raw, "technical", false, where),
     refs: stringList(raw, "refs", where),
     drift: idField(raw, "drift", where),
+    proposal: idField(raw, "proposal", where),
+    agent: boolField(raw, "agent", false, where),
   };
   checkTaskRefs(data.technical, data.refs, `${where}: `);
   return data;
@@ -112,22 +118,52 @@ export function getTask(p: Project, id: string): Task {
 
 export function newTask(
   p: Project,
-  input: { title: string; refs: string[]; technical: boolean; drift?: string; body?: string },
+  input: { title: string; refs: string[]; technical: boolean; drift?: string; proposal?: string; body?: string },
 ): Task {
   checkTaskRefs(input.technical, input.refs);
   checkRefs(p, input.refs);
   const drift = input.drift ? getDrift(p, input.drift).id : null;
-  const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift };
+  const proposal = input.proposal ? getProposal(p, input.proposal).id : null;
+  const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift, proposal, agent: false };
   return create(tasksDir(p), input.title, data, input.body ?? "");
 }
 
-export function moveTask(p: Project, id: string, column: string): Task {
+/** Who moves a Task: the agent (through its tools, or the command line in the terminal Trama started) or the developer. */
+export type Mover = "agent" | "developer";
+
+/**
+ * Moves a Task. The agent takes it by moving it to In progress (and keeps it when it does so again); moving it to
+ * To do or Done clears the mark. The developer never takes a Task and cannot move one the agent has taken.
+ */
+export function moveTask(p: Project, id: string, column: string, by: Mover): Task {
   if (!COLUMNS.includes(column as Column))
     throw new TramaError(`Unknown column "${column}" (expected ${COLUMNS.join(", ")})`);
   const task = getTask(p, id);
+  if (by === "developer" && task.data.agent)
+    throw new TramaError(`The agent is working on Task ${task.id}, so it cannot be moved. Take it back first ("trama task take-back ${task.id}", or the Take back button on its card).`);
   task.data.column = column as Column;
+  if (by === "agent") task.data.agent = column === "doing";
   writeDocument(task.path, task.data, task.body);
   return task;
+}
+
+/** The developer's decision to get a Task back from the agent: the mark is cleared and the Task stays In progress. */
+export function takeBackTask(p: Project, id: string): Task {
+  const task = getTask(p, id);
+  if (!task.data.agent) throw new TramaError(`The agent has not taken Task ${task.id}`);
+  task.data.agent = false;
+  writeDocument(task.path, task.data, task.body);
+  return task;
+}
+
+/** The agent's command ended, so no agent can still be working: every Task it took is released, where it is. */
+export function releaseTasks(p: Project): Task[] {
+  const released = listTasks(p).filter((t) => t.data.agent);
+  for (const task of released) {
+    task.data.agent = false;
+    writeDocument(task.path, task.data, task.body);
+  }
+  return released;
 }
 
 export function listDrifts(p: Project): Drift[] {

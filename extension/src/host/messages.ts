@@ -15,8 +15,11 @@ function parseAction(value: unknown): AgentAction | string {
   const raw = value as Raw;
   switch (raw["kind"]) {
     case "design":
-      if (raw["prompt"] !== undefined && typeof raw["prompt"] !== "string") return "design prompt must be a string";
-      return raw["prompt"] === undefined ? { kind: "design" } : { kind: "design", prompt: raw["prompt"] };
+    case "fix": {
+      const kind = raw["kind"];
+      if (raw["prompt"] !== undefined && typeof raw["prompt"] !== "string") return `${kind} prompt must be a string`;
+      return raw["prompt"] === undefined ? { kind } : { kind, prompt: raw["prompt"] };
+    }
     case "scan":
       if (raw["feature"] === undefined) return { kind: "scan" };
       return typeof raw["feature"] === "string" && ID.test(raw["feature"]) ? { kind: "scan", feature: raw["feature"] } : "scan needs a valid Feature ID";
@@ -24,6 +27,8 @@ function parseAction(value: unknown): AgentAction | string {
       return typeof raw["task"] === "string" && ID.test(raw["task"]) ? { kind: "implement", task: raw["task"] } : "implement needs a valid Task ID";
     case "implement-all":
       return { kind: "implement-all" };
+    case "implement-design":
+      return typeof raw["proposal"] === "string" && ID.test(raw["proposal"]) ? { kind: "implement-design", proposal: raw["proposal"] } : "implement-design needs a valid Proposal ID";
     default:
       return `unknown action "${String(raw["kind"])}"`;
   }
@@ -38,7 +43,6 @@ export function parseToHost(value: unknown): Parsed {
   const id = typeof raw["id"] === "string" && ID.test(raw["id"]) ? raw["id"] : undefined;
   switch (type) {
     case "ready":
-    case "newTechnicalTask":
       return { ok: true, message: { type } };
     case "launch": {
       const action = parseAction(raw["action"]);
@@ -51,6 +55,8 @@ export function parseToHost(value: unknown): Parsed {
       if (id === undefined) return bad("moveTask needs a valid Task ID");
       if (typeof raw["column"] !== "string" || !COLUMNS.includes(raw["column"])) return bad(`unknown column "${String(raw["column"])}"`);
       return { ok: true, message: { type, id, column: raw["column"] as Column } };
+    case "takeBackTask":
+      return id === undefined ? bad("takeBackTask needs a valid Task ID") : { ok: true, message: { type, id } };
     case "approveProposal":
     case "rejectProposal":
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };

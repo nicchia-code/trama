@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import { TramaError } from "../../../src/core/errors";
+import { projectAt } from "../../../src/core/store";
+import { releaseTasks } from "../../../src/core/work";
 import { isCursor } from "./cursor";
 import { agentCommandLine, shellFamily } from "./quote";
 
@@ -39,7 +42,18 @@ async function openChat(prompt: string): Promise<void> {
  * never reused. Without shell integration there is no way to know, so such a terminal is not reused either.
  */
 let lastTerminal: vscode.Terminal | undefined;
+/** The project folder the last terminal was started for, whose Tasks the agent may have taken. */
+let lastRoot: string | undefined;
 let commandRunning = false;
+
+function releaseTakenTasks(root: string): void {
+  try {
+    releaseTasks(projectAt(root));
+  } catch (err) {
+    if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: could not release the Tasks the agent had taken: ${err.message}`);
+    else throw err;
+  }
+}
 
 /** Follows the commands that start and end in the terminal Trama launches agents in. */
 export function watchAgentTerminal(): vscode.Disposable {
@@ -48,7 +62,11 @@ export function watchAgentTerminal(): vscode.Disposable {
       if (e.terminal === lastTerminal) commandRunning = true;
     }),
     vscode.window.onDidEndTerminalShellExecution((e) => {
-      if (e.terminal === lastTerminal) commandRunning = false;
+      if (e.terminal !== lastTerminal) return;
+      commandRunning = false;
+      // The command ended, so no agent can still be working: the Tasks it took are the developer's again.
+      // Without shell integration this event never comes, and the Tasks stay taken until the developer takes them back.
+      if (lastRoot !== undefined) releaseTakenTasks(lastRoot);
     }),
     vscode.window.onDidCloseTerminal((t) => {
       if (t === lastTerminal) {
@@ -86,5 +104,6 @@ export async function launchAgent(root: string, prompt: string): Promise<void> {
   terminal.show();
   terminal.sendText(agentCommandLine(template, prompt, shellFamily(vscode.env.shell)));
   lastTerminal = terminal;
+  lastRoot = root;
   commandRunning = true;
 }

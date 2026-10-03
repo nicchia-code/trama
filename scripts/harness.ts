@@ -68,8 +68,14 @@ newTask(p, { title: "Implement refunds for prepared orders", refs: ["order/Refun
 newTask(p, { title: "Payment declined email", refs: ["order/Awaiting payment/payment.DECLINED"], technical: false });
 const doing = newTask(p, { title: "Cart confirmation", refs: ["cart/Has items/user.CHECKOUT"], technical: false });
 const done = newTask(p, { title: "Upgrade dependencies", refs: [], technical: true });
-moveTask(p, doing.id, "doing");
-moveTask(p, done.id, "done");
+moveTask(p, doing.id, "doing", "developer");
+moveTask(p, done.id, "done", "developer");
+// Taken by the agent: alone, and as one Task of a design.
+moveTask(p, newTask(p, { title: "Refund after pickup", refs: ["order/Refunding"], technical: false }).id, "doing", "agent");
+const returns = newProposal(p, "Returns after shipping");
+const returnTask = (title: string) => newTask(p, { title, refs: ["order/Shipped"], technical: false, proposal: returns.id }).id;
+returnTask("Return request");
+moveTask(p, returnTask("Refund on return"), "doing", "agent");
 
 const snapshot = buildSnapshot(p);
 if (keep) syncInPlace(join(dir, ".trama"), join(keep, ".trama"));

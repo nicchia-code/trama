@@ -47,16 +47,17 @@ All exploring commands are read-only.
 | `proposal approve <id>` | Developer only. Fails if a required Proposal is not approved, or the Proposal is stale or invalid; otherwise applies it, sets `status: approved` and regenerates the `trama-req-*` skills. |
 | `proposal reject <id> --feedback <text>` | Developer only. Sets `status: rejected` and appends the feedback. |
 
-`approve`, `reject` and `drift resolve` are the developer's decisions. The extension sets `TRAMA_AGENT=1` in every agent it launches, and the CLI refuses these three commands when that variable is set. This stops an agent that runs them by mistake, not one that clears the variable on purpose (ADR 0005).
+`approve`, `reject`, `drift resolve` and `task take-back` are the developer's decisions. The extension sets `TRAMA_AGENT=1` in every agent it launches, and the CLI refuses these four commands when that variable is set. This stops an agent that runs them by mistake, not one that clears the variable on purpose (ADR 0005).
 
 ## Tasks
 
 | Command | Effect |
 |---|---|
-| `task new <title> (--ref <ref>… \| --technical [--ref <requirement>…]) [--drift <id>] [--body <text>]` | Creates a Task in `todo`. A Task references at least one Model element and may add Requirements (`requirements/ui#order/Paid`); a Technical Task may reference only Requirements. Fails if a reference does not resolve. |
-| `task list [--column todo\|doing\|done]` | Tasks grouped by column. |
+| `task new <title> (--ref <ref>… \| --technical [--ref <requirement>…]) [--drift <id>] [--proposal <id>] [--body <text>]` | Creates a Task in `todo`. A Task references at least one Model element and may add Requirements (`requirements/ui#order/Paid`); a Technical Task may reference only Requirements. `--proposal` links the Task to the Proposal (the design) it comes from; the Proposal must exist, in any status. The Scan files its Tasks with it after an approval. Fails if a reference or the Proposal does not resolve. |
+| `task list [--column todo\|doing\|done]` | Tasks grouped by column, flat: every Task is listed, with its Proposal ID when it has one, so the agent can always find the Tasks in `todo`. A Task the agent has taken is marked `(agent working)`, here and in `task show`, `board` and the agent tools. |
 | `task show <id>` | The Task, with the current text of each reference inlined, then the Requirements attached to the referenced elements (or to what contains them) and the Areas whose General Requirements apply. |
-| `task move <id> <todo\|doing\|done>` | Moves the Task to another column. |
+| `task move <id> <todo\|doing\|done>` | Moves the Task to another column. Run in the agent terminal (`TRAMA_AGENT` set), a move to `doing` takes the Task for the agent and a move to `todo` or `done` clears that; run without it, the move is refused while the agent has the Task. |
+| `task take-back <id>` | Developer only. Clears the agent's mark on a Task it has taken; the Task stays in `doing` and the developer can move it again. Refused when the Task is not taken. |
 
 ## Drifts
 
@@ -71,7 +72,7 @@ All exploring commands are read-only.
 
 | Command | Output |
 |---|---|
-| `board` | **To decide** (open Proposals and Drifts), **To do**, **In progress**, **Done**: the same data the extension's board shows. |
+| `board` | **To decide** (open Proposals and Drifts), **To do**, **In progress**, **Done**: the same data the extension's board shows. The Tasks linked to one Proposal, when there are at least two, are listed once, as the Proposal with its Tasks underneath (each with its own column), in the column they add up to: To do while none has started, Done when all are done, In progress otherwise. Other Tasks are listed as before. |
 
 ## Agent tools and MCP
 
@@ -92,4 +93,4 @@ In Cursor the extension writes this entry into `.cursor/mcp.json` itself.
 | `trama_task_new`, `trama_task_show`, `trama_task_move` | Like `task new`, `show`, `move` |
 | `trama_drift_new`, `trama_drift_show` | Like `drift new`, `show` |
 
-There is no tool for `proposal approve`, `proposal reject` or `drift resolve`.
+There is no tool for `proposal approve`, `proposal reject`, `drift resolve` or `task take-back`.

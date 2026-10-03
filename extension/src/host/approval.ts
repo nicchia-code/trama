@@ -9,8 +9,8 @@ export interface ApprovalOptions {
   autoScan: boolean;
   /** Whether `trama.agentCommand` is set: without it nothing can be launched. */
   agentConfigured: boolean;
-  /** Starts ONE agent run that scans these Features. */
-  launchScan(features: string[]): Promise<void>;
+  /** Starts ONE agent run that scans these Features, after the approval of `proposal` (its ID, as stored). */
+  launchScan(features: string[], proposal: string): Promise<void>;
 }
 
 /**
@@ -21,11 +21,12 @@ export interface ApprovalOptions {
  */
 export async function applyApprovedProposal(options: ApprovalOptions, proposalId: string, apply: () => void): Promise<void> {
   const { project } = options;
-  const isImport = getProposal(project, proposalId).data.kind === "import";
+  const approved = getProposal(project, proposalId);
+  const isImport = approved.data.kind === "import";
   const scope = proposalScope(project, proposalId);
   apply();
   if (isImport || !options.autoScan || !options.agentConfigured) return;
   const existing = loadModel(project).features;
   const features = scope.filter((f) => existing.has(f));
-  if (features.length > 0) await options.launchScan(features);
+  if (features.length > 0) await options.launchScan(features, approved.id);
 }

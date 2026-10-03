@@ -23,7 +23,7 @@ import {
   writeFileEnsuringDir,
 } from "../core/store";
 import type { Model } from "../core/types";
-import { getDrift, getTask, moveTask, newDrift, newTask, resolveDrift } from "../core/work";
+import { getDrift, getTask, moveTask, newDrift, newTask, resolveDrift, takeBackTask } from "../core/work";
 import {
   analyzeView,
   eventView,
@@ -53,6 +53,8 @@ export type Values = Record<string, string | boolean | (string | boolean)[] | un
 export interface Context {
   cwd: string;
   rootOption?: string;
+  /** True when the command runs in the terminal Trama started for the agent (`TRAMA_AGENT` is set). */
+  byAgent: boolean;
   project(): Project;
 }
 
@@ -87,10 +89,11 @@ function required(value: string | undefined, flag: string): string {
   return value;
 }
 
-export function makeContext(cwd: string, rootOption?: string): Context {
+export function makeContext(cwd: string, rootOption?: string, byAgent = false): Context {
   return {
     cwd,
     rootOption,
+    byAgent,
     project() {
       if (rootOption === undefined) return findProject(cwd);
       const project = projectAt(resolve(cwd, rootOption));
@@ -209,15 +212,19 @@ export const COMMANDS: Command[] = [
       return text(`Rejected Proposal ${p.id}`, { id: p.id, status: p.data.status });
     } },
 
-  { name: "task new", args: "<title>", summary: "Create a Task in 'todo' (--ref … or --technical)", options: { ref, technical: { type: "boolean" }, drift: { type: "string" }, body: { type: "string" } }, run(ctx, a, o) {
-      const t = newTask(ctx.project(), { title: a[0] as string, refs: list(o["ref"]), technical: o["technical"] === true, drift: str(o["drift"]), body: str(o["body"]) });
+  { name: "task new", args: "<title>", summary: "Create a Task in 'todo' (--ref … or --technical; --proposal <id> links it to the design it comes from)", options: { ref, technical: { type: "boolean" }, drift: { type: "string" }, proposal: { type: "string" }, body: { type: "string" } }, run(ctx, a, o) {
+      const t = newTask(ctx.project(), { title: a[0] as string, refs: list(o["ref"]), technical: o["technical"] === true, drift: str(o["drift"]), proposal: str(o["proposal"]), body: str(o["body"]) });
       return text(`Created Task ${t.id} at ${t.path}`, { id: t.id, path: t.path });
     } },
   { name: "task list", args: "", summary: "Tasks grouped by column", options: { column: { type: "string" } }, run: (ctx, _a, o) => taskListView(ctx.project(), str(o["column"])) },
   { name: "task show", args: "<id>", summary: "A Task with the current Model text of its references", run: (ctx, a) => taskShowView(ctx.project(), getTask(ctx.project(), a[0] as string)) },
   { name: "task move", args: "<id> <column>", summary: "Move a Task to todo, doing or done", run(ctx, a) {
-      const t = moveTask(ctx.project(), a[0] as string, a[1] as string);
+      const t = moveTask(ctx.project(), a[0] as string, a[1] as string, ctx.byAgent ? "agent" : "developer");
       return text(`Task ${t.id} is now ${t.data.column}`, { id: t.id, column: t.data.column });
+    } },
+  { name: "task take-back", args: "<id>", summary: "Take a Task back from the agent that has it; it stays in progress", developerOnly: true, run(ctx, a) {
+      const t = takeBackTask(ctx.project(), a[0] as string);
+      return text(`Task ${t.id} is yours again (still ${t.data.column})`, { id: t.id, column: t.data.column, agent: t.data.agent });
     } },
 
   { name: "drift new", args: "<title>", summary: "Record an open Drift", options: { ref, proposal: { type: "string" }, body: { type: "string" } }, run(ctx, a, o) {

@@ -39,7 +39,7 @@ function affectedByRequirements(before: ProjectModel, after: ProjectModel, paths
     const was = before.areas.find((a) => a.id === id);
     const is = after.areas.find((a) => a.id === id);
     const text = (area: Area | undefined, ref: string | null) => area?.sections.find((s) => s.ref === ref)?.text ?? "";
-    if (text(was, null) !== text(is, null) || was?.intro !== is?.intro) return [...after.model.features.keys()].sort();
+    if (text(was, null) !== text(is, null) || was?.intro !== is?.intro || was?.description !== is?.description) return [...after.model.features.keys()].sort();
     const refs = new Set([...(was?.sections ?? []), ...(is?.sections ?? [])].flatMap((s) => (s.ref === null ? [] : [s.ref])));
     for (const ref of refs) {
       if (text(was, ref) === text(is, ref)) continue;

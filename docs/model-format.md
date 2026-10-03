@@ -217,6 +217,8 @@ refs:
   - order/Paid/user.CANCEL
   - order/Refunding
 drift: "0003"           # optional: the Drift this Task resolves
+proposal: "0007"        # optional: the Proposal (the design) this Task comes from
+agent: false            # true while the agent has taken the Task (default false)
 ---
 # Refund cancelled orders once preparation has started
 
@@ -225,6 +227,9 @@ What to do, in prose.
 
 - A Task that is not technical references at least one Model element in `refs`, and may add Requirements. A Technical Task references no Model element; it may reference Requirements (for example `requirements/ui#General` for adopting a theme).
 - The board's **To decide** column is not a Task column: it shows open Proposals and open Drifts.
+- `proposal` is set when the agent files the Task after that Proposal was approved (the Scan is told which Proposal). It must name an existing Proposal, in any status. Tasks written before the field existed, Tasks of a Scan started by hand, Technical Tasks and Tasks that fix a Drift carry none.
+- `agent` is `true` while the agent has taken the Task: it takes it by moving it to `doing` with its tools, or with `trama task move` in the terminal Trama started (`TRAMA_AGENT` set). While it is taken the developer cannot move it; `trama task take-back`, the Take back button, or the end of the agent terminal's command clears the mark and leaves the Task in `doing`. Tasks written before the field existed are free.
+- The Tasks linked to one Proposal form a **design**. The Board shows a design of two or more Tasks as one card, closed at first, standing in the column its Tasks add up to: To do while all are in To do, Done when all are done, In progress in every other case. A design of one Task, and Tasks with no `proposal`, are plain cards.
 
 ## Drift
 

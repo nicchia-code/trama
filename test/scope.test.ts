@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildModel } from "../src/core/model";
@@ -49,6 +49,25 @@ describe("proposalScope", () => {
     writeFileSync(editInProposal(p, prop.id, "billing/feature.md"), "# Billing\n\nInvoices.\n");
     writeFileSync(editInProposal(p, prop.id, "billing/invoice.md"), "# Invoice\n\n## States\n\n### Open (initial)\n");
     expect(proposalScope(p, prop.id)).toEqual(["billing"]);
+  });
+});
+
+describe("proposalScope for Requirements", () => {
+  beforeEach(() => {
+    mkdirSync(join(dir, ".trama/model/billing"), { recursive: true });
+    writeFileSync(join(dir, ".trama/model/billing/feature.md"), "# Billing\n\nInvoices.\n");
+    writeFileSync(join(dir, ".trama/model/billing/invoice.md"), "# Invoice\n\n## States\n\n### Open (initial)\n");
+  });
+
+  test("a change to an Area's description, introduction or General section affects every Feature", () => {
+    const area = "requirements/ui.md";
+    expect(proposalScope(p, proposalEditing(area, (t) => t.replace("shown to customers", "shown to customers and couriers")))).toEqual(["billing", "checkout"]);
+    expect(proposalScope(p, proposalEditing(area, (t) => t.replace("# Interface\n", "# Interface\n\nApplies everywhere.\n")))).toEqual(["billing", "checkout"]);
+    expect(proposalScope(p, proposalEditing(area, (t) => t.replace("- Mobile first;", "- Mobile first, always;")))).toEqual(["billing", "checkout"]);
+  });
+
+  test("a change to another section affects only the Features of the element it names", () => {
+    expect(proposalScope(p, proposalEditing("requirements/ui.md", (t) => `${t.trimEnd()}\n- One more rule.\n`))).toEqual(["checkout"]);
   });
 });
 

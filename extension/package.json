@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -32,6 +32,11 @@
       {
         "command": "trama.design",
         "title": "Design with Agent…",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.fix",
+        "title": "Fix with Agent…",
         "category": "Trama"
       },
       {
@@ -395,6 +400,10 @@
               "type": "string",
               "description": "ID of the Drift this Task resolves, if any"
             },
+            "proposal": {
+              "type": "string",
+              "description": "ID of the Proposal (the design) this Task comes from, when you file it after that Proposal was approved; it must exist"
+            },
             "body": {
               "type": "string",
               "description": "What must be true when done, in domain words"
@@ -437,7 +446,7 @@
         "toolReferenceName": "trama_task_move",
         "canBeReferencedInPrompt": true,
         "userDescription": "Move a Task",
-        "modelDescription": "Moves a Task to `todo`, `doing` or `done`. Move it to `doing` when you start and to `done` when the behaviour matches the Model and the code follows its Requirements.",
+        "modelDescription": "Moves a Task to `todo`, `doing` or `done`. Moving it to `doing` takes it: the developer cannot move it until the Task leaves `doing` or the developer takes it back. Move it to `doing` when you start and to `done` when the behaviour matches the Model and the code follows its Requirements.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"

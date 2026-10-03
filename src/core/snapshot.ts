@@ -88,6 +88,12 @@ export interface TaskView {
   technical: boolean;
   refs: string[];
   drift: string | null;
+  /** ID of the Proposal (the design) the Task comes from, if any. */
+  proposal: string | null;
+  /** Title of that Proposal, for the card that groups its Tasks; null when the Task has none or the Proposal is gone. */
+  proposalTitle: string | null;
+  /** True while the agent has taken the Task: the developer cannot move it. */
+  agent: boolean;
   /** Path relative to `.trama/`, for opening the file. */
   file: string;
 }
@@ -198,7 +204,7 @@ export function buildSnapshot(p: Project): Snapshot {
         }),
       };
     });
-
+  const proposalTitles = new Map(listProposals(p).map((x) => [x.id, x.title]));
   return {
     ...modelView(project),
     diagnostics: project.diagnostics,
@@ -214,6 +220,9 @@ export function buildSnapshot(p: Project): Snapshot {
       technical: t.data.technical,
       refs: t.data.refs,
       drift: t.data.drift,
+      proposal: t.data.proposal,
+      proposalTitle: (t.data.proposal !== null && proposalTitles.get(t.data.proposal)) || null,
+      agent: t.data.agent,
       file: `tasks/${t.name}`,
     })),
   };

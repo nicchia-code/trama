@@ -3,6 +3,7 @@ import { requiredReasons } from "../core/required";
 import { hasContent, loadProject, parseRequirementRef, type ProjectModel, requirementsFor, resolveProjectRef } from "../core/requirements";
 import type { Project } from "../core/store";
 import { formatDiagnostic } from "../core/model";
+import { placeTasks } from "../core/design";
 import { COLUMNS, type Drift, listDrifts, listTasks, type Task } from "../core/work";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 
@@ -64,7 +65,24 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
   };
 }
 
-const taskSummary = (t: Task) => ({ id: t.id, title: t.title, column: t.data.column, technical: t.data.technical, refs: t.data.refs, drift: t.data.drift });
+/** A Task as the views and the JSON output show it. */
+export interface TaskSummary {
+  id: string;
+  title: string;
+  column: Task["data"]["column"];
+  technical: boolean;
+  refs: string[];
+  drift: string | null;
+  /** ID of the Proposal (the design) the Task comes from, if any. */
+  proposal: string | null;
+  /** True while the agent has taken the Task. */
+  agent: boolean;
+}
+
+/** Appended to a Task's line in the textual views while the agent has taken it. */
+const WORKING = " (agent working)";
+
+const taskSummary = (t: Task): TaskSummary => ({ id: t.id, title: t.title, column: t.data.column, technical: t.data.technical, refs: t.data.refs, drift: t.data.drift, proposal: t.data.proposal, agent: t.data.agent });
 const driftSummary = (d: Drift) => ({ id: d.id, title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task });
 
 /** The current text of a Model element or Requirement, for inlining into a Task or Drift. */
@@ -131,7 +149,7 @@ export function taskShowView(p: Project, task: Task): Result {
   const md = [
     `${task.body.trim()}`,
     "",
-    `Column: **${task.data.column}**${task.data.technical ? " · technical" : ""}${task.data.drift ? ` · from Drift ${task.data.drift}` : ""}`,
+    `Column: **${task.data.column}**${task.data.technical ? " · technical" : ""}${task.data.drift ? ` · from Drift ${task.data.drift}` : ""}${task.data.proposal ? ` · from Proposal ${task.data.proposal}` : ""}${task.data.agent ? WORKING : ""}`,
     "",
     "## References",
     task.data.refs.length === 0 ? "_Technical Task: no references._" : refsBlock(project, task.data.refs),
@@ -143,7 +161,7 @@ export function taskShowView(p: Project, task: Task): Result {
 export function taskListView(p: Project, column?: string): Result {
   const tasks = listTasks(p).filter((t) => !column || t.data.column === column);
   const md = COLUMNS.filter((c) => !column || c === column)
-    .map((c) => `## ${c}\n${bullets(tasks.filter((t) => t.data.column === c).map((t) => `- ${t.id} ${t.title}${t.data.technical ? " (technical)" : ""}`))}`)
+    .map((c) => `## ${c}\n${bullets(tasks.filter((t) => t.data.column === c).map((t) => `- ${t.id} ${t.title}${t.data.technical ? " (technical)" : ""}${t.data.proposal ? ` (Proposal ${t.data.proposal})` : ""}${t.data.agent ? WORKING : ""}`))}`)
     .join("\n\n");
   return { md: `# Tasks\n\n${md}`, json: { tasks: tasks.map(taskSummary) } };
 }
@@ -173,12 +191,29 @@ export function driftListView(p: Project, all: boolean): Result {
   return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map(driftSummary) } };
 }
 
+/**
+ * The Board as text. Like the Board in the editor, the Tasks of one design stand together: each design once, in the
+ * column its Tasks add up to, with its Tasks underneath, each with its own column. `task list` stays flat.
+ */
 export function boardView(p: Project): Result {
-  const proposals = listProposals(p).filter((x) => x.data.status === "open").map((x) => proposalSummary(p, x));
+  const allProposals = listProposals(p);
+  const proposals = allProposals.filter((x) => x.data.status === "open").map((x) => proposalSummary(p, x));
+  const titles = new Map(allProposals.map((x) => [x.id, x.title]));
   const drifts = listDrifts(p).filter((d) => d.data.status === "open");
-  const tasks = listTasks(p);
-  const column = (c: string) => tasks.filter((t) => t.data.column === c);
-  const line = (t: Task) => `- ${t.id} ${t.title}${t.data.technical ? " (technical)" : ""}`;
+  const placed = placeTasks(listTasks(p).map(taskSummary));
+  const line = (t: TaskSummary) => `${t.id} ${t.title}${t.technical ? " (technical)" : ""}${t.agent ? WORKING : ""}`;
+  const entries = (column: string) =>
+    placed
+      .filter((x) => x.column === column)
+      .map((x) => {
+        if (!x.design) return { md: `- ${line(x.task)}`, json: { kind: "task" as const, ...x.task } };
+        const done = x.tasks.filter((t) => t.column === "done").length;
+        const title = titles.get(x.proposal) ?? `Proposal ${x.proposal}`;
+        return {
+          md: [`- Proposal ${x.proposal} "${title}" (${done}/${x.tasks.length} done)`, ...x.tasks.map((t) => `  - ${line(t)} [${t.column}]`)].join("\n"),
+          json: { kind: "design" as const, proposal: x.proposal, title, done, total: x.tasks.length, tasks: x.tasks },
+        };
+      });
   const md = [
     "# Board",
     "",
@@ -189,21 +224,21 @@ export function boardView(p: Project): Result {
     ]),
     "",
     "## To do",
-    bullets(column("todo").map(line)),
+    bullets(entries("todo").map((e) => e.md)),
     "",
     "## In progress",
-    bullets(column("doing").map(line)),
+    bullets(entries("doing").map((e) => e.md)),
     "",
     "## Done",
-    bullets(column("done").map(line)),
+    bullets(entries("done").map((e) => e.md)),
   ].join("\n");
   return {
     md,
     json: {
       toDecide: { proposals, drifts: drifts.map(driftSummary) },
-      todo: column("todo").map(taskSummary),
-      doing: column("doing").map(taskSummary),
-      done: column("done").map(taskSummary),
+      todo: entries("todo").map((e) => e.json),
+      doing: entries("doing").map((e) => e.json),
+      done: entries("done").map((e) => e.json),
     },
   };
 }

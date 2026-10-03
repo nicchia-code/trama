@@ -9,16 +9,19 @@ const ok = (message: unknown) => {
 
 test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "ready" })).toEqual({ type: "ready" });
-  expect(ok({ type: "newTechnicalTask" })).toEqual({ type: "newTechnicalTask" });
   expect(ok({ type: "launch", action: { kind: "design" } })).toEqual({ type: "launch", action: { kind: "design" } });
+  expect(ok({ type: "launch", action: { kind: "fix" } })).toEqual({ type: "launch", action: { kind: "fix" } });
+  expect(ok({ type: "launch", action: { kind: "fix", prompt: "x" } })).toEqual({ type: "launch", action: { kind: "fix", prompt: "x" } });
   expect(ok({ type: "launch", action: { kind: "design", prompt: "x" } })).toEqual({ type: "launch", action: { kind: "design", prompt: "x" } });
   expect(ok({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ type: "launch", action: { kind: "scan", feature: "checkout" } });
   expect(ok({ type: "launch", action: { kind: "scan" } })).toEqual({ type: "launch", action: { kind: "scan" } });
   expect(ok({ type: "launch", action: { kind: "implement", task: "0003" } })).toEqual({ type: "launch", action: { kind: "implement", task: "0003" } });
   expect(ok({ type: "launch", action: { kind: "implement-all" } })).toEqual({ type: "launch", action: { kind: "implement-all" } });
+  expect(ok({ type: "launch", action: { kind: "implement-design", proposal: "0007" } })).toEqual({ type: "launch", action: { kind: "implement-design", proposal: "0007" } });
   expect(ok({ type: "openModelFile", path: "checkout/order.md" })).toEqual({ type: "openModelFile", path: "checkout/order.md" });
   expect(ok({ type: "openFile", path: "tasks/0003-x.md" })).toEqual({ type: "openFile", path: "tasks/0003-x.md" });
   expect(ok({ type: "moveTask", id: "0003", column: "doing" })).toEqual({ type: "moveTask", id: "0003", column: "doing" });
+  expect(ok({ type: "takeBackTask", id: "0003" })).toEqual({ type: "takeBackTask", id: "0003" });
   expect(ok({ type: "approveProposal", id: "0001" })).toEqual({ type: "approveProposal", id: "0001" });
   expect(ok({ type: "rejectProposal", id: "0001" })).toEqual({ type: "rejectProposal", id: "0001" });
   expect(ok({ type: "resolveDrift", id: "0002", how: "accept-proposal" })).toEqual({ type: "resolveDrift", id: "0002", how: "accept-proposal" });
@@ -39,14 +42,18 @@ test("rejects unknown types, wrong shapes, unknown columns and IDs that are not 
     { type: "launch" },
     { type: "launch", action: { kind: "run", command: "rm -rf /" } },
     { type: "launch", action: { kind: "design", prompt: 3 } },
+    { type: "launch", action: { kind: "fix", prompt: 3 } },
     { type: "launch", action: { kind: "scan", feature: "a`; rm -rf /; `" } },
     { type: "launch", action: { kind: "implement", task: 3 } },
+    { type: "launch", action: { kind: "implement-design" } },
+    { type: "launch", action: { kind: "implement-design", proposal: "0007`; rm -rf /; `" } },
     { type: "openFile" },
     { type: "openFile", path: "" },
     { type: "openModelFile", path: 7 },
     { type: "moveTask", id: "0003", column: "archive" },
     { type: "moveTask", id: 3, column: "todo" },
     { type: "moveTask", id: "../x", column: "todo" },
+    { type: "takeBackTask", id: "../x" },
     { type: "approveProposal", id: "" },
     { type: "rejectProposal", id: { toString: "x" } },
     { type: "resolveDrift", id: "0002", how: "delete" },

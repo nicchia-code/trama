@@ -6,11 +6,15 @@ export type Column = "todo" | "doing" | "done";
 export type AgentAction =
   /** `prompt` absent: the host asks the developer with an input box. */
   | { kind: "design"; prompt?: string }
+  /** A problem described in a line; the agent turns it into Tasks (or a Drift). The host asks for the description when it is missing. */
+  | { kind: "fix"; prompt?: string }
   /** `feature` absent: the whole System. */
   | { kind: "scan"; feature?: string }
   | { kind: "implement"; task: string }
   /** Every Task in "todo", in order; the agent stops at the first Drift. */
   | { kind: "implement-all" }
+  /** The Tasks of one design (Proposal) still in "todo", in order; the agent stops at the first Drift. */
+  | { kind: "implement-design"; proposal: string }
   /** Describe the existing code as Proposals for the Model; the agent asks its own questions. */
   | { kind: "import" };
 
@@ -23,8 +27,8 @@ export type ToHost =
   /** Path relative to `.trama/` (for example `tasks/0003-x.md`). */
   | { type: "openFile"; path: string }
   | { type: "moveTask"; id: string; column: Column }
-  /** The host asks for the title with an input box. */
-  | { type: "newTechnicalTask" }
+  /** The developer takes a Task back from the agent that has it. */
+  | { type: "takeBackTask"; id: string }
   | { type: "approveProposal"; id: string }
   /** The host asks for the feedback with an input box. */
   | { type: "rejectProposal"; id: string }

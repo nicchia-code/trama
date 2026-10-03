@@ -1,7 +1,7 @@
 // DOM builders for Board cards. Every piece of data goes in through textContent, never innerHTML.
 import type { ViewContext } from "../types";
-import type { Badge, Card, DriftCard, ProposalCard, TaskCard } from "./logic";
-import { COLUMN_TITLES } from "./logic";
+import type { Badge, Card, DesignCard, DriftCard, ProposalCard, TaskCard } from "./logic";
+import { AGENT_WORKING, COLUMN_TITLES, designRunBlocker } from "./logic";
 import { viewOfRef } from "../requirements/logic";
 
 export interface CardEnv {
@@ -10,6 +10,9 @@ export interface CardEnv {
   moveTask(card: TaskCard, column: TaskCard["column"]): void;
   /** Called when a Task card starts or stops being dragged. */
   drag(card: TaskCard | null): void;
+  /** Whether a design card was left open; kept for the session, so a refresh does not close it. */
+  isExpanded(key: string): boolean;
+  setExpanded(key: string, expanded: boolean): void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -26,7 +29,7 @@ interface ButtonOptions {
   action: string;
   onClick: () => void;
   primary?: boolean;
-  /** A reason: disables the button and shows as its tooltip. */
+  /** A reason: disables the button, shows as its tooltip and is its accessible description. */
   disabled?: string | boolean;
   className?: string;
 }
@@ -38,7 +41,10 @@ function button(o: ButtonOptions): HTMLButtonElement {
   if (o.aria) node.setAttribute("aria-label", o.aria);
   if (o.disabled) {
     node.disabled = true;
-    if (typeof o.disabled === "string") node.title = o.disabled;
+    if (typeof o.disabled === "string") {
+      node.title = o.disabled;
+      node.setAttribute("aria-description", o.disabled);
+    }
   }
   node.addEventListener("click", o.onClick);
   return node;
@@ -48,6 +54,26 @@ function badge(b: { label: string; tone?: Badge["tone"]; tooltip?: string }): HT
   const node = el("span", `board-badge${b.tone ? ` ${b.tone}` : ""}`, b.label);
   if (b.tooltip) node.title = b.tooltip;
   return node;
+}
+
+/** "agent working": the badge of a Task the agent has taken, with an indicator that stops for reduced motion (see the CSS). */
+function workingBadge(): HTMLElement {
+  const node = el("span", "board-badge board-working");
+  node.title = AGENT_WORKING;
+  const indicator = el("span", "board-working-dot");
+  indicator.setAttribute("aria-hidden", "true");
+  node.append(indicator, "agent working");
+  return node;
+}
+
+/** Gives the Task back to the developer; shown only on Tasks the agent has taken. */
+function takeBack(card: TaskCard, env: CardEnv): HTMLElement {
+  return button({
+    label: "Take back",
+    aria: `Take back task ${card.id} from the agent`,
+    action: "take-back",
+    onClick: () => env.context.post({ type: "takeBackTask", id: card.id }),
+  });
 }
 
 function chips(refs: string[], env: CardEnv): HTMLElement {
@@ -144,7 +170,8 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
 
 function task(card: TaskCard, env: CardEnv): HTMLElement {
   const node = shell(card, `Task ${card.id}: ${card.title}`);
-  node.draggable = true;
+  node.draggable = !card.agent;
+  node.dataset["agent"] = String(card.agent);
   node.addEventListener("dragstart", (event) => {
     event.dataTransfer?.setData("text/plain", card.key);
     if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
@@ -156,25 +183,15 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
     env.drag(null);
   });
 
-  const move = (direction: "left" | "right", target: TaskCard["column"] | null) =>
-    button({
-      label: direction === "left" ? "←" : "→",
-      aria: target === null ? `Task ${card.id} cannot move ${direction}` : `Move task ${card.id} to ${COLUMN_TITLES[target]}`,
-      action: `move-${direction}`,
-      className: "board-move",
-      disabled: target === null,
-      onClick: () => target !== null && env.moveTask(card, target),
-    });
-  const moves = el("span", "board-moves");
-  moves.append(move("left", card.left), move("right", card.right));
-
-  node.append(head(card.id, ...(card.technical && card.refs.length === 0 ? [badge({ label: "technical" })] : []), moves), el("h3", "board-card-title", card.title));
+  const badges = [...(card.technical && card.refs.length === 0 ? [badge({ label: "technical" })] : []), ...(card.agent ? [workingBadge()] : [])];
+  node.append(head(card.id, ...badges, moveButtons(card, env)), el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
   if (card.drift !== null) node.append(el("p", "board-muted board-origin", `from Drift ${card.drift}`));
   if (card.excerpt) node.append(el("p", "board-excerpt", card.excerpt));
   const open = button({ label: "Open", aria: `Open file of task ${card.id}`, action: "open", onClick: () => env.context.post({ type: "openFile", path: card.file }) });
   node.append(
     actions(
+      ...(card.agent ? [takeBack(card, env)] : []),
       ...(card.column === "todo" ? [button({ label: "Run", aria: `Run task ${card.id}`, action: "run", primary: true, onClick: () => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } }) })] : []),
       open,
     ),
@@ -182,15 +199,96 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
   return node;
 }
 
+/** The two arrows that move a Task to its neighbouring column. */
+function moveButtons(card: TaskCard, env: CardEnv): HTMLElement {
+  const move = (direction: "left" | "right", target: TaskCard["column"] | null) =>
+    button({
+      label: direction === "left" ? "←" : "→",
+      aria: card.agent ? `Task ${card.id} cannot move: the agent is working on it` : target === null ? `Task ${card.id} cannot move ${direction}` : `Move task ${card.id} to ${COLUMN_TITLES[target]}`,
+      action: `move-${direction}`,
+      className: "board-move",
+      disabled: card.agent ? AGENT_WORKING : target === null,
+      onClick: () => target !== null && env.moveTask(card, target),
+    });
+  const moves = el("span", "board-moves");
+  moves.append(move("left", card.left), move("right", card.right));
+  return moves;
+}
+
+/** A dot for a Task's column: told apart by colour, named for screen readers and tooltips. */
+function statusDot(column: TaskCard["column"]): HTMLElement {
+  const dot = el("span", `board-dot is-${column}`);
+  dot.setAttribute("role", "img");
+  dot.setAttribute("aria-label", COLUMN_TITLES[column]);
+  dot.title = COLUMN_TITLES[column];
+  return dot;
+}
+
+/** The Tasks of one design as a single card, closed until the developer expands it. It cannot be dragged. */
+function design(card: DesignCard, env: CardEnv): HTMLElement {
+  const node = shell(card, `${card.heading}: ${card.title}, ${card.done} of ${card.tasks.length} tasks done`);
+  node.append(
+    head(card.heading, badge({ label: `${card.done}/${card.tasks.length} done`, tooltip: `${card.done} of ${card.tasks.length} Tasks are done` })),
+    el("h3", "board-card-title", card.title),
+  );
+
+  const list = el("ul", "board-design-tasks");
+  list.id = `board-design-${card.id}`;
+  for (const t of card.tasks) {
+    const item = el("li", "board-design-task");
+    item.dataset["task"] = t.id;
+    item.append(statusDot(t.column), el("span", "board-card-kind", t.id), el("span", "board-design-title", t.title));
+    if (t.agent) item.append(workingBadge(), takeBack(t, env));
+    item.append(moveButtons(t, env));
+    list.append(item);
+  }
+
+  const label = (open: boolean) => (open ? "Hide tasks" : `Show ${card.tasks.length} tasks`);
+  let isOpen = env.isExpanded(card.key);
+  const toggle = button({ label: "", action: "toggle", onClick: () => {} });
+  const show = () => {
+    list.hidden = !isOpen;
+    toggle.textContent = label(isOpen);
+    toggle.setAttribute("aria-expanded", String(isOpen));
+  };
+  toggle.setAttribute("aria-controls", list.id);
+  toggle.addEventListener("click", () => {
+    isOpen = !isOpen;
+    env.setExpanded(card.key, isOpen);
+    show();
+  });
+  show();
+  const run = button({
+    label: "Run this design",
+    aria: `Run the Tasks of ${card.heading} that are in To do`,
+    action: "run-design",
+    primary: true,
+    disabled: designRunBlocker(card.tasks) ?? false,
+    onClick: () => env.context.post({ type: "launch", action: { kind: "implement-design", proposal: card.id } }),
+  });
+  node.append(actions(run, toggle), list);
+  return node;
+}
+
 /** Dims a Task card while its move waits for the host's next snapshot. */
 export function setPending(node: HTMLElement, pending: boolean) {
-  node.draggable = !pending;
+  node.draggable = !pending && node.dataset["agent"] !== "true";
   node.classList.toggle("is-pending", pending);
   node.setAttribute("aria-busy", String(pending));
+}
+
+/** Dims the Tasks of a design card whose move waits for the host's next snapshot. */
+export function setDesignPending(node: HTMLElement, pending: ReadonlySet<string>) {
+  for (const item of node.querySelectorAll<HTMLElement>("[data-task]")) {
+    const busy = pending.has(item.dataset["task"] as string);
+    item.classList.toggle("is-pending", busy);
+    item.setAttribute("aria-busy", String(busy));
+  }
 }
 
 export function renderCard(card: Card, env: CardEnv): HTMLElement {
   if (card.kind === "proposal") return proposal(card, env);
   if (card.kind === "drift") return drift(card, env);
+  if (card.kind === "design") return design(card, env);
   return task(card, env);
 }

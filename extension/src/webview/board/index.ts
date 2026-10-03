@@ -1,8 +1,8 @@
 import type { Snapshot } from "../../../../src/core/snapshot";
 import type { MountView } from "../types";
 import css from "./board.css" with { type: "text" };
-import { buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, dropTarget, type TaskCard } from "./logic";
-import { type CardEnv, renderCard, setPending } from "./render";
+import { buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, dropTarget, runAllBlocker, type TaskCard } from "./logic";
+import { type CardEnv, renderCard, setDesignPending, setPending } from "./render";
 
 /** The host answers a move with a snapshot; if it fails it sends an error instead, so dimmed cards are released after this long. */
 const PENDING_TIMEOUT_MS = 5000;
@@ -43,14 +43,16 @@ export const mountBoard: MountView = (root, context) => {
     return node;
   };
   const runAll = toolbarButton("Run all To do", () => context.post({ type: "launch", action: { kind: "implement-all" } }), true);
-  toolbarButton("New technical task", () => context.post({ type: "newTechnicalTask" }));
   toolbarButton("Scan System", () => context.post({ type: "launch", action: { kind: "scan" } }));
   toolbarButton("Design…", () => context.post({ type: "launch", action: { kind: "design" } }));
+  toolbarButton("Fix…", () => context.post({ type: "launch", action: { kind: "fix" } }));
 
   let dragged: TaskCard | null = null;
   const pending = new Set<string>();
   let pendingTimer: number | undefined;
   let snapshot: Snapshot | null = null;
+  /** Design cards the developer left open. Kept while the panel lives, so a refresh does not close them. */
+  const expanded = new Set<string>();
 
   const env: CardEnv = {
     context,
@@ -58,8 +60,13 @@ export const mountBoard: MountView = (root, context) => {
       dragged = card;
       if (card === null) for (const column of Object.values(parts)) column.section.classList.remove("drop-ok", "drop-refused");
     },
+    isExpanded: (key) => expanded.has(key),
+    setExpanded: (key, open) => {
+      if (open) expanded.add(key);
+      else expanded.delete(key);
+    },
     moveTask: (card, column) => {
-      if (pending.has(card.id)) return;
+      if (card.agent || pending.has(card.id)) return;
       context.post({ type: "moveTask", id: card.id, column });
       pending.add(card.id);
       clearTimeout(pendingTimer);
@@ -134,11 +141,17 @@ export const mountBoard: MountView = (root, context) => {
           cache.set(card.key, entry);
         }
         if (card.kind === "task") setPending(entry.node, pending.has(card.id));
+        if (card.kind === "design") setDesignPending(entry.node, pending);
         return entry.node;
       });
       reconcile(part.body, nodes.length > 0 ? nodes : [part.hint]);
-      if (column.id === "todo") runAll.disabled = column.cards.length === 0;
     }
+    // Run all To do covers the Tasks inside design cards too, which may stand in another column.
+    const blocker = runAllBlocker(snapshot.tasks);
+    runAll.disabled = blocker !== null;
+    runAll.title = blocker ?? "";
+    if (blocker === null) runAll.removeAttribute("aria-description");
+    else runAll.setAttribute("aria-description", blocker);
     for (const key of cache.keys()) if (!live.has(key)) cache.delete(key);
 
     if (focused?.key !== undefined && (document.activeElement === document.body || document.activeElement === null)) {

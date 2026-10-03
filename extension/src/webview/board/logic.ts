@@ -3,6 +3,7 @@ import type { FileChange } from "../../../../src/core/diff";
 import { formatDiagnostic } from "../../../../src/core/model";
 import type { DriftView, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
 import type { Column } from "../../protocol";
+import { designColumn, placeTasks, takenBlocker } from "../../../../src/core/design";
 import { requiredReasons } from "../../../../src/core/required";
 import { proposalTouches } from "../requirements/logic";
 
@@ -82,6 +83,10 @@ export interface TaskCard {
   technical: boolean;
   refs: string[];
   drift: string | null;
+  /** ID of the Proposal (the design) the Task comes from, if any. */
+  proposal: string | null;
+  /** True while the agent has taken the Task. */
+  agent: boolean;
   excerpt: string;
   /** Path relative to `.trama/`. */
   file: string;
@@ -91,7 +96,21 @@ export interface TaskCard {
   right: Column | null;
 }
 
-export type Card = ProposalCard | DriftCard | TaskCard;
+/** The Tasks of one design (Proposal) shown as a single card; it stands in the column its Tasks add up to. */
+export interface DesignCard {
+  kind: "design";
+  key: string;
+  /** The Proposal's ID. */
+  id: string;
+  heading: string;
+  title: string;
+  /** The design's Tasks in creation order, each with its own column. */
+  tasks: TaskCard[];
+  done: number;
+  column: Column;
+}
+
+export type Card = ProposalCard | DriftCard | TaskCard | DesignCard;
 
 export interface BoardColumn {
   id: ColumnId;
@@ -113,6 +132,19 @@ export function excerpt(body: string, maxLines = 2, maxChars = EXCERPT_CHARS): s
     .slice(0, maxLines);
   const text = lines.join("\n");
   return text.length > maxChars ? `${text.slice(0, maxChars - 1).trimEnd()}…` : text;
+}
+
+/** Why a Task the agent has taken cannot be moved, dragged or run; shown as the tooltip and the accessible description of the disabled controls. */
+export const AGENT_WORKING = "The agent is working on this Task. Take it back to move it.";
+
+/** Why Run all To do is unavailable, or null: a Task is taken by the agent, or nothing is in To do (design cards' Tasks count). */
+export function runAllBlocker(tasks: Pick<TaskView, "id" | "column" | "agent">[]): string | null {
+  return takenBlocker(tasks) ?? (tasks.some((t) => t.column === "todo") ? null : "No Task is in To do");
+}
+
+/** Why Run this design is unavailable, or null: one of its Tasks is taken by the agent, or none is in To do. */
+export function designRunBlocker(tasks: Pick<TaskCard, "id" | "column" | "agent">[]): string | null {
+  return takenBlocker(tasks) ?? (tasks.some((t) => t.column === "todo") ? null : "No Task of this design is in To do");
 }
 
 /** The Task column next to `column` in the given direction, or null at the ends. */
@@ -205,11 +237,26 @@ export function taskCard(t: TaskView): TaskCard {
     technical: t.technical,
     refs: t.refs,
     drift: t.drift,
+    proposal: t.proposal,
+    agent: t.agent,
     excerpt: excerpt(t.body),
     file: t.file,
     column: t.column,
     left: neighbour(t.column, "left"),
     right: neighbour(t.column, "right"),
+  };
+}
+
+export function designCard(proposal: string, title: string | null, tasks: TaskCard[]): DesignCard {
+  return {
+    kind: "design",
+    key: `design:${proposal}`,
+    id: proposal,
+    heading: `Proposal ${proposal}`,
+    title: title ?? `Proposal ${proposal}`,
+    tasks,
+    done: tasks.filter((t) => t.column === "done").length,
+    column: designColumn(tasks.map((t) => t.column)),
   };
 }
 
@@ -221,6 +268,10 @@ export function buildBoard(snapshot: Snapshot): BoardColumn[] {
     doing: [],
     done: [],
   };
-  for (const task of snapshot.tasks) cards[task.column].push(taskCard(task));
+  // Tasks of one design are shown together once there are enough of them (see `placeTasks`).
+  for (const placed of placeTasks(snapshot.tasks)) {
+    if (!placed.design) cards[placed.column].push(taskCard(placed.task));
+    else cards[placed.column].push(designCard(placed.proposal, placed.tasks[0]?.proposalTitle ?? null, placed.tasks.map(taskCard)));
+  }
   return COLUMN_ORDER.map((id) => ({ id, title: COLUMN_TITLES[id], hint: EMPTY_HINTS[id], cards: cards[id] }));
 }

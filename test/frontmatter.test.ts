@@ -36,6 +36,7 @@ describe("malformed Task files give domain errors naming the file", () => {
     ["refs is a mapping", "refs:\n  a: b", /"refs" must be a list of strings/],
     ["unknown column", "column: blocked\nrefs: [order]", /"column" must be one of todo, doing, done/],
     ["technical is not a boolean", "technical: maybe\nrefs: [order]", /"technical" must be true or false/],
+    ["agent is not a boolean", "agent: yes please\nrefs: [order]", /"agent" must be true or false/],
     ["non-technical without refs", "column: todo", /must reference at least one Model element in "refs"/],
     ["technical with refs", "technical: true\nrefs: [order]", /Technical Task cannot reference the Model/],
     ["drift is not numeric", "refs: [order]\ndrift: abc", /"drift" must be a numeric ID/],
@@ -65,6 +66,13 @@ describe("malformed Task files give domain errors naming the file", () => {
   test("a technical Task with no refs loads", () => {
     task("technical: true");
     expect(getTask(p, "1").data).toMatchObject({ technical: true, refs: [], column: "todo" });
+  });
+
+  test("a Task is free unless its file says the agent has taken it", () => {
+    task("technical: true");
+    expect(getTask(p, "1").data.agent).toBe(false);
+    task("technical: true\nagent: true");
+    expect(getTask(p, "1").data.agent).toBe(true);
   });
 });
 

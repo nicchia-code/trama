@@ -219,6 +219,7 @@ export const TOOLS: ToolSpec[] = [
         refs: stringList(`Model elements the Task covers, and Requirements it must satisfy. ${REF} ${REQ_REF}`),
         technical: { type: "boolean", description: "True for work that changes no behaviour (refactor, dependencies, applying a Requirement); then refs may only name Requirements" },
         drift: string("ID of the Drift this Task resolves, if any"),
+        proposal: string("ID of the Proposal (the design) this Task comes from, when you file it after that Proposal was approved; it must exist"),
         body: string("What must be true when done, in domain words"),
       },
       required: ["title"],
@@ -226,7 +227,7 @@ export const TOOLS: ToolSpec[] = [
     },
     writes: true,
     run: (p, i) => {
-      const t = newTask(p, { title: text(i, "title"), refs: texts(i, "refs"), technical: i["technical"] === true, drift: optionalText(i, "drift"), body: optionalText(i, "body") });
+      const t = newTask(p, { title: text(i, "title"), refs: texts(i, "refs"), technical: i["technical"] === true, drift: optionalText(i, "drift"), proposal: optionalText(i, "proposal"), body: optionalText(i, "body") });
       return `Created Task ${t.id}.`;
     },
   },
@@ -241,11 +242,11 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_task_move",
     title: "Move a Task",
-    description: "Moves a Task to `todo`, `doing` or `done`. Move it to `doing` when you start and to `done` when the behaviour matches the Model and the code follows its Requirements.",
+    description: "Moves a Task to `todo`, `doing` or `done`. Moving it to `doing` takes it: the developer cannot move it until the Task leaves `doing` or the developer takes it back. Move it to `doing` when you start and to `done` when the behaviour matches the Model and the code follows its Requirements.",
     inputSchema: { type: "object", properties: { task: string("Task ID"), column: { type: "string", enum: ["todo", "doing", "done"] } }, required: ["task", "column"], additionalProperties: false },
     writes: true,
     run: (p, i) => {
-      const t = moveTask(p, text(i, "task"), text(i, "column"));
+      const t = moveTask(p, text(i, "task"), text(i, "column"), "agent");
       return `Task ${t.id} is now ${t.data.column}.`;
     },
   },

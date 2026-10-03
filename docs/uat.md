@@ -306,7 +306,7 @@ j validate --proposal 3        # exit code 1
 ### E1. Layout
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Click the **Board** tab | Toolbar: **Run all To do** (blue), **New technical task**, **Scan System**, **Design…** | ☐ |
+| 1 | Click the **Board** tab | Toolbar: **Run all To do** (blue), **Scan System**, **Design…**, **Fix…** | ☐ |
 | 2 | Look at the columns | `TO DECIDE 4`, `TO DO 2`, `IN PROGRESS 1`, `DONE 1`, each with a count badge | ☐ |
 
 ### E2. To decide
@@ -363,6 +363,22 @@ j validate --proposal 3        # exit code 1
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Do F4 (stale) and look at the Proposal 0001 card | Orange badge `stale`; **Approve** disabled; hover shows a tooltip naming `checkout/order.md` | ☐ |
+
+### E10. A design's Tasks as one card
+↻ first. Then seed it from the verification shell (the Proposal only has to exist): `trama --root $D task new "Return request" --ref order --proposal 1`, then the same with `"Refund on return"` and `"Return label"`. Checked in the browser harness with a hand-made snapshot; not yet run inside VS Code.
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Look at the Board after the three commands | The three Tasks are **one** card in To do: `Proposal 0001`, a badge `0/3 done`, the title `Returns after shipping`, buttons **Run this design** (blue) and **Show 3 tasks**; no separate cards for the three Tasks | ☐ |
+| 2 | Click **Show 3 tasks** | The button reads **Hide tasks**; three rows in creation order, each with a status dot, its ID, its title and ← → buttons (← disabled). Hovering a dot shows `To do` | ☐ |
+| 3 | In the first row click → | The row's dot changes to `In progress`; the card moves to the In progress column, stays open, and its badge still says `0/3 done` | ☐ |
+| 4 | In that row click → again | Badge `1/3 done`, the row's dot is `Done`; the card stays in In progress (a mix of To do and Done) | ☐ |
+| 5 | Edit any file under `$D/tasks/` from outside (see F1) | The card stays open and in place after the refresh | ☐ |
+| 6 | Try to drag the card onto another column | It cannot be dragged; nothing moves | ☐ |
+| 7 | **Run this design** | The launch prints `Use the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column, in order, one after the other. Stop at the first Drift you file.` | ☐ |
+| 8 | Move the other two Tasks to Done (→ twice each) | The card moves to Done, badge `3/3 done`, **Run this design** is disabled with the tooltip `No Task of this design is in To do` | ☐ |
+| 9 | Close the panel and open it again | The card is closed again | ☐ |
+| 10 | `trama --root $D board` and `trama --root $D task list` | `board` lists `Proposal 0001 "Returns after shipping" (3/3 done)` once, in Done, with the three Tasks under it and their columns; `task list` lists the three Tasks flat, each with `(Proposal 0001)` | ☐ |
+| 11 | Create a fourth Task with `--proposal 2` only (a second Proposal) | A design of one Task stays a plain card | ☐ |
 
 ---
 
@@ -452,14 +468,15 @@ For every G test, ↻ first, then open the panel and the "Trama agent" terminal 
 | 1 | ↻. **Reject** Proposal 0002 with feedback `x` | Card leaves To decide | ☐ |
 | 2 | On Drift 0002 press **Accept Proposal** | Either the button is disabled with a tooltip, or a red banner appears: `Proposal 0002 is rejected; only open Proposals can be approved`. No crash, no terminal launch, the Drift stays open | ☐ |
 
-### G9. New technical task
+### G9. Fix
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Board: **New technical task** | An input box titled `New Technical Task`, prompt `Title of the Technical Task (work that does not change the Model)` | ☐ |
-| 2 | Press Enter with the box empty | `A title is required` | ☐ |
-| 3 | Type `Rebuild CI cache`, Enter | A card `0005` appears in To do with a `technical` badge and no chips | ☐ |
-| 4 | `sed -n 1,6p $D/tasks/0005-*.md` | `column: todo`, `technical: true`, `refs: []` | ☐ |
-| 5 | Run it again, press Esc | Nothing is created | ☐ |
+| 1 | Board: **Fix…** | An input box titled `Fix with Agent`, prompt `What is wrong? The agent turns it into Tasks, or a Drift if the Model is wrong.` | ☐ |
+| 2 | Press Enter with the box empty | `Describe the problem` | ☐ |
+| 3 | Press Esc | Nothing is sent to the agent | ☐ |
+| 4 | Type `The cart total ignores the coupon`, Enter | The printed line is exactly `Use the trama-fix skill. The cart total ignores the coupon` | ☐ |
+| 5 | Palette: **Trama: Fix with Agent…** | Same input box as step 1 | ☐ |
+| 6 | The Board has no **New technical task** button | Technical Tasks are filed by the agent (`trama task new --technical`) | ☐ |
 
 ### G10. Stale approval is refused
 | # | Action | Expected | ✓ |
