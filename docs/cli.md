@@ -71,6 +71,18 @@ All exploring commands are read-only.
 | `drift replace-proposal <id> --proposal <id>` | Attaches a newer Proposal to an open Drift in place of the stale one attached to it, and rejects the stale one with the feedback `Replaced by Proposal <id>`. Refused unless the Drift is open, its attached Proposal is open and stale, and the new one exists, differs from it and was not rejected or discarded. Not developer-only: the agent runs it when asked to rework a stale Proposal. |
 | `drift resolve <id> --fix-code \| --accept-proposal \| --dismiss [--skills-dir <dir>…]` | Developer only. `--fix-code` (keep what should happen) creates a Task referencing the same elements and links it to the Drift; the Task is technical when the Drift references only Requirements. If the Drift has an origin Task that is not Done, that Task goes back to `todo` (its agent mark cleared) and stays blocked, `(waiting for Task <id>)`, until the fix Task is Done. Every resolution ends the Drift's blocking of the other Tasks. `--accept-proposal` (keep what happens) approves the attached Proposal, with the same skill regeneration and `--skills-dir` as `proposal approve`, and is refused, naming why, when it cannot be approved. `--dismiss` (keep what happens, with no Proposal) closes the Drift without changes and is refused when the Drift has an attached Proposal. |
 
+## Announcements
+
+Announcing a card before the agent creates it makes the Board show a ghost of it meanwhile.
+
+| Command | Effect |
+|---|---|
+| `announce <proposal\|task\|drift> <title>` | Announces a card the agent is about to create, as soon as it knows it will. Prints the announcement ID, six letters and digits. Not developer-only: the agent runs it. Writes a temporary file under `.trama/announcements/` (see the file format). When `TRAMA_TERMINAL` holds a terminal ID (the extension sets it in every agent terminal it starts), the announcement belongs to that terminal; without it, or with a value that is not six lowercase letters and digits, it belongs to none. |
+
+`proposal new`, `task new` and `drift new` take `--announcement <id>`: when the card is created, the announcement it names is delivered and the ghost gives way to the real card. A `proposal new` with no `--announcement` takes over the oldest announcement that Trama made for a design request and that no Draft has taken yet, whatever its terminal; with none waiting it makes an announcement of its own, so the Board shows its Draft, and that one belongs to the terminal in `TRAMA_TERMINAL`, if any. An ID that is unknown, already delivered or withdrawn, of another kind, or already bound to a Draft never prevents the card from being created; the output adds a note saying so. `proposal submit` delivers the announcement bound to the Draft only when it succeeds; `proposal discard` withdraws it with no notice. The agent tools `trama_announce` and `trama_proposal_new` do the same through `trama mcp`, which reads `TRAMA_TERMINAL` once when it starts.
+
+Only the extension withdraws announcements the agent never delivered, and each terminal only its own: the command Trama typed into an agent terminal ending (recognised by the command line the editor reports for it, compared after trimming; any other command, or an end reported without that line, withdraws nothing) or that terminal closing withdraws the announcements that belong to it. Every announcement, whatever terminal it belongs to, is also withdrawn after fifteen minutes in which the agent announced nothing, changed no announced Draft and filed no card (the count stops while a question round is open), and at startup; announcements that belong to no terminal (from the editor's chat, or from an agent Trama did not start) go only that way. The command line alone never withdraws any.
+
 ## Board
 
 | Command | Output |
@@ -132,6 +144,7 @@ In Cursor the extension writes this entry into `.cursor/mcp.json` itself.
 | `trama_proposal_new`, `trama_proposal_show`, `trama_proposal_delete_file` | Like `proposal new` (`requires`, `import`), `show`, `delete` |
 | `trama_proposal_write` | `proposal edit` plus writing the complete new Model or Requirement file; answers with the validation of the Model and Requirements with the Proposal applied |
 | `trama_proposal_submit` | Validates and hands a finished Draft over to the developer; new, write and delete tools leave it Draft until this succeeds |
+| `trama_announce` | Like `announce` (`kind`, `title`); `trama_proposal_new`, `trama_task_new` and `trama_drift_new` take the `announcement` it returns |
 | `trama_task_new`, `trama_task_show`, `trama_task_move` | Like `task new`, `show`, `move` |
 | `trama_drift_new`, `trama_drift_show`, `trama_drift_replace_proposal` | Like `drift new` (the origin Task is `task`; `happens` and `should` are the two texts and `where` the optional third), `show`, `replace-proposal` |
 

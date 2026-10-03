@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { listAnnouncements } from "../src/core/announcements";
 import { getProposal, listProposals } from "../src/core/proposals";
 import { type Project, projectAt } from "../src/core/store";
 import { listTasks } from "../src/core/work";
@@ -69,6 +70,18 @@ describe("callTool", () => {
     const board = (await callTool(p, "trama_board", {})).text;
     expect(board).toContain("Drift 0001: Late refund");
     expect(board).toContain("0001 Refunds");
+  });
+
+  test("an announced Task or Drift is delivered by creating it with the announcement ID, and an unknown ID only adds a note", async () => {
+    const taskAnnouncement = /announcement (\w{6})/.exec((await callTool(p, "trama_announce", { kind: "task", title: "Refunds" })).text)?.[1];
+    expect(listAnnouncements(p).map((a) => a.kind)).toEqual(["task"]);
+    const created = await callTool(p, "trama_task_new", { title: "Refunds", refs: ["order/Refunding"], announcement: taskAnnouncement });
+    expect(created).toEqual({ text: "Created Task 0001.", isError: false });
+    expect(listAnnouncements(p)).toEqual([]);
+    const unknown = await callTool(p, "trama_drift_new", { title: "Late refund", refs: ["order/Shipped"], happens: "The code refunds late.", should: "The Model forbids it.", announcement: "zzzzzz" });
+    expect(unknown.isError).toBe(false);
+    expect(unknown.text).toContain('No announcement "zzzzzz" was found');
+    expect((await callTool(p, "trama_announce", { kind: "card", title: "x" })).isError).toBe(true);
   });
 });
 

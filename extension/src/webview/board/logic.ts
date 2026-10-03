@@ -2,7 +2,7 @@
 import type { FileChange } from "../../../../src/core/diff";
 import { formatDiagnostic } from "../../../../src/core/model";
 import type { Blocker } from "../../../../src/core/blocking";
-import type { DriftView, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
+import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
 import type { Column } from "../../protocol";
 import { designColumn, placeTasks, takenBlocker } from "../../../../src/core/design";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
@@ -271,25 +271,65 @@ export function buildBoard(snapshot: Snapshot): BoardColumn[] {
   return COLUMN_ORDER.map((id) => ({ id, title: COLUMN_TITLES[id], hint: EMPTY_HINTS[id], cards: cards[id] }));
 }
 
-/** The ghost of a Task whose move is being carried out: its card as it will be in `column`, and the place among that column's cards. */
-export interface Ghost {
-  card: TaskCard;
+/** A card the agent is about to create, as the Board draws its ghost. */
+export interface AnnouncedCard {
+  /** Stable per announcement, so the same node is reused while it is only updated. */
+  key: string;
+  kind: AnnouncementView["kind"];
+  /** "Proposal", "Task" or "Drift". */
+  kindLabel: string;
+  title: string;
+  /** "Preparing", "Writing", or "Waiting for your answers" while a question round is open. */
+  phase: string;
+  /** What assistive technology reads: the kind, the title and the phase. */
+  label: string;
+}
+
+const ANNOUNCED_KIND_LABELS: Record<AnnouncementView["kind"], string> = { proposal: "Proposal", task: "Task", drift: "Drift" };
+
+export const announcedPhase = (phase: AnnouncementView["phase"], asking: boolean): string => (asking ? "Waiting for your answers" : phase === "writing" ? "Writing" : "Preparing");
+
+export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCard {
+  const kindLabel = ANNOUNCED_KIND_LABELS[a.kind];
+  const phase = announcedPhase(a.phase, asking);
+  return { key: `announced:${a.id}`, kind: a.kind, kindLabel, title: a.title, phase, label: `${kindLabel} the agent is creating, ${phase.toLowerCase()}: ${a.title}` };
+}
+
+/** The sentence the notice of a withdrawn announcement shows. */
+export const withdrawnNotice = (a: AnnouncementView): string => `The agent finished without delivering ${ANNOUNCED_KIND_LABELS[a.kind]} ${a.title}.`;
+
+export interface PlacedGhost {
+  card: AnnouncedCard;
+  /** Among the column's real cards: the ghost stands before the real card at this position, or last when it is past the end. */
   index: number;
 }
 
 /**
- * Where the Task `id` will stand once it is in `column`, or null when it gets no ghost: it is unknown, already there,
- * or part of a design card (whose column is derived from all its Tasks, so its row is only dimmed).
+ * The ghosts of the announced cards, by column and in the order announced. To decide takes Proposals and Drifts, To do
+ * takes Tasks. A ghost stands after the real cards of its kind (Proposals before Drifts), where its real card will take
+ * its place, so no other card jumps when it arrives.
  */
-export function ghostFor(snapshot: Snapshot, id: string, column: Column): Ghost | null {
-  const current = snapshot.tasks.find((t) => t.id === id);
-  if (current === undefined || current.column === column) return null;
-  const moved = snapshot.tasks.map((t) => (t.id === id ? { ...t, column } : t));
-  let index = 0;
-  for (const placed of placeTasks(moved)) {
-    if (!placed.design && placed.task.id === id) return { card: taskCard(placed.task), index };
-    if (placed.design && placed.tasks.some((t) => t.id === id)) return null;
-    if (placed.column === column) index++;
+export function announcedGhosts(columns: BoardColumn[], announcements: AnnouncementView[], asking: boolean): Record<ColumnId, PlacedGhost[]> {
+  const real = (id: ColumnId) => columns.find((c) => c.id === id)?.cards ?? [];
+  const proposals = real("decide").filter((c) => c.kind === "proposal").length;
+  const out: Record<ColumnId, PlacedGhost[]> = { decide: [], todo: [], doing: [], done: [] };
+  for (const a of announcements) {
+    const card = announcedCard(a, asking);
+    if (a.kind === "task") out.todo.push({ card, index: real("todo").length });
+    else out.decide.push({ card, index: a.kind === "proposal" ? proposals : real("decide").length });
   }
-  return null;
+  // Proposals stand before Drifts even when they were announced after them, as the real cards do.
+  out.decide = [...out.decide.filter((g) => g.card.kind === "proposal"), ...out.decide.filter((g) => g.card.kind === "drift")];
+  return out;
+}
+
+/** `real` with each extra put before the real item at its index (last when past the end); extras with one index keep their order. */
+export function interleave<T>(real: T[], extras: { item: T; index: number }[]): T[] {
+  const out = [...real];
+  let added = 0;
+  for (const extra of [...extras].sort((a, b) => a.index - b.index)) {
+    out.splice(Math.min(extra.index + added, out.length), 0, extra.item);
+    added++;
+  }
+  return out;
 }

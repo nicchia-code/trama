@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TramaError, UsageError } from "../core/errors";
+import { ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote } from "../core/announcements";
 import { installSkills, missingSkills, skillConflicts } from "./skills";
 import {
   approveProposal,
@@ -57,6 +58,8 @@ export interface Context {
   rootOption?: string;
   /** True when the command runs in the terminal Trama started for the agent (`TRAMA_AGENT` is set). */
   byAgent: boolean;
+  /** The agent terminal the command runs in (`TRAMA_TERMINAL`), when Trama started it. */
+  terminal?: string;
   project(): Project;
 }
 
@@ -91,11 +94,12 @@ function required(value: string | undefined, flag: string): string {
   return value;
 }
 
-export function makeContext(cwd: string, rootOption?: string, byAgent = false): Context {
+export function makeContext(cwd: string, rootOption?: string, byAgent = false, terminal?: string): Context {
   return {
     cwd,
     rootOption,
     byAgent,
+    terminal,
     project() {
       if (rootOption === undefined) return findProject(cwd);
       const project = projectAt(resolve(cwd, rootOption));
@@ -191,9 +195,17 @@ export const COMMANDS: Command[] = [
     },
   },
 
-  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" } }, run(ctx, a, o) {
-      const p = newProposal(ctx.project(), a[0] as string, str(o["body"]), { requires: list(o["requires"]), kind: o["import"] === true ? "import" : "change" });
-      return text(`Created Draft Proposal ${p.id} at ${p.dir}. Submit it when finished.`, { id: p.id, path: p.dir, status: p.data.status });
+  { name: "announce", args: "<kind> <title>", summary: "Say that you are about to create a card, so the Board shows a ghost of it: kind is proposal, task or drift. Prints the announcement ID; pass it as --announcement when you create the card", run(ctx, a) {
+      const kind = a[0] as string;
+      if (!(ANNOUNCEMENT_KINDS as readonly string[]).includes(kind)) throw new UsageError(`The kind must be one of ${ANNOUNCEMENT_KINDS.join(", ")}, not "${kind}"`);
+      const announcement = announce(ctx.project(), { kind: kind as AnnouncementKind, title: a[1] as string, ...(ctx.terminal ? { terminal: ctx.terminal } : {}) });
+      return text(announcement.id, { id: announcement.id, kind: announcement.kind, title: announcement.title });
+    } },
+  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code; --announcement <id> names the announcement of this Proposal); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" }, announcement: { type: "string" } }, run(ctx, a, o) {
+      const project = ctx.project();
+      const note = announcementNote(project, str(o["announcement"]), "proposal");
+      const p = newProposal(project, a[0] as string, str(o["body"]), { requires: list(o["requires"]), kind: o["import"] === true ? "import" : "change", announcement: str(o["announcement"]), terminal: ctx.terminal });
+      return text(`Created Draft Proposal ${p.id} at ${p.dir}. Submit it when finished.${note ? `\n${note}` : ""}`, { id: p.id, path: p.dir, status: p.data.status, ...(note ? { note } : {}) });
     } },
   { name: "proposal edit", args: "<id> <model-path>", summary: "Make a Model file editable inside a Proposal; prints the path to edit", run(ctx, a) {
       const project = ctx.project();
@@ -226,9 +238,11 @@ export const COMMANDS: Command[] = [
       return text(`Rejected Proposal ${p.id}`, { id: p.id, status: p.data.status });
     } },
 
-  { name: "task new", args: "<title>", summary: "Create a Task in 'todo' (--ref … or --technical; --proposal <id> links it to the design it comes from)", options: { ref, technical: { type: "boolean" }, drift: { type: "string" }, proposal: { type: "string" }, body: { type: "string" } }, run(ctx, a, o) {
-      const t = newTask(ctx.project(), { title: a[0] as string, refs: list(o["ref"]), technical: o["technical"] === true, drift: str(o["drift"]), proposal: str(o["proposal"]), body: str(o["body"]) });
-      return text(`Created Task ${t.id} at ${t.path}`, { id: t.id, path: t.path });
+  { name: "task new", args: "<title>", summary: "Create a Task in 'todo' (--ref … or --technical; --proposal <id> links it to the design it comes from; --announcement <id> names the announcement of this Task)", options: { ref, technical: { type: "boolean" }, drift: { type: "string" }, proposal: { type: "string" }, body: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
+      const project = ctx.project();
+      const note = announcementNote(project, str(o["announcement"]), "task");
+      const t = newTask(project, { title: a[0] as string, refs: list(o["ref"]), technical: o["technical"] === true, drift: str(o["drift"]), proposal: str(o["proposal"]), body: str(o["body"]), announcement: str(o["announcement"]) });
+      return text(`Created Task ${t.id} at ${t.path}${note ? `\n${note}` : ""}`, { id: t.id, path: t.path, ...(note ? { note } : {}) });
     } },
   { name: "task list", args: "", summary: "Tasks grouped by column", options: { column: { type: "string" } }, run: (ctx, _a, o) => taskListView(ctx.project(), str(o["column"])) },
   { name: "task show", args: "<id>", summary: "A Task with the current Model text of its references", run: (ctx, a) => taskShowView(ctx.project(), getTask(ctx.project(), a[0] as string)) },
@@ -241,9 +255,11 @@ export const COMMANDS: Command[] = [
       return text(`Task ${t.id} is yours again (still ${t.data.column})`, { id: t.id, column: t.data.column, agent: t.data.agent });
     } },
 
-  { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; --where (optional) says where in the code it was seen, the only place for files and code names; --task <id> names the Task you were implementing when you found it", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, where: { type: "string" } }, run(ctx, a, o) {
-      const d = newDrift(ctx.project(), { title: a[0] as string, refs: list(o["ref"]), proposal: str(o["proposal"]), origin: str(o["task"]), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", ...(o["where"] !== undefined ? { where: str(o["where"]) ?? "" } : {}) });
-      return text(`Created Drift ${d.id} at ${d.path}`, { id: d.id, path: d.path });
+  { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; --where (optional) says where in the code it was seen, the only place for files and code names; --task <id> names the Task you were implementing when you found it; --announcement <id> names the announcement of this Drift", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, where: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
+      const project = ctx.project();
+      const note = announcementNote(project, str(o["announcement"]), "drift");
+      const d = newDrift(project, { title: a[0] as string, refs: list(o["ref"]), proposal: str(o["proposal"]), origin: str(o["task"]), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", announcement: str(o["announcement"]), ...(o["where"] !== undefined ? { where: str(o["where"]) ?? "" } : {}) });
+      return text(`Created Drift ${d.id} at ${d.path}${note ? `\n${note}` : ""}`, { id: d.id, path: d.path, ...(note ? { note } : {}) });
     } },
   { name: "drift list", args: "", summary: "Open Drifts (--all for every one)", options: { all: { type: "boolean" } }, run: (ctx, _a, o) => driftListView(ctx.project(), o["all"] === true) },
   { name: "drift show", args: "<id>", summary: "A Drift with its references and attached Proposal", run: (ctx, a) => driftShowView(ctx.project(), getDrift(ctx.project(), a[0] as string)) },

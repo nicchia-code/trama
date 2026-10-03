@@ -7,8 +7,10 @@ import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir
 import { takenBlocker } from "../../../src/core/design";
 import { getDrift, getTask, listTasks, moveTask, resolveDrift, staleAttachedProposal, takeBackTask } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
+import { onAnnouncementsWithdrawn } from "./announcements";
 import { agentReady, configuredSkillsDir, launchAgent, settings } from "./agent";
 import { driftBlockedMessage, REWORK_PROPOSAL } from "./drift-blocked";
+import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { resolveMarkdownFile } from "./paths";
@@ -111,9 +113,14 @@ export class Controller implements vscode.Disposable {
     watcher.onDidCreate(onChange);
     watcher.onDidChange(onChange);
     watcher.onDidDelete(onChange);
+    const subscriptions = [
+      onAnnouncementsWithdrawn((announcements) => this.post({ type: "withdrawn", announcements })),
+      onQuestionRoundChange(() => this.refresh()),
+    ];
 
     panel.onDidDispose(() => {
       watcher.dispose();
+      for (const subscription of subscriptions) subscription.dispose();
       clearTimeout(this.timer);
       this.panel = this.watcher = this.project = undefined;
     });
@@ -135,7 +142,7 @@ export class Controller implements vscode.Disposable {
   private refresh(): void {
     if (!this.project) return;
     try {
-      this.post({ type: "snapshot", snapshot: buildSnapshot(this.project) });
+      this.post({ type: "snapshot", snapshot: buildSnapshot(this.project), asking: questionRoundOpen() });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -263,7 +270,7 @@ export class Controller implements vscode.Disposable {
             validateInput: notBlank(asking.missing),
           }));
         if (request === undefined || request.trim() === "") return;
-        await launchAgent(project.root, buildPrompt({ kind: action.kind, prompt: request }));
+        await launchAgent(project.root, buildPrompt({ kind: action.kind, prompt: request }), action.kind === "design" ? request.trim() : undefined);
         return;
       }
       case "scan":
@@ -293,7 +300,7 @@ export class Controller implements vscode.Disposable {
       case "rework-drift": {
         const drift = getDrift(project, action.drift);
         const stale = staleAttachedProposal(project, drift);
-        await launchAgent(project.root, buildPrompt({ kind: "rework-drift", drift: drift.id, proposal: stale.id }));
+        await launchAgent(project.root, buildPrompt({ kind: "rework-drift", drift: drift.id, proposal: stale.id }), `Rework of Proposal ${stale.id}`);
         return;
       }
     }

@@ -83,5 +83,6 @@ export function snapshotOf(files: FileMap): Snapshot {
     proposals: [],
     drifts: [],
     tasks: [],
+    announcements: [],
   };
 }

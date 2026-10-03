@@ -4,6 +4,7 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { withdrawAll } from "../src/core/announcements";
 import { editInProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { projectAt } from "../src/core/store";
@@ -90,6 +91,7 @@ resolveDrift(p, newDrift(p, { title: "Code sends the email twice", refs: ["cart/
 const draft = newProposal(p, "Inventory checks", "The agent is still writing this change.");
 newDrift(p, { title: "Inventory Model is incomplete", refs: ["cart"], proposal: draft.id, happens: "The code checks inventory before checkout.", should: "The Model does not mention inventory checks; the attached Proposal is still being written." });
 
+withdrawAll(p); // The Drafts above made ghosts of their own; the demo starts with none.
 const snapshot = buildSnapshot(p);
 if (keep) syncInPlace(join(dir, ".trama"), join(keep, ".trama"));
 rmSync(dir, { recursive: true, force: true });

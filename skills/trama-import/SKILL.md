@@ -16,6 +16,7 @@ If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, 
 | `trama system`, `trama feature <id>`, `trama machine <id>`, `trama state <ref>`, `trama event <ref>` | `trama_view` with `ref` (no `ref` for the System) |
 | `trama requirements`, `trama requirements <area>` | `trama_view` with `ref` `requirements` or `requirements/<area>` |
 | `trama search`, `trama validate`, `trama analyze` | `trama_search`, `trama_validate`, `trama_analyze` |
+| `trama announce proposal "<title>"` | `trama_announce` with `kind: "proposal"` |
 | `trama proposal new --import [--requires <id>]` | `trama_proposal_new` with `import: true` and `requires` |
 | `trama proposal edit`, then editing the printed file | `trama_proposal_write` with the complete new file |
 | `trama proposal show` | `trama_proposal_show` |
@@ -25,6 +26,10 @@ If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, 
 There is no tool for approving, rejecting or discarding: those are the developer's decisions.
 
 A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>` (or `trama_proposal_submit`). If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` or `trama_proposal_write` again: it returns an open Proposal to Draft, so submit again when finished.
+
+## Announcing cards
+
+Once you have planned the Model (step 4), announce every Proposal you will write, each as soon as you know its title: `trama announce proposal "<title>"` (or `trama_announce`) prints an announcement ID. Pass it when you open that Proposal: `trama proposal new … --import --announcement <id>` (the `announcement` field of `trama_proposal_new`). The Board shows a ghost of each Proposal meanwhile. Never wait for a ghost to show and never skip or delay a Proposal because of it; an unknown ID is only noted in the output.
 
 ## Hard rules
 

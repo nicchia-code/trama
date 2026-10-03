@@ -381,7 +381,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 4 | In that row click → again | Badge `1/3 done`, the row's dot is `Done`; the card stays in In progress (a mix of To do and Done) | ☐ |
 | 5 | Edit any file under `$D/tasks/` from outside (see F1) | The card stays open and in place after the refresh | ☐ |
 | 6 | Try to drag the card onto another column | It cannot be dragged; nothing moves | ☐ |
-| 7 | **Run this design** | The launch prints `Use the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column, in order, one after the other. Skip the Tasks that are blocked and go on with the others, also after you file a Drift; at the end list the Tasks you skipped with the Drift that blocks each.` | ☐ |
+| 7 | **Run this design** | The launch prints `Use the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column, in order, one after the other. Stop at the first Drift you file.` | ☐ |
 | 8 | Move the other two Tasks to Done (→ twice each) | The card moves to Done, badge `3/3 done`, **Run this design** is disabled with the tooltip `No Task of this design is in To do` | ☐ |
 | 9 | Close the panel and open it again | The card is closed again | ☐ |
 | 10 | `trama --root $D board` and `trama --root $D task list` | `board` lists `Proposal 0001 "Returns after shipping" (3/3 done)` once, in Done, with the three Tasks under it and their columns; `task list` lists the three Tasks flat, each with `(Proposal 0001)` | ☐ |
@@ -401,6 +401,30 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 8 | Click **Keep this** under **WHAT SHOULD HAPPEN** on Drift 0006 | Task `0001` goes back to To do and its badges become `waiting 0010` and `blocked 0007`; clicking `waiting 0010` scrolls to the fix Task's card and focuses it | ☐ |
 | 9 | Move the fix Task `0010` to Done and click **Keep this** under **WHAT HAPPENS** on Drift 0007 | Task `0001` has no badge any more | ☐ |
 | 10 | `j --json drift show 7`, then `j drift new "x" --ref order --task 99 --happens a --should b` | The first has `"origin": null` (filed without `--task`) and the two texts; the second fails with `No Task with ID "99"` and creates nothing | ☐ |
+
+### E12. Ghosts of announced cards
+Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": "bash -c \\"sleep 600\\" {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, and reload the window so the extension reads the settings. `j` below is the verification shell's.
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Board: **Design…**, type `Add refunds after pickup`, Enter. Note the To decide count and the number on the Board tab | Within about a second a dashed, translucent skeleton appears in To decide after the last real Proposal and before the first Drift: kind `Proposal`, title `Add refunds after pickup`, the line `Preparing`, and a shimmer on its text lines | ☐ |
+| 2 | Look at the To decide count and the number on the Board tab again | Both are as in row 1: a ghost is not counted | ☐ |
+| 3 | Press Tab through the Board, then click the ghost | Focus never lands on it, the click does nothing, it has no buttons or links and cannot be dragged. Its accessible name is `Proposal the agent is creating, preparing: Add refunds after pickup` | ☐ |
+| 4 | `ls -A $D/announcements` and `cat $D/announcements/*.md`, then `T=$(sed -n 's/^terminal: //p' $D/announcements/*.md)` | `.gitignore` and one `<id>.md` with `kind: proposal`, `source: request`, a `terminal:` line with six lowercase letters and digits (kept in `$T`) and the H1 `Add refunds after pickup`; `cat $D/announcements/.gitignore` prints `*` | ☐ |
+| 5 | `j proposal new "Refunds after pickup"`; note the ID it prints, `<P>` | No note in the output. The same ghost (no second one) now reads title `Refunds after pickup` and the line `Writing` | ☐ |
+| 6 | `j proposal submit <P>` | The ghost disappears and the real card of that Proposal stands in its place; the count and the badge go up by one; no notice appears | ☐ |
+| 7 | `A=$(j announce task "Refund prepared orders")` | A ghost of kind `Task` and line `Preparing` stands in To do after the real cards, with the count of To do unchanged | ☐ |
+| 8 | `j task new "Refund prepared orders" --ref order/Refunding --announcement $A` | The ghost gives way to the real card, at the same place; `ls -A $D/announcements` shows only `.gitignore` | ☐ |
+| 9 | `j announce drift "Cart differs"` | A `Drift` ghost stands in To decide after the last real Drift. It belongs to no terminal (`terminal: null` in its file) | ☐ |
+| 10 | `j task new "Unannounced" --ref order --announcement zzzzzz` | The Task is created and the output adds `No announcement "zzzzzz" was found …`; no ghost appears or is left | ☐ |
+| 11 | `TRAMA_TERMINAL=$T j announce task "Left behind"`, then in the **Trama agent** terminal press Ctrl+C | The `Task` ghost disappears at once. At the top of the Board one notice, `The agent finished without delivering Task Left behind.`, with a **Close** button. The `Drift` ghost of row 9 stays: it belongs to no terminal | ☐ |
+| 12 | Click **Close** on the notice, switch to the Diagram tab and back | The notice is gone; closing the Trama tab and opening it again shows none | ☐ |
+| 13 | `j proposal new "Never finished"`, read the ghost, then `j proposal discard <ID it printed>` | A `Writing` ghost titled `Never finished`; after the discard it disappears and **no** notice is shown | ☐ |
+| 14 | `j announce task "Gone quiet"`, then edit its file under `$D/announcements` and set `touched` to a time 20 minutes ago, save | Within about 30 seconds the ghost disappears and the notice `The agent finished without delivering Task Gone quiet.` appears; the `Drift` ghost of row 9, which also belongs to no terminal, goes with it, with its own notice | ☐ |
+| 15 | `j announce task "Before reload"`, then Developer: Reload Window and open the Board | The ghost is not there and no notice is shown: leftovers are withdrawn at startup | ☐ |
+| 16 | Set `printf '{"trama.agentLauncher": "chat", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, reload, **Design…** with any text | The prompt goes to the chat (or the clipboard) and **no** ghost appears | ☐ |
+| 17 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with the chat launcher the ghost starts with the Draft | ☐ |
+| 18 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
+| 19 | Restore S2. ↻, drag Task 0001 onto In progress (E5) | The card dims and moves; no dashed copy of it appears in In progress at any moment | ☐ |
 
 ---
 
@@ -540,7 +564,7 @@ Each launch sends one command to the terminal named **Trama agent** (cwd = the d
 | H8 | Click **Design…** and press Esc | Nothing is printed | ☐ |
 | H9 | Diagram toolbar **Design…** | Same input box and result as H5–H7 | ☐ |
 | H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
-| H11 | Board: **Run all To do** | `Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Skip the Tasks that are blocked and go on with the others, also after you file a Drift; at the end list the Tasks you skipped with the Drift that blocks each.` | ☐ |
+| H11 | Board: **Run all To do** | `Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Stop at the first Drift you file.` | ☐ |
 | H12 | Move Task 0001 and 0002 to In progress (E5), look at **Run all To do**, then ↻ | The button is **disabled** while To do is empty | ☐ |
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
@@ -550,6 +574,9 @@ Each launch sends one command to the terminal named **Trama agent** (cwd = the d
 | H18 | Set `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, click **Scan System** | An input box `Trama: agent command`, placeholder `claude {prompt}    or    codex {prompt}`. With empty text: `Enter the command that starts your agent`. **Press Esc**: nothing is launched. (Typing a command would save it in your *user* settings.) | ☐ |
 | H19 | Restore S2. Set `printf '{"trama.agentCommand": "echo {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, approve Proposal 0001 | The Proposal is approved (G1.1, G1.4–G1.8 hold) but **no** command is sent to the terminal | ☐ |
 | H20 | Restore S2 (settings back to `echo {prompt}`) | | ☐ |
+| H21 | Set `printf '{"trama.agentCommand": "echo {prompt}", "trama.autoScan": false, "trama.language": " Italian "}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, click **Scan System** | One line, ending `Use the trama-scan skill on the whole System. Write everything you generate in Italian, except code, which always stays in English.` (the typed text is trimmed). The same ending appears after **Run all To do**, **Run** on a Task, **Design…** (after the request) and **Rework** of a stale Proposal | ☐ |
+| H22 | Change `trama.language` to `"   "` (spaces only), ↻, click **Scan System** | The line is exactly `Use the trama-scan skill on the whole System.`, with nothing about language | ☐ |
+| H23 | Restore S2 (settings back to `echo {prompt}`, no `trama.language`) | | ☐ |
 
 ---
 

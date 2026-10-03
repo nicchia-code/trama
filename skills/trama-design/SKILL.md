@@ -17,6 +17,7 @@ If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, 
 | `trama requirements`, `trama requirements <area>`, `trama requirements <ref>` | `trama_view` with `ref` `requirements`, `requirements/<area>`, or the Model `ref` |
 | `trama paths`, `trama analyze`, `trama search`, `trama validate` | `trama_paths`, `trama_analyze`, `trama_search`, `trama_validate` |
 | `trama board`, `trama task list`, `trama drift list`, `trama proposal list` | `trama_board` |
+| `trama announce <kind> "<title>"` (kind: `proposal`, `task`, `drift`) | `trama_announce` |
 | `trama proposal new` | `trama_proposal_new` |
 | `trama proposal edit`, then editing the printed file | `trama_proposal_write` with the complete new file |
 | `trama proposal delete`, `trama proposal show` | `trama_proposal_delete_file`, `trama_proposal_show` |
@@ -29,6 +30,10 @@ If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, 
 There is no tool for approving, rejecting, discarding or resolving: those are the developer's decisions.
 
 A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>` (or `trama_proposal_submit`). If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` or `trama_proposal_write` again: it returns an open Proposal to Draft, so submit again when finished.
+
+## Announcing cards
+
+When the developer asked for a design from Trama's terminal, Trama has already announced the first Proposal on the Board, so you do not announce it. When you write more Proposals after the first (a large change split into Proposals that build on each other), announce each one as soon as you know you will write it: `trama announce proposal "<title>"` (or `trama_announce`) prints an announcement ID. Pass it when you open that Proposal: `trama proposal new … --announcement <id>` (the `announcement` field of `trama_proposal_new`). The Board shows a ghost of the card meanwhile. Never wait for the ghost to show and never skip or delay a card because of it; an unknown ID is only noted in the output.
 
 ## Hard rules
 

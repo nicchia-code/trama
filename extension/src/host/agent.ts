@@ -1,11 +1,14 @@
 import * as vscode from "vscode";
+import { announce, newTerminalId, TERMINAL_ENV } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
 import { QUESTION_ENDPOINT_ENV } from "../../../src/core/question-channel";
 import { isCursor } from "./cursor";
+import { withdrawWaiting } from "./announcements";
 import { agentCommandLine, shellFamily } from "./quote";
 import { questionEndpoint } from "./questions";
+import { withLanguage } from "./prompts";
 
 const TERMINAL_NAME = "Trama agent";
 
@@ -15,6 +18,9 @@ export const configuredAgentCommand = (): string => settings().get<string>("agen
 
 /** The folder the developer chose for Trama's skills (`trama.skillsDir`), relative to the project root unless absolute. */
 export const configuredSkillsDir = (): string => settings().get<string>("skillsDir", ".agents/skills").trim() || ".agents/skills";
+
+/** The language the agent writes in (`trama.language`), as typed; empty when none is chosen. Read at every launch. */
+export const configuredLanguage = (): string => settings().get<string>("language", "").trim();
 
 /** Where the buttons send their prompt: a terminal command, or the agent chat built into the editor. */
 export const agentLauncher = (): "terminal" | "chat" => (settings().get<string>("agentLauncher", "terminal") === "chat" ? "chat" : "terminal");
@@ -51,8 +57,12 @@ let lastTerminal: vscode.Terminal | undefined;
 let lastRoot: string | undefined;
 let commandRunning = false;
 let lastQuestionEndpoint: string | undefined;
-/** Every terminal Trama started and is still open, with the project folder it was started for; any of them may end a command that had taken Tasks. */
-const launched = new Map<vscode.Terminal, string>();
+/**
+ * Every terminal Trama started and is still open: its identity (`TRAMA_TERMINAL`, kept when the terminal is reused),
+ * the project folder it was started for (any terminal may end a command that had taken Tasks) and the command line
+ * Trama last typed into it. Only the end of that command line is the agent's command ending.
+ */
+const agentTerminals = new Map<vscode.Terminal, { id: string; root: string; line: string }>();
 
 function releaseTakenTasks(root: string): void {
   try {
@@ -67,19 +77,25 @@ function releaseTakenTasks(root: string): void {
 export function watchAgentTerminal(): vscode.Disposable {
   return vscode.Disposable.from(
     vscode.window.onDidStartTerminalShellExecution((e) => {
-      if (e.terminal === lastTerminal) commandRunning = true;
+      if (e.terminal === lastTerminal && isTypedCommand(e.terminal, e.execution.commandLine.value)) commandRunning = true;
     }),
     vscode.window.onDidEndTerminalShellExecution((e) => {
-      const root = launched.get(e.terminal);
-      if (root === undefined) return;
-      if (e.terminal === lastTerminal) commandRunning = false;
+      const info = agentTerminals.get(e.terminal);
+      if (info === undefined) return;
       // A command ended in a terminal Trama started, so a Task marked as taken is released, whichever launch took it
       // (an earlier terminal may end while a later one runs: the Model releases every taken Task at once).
       // Without shell integration this event never comes, and the Tasks stay taken until the developer takes them back.
-      releaseTakenTasks(root);
+      releaseTakenTasks(info.root);
+      // Only the end of the command Trama typed counts as the agent finishing; any other command, or an end that comes
+      // without a command line, changes nothing here.
+      if (!isTypedCommand(e.terminal, e.execution.commandLine.value)) return;
+      if (e.terminal === lastTerminal) commandRunning = false;
+      withdrawWaiting(info.root, info.id);
     }),
     vscode.window.onDidCloseTerminal((t) => {
-      launched.delete(t);
+      const info = agentTerminals.get(t);
+      agentTerminals.delete(t);
+      if (info !== undefined) withdrawWaiting(info.root, info.id);
       if (t === lastTerminal) {
         lastTerminal = undefined;
         commandRunning = false;
@@ -88,11 +104,29 @@ export function watchAgentTerminal(): vscode.Disposable {
   );
 }
 
+/** Whether `commandLine`, as the terminal reported it, is the line Trama last typed into `terminal`, compared after trimming. */
+function isTypedCommand(terminal: vscode.Terminal, commandLine: string | undefined): boolean {
+  const typed = agentTerminals.get(terminal)?.line;
+  return typed !== undefined && commandLine !== undefined && commandLine.trim() === typed.trim();
+}
+
+function announceDesignRequest(root: string, title: string, terminal: string): void {
+  try {
+    announce(projectAt(root), { kind: "proposal", title, source: "request", terminal });
+  } catch (err) {
+    if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: could not announce the Proposal: ${err.message}`);
+    else throw err;
+  }
+}
+
 /**
  * Sends `prompt` to the developer's agent: the editor's chat when `trama.agentLauncher` is "chat", otherwise the
  * agent command in the "Trama agent" terminal (a new one while the last is busy), asking for the command first if none is set.
+ * `announceProposal` is the title of the Proposal a design request will make: with the terminal launcher it is announced
+ * once the instruction is sent, so the Board shows its ghost at once. The chat has no end to follow, so it announces nothing.
  */
-export async function launchAgent(root: string, prompt: string): Promise<void> {
+export async function launchAgent(root: string, instruction: string, announceProposal?: string): Promise<void> {
+  const prompt = withLanguage(instruction, configuredLanguage());
   if (agentLauncher() === "chat") return openChat(prompt);
   let template = configuredAgentCommand();
   if (template === "") {
@@ -113,12 +147,15 @@ export async function launchAgent(root: string, prompt: string): Promise<void> {
   if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
   const reusable = previous !== undefined && lastRoot === root && lastQuestionEndpoint === endpoint && previous.exitStatus === undefined && previous.shellIntegration !== undefined && !commandRunning;
   // TRAMA_AGENT makes the CLI refuse the developer's commands (approve, reject, resolve) to the agent.
-  const terminal = reusable ? previous : vscode.window.createTerminal({ name: TERMINAL_NAME, cwd: root, env: { TRAMA_AGENT: "1", [QUESTION_ENDPOINT_ENV]: endpoint } });
+  const terminalId = (reusable ? agentTerminals.get(previous)?.id : undefined) ?? newTerminalId();
+  const terminal = reusable ? previous : vscode.window.createTerminal({ name: TERMINAL_NAME, cwd: root, env: { TRAMA_AGENT: "1", [QUESTION_ENDPOINT_ENV]: endpoint, [TERMINAL_ENV]: terminalId } });
+  const line = agentCommandLine(template, prompt, shellFamily(vscode.env.shell));
+  agentTerminals.set(terminal, { id: terminalId, root, line });
   terminal.show();
-  terminal.sendText(agentCommandLine(template, prompt, shellFamily(vscode.env.shell)));
-  launched.set(terminal, root);
+  terminal.sendText(line);
   lastTerminal = terminal;
   lastRoot = root;
   lastQuestionEndpoint = endpoint;
   commandRunning = true;
+  if (announceProposal !== undefined) announceDesignRequest(root, announceProposal, terminalId);
 }

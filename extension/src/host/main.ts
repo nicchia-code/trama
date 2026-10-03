@@ -1,6 +1,7 @@
 import { delimiter, dirname } from "node:path";
 import * as vscode from "vscode";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
+import { watchAnnouncements } from "./announcements";
 import { watchAgentTerminal, configuredSkillsDir } from "./agent";
 import { Controller, describeError } from "./controller";
 import { isCursor } from "./cursor";
@@ -52,6 +53,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("trama.import", guarded(() => trama.launch({ kind: "import" }))),
     vscode.commands.registerCommand("trama.updateSkills", guarded(async () => trama.updateSkills())),
     watchAgentTerminal(),
+    watchAnnouncements(() => findProject()?.root),
     questions,
     registerTramaTools(findProject, questions.ask),
     watchRequirements(),

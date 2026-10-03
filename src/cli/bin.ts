@@ -1,4 +1,5 @@
 // The `trama` executable. Kept apart from main.ts, which the extension bundles as a library.
+import { terminalFromEnv } from "../core/announcements";
 import { TramaError, UsageError } from "../core/errors";
 import { questionAborted, questionFailure } from "../core/questions";
 import { serveMcp } from "../tools/mcp";
@@ -11,7 +12,7 @@ try {
   const selected = asyncCommand(argv);
   if (selected?.command === "mcp") {
     const context = makeContext(process.cwd(), selected.root);
-    await serveMcp(() => context.project(), VERSION);
+    await serveMcp(() => context.project(), VERSION, undefined, undefined, { terminal: terminalFromEnv(process.env) });
     process.exit(0);
   }
   if (selected?.command === "ask") {

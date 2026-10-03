@@ -1,3 +1,4 @@
+import { type Announcement, type AnnouncementKind, listAnnouncements } from "./announcements";
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
 import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type ProposalKind } from "./proposals";
@@ -108,11 +109,23 @@ export interface TaskView {
   file: string;
 }
 
+/** A card the agent is about to create, drawn as a ghost in the column it will land in. */
+export interface AnnouncementView {
+  id: string;
+  kind: AnnouncementKind;
+  /** The Draft's own title once a Draft is bound to it, the announced title before. */
+  title: string;
+  /** Preparing until a Draft exists, Writing once it does. */
+  phase: "preparing" | "writing";
+}
+
 export interface Snapshot extends ModelView {
   diagnostics: Diagnostic[];
   proposals: ProposalView[];
   drifts: DriftView[];
   tasks: TaskView[];
+  /** The announcements that still exist, in the order they were announced. */
+  announcements: AnnouncementView[];
 }
 
 function actorChange(id: string, before: Actor | undefined, after: Actor | undefined): ActorChange {
@@ -249,7 +262,13 @@ export function buildSnapshot(p: Project): Snapshot {
       blockedBy: blocked.get(t.id) ?? [],
       file: `tasks/${t.name}`,
     })),
+    announcements: listAnnouncements(p).map((a) => announcementView(a, a.proposal === null ? undefined : proposalById.get(a.proposal)?.title)),
   };
+}
+
+/** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. */
+export function announcementView(a: Announcement, proposalTitle: string | undefined): AnnouncementView {
+  return { id: a.id, kind: a.kind, title: proposalTitle || a.title, phase: a.proposal === null ? "preparing" : "writing" };
 }
 
 /** The title is shown separately, so the body drops its leading H1. */

@@ -272,6 +272,28 @@ A Drift is not part of the Model, so it may name code, but only where it helps. 
 - Whether a Task is **blocked** is never stored: it is worked out from the Drifts, the Tasks and their `refs` whenever it is asked. An open Drift blocks its origin Task and every Task that is not Done and concerns the same thing, that is, when a reference of one is the same as, or inside, a reference of the other (a Machine contains its States and Transitions, a Feature its Machines; a Requirement section of an element counts as that element; the General section of an Area only equals itself). A Drift resolved as `fix-code` leaves its origin Task, if not Done, waiting for the fix Task (the Drift's `task`) until that Task is Done. A Done Task is never blocked.
 - The agent cannot move a blocked Task to `doing`; the developer can move it, and a blocked Task already in `doing` stays there.
 
+## Announcement
+
+`announcements/<id>.md`: a card the agent is about to create, kept only so the Board can show a ghost of it. It is temporary, not project information: nothing decides on it, it is not counted among what awaits a decision, and it ceases to exist as soon as the card arrives or the agent's work is over without it.
+
+```markdown
+---
+kind: proposal          # proposal | task | drift
+source: agent           # agent | request (announced by Trama when a design request was sent)
+proposal: "0021"        # the Draft bound to it; absent until the Draft exists
+terminal: ab12cd        # the agent terminal it belongs to; none when there is none
+created: 2026-01-01T12:00:00.000Z
+touched: 2026-01-01T12:03:10.000Z
+---
+# Refunds after shipping
+```
+
+- The ID is the file name: six random lowercase letters and digits. `created` orders the ghosts as they were announced and is always later than the previous announcement's; `touched` is when the agent last did something about an announced card.
+- The title is the H1. Once a Draft is bound to it, the ghost shows the Draft's own title instead.
+- An announcement with no Draft is **Preparing**, with one it is **Writing**; both are shown as ghosts. A file that cannot be read is skipped, not reported.
+- `terminal` is the ID (six lowercase letters and digits) the extension gives each agent terminal it starts, in the `TRAMA_TERMINAL` environment variable. Only that terminal's command ending or closing withdraws the announcement; without a terminal (announced from the chat or by an agent Trama did not start, or written before the field existed, which has no `terminal` line) only the quiet period and the editor starting up do.
+- The folder holds a `.gitignore` that ignores everything in it, written with the first announcement, so announcements are never versioned.
+
 ## Requirements
 
 `requirements/<area>.md`: how the System must be built, beside the Model (ADR 0007). `trama init` creates five empty Areas: `ui`, `tech`, `quality`, `data` and `rules`. Add, split or delete Areas freely.

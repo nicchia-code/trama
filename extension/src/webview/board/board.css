@@ -77,8 +77,6 @@
 .board-card.is-dragging { opacity: .5; }
 .board-card.is-pending { opacity: .5; }
 .board-design-task.is-pending { opacity: .5; }
-/* The ghost of a Task being moved: where it is going to be, until the real card arrives. */
-.board-card.is-ghost { opacity: .5; border-style: dashed; pointer-events: none; user-select: none; }
 
 /* A design card: its Tasks as a list, told apart by a dot (colour plus an accessible name). */
 .board-design-tasks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
@@ -150,3 +148,25 @@ button.board-move { padding: 0 6px; line-height: 18px; min-width: 24px; }
 
 .board-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 button.board-btn { padding: 2px 8px; }
+
+/* The ghost of a card the agent is about to create: a dashed, translucent skeleton that cannot be used. */
+.board-announced { opacity: .7; border-style: dashed; pointer-events: none; user-select: none; }
+.board-skeleton { display: flex; flex-direction: column; gap: 6px; }
+.board-skeleton-line {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, color-mix(in srgb, currentColor 10%, transparent) 25%, color-mix(in srgb, currentColor 28%, transparent) 50%, color-mix(in srgb, currentColor 10%, transparent) 75%);
+  background-size: 200% 100%;
+  animation: board-shimmer 1.4s linear infinite;
+}
+.board-skeleton-line.is-short { width: 60%; }
+@keyframes board-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .board-skeleton-line { animation: none; } }
+.board-announced-phase { font-size: 12px; font-style: italic; color: var(--board-muted); }
+
+/* What the developer is told when an announced card never came. */
+.board-notices { display: flex; flex-direction: column; gap: 4px; padding: 0 12px; }
+.board-notices:empty { display: none; }
+.board-notice { display: flex; align-items: center; gap: 8px; justify-content: space-between; margin-top: 6px; padding: 4px 8px; border: 1px solid var(--board-warning); border-radius: 3px; background: color-mix(in srgb, var(--board-warning) 18%, transparent); }
+.board-notice-text { overflow-wrap: anywhere; }

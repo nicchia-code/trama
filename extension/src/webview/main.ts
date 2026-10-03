@@ -87,13 +87,15 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     snapshot = message.snapshot;
     showError(null);
     mounted.diagram.update(snapshot);
-    mounted.board.update(snapshot);
+    mounted.board.update(snapshot, message.asking);
     mounted.requirements.update(snapshot);
     showModelErrors(snapshot.diagnostics);
     const decide = snapshot.proposals.length + snapshot.drifts.length;
     const badge = app.querySelector("[data-badge]") as HTMLElement;
     badge.hidden = decide === 0;
     badge.textContent = String(decide);
+  } else if (message.type === "withdrawn") {
+    mounted.board.withdrawn?.(message.announcements);
   } else if (message.type === "error") {
     showError(message.message);
     for (const view of Object.values(mounted)) view.fail?.();

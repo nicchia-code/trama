@@ -1,8 +1,8 @@
-import type { Snapshot } from "../../../../src/core/snapshot";
+import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
 import type { MountView } from "../types";
 import css from "./board.css" with { type: "text" };
-import { buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, dropTarget, ghostFor, runAllBlocker, type TaskCard } from "./logic";
-import { type CardEnv, renderCard, renderGhost, setDesignPending, setPending } from "./render";
+import { announcedGhosts, buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, dropTarget, interleave, runAllBlocker, type TaskCard, withdrawnNotice } from "./logic";
+import { type CardEnv, renderAnnounced, renderCard, setDesignPending, setPending } from "./render";
 
 /** The host answers a move with a snapshot, or with an error that releases the dimmed cards at once; if neither comes, they are released after this long. */
 const PENDING_TIMEOUT_MS = 5000;
@@ -31,8 +31,10 @@ export const mountBoard: MountView = (root, context) => {
   const toolbar = el("div", "board-toolbar");
   toolbar.setAttribute("role", "toolbar");
   toolbar.setAttribute("aria-label", "Board actions");
+  const noticesEl = el("div", "board-notices");
+  noticesEl.setAttribute("role", "status");
   const columnsEl = el("div", "board-columns");
-  board.append(toolbar, columnsEl);
+  board.append(toolbar, noticesEl, columnsEl);
   root.append(board);
 
   const toolbarButton = (label: string, onClick: () => void, primary = false) => {
@@ -52,6 +54,11 @@ export const mountBoard: MountView = (root, context) => {
   const pending = new Map<string, TaskCard["column"]>();
   let pendingTimer: number | undefined;
   let snapshot: Snapshot | null = null;
+  /** Whether a question round is open: the ghosts then say the agent waits for the developer's answers. */
+  let asking = false;
+  /** What the developer was told about announced cards the agent never delivered; kept until closed, or until the panel closes. */
+  const notices: { id: number; text: string }[] = [];
+  let nextNotice = 0;
   /** Design cards the developer left open. Kept while the panel lives, so a refresh does not close them. */
   const expanded = new Set<string>();
 
@@ -127,7 +134,7 @@ export const mountBoard: MountView = (root, context) => {
   }
 
   const cache = new Map<string, { signature: string; node: HTMLElement }>();
-  const ghosts = new Map<string, { signature: string; node: HTMLElement }>();
+  const announced = new Map<string, { signature: string; node: HTMLElement }>();
 
   function render() {
     if (snapshot === null) return;
@@ -135,22 +142,10 @@ export const mountBoard: MountView = (root, context) => {
     const focused = active instanceof HTMLElement && board.contains(active) ? { key: active.closest<HTMLElement>("[data-key]")?.dataset["key"], action: active.dataset["action"] } : null;
 
     const live = new Set<string>();
-    const liveGhosts = new Set<string>();
-    const ghostsByColumn = new Map<ColumnId, { node: HTMLElement; index: number }[]>();
-    for (const [id, target] of pending) {
-      const ghost = ghostFor(snapshot, id, target);
-      if (ghost === null) continue;
-      liveGhosts.add(id);
-      const signature = JSON.stringify(ghost.card);
-      let entry = ghosts.get(id);
-      if (entry?.signature !== signature) {
-        entry = { signature, node: renderGhost(ghost.card) };
-        ghosts.set(id, entry);
-      }
-      ghostsByColumn.set(target, [...(ghostsByColumn.get(target) ?? []), { node: entry.node, index: ghost.index }]);
-    }
-    for (const id of ghosts.keys()) if (!liveGhosts.has(id)) ghosts.delete(id);
-    for (const column of buildBoard(snapshot)) {
+    const columns = buildBoard(snapshot);
+    const placedGhosts = announcedGhosts(columns, snapshot.announcements, asking);
+    const liveAnnounced = new Set<string>();
+    for (const column of columns) {
       const part = parts[column.id];
       part.count.textContent = String(column.cards.length);
       part.hint.textContent = column.hint;
@@ -166,9 +161,20 @@ export const mountBoard: MountView = (root, context) => {
         if (card.kind === "design") setDesignPending(entry.node, pending);
         return entry.node;
       });
-      // The count stays that of the real cards. A ghost stands at the place its Task will have among them.
-      for (const ghost of [...(ghostsByColumn.get(column.id) ?? [])].sort((a, b) => a.index - b.index)) nodes.splice(ghost.index, 0, ghost.node);
-      reconcile(part.body, nodes.length > 0 ? nodes : [part.hint]);
+      const withAnnounced = interleave(
+        nodes,
+        placedGhosts[column.id].map((g) => {
+          liveAnnounced.add(g.card.key);
+          const signature = JSON.stringify(g.card);
+          let entry = announced.get(g.card.key);
+          if (entry?.signature !== signature) {
+            entry = { signature, node: renderAnnounced(g.card) };
+            announced.set(g.card.key, entry);
+          }
+          return { item: entry.node, index: g.index };
+        }),
+      );
+      reconcile(part.body, withAnnounced.length > 0 ? withAnnounced : [part.hint]);
     }
     // Run all To do covers the Tasks inside design cards too, which may stand in another column.
     const blocker = runAllBlocker(snapshot.tasks);
@@ -177,6 +183,7 @@ export const mountBoard: MountView = (root, context) => {
     if (blocker === null) runAll.removeAttribute("aria-description");
     else runAll.setAttribute("aria-description", blocker);
     for (const key of cache.keys()) if (!live.has(key)) cache.delete(key);
+    for (const key of announced.keys()) if (!liveAnnounced.has(key)) announced.delete(key);
 
     if (focused?.key !== undefined && (document.activeElement === document.body || document.activeElement === null)) {
       const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === focused.key);
@@ -187,9 +194,27 @@ export const mountBoard: MountView = (root, context) => {
     }
   }
 
+  function renderNotices() {
+    noticesEl.replaceChildren(
+      ...notices.map((notice) => {
+        const row = el("div", "board-notice");
+        const close = el("button", "trama-btn board-btn board-notice-close", "Close");
+        close.type = "button";
+        close.setAttribute("aria-label", `Close the notice: ${notice.text}`);
+        close.addEventListener("click", () => {
+          notices.splice(notices.findIndex((n) => n.id === notice.id), 1);
+          renderNotices();
+        });
+        row.append(el("span", "board-notice-text", notice.text), close);
+        return row;
+      }),
+    );
+  }
+
   return {
-    update(next) {
+    update(next, isAsking = false) {
       snapshot = next;
+      asking = isAsking;
       pending.clear();
       clearTimeout(pendingTimer);
       render();
@@ -198,6 +223,10 @@ export const mountBoard: MountView = (root, context) => {
       pending.clear();
       clearTimeout(pendingTimer);
       render();
+    },
+    withdrawn(gone: AnnouncementView[]) {
+      for (const a of gone) notices.push({ id: nextNotice++, text: withdrawnNotice(a) });
+      renderNotices();
     },
     show() {},
   };

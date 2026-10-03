@@ -3,6 +3,7 @@ import { analyzeView, eventView, featureView, machineView, pathsView, searchView
 import { requirementsView, withRequirements } from "../cli/requirements";
 import type { Result } from "../cli/result";
 import { boardView, driftShowView, proposalShowView, taskShowView } from "../cli/work";
+import { ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote } from "../core/announcements";
 import { TramaError, UsageError } from "../core/errors";
 import { askEditor } from "../core/question-channel";
 import { parseQuestionRequest, QUESTION_SCHEMA, questionFailure, type QuestionContext, type QuestionHandler } from "../core/questions";
@@ -39,6 +40,8 @@ export interface ToolOutcome {
 export interface ToolOptions {
   questionHandler?: QuestionHandler;
   context?: QuestionContext;
+  /** The agent terminal the calling agent runs in (`TRAMA_TERMINAL`), so the cards it announces belong to it. */
+  terminal?: string;
 }
 
 const string = (description: string) => ({ type: "string", description });
@@ -165,6 +168,27 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   {
+    name: "trama_announce",
+    title: "Announce a card you are about to create",
+    description: "Say that you are about to create a Proposal, a Task or a Drift, as soon as you know it, so the developer's Board shows a ghost of it meanwhile. Returns an announcement ID: pass it as `announcement` when you create that card (trama_proposal_new, trama_task_new, trama_drift_new). Never wait for the ghost to show, and never skip creating the card because of it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["proposal", "task", "drift"], description: "What kind of card is coming" },
+        title: string("The title the card will have"),
+      },
+      required: ["kind", "title"],
+      additionalProperties: false,
+    },
+    writes: true,
+    run: (p, i, o) => {
+      const kind = text(i, "kind");
+      if (!(ANNOUNCEMENT_KINDS as readonly string[]).includes(kind)) throw new UsageError(`"kind" must be one of ${ANNOUNCEMENT_KINDS.join(", ")}`);
+      const a = announce(p, { kind: kind as AnnouncementKind, title: text(i, "title"), ...(o.terminal ? { terminal: o.terminal } : {}) });
+      return `Announced a ${a.kind}: announcement ${a.id}. Pass it as "announcement" when you create the card.`;
+    },
+  },
+  {
     name: "trama_proposal_new",
     title: "Create a Draft Proposal",
     description: "Creates a Draft Proposal: the only way to change the Model or its Requirements. Write each changed Model or Requirement file with trama_proposal_write, then validate, review the changes and hand it over with trama_proposal_submit when finished. Only the developer can approve it after submission. A large change can be split into Proposals that build on each other: list the earlier ones in `requires`; this one is written and validated on top of them and can only be approved after them.",
@@ -175,14 +199,16 @@ export const TOOLS: ToolSpec[] = [
         body: string("Why the change is needed"),
         requires: stringList("IDs of Draft, open or approved Proposals this one builds on"),
         import: { type: "boolean", description: "True when the Proposal describes existing code (trama-import skill); approving it starts no Scan" },
+        announcement: string("ID given by trama_announce for this Proposal, if you announced it"),
       },
       required: ["title"],
       additionalProperties: false,
     },
     writes: true,
-    run: (p, i) => {
-      const proposal = newProposal(p, text(i, "title"), optionalText(i, "body") ?? "", { requires: texts(i, "requires"), kind: i["import"] === true ? "import" : "change" });
-      return `Created Draft Proposal ${proposal.id}${proposal.data.requires.length > 0 ? ` on top of ${proposal.data.requires.join(", ")}` : ""}. Write each new or changed Model or Requirement file with trama_proposal_write, then hand it over with trama_proposal_submit when finished.`;
+    run: (p, i, o) => {
+      const note = announcementNote(p, optionalText(i, "announcement"), "proposal");
+      const proposal = newProposal(p, text(i, "title"), optionalText(i, "body") ?? "", { requires: texts(i, "requires"), kind: i["import"] === true ? "import" : "change", announcement: optionalText(i, "announcement"), terminal: o.terminal });
+      return `Created Draft Proposal ${proposal.id}${proposal.data.requires.length > 0 ? ` on top of ${proposal.data.requires.join(", ")}` : ""}. Write each new or changed Model or Requirement file with trama_proposal_write, then hand it over with trama_proposal_submit when finished.${note ? ` ${note}` : ""}`;
     },
   },
   {
@@ -254,14 +280,16 @@ export const TOOLS: ToolSpec[] = [
         drift: string("ID of the Drift this Task resolves, if any"),
         proposal: string("ID of the Proposal (the design) this Task comes from, when you file it after that Proposal was approved; it must exist"),
         body: string("What must be true when done, in domain words"),
+        announcement: string("ID given by trama_announce for this Task, if you announced it"),
       },
       required: ["title"],
       additionalProperties: false,
     },
     writes: true,
     run: (p, i) => {
-      const t = newTask(p, { title: text(i, "title"), refs: texts(i, "refs"), technical: i["technical"] === true, drift: optionalText(i, "drift"), proposal: optionalText(i, "proposal"), body: optionalText(i, "body") });
-      return `Created Task ${t.id}.`;
+      const note = announcementNote(p, optionalText(i, "announcement"), "task");
+      const t = newTask(p, { title: text(i, "title"), refs: texts(i, "refs"), technical: i["technical"] === true, drift: optionalText(i, "drift"), proposal: optionalText(i, "proposal"), body: optionalText(i, "body"), announcement: optionalText(i, "announcement") });
+      return `Created Task ${t.id}.${note ? ` ${note}` : ""}`;
     },
   },
   {
@@ -297,14 +325,16 @@ export const TOOLS: ToolSpec[] = [
         happens: string("What happens: what the code does, in terms of behaviour and domain words, for a programmer reading at a glance. Short Markdown, about 100 words. Name a variable, function, class, field or file only when the difference cannot be understood without it, as inline code; code locations go in `where`"),
         should: string("What should happen: what the Model or the Requirement says, in the same style"),
         where: string("Optional: where in the code the difference was seen (files, and the code element when it helps; no line numbers, no long code). The only place for code locations"),
+        announcement: string("ID given by trama_announce for this Drift, if you announced it"),
       },
       required: ["title", "refs", "happens", "should"],
       additionalProperties: false,
     },
     writes: true,
     run: (p, i) => {
-      const d = newDrift(p, { title: text(i, "title"), refs: texts(i, "refs"), proposal: optionalText(i, "proposal"), origin: optionalText(i, "task"), happens: text(i, "happens"), should: text(i, "should"), ...(i["where"] != null ? { where: text(i, "where") } : {}) });
-      return `Recorded Drift ${d.id}. The developer will decide on it.`;
+      const note = announcementNote(p, optionalText(i, "announcement"), "drift");
+      const d = newDrift(p, { title: text(i, "title"), refs: texts(i, "refs"), proposal: optionalText(i, "proposal"), origin: optionalText(i, "task"), happens: text(i, "happens"), should: text(i, "should"), announcement: optionalText(i, "announcement"), ...(i["where"] != null ? { where: text(i, "where") } : {}) });
+      return `Recorded Drift ${d.id}. The developer will decide on it.${note ? ` ${note}` : ""}`;
     },
   },
   {

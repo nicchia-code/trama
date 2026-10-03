@@ -60,6 +60,8 @@ export async function handleMcp(message: unknown, project: () => Project, versio
 
 export interface McpOptions {
   questionHandler?: QuestionHandler;
+  /** The agent terminal the server's agent runs in (`TRAMA_TERMINAL`). */
+  terminal?: string;
   output?: NodeJS.WritableStream;
 }
 
@@ -109,7 +111,7 @@ export async function serveMcp(project: () => Project, version: string, input: N
       const controller = new AbortController();
       const id = req?.id ?? null;
       if (req && "id" in req) pending.set(id, controller);
-      void handleMcp(message, project, version, { questionHandler: options.questionHandler, context: { agent, signal: controller.signal } })
+      void handleMcp(message, project, version, { questionHandler: options.questionHandler, terminal: options.terminal, context: { agent, signal: controller.signal } })
         .then((response) => { if (response) reply(response); })
         .catch((error: unknown) => { reply(fail(id, -32603, error instanceof Error ? error.message : String(error))); })
         .finally(() => { if (pending.get(id) === controller) pending.delete(id); });

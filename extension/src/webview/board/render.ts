@@ -1,6 +1,6 @@
 // DOM builders for Board cards. Every piece of data goes in through textContent, never innerHTML.
 import type { ViewContext } from "../types";
-import type { Badge, BlockBadge, Card, DesignCard, DriftCard, ProposalCard, TaskCard } from "./logic";
+import type { AnnouncedCard, Badge, BlockBadge, Card, DesignCard, DriftCard, ProposalCard, TaskCard } from "./logic";
 import { AGENT_WORKING, COLUMN_TITLES, designRunBlocker } from "./logic";
 import { renderDriftCompare } from "../drift-compare";
 import { renderMarkdown } from "../markdown";
@@ -327,15 +327,20 @@ export function setDesignPending(node: HTMLElement, pending: { has(id: string): 
 }
 
 /**
- * The ghost of a Task being moved: a translucent, dashed copy of its card in the destination column. It is not
- * focusable, draggable or clickable and is hidden from assistive technology; the busy mark is on the original card.
+ * The ghost of a card the agent is about to create: a skeleton with the card's kind, its title and what the agent is
+ * doing about it. It is not focusable, draggable or clickable and has no buttons or links; its accessible name says
+ * the kind, the title and the phase, and its children are hidden from assistive technology.
  */
-export function renderGhost(card: TaskCard): HTMLElement {
-  const node = el("article", "board-card board-card-task is-ghost");
-  node.setAttribute("aria-hidden", "true");
-  const top = head(card.id);
-  top.prepend(statusDot(card));
-  node.append(top, el("h3", "board-card-title", card.title));
+export function renderAnnounced(card: AnnouncedCard): HTMLElement {
+  const node = el("div", `board-card board-announced board-card-${card.kind}`);
+  node.dataset["key"] = card.key;
+  node.setAttribute("role", "img");
+  node.setAttribute("aria-label", card.label);
+  const top = el("div", "board-card-head");
+  top.append(el("span", "board-card-kind", card.kindLabel));
+  const lines = el("div", "board-skeleton");
+  lines.append(el("span", "board-skeleton-line"), el("span", "board-skeleton-line is-short"));
+  node.append(top, el("div", "board-card-title", card.title), lines, el("div", "board-announced-phase", card.phase));
   return node;
 }
 

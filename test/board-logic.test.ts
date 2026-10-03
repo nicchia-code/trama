@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
-import type { DriftView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { approveBlocker, blockBadge, buildBoard, designRunBlocker, dropTarget, formatCounts, ghostFor, neighbour, proposalBadges, runAllBlocker, summarizeChanges, summarizeFile } from "../extension/src/webview/board/logic";
+import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
+import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, designRunBlocker, dropTarget, formatCounts, interleave, neighbour, proposalBadges, runAllBlocker, summarizeChanges, summarizeFile, withdrawnNotice } from "../extension/src/webview/board/logic";
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "0007",
@@ -21,7 +21,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
 });
 const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, requirementsOnly: false, proposalBlock: null, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
-const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], ...over });
+const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], announcements: [], ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
 
 test("groups the snapshot into four columns, Proposals before Drifts in To decide", () => {
@@ -193,28 +193,45 @@ test("a blocked Task, alone or inside a design, gets one badge per blocker that 
   expect(card?.kind === "task" && [card.left, card.right]).toEqual([null, "doing"]);
 });
 
-test("a moving Task's ghost stands where it will sit among the destination column's cards, in Task order", () => {
-  const snap = snapshot({
-    tasks: [task({ id: "0001", column: "doing" }), task({ id: "0002", column: "todo" }), task({ id: "0003", column: "doing" }), task({ id: "0004", column: "doing" })],
-  });
-  const ghost = ghostFor(snap, "0002", "doing");
-  expect(ghost?.index).toBe(1);
-  expect(ghost?.card.column).toBe("doing");
-  expect(ghostFor(snap, "0002", "done")?.index).toBe(0);
+const announcement = (over: Partial<AnnouncementView> = {}): AnnouncementView => ({ id: "abc123", kind: "proposal", title: "Refunds", phase: "preparing", ...over });
+
+test("announced ghosts stand in the column their card will land in, after the real cards of their kind, Proposals before Drifts", () => {
+  const columns = buildBoard(
+    snapshot({
+      proposals: [proposal({ id: "0007" })],
+      drifts: [drift({ id: "0003" })],
+      tasks: [task({ id: "0001", column: "todo" }), task({ id: "0002", column: "done" })],
+    }),
+  );
+  const placed = announcedGhosts(
+    columns,
+    [announcement({ id: "d00001", kind: "drift", title: "A Drift" }), announcement({ id: "t00001", kind: "task", title: "A Task" }), announcement({ id: "p00001", title: "A Proposal" })],
+    false,
+  );
+  expect(placed.decide.map((g) => [g.card.title, g.index])).toEqual([["A Proposal", 1], ["A Drift", 2]]);
+  expect(placed.todo.map((g) => [g.card.title, g.index])).toEqual([["A Task", 1]]);
+  expect(placed.doing).toEqual([]);
+  expect(placed.done).toEqual([]);
 });
 
-test("a Task inside a design card, one already in the column or an unknown one gets no ghost", () => {
-  const snap = snapshot({
-    tasks: [task({ id: "0001", proposal: "0016" }), task({ id: "0002", proposal: "0016" }), task({ id: "0003", column: "doing" })],
-  });
-  expect(ghostFor(snap, "0001", "doing")).toBeNull();
-  expect(ghostFor(snap, "0003", "doing")).toBeNull();
-  expect(ghostFor(snap, "9999", "doing")).toBeNull();
+test("interleaving puts each ghost before the real card at its index, keeping the order of ghosts that share one", () => {
+  expect(interleave(["p1", "p2", "d1"], [{ item: "ghost-d", index: 3 }, { item: "ghost-p", index: 2 }, { item: "ghost-p2", index: 2 }])).toEqual(["p1", "p2", "ghost-p", "ghost-p2", "d1", "ghost-d"]);
+  expect(interleave([], [{ item: "only", index: 0 }])).toEqual(["only"]);
 });
 
-test("a design card in the destination column counts as one card when placing the ghost", () => {
-  const snap = snapshot({
-    tasks: [task({ id: "0001", column: "doing", proposal: "0016" }), task({ id: "0002", column: "doing", proposal: "0016" }), task({ id: "0003", column: "todo" }), task({ id: "0004", column: "doing" })],
-  });
-  expect(ghostFor(snap, "0003", "doing")?.index).toBe(1);
+test("a ghost says Preparing, Writing, or that the agent waits for the answers while a question round is open, and its name tells kind, title and phase", () => {
+  expect(announcedCard(announcement(), false).phase).toBe("Preparing");
+  expect(announcedCard(announcement({ phase: "writing" }), false).phase).toBe("Writing");
+  const waiting = announcedCard(announcement({ phase: "writing" }), true);
+  expect(waiting.phase).toBe("Waiting for your answers");
+  expect(waiting.label).toBe("Proposal the agent is creating, waiting for your answers: Refunds");
+});
+
+test("the notice of a withdrawn announcement names its kind and title", () => {
+  expect(withdrawnNotice(announcement({ kind: "task", title: "Refunds" }))).toBe("The agent finished without delivering Task Refunds.");
+});
+
+test("ghosts are not cards: the columns and what awaits a decision ignore them", () => {
+  const snap = snapshot({ announcements: [announcement(), announcement({ id: "t00001", kind: "task" })] });
+  expect(buildBoard(snap).map((c) => c.cards.length)).toEqual([0, 0, 0, 0]);
 });

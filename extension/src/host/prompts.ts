@@ -21,9 +21,9 @@ export function buildPrompt(action: ResolvedAction): string {
     case "implement":
       return `Use the trama-implement skill on Task ${action.task}.`;
     case "implement-all":
-      return 'Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Skip the Tasks that are blocked and go on with the others, also after you file a Drift; at the end list the Tasks you skipped with the Drift that blocks each.';
+      return 'Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Stop at the first Drift you file.';
     case "implement-design":
-      return `Use the trama-implement skill on every Task of Proposal ${action.proposal} that is in the "todo" column, in order, one after the other. Skip the Tasks that are blocked and go on with the others, also after you file a Drift; at the end list the Tasks you skipped with the Drift that blocks each.`;
+      return `Use the trama-implement skill on every Task of Proposal ${action.proposal} that is in the "todo" column, in order, one after the other. Stop at the first Drift you file.`;
     case "import":
       return "Use the trama-import skill on this repository.";
   }
@@ -39,4 +39,13 @@ export function buildScanPrompt(features: string[], proposal?: string): string {
       ? "Use the trama-scan skill on the whole System."
       : `Use the trama-scan skill on the ${features.length === 1 ? "Feature" : "Features"} ${features.map((f) => `\`${f}\``).join(", ")}.`;
   return proposal === undefined ? scope : `${scope} The scan follows the approval of Proposal ${proposal}: link every Task you file to it with --proposal ${proposal}.`;
+}
+
+/**
+ * Ends an instruction with the request to write in `language` (`trama.language`), on the same line. Empty or blank text
+ * asks nothing, so the instruction is exactly as built. The language is used trimmed, as typed.
+ */
+export function withLanguage(prompt: string, language: string): string {
+  const typed = language.trim();
+  return typed === "" ? prompt : `${prompt} Write everything you generate in ${typed}, except code, which always stays in English.`;
 }

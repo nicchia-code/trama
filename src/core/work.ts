@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { deliverCard } from "./announcements";
 import { type Blocker, computeBlocked, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
 import { approveProposal, getProposal, health, type Proposal, rejectProposal } from "./proposals";
@@ -122,7 +123,7 @@ export function getTask(p: Project, id: string): Task {
 
 export function newTask(
   p: Project,
-  input: { title: string; refs: string[]; technical: boolean; drift?: string; proposal?: string; body?: string },
+  input: { title: string; refs: string[]; technical: boolean; drift?: string; proposal?: string; body?: string; announcement?: string },
 ): Task {
   checkTaskRefs(input.technical, input.refs);
   checkRefs(p, input.refs);
@@ -131,7 +132,9 @@ export function newTask(
   const linked = input.proposal ? getProposal(p, input.proposal).id : null;
   const proposal = input.technical ? null : linked;
   const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift, proposal, agent: false };
-  return create(tasksDir(p), input.title, data, input.body ?? "");
+  const task = create(tasksDir(p), input.title, data, input.body ?? "");
+  deliverCard(p, input.announcement, "task");
+  return task;
 }
 
 /** The blocked Tasks and why, by Task ID, worked out from the Drifts and Tasks as they are now. */
@@ -219,7 +222,7 @@ export function driftSides(drift: Drift): DriftSides | null {
 
 export function newDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; happens: string; should: string; where?: string },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; happens: string; should: string; where?: string; announcement?: string },
 ): Drift {
   if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with --ref");
   const happens = input.happens.trim();
@@ -233,7 +236,9 @@ export function newDrift(
   const origin = input.origin ? getTask(p, input.origin).id : null;
   const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin };
   const sections = [`## ${HAPPENS_HEADING}\n\n${happens}`, `## ${SHOULD_HEADING}\n\n${should}`, ...(where ? [`## ${WHERE_HEADING}\n\n${where}`] : [])];
-  return create(driftsDir(p), input.title, data, sections.join("\n\n"));
+  const drift = create(driftsDir(p), input.title, data, sections.join("\n\n"));
+  deliverCard(p, input.announcement, "drift");
+  return drift;
 }
 
 export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-proposal" | "dismiss", skillsDirs: string[] = []): Drift {

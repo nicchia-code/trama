@@ -3,6 +3,7 @@ import { createQuestionServer, questionProjectId, type QuestionServer } from "..
 import { QuestionRoundQueue } from "../../../src/core/question-rounds";
 import { unavailableQuestions, type QuestionHandler } from "../../../src/core/questions";
 import { projectAt, type Project } from "../../../src/core/store";
+import { trackRound } from "./question-activity";
 import { presentQuestionRound } from "./question-ui";
 
 interface WindowRoundService {
@@ -77,7 +78,7 @@ export class EditorQuestions implements vscode.Disposable {
     const current = this.service;
     if (current && current.identity === identity) return current;
     this.closeService();
-    const queue = new QuestionRoundQueue(presentQuestionRound);
+    const queue = new QuestionRoundQueue(trackRound(presentQuestionRound));
     const service: WindowRoundService = {
       identity, queue,
       server: createQuestionServer({

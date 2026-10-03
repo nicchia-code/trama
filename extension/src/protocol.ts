@@ -1,4 +1,4 @@
-import type { Snapshot } from "../../src/core/snapshot";
+import type { AnnouncementView, Snapshot } from "../../src/core/snapshot";
 
 export type Column = "todo" | "doing" | "done";
 
@@ -11,9 +11,9 @@ export type AgentAction =
   /** `feature` absent: the whole System. */
   | { kind: "scan"; feature?: string }
   | { kind: "implement"; task: string }
-  /** Every Task in "todo", in order; the agent skips the Tasks that are blocked and goes on after a Drift. */
+  /** Every Task in "todo", in order; the agent stops at the first Drift it files. */
   | { kind: "implement-all" }
-  /** The Tasks of one design (Proposal) still in "todo", in order; the agent skips the Tasks that are blocked and goes on after a Drift. */
+  /** The Tasks of one design (Proposal) still in "todo", in order; the agent stops at the first Drift it files. */
   | { kind: "implement-design"; proposal: string }
   /** Describe the existing code as Proposals for the Model; the agent asks its own questions. */
   | { kind: "import" }
@@ -53,7 +53,10 @@ export interface NavigateOptions {
 
 /** Host -> webview. */
 export type ToWebview =
-  | { type: "snapshot"; snapshot: Snapshot }
+  /** `asking`: a question round is open, so the ghosts of announced cards say the agent waits for the developer's answers. */
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean }
+  /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
+  | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */
   | { type: "error"; message: string }
   | ({ type: "navigate"; view: ViewName } & NavigateOptions);

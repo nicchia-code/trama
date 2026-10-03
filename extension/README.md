@@ -14,6 +14,8 @@ Where the prompt goes is set by `trama.agentLauncher`:
 
 Agents run the `trama` CLI, so it must be on their `PATH`. `trama.autoScan` scans the touched Features after a Proposal is approved. `trama.skillsDir` is where Initialize installs the agent skills (`.claude/skills` for Claude Code).
 
+`trama.language` is the language the agent writes in, typed as free text (`Italian`, `Deutsch`…) and empty by default. When it is set, every instruction Trama sends to the agent, with either launcher, ends with `Write everything you generate in <language>, except code, which always stays in English.` That covers the text the agent writes for Trama (Proposals, Model and Requirement text, Task and Drift texts, questions and replies); code, its comments, commit messages, the project's own documentation, names and titles, IDs, Event names and the section titles Trama requires stay English. The setting is read at each launch, changes nothing already written, is not saved in the project (an agent you start without Trama does not receive it) and leaves the Trama interface in English.
+
 ## Agent questions
 
 Agents use `trama_ask`, registered natively for Copilot and through MCP for Cursor and terminal clients. Without agent tools, `trama ask --root <project>` accepts the same JSON request on stdin; see the [request and result contract](https://github.com/nicchia-code/trama/blob/main/docs/cli.md#question-rounds).

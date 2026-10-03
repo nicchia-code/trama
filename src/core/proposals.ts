@@ -1,5 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { bindDraft, markActivity, markDraftActivity, removeBoundTo } from "./announcements";
 import { diffFile, type FileChange } from "./diff";
 import { TramaError } from "./errors";
 import { formatDiagnostic } from "./model";
@@ -99,7 +100,12 @@ export function getProposal(p: Project, id: string): Proposal {
   return load(p, findNumbered(proposalsDir(p), id, "Proposal"));
 }
 
-export function newProposal(p: Project, title: string, body = "", options: { requires?: string[]; kind?: ProposalKind } = {}): Proposal {
+export function newProposal(
+  p: Project,
+  title: string,
+  body = "",
+  options: { requires?: string[]; kind?: ProposalKind; announcement?: string; terminal?: string } = {},
+): Proposal {
   const requires = (options.requires ?? []).map((r) => {
     const required = getProposal(p, r);
     if (required.data.status === "rejected" || required.data.status === "discarded")
@@ -117,6 +123,7 @@ export function newProposal(p: Project, title: string, body = "", options: { req
     body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
   };
   save(proposal);
+  bindDraft(p, proposal, options.announcement, options.terminal);
   return proposal;
 }
 
@@ -206,6 +213,7 @@ export function editInProposal(p: Project, id: string, modelPath: string): strin
   const target = trackedLocation(proposal.dir, rel);
   if (proposal.data.delete.includes(rel)) throw new TramaError(`${rel} is marked for deletion in Proposal ${proposal.id}`);
   touch(proposal);
+  markDraftActivity(p, proposal.id);
   if (existsSync(target)) {
     save(proposal);
     return target;
@@ -232,6 +240,7 @@ export function deleteInProposal(p: Project, id: string, modelPath: string) {
   if (existsSync(trackedLocation(proposal.dir, rel)))
     throw new TramaError(`${rel} is already edited in Proposal ${proposal.id}; remove that copy first`);
   touch(proposal);
+  markDraftActivity(p, proposal.id);
   proposal.data.base[rel] ??= sha256(content);
   if (!proposal.data.delete.includes(rel)) proposal.data.delete.push(rel);
   save(proposal);
@@ -374,6 +383,8 @@ export function submitProposal(p: Project, id: string): Proposal {
   if (problems.length > 0) throw new TramaError(`Proposal ${proposal.id} cannot be handed over yet:\n${problems.map((x) => `- ${x}`).join("\n")}`);
   proposal.data.status = "open";
   save(proposal);
+  removeBoundTo(p, proposal.id);
+  markActivity(p);
   return proposal;
 }
 
@@ -383,5 +394,6 @@ export function discardProposal(p: Project, id: string): Proposal {
   requireStatus(proposal, "draft", "discarded");
   proposal.data.status = "discarded";
   save(proposal);
+  removeBoundTo(p, proposal.id);
   return proposal;
 }
