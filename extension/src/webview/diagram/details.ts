@@ -34,7 +34,7 @@ export interface Detail {
   toggle: { state: string; expanded: boolean } | null;
   /** Shown with Approve and Reject: the selected element is a ghost of this Proposal, or none is selected. */
   proposal: ProposalView | null;
-  /** Shown with Fix code, Accept Proposal and Dismiss. */
+  /** Drawn by the panel as the comparison of what happens and what should happen, with a Keep this for each side. */
   drift: DriftView | null;
 }
 
@@ -172,13 +172,13 @@ export function detailOfEdge(scene: Scene, graph: GraphSpec, edge: GEdge): Detai
   });
 }
 
-/** A Drift: what it says, what it points at (resolved or not) and its attached Proposal. */
+/** A Drift: the two sides it compares (drawn by the panel), what it points at (resolved or not) and its attached Proposal. */
 export function detailOfDrift(scene: Scene, drift: DriftView): Detail {
   const attached = drift.proposal !== null && scene.proposal?.id === drift.proposal;
   return detail({
     kind: `Drift ${drift.id}`,
     title: drift.title,
-    description: drift.body,
+    description: "",
     sections: [
       {
         heading: "Points at",

@@ -56,8 +56,17 @@ Stop working on the Task at once and file a Drift when any of these is true:
 Then:
 
 1. Decide which case applies. If the code is right and the Model forgot a case, first create a Proposal with the `trama-design` skill, without its interview (list your choices in the Proposal body). Finish its files, validate, read it and submit it before attaching it to the Drift; correct and retry any refusal. Otherwise there is no Proposal.
-2. File the Drift **once**: `trama drift new "<title>" --ref <nearest Model element or Requirement> --task <id of the Task you are implementing> --body "<what the Model or Requirement says, why it cannot be followed, what you would do instead, where in the code>"` (the tool's `task` field is the same), adding `--proposal <id>` only in the first case. `--task` records the origin: the Drift blocks that Task. `trama drift new` always creates a new card, so never run it twice for the same problem.
+2. File the Drift **once**: `trama drift new "<title>" --ref <nearest Model element or Requirement> --task <id of the Task you are implementing> --happens "<what the code does or what you would do instead, in terms of behaviour>" --should "<what the Model or Requirement says and why it cannot be followed>" [--where "<where in the code>"]` (the tool's `task`, `happens`, `should` and `where` fields are the same), adding `--proposal <id>` only in the first case. The two texts are required; `--where` is optional and the only place for code locations. Write them as described in "Writing a Drift". `--task` records the origin: the Drift blocks that Task. `trama drift new` always creates a new card, so never run it twice for the same problem.
 3. Leave the Task in `doing`; the developer decides whether the code or the Model changes. Do not stop the run: go on with the next Task that is not blocked. The Drift you just filed also blocks the Tasks that concern the same thing, and starting one of them is refused; skip those, as in step 2.
 4. When no Task is left, report. Say what you implemented, and list every Task you filed a Drift for or skipped as blocked, each with the Drift (or fix Task) that blocks it.
 
 Small choices that stay below Diagram level and that no Requirement covers (names, data structures, how an effect is carried out) are yours to make; do not file Drifts for them.
+
+## Writing a Drift
+
+The developer reads a Drift at a glance, as a programmer, but not as a code review. Write the two sides at the level of behaviour.
+
+- **Say what the System does and what it should do**, in the words of the domain ("the cart total ignores the coupon"), not how the code does it.
+- **Name no variable, function, class, field or file** in `--happens` or `--should`, unless the difference cannot be understood without it. Then name only the one or two that matter, as `inline code`.
+- **Code locations go only in `--where`** (the tool's `where` field), which is optional: the files, and the code element when it helps. No line numbers, which go stale, and no long pieces of code.
+- **Use short Markdown:** short paragraphs, a bulleted list when there are several separate points, **bold** for the one or two terms that carry the difference. No headings inside a section, no tables, about 100 words per side.

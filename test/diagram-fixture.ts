@@ -38,11 +38,11 @@ export function shopWithProposals(): Snapshot {
       "# Return\n\nA package coming back.\n\n## States\n\n### Requested (initial)\n- `user.RETURN` → In transit\n\n### In transit\n- `courier.PICKED_UP` → Received\n\n### Received (final)\n",
     );
 
-    newDrift(p, { title: "Code refunds after the package is picked up", refs: ["order/Shipped"], body: "src/refund.ts refunds even when the courier already picked the package up." });
+    newDrift(p, { title: "Code refunds after the package is picked up", refs: ["order/Shipped"], happens: "src/refund.ts refunds even when the courier already picked the package up.", should: "A shipped order can no longer be refunded once the courier has picked the package up." });
     const forgotten = newProposal(p, "Orders can be lost in transit", "The code handles a lost package; the Model forgot it.");
     const payment = editInProposal(p, forgotten.id, "checkout/payment.md");
     writeFileSync(payment, readFileSync(payment, "utf8").replace("### Declined (final)", "### Declined (final)\n### Written off (final)"));
-    newDrift(p, { title: "Code has a Written off payment", refs: ["payment"], proposal: forgotten.id, body: "worker/lost.ts writes the payment off after 30 days." });
+    newDrift(p, { title: "Code has a Written off payment", refs: ["payment"], proposal: forgotten.id, happens: "worker/lost.ts writes the payment off after 30 days.", should: "A payment ends as Declined or Refunded; nothing writes it off." });
 
     handOver(p, returns.id, forgotten.id);
     return buildSnapshot(p);
@@ -81,7 +81,6 @@ export function snapshotOf(files: FileMap): Snapshot {
     diagnostics: model.diagnostics,
     areas: [],
     proposals: [],
-    drafts: [],
     drifts: [],
     tasks: [],
   };

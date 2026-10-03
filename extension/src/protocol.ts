@@ -16,7 +16,9 @@ export type AgentAction =
   /** The Tasks of one design (Proposal) still in "todo", in order; the agent skips the Tasks that are blocked and goes on after a Drift. */
   | { kind: "implement-design"; proposal: string }
   /** Describe the existing code as Proposals for the Model; the agent asks its own questions. */
-  | { kind: "import" };
+  | { kind: "import" }
+  /** The agent writes a new Proposal for the Drift in place of its stale attached one. The host refuses unless that Proposal is open and stale. */
+  | { kind: "rework-drift"; drift: string };
 
 /** Webview -> host. The host validates everything: the webview is untrusted input. */
 export type ToHost =
@@ -32,9 +34,11 @@ export type ToHost =
   | { type: "approveProposal"; id: string }
   /** The host asks for the feedback with an input box. */
   | { type: "rejectProposal"; id: string }
-  /** The host confirms discarding a Draft without feedback. */
-  | { type: "discardProposal"; id: string }
-  | { type: "resolveDrift"; id: string; how: "fix-code" | "accept-proposal" | "dismiss" };
+  | { type: "resolveDrift"; id: string; how: "fix-code" | "accept-proposal" | "dismiss" }
+  /** The developer clicked "Keep this" on the side of a Drift whose attached Proposal cannot be approved: the host explains why, with a warning. */
+  | { type: "driftBlocked"; id: string }
+  /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
+  | { type: "openLink"; url: string };
 
 export type ViewName = "diagram" | "board" | "requirements";
 

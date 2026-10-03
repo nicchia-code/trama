@@ -29,3 +29,29 @@ button.trama-btn:disabled { opacity: .5; cursor: default; }
 .shell-model-errors summary { cursor: pointer; }
 .shell-model-errors ul { margin: 6px 0 0; padding-left: 18px; }
 .shell-link { background: none; border: 0; padding: 0; color: var(--vscode-textLink-foreground, #3794ff); cursor: pointer; font: inherit; text-decoration: underline; }
+button.trama-btn.is-blocked { opacity: .5; cursor: default; }
+.drift-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; margin: 10px 0; }
+.drift-compare-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px 10px; border: 1px solid var(--vscode-panel-border, #444); border-radius: 3px; }
+.drift-compare-head { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.drift-compare-source { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: .7; }
+.drift-compare-text { flex: 1; margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.drift-compare-where { margin: 0 0 10px; padding: 6px 10px; border: 1px solid var(--vscode-panel-border, #444); border-radius: 3px; }
+.drift-compare-where-head { cursor: pointer; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.drift-compare-where-text { margin-top: 6px; }
+.drift-compare-col > button { align-self: flex-start; }
+.drift-compare-consequence { margin: 0; font-size: 12px; opacity: .8; }
+.md, .md-inline { overflow-wrap: anywhere; user-select: text; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 .6em; }
+.md ul, .md ol { margin: 0 0 .6em; padding-left: 1.5em; }
+.md li > p { margin-bottom: .3em; }
+.md li > :last-child { margin-bottom: 0; }
+.md blockquote { margin: 0 0 .6em; padding: 0 0 0 .8em; border-left: 3px solid var(--vscode-textBlockQuote-border, #555); color: var(--vscode-textBlockQuote-foreground, inherit); opacity: .9; }
+.md .md-heading { margin: .8em 0 .3em; font-size: 1em; font-weight: 700; }
+.md .md-h3, .md .md-h4 { font-weight: 600; }
+.md .md-h5, .md .md-h6 { font-weight: 600; font-style: italic; }
+.md code, .md-inline code { font-family: var(--vscode-editor-font-family, monospace); font-size: .95em; padding: 0 .25em; border-radius: 3px; background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, .2)); }
+.md pre { margin: 0 0 .6em; padding: 6px 8px; overflow-x: auto; border-radius: 3px; background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, .2)); max-width: 100%; }
+.md pre code { padding: 0; background: none; font-size: .95em; white-space: pre; overflow-wrap: normal; }
+.md a, .md-inline a { color: var(--vscode-textLink-foreground, #3794ff); }

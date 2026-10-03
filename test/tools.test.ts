@@ -65,7 +65,7 @@ describe("callTool", () => {
 
   test("Tasks and Drifts created by tools appear on the board", async () => {
     expect((await callTool(p, "trama_task_new", { title: "Refunds", refs: ["order/Refunding"], body: "Money back" })).isError).toBe(false);
-    expect((await callTool(p, "trama_drift_new", { title: "Late refund", refs: ["order/Shipped"] })).isError).toBe(false);
+    expect((await callTool(p, "trama_drift_new", { title: "Late refund", refs: ["order/Shipped"], happens: "The code refunds late.", should: "The Model forbids it." })).isError).toBe(false);
     const board = (await callTool(p, "trama_board", {})).text;
     expect(board).toContain("Drift 0001: Late refund");
     expect(board).toContain("0001 Refunds");

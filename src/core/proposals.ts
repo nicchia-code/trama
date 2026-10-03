@@ -287,7 +287,45 @@ export function changes(p: Project, proposal: Proposal): FileChange[] {
   return paths.map((path) => diffFile(path, before.get(path), after.get(path)));
 }
 
-export function approveProposal(p: Project, id: string): Proposal {
+export type ApprovalBlockKind = "missing" | "draft" | "rejected" | "discarded" | "approved" | "waiting" | "stale" | "unregistered" | "invalid";
+
+export interface ApprovalBlock {
+  kind: ApprovalBlockKind;
+  /** One sentence naming the Proposal and why it cannot be approved now. */
+  reason: string;
+}
+
+/** Why the Proposal `id` cannot be approved right now (so cannot be accepted through a Drift), or null when it can. */
+export function approvalBlock(p: Project, id: string): ApprovalBlock | null {
+  let proposal: Proposal;
+  try {
+    proposal = getProposal(p, id);
+  } catch {
+    return { kind: "missing", reason: `Proposal ${id} does not exist.` };
+  }
+  const name = `Proposal ${proposal.id}`;
+  switch (proposal.data.status) {
+    case "draft":
+      return { kind: "draft", reason: `${name} is still being written.` };
+    case "rejected":
+      return { kind: "rejected", reason: `${name} was rejected.` };
+    case "discarded":
+      return { kind: "discarded", reason: `${name} was discarded.` };
+    case "approved":
+      return { kind: "approved", reason: `${name} is already approved.` };
+    case "open":
+      break;
+  }
+  const h = health(p, proposal);
+  if (h.requires.length > 0) return { kind: "waiting", reason: `${name} waits for other Proposals: ${h.requires.map((r) => r.id).join(", ")}.` };
+  if (h.stale.length > 0) return { kind: "stale", reason: `${name} is stale: the Model changed since it was written.` };
+  if (h.unbased.length > 0) return { kind: "unregistered", reason: `${name} holds files it never registered.` };
+  if (validateProposal(p, proposal).length > 0) return { kind: "invalid", reason: `${name} would leave the Model or its Requirements invalid.` };
+  return null;
+}
+
+/** `skillsDirs` are the configured skills folders (besides the usual ones) where the generated `trama-req-*` skills are refreshed. */
+export function approveProposal(p: Project, id: string, skillsDirs: string[] = []): Proposal {
   const proposal = getProposal(p, id);
   requireStatus(proposal, "open", "approved");
   const h = health(p, proposal);
@@ -305,15 +343,17 @@ export function approveProposal(p: Project, id: string): Proposal {
   for (const [path, content] of newFiles(proposal)) writeFileEnsuringDir(trackedLocation(p.dir, path), content);
   proposal.data.status = "approved";
   save(proposal);
-  syncRequirementSkills(p);
+  syncRequirementSkills(p, skillsDirs);
   return proposal;
 }
 
-export function rejectProposal(p: Project, id: string, feedback: string): Proposal {
+/** Rejects an open Proposal. The feedback is optional: with text it is appended under `## Feedback`; empty or blank adds nothing. */
+export function rejectProposal(p: Project, id: string, feedback = ""): Proposal {
   const proposal = getProposal(p, id);
   requireStatus(proposal, "open", "rejected");
   proposal.data.status = "rejected";
-  proposal.body = `${proposal.body.trimEnd()}\n\n## Feedback\n\n${feedback.trim()}\n`;
+  const text = feedback.trim();
+  if (text) proposal.body = `${proposal.body.trimEnd()}\n\n## Feedback\n\n${text}\n`;
   save(proposal);
   return proposal;
 }

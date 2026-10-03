@@ -57,9 +57,9 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 | `order` States | Draft (initial), Awaiting payment, Paid [Preparing (initial), Ready to ship], Refunding, Shipped (final), Cancelled (final) |
 | Proposal 0001 "Returns after shipping" | `actors/user.md` (+1), `checkout/order.md` (+2 ~2), `checkout/return.md` (+5, new Machine) |
 | Proposal 0002 "Orders can be lost in transit" | `checkout/payment.md` (+1: State `Written off (final)`) |
-| Drift 0001 | "Code refunds after the package is picked up", points at `order/Shipped`, no Proposal |
+| Drift 0001 | "Code refunds after the package is picked up", points at `order/Shipped`, no Proposal; its texts use **bold**, *italic*, a bulleted list and a link, and it has a Where in the code section (two files) |
 | Drift 0002 | "Code has a Written off payment", points at `payment`, Proposal 0002 attached |
-| Task 0001 To do | "Implement refunds for prepared orders", refs `order/Refunding`, `order/Paid/user.CANCEL` |
+| Task 0001 To do | "Implement refunds for prepared orders", refs `order/Refunding`, `order/Paid/user.CANCEL`; its body is Markdown (an introduction, a two-item list with bold, an inline code span) |
 | Task 0002 To do | "Payment declined email", ref `order/Awaiting payment/payment.DECLINED` |
 | Task 0003 In progress | "Cart confirmation", ref `cart/Has items/user.CHECKOUT` |
 | Task 0004 Done | "Upgrade dependencies", technical |
@@ -273,8 +273,8 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 1 | Read the shell output | Validation and submission report `Event reference to unknown owner "cart"` | ☐ |
 | 2 | Open the Diagram selector | No entry for the Draft | ☐ |
 | 3 | `j proposal show <id>` | Status draft, the validation error and the removed cart are listed | ☐ |
-| 4 | Board tab | Draft card in the band above the columns; only **Discard**, no Approve or Reject | ☐ |
-| 5 | Click Discard, then cancel; repeat and confirm | Cancelling keeps it; confirming removes the draft without adding it to To decide | ☐ |
+| 4 | Board tab | No card for the Draft anywhere on the Board, and no Discard button | ☐ |
+| 5 | `j board`, then `j proposal discard <id>` | `j board` lists the Draft under **In writing** marked `(draft)`; after the discard it is marked discarded and never enters To decide | ☐ |
 | 6 | ↻ reset when done | | ☐ |
 
 ---
@@ -284,13 +284,15 @@ j proposal submit <id>           # exit code 1; stays Draft
 ### D1. A Drift without a Proposal
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Machine level `order`, click the red `Drift 0001` ghost | Panel `DRIFT 0001`, title `Code refunds after the package is picked up`, body `src/refund.ts refunds even when the courier already picked the package up.`, `POINTS AT` `order/Shipped` | ☐ |
-| 2 | Look at the buttons | **Fix code** and **Dismiss** only. There is no Accept Proposal | ☐ |
+| 1 | Machine level `order`, click the red `Drift 0001` ghost | Panel `DRIFT 0001`, title `Code refunds after the package is picked up`, two boxes: **WHAT HAPPENS** with `A shipped order is still refunded after the courier has picked the package up.` (**shipped** in bold) and a two-item bulleted list, and **WHAT SHOULD HAPPEN** `Model` with `A shipped order can no longer be refunded…` (bold) and a `the refund policy` link; under the boxes a collapsed block **Where in the code**; `POINTS AT` `order/Shipped` | ☐ |
+| 2 | Look at the buttons and the lines under them | Each box has one **Keep this**. Under the left one `Closes the Drift; nothing changes`, under the right one (blue) `A Task is created for the agent to fix the code`. No Fix code, Accept Proposal or Dismiss | ☐ |
+| 3 | Click **Where in the code**; select another element and select the Drift again | It opens across the whole width under the two boxes and lists `src/refund.ts` and `src/courier.ts` as code; after selecting the Drift again it is closed. It never holds anything the Keep this buttons depend on | ☐ |
+| 4 | Click the link in **WHAT SHOULD HAPPEN** (harness: `window.__posts`) | The webview does not navigate; it posts `{ type: "openLink", url: "https://example.com/policy" }`. In VS Code the system browser opens the address | ☐ |
 
 ### D2. A Drift with an attached Proposal
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | System level, click `Drift 0002` | Panel shows `DRIFT 0002`, `Code has a Written off payment`, `POINTS AT` `payment`, and three buttons **Fix code**, **Accept Proposal**, **Dismiss** | ☐ |
+| 1 | System level, click `Drift 0002` | Panel shows `DRIFT 0002`, `Code has a Written off payment`, the two boxes, `POINTS AT` `payment`. The left **Keep this** says `Approves Proposal 0002 and changes the Model to match` | ☐ |
 | 2 | Look at the selector | It switched to `0002 · Orders can be lost in transit` | ☐ |
 | 3 | Go to `checkout › payment` | A dashed blue `Written off` final State is visible | ☐ |
 
@@ -316,13 +318,16 @@ j proposal submit <id>           # exit code 1; stays Draft
 |---|---|---|---|
 | 1 | Read the first card | `Proposal 0001`, `Returns after shipping`, rows `actors/user.md +1`, `checkout/order.md +2 ~2`, `checkout/return.md +5`, buttons **View on diagram**, **Approve** (blue), **Reject**; a blue left border | ☐ |
 | 2 | Read the second card | `Proposal 0002`, `Orders can be lost in transit`, `checkout/payment.md +1` | ☐ |
-| 3 | Read the third card | `Drift 0001`, title, body excerpt, chip `order/Shipped`, buttons **Fix code**, **Dismiss**, **View on diagram**; a red left border | ☐ |
-| 4 | Read the fourth card | `Drift 0002`, chip `payment`, a link `Proposal 0002 attached`, buttons **Fix code**, **Accept Proposal**, **Dismiss**, **View on diagram** | ☐ |
+| 3 | Read the third card | `Drift 0001`, title, chip `order/Shipped`, the two boxes with their **Keep this** buttons and lines, **View on diagram**; a red left border | ☐ |
+| 4 | Read the fourth card | `Drift 0002`, chip `payment`, a link `Proposal 0002 attached`, the two boxes; the left line says `Approves Proposal 0002 and changes the Model to match`; **View on diagram** | ☐ |
 
 ### E3. Task cards
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Read `0001` in To do | Title `Implement refunds for prepared orders`, chips `order/Refunding` and `order/Paid/user.CANCEL`, an excerpt (`When a paid order is cancelled after preparation has started…`), buttons **Run** (blue) and **Open**, arrows ← (disabled) and → | ☐ |
+| 1 | Read `0001` in To do | Title `Implement refunds for prepared orders`, chips `order/Refunding` and `order/Paid/user.CANCEL`, no excerpt, buttons **Show details**, **Run** (blue) and **Open**, arrows ← (disabled) and → | ☐ |
+| 1b | Click **Show details** on `0001` | The body shows as Markdown in the card: `When a paid order is cancelled after preparation has started:`, a two-item list with **refunded** in bold, and `order/Refunding` in a code span; the button reads **Hide details** and its accessible name is `Hide details of task 0001` | ☐ |
+| 1c | With the details open, make the Board refresh (move another Task) | `0001` stays open. Closing the panel and reopening it shows every card closed again | ☐ |
+| 1d | Read `0002` in To do | No **Show details** button (the Task has no body). Task rows inside a design card have no details toggle either | ☐ |
 | 2 | Read `0004` in Done | Badge `technical`, no chips, only **Open**, arrow ← enabled and → disabled | ☐ |
 | 3 | Read `0003` in In progress | Chip `cart/Has items/user.CHECKOUT`, both arrows enabled | ☐ |
 
@@ -383,7 +388,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 11 | Create a fourth Task with `--proposal 2` only (a second Proposal) | A design of one Task stays a plain card | ☐ |
 
 ### E11. Blocked Tasks
-↻ first. Seed it from the verification shell: `j drift new "Refund amount differs" --ref order/Refunding --task 1`, then `j drift new "Cancel differs" --ref order/Paid`. The harness seed already has blocked Tasks too (Tasks inside the design card, Task `0008` waiting for the fix Task `0009`); the new Drifts are 0006 and 0007. Task `0005`, taken by the agent, also gets the badge `blocked 0006`: blocking does not release it.
+↻ first. Seed it from the verification shell: `j drift new "Refund amount differs" --ref order/Refunding --task 1 --happens "The code refunds late." --should "The Model refunds at once."`, then `j drift new "Cancel differs" --ref order/Paid --happens "The code cancels twice." --should "The Model cancels once."`. The harness seed already has blocked Tasks too (Tasks inside the design card, Task `0008` waiting for the fix Task `0009`); the new Drifts are 0006 and 0007. Task `0005`, taken by the agent, also gets the badge `blocked 0006`: blocking does not release it.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Look at Task `0001` on the Board | Red badges `blocked 0006` (the Drift filed with `--task 1`) and `blocked 0007` (it refs `order/Paid/user.CANCEL`, inside `order/Paid`); both arrows and **Run** stay enabled | ☐ |
@@ -393,9 +398,9 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 5 | `j task move 1 doing`, and the same with `TRAMA_AGENT=1 j task move 1 doing` | The first prints `Task 0001 is now doing`; the second is refused naming `Drift 0006 "Refund amount differs"` and `Drift 0007`, saying the developer must decide; the Task is unchanged | ☐ |
 | 6 | `j board`, `j task list`, `j task show 1` | `(blocked by Drift 0006) (blocked by Drift 0007)` after the title; `task show` also lists `Blocked by Drift 0006: Refund amount differs` and the same for 0007 | ☐ |
 | 7 | `j drift show 6` | It does not list Task 0001 | ☐ |
-| 8 | Click **Fix code** on Drift 0006 | Task `0001` goes back to To do and its badges become `waiting 0010` and `blocked 0007`; clicking `waiting 0010` scrolls to the fix Task's card and focuses it | ☐ |
-| 9 | Move the fix Task `0010` to Done and dismiss Drift 0007 | Task `0001` has no badge any more | ☐ |
-| 10 | `j --json drift show 7`, then `j drift new "x" --ref order --task 99` | The first has `"origin": null` (filed without `--task`); the second fails with `No Task with ID "99"` and creates nothing | ☐ |
+| 8 | Click **Keep this** under **WHAT SHOULD HAPPEN** on Drift 0006 | Task `0001` goes back to To do and its badges become `waiting 0010` and `blocked 0007`; clicking `waiting 0010` scrolls to the fix Task's card and focuses it | ☐ |
+| 9 | Move the fix Task `0010` to Done and click **Keep this** under **WHAT HAPPENS** on Drift 0007 | Task `0001` has no badge any more | ☐ |
+| 10 | `j --json drift show 7`, then `j drift new "x" --ref order --task 99 --happens a --should b` | The first has `"origin": null` (filed without `--task`) and the two texts; the second fails with `No Task with ID "99"` and creates nothing | ☐ |
 
 ---
 
@@ -442,12 +447,19 @@ For every G test, ↻ first, then open the panel and the "Trama agent" terminal 
 ### G3. Reject with feedback
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | ↻. Board: **Reject** on Proposal 0001 | An input box titled `Reject Proposal 0001`, prompt `Feedback for the agent: what should the next Proposal do differently?` | ☐ |
-| 2 | Press Enter with the box empty | The box refuses: `Feedback is required` | ☐ |
-| 3 | Type `Split it by state`, press Enter | The card leaves To decide. No terminal is opened | ☐ |
-| 4 | `grep status $D/proposals/0001-*/proposal.md` | `status: rejected` | ☐ |
-| 5 | `tail -4 $D/proposals/0001-*/proposal.md` | A `## Feedback` heading followed by `Split it by state` | ☐ |
-| 6 | `j validate` | The Model is unchanged and valid (order.md has no `Returned`) | ☐ |
+| 1 | ↻. Board: **Reject** on Proposal 0001 | An input box titled `Reject Proposal 0001`, prompt `Feedback for the agent (optional): what should the next Proposal do differently? Press Enter to reject without feedback, Esc to cancel.` | ☐ |
+| 2 | Type `Split it by state`, press Enter | The card leaves To decide. No terminal is opened | ☐ |
+| 3 | `grep status $D/proposals/0001-*/proposal.md` | `status: rejected` | ☐ |
+| 4 | `tail -4 $D/proposals/0001-*/proposal.md` | A `## Feedback` heading followed by `Split it by state` | ☐ |
+| 5 | `j validate` | The Model is unchanged and valid (order.md has no `Returned`) | ☐ |
+
+### G3b. Reject without feedback
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. Board: **Reject** on Proposal 0001, press Enter with the box empty | The box accepts it. The card leaves To decide. No terminal is opened | ☐ |
+| 2 | `grep status $D/proposals/0001-*/proposal.md` | `status: rejected` | ☐ |
+| 3 | `grep -c Feedback $D/proposals/0001-*/proposal.md` | `0`: no Feedback section was added | ☐ |
+| 4 | ↻. **Reject** on 0001, type spaces only, press Enter | The same: rejected, still no Feedback section | ☐ |
 
 ### G4. Cancel the rejection
 | # | Action | Expected | ✓ |
@@ -457,7 +469,7 @@ For every G test, ↻ first, then open the panel and the "Trama agent" terminal 
 ### G5. Accept a Drift's attached Proposal
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | ↻. Board: **Accept Proposal** on Drift 0002 | Both Drift 0002 and Proposal 0002 leave To decide (count 2) | ☐ |
+| 1 | ↻. Board: **Keep this** under **WHAT HAPPENS** on Drift 0002 | Both Drift 0002 and Proposal 0002 leave To decide (count 2) | ☐ |
 | 2 | Read the terminal | Exactly **one** line: ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
 | 3 | `grep -n 'Written off' $D/model/checkout/payment.md` | A line `### Written off (final)` | ☐ |
 | 4 | `sed -n 1,8p $D/drifts/0002-*.md` | `status: resolved`, `resolution: proposal`, `proposal: "0002"` | ☐ |
@@ -466,24 +478,34 @@ For every G test, ↻ first, then open the panel and the "Trama agent" terminal 
 ### G6. Fix the code (Drift → Task)
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | ↻. Board: **Fix code** on Drift 0001 | Drift 0001 leaves To decide (count 3) | ☐ |
+| 1 | ↻. Board: **Keep this** under **WHAT SHOULD HAPPEN** on Drift 0001 | Drift 0001 leaves To decide (count 3) | ☐ |
 | 2 | Look at To do | A new card `0005` `Fix code to match the Model: Code refunds after the package is picked up`, chip `order/Shipped`, text `from Drift 0001` | ☐ |
 | 3 | `ls $D/tasks` | Includes `0005-fix-code-to-match-the-model-code-refunds.md` | ☐ |
 | 4 | `sed -n 1,8p $D/tasks/0005-*.md` | `column: todo`, `technical: false`, refs `order/Shipped`, `drift: "0001"` | ☐ |
 | 5 | `sed -n 1,8p $D/drifts/0001-*.md` | `status: resolved`, `resolution: fix-code`, `task: "0005"` | ☐ |
 | 6 | Terminal | Nothing was launched | ☐ |
 
-### G7. Dismiss a Drift
+### G7. Keep what happens with no Proposal
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | ↻. Board: **Dismiss** on Drift 0001 | The card disappears; the Tasks do not change (still 4 files in `$D/tasks`) | ☐ |
+| 1 | ↻. Board: **Keep this** under **WHAT HAPPENS** on Drift 0001 | The card disappears; the Tasks do not change (still 4 files in `$D/tasks`) | ☐ |
 | 2 | `sed -n 1,8p $D/drifts/0001-*.md` | `status: resolved`, `resolution: dismissed`, `task: null` | ☐ |
+| 3 | `j drift resolve 2 --dismiss` (Drift 0002 has Proposal 0002 attached) | Refused: the Drift has an attached Proposal; accept it or fix the code | ☐ |
 
-### G8. Accept a Drift whose Proposal was rejected 🔍
+### G8. Keep what happens when the Proposal was rejected
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | ↻. **Reject** Proposal 0002 with feedback `x` | Card leaves To decide | ☐ |
-| 2 | On Drift 0002 press **Accept Proposal** | Either the button is disabled with a tooltip, or a red banner appears: `Proposal 0002 is rejected; only open Proposals can be approved`. No crash, no terminal launch, the Drift stays open | ☐ |
+| 2 | On Drift 0002 look at the left **Keep this** | It looks disabled; the line under it says `Proposal 0002 was rejected.` | ☐ |
+| 3 | Click it | A warning in the editor: `Proposal 0002 was rejected. It will not change the Model: keep what should happen to have the code fixed.` Nothing changes, no terminal launch, the Drift stays open | ☐ |
+
+### G8b. Keep what happens when the Proposal is stale; rework it
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | ↻. Append a blank line to `$D/model/checkout/payment.md` (makes Proposal 0002 stale), then click the left **Keep this** on Drift 0002 | A warning `Proposal 0002 is stale: the Model changed since it was written.` with a **Rework Proposal** button | ☐ |
+| 2 | Click **Rework Proposal** | The terminal prints one line: `Use the trama-design skill, without asking questions. Proposal 0002, attached to Drift 0002, is stale: write a new Proposal that makes the same change on the current Model and Requirements, hand it over, and attach it to the Drift in place of the stale one.` | ☐ |
+| 3 | `j drift replace-proposal 2 --proposal <new id>` after a new Proposal exists | Drift 0002 shows the new Proposal; Proposal 0002 is rejected with `Replaced by Proposal <new id>` under `## Feedback` | ☐ |
+| 4 | On a Drift whose Proposal is still a Draft, click the left **Keep this** | A warning `… is still being written. Wait until the agent hands it over.` | ☐ |
 
 ### G9. Fix
 | # | Action | Expected | ✓ |
@@ -581,6 +603,19 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 ---
 
+## Q. Markdown in the panel
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| Q1 | Diagram, System level, select the System. In `.trama/model/system.md` write a description with `**bold**`, a list and a `code` span | The panel shows bold text, a list and monospace code, not the marks. A heading line (`## Title`) shows bold at the text size, never bigger than the panel's own headings | ☐ |
+| Q2 | Select a State whose Transition note has `*italic*` | The note in the list entry shows italic inline; a `- item` line in a note stays as written (only inline formatting there) | ☐ |
+| Q3 | Open a Proposal whose body has a list and a fenced block | The Proposal card shows the list and a code block; a long line scrolls inside the block, not the panel | ☐ |
+| Q4 | Requirements tab, an Area whose section holds a bulleted list | The list shows as a list; a changed section shows the old text struck through, also as Markdown | ☐ |
+| Q5 | Write `<img src=x onerror=alert(1)>`, `![pic](https://example.com/a.png)`, a `| a | b |` table, `[x](javascript:alert(1))` and `[rel](docs/x.md)` in a Requirement section | The first three show as written text; no image loads and no alert fires; the table keeps its lines; the last two show only their label, as plain text without a link | ☐ |
+| Q6 | Write `2 * 3 * 4` and an unclosed `**bold` | Both show as written | ☐ |
+
+---
+
 ## M. Requirements
 
 | # | Action | Expected | ✓ |
@@ -595,7 +630,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | M8 | `j proposal new "Blue badge"`, then `j proposal edit <id> requirements/ui.md`, change "green" to "blue" in the printed file and `j proposal submit <id>` | On the Board the submitted card lists `requirements/ui.md ~1` and has **View requirements**, not **View on diagram** | ☐ |
 | M9 | Click **View requirements** | Requirements tab with the Proposal selected: `order/Paid` has a **changed** badge, the old text struck through above the new one | ☐ |
 | M10 | `j proposal edit <id> checkout/order.md`, delete the `### Paid` State and its sub-States in the printed file, then `j validate --proposal <id>` and `j proposal submit <id>` | The edit withdraws it into Draft. Both commands fail with the missing State and Requirement errors; it is absent from the selectors and decision count | ☐ |
-| M11 | Discard the Draft from the Board | Card gone; `ui.md` and the skill unchanged | ☐ |
+| M11 | `j proposal discard <id>` | The Draft is discarded; `ui.md` and the skill unchanged | ☐ |
 
 ---
 
@@ -616,13 +651,13 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| O1 | Board tab after reset | Inventory checks is a Draft above the columns, with its ID, title, animated indicator and "The agent is writing this Proposal"; only Discard, no navigation | ☐ |
+| O1 | Board tab after reset | Nothing for Inventory checks: no card, no band, no Discard button | ☐ |
 | O2 | Inspect Diagram and Requirements selectors and Board badge | No Draft in either selector or the decision count | ☐ |
-| O3 | Enable reduced motion | Draft indicator stops; text remains | ☐ |
-| O4 | Attempt to accept the Inventory Drift's attached Proposal | Accept is disabled, with the still-being-written reason; a direct host or CLI attempt is refused too | ☐ |
-| O5 | Submit the Draft with `j proposal submit 4` | It leaves the band and appears in To decide and the Diagram selector; the badge increases by one | ☐ |
-| O6 | `j proposal edit 4 checkout/order.md`, without changing its contents | Notice says returned to Draft; overlay and decision card disappear, Draft card returns | ☐ |
-| O7 | Click Discard and cancel, then repeat and confirm | Exact confirmation: "Discard this draft? The agent will not be told." Cancel changes nothing; confirm removes it and marks it discarded | ☐ |
+| O3 | `j board` | Inventory checks is listed under **In writing** marked `(draft)`, apart from To decide | ☐ |
+| O4 | Attempt to keep what happens on the Inventory Drift, whose attached Proposal is still a Draft | The left **Keep this** looks disabled with the still-being-written reason and the click shows the editor warning; a direct host or CLI attempt is refused too | ☐ |
+| O5 | Submit the Draft with `j proposal submit 4` | It appears in To decide and the Diagram selector; the badge increases by one | ☐ |
+| O6 | `j proposal edit 4 checkout/order.md`, without changing its contents | Notice says returned to Draft; overlay and decision card disappear and nothing replaces them on the Board | ☐ |
+| O7 | `j proposal discard 4` | It is marked discarded, with no confirmation and no feedback asked | ☐ |
 
 ---
 

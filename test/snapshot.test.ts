@@ -81,7 +81,7 @@ test("the snapshot carries the Model, open Proposals as ghost overlays, Drifts a
   const order = editInProposal(p, prop.id, "checkout/order.md");
   writeFileSync(order, readFileSync(order, "utf8").replace("### Shipped (final)", "### Shipped\n- `user.CANCEL` → Returned\n\n### Returned (final)"));
   writeFileSync(editInProposal(p, prop.id, "actors/user.md"), readFileSync(join(dir, ".trama/model/actors/user.md"), "utf8") + "\n### RETURN\nAsks to return.\n");
-  newDrift(p, { title: "Code refunds late", refs: ["order/Shipped"], body: "see refund.ts" });
+  newDrift(p, { title: "Code refunds late", refs: ["order/Shipped"], happens: "see refund.ts", should: "The Model says another." });
   newTask(p, { title: "Build cart", refs: ["cart"], technical: false });
   handOver(p, prop.id);
   const done = newProposal(p, "Closed");
@@ -96,7 +96,8 @@ test("the snapshot carries the Model, open Proposals as ghost overlays, Drifts a
   const returned = flat(view?.machines[0]?.states ?? []).find((s) => s.name === "Returned");
   expect(returned?.change).toBe("added");
   expect(view?.actors).toEqual([{ id: "user", change: "modified", events: expect.arrayContaining([{ name: "RETURN", change: "added" }]) }]);
-  expect(snap.drifts).toMatchObject([{ id: "0001", title: "Code refunds late", body: "see refund.ts", refs: ["order/Shipped"], proposal: null }]);
+  expect(snap.drifts).toMatchObject([{ id: "0001", title: "Code refunds late", refs: ["order/Shipped"], proposal: null }]);
+  expect(snap.drifts[0]?.body).toContain("see refund.ts");
   expect(snap.tasks[0]).toMatchObject({ title: "Build cart", column: "todo", refs: ["cart"], file: "tasks/0001-build-cart.md" });
   expect(JSON.parse(JSON.stringify(snap))).toEqual(snap);
 });
@@ -110,10 +111,26 @@ test("a Proposal that would leave the Model invalid reports the errors instead o
   expect(view?.errors.map((e) => e.message)).toEqual([expect.stringContaining('unknown State "Nowhere"')]);
 });
 
+test("an open Drift carries its two sides and why its attached Proposal cannot be approved, stale included", () => {
+  const prop = newProposal(p, "Lost orders");
+  const payment = editInProposal(p, prop.id, "checkout/payment.md");
+  writeFileSync(payment, readFileSync(payment, "utf8").replace("### Declined (final)", "### Declined (final)\n### Written off (final)"));
+  newDrift(p, { title: "Lost", refs: ["payment"], proposal: prop.id, happens: "Code writes it off.", should: "Nothing writes it off." });
+  newDrift(p, { title: "Theme", refs: ["requirements/ui#General"], happens: "Material 2.", should: "Material 3." });
+  const drifts = () => buildSnapshot(p).drifts;
+
+  expect(drifts()[0]).toMatchObject({ sides: { happens: "Code writes it off.", should: "Nothing writes it off." }, requirementsOnly: false, proposalBlock: { kind: "draft" } });
+  expect(drifts()[1]).toMatchObject({ requirementsOnly: true, proposal: null, proposalBlock: null });
+  handOver(p, prop.id);
+  expect(drifts()[0]?.proposalBlock).toBeNull();
+  writeFileSync(join(dir, ".trama/model/checkout/payment.md"), `${readFileSync(join(dir, ".trama/model/checkout/payment.md"), "utf8")}\n`);
+  expect(drifts()[0]?.proposalBlock).toMatchObject({ kind: "stale", reason: `Proposal ${prop.id} is stale: the Model changed since it was written.` });
+});
+
 test("a Task's blockers travel in the snapshot: the open Drifts that concern it, and none once it is Done", () => {
   const task = newTask(p, { title: "Cart flow", refs: ["cart"], technical: false });
   const other = newTask(p, { title: "Payment flow", refs: ["payment"], technical: false });
-  const drift = newDrift(p, { title: "Cart differs", refs: ["cart"] });
+  const drift = newDrift(p, { title: "Cart differs", refs: ["cart"], happens: "The code does it one way.", should: "The Model says another." });
   const blockers = () => Object.fromEntries(buildSnapshot(p).tasks.map((t) => [t.id, t.blockedBy]));
   expect(blockers()).toEqual({ [task.id]: [{ kind: "drift", drift: drift.id, title: "Cart differs" }], [other.id]: [] });
   moveTask(p, task.id, "done", "developer");

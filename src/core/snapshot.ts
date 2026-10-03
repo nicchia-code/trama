@@ -1,12 +1,12 @@
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
-import { applied, baseFiles, changes, health, listProposals, type ProposalKind } from "./proposals";
+import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type ProposalKind } from "./proposals";
 import { appliesUnder, type RequiredProposal } from "./required";
-import { type Area, buildProject, type ProjectModel } from "./requirements";
+import { type Area, buildProject, parseRequirementRef, type ProjectModel } from "./requirements";
 import { type Project, readTrackedFiles, REQUIREMENTS_PREFIX } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
-import { type Column, listDrifts, listTasks } from "./work";
+import { type Column, type DriftSides, driftSides, listDrifts, listTasks } from "./work";
 
 export interface ActorChange {
   id: string;
@@ -75,12 +75,17 @@ export interface ProposalView {
 export interface DriftView {
   id: string;
   title: string;
+  /** The Drift's text after the title, for a Drift written before the two sides existed. */
   body: string;
+  /** What the code does, what the Model or Requirement says and where in the code it was seen; null for a Drift written before the two sections existed. */
+  sides: DriftSides | null;
+  /** True when the Drift points only to Requirements: the "should" side is then what the Requirements say. */
+  requirementsOnly: boolean;
   refs: string[];
   /** ID of the attached Proposal, if any. */
   proposal: string | null;
-  /** Lifecycle refusal for an attached Proposal absent from the open overlays. */
-  proposalBlocker: string | null;
+  /** Why the attached Proposal cannot be approved now (draft, rejected, discarded, stale, waiting, invalid…), or null when it can or there is none. */
+  proposalBlock: ApprovalBlock | null;
 }
 
 export interface TaskView {
@@ -106,8 +111,6 @@ export interface TaskView {
 export interface Snapshot extends ModelView {
   diagnostics: Diagnostic[];
   proposals: ProposalView[];
-  /** Drafts are Board-only: never overlays and never counted as awaiting a decision. */
-  drafts: { id: string; title: string }[];
   drifts: DriftView[];
   tasks: TaskView[];
 }
@@ -220,18 +223,18 @@ export function buildSnapshot(p: Project): Snapshot {
     ...modelView(project),
     diagnostics: project.diagnostics,
     proposals,
-    drafts: allProposals.filter((x) => x.data.status === "draft").map((x) => ({ id: x.id, title: x.title })),
     drifts: listDrifts(p)
       .filter((d) => d.data.status === "open")
-      .map((d) => {
-        const attached = d.data.proposal === null ? undefined : proposalById.get(d.data.proposal);
-        const status = attached?.data.status;
-        const proposalBlocker = d.data.proposal === null || status === "open" ? null
-          : status === "draft" ? `Proposal ${d.data.proposal} is still being written.`
-          : status === undefined ? `Proposal ${d.data.proposal} does not exist.`
-          : `Proposal ${d.data.proposal} is ${status}.`;
-        return { id: d.id, title: d.title, body: stripTitle(d.body), refs: d.data.refs, proposal: d.data.proposal, proposalBlocker };
-      }),
+      .map((d) => ({
+        id: d.id,
+        title: d.title,
+        body: stripTitle(d.body),
+        sides: driftSides(d),
+        requirementsOnly: d.data.refs.every((r) => parseRequirementRef(r) !== null),
+        refs: d.data.refs,
+        proposal: d.data.proposal,
+        proposalBlock: d.data.proposal === null ? null : approvalBlock(p, d.data.proposal),
+      })),
     tasks: tasks.map((t) => ({
       id: t.id,
       title: t.title,

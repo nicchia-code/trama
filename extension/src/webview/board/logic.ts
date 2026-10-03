@@ -83,11 +83,10 @@ export interface DriftCard {
   id: string;
   heading: string;
   title: string;
-  excerpt: string;
   refs: string[];
   proposal: string | null;
-  /** Why Accept Proposal is disabled although a Proposal is attached; null when it is available. */
-  acceptBlocker: string | null;
+  /** The Drift as the snapshot carries it: the card shows its two sides and its choices (see `driftComparison`). */
+  drift: DriftView;
 }
 
 export interface TaskCard {
@@ -104,7 +103,8 @@ export interface TaskCard {
   agent: boolean;
   /** One badge per thing that blocks the Task; empty when it is free. */
   blocks: BlockBadge[];
-  excerpt: string;
+  /** The Task's text after its title, in Markdown; empty when it has none. */
+  body: string;
   /** Path relative to `.trama/`. */
   file: string;
   column: Column;
@@ -138,18 +138,6 @@ export interface BoardColumn {
 
 const MAX_FILES = 4;
 const MAX_TOOLTIP_ITEMS = 3;
-const EXCERPT_CHARS = 200;
-
-/** First non-empty lines of a Markdown body, cut to a short length. */
-export function excerpt(body: string, maxLines = 2, maxChars = EXCERPT_CHARS): string {
-  const lines = body
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .slice(0, maxLines);
-  const text = lines.join("\n");
-  return text.length > maxChars ? `${text.slice(0, maxChars - 1).trimEnd()}…` : text;
-}
 
 /** Why a Task the agent has taken cannot be moved, dragged or run; shown as the tooltip and the accessible description of the disabled controls. */
 export const AGENT_WORKING = "The agent is working on this Task. Take it back to move it.";
@@ -230,19 +218,8 @@ export function proposalCard(p: ProposalView): ProposalCard {
   };
 }
 
-export function driftCard(d: DriftView, proposals: ProposalView[]): DriftCard {
-  const attached = d.proposal === null ? undefined : proposals.find((p) => p.id === d.proposal);
-  return {
-    kind: "drift",
-    key: `drift:${d.id}`,
-    id: d.id,
-    heading: `Drift ${d.id}`,
-    title: d.title,
-    excerpt: excerpt(d.body),
-    refs: d.refs,
-    proposal: d.proposal,
-    acceptBlocker: d.proposalBlocker ?? (attached ? approveBlocker(attached) : null),
-  };
+export function driftCard(d: DriftView): DriftCard {
+  return { kind: "drift", key: `drift:${d.id}`, id: d.id, heading: `Drift ${d.id}`, title: d.title, refs: d.refs, proposal: d.proposal, drift: d };
 }
 
 export function taskCard(t: TaskView): TaskCard {
@@ -257,7 +234,7 @@ export function taskCard(t: TaskView): TaskCard {
     proposal: t.proposal,
     agent: t.agent,
     blocks: t.blockedBy.map(blockBadge),
-    excerpt: excerpt(t.body),
+    body: t.body,
     file: t.file,
     column: t.column,
     left: neighbour(t.column, "left"),
@@ -281,7 +258,7 @@ export function designCard(proposal: string, title: string | null, tasks: TaskCa
 /** The four columns of the Board: open Proposals then open Drifts to decide, Tasks by column. */
 export function buildBoard(snapshot: Snapshot): BoardColumn[] {
   const cards: Record<ColumnId, Card[]> = {
-    decide: [...snapshot.proposals.map(proposalCard), ...snapshot.drifts.map((d) => driftCard(d, snapshot.proposals))],
+    decide: [...snapshot.proposals.map(proposalCard), ...snapshot.drifts.map(driftCard)],
     todo: [],
     doing: [],
     done: [],
@@ -292,4 +269,27 @@ export function buildBoard(snapshot: Snapshot): BoardColumn[] {
     else cards[placed.column].push(designCard(placed.proposal, placed.tasks[0]?.proposalTitle ?? null, placed.tasks.map(taskCard)));
   }
   return COLUMN_ORDER.map((id) => ({ id, title: COLUMN_TITLES[id], hint: EMPTY_HINTS[id], cards: cards[id] }));
+}
+
+/** The ghost of a Task whose move is being carried out: its card as it will be in `column`, and the place among that column's cards. */
+export interface Ghost {
+  card: TaskCard;
+  index: number;
+}
+
+/**
+ * Where the Task `id` will stand once it is in `column`, or null when it gets no ghost: it is unknown, already there,
+ * or part of a design card (whose column is derived from all its Tasks, so its row is only dimmed).
+ */
+export function ghostFor(snapshot: Snapshot, id: string, column: Column): Ghost | null {
+  const current = snapshot.tasks.find((t) => t.id === id);
+  if (current === undefined || current.column === column) return null;
+  const moved = snapshot.tasks.map((t) => (t.id === id ? { ...t, column } : t));
+  let index = 0;
+  for (const placed of placeTasks(moved)) {
+    if (!placed.design && placed.task.id === id) return { card: taskCard(placed.task), index };
+    if (placed.design && placed.tasks.some((t) => t.id === id)) return null;
+    if (placed.column === column) index++;
+  }
+  return null;
 }

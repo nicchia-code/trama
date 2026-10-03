@@ -63,7 +63,7 @@ describe("one Scan after every approved Proposal", () => {
 
   test("accepting a Drift's attached Proposal launches exactly one Scan", async () => {
     const id = proposalEditing("checkout/order.md", orderChange);
-    const drift = newDrift(p, { title: "Code has Lost", refs: ["order"], proposal: id });
+    const drift = newDrift(p, { title: "Code has Lost", refs: ["order"], proposal: id, happens: "The code does it one way.", should: "The Model says another." });
     await applyApprovedProposal(options(), id, () => resolveDrift(p, drift.id, "accept-proposal"));
     expect(scans).toEqual([["checkout"]]);
     expect(scanned).toEqual([id]);
@@ -101,7 +101,7 @@ describe("one Scan after every approved Proposal", () => {
 
   test("accepting a Drift without an attached Proposal is refused before anything happens", async () => {
     const id = proposalEditing("checkout/order.md", orderChange);
-    const drift = newDrift(p, { title: "Plain", refs: ["order"] });
+    const drift = newDrift(p, { title: "Plain", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
     await expect(applyApprovedProposal(options(), id, () => resolveDrift(p, drift.id, "accept-proposal"))).rejects.toThrow(/no attached Proposal/);
     expect(scans).toEqual([]);
     expect(getProposal(p, id).data.status).toBe("open");

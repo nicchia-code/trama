@@ -10,7 +10,7 @@ import { deleteInProposal, editInProposal, getProposal, newProposal, submitPropo
 import { resolveRef } from "../core/refs";
 import { loadProject } from "../core/requirements";
 import { loadModel, type Project } from "../core/store";
-import { getDrift, getTask, moveTask, newDrift, newTask } from "../core/work";
+import { getDrift, getTask, moveTask, newDrift, newTask, replaceDriftProposal } from "../core/work";
 import { formatDiagnostic } from "../core/model";
 
 /**
@@ -294,15 +294,34 @@ export const TOOLS: ToolSpec[] = [
         refs: stringList(`The Model elements or Requirements closest to the difference. ${REF} ${REQ_REF}`),
         proposal: string("ID of a Proposal that would fix the Model, if the code is right"),
         task: string("ID of the Task you were implementing when you found the difference; leave out for a Scan or a Fix"),
-        body: string("What the code does, what the Model or Requirement says, where in the code"),
+        happens: string("What happens: what the code does, in terms of behaviour and domain words, for a programmer reading at a glance. Short Markdown, about 100 words. Name a variable, function, class, field or file only when the difference cannot be understood without it, as inline code; code locations go in `where`"),
+        should: string("What should happen: what the Model or the Requirement says, in the same style"),
+        where: string("Optional: where in the code the difference was seen (files, and the code element when it helps; no line numbers, no long code). The only place for code locations"),
       },
-      required: ["title", "refs"],
+      required: ["title", "refs", "happens", "should"],
       additionalProperties: false,
     },
     writes: true,
     run: (p, i) => {
-      const d = newDrift(p, { title: text(i, "title"), refs: texts(i, "refs"), proposal: optionalText(i, "proposal"), origin: optionalText(i, "task"), body: optionalText(i, "body") });
+      const d = newDrift(p, { title: text(i, "title"), refs: texts(i, "refs"), proposal: optionalText(i, "proposal"), origin: optionalText(i, "task"), happens: text(i, "happens"), should: text(i, "should"), ...(i["where"] != null ? { where: text(i, "where") } : {}) });
       return `Recorded Drift ${d.id}. The developer will decide on it.`;
+    },
+  },
+  {
+    name: "trama_drift_replace_proposal",
+    title: "Replace the stale Proposal of a Drift",
+    description: "Attaches a newer Proposal to an open Drift in place of the stale one attached to it, after the developer asked you to rework it. First write the new Proposal on the current Model and hand it over (trama_proposal_submit). The old Proposal is rejected as replaced. Refused unless the attached Proposal is open and stale.",
+    inputSchema: {
+      type: "object",
+      properties: { drift: string("Drift ID"), proposal: string("ID of the new Proposal") },
+      required: ["drift", "proposal"],
+      additionalProperties: false,
+    },
+    writes: true,
+    run: (p, i) => {
+      const old = getDrift(p, text(i, "drift")).data.proposal;
+      const d = replaceDriftProposal(p, text(i, "drift"), text(i, "proposal"));
+      return `Drift ${d.id} now has Proposal ${d.data.proposal}; Proposal ${old} was rejected as replaced.`;
     },
   },
   {

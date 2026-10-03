@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { DriftView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { approveBlocker, blockBadge, buildBoard, designRunBlocker, dropTarget, excerpt, formatCounts, neighbour, proposalBadges, runAllBlocker, summarizeChanges, summarizeFile } from "../extension/src/webview/board/logic";
+import { approveBlocker, blockBadge, buildBoard, designRunBlocker, dropTarget, formatCounts, ghostFor, neighbour, proposalBadges, runAllBlocker, summarizeChanges, summarizeFile } from "../extension/src/webview/board/logic";
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "0007",
@@ -19,9 +19,9 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   areas: [],
   ...over,
 });
-const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, proposalBlocker: null, ...over });
+const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, requirementsOnly: false, proposalBlock: null, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
-const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drafts: [], drifts: [], tasks: [], ...over });
+const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
 
 test("groups the snapshot into four columns, Proposals before Drifts in To decide", () => {
@@ -50,15 +50,6 @@ test("keys differ across kinds that share an ID", () => {
   const board = buildBoard(snapshot({ proposals: [proposal({ id: "0003" })], drifts: [drift({ id: "0003" })], tasks: [task({ id: "0003" })] }));
   const keys = board.flatMap((c) => c.cards.map((card) => card.key));
   expect(new Set(keys).size).toBe(3);
-});
-
-test("excerpt keeps the first non-empty lines and shortens long text", () => {
-  expect(excerpt("\n  one  \n\n two\nthree")).toBe("one\ntwo");
-  expect(excerpt("one\ntwo\nthree", 3)).toBe("one\ntwo\nthree");
-  expect(excerpt("")).toBe("");
-  const long = excerpt("x".repeat(500), 2, 50);
-  expect(long.length).toBe(50);
-  expect(long.endsWith("…")).toBe(true);
 });
 
 test("neighbour moves along To do, In progress, Done and stops at the ends", () => {
@@ -126,16 +117,6 @@ test("badges name each problem and list the files or the first messages in the t
   expect(badges[1]?.tooltip).toContain("f.md:3: problem 3");
   expect(badges[1]?.tooltip).not.toContain("problem 4");
   expect(badges[1]?.tooltip).toContain("and 2 more");
-});
-
-test("a Drift with an attached Proposal inherits its approval blocker", () => {
-  const blocked = buildBoard(snapshot({ proposals: [proposal({ id: "0008", stale: ["x.md"] })], drifts: [drift({ proposal: "0008" })] }))[0]?.cards.at(-1);
-  expect(blocked).toMatchObject({ kind: "drift", proposal: "0008" });
-  expect(blocked?.kind === "drift" && blocked.acceptBlocker).toContain("Stale");
-  const ok = buildBoard(snapshot({ proposals: [proposal({ id: "0008" })], drifts: [drift({ proposal: "0008" })] }))[0]?.cards.at(-1);
-  expect(ok?.kind === "drift" && ok.acceptBlocker).toBeNull();
-  const plain = buildBoard(snapshot({ drifts: [drift()] }))[0]?.cards[0];
-  expect(plain).toMatchObject({ proposal: null, acceptBlocker: null, excerpt: "line one\nline two" });
 });
 
 const design = (id: string, column: TaskView["column"], proposal: string | null = "0007") => task({ id, column, proposal, proposalTitle: proposal === null ? null : "Returns" });
@@ -210,4 +191,30 @@ test("a blocked Task, alone or inside a design, gets one badge per blocker that 
   expect(blockBadge(blockedBy[0] as TaskView["blockedBy"][number]).target.kind).toBe("drift");
   // Blocking disables nothing: the move arrows follow the column only.
   expect(card?.kind === "task" && [card.left, card.right]).toEqual([null, "doing"]);
+});
+
+test("a moving Task's ghost stands where it will sit among the destination column's cards, in Task order", () => {
+  const snap = snapshot({
+    tasks: [task({ id: "0001", column: "doing" }), task({ id: "0002", column: "todo" }), task({ id: "0003", column: "doing" }), task({ id: "0004", column: "doing" })],
+  });
+  const ghost = ghostFor(snap, "0002", "doing");
+  expect(ghost?.index).toBe(1);
+  expect(ghost?.card.column).toBe("doing");
+  expect(ghostFor(snap, "0002", "done")?.index).toBe(0);
+});
+
+test("a Task inside a design card, one already in the column or an unknown one gets no ghost", () => {
+  const snap = snapshot({
+    tasks: [task({ id: "0001", proposal: "0016" }), task({ id: "0002", proposal: "0016" }), task({ id: "0003", column: "doing" })],
+  });
+  expect(ghostFor(snap, "0001", "doing")).toBeNull();
+  expect(ghostFor(snap, "0003", "doing")).toBeNull();
+  expect(ghostFor(snap, "9999", "doing")).toBeNull();
+});
+
+test("a design card in the destination column counts as one card when placing the ghost", () => {
+  const snap = snapshot({
+    tasks: [task({ id: "0001", column: "doing", proposal: "0016" }), task({ id: "0002", column: "doing", proposal: "0016" }), task({ id: "0003", column: "todo" }), task({ id: "0004", column: "doing" })],
+  });
+  expect(ghostFor(snap, "0003", "doing")?.index).toBe(1);
 });

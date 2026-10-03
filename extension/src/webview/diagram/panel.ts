@@ -1,6 +1,8 @@
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
-import type { DriftView, ProposalView } from "../../../../src/core/snapshot";
+import type { ProposalView } from "../../../../src/core/snapshot";
 import { approveBlocker } from "../board/logic";
+import { renderDriftCompare } from "../drift-compare";
+import { renderInline, renderMarkdown } from "../markdown";
 import type { Detail, DetailItem } from "./details";
 import type { Level } from "./graph";
 
@@ -13,6 +15,10 @@ export interface PanelActions {
   approve(proposal: string): void;
   reject(proposal: string): void;
   resolveDrift(drift: string, how: "fix-code" | "accept-proposal" | "dismiss"): void;
+  /** "Keep this" clicked on a Drift whose attached Proposal cannot be approved. */
+  driftBlocked(drift: string): void;
+  /** An http or https link of a rendered text was followed. */
+  openLink(url: string): void;
 }
 
 export interface Panel {
@@ -44,6 +50,12 @@ function list(className: string, lines: string[]): HTMLElement {
 }
 
 export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
+  const body = (source: string): HTMLElement => {
+    const node = renderMarkdown(source, actions.openLink);
+    node.classList.add("dg-body");
+    return node;
+  };
+
   const renderItem = (item: DetailItem): HTMLElement => {
     const li = el("li", `dg-item change-${item.change}`);
     const head = item.ref ? el("button", "dg-link", item.text) : el("span", "dg-item-text", item.text);
@@ -53,14 +65,18 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     }
     li.append(head);
     if (item.change !== "same") li.append(el("span", "dg-tag", item.change));
-    if (item.note) li.append(el("div", "dg-note", item.note));
+    if (item.note) {
+      const note = el("div", "dg-note");
+      note.append(renderInline(item.note, actions.openLink));
+      li.append(note);
+    }
     return li;
   };
 
   const renderProposal = (p: ProposalView): HTMLElement => {
     const box = el("section", "dg-proposal");
     box.append(el("div", "dg-kind", `Proposal ${p.id}`), el("h3", "", p.title));
-    if (p.body) box.append(el("p", "dg-body", p.body));
+    if (p.body) box.append(body(p.body));
     const open = p.requires.filter((r) => appliesUnder(r.status));
     if (open.length > 0) box.append(el("div", "dg-note", `Drawn on top of ${open.map((r) => `Proposal ${r.id}`).join(", ")}, not yet approved: what they add is shown as if approved.`));
     const unusable = p.requires.filter((r) => !appliesUnder(r.status));
@@ -85,18 +101,10 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     const row = el("div", "dg-actions");
     row.append(
       button("Approve", () => actions.approve(p.id), { primary: true, disabled: blocker !== null, title: blocker ?? "Apply this Proposal to the Model" }),
-      button("Reject", () => actions.reject(p.id), { title: "Reject this Proposal and give the agent feedback" }),
+      button("Reject", () => actions.reject(p.id), { title: "Reject this Proposal; feedback for the agent is optional" }),
     );
     box.append(row);
     return box;
-  };
-
-  const renderDrift = (d: DriftView): HTMLElement => {
-    const row = el("div", "dg-actions");
-    row.append(button("Fix code", () => actions.resolveDrift(d.id, "fix-code"), { primary: true, title: "The Model is right: have the agent fix the code" }));
-    if (d.proposal) row.append(button("Accept Proposal", () => actions.resolveDrift(d.id, "accept-proposal"), { disabled: d.proposalBlocker !== null, title: d.proposalBlocker ?? `The code is right: approve Proposal ${d.proposal}` }));
-    row.append(button("Dismiss", () => actions.resolveDrift(d.id, "dismiss"), { title: "Ignore this difference" }));
-    return row;
   };
 
   return {
@@ -107,8 +115,12 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       head.append(el("h2", "", detail.title));
       if (detail.change !== "same") head.append(el("div", `dg-badge change-${detail.change}`, CHANGE_TEXT[detail.change]));
       root.append(head);
+      if (detail.drift) {
+        const d = detail.drift;
+        root.append(renderDriftCompare(d, { keep: (how) => actions.resolveDrift(d.id, how), blocked: () => actions.driftBlocked(d.id), openLink: actions.openLink }));
+      }
 
-      if (detail.description) root.append(el("p", "dg-body", detail.description));
+      if (detail.description) root.append(body(detail.description));
       if (detail.changes.length > 0) root.append(el("div", "dg-heading", "What changes"), list("dg-change-lines", detail.changes));
 
       const row = el("div", "dg-actions");
@@ -124,7 +136,6 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
         for (const i of s.items) ul.append(renderItem(i));
         root.append(el("div", "dg-heading", s.heading), ul);
       }
-      if (detail.drift) root.append(renderDrift(detail.drift));
       if (detail.proposal) root.append(renderProposal(detail.proposal));
     },
   };

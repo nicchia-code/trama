@@ -1,7 +1,7 @@
 import { delimiter, dirname } from "node:path";
 import * as vscode from "vscode";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
-import { watchAgentTerminal, settings } from "./agent";
+import { watchAgentTerminal, configuredSkillsDir } from "./agent";
 import { Controller, describeError } from "./controller";
 import { isCursor } from "./cursor";
 import { ensureCursorMcp, tramaExecutable } from "./mcp-config";
@@ -73,7 +73,7 @@ function watchRequirements(): vscode.Disposable {
       const project = findProject();
       if (!project) return;
       try {
-        syncRequirementSkills(project, [settings().get<string>("skillsDir", ".agents/skills").trim() || ".agents/skills"]);
+        syncRequirementSkills(project, [configuredSkillsDir()]);
       } catch (err) {
         void vscode.window.showErrorMessage(`Trama: could not regenerate the Requirement skills: ${describeError(err)}`);
       }

@@ -29,7 +29,7 @@
 .rq-section.removed { border-left-color: var(--rq-removed); }
 .rq-section.removed .rq-text { text-decoration: line-through; opacity: .7; }
 .rq-section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-weight: 600; }
-.rq-text { white-space: pre-wrap; line-height: 1.45; }
+.rq-text { line-height: 1.45; }
 .rq-before { text-decoration: line-through; opacity: .6; margin-bottom: 4px; }
 .rq-ref, .rq-link { background: none; border: 0; padding: 0; color: var(--vscode-textLink-foreground, #3794ff); cursor: pointer; font: inherit; font-weight: 600; }
 .rq-link { font-weight: normal; text-decoration: underline; }

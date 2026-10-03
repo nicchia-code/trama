@@ -1,11 +1,11 @@
-import { changes, health, listProposals, type Proposal, validateProposal } from "../core/proposals";
+import { approvalBlock, changes, getProposal, health, listProposals, type Proposal, validateProposal } from "../core/proposals";
 import { requiredReasons } from "../core/required";
 import { hasContent, loadProject, parseRequirementRef, type ProjectModel, requirementsFor, resolveProjectRef } from "../core/requirements";
 import type { Project } from "../core/store";
 import { formatDiagnostic } from "../core/model";
 import { placeTasks } from "../core/design";
 import type { Blocker } from "../core/blocking";
-import { blockedTasks, COLUMNS, type Drift, listDrifts, listTasks, type Task } from "../core/work";
+import { blockedTasks, COLUMNS, type Drift, driftSides, listDrifts, listTasks, type Task } from "../core/work";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 
 /** One-line summary of a Proposal for lists and the board. */
@@ -180,18 +180,38 @@ export function taskListView(p: Project, column?: string): Result {
 
 export function driftShowView(p: Project, drift: Drift): Result {
   const project = loadProject(p);
+  const sides = driftSides(drift);
+  const bodyText = drift.body.replace(/^#\s+.+\n+/, "").trim();
+  const description = sides
+    ? ["## What happens", "", sides.happens, "", "## What should happen", "", sides.should, ...(sides.where ? ["", "## Where in the code", "", sides.where] : [])]
+    : ["## Description", "", bodyText];
+  const attached = drift.data.proposal;
+  let attachedLine = "";
+  let block: { kind: string; reason: string } | null = null;
+  if (attached) {
+    let status = "missing";
+    try {
+      status = getProposal(p, attached).data.status;
+    } catch {
+      // a missing Proposal is reported by approvalBlock below
+    }
+    block = drift.data.status === "open" ? approvalBlock(p, attached) : null;
+    attachedLine = `Attached Proposal: ${attached} (${status})${block ? `\nCannot be approved: ${block.reason}` : ""}`;
+  }
   const md = [
-    drift.body.trim(),
+    `# ${drift.title}`,
+    "",
+    ...description,
     "",
     `Status: **${drift.data.status}**${drift.data.resolution ? ` (${drift.data.resolution})` : ""}`,
-    drift.data.proposal ? `Attached Proposal: ${drift.data.proposal}` : "",
+    attachedLine,
     drift.data.task ? `Task: ${drift.data.task}` : "",
     "",
     "## References",
     refsBlock(project, drift.data.refs),
     ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, drift.data.refs)] : []),
   ].join("\n");
-  return { md, json: { ...driftSummary(drift), body: drift.body } };
+  return { md, json: { ...driftSummary(drift), body: drift.body, happens: sides?.happens ?? null, should: sides?.should ?? null, where: sides?.where ?? null, proposalBlock: block } };
 }
 
 export function driftListView(p: Project, all: boolean): Result {

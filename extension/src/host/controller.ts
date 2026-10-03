@@ -1,13 +1,14 @@
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
-import { approveProposal, discardProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
+import { approvalBlock, approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { takenBlocker } from "../../../src/core/design";
-import { getDrift, getTask, listTasks, moveTask, resolveDrift, takeBackTask } from "../../../src/core/work";
+import { getDrift, getTask, listTasks, moveTask, resolveDrift, staleAttachedProposal, takeBackTask } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
-import { agentReady, launchAgent, settings } from "./agent";
+import { agentReady, configuredSkillsDir, launchAgent, settings } from "./agent";
+import { driftBlockedMessage, REWORK_PROPOSAL } from "./drift-blocked";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { resolveMarkdownFile } from "./paths";
@@ -171,6 +172,9 @@ export class Controller implements vscode.Disposable {
       case "openFile":
         await this.openFile(resolveMarkdownFile(project.dir, message.path));
         return;
+      case "openLink":
+        await vscode.env.openExternal(vscode.Uri.parse(message.url, true));
+        return;
       case "moveTask":
         moveTask(project, message.id, message.column, "developer");
         this.refresh();
@@ -180,34 +184,40 @@ export class Controller implements vscode.Disposable {
         this.refresh();
         return;
       case "approveProposal":
-        await this.approving(project, message.id, () => approveProposal(project, message.id));
+        await this.approving(project, message.id, () => approveProposal(project, message.id, [configuredSkillsDir()]));
         return;
       case "rejectProposal": {
         const feedback = await vscode.window.showInputBox({
           title: `Reject Proposal ${message.id}`,
-          prompt: "Feedback for the agent: what should the next Proposal do differently?",
-          validateInput: notBlank("Feedback is required"),
+          prompt: "Feedback for the agent (optional): what should the next Proposal do differently? Press Enter to reject without feedback, Esc to cancel.",
+          ignoreFocusOut: true,
         });
         if (feedback === undefined) return;
         rejectProposal(project, message.id, feedback);
         this.refresh();
         return;
       }
-      case "discardProposal": {
-        const choice = await vscode.window.showWarningMessage("Discard this draft? The agent will not be told.", { modal: true }, "Discard");
-        if (choice !== "Discard") return;
-        discardProposal(project, message.id);
-        this.refresh();
-        return;
-      }
       case "resolveDrift": {
-        const resolve = () => resolveDrift(project, message.id, message.how);
+        const resolve = () => resolveDrift(project, message.id, message.how, [configuredSkillsDir()]);
         const attached = getDrift(project, message.id).data.proposal;
         if (message.how === "accept-proposal" && attached !== null) await this.approving(project, attached, resolve);
         else {
           resolve();
           this.refresh();
         }
+        return;
+      }
+      case "driftBlocked": {
+        const proposal = getDrift(project, message.id).data.proposal;
+        const block = proposal === null ? null : approvalBlock(project, proposal);
+        if (block === null) {
+          // The Proposal can be approved now: the developer was looking at an old picture.
+          this.refresh();
+          return;
+        }
+        const stale = block.kind === "stale";
+        const choice = await vscode.window.showWarningMessage(driftBlockedMessage(block), ...(stale ? [REWORK_PROPOSAL] : []));
+        if (choice === REWORK_PROPOSAL) await this.launchAction(project, { kind: "rework-drift", drift: message.id });
         return;
       }
     }
@@ -280,6 +290,12 @@ export class Controller implements vscode.Disposable {
       case "import":
         await launchAgent(project.root, buildPrompt(action));
         return;
+      case "rework-drift": {
+        const drift = getDrift(project, action.drift);
+        const stale = staleAttachedProposal(project, drift);
+        await launchAgent(project.root, buildPrompt({ kind: "rework-drift", drift: drift.id, proposal: stale.id }));
+        return;
+      }
     }
   }
 }

@@ -25,7 +25,7 @@ import {
   writeFileEnsuringDir,
 } from "../core/store";
 import type { Model } from "../core/types";
-import { getDrift, getTask, moveTask, newDrift, newTask, resolveDrift, takeBackTask } from "../core/work";
+import { getDrift, getTask, moveTask, newDrift, newTask, replaceDriftProposal, resolveDrift, takeBackTask } from "../core/work";
 import {
   analyzeView,
   eventView,
@@ -217,12 +217,12 @@ export const COMMANDS: Command[] = [
     } },
   { name: "proposal show", args: "<id>", summary: "A Proposal: staleness, structural changes, validation", run: (ctx, a) => proposalShowView(ctx.project(), getProposal(ctx.project(), a[0] as string)) },
   { name: "proposal list", args: "", summary: "Draft and open Proposals (--all for every one)", options: { all: { type: "boolean" } }, run: (ctx, _a, o) => proposalListView(ctx.project(), o["all"] === true) },
-  { name: "proposal approve", args: "<id>", summary: "Apply a Proposal to the Model", developerOnly: true, run(ctx, a) {
-      const p = approveProposal(ctx.project(), a[0] as string);
+  { name: "proposal approve", args: "<id>", summary: "Apply a Proposal to the Model and regenerate the Requirement skills (--skills-dir adds the configured skills folder to the usual ones)", developerOnly: true, options: { "skills-dir": ref }, run(ctx, a, o) {
+      const p = approveProposal(ctx.project(), a[0] as string, list(o["skills-dir"]));
       return text(`Approved Proposal ${p.id}`, { id: p.id, status: p.data.status });
     } },
-  { name: "proposal reject", args: "<id>", summary: "Reject a Proposal with feedback", developerOnly: true, options: { feedback: { type: "string" } }, run(ctx, a, o) {
-      const p = rejectProposal(ctx.project(), a[0] as string, required(str(o["feedback"]), "feedback"));
+  { name: "proposal reject", args: "<id>", summary: "Reject a Proposal, optionally with feedback for the agent", developerOnly: true, options: { feedback: { type: "string" } }, run(ctx, a, o) {
+      const p = rejectProposal(ctx.project(), a[0] as string, str(o["feedback"]));
       return text(`Rejected Proposal ${p.id}`, { id: p.id, status: p.data.status });
     } },
 
@@ -241,17 +241,22 @@ export const COMMANDS: Command[] = [
       return text(`Task ${t.id} is yours again (still ${t.data.column})`, { id: t.id, column: t.data.column, agent: t.data.agent });
     } },
 
-  { name: "drift new", args: "<title>", summary: "Record an open Drift (--task <id> names the Task you were implementing when you found it)", options: { ref, proposal: { type: "string" }, task: { type: "string" }, body: { type: "string" } }, run(ctx, a, o) {
-      const d = newDrift(ctx.project(), { title: a[0] as string, refs: list(o["ref"]), proposal: str(o["proposal"]), origin: str(o["task"]), body: str(o["body"]) });
+  { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; --where (optional) says where in the code it was seen, the only place for files and code names; --task <id> names the Task you were implementing when you found it", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, where: { type: "string" } }, run(ctx, a, o) {
+      const d = newDrift(ctx.project(), { title: a[0] as string, refs: list(o["ref"]), proposal: str(o["proposal"]), origin: str(o["task"]), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", ...(o["where"] !== undefined ? { where: str(o["where"]) ?? "" } : {}) });
       return text(`Created Drift ${d.id} at ${d.path}`, { id: d.id, path: d.path });
     } },
   { name: "drift list", args: "", summary: "Open Drifts (--all for every one)", options: { all: { type: "boolean" } }, run: (ctx, _a, o) => driftListView(ctx.project(), o["all"] === true) },
   { name: "drift show", args: "<id>", summary: "A Drift with its references and attached Proposal", run: (ctx, a) => driftShowView(ctx.project(), getDrift(ctx.project(), a[0] as string)) },
-  { name: "drift resolve", args: "<id>", summary: "Resolve with --fix-code, --accept-proposal or --dismiss", developerOnly: true, options: { "fix-code": { type: "boolean" }, "accept-proposal": { type: "boolean" }, dismiss: { type: "boolean" } }, run(ctx, a, o) {
+  { name: "drift resolve", args: "<id>", summary: "Resolve with --fix-code, --accept-proposal or --dismiss (--skills-dir adds the configured skills folder for the approval of --accept-proposal)", developerOnly: true, options: { "fix-code": { type: "boolean" }, "accept-proposal": { type: "boolean" }, dismiss: { type: "boolean" }, "skills-dir": ref }, run(ctx, a, o) {
       const chosen = (["fix-code", "accept-proposal", "dismiss"] as const).filter((k) => o[k] === true);
       if (chosen.length !== 1) throw new UsageError("Choose exactly one of --fix-code, --accept-proposal, --dismiss");
-      const d = resolveDrift(ctx.project(), a[0] as string, chosen[0] as (typeof chosen)[number]);
+      const d = resolveDrift(ctx.project(), a[0] as string, chosen[0] as (typeof chosen)[number], list(o["skills-dir"]));
       return text(`Drift ${d.id} resolved (${d.data.resolution})${d.data.task ? `; Task ${d.data.task} created` : ""}`, { id: d.id, resolution: d.data.resolution, task: d.data.task });
+    } },
+  { name: "drift replace-proposal", args: "<id>", summary: "Attach a newer Proposal (--proposal <id>) to an open Drift in place of its stale one, which is rejected", options: { proposal: { type: "string" } }, run(ctx, a, o) {
+      const old = getDrift(ctx.project(), a[0] as string).data.proposal;
+      const d = replaceDriftProposal(ctx.project(), a[0] as string, required(str(o["proposal"]), "proposal"));
+      return text(`Drift ${d.id} now has Proposal ${d.data.proposal}; Proposal ${old} was rejected as replaced`, { id: d.id, proposal: d.data.proposal, replaced: old });
     } },
 
   { name: "board", args: "", summary: "To decide, To do, In progress, Done", run: (ctx) => boardView(ctx.project()) },

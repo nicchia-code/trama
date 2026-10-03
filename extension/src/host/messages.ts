@@ -1,5 +1,6 @@
 import type { Raw } from "../../../src/core/schema";
 import type { AgentAction, Column, ToHost } from "../protocol";
+import { safeLink } from "../../../src/core/links";
 
 export type Parsed = { ok: true; message: ToHost } | { ok: false; reason: string };
 
@@ -29,6 +30,8 @@ function parseAction(value: unknown): AgentAction | string {
       return { kind: "implement-all" };
     case "implement-design":
       return typeof raw["proposal"] === "string" && ID.test(raw["proposal"]) ? { kind: "implement-design", proposal: raw["proposal"] } : "implement-design needs a valid Proposal ID";
+    case "rework-drift":
+      return typeof raw["drift"] === "string" && ID.test(raw["drift"]) ? { kind: "rework-drift", drift: raw["drift"] } : "rework-drift needs a valid Drift ID";
     default:
       return `unknown action "${String(raw["kind"])}"`;
   }
@@ -59,12 +62,17 @@ export function parseToHost(value: unknown): Parsed {
       return id === undefined ? bad("takeBackTask needs a valid Task ID") : { ok: true, message: { type, id } };
     case "approveProposal":
     case "rejectProposal":
-    case "discardProposal":
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };
     case "resolveDrift":
       if (id === undefined) return bad("resolveDrift needs a valid Drift ID");
       if (typeof raw["how"] !== "string" || !HOWS.includes(raw["how"])) return bad(`unknown resolution "${String(raw["how"])}"`);
       return { ok: true, message: { type, id, how: raw["how"] as "fix-code" | "accept-proposal" | "dismiss" } };
+    case "driftBlocked":
+      return id === undefined ? bad("driftBlocked needs a valid Drift ID") : { ok: true, message: { type, id } };
+    case "openLink": {
+      const url = typeof raw["url"] === "string" ? safeLink(raw["url"]) : null;
+      return url === null ? bad("openLink needs an http or https address") : { ok: true, message: { type, url } };
+    }
     default:
       return bad(`unknown message type "${type}"`);
   }

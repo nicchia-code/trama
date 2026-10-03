@@ -44,7 +44,7 @@ function navigate(view: ViewName, options: NavigateOptions = {}) {
   mounted[view].show(options);
 }
 
-const context: ViewContext = { post, navigate };
+const context: ViewContext = { post, navigate, openLink: (url) => post({ type: "openLink", url }) };
 const mounted: Record<ViewName, View> = {
   diagram: mountDiagram(roots.diagram, context),
   board: mountBoard(roots.board, context),
@@ -94,8 +94,10 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     const badge = app.querySelector("[data-badge]") as HTMLElement;
     badge.hidden = decide === 0;
     badge.textContent = String(decide);
-  } else if (message.type === "error") showError(message.message);
-  else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal });
+  } else if (message.type === "error") {
+    showError(message.message);
+    for (const view of Object.values(mounted)) view.fail?.();
+  } else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal });
 });
 
 navigate(current);

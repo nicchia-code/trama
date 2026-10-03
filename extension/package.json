@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.3.7",
+  "version": "0.3.11",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -611,14 +611,54 @@
               "type": "string",
               "description": "ID of the Task you were implementing when you found the difference; leave out for a Scan or a Fix"
             },
-            "body": {
+            "happens": {
               "type": "string",
-              "description": "What the code does, what the Model or Requirement says, where in the code"
+              "description": "What happens: what the code does, in terms of behaviour and domain words, for a programmer reading at a glance. Short Markdown, about 100 words. Name a variable, function, class, field or file only when the difference cannot be understood without it, as inline code; code locations go in `where`"
+            },
+            "should": {
+              "type": "string",
+              "description": "What should happen: what the Model or the Requirement says, in the same style"
+            },
+            "where": {
+              "type": "string",
+              "description": "Optional: where in the code the difference was seen (files, and the code element when it helps; no line numbers, no long code). The only place for code locations"
             }
           },
           "required": [
             "title",
-            "refs"
+            "refs",
+            "happens",
+            "should"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_drift_replace_proposal",
+        "displayName": "Trama: Replace the stale Proposal of a Drift",
+        "toolReferenceName": "trama_drift_replace_proposal",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Replace the stale Proposal of a Drift",
+        "modelDescription": "Attaches a newer Proposal to an open Drift in place of the stale one attached to it, after the developer asked you to rework it. First write the new Proposal on the current Model and hand it over (trama_proposal_submit). The old Proposal is rejected as replaced. Refused unless the attached Proposal is open and stale.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "drift": {
+              "type": "string",
+              "description": "Drift ID"
+            },
+            "proposal": {
+              "type": "string",
+              "description": "ID of the new Proposal"
+            }
+          },
+          "required": [
+            "drift",
+            "proposal"
           ],
           "additionalProperties": false
         }

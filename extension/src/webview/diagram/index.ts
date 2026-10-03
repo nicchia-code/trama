@@ -79,6 +79,8 @@ export const mountDiagram: MountView = (root, context) => {
     approve: (id) => context.post({ type: "approveProposal", id }),
     reject: (id) => context.post({ type: "rejectProposal", id }),
     resolveDrift: (id, how) => context.post({ type: "resolveDrift", id, how }),
+    driftBlocked: (id) => context.post({ type: "driftBlocked", id }),
+    openLink: context.openLink,
   });
 
   const canvas = createCanvas(stage, $("div.dg-canvas"), {

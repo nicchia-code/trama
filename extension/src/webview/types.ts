@@ -6,6 +6,8 @@ export interface ViewContext {
   post(message: ToHost): void;
   /** Switch tab, optionally pointing the Diagram at an element or a Proposal. */
   navigate(view: ViewName, options?: NavigateOptions): void;
+  /** Follow an http or https link of a rendered text: the host opens it in the system browser. */
+  openLink(url: string): void;
 }
 
 export interface View {
@@ -13,6 +15,8 @@ export interface View {
   update(snapshot: Snapshot): void;
   /** Called when the view becomes visible or is navigated to. */
   show(options: NavigateOptions): void;
+  /** Called when the host reports an error: drops whatever the view was waiting on the host for, such as a move in flight. */
+  fail?(): void;
 }
 
 export type MountView = (root: HTMLElement, context: ViewContext) => View;

@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import { run } from "../../../src/cli/main";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { TRAMA_DIR, type Project, projectAt } from "../../../src/core/store";
-import { settings } from "./agent";
+import { configuredSkillsDir } from "./agent";
 
 const fileFolders = () => (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file");
 
@@ -32,7 +32,7 @@ async function pickFolder(): Promise<string | undefined> {
 export async function initializeProject(): Promise<Project | undefined> {
   const root = await pickFolder();
   if (root === undefined) return undefined;
-  const skillsDir = settings().get<string>("skillsDir", ".agents/skills").trim() || ".agents/skills";
+  const skillsDir = configuredSkillsDir();
   for (let force = false; ; force = true) {
     try {
       run(["--root", root, "init", "--skills-dir", skillsDir, ...(force ? ["--force"] : [])], root);
@@ -55,7 +55,7 @@ export async function initializeProject(): Promise<Project | undefined> {
 
 /** Replaces the project's agent skills with the ones shipped in this version of Trama, and says what changed. */
 export function updateSkills(project: Project): void {
-  const skillsDir = settings().get<string>("skillsDir", ".agents/skills").trim() || ".agents/skills";
+  const skillsDir = configuredSkillsDir();
   const { out } = run(["--root", project.root, "skills", "update", "--skills-dir", skillsDir], project.root);
   void vscode.window.showInformationMessage(`Trama: ${out.split("\n")[0]}`);
 }

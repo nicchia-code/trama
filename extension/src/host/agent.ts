@@ -13,6 +13,9 @@ export const settings = () => vscode.workspace.getConfiguration("trama");
 
 export const configuredAgentCommand = (): string => settings().get<string>("agentCommand", "").trim();
 
+/** The folder the developer chose for Trama's skills (`trama.skillsDir`), relative to the project root unless absolute. */
+export const configuredSkillsDir = (): string => settings().get<string>("skillsDir", ".agents/skills").trim() || ".agents/skills";
+
 /** Where the buttons send their prompt: a terminal command, or the agent chat built into the editor. */
 export const agentLauncher = (): "terminal" | "chat" => (settings().get<string>("agentLauncher", "terminal") === "chat" ? "chat" : "terminal");
 
@@ -48,6 +51,8 @@ let lastTerminal: vscode.Terminal | undefined;
 let lastRoot: string | undefined;
 let commandRunning = false;
 let lastQuestionEndpoint: string | undefined;
+/** Every terminal Trama started and is still open, with the project folder it was started for; any of them may end a command that had taken Tasks. */
+const launched = new Map<vscode.Terminal, string>();
 
 function releaseTakenTasks(root: string): void {
   try {
@@ -65,13 +70,16 @@ export function watchAgentTerminal(): vscode.Disposable {
       if (e.terminal === lastTerminal) commandRunning = true;
     }),
     vscode.window.onDidEndTerminalShellExecution((e) => {
-      if (e.terminal !== lastTerminal) return;
-      commandRunning = false;
-      // The command ended, so no agent can still be working: the Tasks it took are the developer's again.
+      const root = launched.get(e.terminal);
+      if (root === undefined) return;
+      if (e.terminal === lastTerminal) commandRunning = false;
+      // A command ended in a terminal Trama started, so a Task marked as taken is released, whichever launch took it
+      // (an earlier terminal may end while a later one runs: the Model releases every taken Task at once).
       // Without shell integration this event never comes, and the Tasks stay taken until the developer takes them back.
-      if (lastRoot !== undefined) releaseTakenTasks(lastRoot);
+      releaseTakenTasks(root);
     }),
     vscode.window.onDidCloseTerminal((t) => {
+      launched.delete(t);
       if (t === lastTerminal) {
         lastTerminal = undefined;
         commandRunning = false;
@@ -108,6 +116,7 @@ export async function launchAgent(root: string, prompt: string): Promise<void> {
   const terminal = reusable ? previous : vscode.window.createTerminal({ name: TERMINAL_NAME, cwd: root, env: { TRAMA_AGENT: "1", [QUESTION_ENDPOINT_ENV]: endpoint } });
   terminal.show();
   terminal.sendText(agentCommandLine(template, prompt, shellFamily(vscode.env.shell)));
+  launched.set(terminal, root);
   lastTerminal = terminal;
   lastRoot = root;
   lastQuestionEndpoint = endpoint;

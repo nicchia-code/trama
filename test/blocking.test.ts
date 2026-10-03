@@ -34,7 +34,7 @@ describe("which Tasks an open Drift blocks", () => {
       ["payment", [other]],
     ];
     for (const [ref, blocked] of cases) {
-      const drift = newDrift(p, { title: ref, refs: [ref] });
+      const drift = newDrift(p, { title: ref, refs: [ref], happens: "The code does it one way.", should: "The Model says another." });
       expect(Object.keys(blockedBy()).sort()).toEqual([...blocked].sort());
       resolveDrift(p, drift.id, "dismiss");
     }
@@ -47,7 +47,7 @@ describe("which Tasks an open Drift blocks", () => {
     const general = task(["requirements/ui#General"]);
     const element = task(["order/Shipped"]);
     const blockedFor = (ref: string) => {
-      const d = newDrift(p, { title: ref, refs: [ref] });
+      const d = newDrift(p, { title: ref, refs: [ref], happens: "The code does it one way.", should: "The Model says another." });
       const ids = Object.keys(blockedBy()).sort();
       resolveDrift(p, d.id, "dismiss");
       return ids;
@@ -66,7 +66,7 @@ describe("which Tasks an open Drift blocks", () => {
     const finished = task(["order"]);
     const origin = task(["cart"]);
     moveTask(p, finished, "done", "developer");
-    const drift = newDrift(p, { title: "d", refs: ["order"], origin });
+    const drift = newDrift(p, { title: "d", refs: ["order"], origin, happens: "The code does it one way.", should: "The Model says another." });
     expect(blockedBy()).toEqual({ [concerned]: [`drift ${drift.id}`], [origin]: [`drift ${drift.id}`] });
     moveTask(p, origin, "done", "developer");
     expect(blockedBy()).toEqual({ [concerned]: [`drift ${drift.id}`] });
@@ -76,8 +76,8 @@ describe("which Tasks an open Drift blocks", () => {
 
   test("a Task blocked by several Drifts lists each, and a Drift filed without an origin blocks only what it concerns", () => {
     const t = task(["order/Paid"]);
-    const a = newDrift(p, { title: "a", refs: ["order"] });
-    const b = newDrift(p, { title: "b", refs: ["order/Paid/user.CANCEL"] });
+    const a = newDrift(p, { title: "a", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
+    const b = newDrift(p, { title: "b", refs: ["order/Paid/user.CANCEL"], happens: "The code does it one way.", should: "The Model says another." });
     task(["cart"]);
     expect(blockedBy()).toEqual({ [t]: [`drift ${a.id}`, `drift ${b.id}`] });
   });
@@ -85,7 +85,7 @@ describe("which Tasks an open Drift blocks", () => {
   test("fixing the code leaves the origin waiting for the fix Task until it is Done; the Task and Drift that fixed it block nothing else", () => {
     const origin = task(["order"]);
     const bystander = task(["order/Paid"]);
-    const drift = newDrift(p, { title: "d", refs: ["order"], origin });
+    const drift = newDrift(p, { title: "d", refs: ["order"], origin, happens: "The code does it one way.", should: "The Model says another." });
     resolveDrift(p, drift.id, "fix-code");
     const fix = Object.entries(blockedBy()).find(([id]) => id === origin)?.[1][0]?.replace("task ", "") as string;
     expect(blockedBy()).toEqual({ [origin]: [`task ${fix}`] });
@@ -96,9 +96,9 @@ describe("which Tasks an open Drift blocks", () => {
 
   test("a Drift resolved another way, or fixed with the origin already Done, leaves the origin free", () => {
     const [a, b] = [task(["cart"]), task(["cart"])] as [string, string];
-    resolveDrift(p, newDrift(p, { title: "a", refs: ["cart"], origin: a }).id, "dismiss");
+    resolveDrift(p, newDrift(p, { title: "a", refs: ["cart"], origin: a, happens: "The code does it one way.", should: "The Model says another." }).id, "dismiss");
     moveTask(p, b, "done", "developer");
-    resolveDrift(p, newDrift(p, { title: "b", refs: ["cart"], origin: b }).id, "fix-code");
+    resolveDrift(p, newDrift(p, { title: "b", refs: ["cart"], origin: b, happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code");
     expect(blockedBy()).toEqual({});
   });
 });

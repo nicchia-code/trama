@@ -1,5 +1,6 @@
 import type { AreaView, SectionView, Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
+import { renderMarkdown } from "../markdown";
 import type { MountView } from "../types";
 import { areasWith, parseTarget, sectionMatches, visibleSections } from "./logic";
 import css from "./requirements.css" with { type: "text" };
@@ -19,6 +20,13 @@ function button(label: string, className: string, title: string, onClick: () => 
   node.type = "button";
   node.title = title;
   node.addEventListener("click", onClick);
+  return node;
+}
+
+/** Markdown text with the given classes. */
+function markdown(source: string, openLink: (url: string) => void, className: string): HTMLElement {
+  const node = renderMarkdown(source, openLink);
+  node.classList.add(...className.split(" "));
   return node;
 }
 
@@ -72,8 +80,8 @@ export const mountRequirements: MountView = (root, context) => {
     else head.append(button(section.ref, "rq-ref", `Show ${section.ref} on the diagram`, () => context.navigate("diagram", { ref: section.ref ?? undefined })));
     if (CHANGE_LABEL[section.change]) head.append(el("span", `rq-badge ${section.change}`, CHANGE_LABEL[section.change]));
     node.append(head);
-    if (section.change === "changed" && section.before !== null) node.append(el("div", "rq-text rq-before", section.before));
-    node.append(el("div", "rq-text", section.text || "Empty."));
+    if (section.change === "changed" && section.before !== null) node.append(markdown(section.before, context.openLink, "rq-text rq-before"));
+    node.append(section.text ? markdown(section.text, context.openLink, "rq-text") : el("div", "rq-text", "Empty."));
     node.dataset["key"] = `${area.id}#${section.ref ?? "General"}`;
     return node;
   }
@@ -92,7 +100,7 @@ export const mountRequirements: MountView = (root, context) => {
     head.append(el("span", "rq-spacer"), button("Open file", "trama-btn", `Open .trama/${area.file}`, () => context.post({ type: "openFile", path: area.file })));
     card.append(head);
     if (area.description) card.append(el("p", "rq-when", area.description));
-    if (area.intro) card.append(el("div", "rq-text", area.intro));
+    if (area.intro) card.append(markdown(area.intro, context.openLink, "rq-text"));
     if (sections.length === 0) card.append(el("p", "rq-muted", "No Requirements yet. Write them in the file, or ask an agent with Design…"));
     for (const s of sections) card.append(sectionNode(area, s));
     return card;

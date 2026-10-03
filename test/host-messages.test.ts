@@ -18,6 +18,7 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "launch", action: { kind: "implement", task: "0003" } })).toEqual({ type: "launch", action: { kind: "implement", task: "0003" } });
   expect(ok({ type: "launch", action: { kind: "implement-all" } })).toEqual({ type: "launch", action: { kind: "implement-all" } });
   expect(ok({ type: "launch", action: { kind: "implement-design", proposal: "0007" } })).toEqual({ type: "launch", action: { kind: "implement-design", proposal: "0007" } });
+  expect(ok({ type: "launch", action: { kind: "rework-drift", drift: "0003" } })).toEqual({ type: "launch", action: { kind: "rework-drift", drift: "0003" } });
   expect(ok({ type: "openModelFile", path: "checkout/order.md" })).toEqual({ type: "openModelFile", path: "checkout/order.md" });
   expect(ok({ type: "openFile", path: "tasks/0003-x.md" })).toEqual({ type: "openFile", path: "tasks/0003-x.md" });
   expect(ok({ type: "moveTask", id: "0003", column: "doing" })).toEqual({ type: "moveTask", id: "0003", column: "doing" });
@@ -25,6 +26,7 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "approveProposal", id: "0001" })).toEqual({ type: "approveProposal", id: "0001" });
   expect(ok({ type: "rejectProposal", id: "0001" })).toEqual({ type: "rejectProposal", id: "0001" });
   expect(ok({ type: "resolveDrift", id: "0002", how: "accept-proposal" })).toEqual({ type: "resolveDrift", id: "0002", how: "accept-proposal" });
+  expect(ok({ type: "driftBlocked", id: "0002" })).toEqual({ type: "driftBlocked", id: "0002" });
 });
 
 test("drops fields that are not part of the contract", () => {
@@ -33,6 +35,8 @@ test("drops fields that are not part of the contract", () => {
 
 test("rejects unknown types, wrong shapes, unknown columns and IDs that are not plain IDs", () => {
   const rejected: unknown[] = [
+    { type: "driftBlocked" },
+    { type: "driftBlocked", id: "0002`; rm -rf /; `" },
     null,
     "ready",
     [],
@@ -47,6 +51,8 @@ test("rejects unknown types, wrong shapes, unknown columns and IDs that are not 
     { type: "launch", action: { kind: "implement", task: 3 } },
     { type: "launch", action: { kind: "implement-design" } },
     { type: "launch", action: { kind: "implement-design", proposal: "0007`; rm -rf /; `" } },
+    { type: "launch", action: { kind: "rework-drift" } },
+    { type: "launch", action: { kind: "rework-drift", drift: "0003`; rm -rf /; `" } },
     { type: "openFile" },
     { type: "openFile", path: "" },
     { type: "openModelFile", path: 7 },
@@ -60,4 +66,10 @@ test("rejects unknown types, wrong shapes, unknown columns and IDs that are not 
     { type: "resolveDrift", how: "dismiss" },
   ];
   for (const message of rejected) expect(parseToHost(message).ok).toBe(false);
+});
+
+test("openLink accepts only http and https addresses", () => {
+  expect(ok({ type: "openLink", url: "https://example.com/a" })).toEqual({ type: "openLink", url: "https://example.com/a" });
+  for (const url of ["javascript:alert(1)", "file:///etc/passwd", "docs/x.md", "", 3]) expect(parseToHost({ type: "openLink", url }).ok).toBe(false);
+  expect(parseToHost({ type: "openLink" }).ok).toBe(false);
 });

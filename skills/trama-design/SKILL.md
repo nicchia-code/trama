@@ -23,6 +23,7 @@ If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, 
 | `trama proposal submit <id>` | `trama_proposal_submit` |
 | `trama task new`, `trama task show`, `trama task move` | `trama_task_new`, `trama_task_show`, `trama_task_move` |
 | `trama drift new`, `trama drift show` | `trama_drift_new`, `trama_drift_show` |
+| `trama drift replace-proposal <id> --proposal <p>` | `trama_drift_replace_proposal` |
 | `trama ask --root <project>` (JSON request on stdin) | `trama_ask` |
 
 There is no tool for approving, rejecting, discarding or resolving: those are the developer's decisions.
@@ -75,7 +76,11 @@ Use **`trama_ask` first**, whether offered natively by VS Code or through MCP. I
 
 ## When a Proposal comes back
 
-If the developer rejected it, the reason is under `## Feedback` in `trama proposal show <id>`. Do not patch the rejected Proposal: open a **new** one that addresses the feedback. A stale Proposal (the Model changed under it) is also replaced by a new one.
+If the developer rejected it, the reason, when they gave one, is under `## Feedback` in `trama proposal show <id>`. Do not patch the rejected Proposal: open a **new** one that addresses the feedback. A stale Proposal (the Model changed under it) is also replaced by a new one.
+
+### Reworking the stale Proposal of a Drift
+
+When the prompt says that Proposal `<p>`, attached to Drift `<d>`, is stale, do not interview the developer. Write a new Proposal that makes the same change on the current Model and Requirements (read `trama proposal show <p>` for what it did; list your choices in the new Proposal body), validate it and submit it as usual. Only after the submission succeeds run `trama drift replace-proposal <d> --proposal <new id>` (or `trama_drift_replace_proposal`): it attaches the new Proposal to the Drift and rejects the stale one as replaced. Run it once. If it is refused, report why and stop.
 
 ## Good Model habits
 

@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { type Blocker, computeBlocked, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
-import { approveProposal, getProposal } from "./proposals";
+import { approveProposal, getProposal, health, type Proposal, rejectProposal } from "./proposals";
 import { loadProject, parseRequirementRef, resolveProjectRef } from "./requirements";
 import { boolField, enumField, enumOrNull, idField, type Raw, stringList } from "./schema";
 import {
@@ -127,7 +127,9 @@ export function newTask(
   checkTaskRefs(input.technical, input.refs);
   checkRefs(p, input.refs);
   const drift = input.drift ? getDrift(p, input.drift).id : null;
-  const proposal = input.proposal ? getProposal(p, input.proposal).id : null;
+  // The Proposal must exist, but a Technical Task is never part of a design, so it keeps no link to it.
+  const linked = input.proposal ? getProposal(p, input.proposal).id : null;
+  const proposal = input.technical ? null : linked;
   const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift, proposal, agent: false };
   return create(tasksDir(p), input.title, data, input.body ?? "");
 }
@@ -186,19 +188,55 @@ export function getDrift(p: Project, id: string): Drift {
   return load(driftsDir(p), findNumbered(driftsDir(p), id, "Drift"), parseDrift);
 }
 
+const HAPPENS_HEADING = "What happens";
+const SHOULD_HEADING = "What should happen";
+const WHERE_HEADING = "Where in the code";
+
+export interface DriftSides {
+  happens: string;
+  should: string;
+  /** Where in the code the difference was seen; null when the Drift has no such section. */
+  where: string | null;
+}
+
+/** The sides of a Drift: what the code does and what the Model or Requirement says, and where in the code it was seen. Null for a Drift written before the two sections existed. */
+export function driftSides(drift: Drift): DriftSides | null {
+  const sections = new Map<string, string[]>();
+  let current: string[] | null = null;
+  // Only the three known headings start a section: any other line, `## ` ones included, belongs to the section it is in.
+  for (const line of drift.body.split("\n")) {
+    const heading = /^## (.+?)\s*$/.exec(line)?.[1];
+    if (heading === HAPPENS_HEADING || heading === SHOULD_HEADING || heading === WHERE_HEADING) {
+      current = [];
+      sections.set(heading, current);
+    } else current?.push(line);
+  }
+  const text = (heading: string) => sections.get(heading)?.join("\n").trim() ?? "";
+  const happens = text(HAPPENS_HEADING);
+  const should = text(SHOULD_HEADING);
+  return happens && should ? { happens, should, where: text(WHERE_HEADING) || null } : null;
+}
+
 export function newDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; body?: string },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; happens: string; should: string; where?: string },
 ): Drift {
   if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with --ref");
+  const happens = input.happens.trim();
+  const should = input.should.trim();
+  const where = input.where?.trim();
+  if (!happens) throw new TramaError(`A Drift needs its "${HAPPENS_HEADING}" text: what the code does, in terms of behaviour`);
+  if (!should) throw new TramaError(`A Drift needs its "${SHOULD_HEADING}" text: what the Model or the Requirement says`);
+  if (where === "") throw new TramaError(`The "${WHERE_HEADING}" text is optional, but when given it needs text: the files where the difference was seen`);
   checkRefs(p, input.refs);
   const proposal = input.proposal ? getProposal(p, input.proposal).id : null;
   const origin = input.origin ? getTask(p, input.origin).id : null;
   const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin };
-  return create(driftsDir(p), input.title, data, input.body ?? "");
+  const sections = [`## ${HAPPENS_HEADING}\n\n${happens}`, `## ${SHOULD_HEADING}\n\n${should}`, ...(where ? [`## ${WHERE_HEADING}\n\n${where}`] : [])];
+  return create(driftsDir(p), input.title, data, sections.join("\n\n"));
 }
 
-export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-proposal" | "dismiss"): Drift {
+export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-proposal" | "dismiss", skillsDirs: string[] = []): Drift {
   const drift = getDrift(p, id);
   if (drift.data.status !== "open") throw new TramaError(`Drift ${drift.id} is already resolved`);
   if (how === "fix-code") {
@@ -224,10 +262,41 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
     }
   } else if (how === "accept-proposal") {
     if (!drift.data.proposal) throw new TramaError(`Drift ${drift.id} has no attached Proposal`);
-    approveProposal(p, drift.data.proposal);
+    approveProposal(p, drift.data.proposal, skillsDirs);
     drift.data.resolution = "proposal";
-  } else drift.data.resolution = "dismissed";
+  } else {
+    if (drift.data.proposal)
+      throw new TramaError(`Drift ${drift.id} has an attached Proposal (${drift.data.proposal}): accept that Proposal to keep the code, or fix the code`);
+    drift.data.resolution = "dismissed";
+  }
   drift.data.status = "resolved";
+  writeDocument(drift.path, drift.data, drift.body);
+  return drift;
+}
+
+/** The open, stale Proposal attached to an open Drift: the only kind that can be reworked and replaced. Refuses otherwise, saying why. */
+export function staleAttachedProposal(p: Project, drift: Drift): Proposal {
+  if (drift.data.status !== "open") throw new TramaError(`Drift ${drift.id} is already resolved`);
+  if (!drift.data.proposal) throw new TramaError(`Drift ${drift.id} has no attached Proposal to replace`);
+  const old = getProposal(p, drift.data.proposal);
+  if (old.data.status !== "open") throw new TramaError(`Proposal ${old.id} is ${old.data.status}: only an open, stale Proposal can be replaced`);
+  if (health(p, old).stale.length === 0) throw new TramaError(`Proposal ${old.id} is not stale: only a stale Proposal can be replaced`);
+  return old;
+}
+
+/**
+ * The agent attaches a newer Proposal to an open Drift in place of the stale one attached to it. The old Proposal is
+ * rejected at once, saying it was replaced; Proposals that require it stay blocked (see `requiredProposals`).
+ */
+export function replaceDriftProposal(p: Project, id: string, proposalId: string): Drift {
+  const drift = getDrift(p, id);
+  const old = staleAttachedProposal(p, drift);
+  const replacement = getProposal(p, proposalId);
+  if (replacement.id === old.id) throw new TramaError(`Proposal ${old.id} is the one already attached; name a newer one`);
+  if (replacement.data.status === "rejected" || replacement.data.status === "discarded")
+    throw new TramaError(`Proposal ${replacement.id} was ${replacement.data.status}: it cannot replace the attached one`);
+  rejectProposal(p, old.id, `Replaced by Proposal ${replacement.id}`);
+  drift.data.proposal = replacement.id;
   writeDocument(drift.path, drift.data, drift.body);
   return drift;
 }

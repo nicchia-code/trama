@@ -182,7 +182,7 @@ delete:
 Why this change is needed, in prose.
 
 ## Feedback
-Written by the developer on rejection.
+Written by the developer on rejection, only when they gave some.
 ```
 
 - Next to `proposal.md`, a `model/` folder holds the **full new version** of every touched Model file, at the same path it has under `.trama/model/`, and a `requirements/` folder does the same for touched Areas.
@@ -192,7 +192,7 @@ Written by the developer on rejection.
 - **Requires**: a Proposal that lists `requires` is written, diffed and validated on top of the draft and open Proposals it requires, directly or through them, applied in order. Its `base` hashes refer to that state, so approving a required Proposal does not make it stale. It cannot be approved while any required Proposal is a draft, open, rejected, discarded or missing, or while two Proposals require each other; a rejected or discarded requirement leaves it blocked. `trama proposal new` refuses to require a rejected or discarded Proposal.
 - A Proposal is **stale** when any file's current hash (on top of the Proposals it requires) differs from its `base` entry. Staleness is computed, never stored. A stale Proposal cannot be approved; the agent writes a new one.
 - **Approving** checks that every required Proposal is approved and that the Proposal is not stale, validates the Model and its Requirements with the Proposal applied, copies the new files into `model/` and `requirements/`, removes the `delete` entries, sets `status: approved` and regenerates the `trama-req-*` skills. The extension scans the affected Features afterwards, except for `kind: import` Proposals, whose Model already matches the code (ADR 0008).
-- **Rejecting** sets `status: rejected` and appends `## Feedback`. The agent answers with a new Proposal.
+- **Rejecting** sets `status: rejected` and appends `## Feedback` when the developer gave feedback; it is optional, and an empty or blank one adds nothing. The agent answers with a new Proposal.
 - **Discarding** a draft the agent never finished sets `status: discarded`; no feedback is written. Only drafts can be discarded.
 - Approved, rejected and discarded Proposals stay on disk as history.
 
@@ -251,10 +251,22 @@ origin: "0012"          # optional: the Task the agent was implementing when it 
 ---
 # Code refunds orders after shipping
 
-What the code does, what the Model says, and where in the code this was found.
+## What happens
+
+What the code does today, in terms of behaviour.
+
+## What should happen
+
+What the Model or the Requirement says.
+
+## Where in the code
+
+Optional: the files where the difference was seen.
 ```
 
-A Drift is not part of the Model, so its prose may mention code paths.
+The body is Markdown. The first two sections come in this order and both need text; a Drift cannot be filed without them. The third, `## Where in the code`, is optional but needs text when present. Drifts resolved before the sections existed keep a free body and are shown as one block. `resolution: dismissed` means the developer kept the code and no Proposal was attached.
+
+A Drift is not part of the Model, so it may name code, but only where it helps. The two sides are written for a programmer reading at a glance, not as a code review: behaviour in domain words, no variable, function, class, field or file names unless the difference cannot be understood without them (then one or two, as inline code), short paragraphs, a bulleted list for several points, bold for the key terms, no headings or tables, about 100 words per side. Files and code elements go in `## Where in the code`, with no line numbers. Nothing refuses a Drift for its style. The Task created when the code is fixed carries all the sections.
 
 - `origin` is the Task the agent was implementing when it filed the Drift (`drift new --task`). It must name an existing Task. A Drift filed by a Scan or a Fix has none, and Drifts written before the field existed have none.
 - Whether a Task is **blocked** is never stored: it is worked out from the Drifts, the Tasks and their `refs` whenever it is asked. An open Drift blocks its origin Task and every Task that is not Done and concerns the same thing, that is, when a reference of one is the same as, or inside, a reference of the other (a Machine contains its States and Transitions, a Feature its Machines; a Requirement section of an element counts as that element; the General section of an Area only equals itself). A Drift resolved as `fix-code` leaves its origin Task, if not Done, waiting for the fix Task (the Drift's `task`) until that Task is Done. A Done Task is never blocked.

@@ -89,6 +89,19 @@ describe("Proposals with Requirements", () => {
     expect(readFileSync(skillFile("ui"), "utf8")).not.toContain("progress bar");
   });
 
+  test("approving refreshes the Requirement skills in the configured skills folder too, when it holds trama-design", () => {
+    const custom = join(dir, "tools/agent-skills");
+    mkdirSync(join(custom, "trama-design"), { recursive: true });
+    writeFileSync(join(custom, "trama-design/SKILL.md"), "---\nname: trama-design\n---\n");
+    const prop = newProposal(p, "Badge colour");
+    writeFileSync(editInProposal(p, prop.id, "requirements/ui.md"), UI.replace("Show a green badge.", "Show a blue badge."));
+    handOver(p, prop.id);
+    approveProposal(p, prop.id, ["tools/agent-skills"]);
+
+    expect(readFileSync(join(custom, "trama-req-ui/SKILL.md"), "utf8")).toContain("Show a blue badge.");
+    expect(readFileSync(skillFile("ui"), "utf8")).toContain("Show a blue badge.");
+  });
+
   test("a Proposal that only edits Requirements shows as an Area change, not as a Machine", () => {
     const prop = newProposal(p, "Badge colour");
     writeFileSync(editInProposal(p, prop.id, "requirements/ui.md"), UI.replace("Show a green badge.", "Show a blue badge.").replace("## order/Preparing\nShow a progress bar.\n", "") + "\n## cart\nSticky total.\n");
@@ -132,8 +145,8 @@ describe("Tasks and generated skills", () => {
   });
 
   test("fixing the code for a Drift against Requirements only creates a technical Task; with a Model element, an ordinary one", () => {
-    const theme = resolveDrift(p, newDrift(p, { title: "Uses Material 2", refs: ["requirements/ui#General"] }).id, "fix-code");
-    const badge = resolveDrift(p, newDrift(p, { title: "Red badge", refs: ["order/Paid", "requirements/ui#order/Paid"] }).id, "fix-code");
+    const theme = resolveDrift(p, newDrift(p, { title: "Uses Material 2", refs: ["requirements/ui#General"], happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code");
+    const badge = resolveDrift(p, newDrift(p, { title: "Red badge", refs: ["order/Paid", "requirements/ui#order/Paid"], happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code");
     const show = (id: string | null) => JSON.parse(run(["--json", "task", "show", id ?? ""], dir, {}).out);
     expect(show(theme.data.task)).toMatchObject({ technical: true, refs: ["requirements/ui#General"], drift: theme.id });
     expect(show(badge.data.task)).toMatchObject({ technical: false, refs: ["order/Paid", "requirements/ui#order/Paid"], drift: badge.id });
