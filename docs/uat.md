@@ -611,6 +611,27 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 ---
 
+## P. Agent question rounds
+
+Use the [question request contract](./cli.md#question-rounds) for native `trama_ask`, MCP `tools/call`, or `trama ask --root /tmp/trama-demo/shop < round.json`. Include single-choice and multiple-choice questions, with different recommendations.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| P1 | Submit a valid round, then switch focus away and back | Native top-of-window Quick Pick opens without clicking a notification and remains open across focus loss. Title identifies Copilot, the MCP client's name or `trama ask`; supplied text and descriptions are unchanged | ☐ |
+| P2 | Submit a round whose later question has an out-of-range recommendation | Identified `invalid-input` error; no earlier question is presented | ☐ |
+| P3 | Accept a non-recommended choice, advance, then use Back | The preceding answer is restored rather than resetting to its recommendation; accepting a revision replaces it | ☐ |
+| P4 | Select ordinary multi-choice options and Other; accept blank text, then enter text | Blank text stays in the input with visible feedback; the completed answer contains both original selected labels and free text, without recommendation markers | ☐ |
+| P5 | Escape from free input; Escape from the question; Escape from skip confirmation | Each returns to the same question without accepting text or skipping it | ☐ |
+| P6 | Accept the first question; skip one; then Skip all | Prior accepted answer is preserved; only explicitly skipped questions have skipped entries. Result returns immediately, without Send | ☐ |
+| P7 | Start two rounds in one window; cancel the queued caller, then cancel the active caller with another round queued | Cancelling the queued caller preserves the active controls. Cancelling the active caller disposes them and opens the next FIFO round, with no orphan prompt | ☐ |
+| P8 | Leave a multi-question native round at free input after one accepted answer; queue CLI and MCP rounds; remove or rename `.trama/` in the fixture | All three return `editor-interrupted`, no answers, and the controls disappear; queued questions never appear | ☐ |
+| P9 | Close the editor with a CLI round active and an MCP round queued | Both return `editor-interrupted`; a later new request without an editor returns `unavailable`, not an interruption or skipped answers | ☐ |
+| P10 | Keep a round pending in one window while completing one in another; change focus between same-project windows | Windows remain independent. Discovery chooses the most recently focused live window; an endpoint supplied by a Trama-launched terminal takes precedence | ☐ |
+| P11 | Leave an MCP round pending, send ping and another tool request, then cancel by request ID | Other requests respond before the round completes; cancellation affects only that request and the MCP server keeps serving | ☐ |
+| P12 | Read the three shipped interview skills and exercise an explicit skip, initial absence and admitted-round interruption | Skips are reported as assumptions, initial absence alone permits agent-specific fallback, and interruption stops the workflow without retry or creating work from unanswered decisions | ☐ |
+
+---
+
 ## L. Defect log
 
 | Test ID | What you did | Expected | What happened | Severity |
@@ -619,4 +640,4 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 ## Not covered
 
-Licensing does not exist yet. Removing a whole Feature or Actor through a Proposal has unit tests only. The macOS `.vsix` has passed only CI checks, not a run on a real Mac.
+Licensing does not exist yet. Removing a whole Feature or Actor through a Proposal has unit tests only. The macOS `.vsix` has passed only CI checks, not a run on a real Mac. The Windows private-pipe bridge has not been exercised on Windows; the socket and native Quick Input paths have been exercised on Linux.

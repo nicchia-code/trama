@@ -1,0 +1,376 @@
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { once } from "node:events";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createConnection, createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
+import { askEditor, createQuestionServer, QUESTION_ENDPOINT_ENV, questionProjectId, type QuestionServer } from "../src/core/question-channel";
+import { QuestionRoundQueue, type CompletedQuestionRound } from "../src/core/question-rounds";
+import { QuestionInterruptedError, type QuestionHandler, type QuestionRequest } from "../src/core/questions";
+import { projectAt } from "../src/core/store";
+
+let root: string;
+let projectRoot: string;
+let runtimeDir: string;
+let servers: QuestionServer[];
+let children: ChildProcessWithoutNullStreams[];
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "trama-qtest-"));
+  projectRoot = join(root, "project");
+  runtimeDir = join(root, "runtime");
+  mkdirSync(projectRoot);
+  servers = [];
+  children = [];
+});
+afterEach(async () => {
+  for (const child of children) {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, "exit");
+      child.kill("SIGKILL");
+      await exited;
+    }
+  }
+  await Promise.all(servers.map((server) => server.dispose()));
+  rmSync(root, { recursive: true, force: true });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+function round(id = "choice"): QuestionRequest {
+  return { questions: [{ id, question: "Which change should be made?", options: [{ label: "Keep", description: "Preserve current behavior" }, { label: "Change", description: "Use the new behavior" }], recommended: 0, multi: false }] };
+}
+
+function answer(id: string, text?: string): CompletedQuestionRound {
+  return { status: "answered", answers: { [id]: { status: "answered", selected: ["Change"], ...(text === undefined ? {} : { text }) } } };
+}
+
+async function server(handler: QuestionHandler, options: { projectRoot?: string; focusedAt?: number; onClose?: () => void } = {}) {
+  const created = await createQuestionServer({ project: projectAt(options.projectRoot ?? projectRoot), runtimeDir, handler, focusedAt: options.focusedAt, onClose: options.onClose });
+  servers.push(created);
+  return created;
+}
+
+function ask(request: QuestionRequest, endpoint?: string, signal?: AbortSignal) {
+  return askEditor(projectAt(projectRoot), request, { agent: "trama ask", signal }, { runtimeDir, env: endpoint === undefined ? {} : { [QUESTION_ENDPOINT_ENV]: endpoint } });
+}
+
+function outcome<T>(promise: Promise<T>): Promise<T | Error> {
+  return promise.catch((error: unknown) => {
+    if (!(error instanceof Error)) throw error;
+    return error;
+  });
+}
+
+test("validates the complete round before routing or presenting any question", async () => {
+  let presentations = 0;
+  const editor = await server(async () => { presentations++; return answer("choice"); });
+  const invalid = round();
+  invalid.questions.push({ ...round("later").questions[0]!, recommended: 8 });
+  await expect(ask(invalid, editor.endpoint)).rejects.toThrow("questions[1].recommended");
+  expect(presentations).toBe(0);
+});
+
+test("a missing initial editor is unavailable, not an interrupted or answered round", async () => {
+  expect(await ask(round())).toMatchObject({ status: "unavailable" });
+  expect(existsSync(runtimeDir)).toBe(false);
+});
+
+test("a stale launching endpoint is authoritative even when another project window is live", async () => {
+  let presentations = 0;
+  await server(async () => { presentations++; return answer("choice"); });
+  const stale = process.platform === "win32" ? "\\\\.\\pipe\\trama-question-00000000-0000-0000-0000-000000000000" : join(runtimeDir, "gone.sock");
+  expect(await ask(round(), stale)).toMatchObject({ status: "unavailable" });
+  expect(presentations).toBe(0);
+});
+
+test("an authoritative endpoint for another project refuses without presentation or rerouting", async () => {
+  const otherRoot = join(root, "other");
+  mkdirSync(otherRoot);
+  let presentations = 0;
+  const wrong = await server(async () => { presentations++; return answer("choice"); }, { projectRoot: otherRoot });
+  await server(async () => { presentations++; return answer("choice"); });
+  expect(await ask(round(), wrong.endpoint)).toMatchObject({ status: "unavailable" });
+  expect(presentations).toBe(0);
+});
+
+test("discovery selects focus recency among live same-project windows, never sends rounds to probes", async () => {
+  const presented: string[] = [];
+  const earlier = await server(async () => { presented.push("earlier"); return answer("choice", "earlier window"); }, { focusedAt: 10 });
+  await server(async () => { presented.push("later"); return answer("choice", "later window"); }, { focusedAt: 20 });
+  const stale = process.platform === "win32" ? "\\\\.\\pipe\\trama-question-00000000-0000-0000-0000-000000000000" : join(runtimeDir, "stale.sock");
+  writeFileSync(join(runtimeDir, "stale.json"), JSON.stringify({ projectId: questionProjectId(projectAt(projectRoot)), windowId: "stale", endpoint: stale, focusedAt: 999 }), { mode: 0o600 });
+  const otherRoot = join(root, "other");
+  mkdirSync(otherRoot);
+  const wrong = await server(async () => { presented.push("wrong project"); return answer("choice"); }, { projectRoot: otherRoot, focusedAt: 9999 });
+  // Even a misleading record cannot route a request before the live project's identity is checked.
+  writeFileSync(join(runtimeDir, "mismatch.json"), JSON.stringify({ projectId: questionProjectId(projectAt(projectRoot)), windowId: "mismatch", endpoint: wrong.endpoint, focusedAt: 99999 }), { mode: 0o600 });
+  expect(await ask(round())).toEqual(answer("choice", "later window"));
+  await earlier.focus(30);
+  expect(await ask(round())).toEqual(answer("choice", "earlier window"));
+  expect(presented).toEqual(["later", "earlier"]);
+});
+
+test("explicit project routing works from an unrelated caller working directory", async () => {
+  await server(async () => answer("choice", "explicit project"));
+  const elsewhere = join(root, "elsewhere");
+  mkdirSync(elsewhere);
+  const script = `import { askEditor } from ${JSON.stringify(join(import.meta.dir, "../src/core/question-channel.ts"))};
+import { projectAt } from ${JSON.stringify(join(import.meta.dir, "../src/core/store.ts"))};
+console.log(JSON.stringify(await askEditor(projectAt(${JSON.stringify(projectRoot)}), ${JSON.stringify(round())}, {agent:'trama ask'}, {env:{},runtimeDir:${JSON.stringify(runtimeDir)}})));`;
+  const child = spawn(process.execPath, ["-e", script], { cwd: elsewhere, stdio: ["pipe", "pipe", "pipe"] });
+  children.push(child);
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+  const [code] = await once(child, "close");
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+  expect(JSON.parse(stdout)).toEqual(answer("choice", "explicit project"));
+});
+
+test("window shutdown interrupts its active and queued rounds without starting queued controls", async () => {
+  const entered = deferred<void>();
+  const queued = deferred<void>();
+  const decision = deferred<CompletedQuestionRound>();
+  const presented: string[] = [];
+  let activeSignal: AbortSignal | undefined;
+  const queue = new QuestionRoundQueue((request, context) => {
+    presented.push(request.questions[0]!.id);
+    activeSignal = context.signal;
+    entered.resolve();
+    return decision.promise;
+  });
+  const editor = await server((_project, request, context) => {
+    const result = queue.ask(request, context);
+    if (request.questions[0]!.id === "queued") queued.resolve();
+    return result;
+  }, { onClose: () => queue.dispose() });
+  const healthy = await server(async () => answer("healthy", "another window"));
+  const activeResult = outcome(ask(round("active"), editor.endpoint));
+  await entered.promise;
+  const queuedResult = outcome(ask(round("queued"), editor.endpoint));
+  await queued.promise;
+  await editor.dispose();
+  expect(await activeResult).toBeInstanceOf(QuestionInterruptedError);
+  expect(await queuedResult).toBeInstanceOf(QuestionInterruptedError);
+  expect(activeSignal?.reason).toBeInstanceOf(QuestionInterruptedError);
+  expect(presented).toEqual(["active"]);
+  expect(await ask(round("healthy"), healthy.endpoint)).toEqual(answer("healthy", "another window"));
+});
+
+test("a presenter lost after wire submission cannot turn the round into initial unavailability", async () => {
+  let presentations = 0;
+  const queue = new QuestionRoundQueue(async () => { presentations++; return answer("choice"); });
+  const editor = await server((_project, request, context) => queue.ask(request, context), { onClose: () => queue.dispose() });
+  queue.dispose();
+  expect(await outcome(ask(round(), editor.endpoint))).toBeInstanceOf(QuestionInterruptedError);
+  expect(presentations).toBe(0);
+});
+
+(process.platform === "win32" ? test.skip : test)("an unavailable reply after admission cannot authorize fallback", async () => {
+  const endpoint = join(root, "late-unavailable.sock");
+  const peer = createServer((socket) => {
+    const input = createInterface({ input: socket });
+    socket.once("close", () => input.close());
+    input.on("line", (line) => {
+      const message = JSON.parse(line) as { type: string };
+      if (message.type === "hello") {
+        socket.write(`${JSON.stringify({ type: "ready", projectId: questionProjectId(projectAt(projectRoot)), windowId: "lost-presenter", endpoint, focusedAt: 1 })}\n`);
+      } else {
+        socket.end(`${JSON.stringify({ status: "unavailable", reason: "Presenter lost after admission" })}\n`);
+      }
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    peer.once("error", reject);
+    peer.listen(endpoint, resolve);
+  });
+  chmodSync(endpoint, 0o600);
+  try {
+    const result = await outcome(ask(round(), endpoint));
+    expect(result).toBeInstanceOf(QuestionInterruptedError);
+    expect((result as QuestionInterruptedError).code).toBe("editor-interrupted");
+    expect(result).not.toHaveProperty("answers");
+  } finally {
+    await new Promise<void>((resolve) => peer.close(() => resolve()));
+  }
+});
+
+test("cancelling a queued caller removes only its round and preserves the oldest remaining round", async () => {
+  const activeEntered = deferred<void>();
+  const cancelledQueued = deferred<void>();
+  const cancelledRemoved = deferred<void>();
+  const followingQueued = deferred<void>();
+  const followingEntered = deferred<void>();
+  const activeDecision = deferred<CompletedQuestionRound>();
+  const followingDecision = deferred<CompletedQuestionRound>();
+  const presented: string[] = [];
+  const queue = new QuestionRoundQueue((request) => {
+    const id = request.questions[0]!.id;
+    presented.push(id);
+    if (id === "active") { activeEntered.resolve(); return activeDecision.promise; }
+    followingEntered.resolve();
+    return followingDecision.promise;
+  });
+  const editor = await server((_project, request, context) => {
+    const result = queue.ask(request, context);
+    if (request.questions[0]!.id === "cancelled") {
+      context.signal?.addEventListener("abort", () => cancelledRemoved.resolve(), { once: true });
+      cancelledQueued.resolve();
+    }
+    if (request.questions[0]!.id === "following") followingQueued.resolve();
+    return result;
+  }, { onClose: () => queue.dispose() });
+  const active = outcome(ask(round("active"), editor.endpoint));
+  await activeEntered.promise;
+  const controller = new AbortController();
+  const cancelled = outcome(ask(round("cancelled"), editor.endpoint, controller.signal));
+  await cancelledQueued.promise;
+  const following = outcome(ask(round("following"), editor.endpoint));
+  await followingQueued.promise;
+  controller.abort();
+  expect(await cancelled).toMatchObject({ name: "AbortError" });
+  await cancelledRemoved.promise;
+  activeDecision.resolve(answer("active"));
+  expect(await active).toEqual(answer("active"));
+  await followingEntered.promise;
+  followingDecision.resolve(answer("following", "surviving caller"));
+  expect(await following).toEqual(answer("following", "surviving caller"));
+  expect(presented).toEqual(["active", "following"]);
+});
+
+test("cancelling an active caller aborts its controls and advances the queue without interrupting its successor", async () => {
+  const activeEntered = deferred<void>();
+  const followingQueued = deferred<void>();
+  const followingEntered = deferred<void>();
+  const followingDecision = deferred<CompletedQuestionRound>();
+  let activeSignal: AbortSignal | undefined;
+  const queue = new QuestionRoundQueue((request, context) => {
+    if (request.questions[0]!.id === "active") {
+      activeSignal = context.signal;
+      activeEntered.resolve();
+      return new Promise<CompletedQuestionRound>(() => {});
+    }
+    followingEntered.resolve();
+    return followingDecision.promise;
+  });
+  const editor = await server((_project, request, context) => {
+    const result = queue.ask(request, context);
+    if (request.questions[0]!.id === "following") followingQueued.resolve();
+    return result;
+  }, { onClose: () => queue.dispose() });
+  const controller = new AbortController();
+  const active = outcome(ask(round("active"), editor.endpoint, controller.signal));
+  await activeEntered.promise;
+  const following = outcome(ask(round("following"), editor.endpoint));
+  await followingQueued.promise;
+  controller.abort();
+  expect(await active).toMatchObject({ name: "AbortError" });
+  await followingEntered.promise;
+  expect(activeSignal?.aborted).toBe(true);
+  expect(activeSignal?.reason).toMatchObject({ name: "AbortError" });
+  followingDecision.resolve(answer("following"));
+  expect(await following).toEqual(answer("following"));
+});
+
+test("a crashed editor interrupts an admitted round, leaves stale discovery unavailable, and never reroutes", async () => {
+  const endpoint = deferred<string>();
+  const admitted = deferred<void>();
+  const script = `import { createQuestionServer } from ${JSON.stringify(join(import.meta.dir, "../src/core/question-channel.ts"))};
+import { projectAt } from ${JSON.stringify(join(import.meta.dir, "../src/core/store.ts"))};
+const server = await createQuestionServer({project:projectAt(${JSON.stringify(projectRoot)}),runtimeDir:${JSON.stringify(runtimeDir)},handler:()=>{console.log('admitted');return new Promise(()=>{});}});
+console.log(server.endpoint);`;
+  const child = spawn(process.execPath, ["-e", script], { stdio: ["pipe", "pipe", "pipe"] });
+  children.push(child);
+  const output = createInterface({ input: child.stdout });
+  output.on("line", (line) => { if (line === "admitted") admitted.resolve(); else endpoint.resolve(line); });
+  child.on("error", (error) => { endpoint.reject(error); admitted.reject(error); });
+  const address = await endpoint.promise;
+  let rerouted = 0;
+  await server(async () => { rerouted++; return answer("choice"); }, { focusedAt: 1 });
+  const result = outcome(ask(round(), address));
+  await admitted.promise;
+  const exited = once(child, "exit");
+  child.kill("SIGKILL");
+  await exited;
+  expect(await result).toBeInstanceOf(QuestionInterruptedError);
+  expect(await ask(round(), address)).toMatchObject({ status: "unavailable" });
+  expect(rerouted).toBe(0);
+  // Remove the healthy window; a crash record by itself must not count as a live editor.
+  await servers[0]!.dispose();
+  expect(await ask(round())).toMatchObject({ status: "unavailable" });
+  output.close();
+});
+
+test("the server rejects an invalid wire round before presenting even its valid first question", async () => {
+  let presented = 0;
+  const editor = await server(async () => { presented++; return answer("choice"); });
+  const invalid = round();
+  invalid.questions.push({ ...round("last").questions[0]!, multi: "yes" as unknown as boolean });
+  const socket = createConnection({ path: editor.endpoint });
+  const output = createInterface({ input: socket });
+  const failure = deferred<unknown>();
+  output.on("line", (line) => {
+    const value = JSON.parse(line);
+    if (value.type === "ready") socket.write(`${JSON.stringify({ type: "ask", projectId: questionProjectId(projectAt(projectRoot)), request: invalid, agent: "trama ask" })}\n`);
+    else failure.resolve(value);
+  });
+  await once(socket, "connect");
+  socket.write(`${JSON.stringify({ type: "hello", projectId: questionProjectId(projectAt(projectRoot)) })}\n`);
+  expect(await failure.promise).toMatchObject({ error: { code: "invalid-input", message: "questions[1].multi must be a boolean" } });
+  expect(presented).toBe(0);
+  socket.destroy();
+  output.close();
+});
+
+test("runtime files contain routing identities only, never pending questions or completed answers", async () => {
+  const secretQuestion = "private question 10ed86d0";
+  const secretAnswer = "private answer e547cdcc";
+  const entered = deferred<void>();
+  const decision = deferred<CompletedQuestionRound>();
+  const editor = await server(async () => { entered.resolve(); return decision.promise; });
+  const request = round();
+  request.questions[0]!.question = secretQuestion;
+  const result = ask(request, editor.endpoint);
+  await entered.promise;
+  const checkFiles = () => {
+    if (process.platform !== "win32") {
+      expect(lstatSync(runtimeDir).mode & 0o777).toBe(0o700);
+      expect(lstatSync(editor.endpoint).mode & 0o777).toBe(0o600);
+    }
+    for (const name of readdirSync(runtimeDir)) {
+      const path = join(runtimeDir, name);
+      if (!lstatSync(path).isFile()) continue;
+      const content = readFileSync(path, "utf8");
+      expect(content).not.toContain(secretQuestion);
+      expect(content).not.toContain(secretAnswer);
+      expect(Object.keys(JSON.parse(content)).sort()).toEqual(["endpoint", "focusedAt", "projectId", "windowId"]);
+      if (process.platform !== "win32") expect(lstatSync(path).mode & 0o777).toBe(0o600);
+    }
+    expect(readdirSync(projectRoot)).toEqual([]);
+  };
+  checkFiles();
+  decision.resolve(answer("choice", secretAnswer));
+  expect(await result).toEqual(answer("choice", secretAnswer));
+  await editor.focus(100);
+  checkFiles();
+  await editor.dispose();
+  expect(readdirSync(runtimeDir)).toEqual([]);
+});
+
+(process.platform === "win32" ? test.skip : test)("insecure Unix discovery storage cannot submit questions", async () => {
+  let presented = 0;
+  await server(async () => { presented++; return answer("choice"); });
+  chmodSync(runtimeDir, 0o755);
+  expect(await ask(round())).toMatchObject({ status: "unavailable" });
+  expect(presented).toBe(0);
+  chmodSync(runtimeDir, 0o700);
+});

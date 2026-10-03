@@ -7,6 +7,7 @@ import { isCursor } from "./cursor";
 import { ensureCursorMcp, tramaExecutable } from "./mcp-config";
 import { findProject } from "./project";
 import { registerTramaTools } from "./tools";
+import { EditorQuestions } from "./questions";
 
 const SKILL_SYNC_DEBOUNCE_MS = 300;
 
@@ -35,6 +36,7 @@ function setUpCursor(extensionPath: string): void {
 export function activate(context: vscode.ExtensionContext): void {
   const trama = new Controller(context.extensionUri);
   controller = trama;
+  const questions = new EditorQuestions(findProject);
   context.subscriptions.push(
     vscode.commands.registerCommand("trama.open", guarded(() => trama.open())),
     vscode.commands.registerCommand(
@@ -50,7 +52,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("trama.import", guarded(() => trama.launch({ kind: "import" }))),
     vscode.commands.registerCommand("trama.updateSkills", guarded(async () => trama.updateSkills())),
     watchAgentTerminal(),
-    registerTramaTools(findProject),
+    questions,
+    registerTramaTools(findProject, questions.ask),
     watchRequirements(),
   );
   setUpCursor(context.extensionPath);

@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -89,6 +89,85 @@
       }
     },
     "languageModelTools": [
+      {
+        "name": "trama_ask",
+        "displayName": "Trama: Ask the developer",
+        "toolReferenceName": "trama_ask",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Ask the developer",
+        "modelDescription": "Present a complete question round in the project's editor and wait for answers. Only an initial unavailable result permits your own question tool. An editor-interrupted error stops this workflow without fallback, retry, rerouting or resumption.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "questions": {
+              "type": "array",
+              "minItems": 1,
+              "description": "All questions in this round, in presentation order.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "question",
+                  "options",
+                  "recommended",
+                  "multi"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Unique question ID."
+                  },
+                  "question": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "label",
+                        "description"
+                      ],
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "description": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  },
+                  "recommended": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Zero-based index of the recommended option."
+                  },
+                  "multi": {
+                    "type": "boolean",
+                    "description": "Allow multiple options together."
+                  }
+                }
+              }
+            }
+          },
+          "required": [
+            "questions"
+          ],
+          "additionalProperties": false
+        }
+      },
       {
         "name": "trama_view",
         "displayName": "Trama: View the Model and Requirements",

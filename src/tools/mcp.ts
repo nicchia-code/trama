@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
+import type { QuestionHandler } from "../core/questions";
 import type { Project } from "../core/store";
-import { callTool, TOOLS } from "./catalog";
+import { callTool, TOOLS, type ToolOptions } from "./catalog";
 
 /**
  * A Model Context Protocol server over stdio (newline-delimited JSON-RPC 2.0) exposing the Trama tools, for agents
@@ -22,7 +23,7 @@ const ok = (id: Request["id"], result: unknown): Response => ({ jsonrpc: "2.0", 
 const fail = (id: Request["id"], code: number, message: string): Response => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
 
 /** Answers one decoded message. Notifications (no `id`) get no answer. */
-export function handleMcp(message: unknown, project: () => Project, version: string): Response | null {
+export async function handleMcp(message: unknown, project: () => Project, version: string, options: ToolOptions = {}): Promise<Response | null> {
   if (typeof message !== "object" || message === null || Array.isArray(message)) return fail(null, -32600, "Invalid Request");
   const req = message as Request;
   const isNotification = !("id" in req);
@@ -49,7 +50,7 @@ export function handleMcp(message: unknown, project: () => Project, version: str
     case "tools/call": {
       const name = req.params?.["name"];
       if (typeof name !== "string") return fail(req.id, -32602, "tools/call needs a tool name");
-      const outcome = callTool(project, name, req.params?.["arguments"]);
+      const outcome = await callTool(project, name, req.params?.["arguments"], options);
       return ok(req.id, { content: [{ type: "text", text: outcome.text }], isError: outcome.isError });
     }
     default:
@@ -57,18 +58,68 @@ export function handleMcp(message: unknown, project: () => Project, version: str
   }
 }
 
-/** Serves until stdin closes. Each line is one JSON-RPC message; each answer is one line on stdout. */
-export async function serveMcp(project: () => Project, version: string, input: NodeJS.ReadableStream = process.stdin, write: (line: string) => void = (l) => process.stdout.write(l)): Promise<void> {
-  for await (const line of createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY })) {
-    if (line.trim() === "") continue;
-    let message: unknown;
-    try {
-      message = JSON.parse(line);
-    } catch {
-      write(`${JSON.stringify(fail(null, -32700, "Parse error"))}\n`);
-      continue;
+export interface McpOptions {
+  questionHandler?: QuestionHandler;
+  output?: NodeJS.WritableStream;
+}
+
+/** Dispatch concurrently so a pending question does not block ping, tools or cancellation. */
+export async function serveMcp(project: () => Project, version: string, input: NodeJS.ReadableStream = process.stdin, write?: (line: string) => void, options: McpOptions = {}): Promise<void> {
+  const output = options.output ?? (write ? undefined : process.stdout);
+  const send = write ?? ((line: string) => { output?.write(line); });
+  const pending = new Map<string | number | null, AbortController>();
+  const lines = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY });
+  let connected = true;
+  let agent = "MCP client";
+  const disconnect = () => {
+    if (!connected) return;
+    connected = false;
+    for (const controller of pending.values()) controller.abort();
+    pending.clear();
+    lines.close();
+  };
+  const reply = (response: Response) => {
+    if (!connected) return;
+    try { send(`${JSON.stringify(response)}\n`); }
+    catch { disconnect(); }
+  };
+  input.on("error", disconnect);
+  output?.on("close", disconnect);
+  output?.on("error", disconnect);
+  try {
+    for await (const line of lines) {
+      if (!connected) break;
+      if (line.trim() === "") continue;
+      let message: unknown;
+      try { message = JSON.parse(line); }
+      catch {
+        reply(fail(null, -32700, "Parse error"));
+        continue;
+      }
+      const req = typeof message === "object" && message !== null && !Array.isArray(message) ? message as Request : undefined;
+      if (req?.method === "notifications/cancelled" && !("id" in req)) {
+        const id = req.params?.["requestId"];
+        if (typeof id === "string" || typeof id === "number") pending.get(id)?.abort();
+        continue;
+      }
+      if (req?.method === "initialize") {
+        const info = req.params?.["clientInfo"];
+        if (typeof info === "object" && info !== null && "name" in info && typeof info.name === "string") agent = info.name;
+      }
+      const controller = new AbortController();
+      const id = req?.id ?? null;
+      if (req && "id" in req) pending.set(id, controller);
+      void handleMcp(message, project, version, { questionHandler: options.questionHandler, context: { agent, signal: controller.signal } })
+        .then((response) => { if (response) reply(response); })
+        .catch((error: unknown) => { reply(fail(id, -32603, error instanceof Error ? error.message : String(error))); })
+        .finally(() => { if (pending.get(id) === controller) pending.delete(id); });
     }
-    const reply = handleMcp(message, project, version);
-    if (reply) write(`${JSON.stringify(reply)}\n`);
+  } catch (error) {
+    if (connected) throw error;
+  } finally {
+    disconnect();
+    input.off("error", disconnect);
+    output?.off("close", disconnect);
+    // Keep swallowing stream errors while aborted handlers settle; no response is written after disconnection.
   }
 }

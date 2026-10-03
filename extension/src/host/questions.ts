@@ -1,0 +1,112 @@
+import * as vscode from "vscode";
+import { createQuestionServer, questionProjectId, type QuestionServer } from "../../../src/core/question-channel";
+import { QuestionRoundQueue } from "../../../src/core/question-rounds";
+import { unavailableQuestions, type QuestionHandler } from "../../../src/core/questions";
+import { projectAt, type Project } from "../../../src/core/store";
+import { presentQuestionRound } from "./question-ui";
+
+interface WindowRoundService {
+  identity: string;
+  queue: QuestionRoundQueue;
+  server: Promise<QuestionServer>;
+}
+
+let windowQuestions: EditorQuestions | undefined;
+
+/** Wait for the launching window's endpoint rather than discovering another window. */
+export async function questionEndpoint(root: string): Promise<string | undefined> {
+  return windowQuestions?.endpoint(root);
+}
+
+/** The same window-owned queue serves native tools and all local connections. */
+export class EditorQuestions implements vscode.Disposable {
+  private service: WindowRoundService | undefined;
+  private closed = false;
+  private readonly subscriptions: vscode.Disposable[];
+
+  readonly ask: QuestionHandler = async (project, request, context) => {
+    const current = this.project();
+    if (this.closed || !current || questionProjectId(current) !== questionProjectId(project)) return unavailableQuestions();
+    const service = this.ensure(current);
+    return service.queue.ask(request, context);
+  };
+
+  constructor(private readonly project: () => Project | undefined) {
+    windowQuestions = this;
+    // Directory deletion/rename does not emit separate events for its children.
+    const watcher = vscode.workspace.createFileSystemWatcher("**/.trama");
+    this.subscriptions = [
+      watcher,
+      watcher.onDidCreate(() => this.refresh()),
+      watcher.onDidDelete(() => this.refresh()),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.refresh()),
+      vscode.window.onDidChangeWindowState((state) => {
+        if (state.focused && this.service) {
+          void this.service.server.then((server) => server.focus()).catch((error: unknown) => this.report(error));
+        }
+      }),
+    ];
+    this.refresh();
+  }
+
+  async endpoint(root: string): Promise<string | undefined> {
+    this.refresh();
+    const service = this.service;
+    if (!service || service.identity !== questionProjectId(projectAt(root))) return undefined;
+    const server = await service.server;
+    return this.closed || this.service !== service ? undefined : server.endpoint;
+  }
+
+  dispose(): void {
+    if (this.closed) return;
+    this.closed = true;
+    if (windowQuestions === this) windowQuestions = undefined;
+    for (const subscription of this.subscriptions) subscription.dispose();
+    this.closeService();
+  }
+
+  private refresh(): void {
+    if (this.closed) return;
+    const project = this.project();
+    if (!project) { this.closeService(); return; }
+    this.ensure(project);
+  }
+
+  private ensure(project: Project): WindowRoundService {
+    const identity = questionProjectId(project);
+    const current = this.service;
+    if (current && current.identity === identity) return current;
+    this.closeService();
+    const queue = new QuestionRoundQueue(presentQuestionRound);
+    const service: WindowRoundService = {
+      identity, queue,
+      server: createQuestionServer({
+        project,
+        focusedAt: vscode.window.state.focused ? Date.now() : 0,
+        handler: async (callerProject, request, context) => {
+          if (this.closed || this.service !== service || questionProjectId(callerProject) !== identity) return unavailableQuestions();
+          return queue.ask(request, context);
+        },
+        onClose: () => {
+          queue.dispose();
+          if (this.service === service) this.service = undefined;
+        },
+      }),
+    };
+    this.service = service;
+    void service.server.catch((error: unknown) => this.report(error));
+    return service;
+  }
+
+  private closeService(): void {
+    const service = this.service;
+    this.service = undefined;
+    if (!service) return;
+    service.queue.dispose();
+    void service.server.then((server) => server.dispose()).catch((error: unknown) => this.report(error));
+  }
+
+  private report(error: unknown): void {
+    if (!this.closed) void vscode.window.showErrorMessage(`Trama question channel: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}

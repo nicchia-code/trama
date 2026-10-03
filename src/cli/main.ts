@@ -1,5 +1,7 @@
 import { parseArgs } from "node:util";
 import { TramaError, UsageError } from "../core/errors";
+import { askEditor } from "../core/question-channel";
+import { parseQuestionRequest, questionAborted, questionFailure, type QuestionHandler } from "../core/questions";
 import { arity, COMMANDS, type Command, makeContext, type Values } from "./commands";
 import type { Result } from "./result";
 
@@ -17,6 +19,7 @@ function help(): string {
     "",
     "Options: --json prints JSON instead of Markdown; --root <dir> uses <dir>/.trama.",
     "trama mcp [--root <dir>] serves the agent tools over MCP (stdio) until stdin closes.",
+    "trama ask [--root <dir>] reads a question round as JSON from stdin and waits for the editor; stdout is JSON.",
     "Exit codes: 0 ok, 1 failure (validation errors, unknown element, stale Proposal), 2 usage.",
   ].join("\n");
 }
@@ -73,9 +76,26 @@ export function run(argv: string[], cwd: string, env: Record<string, string | un
   return { out: json ? JSON.stringify(result.json, null, 2) : result.md.replace(/\n{3,}/g, "\n\n").trimEnd(), exit: result.exit ?? 0 };
 }
 
-/** `trama mcp [--root <dir>]`: the long-running MCP server, the only command that does not print and exit. */
-export function mcpRoot(argv: string[]): { root?: string } | null {
+/** Commands whose asynchronous lifetime is owned by the executable, not the ordinary synchronous command API. */
+export function asyncCommand(argv: string[]): { command: "mcp" | "ask"; root?: string } | null {
   const { rest, root } = splitGlobals(argv);
-  return rest.length === 1 && rest[0] === "mcp" ? { root } : null;
+  const command = rest[0];
+  return rest.length === 1 && (command === "mcp" || command === "ask") ? { command, root } : null;
+}
+
+/** The blocking JSON-only ask command, sharing validation and outcomes with the agent tools. */
+export async function runAsk(argv: string[], cwd: string, input: string, options: { handler?: QuestionHandler; signal?: AbortSignal; env?: Record<string, string | undefined> } = {}): Promise<{ out: string; exit: number }> {
+  try {
+    const selected = asyncCommand(argv);
+    if (selected?.command !== "ask") throw new UsageError("Usage: trama ask [--root <dir>]");
+    const request = parseQuestionRequest(JSON.parse(input));
+    if (options.signal?.aborted) throw questionAborted();
+    const project = makeContext(cwd, selected.root).project();
+    const handler: QuestionHandler = options.handler ?? ((project, request, context) => askEditor(project, request, context, { env: options.env }));
+    const result = await handler(project, request, { agent: "trama ask", signal: options.signal });
+    return { out: JSON.stringify(result), exit: 0 };
+  } catch (error) {
+    return { out: JSON.stringify(questionFailure(error)), exit: error instanceof UsageError || error instanceof SyntaxError ? 2 : 1 };
+  }
 }
 

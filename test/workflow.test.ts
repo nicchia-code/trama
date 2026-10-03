@@ -171,7 +171,7 @@ describe("Tasks and Drifts", () => {
     expect(releaseTasks(p)).toEqual([]);
   });
 
-  test("a taken Task is marked (agent working) in the board, the task list, task show and the agent tools", () => {
+  test("a taken Task is marked (agent working) in the board, the task list, task show and the agent tools", async () => {
     const prop = newProposal(p, "Returns");
     const mk = (title: string, proposal?: string) => newTask(p, { title, refs: ["order"], technical: false, proposal }).id;
     const [taken, free, a, b] = [mk("Taken"), mk("Free"), mk("In design", prop.id), mk("Other in design", prop.id)] as [string, string, string, string];
@@ -189,12 +189,12 @@ describe("Tasks and Drifts", () => {
     expect(cli("task", "list")).not.toContain(`${free} Free (agent working)`);
     expect(cli("task", "show", taken)).toContain("(agent working)");
     expect(cli("task", "show", free)).not.toContain("(agent working)");
-    expect(callTool(p, "trama_board", {}).text).toContain(`${taken} Taken (agent working)`);
-    expect(callTool(p, "trama_task_show", { task: taken }).text).toContain("(agent working)");
+    expect((await callTool(p, "trama_board", {})).text).toContain(`${taken} Taken (agent working)`);
+    expect((await callTool(p, "trama_task_show", { task: taken })).text).toContain("(agent working)");
     expect(JSON.parse(run(["--root", dir, "--json", "task", "list"], process.cwd(), {}).out).tasks.find((t: { id: string }) => t.id === taken).agent).toBe(true);
   });
 
-  test("the command line takes the Task only inside the terminal Trama started, and the agent tools always do", () => {
+  test("the command line takes the Task only inside the terminal Trama started, and the agent tools always do", async () => {
     const run2 = (env: Record<string, string>, ...args: string[]) => run(["--root", dir, "task", "move", ...args], process.cwd(), env);
     const [a, b, c] = [1, 2, 3].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string];
 
@@ -207,7 +207,7 @@ describe("Tasks and Drifts", () => {
     run2({ TRAMA_AGENT: "1" }, b, "done");
     expect(getTask(p, b).data).toMatchObject({ column: "done", agent: false });
 
-    expect(callTool(p, "trama_task_move", { task: c, column: "doing" }).isError).toBe(false);
+    expect((await callTool(p, "trama_task_move", { task: c, column: "doing" })).isError).toBe(false);
     expect(getTask(p, c).data.agent).toBe(true);
   });
 

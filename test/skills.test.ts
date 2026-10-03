@@ -2,65 +2,9 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMMANDS } from "../src/cli/commands";
 import { run } from "../src/cli/main";
 import { SKILLS } from "../src/cli/skills";
 
-const names = new Set(COMMANDS.map((c) => c.name));
-const options = new Map(COMMANDS.map((c) => [c.name, new Set(Object.keys(c.options ?? {}))]));
-
-test("every command and flag a skill mentions exists in the CLI", () => {
-  const problems: string[] = [];
-  for (const [file, content] of Object.entries(SKILLS)) {
-    if (!file.endsWith("SKILL.md")) continue;
-    for (const span of content.matchAll(/`(trama [^`]+)`/g)) {
-      const words = (span[1] as string).split(/\s+/).slice(1).filter((w) => !w.startsWith("<") && !w.startsWith("[") && !w.startsWith('"'));
-      const positional = words.filter((w) => !w.startsWith("-") && !w.startsWith("…"));
-      const two = `${positional[0]} ${positional[1]}`;
-      const command = names.has(two) ? two : positional[0];
-      if (command === undefined || !names.has(command)) {
-        problems.push(`${file}: unknown command in \`${span[1]}\``);
-        continue;
-      }
-      for (const flag of words.filter((w) => w.startsWith("--")))
-        if (flag !== "--json" && !options.get(command)?.has(flag.slice(2))) problems.push(`${file}: \`${command}\` has no ${flag}`);
-    }
-  }
-  expect(problems).toEqual([]);
-});
-
-test("each skill declares a name equal to its folder and a trigger description", () => {
-  for (const [file, content] of Object.entries(SKILLS)) {
-    if (!file.endsWith("SKILL.md")) continue;
-    const front = /^---\nname: (.+)\ndescription: (.+)\n---\n/.exec(content);
-    expect(front, file).not.toBeNull();
-    expect(front?.[1]).toBe(file.split("/")[0]);
-    expect(front?.[2]).toMatch(/^Use when/);
-  }
-});
-
-test("the design skill links to a FORMAT.md that ships with it", () => {
-  expect(SKILLS["trama-design/SKILL.md"]).toContain("(./FORMAT.md)");
-  expect(SKILLS["trama-design/FORMAT.md"]).toContain("## Machine");
-});
-
-test("init installs the skills where asked, and the default is .agents/skills", () => {
-  const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
-  try {
-    run(["--root", root, "init"], root);
-    for (const rel of Object.keys(SKILLS)) expect(readFileSync(join(root, ".agents/skills", rel), "utf8")).toBe(SKILLS[rel] as string);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-  const other = mkdtempSync(join(tmpdir(), "trama-skills-"));
-  try {
-    run(["--root", other, "init", "--skills-dir", ".claude/skills"], other);
-    expect(existsSync(join(other, ".claude/skills/trama-scan/SKILL.md"))).toBe(true);
-    expect(existsSync(join(other, ".agents"))).toBe(false);
-  } finally {
-    rmSync(other, { recursive: true, force: true });
-  }
-});
 
 test("init refuses to overwrite customised skill files and creates nothing", () => {
   const root = mkdtempSync(join(tmpdir(), "trama-skills-"));

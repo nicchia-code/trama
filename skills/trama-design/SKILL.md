@@ -23,6 +23,7 @@ If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, 
 | `trama proposal submit <id>` | `trama_proposal_submit` |
 | `trama task new`, `trama task show`, `trama task move` | `trama_task_new`, `trama_task_show`, `trama_task_move` |
 | `trama drift new`, `trama drift show` | `trama_drift_new`, `trama_drift_show` |
+| `trama ask --root <project>` (JSON request on stdin) | `trama_ask` |
 
 There is no tool for approving, rejecting, discarding or resolving: those are the developer's decisions.
 
@@ -60,7 +61,13 @@ Skip the interview only when the developer says so ("don't ask, decide"), or whe
 
 ### Asking
 
-Use the question tool of the agent you are running in:
+Use **`trama_ask` first**, whether offered natively by VS Code or through MCP. If it is not offered, run **`trama ask --root <project>`** with the same JSON request on stdin.
+
+- Send one complete round as `{questions: [...]}`. Every question has a unique non-empty `id`, `question`, `options` as `{label, description}`, a zero-based `recommended` index, and an explicit `multi` boolean. Set `multi: true` only when several answers can genuinely hold together. Do not supply "Other": Trama adds it.
+- A result with `status: "answered"` contains `answers` keyed by question id. An answered entry has the original `selected` labels and optional free-form `text`; a `status: "skipped"` entry is an explicit developer skip. Use the recommendation for that skipped decision, report it as an assumption for review, and do not ask it again.
+- An `invalid-input` error means the request was refused before opening a round: correct the identified field and submit the corrected request.
+- An **`editor-interrupted` error stops this workflow immediately**. Do not use partial answers or recommendations, fall back, retry, reroute, resume the round, or create or submit a Proposal from its unanswered decisions. Report that the editor was lost.
+- Only an initial `status: "unavailable"` result permits the agent-specific fallback below. Prefer its question tool; use text only if that tool is absent.
 
 - **omp:** the `ask` tool. One entry in `questions` per decision: a short `id`, the `question`, `options` as `{label, description}` with the tradeoff in `description`, and `recommended` set to the index of your recommended option. Set `multi: true` only when several answers can genuinely hold together. Do not add an "Other" option: omp adds one.
 - **VS Code agent (Copilot):** the `vscode_askQuestions` tool ("Ask Clarifying Questions", `#tool:vscode/askQuestions` in prompts). One entry in `questions` per decision: a unique `header` of at most 50 characters, a `question` of at most 200 characters, `options` as `{label, description}` with the tradeoff in `description`, and `recommended: true` on your recommended option. Set `multiSelect: true` only when several answers can hold together. Leave free-form answers allowed.

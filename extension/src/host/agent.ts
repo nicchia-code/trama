@@ -2,8 +2,10 @@ import * as vscode from "vscode";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
+import { QUESTION_ENDPOINT_ENV } from "../../../src/core/question-channel";
 import { isCursor } from "./cursor";
 import { agentCommandLine, shellFamily } from "./quote";
+import { questionEndpoint } from "./questions";
 
 const TERMINAL_NAME = "Trama agent";
 
@@ -45,6 +47,7 @@ let lastTerminal: vscode.Terminal | undefined;
 /** The project folder the last terminal was started for, whose Tasks the agent may have taken. */
 let lastRoot: string | undefined;
 let commandRunning = false;
+let lastQuestionEndpoint: string | undefined;
 
 function releaseTakenTasks(root: string): void {
   try {
@@ -98,12 +101,15 @@ export async function launchAgent(root: string, prompt: string): Promise<void> {
   }
 
   const previous = lastTerminal;
-  const reusable = previous !== undefined && previous.exitStatus === undefined && previous.shellIntegration !== undefined && !commandRunning;
+  const endpoint = await questionEndpoint(root);
+  if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
+  const reusable = previous !== undefined && lastRoot === root && lastQuestionEndpoint === endpoint && previous.exitStatus === undefined && previous.shellIntegration !== undefined && !commandRunning;
   // TRAMA_AGENT makes the CLI refuse the developer's commands (approve, reject, resolve) to the agent.
-  const terminal = reusable ? previous : vscode.window.createTerminal({ name: TERMINAL_NAME, cwd: root, env: { TRAMA_AGENT: "1" } });
+  const terminal = reusable ? previous : vscode.window.createTerminal({ name: TERMINAL_NAME, cwd: root, env: { TRAMA_AGENT: "1", [QUESTION_ENDPOINT_ENV]: endpoint } });
   terminal.show();
   terminal.sendText(agentCommandLine(template, prompt, shellFamily(vscode.env.shell)));
   lastTerminal = terminal;
   lastRoot = root;
+  lastQuestionEndpoint = endpoint;
   commandRunning = true;
 }

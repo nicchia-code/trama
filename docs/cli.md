@@ -6,7 +6,7 @@
 
 - `trama [--json] [--root <dir>] <command> …`
 - Without `--root`, the CLI walks up from the current directory to the first folder containing `.trama/`.
-- Default output is Markdown: compact for agents and readable for people. `--json` prints the same data as one JSON document, for the extension and for scripts.
+- Default output is Markdown: compact for agents and readable for people. `--json` prints the same data as one JSON document, for the extension and for scripts. `ask` always prints JSON; `mcp` uses JSON-RPC.
 - Element arguments use the reference syntax from the format spec: `order`, `order/Paid`, `order/Paid/user.CANCEL`, `user.CANCEL`.
 - Exit codes: `0` success; `1` domain failure (validation errors, unknown element, stale Proposal); `2` usage error.
 - Commands that create a file print its ID and path. The agent may edit the file's prose directly afterwards.
@@ -76,6 +76,43 @@ All exploring commands are read-only.
 |---|---|
 | `board` | Draft Proposals marked `(draft)` in **In writing**, separate from **To decide** (handed-over Proposals and open Drifts), then **To do**, **In progress**, **Done**. JSON keeps Drafts in `inWriting`, outside `toDecide`. The Tasks linked to one Proposal, when there are at least two, are listed once, as the Proposal with its Tasks underneath (each with its own column), in the column they add up to: To do while none has started, Done when all are done, In progress otherwise. Other Tasks are listed as before. |
 
+## Question rounds
+
+`trama ask [--root <dir>] < round.json` reads one complete question round from JSON stdin and waits for its editor window. It always prints one JSON result or error on stdout; command diagnostics go to stderr. `--root` selects the project independently of the caller's current directory.
+
+Example `round.json`:
+
+```json
+{
+  "questions": [{
+    "id": "route",
+    "question": "Choose the route",
+    "options": [
+      { "label": "Fast", "description": "Fewer checks" },
+      { "label": "Safe", "description": "More checks" }
+    ],
+    "recommended": 1,
+    "multi": false
+  }]
+}
+```
+
+Every question needs a unique non-empty ID, non-empty question text, at least two options with non-empty labels and descriptions, an in-range integer recommendation and an explicit `multi` boolean. Unknown fields are refused. The whole round is validated before any question is shown. Do not add an Other option: the editor supplies it.
+
+- **Completed:** `status: "answered"` and `answers` keyed by question ID. Each entry is `{status: "answered", selected: [...]}` with original option labels and optional `text`, or `{status: "skipped"}`. A multiple-choice answer may combine selected options and free text. Recommendation markers never appear in returned labels.
+- **Initially unavailable:** `status: "unavailable"` and a `reason`. No answers are supplied; only this outcome permits the agent's own question interface.
+- **Invalid request:** `error.code: "invalid-input"` with the offending field identified in `error.message`; correct the request rather than using fallback answers.
+- **Editor lost after submission:** `error.code: "editor-interrupted"` with no answers. Stop the current workflow: no partial answers, recommendations, fallback, retry, rerouting or resumption. This is not initial unavailability.
+- **Caller cancellation:** abandons only that caller's round. SIGINT/SIGTERM and observable output disconnection cancel CLI waiting; MCP supports `notifications/cancelled` with `requestId`, and connection loss cancels that connection's pending calls.
+
+Completed and initially unavailable results exit `0`; question failures and cancellation exit `1`; malformed requests exit `2`.
+
+Questions open immediately in native editor Quick Picks. Back preserves accepted answers; Other opens a native input box; Escape requires `Skip this one`, `Skip all` or `Go back`. Skips contain no invented answer: the agent applies its recommendation and lists the skipped decisions for review. There is no final Send step or response deadline.
+
+Each window owns one FIFO shared by native tools, MCP and CLI callers. Cancelling one caller does not cancel another; losing the editor interrupts both its active and queued rounds. Other windows remain independent. The endpoint in `TRAMA_QUESTION_ENDPOINT`, set by Trama in launched agent terminals, is authoritative; otherwise discovery selects the most recently focused live window for the selected project. Requests are sent to only that window.
+
+Routing uses private user-local sockets on Unix and user-only local named pipes on Windows. Discovery records live outside the repository and contain only project/window identities, endpoint and focus recency. Questions and incomplete answers remain in memory, never in `.trama/` or discovery files. The Windows bridge uses OS Windows PowerShell 5.1 and .NET Framework `Add-Type`; it fails closed if those facilities are unavailable, rather than falling back to a permissive Node pipe.
+
 ## Agent tools and MCP
 
 `trama mcp [--root <dir>]` serves the agent tools over MCP (stdio, newline-delimited JSON-RPC) until stdin closes. The same tools are registered natively in VS Code, so Copilot's agent mode can call them without the CLI (ADR 0006). Configure it in any MCP client, for example:
@@ -88,6 +125,7 @@ In Cursor the extension writes this entry into `.cursor/mcp.json` itself.
 
 | Tool | Does |
 |---|---|
+| `trama_ask` | The same request and result as `ask`; always offered, including when the editor is initially unavailable. Native invocation identifies the agent as Copilot; MCP uses `initialize.clientInfo.name`. Pending rounds do not block other tool requests. |
 | `trama_view` | Like `system`, `feature`, `machine`, `state`, `event` chosen by `ref`, with the attached Requirements; `requirements` or `requirements/<area>[#section]` like `requirements` |
 | `trama_paths`, `trama_analyze`, `trama_search`, `trama_validate`, `trama_board` | Like the commands of the same name |
 | `trama_proposal_new`, `trama_proposal_show`, `trama_proposal_delete_file` | Like `proposal new` (`requires`, `import`), `show`, `delete` |

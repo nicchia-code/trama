@@ -4,6 +4,8 @@ import { requirementsView, withRequirements } from "../cli/requirements";
 import type { Result } from "../cli/result";
 import { boardView, driftShowView, proposalShowView, taskShowView } from "../cli/work";
 import { TramaError, UsageError } from "../core/errors";
+import { askEditor } from "../core/question-channel";
+import { parseQuestionRequest, QUESTION_SCHEMA, questionFailure, type QuestionContext, type QuestionHandler } from "../core/questions";
 import { deleteInProposal, editInProposal, getProposal, newProposal, submitProposal, validateProposal } from "../core/proposals";
 import { resolveRef } from "../core/refs";
 import { loadProject } from "../core/requirements";
@@ -26,12 +28,17 @@ export interface ToolSpec {
   inputSchema: { type: "object"; properties: Record<string, object>; required?: string[]; additionalProperties: false };
   /** Whether the tool changes files under `.trama/`. */
   writes: boolean;
-  run(project: Project, input: Record<string, unknown>): string;
+  run(project: Project, input: Record<string, unknown>, options: ToolOptions): string | Promise<string>;
 }
 
 export interface ToolOutcome {
   text: string;
   isError: boolean;
+}
+
+export interface ToolOptions {
+  questionHandler?: QuestionHandler;
+  context?: QuestionContext;
 }
 
 const string = (description: string) => ({ type: "string", description });
@@ -83,6 +90,18 @@ function view(project: Project, ref: string | undefined): string {
 }
 
 export const TOOLS: ToolSpec[] = [
+  {
+    name: "trama_ask",
+    title: "Ask the developer",
+    description: "Present a complete question round in the project's editor and wait for answers. Only an initial unavailable result permits your own question tool. An editor-interrupted error stops this workflow without fallback, retry, rerouting or resumption.",
+    inputSchema: QUESTION_SCHEMA,
+    writes: false,
+    run: async (project, input, options) => {
+      const request = parseQuestionRequest(input);
+      const result = await (options.questionHandler ?? askEditor)(project, request, options.context ?? { agent: "Agent" });
+      return JSON.stringify(result);
+    },
+  },
   {
     name: "trama_view",
     title: "View the Model and Requirements",
@@ -296,14 +315,15 @@ export const TOOLS: ToolSpec[] = [
 ];
 
 /** Runs one tool. Domain and input problems come back as an error result the model can read, never as an exception. */
-export function callTool(project: Project | (() => Project), name: string, input: unknown): ToolOutcome {
+export async function callTool(project: Project | (() => Project), name: string, input: unknown, options: ToolOptions = {}): Promise<ToolOutcome> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return { text: `Unknown tool "${name}".`, isError: true };
-  if (input !== undefined && input !== null && (typeof input !== "object" || Array.isArray(input))) return { text: "Arguments must be an object.", isError: true };
+  if (name !== "trama_ask" && input !== undefined && input !== null && (typeof input !== "object" || Array.isArray(input))) return { text: "Arguments must be an object.", isError: true };
   try {
     const p = typeof project === "function" ? project() : project;
-    return { text: tool.run(p, (input ?? {}) as Record<string, unknown>), isError: false };
+    return { text: await tool.run(p, (input ?? {}) as Record<string, unknown>, options), isError: false };
   } catch (err) {
+    if (name === "trama_ask") return { text: JSON.stringify(questionFailure(err)), isError: true };
     if (err instanceof TramaError || err instanceof UsageError) return { text: err.message, isError: true };
     throw err;
   }
