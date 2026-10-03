@@ -20,15 +20,18 @@ If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, 
 | `trama proposal new` | `trama_proposal_new` |
 | `trama proposal edit`, then editing the printed file | `trama_proposal_write` with the complete new file |
 | `trama proposal delete`, `trama proposal show` | `trama_proposal_delete_file`, `trama_proposal_show` |
+| `trama proposal submit <id>` | `trama_proposal_submit` |
 | `trama task new`, `trama task show`, `trama task move` | `trama_task_new`, `trama_task_show`, `trama_task_move` |
 | `trama drift new`, `trama drift show` | `trama_drift_new`, `trama_drift_show` |
 
-There is no tool for approving, rejecting or resolving: those are the developer's decisions.
+There is no tool for approving, rejecting, discarding or resolving: those are the developer's decisions.
+
+A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>` (or `trama_proposal_submit`). If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds attach it to a Drift and tell the developer to review it. Before every later file change, call `trama proposal edit` or `trama_proposal_write` again: it returns an open Proposal to Draft, so submit again when finished.
 
 ## Hard rules
 
 - NEVER edit code, `.trama/model/` or `.trama/requirements/` in this skill.
-- NEVER run `trama proposal approve`, `trama proposal reject` or `trama drift resolve`.
+- NEVER run `trama proposal approve`, `trama proposal reject`, `trama proposal discard` or `trama drift resolve`.
 - Compare behaviour at the level of the **Diagram**: States, Transitions, Events, who reacts to what. Compare construction against what the Requirements actually state. Variable names, structure, style and performance that no Requirement mentions are not Drifts.
 - The Model matters far more than the code. By default the code is wrong, not the Model.
 
@@ -55,7 +58,7 @@ There is no tool for approving, rejecting or resolving: those are the developer'
    **The design link.** When the prompt says the scan follows the approval of a Proposal, add `--proposal <id>` (the `proposal` field of `trama_task_new`) to every Task you file, so the Board shows the Tasks of one design together. File Tasks with no `--proposal` when the prompt names no Proposal (a scan the developer started by hand).
 6. **File each Drift exactly once, in one of two ways.** `trama drift new` always creates a new card, so decide which way applies before running it.
    - **Ordinary Drift** (the default): `trama drift new "<title>" --ref <nearest Model element or Requirement> --body "<what the code does, what the Model or Requirement says, where in the code you saw it>"`. Code paths belong here, and only here. Do not choose the resolution.
-   - **Drift with a Proposal**, only when the code handles an important case the Model forgot: first create the Proposal by following the `trama-design` skill without its interview (`trama proposal new`, `edit`, `validate --proposal`; list your choices in the Proposal body), then run `trama drift new … --proposal <id>` once, with the same body. Never run `drift new` a second time for the same difference.
+   - **Drift with a Proposal**, only when the code handles an important case the Model forgot: first create the Proposal by following the `trama-design` skill without its interview (`trama proposal new`, `edit`, `validate --proposal`, `proposal show`, `proposal submit`; list your choices in the Proposal body). Correct and retry a refused submission before continuing; only after it succeeds run `trama drift new … --proposal <id>` once, with the same body. Never run `drift new` a second time for the same difference.
 
    Do not open a Proposal for small differences: the default is that the code gets fixed.
 7. **Report.** List the Tasks and Drifts you created with their IDs, Machines you could not find any code for, and Model warnings from `analyze`. Say which Drifts need a decision. Then stop.

@@ -4,7 +4,7 @@ import { formatDiagnostic } from "../../../../src/core/model";
 import type { DriftView, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
 import type { Column } from "../../protocol";
 import { designColumn, placeTasks, takenBlocker } from "../../../../src/core/design";
-import { requiredReasons } from "../../../../src/core/required";
+import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import { proposalTouches } from "../requirements/logic";
 
 export type ColumnId = "decide" | Column;
@@ -192,7 +192,7 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
   const badges: Badge[] = [];
   if (p.kind === "import") badges.push({ label: "import", tone: "info", tooltip: "Describes existing code; approving it starts no Scan" });
   for (const r of p.requires)
-    badges.push({ label: `requires ${r.id}`, tone: r.status === "open" ? "info" : "error", tooltip: requiredReasons([r]).join("") });
+    badges.push({ label: `requires ${r.id}`, tone: appliesUnder(r.status) ? "info" : "error", tooltip: requiredReasons([r]).join("") });
   if (p.stale.length > 0) badges.push({ label: "stale", tone: "warning", tooltip: `The Model changed since the Proposal touched:\n${listed(p.stale)}` });
   if (p.errors.length > 0) badges.push({ label: "invalid", tone: "error", tooltip: `The Model or its Requirements would be invalid:\n${listed(p.errors.map(formatDiagnostic))}` });
   if (p.unbased.length > 0) badges.push({ label: "unregistered files", tone: "warning", tooltip: `Never registered with the Proposal:\n${listed(p.unbased)}` });
@@ -224,7 +224,7 @@ export function driftCard(d: DriftView, proposals: ProposalView[]): DriftCard {
     excerpt: excerpt(d.body),
     refs: d.refs,
     proposal: d.proposal,
-    acceptBlocker: attached ? approveBlocker(attached) : null,
+    acceptBlocker: d.proposalBlocker ?? (attached ? approveBlocker(attached) : null),
   };
 }
 

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { diffFile, type FileChange } from "./diff";
 import { TramaError } from "./errors";
@@ -22,9 +22,13 @@ import {
   writeFileEnsuringDir,
 } from "./store";
 import type { Diagnostic, FileMap } from "./types";
-import { type RequiredProposal, requiredReasons } from "./required";
+import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
 
-export type ProposalStatus = "open" | "approved" | "rejected";
+/**
+ * `draft`: the agent is still writing it; only the agent hands it over and only the developer can discard it.
+ * `open`: handed over, waiting for the developer. A file without a status is `open`.
+ */
+export type ProposalStatus = "draft" | "open" | "approved" | "rejected" | "discarded";
 
 /** `import`: written by the trama-import skill to describe existing code; approving it starts no Scan. */
 export type ProposalKind = "change" | "import";
@@ -50,7 +54,7 @@ export interface Proposal {
 
 const proposalsDir = (p: Project) => join(p.dir, "proposals");
 
-const STATUSES: readonly ProposalStatus[] = ["open", "approved", "rejected"];
+const STATUSES: readonly ProposalStatus[] = ["draft", "open", "approved", "rejected", "discarded"];
 const KINDS: readonly ProposalKind[] = ["change", "import"];
 
 function parseData(raw: Raw, where: string): ProposalData {
@@ -98,7 +102,8 @@ export function getProposal(p: Project, id: string): Proposal {
 export function newProposal(p: Project, title: string, body = "", options: { requires?: string[]; kind?: ProposalKind } = {}): Proposal {
   const requires = (options.requires ?? []).map((r) => {
     const required = getProposal(p, r);
-    if (required.data.status === "rejected") throw new TramaError(`Proposal ${required.id} was rejected; a new Proposal cannot require it`);
+    if (required.data.status === "rejected" || required.data.status === "discarded")
+      throw new TramaError(`Proposal ${required.id} was ${required.data.status}; a new Proposal cannot require it`);
     return required.id;
   });
   const id = nextId(proposalsDir(p));
@@ -108,7 +113,7 @@ export function newProposal(p: Project, title: string, body = "", options: { req
     name,
     dir: join(proposalsDir(p), name),
     title,
-    data: { status: "open", kind: options.kind ?? "change", requires: [...new Set(requires)], base: {}, delete: [] },
+    data: { status: "draft", kind: options.kind ?? "change", requires: [...new Set(requires)], base: {}, delete: [] },
     body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
   };
   save(proposal);
@@ -143,7 +148,7 @@ export function requiredProposals(p: Project, proposal: Proposal): RequiredPropo
       }
       if (required.data.status === "approved") continue;
       visit(required, [...path, id]);
-      out.push({ id: required.id, title: required.title, status: required.data.status === "rejected" ? "rejected" : "open" });
+      out.push({ id: required.id, title: required.title, status: required.data.status as Exclude<RequiredProposal["status"], "missing" | "cycle"> });
     }
   };
   visit(proposal, [proposal.id]);
@@ -154,7 +159,7 @@ export function requiredProposals(p: Project, proposal: Proposal): RequiredPropo
 export function baseFiles(p: Project, proposal: Proposal): FileMap {
   const files = readTrackedFiles(p);
   for (const r of requiredProposals(p, proposal)) {
-    if (r.status !== "open") continue;
+    if (!appliesUnder(r.status)) continue;
     const required = getProposal(p, r.id);
     for (const path of required.data.delete) files.delete(path);
     for (const [path, content] of newFiles(required)) files.set(path, content);
@@ -172,22 +177,39 @@ function normalizeModelPath(path: string): string {
   return clean;
 }
 
-function requireOpen(proposal: Proposal, action: string) {
-  if (proposal.data.status !== "open")
-    throw new TramaError(`Proposal ${proposal.id} is ${proposal.data.status}; only open Proposals can be ${action}`);
+/** Refuses unless the Proposal is in `status`; a Draft gets its own message, because the developer meets it as "not ready yet". */
+function requireStatus(proposal: Proposal, status: "draft" | "open", action: string) {
+  if (proposal.data.status === status) return;
+  if (proposal.data.status === "draft")
+    throw new TramaError(`Proposal ${proposal.id} is still being written: the agent has not handed it over, so it cannot be ${action} yet`);
+  throw new TramaError(`Proposal ${proposal.id} is ${proposal.data.status}; only ${status === "draft" ? "a Draft" : "open Proposals"} can be ${action}`);
+}
+
+function requireEditable(proposal: Proposal) {
+  if (proposal.data.status !== "draft" && proposal.data.status !== "open")
+    throw new TramaError(`Proposal ${proposal.id} is ${proposal.data.status}; only drafts and open Proposals can be edited`);
+}
+
+/** An edit takes a handed-over Proposal back from the developer: it is a Draft until the next submit. */
+function touch(proposal: Proposal) {
+  if (proposal.data.status === "open") proposal.data.status = "draft";
 }
 
 /**
  * Makes `modelPath` editable inside the Proposal and returns the file to edit.
- * Calling it again for the same file changes nothing.
+ * Calling it again for the same file keeps what was recorded for it, but still returns an open Proposal to Draft.
  */
 export function editInProposal(p: Project, id: string, modelPath: string): string {
   const proposal = getProposal(p, id);
-  requireOpen(proposal, "edited");
+  requireEditable(proposal);
   const rel = normalizeModelPath(modelPath);
   const target = trackedLocation(proposal.dir, rel);
   if (proposal.data.delete.includes(rel)) throw new TramaError(`${rel} is marked for deletion in Proposal ${proposal.id}`);
-  if (existsSync(target)) return target;
+  touch(proposal);
+  if (existsSync(target)) {
+    save(proposal);
+    return target;
+  }
 
   const content = baseFiles(p, proposal).get(rel);
   if (content !== undefined) {
@@ -203,12 +225,13 @@ export function editInProposal(p: Project, id: string, modelPath: string): strin
 
 export function deleteInProposal(p: Project, id: string, modelPath: string) {
   const proposal = getProposal(p, id);
-  requireOpen(proposal, "edited");
+  requireEditable(proposal);
   const rel = normalizeModelPath(modelPath);
   const content = baseFiles(p, proposal).get(rel);
   if (content === undefined) throw new TramaError(`${rel} does not exist in the Model or its Requirements`);
   if (existsSync(trackedLocation(proposal.dir, rel)))
     throw new TramaError(`${rel} is already edited in Proposal ${proposal.id}; remove that copy first`);
+  touch(proposal);
   proposal.data.base[rel] ??= sha256(content);
   if (!proposal.data.delete.includes(rel)) proposal.data.delete.push(rel);
   save(proposal);
@@ -266,7 +289,7 @@ export function changes(p: Project, proposal: Proposal): FileChange[] {
 
 export function approveProposal(p: Project, id: string): Proposal {
   const proposal = getProposal(p, id);
-  requireOpen(proposal, "approved");
+  requireStatus(proposal, "open", "approved");
   const h = health(p, proposal);
   if (h.requires.length > 0)
     throw new TramaError(`Proposal ${proposal.id} requires other Proposals first:\n${requiredReasons(h.requires).map((r) => `- ${r}`).join("\n")}`);
@@ -288,9 +311,37 @@ export function approveProposal(p: Project, id: string): Proposal {
 
 export function rejectProposal(p: Project, id: string, feedback: string): Proposal {
   const proposal = getProposal(p, id);
-  requireOpen(proposal, "rejected");
+  requireStatus(proposal, "open", "rejected");
   proposal.data.status = "rejected";
   proposal.body = `${proposal.body.trimEnd()}\n\n## Feedback\n\n${feedback.trim()}\n`;
+  save(proposal);
+  return proposal;
+}
+
+/**
+ * The agent hands a Draft over to the developer. Refused, leaving it a Draft, when the Model and Requirements
+ * with it applied would have errors or when a file it holds was never registered. Being stale or requiring
+ * Proposals that are not approved yet does not refuse it: writing cannot fix those.
+ */
+export function submitProposal(p: Project, id: string): Proposal {
+  const proposal = getProposal(p, id);
+  requireStatus(proposal, "draft", "handed over");
+  const problems: string[] = [];
+  const { unbased } = health(p, proposal);
+  if (unbased.length > 0) problems.push(`it contains files it never registered: ${unbased.join(", ")}. Use "trama proposal edit" first`);
+  const errors = validateProposal(p, proposal);
+  if (errors.length > 0) problems.push(`it would leave the Model invalid:\n${errors.map((d) => `  - ${formatDiagnostic(d)}`).join("\n")}`);
+  if (problems.length > 0) throw new TramaError(`Proposal ${proposal.id} cannot be handed over yet:\n${problems.map((x) => `- ${x}`).join("\n")}`);
+  proposal.data.status = "open";
+  save(proposal);
+  return proposal;
+}
+
+/** The developer gives up a Draft the agent never finished. Nothing is asked of the agent and nothing is appended. */
+export function discardProposal(p: Project, id: string): Proposal {
+  const proposal = getProposal(p, id);
+  requireStatus(proposal, "draft", "discarded");
+  proposal.data.status = "discarded";
   save(proposal);
   return proposal;
 }

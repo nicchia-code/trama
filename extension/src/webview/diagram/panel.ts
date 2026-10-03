@@ -1,4 +1,4 @@
-import { requiredReasons } from "../../../../src/core/required";
+import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import type { DriftView, ProposalView } from "../../../../src/core/snapshot";
 import { approveBlocker } from "../board/logic";
 import type { Detail, DetailItem } from "./details";
@@ -61,9 +61,9 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     const box = el("section", "dg-proposal");
     box.append(el("div", "dg-kind", `Proposal ${p.id}`), el("h3", "", p.title));
     if (p.body) box.append(el("p", "dg-body", p.body));
-    const open = p.requires.filter((r) => r.status === "open");
+    const open = p.requires.filter((r) => appliesUnder(r.status));
     if (open.length > 0) box.append(el("div", "dg-note", `Drawn on top of ${open.map((r) => `Proposal ${r.id}`).join(", ")}, not yet approved: what they add is shown as if approved.`));
-    const unusable = p.requires.filter((r) => r.status !== "open");
+    const unusable = p.requires.filter((r) => !appliesUnder(r.status));
     if (unusable.length > 0) box.append(el("div", "dg-problem-head", "Requires Proposals that cannot be approved"), list("dg-problems", requiredReasons(unusable)));
     if (p.stale.length > 0) box.append(el("div", "dg-problem-head", "Stale: the Model changed since the Proposal was written"), list("dg-problems", p.stale));
     if (p.unbased.length > 0) box.append(el("div", "dg-problem-head", "Touches files it has no base for"), list("dg-problems", p.unbased));
@@ -94,7 +94,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
   const renderDrift = (d: DriftView): HTMLElement => {
     const row = el("div", "dg-actions");
     row.append(button("Fix code", () => actions.resolveDrift(d.id, "fix-code"), { primary: true, title: "The Model is right: have the agent fix the code" }));
-    if (d.proposal) row.append(button("Accept Proposal", () => actions.resolveDrift(d.id, "accept-proposal"), { title: `The code is right: approve Proposal ${d.proposal}` }));
+    if (d.proposal) row.append(button("Accept Proposal", () => actions.resolveDrift(d.id, "accept-proposal"), { disabled: d.proposalBlocker !== null, title: d.proposalBlocker ?? `The code is right: approve Proposal ${d.proposal}` }));
     row.append(button("Dismiss", () => actions.resolveDrift(d.id, "dismiss"), { title: "Ignore this difference" }));
     return row;
   };

@@ -79,7 +79,7 @@ describe("malformed Task files give domain errors naming the file", () => {
 describe("malformed Proposal files", () => {
   const cases: [string, string, RegExp][] = [
     ["delete is a string", "status: open\ndelete: checkout/order.md", /"delete" must be a list of strings/],
-    ["unknown status", "status: pending", /"status" must be one of open, approved, rejected/],
+    ["unknown status", "status: pending", /"status" must be one of draft, open, approved, rejected, discarded/],
     ["base is a list", "base:\n  - checkout/order.md", /"base" must map file paths to hashes/],
     ["base has a non-string hash", "base:\n  checkout/order.md: 5", /"base" must map file paths to hashes/],
     ["base path escapes the Model", 'base:\n  "../../secret.md": new', /must be relative to \.trama\/model\//],

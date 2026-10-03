@@ -244,35 +244,37 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 | 3 | Look at the buttons | **Approve** (blue, enabled) and **Reject** | ☐ |
 
 ### C6. A Proposal that removes things
-Setup: ↻ first (the new Proposal must get ID 0003). Then, in the verification shell (the panel refreshes by itself):
+Setup: ↻ first. Use the new Proposal's ID from the output below as `<id>`. In the verification shell (the panel refreshes by itself):
 ```
-j proposal new "Drop refunds" --body "Refunds are out of scope." >/dev/null
-F=$(j proposal edit 3 checkout/order.md)
+j proposal new "Drop refunds" --body "Refunds are out of scope."
+F=$(j --json proposal edit <id> checkout/order.md | jq -r .path)
 sed -i '/^### Refunding/,/^### Shipped/{/^### Shipped/!d;}' "$F"; sed -i '/→ Refunding/d' "$F"
-j proposal show 3
+j proposal submit <id>
+j proposal show <id>
 ```
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Read the output of `j proposal show 3` | Status open; changes list `- State Refunding`, `- Transition Paid \| user.CANCEL → Refunding…`, `- Transition Refunding \| payment.REFUNDED → Cancelled`; `Valid.` | ☐ |
-| 2 | Board tab | A third Proposal card `Proposal 0003 · Drop refunds` with `checkout/order.md -3`; the Board badge is `5` | ☐ |
-| 3 | Diagram, Machine level `order`, choose `0003 · Drop refunds` | `Refunding` is **faded** with a dashed red border and the word `removed`; the edges into and out of it are dashed red | ☐ |
+| 1 | Read the output of `j proposal show <id>` | Status open; changes list `- State Refunding`, `- Transition Paid \| user.CANCEL → Refunding…`, `- Transition Refunding \| payment.REFUNDED → Cancelled`; `Valid.` | ☐ |
+| 2 | Board tab | The submitted Proposal is in To decide; the existing draft remains outside the decision count | ☐ |
+| 3 | Diagram, Machine level `order`, choose `<id> · Drop refunds` | `Refunding` is **faded** with a dashed red border and the word `removed`; the edges into and out of it are dashed red | ☐ |
 | 4 | Look at the panel | `- State Refunding` and the two removed Transitions listed; **Approve** enabled | ☐ |
-| 5 | ↻ reset when done | Proposal 0003 is gone | ☐ |
+| 5 | ↻ reset when done | The new Proposal is gone | ☐ |
 
 ### C7. An invalid Proposal
-Setup: ↻ first (the new Proposal must get ID 0003). Then in the verification shell:
+Setup: ↻ first. Use the new Proposal's ID as `<id>`. In the verification shell:
 ```
-j proposal new "Drop the cart" >/dev/null
-j proposal delete 3 checkout/cart.md
-j validate --proposal 3        # exit code 1
+j proposal new "Drop the cart"
+j proposal delete <id> checkout/cart.md
+j validate --proposal <id>       # exit code 1
+j proposal submit <id>           # exit code 1; stays Draft
 ```
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Read the shell output | `The Model and its Requirements with Proposal 0003 applied have 1 error(s):` `checkout/order.md:9: Event reference to unknown owner "cart"` | ☐ |
-| 2 | Open the selector | The new entry reads `0003 · Drop the cart ⚠ invalid` | ☐ |
-| 3 | Choose it and read the panel | Red text `The Model with this Proposal applied is invalid` and the same error; `checkout/cart.md (removed)` with the removed States | ☐ |
-| 4 | Look at **Approve** | **Disabled**. Hover: tooltip `Stale or invalid Proposals cannot be approved` | ☐ |
-| 5 | Board tab | The card has a red `invalid` badge and a disabled **Approve**; **Reject** works | ☐ |
+| 1 | Read the shell output | Validation and submission report `Event reference to unknown owner "cart"` | ☐ |
+| 2 | Open the Diagram selector | No entry for the Draft | ☐ |
+| 3 | `j proposal show <id>` | Status draft, the validation error and the removed cart are listed | ☐ |
+| 4 | Board tab | Draft card in the band above the columns; only **Discard**, no Approve or Reject | ☐ |
+| 5 | Click Discard, then cancel; repeat and confirm | Cancelling keeps it; confirming removes the draft without adding it to To decide | ☐ |
 | 6 | ↻ reset when done | | ☐ |
 
 ---
@@ -575,10 +577,10 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | M5 | `ls /tmp/trama-demo/shop/.agents/skills` after `j skills update` | `trama-req-data` and `trama-req-ui` next to the three Trama skills; `trama-req-ui/SKILL.md` has `description: Use when building or changing screens…` | ☐ |
 | M6 | Edit `.trama/requirements/ui.md` by hand: change "Mobile first" to "Mobile first, always" and save | Within a second `.agents/skills/trama-req-ui/SKILL.md` says "Mobile first, always". The Requirements tab shows the new text | ☐ |
 | M7 | Append `## order/Lost` and a line to `ui.md`, save | The yellow bar: "The Model or its Requirements have 1 validation error"; the link `requirements/ui.md:<line>` opens `ui.md`. Remove the section again: the bar disappears | ☐ |
-| M8 | `j proposal new "Blue badge"`, then `j proposal edit <id> requirements/ui.md` and change "green" to "blue" in the printed file | On the Board the Proposal card lists `requirements/ui.md ~1` and has **View requirements**, not **View on diagram** | ☐ |
+| M8 | `j proposal new "Blue badge"`, then `j proposal edit <id> requirements/ui.md`, change "green" to "blue" in the printed file and `j proposal submit <id>` | On the Board the submitted card lists `requirements/ui.md ~1` and has **View requirements**, not **View on diagram** | ☐ |
 | M9 | Click **View requirements** | Requirements tab with the Proposal selected: `order/Paid` has a **changed** badge, the old text struck through above the new one | ☐ |
-| M10 | `j proposal edit <id> checkout/order.md`, delete the `### Paid` State and its sub-States in the printed file, then `j validate --proposal <id>` | Exit 1, among the errors: `requirements/ui.md: Section "## order/Paid" does not match the Model: Machine "order" has no State "Paid"`. **Approve** is disabled on the Board | ☐ |
-| M11 | Reject the Proposal from the Board | Card gone; `ui.md` and the skill unchanged | ☐ |
+| M10 | `j proposal edit <id> checkout/order.md`, delete the `### Paid` State and its sub-States in the printed file, then `j validate --proposal <id>` and `j proposal submit <id>` | The edit withdraws it into Draft. Both commands fail with the missing State and Requirement errors; it is absent from the selectors and decision count | ☐ |
+| M11 | Discard the Draft from the Board | Card gone; `ui.md` and the skill unchanged | ☐ |
 
 ---
 
@@ -586,12 +588,26 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| N1 | Verification shell: `j proposal new "Bank" --import`, `j proposal edit <A> actors/bank.md`, write an Actor `# Bank` with an Event `TRANSFER_RECEIVED` in the printed file | Board: card for Proposal A with an **import** badge | ☐ |
-| N2 | `j proposal new "Billing" --import --requires <A>`, then `j proposal edit <B> billing/feature.md` (write `# Billing`) and `j proposal edit <B> billing/invoice.md` (a Machine with `### Open (initial)` → `` - `bank.TRANSFER_RECEIVED` → Paid `` and `### Paid (final)`) | `j validate --proposal <B>` is valid. Card B has **import** and **requires A** badges; **Approve** is disabled and its tooltip says Proposal A is not approved yet | ☐ |
+| N1 | Verification shell: `j proposal new "Bank" --import`, `j proposal edit <A> actors/bank.md`, write an Actor `# Bank` with an Event `TRANSFER_RECEIVED`, then `j proposal submit <A>` | Board: handed-over card for A with an **import** badge | ☐ |
+| N2 | `j proposal new "Billing" --import --requires <A>`, then `j proposal edit <B> billing/feature.md` (write `# Billing`) and `j proposal edit <B> billing/invoice.md` (a Machine with `### Open (initial)` → `` - `bank.TRANSFER_RECEIVED` → Paid `` and `### Paid (final)`), then `j proposal submit <B>` | Submission succeeds despite A not being approved. Card B has **import** and **requires A** badges; **Approve** is disabled until A is approved | ☐ |
 | N3 | Diagram: pick Proposal B in the selector | The **Bank** Actor is drawn as normal (not as a ghost), **Billing** and **Invoice** as added; the panel says "Drawn on top of Proposal A, not yet approved" | ☐ |
 | N4 | Approve A, then B, from the Board | Both approved; no agent is launched (import Proposals start no Scan); `j validate` is valid | ☐ |
 | N5 | Repeat N1 and N2, then reject A | Card B stays, with **requires A** in red and Approve disabled: "Proposal A "Bank" was rejected" | ☐ |
 | N6 | **Trama: Import from Code** on a repository with code (agent configured) | The agent receives `Use the trama-import skill on this repository.`, asks one round of questions (folders, Feature split) with a recommended option each, then writes Proposals: one for the System and Actors, one per Feature requiring it, each ending with `## Doubts` | ☐ |
+
+---
+
+## O. Draft hand-over
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| O1 | Board tab after reset | Inventory checks is a Draft above the columns, with its ID, title, animated indicator and "The agent is writing this Proposal"; only Discard, no navigation | ☐ |
+| O2 | Inspect Diagram and Requirements selectors and Board badge | No Draft in either selector or the decision count | ☐ |
+| O3 | Enable reduced motion | Draft indicator stops; text remains | ☐ |
+| O4 | Attempt to accept the Inventory Drift's attached Proposal | Accept is disabled, with the still-being-written reason; a direct host or CLI attempt is refused too | ☐ |
+| O5 | Submit the Draft with `j proposal submit 4` | It leaves the band and appears in To decide and the Diagram selector; the badge increases by one | ☐ |
+| O6 | `j proposal edit 4 checkout/order.md`, without changing its contents | Notice says returned to Draft; overlay and decision card disappear, Draft card returns | ☐ |
+| O7 | Click Discard and cancel, then repeat and confirm | Exact confirmation: "Discard this draft? The agent will not be told." Cancel changes nothing; confirm removes it and marks it discarded | ☐ |
 
 ---
 

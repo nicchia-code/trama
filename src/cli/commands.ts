@@ -5,10 +5,12 @@ import { installSkills, missingSkills, skillConflicts } from "./skills";
 import {
   approveProposal,
   deleteInProposal,
+  discardProposal,
   editInProposal,
   getProposal,
   newProposal,
   rejectProposal,
+  submitProposal,
   validateProposal,
 } from "../core/proposals";
 import { createDefaultAreas, loadProject } from "../core/requirements";
@@ -189,20 +191,32 @@ export const COMMANDS: Command[] = [
     },
   },
 
-  { name: "proposal new", args: "<title>", summary: "Open a new Proposal (--requires <id> for each Proposal it builds on; --import when it describes existing code)", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" } }, run(ctx, a, o) {
+  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" } }, run(ctx, a, o) {
       const p = newProposal(ctx.project(), a[0] as string, str(o["body"]), { requires: list(o["requires"]), kind: o["import"] === true ? "import" : "change" });
-      return text(`Created Proposal ${p.id} at ${p.dir}`, { id: p.id, path: p.dir });
+      return text(`Created Draft Proposal ${p.id} at ${p.dir}. Submit it when finished.`, { id: p.id, path: p.dir, status: p.data.status });
     } },
   { name: "proposal edit", args: "<id> <model-path>", summary: "Make a Model file editable inside a Proposal; prints the path to edit", run(ctx, a) {
-      const path = editInProposal(ctx.project(), a[0] as string, a[1] as string);
-      return text(path, { path });
+      const project = ctx.project();
+      const returnedToDraft = getProposal(project, a[0] as string).data.status === "open";
+      const path = editInProposal(project, a[0] as string, a[1] as string);
+      return text(`${path}${returnedToDraft ? "\nProposal returned to Draft; submit it again when finished." : ""}`, { path, status: "draft", returnedToDraft });
     } },
   { name: "proposal delete", args: "<id> <model-path>", summary: "Mark a Model file for deletion in a Proposal", run(ctx, a) {
-      deleteInProposal(ctx.project(), a[0] as string, a[1] as string);
-      return text(`Marked ${a[1]} for deletion in Proposal ${a[0]}`);
+      const project = ctx.project();
+      const returnedToDraft = getProposal(project, a[0] as string).data.status === "open";
+      deleteInProposal(project, a[0] as string, a[1] as string);
+      return text(`Marked ${a[1]} for deletion in Proposal ${a[0]}.${returnedToDraft ? " Proposal returned to Draft; submit it again when finished." : ""}`, { status: "draft", returnedToDraft });
+    } },
+  { name: "proposal submit", args: "<id>", summary: "Hand a valid Draft over to the developer", run(ctx, a) {
+      const p = submitProposal(ctx.project(), a[0] as string);
+      return text(`Submitted Proposal ${p.id} for review`, { id: p.id, status: p.data.status });
+    } },
+  { name: "proposal discard", args: "<id>", summary: "Discard a Draft the agent never finished", developerOnly: true, run(ctx, a) {
+      const p = discardProposal(ctx.project(), a[0] as string);
+      return text(`Discarded Proposal ${p.id}`, { id: p.id, status: p.data.status });
     } },
   { name: "proposal show", args: "<id>", summary: "A Proposal: staleness, structural changes, validation", run: (ctx, a) => proposalShowView(ctx.project(), getProposal(ctx.project(), a[0] as string)) },
-  { name: "proposal list", args: "", summary: "Open Proposals (--all for every one)", options: { all: { type: "boolean" } }, run: (ctx, _a, o) => proposalListView(ctx.project(), o["all"] === true) },
+  { name: "proposal list", args: "", summary: "Draft and open Proposals (--all for every one)", options: { all: { type: "boolean" } }, run: (ctx, _a, o) => proposalListView(ctx.project(), o["all"] === true) },
   { name: "proposal approve", args: "<id>", summary: "Apply a Proposal to the Model", developerOnly: true, run(ctx, a) {
       const p = approveProposal(ctx.project(), a[0] as string);
       return text(`Approved Proposal ${p.id}`, { id: p.id, status: p.data.status });

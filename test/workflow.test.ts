@@ -3,6 +3,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
+import { handOver } from "./handover";
 import { approveProposal, editInProposal, getProposal, health, newProposal, rejectProposal } from "../src/core/proposals";
 import { loadModel, type Project, projectAt } from "../src/core/store";
 import { callTool } from "../src/tools/catalog";
@@ -31,6 +32,7 @@ describe("Proposals", () => {
     editOrder(prop.id, (t) => t.replace("### Shipped (final)", "### Shipped\n- `user.CANCEL` → Returned\n\n### Returned (final)"));
     const fresh = editInProposal(p, prop.id, "checkout/returns.md");
     writeFileSync(fresh, "# Returns\n\nA return.\n\n## States\n\n### Open (initial)\n");
+    handOver(p, prop.id);
     approveProposal(p, prop.id);
 
     expect(loadModel(p).diagnostics).toEqual([]);
@@ -53,6 +55,7 @@ describe("Proposals", () => {
     editOrder(prop.id, (t) => t);
     expect(health(p, getProposal(p, prop.id)).stale).toEqual([]);
     appendFileSync(modelFile("checkout/order.md"), "\n");
+    handOver(p, prop.id);
     expect(health(p, getProposal(p, prop.id)).stale).toEqual(["checkout/order.md"]);
     expect(() => approveProposal(p, prop.id)).toThrow(/stale/);
   });
@@ -61,6 +64,7 @@ describe("Proposals", () => {
     const prop = newProposal(p, "Collision");
     writeFileSync(editInProposal(p, prop.id, "checkout/returns.md"), "# R\n\n## States\n\n### A (initial)\n");
     writeFileSync(modelFile("checkout/returns.md"), "# Other\n\n## States\n\n### B (initial)\n");
+    handOver(p, prop.id);
     expect(() => approveProposal(p, prop.id)).toThrow(/stale/);
   });
 
@@ -68,6 +72,7 @@ describe("Proposals", () => {
     const prop = newProposal(p, "Broken");
     editOrder(prop.id, (t) => t.replace("→ Paid", "→ Nowhere"));
     const before = readFileSync(modelFile("checkout/order.md"), "utf8");
+    handOver(p, prop.id);
     expect(() => approveProposal(p, prop.id)).toThrow(/unknown State "Nowhere"/);
     expect(readFileSync(modelFile("checkout/order.md"), "utf8")).toBe(before);
     expect(getProposal(p, prop.id).data.status).toBe("open");
@@ -77,12 +82,14 @@ describe("Proposals", () => {
     const prop = newProposal(p, "Sneaky");
     mkdirSync(join(prop.dir, "model", "checkout"), { recursive: true });
     writeFileSync(join(prop.dir, "model", "checkout", "ghost.md"), "# G\n\n## States\n\n### A (initial)\n");
+    handOver(p, prop.id);
     expect(() => approveProposal(p, prop.id)).toThrow(/never registered: checkout\/ghost\.md/);
     expect(existsSync(modelFile("checkout/ghost.md"))).toBe(false);
   });
 
   test("rejecting keeps the feedback and blocks later approval", () => {
     const prop = newProposal(p, "Nope");
+    handOver(p, prop.id);
     rejectProposal(p, prop.id, "Split it up.");
     const again = getProposal(p, prop.id);
     expect(again.data.status).toBe("rejected");
@@ -240,6 +247,7 @@ describe("Tasks and Drifts", () => {
     const prop = newProposal(p, "Model forgot this");
     editOrder(prop.id, (t) => t.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
     const drift = newDrift(p, { title: "Code has Lost", refs: ["order"], proposal: prop.id });
+    handOver(p, prop.id);
     resolveDrift(p, drift.id, "accept-proposal");
     expect(getProposal(p, prop.id).data.status).toBe("approved");
     expect(loadModel(p).machines.get("order")?.states.some((s) => s.name === "Lost")).toBe(true);
@@ -277,7 +285,9 @@ describe("CLI", () => {
 
   test("an agent (TRAMA_AGENT set) cannot approve, reject or resolve; the developer can", () => {
     const agent = { TRAMA_AGENT: "1" };
-    editOrder(newProposal(p, "Lost").id, (t) => t.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
+    const lost = newProposal(p, "Lost");
+    editOrder(lost.id, (t) => t.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
+    handOver(p, lost.id);
     newDrift(p, { title: "d", refs: ["order"] });
     expect(() => run(["--root", dir, "proposal", "approve", "1"], dir, agent)).toThrow(/developer's decision/);
     expect(() => run(["--root", dir, "proposal", "reject", "1", "--feedback", "no"], dir, agent)).toThrow(/developer's decision/);

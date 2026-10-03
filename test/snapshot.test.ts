@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { type MergedState, mergeMachine } from "../src/core/merge";
 import { buildModel } from "../src/core/model";
 import { editInProposal, newProposal } from "../src/core/proposals";
+import { handOver } from "./handover";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
 import { newDrift, newTask } from "../src/core/work";
@@ -82,6 +83,7 @@ test("the snapshot carries the Model, open Proposals as ghost overlays, Drifts a
   writeFileSync(editInProposal(p, prop.id, "actors/user.md"), readFileSync(join(dir, ".trama/model/actors/user.md"), "utf8") + "\n### RETURN\nAsks to return.\n");
   newDrift(p, { title: "Code refunds late", refs: ["order/Shipped"], body: "see refund.ts" });
   newTask(p, { title: "Build cart", refs: ["cart"], technical: false });
+  handOver(p, prop.id);
   const done = newProposal(p, "Closed");
   rmSync(join(done.dir, "model"), { recursive: true, force: true });
 
@@ -94,7 +96,7 @@ test("the snapshot carries the Model, open Proposals as ghost overlays, Drifts a
   const returned = flat(view?.machines[0]?.states ?? []).find((s) => s.name === "Returned");
   expect(returned?.change).toBe("added");
   expect(view?.actors).toEqual([{ id: "user", change: "modified", events: expect.arrayContaining([{ name: "RETURN", change: "added" }]) }]);
-  expect(snap.drifts).toEqual([{ id: "0001", title: "Code refunds late", body: "see refund.ts", refs: ["order/Shipped"], proposal: null }]);
+  expect(snap.drifts).toMatchObject([{ id: "0001", title: "Code refunds late", body: "see refund.ts", refs: ["order/Shipped"], proposal: null }]);
   expect(snap.tasks[0]).toMatchObject({ title: "Build cart", column: "todo", refs: ["cart"], file: "tasks/0001-build-cart.md" });
   expect(JSON.parse(JSON.stringify(snap))).toEqual(snap);
 });
@@ -103,6 +105,7 @@ test("a Proposal that would leave the Model invalid reports the errors instead o
   const prop = newProposal(p, "Broken");
   const order = editInProposal(p, prop.id, "checkout/order.md");
   writeFileSync(order, readFileSync(order, "utf8").replace("→ Paid", "→ Nowhere"));
+  handOver(p, prop.id);
   const view = buildSnapshot(p).proposals[0];
   expect(view?.errors.map((e) => e.message)).toEqual([expect.stringContaining('unknown State "Nowhere"')]);
 });

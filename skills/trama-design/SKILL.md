@@ -20,15 +20,18 @@ If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, 
 | `trama proposal new` | `trama_proposal_new` |
 | `trama proposal edit`, then editing the printed file | `trama_proposal_write` with the complete new file |
 | `trama proposal delete`, `trama proposal show` | `trama_proposal_delete_file`, `trama_proposal_show` |
+| `trama proposal submit <id>` | `trama_proposal_submit` |
 | `trama task new`, `trama task show`, `trama task move` | `trama_task_new`, `trama_task_show`, `trama_task_move` |
 | `trama drift new`, `trama drift show` | `trama_drift_new`, `trama_drift_show` |
 
-There is no tool for approving, rejecting or resolving: those are the developer's decisions.
+There is no tool for approving, rejecting, discarding or resolving: those are the developer's decisions.
+
+A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>` (or `trama_proposal_submit`). If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` or `trama_proposal_write` again: it returns an open Proposal to Draft, so submit again when finished.
 
 ## Hard rules
 
 - NEVER edit `.trama/model/` or `.trama/requirements/` directly, nor the generated `trama-req-*` skills. Every change goes through a Proposal, created with `trama proposal new`.
-- NEVER run `trama proposal approve`, `trama proposal reject` or `trama drift resolve`. Those are the developer's decisions. After writing a Proposal, stop and ask the developer to review it.
+- NEVER run `trama proposal approve`, `trama proposal reject`, `trama proposal discard` or `trama drift resolve`. Those are the developer's decisions. After submitting a finished Proposal, stop and ask the developer to review it.
 - The Model describes *what can happen*, never *how it is built*: no variables, field names, database columns, endpoints, classes or file paths. A State is a situation in domain words ("Awaiting payment"), not a combination of values. How it is built (layout, styling, libraries, limits, data fields, formulas) belongs in the Requirements.
 - Conditions and consequences of a Transition are plain prose after the colon.
 
@@ -40,7 +43,7 @@ There is no tool for approving, rejecting or resolving: those are the developer'
 4. **Open a Proposal** for one coherent change, which may touch several Machines, Features and Areas: `trama proposal new "<title>" --body "<why>"`. When the change is too large to review at once, split it into Proposals that build on each other: open the later ones with `--requires <id>` of the earlier ones; each is then written and validated on top of them and can only be approved after them.
 5. **Edit files through it.** For each Model file: `trama proposal edit <id> <model-path>` (for example `checkout/order.md`) prints the path to edit. For an Area: `trama proposal edit <id> requirements/<area>.md`. An existing file arrives pre-filled; a new file arrives empty. To remove a file: `trama proposal delete <id> <path>`. Write files as described in [FORMAT.md](./FORMAT.md). Always write the **complete** new version of a file. Put the Requirements the developer gave you in the same Proposal as the behaviour they belong to.
 6. **Validate until clean.** `trama validate --proposal <id>` must report no errors. A Requirement section titled with a State you removed or renamed is an error: update or remove that section in the same Proposal. Then `trama proposal show <id>` and read the changes: they must match what was agreed, and nothing else.
-7. **Hand over.** Summarise the Proposal in a few lines and tell the developer to review it on the board or with `trama proposal show <id>`, and stop.
+7. **Hand over.** Run `trama proposal submit <id>` only after step 6. If refused, correct its problems and repeat validation and review before retrying. After submission succeeds, summarise the Proposal in a few lines, tell the developer to review it on the board or with `trama proposal show <id>`, and stop.
 
 ## The interview
 

@@ -1,7 +1,7 @@
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
 import { applied, baseFiles, changes, health, listProposals, type ProposalKind } from "./proposals";
-import type { RequiredProposal } from "./required";
+import { appliesUnder, type RequiredProposal } from "./required";
 import { type Area, buildProject, type ProjectModel } from "./requirements";
 import { type Project, readTrackedFiles, REQUIREMENTS_PREFIX } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
@@ -78,6 +78,8 @@ export interface DriftView {
   refs: string[];
   /** ID of the attached Proposal, if any. */
   proposal: string | null;
+  /** Lifecycle refusal for an attached Proposal absent from the open overlays. */
+  proposalBlocker: string | null;
 }
 
 export interface TaskView {
@@ -101,6 +103,8 @@ export interface TaskView {
 export interface Snapshot extends ModelView {
   diagnostics: Diagnostic[];
   proposals: ProposalView[];
+  /** Drafts are Board-only: never overlays and never counted as awaiting a decision. */
+  drafts: { id: string; title: string }[];
   drifts: DriftView[];
   tasks: TaskView[];
 }
@@ -154,13 +158,14 @@ const modelView = (project: ProjectModel): ModelView => ({
 export function buildSnapshot(p: Project): Snapshot {
   const project = buildProject(readTrackedFiles(p));
 
-  const proposals = listProposals(p)
+  const allProposals = listProposals(p);
+  const proposals = allProposals
     .filter((x) => x.data.status === "open")
     .map((proposal): ProposalView => {
       const afterProject = buildProject(applied(p, proposal));
       const after = afterProject.model;
       const h = health(p, proposal);
-      const pending = h.requires.some((r) => r.status === "open");
+      const pending = h.requires.some((r) => appliesUnder(r.status));
       const baseProject = pending ? buildProject(baseFiles(p, proposal)) : project;
       const before = baseProject.model;
       const touched = changes(p, proposal);
@@ -204,14 +209,23 @@ export function buildSnapshot(p: Project): Snapshot {
         }),
       };
     });
-  const proposalTitles = new Map(listProposals(p).map((x) => [x.id, x.title]));
+  const proposalById = new Map(allProposals.map((x) => [x.id, x]));
   return {
     ...modelView(project),
     diagnostics: project.diagnostics,
     proposals,
+    drafts: allProposals.filter((x) => x.data.status === "draft").map((x) => ({ id: x.id, title: x.title })),
     drifts: listDrifts(p)
       .filter((d) => d.data.status === "open")
-      .map((d) => ({ id: d.id, title: d.title, body: stripTitle(d.body), refs: d.data.refs, proposal: d.data.proposal })),
+      .map((d) => {
+        const attached = d.data.proposal === null ? undefined : proposalById.get(d.data.proposal);
+        const status = attached?.data.status;
+        const proposalBlocker = d.data.proposal === null || status === "open" ? null
+          : status === "draft" ? `Proposal ${d.data.proposal} is still being written.`
+          : status === undefined ? `Proposal ${d.data.proposal} does not exist.`
+          : `Proposal ${d.data.proposal} is ${status}.`;
+        return { id: d.id, title: d.title, body: stripTitle(d.body), refs: d.data.refs, proposal: d.data.proposal, proposalBlocker };
+      }),
     tasks: listTasks(p).map((t) => ({
       id: t.id,
       title: t.title,
@@ -221,7 +235,7 @@ export function buildSnapshot(p: Project): Snapshot {
       refs: t.data.refs,
       drift: t.data.drift,
       proposal: t.data.proposal,
-      proposalTitle: (t.data.proposal !== null && proposalTitles.get(t.data.proposal)) || null,
+      proposalTitle: (t.data.proposal !== null && proposalById.get(t.data.proposal)?.title) || null,
       agent: t.data.agent,
       file: `tasks/${t.name}`,
     })),

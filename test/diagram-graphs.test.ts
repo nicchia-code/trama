@@ -200,7 +200,7 @@ test("Drifts draw a red ghost joined to the element their first resolvable refer
 });
 
 test("a Drift on a State hidden in a collapsed State outlines the State that hides it", () => {
-  const snap = { ...shopSnapshot(), drifts: [{ id: "0007", title: "Preparing", body: "", refs: ["order/Preparing"], proposal: null }] };
+  const snap = { ...shopSnapshot(), drifts: [{ id: "0007", title: "Preparing", body: "", refs: ["order/Preparing"], proposal: null, proposalBlocker: null }] };
   const s = buildScene(snap, null);
   const collapsed = buildGraph(s, { kind: "machine", machine: "order" }, new Map());
   expect(nodeOf(collapsed, "s:Paid")).toMatchObject({ drifts: ["0007"], sub: "2 sub-states · ⚠ 1 drift inside" });
@@ -211,7 +211,7 @@ test("a Drift on a State hidden in a collapsed State outlines the State that hid
 });
 
 test("unresolved Drift references are skipped for the ghost and listed in the panel", () => {
-  const snap = { ...shopSnapshot(), drifts: [{ id: "0008", title: "Gone", body: "", refs: ["order/Gone", "order/Paid"], proposal: null }, { id: "0009", title: "All gone", body: "", refs: ["nope"], proposal: null }] };
+  const snap = { ...shopSnapshot(), drifts: [{ id: "0008", title: "Gone", body: "", refs: ["order/Gone", "order/Paid"], proposal: null, proposalBlocker: null }, { id: "0009", title: "All gone", body: "", refs: ["nope"], proposal: null, proposalBlocker: null }] };
   const s = buildScene(snap, null);
   const order = withDrifts(machineGraph(s, "order", null, new Set()), s);
   expect(order.edges.find((e) => e.kind === "drift")).toMatchObject({ source: "d:0008", target: "s:Paid" });

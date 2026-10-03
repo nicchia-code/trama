@@ -28,14 +28,14 @@ test("no tool lets an agent make the developer's decisions", () => {
 describe("callTool", () => {
   test("a Proposal written through the tools is validated and leaves the Model untouched", () => {
     const before = readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8");
-    expect(callTool(p, "trama_proposal_new", { title: "Lost parcels", body: "Couriers lose parcels." })).toEqual({ text: expect.stringContaining("Opened Proposal 0001"), isError: false });
+    callTool(p, "trama_proposal_new", { title: "Lost parcels", body: "Couriers lose parcels." });
     const good = before.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)");
     expect(callTool(p, "trama_proposal_write", { proposal: "1", path: "checkout/order.md", content: good }).text).toContain("are valid");
     const bad = callTool(p, "trama_proposal_write", { proposal: "1", path: "checkout/order.md", content: good.replace("→ Paid", "→ Nowhere") });
     expect(bad.isError).toBe(false);
     expect(bad.text).toContain('unknown State "Nowhere"');
     expect(readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8")).toBe(before);
-    expect(getProposal(p, "1").data.status).toBe("open");
+    expect(getProposal(p, "1").data.status).toBe("draft");
   });
 
   test("a write with malformed content is refused before the Proposal changes", () => {

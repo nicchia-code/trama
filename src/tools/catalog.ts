@@ -4,7 +4,7 @@ import { requirementsView, withRequirements } from "../cli/requirements";
 import type { Result } from "../cli/result";
 import { boardView, driftShowView, proposalShowView, taskShowView } from "../cli/work";
 import { TramaError, UsageError } from "../core/errors";
-import { deleteInProposal, editInProposal, getProposal, newProposal, validateProposal } from "../core/proposals";
+import { deleteInProposal, editInProposal, getProposal, newProposal, submitProposal, validateProposal } from "../core/proposals";
 import { resolveRef } from "../core/refs";
 import { loadProject } from "../core/requirements";
 import { loadModel, type Project } from "../core/store";
@@ -13,7 +13,7 @@ import { formatDiagnostic } from "../core/model";
 
 /**
  * The operations an agent may perform on a Trama project, shared by the MCP server (`trama mcp`) and the VS Code
- * language-model tools. The developer's decisions (approving or rejecting a Proposal, resolving a Drift) are
+ * language-model tools. The developer's decisions (approving, rejecting or discarding a Proposal, resolving a Drift) are
  * deliberately absent: an agent using these tools cannot make them (ADR 0006).
  */
 export interface ToolSpec {
@@ -127,7 +127,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_board",
     title: "Board",
-    description: "The work board: open Proposals and Drifts waiting for the developer's decision, then Tasks to do, in progress and done.",
+    description: "The work board: Draft Proposals in writing, handed-over (open) Proposals and Drifts waiting for the developer's decision, then Tasks to do, in progress and done.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     writes: false,
     run: (p) => md(boardView(p)),
@@ -135,7 +135,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trama_validate",
     title: "Validate",
-    description: "Checks the internal consistency of the Model and its Requirements (every Requirement section must name an existing element), or of both with an open Proposal applied. Never looks at code.",
+    description: "Checks the internal consistency of the Model and its Requirements (every Requirement section must name an existing element), or of both with a Draft or open Proposal applied. Never looks at code.",
     inputSchema: { type: "object", properties: { proposal: string("Proposal ID; omit to validate the current Model") }, additionalProperties: false },
     writes: false,
     run: (p, i) => {
@@ -147,14 +147,14 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     name: "trama_proposal_new",
-    title: "Open a Proposal",
-    description: "Opens a new Proposal: the only way to change the Model or its Requirements. Then write each changed Model or Requirement file with trama_proposal_write. Only the developer can approve it. A large change can be split into Proposals that build on each other: list the earlier ones in `requires`; this one is then written and validated on top of them, and can only be approved after them.",
+    title: "Create a Draft Proposal",
+    description: "Creates a Draft Proposal: the only way to change the Model or its Requirements. Write each changed Model or Requirement file with trama_proposal_write, then validate, review the changes and hand it over with trama_proposal_submit when finished. Only the developer can approve it after submission. A large change can be split into Proposals that build on each other: list the earlier ones in `requires`; this one is written and validated on top of them and can only be approved after them.",
     inputSchema: {
       type: "object",
       properties: {
         title: string("Short title"),
         body: string("Why the change is needed"),
-        requires: stringList("IDs of open or approved Proposals this one builds on"),
+        requires: stringList("IDs of Draft, open or approved Proposals this one builds on"),
         import: { type: "boolean", description: "True when the Proposal describes existing code (trama-import skill); approving it starts no Scan" },
       },
       required: ["title"],
@@ -163,13 +163,13 @@ export const TOOLS: ToolSpec[] = [
     writes: true,
     run: (p, i) => {
       const proposal = newProposal(p, text(i, "title"), optionalText(i, "body") ?? "", { requires: texts(i, "requires"), kind: i["import"] === true ? "import" : "change" });
-      return `Opened Proposal ${proposal.id}${proposal.data.requires.length > 0 ? ` on top of ${proposal.data.requires.join(", ")}` : ""}. Write each new or changed Model or Requirement file with trama_proposal_write.`;
+      return `Created Draft Proposal ${proposal.id}${proposal.data.requires.length > 0 ? ` on top of ${proposal.data.requires.join(", ")}` : ""}. Write each new or changed Model or Requirement file with trama_proposal_write, then hand it over with trama_proposal_submit when finished.`;
     },
   },
   {
     name: "trama_proposal_write",
     title: "Write a Model or Requirement file in a Proposal",
-    description: `Writes the complete new version of one Model or Requirement file inside an open Proposal (nothing changes until the developer approves). \`path\`: ${PATH}. Returns the validation of the Model and Requirements with the Proposal applied; a Requirement section naming a State the Proposal removes or renames is an error, so update the Requirement file in the same Proposal.`,
+    description: `Writes the complete new version of one Model or Requirement file inside a Draft or open Proposal (nothing changes until the developer approves). An open Proposal returns to Draft before the write; hand it over again with trama_proposal_submit when finished. \`path\`: ${PATH}. Returns validation; a Requirement section naming a State the Proposal removes or renames is an error, so update that Requirement in the same Proposal.`,
     inputSchema: {
       type: "object",
       properties: { proposal: string("Proposal ID"), path: string(PATH), content: string("The complete file in the Trama Model or Requirements format") },
@@ -181,23 +181,37 @@ export const TOOLS: ToolSpec[] = [
       const id = text(i, "proposal");
       const content = i["content"];
       if (typeof content !== "string") throw new UsageError('"content" must be a string');
+      const returnedToDraft = getProposal(p, id).data.status === "open";
       const file = editInProposal(p, id, text(i, "path"));
       writeFileSync(file, content.endsWith("\n") ? content : `${content}\n`);
       const errors = validateProposal(p, getProposal(p, id));
+      const withdrawal = `${returnedToDraft ? " Proposal returned to Draft." : " Proposal is a Draft."} Hand it over with trama_proposal_submit when finished.`;
       return errors.length === 0
-        ? `Wrote ${i["path"]} in Proposal ${id}. The Model and Requirements with the Proposal applied are valid.`
-        : `Wrote ${i["path"]} in Proposal ${id}. The Model and Requirements with the Proposal applied have ${errors.length} error(s):\n${errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n")}`;
+        ? `Wrote ${i["path"]} in Proposal ${id}.${withdrawal} The Model and Requirements with the Proposal applied are valid.`
+        : `Wrote ${i["path"]} in Proposal ${id}.${withdrawal} The Model and Requirements with the Proposal applied have ${errors.length} error(s):\n${errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n")}`;
     },
   },
   {
     name: "trama_proposal_delete_file",
     title: "Delete a Model or Requirement file in a Proposal",
-    description: `Marks a Model or Requirement file for deletion in an open Proposal. \`path\`: ${PATH}.`,
+    description: `Marks a Model or Requirement file for deletion in a Draft or open Proposal. An open Proposal returns to Draft; hand it over again with trama_proposal_submit when finished. \`path\`: ${PATH}.`,
     inputSchema: { type: "object", properties: { proposal: string("Proposal ID"), path: string(PATH) }, required: ["proposal", "path"], additionalProperties: false },
     writes: true,
     run: (p, i) => {
+      const returnedToDraft = getProposal(p, text(i, "proposal")).data.status === "open";
       deleteInProposal(p, text(i, "proposal"), text(i, "path"));
-      return `Marked ${i["path"]} for deletion in Proposal ${i["proposal"]}.`;
+      return `Marked ${i["path"]} for deletion in Proposal ${i["proposal"]}.${returnedToDraft ? " Proposal returned to Draft." : " Proposal is a Draft."} Hand it over with trama_proposal_submit when finished.`;
+    },
+  },
+  {
+    name: "trama_proposal_submit",
+    title: "Hand a Proposal over",
+    description: "Hands a Draft Proposal over to the developer, making it open for review. Call only after finishing every file, validating and reviewing the changes. Refuses invalid Model or Requirements and unregistered files, leaving it Draft; staleness and waiting for required approvals do not prevent submission.",
+    inputSchema: { type: "object", properties: { proposal: string("Draft Proposal ID") }, required: ["proposal"], additionalProperties: false },
+    writes: true,
+    run: (p, i) => {
+      const proposal = submitProposal(p, text(i, "proposal"));
+      return `Submitted Proposal ${proposal.id} for the developer to review.`;
     },
   },
   {

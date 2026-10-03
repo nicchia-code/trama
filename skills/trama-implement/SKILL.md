@@ -20,15 +20,18 @@ If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, 
 | `trama proposal new` | `trama_proposal_new` |
 | `trama proposal edit`, then editing the printed file | `trama_proposal_write` with the complete new file |
 | `trama proposal delete`, `trama proposal show` | `trama_proposal_delete_file`, `trama_proposal_show` |
+| `trama proposal submit <id>` | `trama_proposal_submit` |
 | `trama task new`, `trama task show`, `trama task move` | `trama_task_new`, `trama_task_show`, `trama_task_move` |
 | `trama drift new`, `trama drift show` | `trama_drift_new`, `trama_drift_show` |
 
-There is no tool for approving, rejecting or resolving: those are the developer's decisions.
+There is no tool for approving, rejecting, discarding or resolving: those are the developer's decisions.
+
+A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>` (or `trama_proposal_submit`). If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds attach it to a Drift and tell the developer to review it. Before every later file change, call `trama proposal edit` or `trama_proposal_write` again: it returns an open Proposal to Draft, so submit again when finished.
 
 ## Hard rules
 
 - NEVER edit `.trama/model/`, `.trama/requirements/` or the generated `trama-req-*` skills.
-- NEVER run `trama proposal approve`, `trama proposal reject` or `trama drift resolve`.
+- NEVER run `trama proposal approve`, `trama proposal reject`, `trama proposal discard` or `trama drift resolve`.
 - NEVER implement behaviour that contradicts the Model, or code that contradicts a Requirement, to get something working.
 - Do not touch code unrelated to the Task.
 
@@ -52,7 +55,7 @@ Stop at once and file a Drift when any of these is true:
 
 Then:
 
-1. Decide which case applies. If the code is right and the Model forgot a case, first create a Proposal with the `trama-design` skill, without its interview (list your choices in the Proposal body). Otherwise there is no Proposal.
+1. Decide which case applies. If the code is right and the Model forgot a case, first create a Proposal with the `trama-design` skill, without its interview (list your choices in the Proposal body). Finish its files, validate, read it and submit it before attaching it to the Drift; correct and retry any refusal. Otherwise there is no Proposal.
 2. File the Drift **once**: `trama drift new "<title>" --ref <nearest Model element or Requirement> --body "<what the Model or Requirement says, why it cannot be followed, what you would do instead, where in the code>"`, adding `--proposal <id>` only in the first case. `trama drift new` always creates a new card, so never run it twice for the same problem.
 3. Leave the Task in `doing`. Report the Drift ID and stop. The developer decides whether the code or the Model changes.
 

@@ -39,15 +39,17 @@ All exploring commands are read-only.
 
 | Command | Effect |
 |---|---|
-| `proposal new <title> [--body <text>] [--requires <id>…] [--import]` | Creates `proposals/<NNNN-slug>/proposal.md` with `status: open`. `--requires` writes it on top of those open or approved Proposals (refused for a rejected one); `--import` marks it `kind: import` (ADR 0008). |
-| `proposal edit <id> <path>` | `<path>` is a Model file relative to `.trama/model/` or an Area `requirements/<area>.md`. Copies the current file into the Proposal and records its hash in `base`, or creates an empty file marked `new` if it does not exist. Prints the path to edit. Running it twice on the same file changes nothing. |
-| `proposal delete <id> <path>` | Adds the file to `delete` and records its hash in `base`. |
+| `proposal new <title> [--body <text>] [--requires <id>…] [--import]` | Creates `proposals/<NNNN-slug>/proposal.md` with `status: draft`. `--requires` writes it on top of those draft, open or approved Proposals (refused for a rejected or discarded one); `--import` marks it `kind: import` (ADR 0008). |
+| `proposal edit <id> <path>` | `<path>` is a Model file relative to `.trama/model/` or an Area `requirements/<area>.md`. Copies the current file into the Proposal and records its hash in `base`, or creates an empty file marked `new` if it does not exist. Prints the path to edit. Register before every change: an open Proposal returns to Draft, with a notice after the path. Re-registering keeps the original hash and contents. Use `--json` and its `path` field for scripts. |
+| `proposal delete <id> <path>` | Adds the file to `delete` and records its hash in `base`; an open Proposal returns to Draft, with a notice. |
+| `proposal submit <id>` | Hands a Draft over, setting `status: open`. Refuses validation errors and unregistered files, leaving it Draft. Staleness or waiting for required approvals do not prevent submission. |
+| `proposal discard <id>` | Developer only. Discards only a Draft, setting `status: discarded`; no feedback, no changes to dependents or attached Drifts. |
 | `proposal show <id>` | Description; stale or not; for each touched file, what is added, removed or changed; validation errors of the Model and Requirements with the Proposal applied. |
-| `proposal list [--all]` | Open Proposals (all of them with `--all`), marking import ones, stale ones and the required Proposals not approved yet. |
-| `proposal approve <id>` | Developer only. Fails if a required Proposal is not approved, or the Proposal is stale or invalid; otherwise applies it, sets `status: approved` and regenerates the `trama-req-*` skills. |
-| `proposal reject <id> --feedback <text>` | Developer only. Sets `status: rejected` and appends the feedback. |
+| `proposal list [--all]` | Draft and open Proposals (all statuses with `--all`), marking drafts `(draft)`, imports, stale ones and required Proposals not approved yet. |
+| `proposal approve <id>` | Developer only, open Proposals only. Refuses Drafts as still being written. Fails if a required Proposal is not approved, or the Proposal is stale or invalid; otherwise applies it, sets `status: approved` and regenerates the `trama-req-*` skills. |
+| `proposal reject <id> --feedback <text>` | Developer only, open Proposals only. Sets `status: rejected` and appends the feedback; Drafts are refused as still being written. |
 
-`approve`, `reject`, `drift resolve` and `task take-back` are the developer's decisions. The extension sets `TRAMA_AGENT=1` in every agent it launches, and the CLI refuses these four commands when that variable is set. This stops an agent that runs them by mistake, not one that clears the variable on purpose (ADR 0005).
+`approve`, `reject`, `discard`, `drift resolve` and `task take-back` are the developer's decisions. The extension sets `TRAMA_AGENT=1` in every agent it launches, and the CLI refuses these commands when that variable is set. This stops an agent that runs them by mistake, not one that clears the variable on purpose (ADR 0005).
 
 ## Tasks
 
@@ -72,7 +74,7 @@ All exploring commands are read-only.
 
 | Command | Output |
 |---|---|
-| `board` | **To decide** (open Proposals and Drifts), **To do**, **In progress**, **Done**: the same data the extension's board shows. The Tasks linked to one Proposal, when there are at least two, are listed once, as the Proposal with its Tasks underneath (each with its own column), in the column they add up to: To do while none has started, Done when all are done, In progress otherwise. Other Tasks are listed as before. |
+| `board` | Draft Proposals marked `(draft)` in **In writing**, separate from **To decide** (handed-over Proposals and open Drifts), then **To do**, **In progress**, **Done**. JSON keeps Drafts in `inWriting`, outside `toDecide`. The Tasks linked to one Proposal, when there are at least two, are listed once, as the Proposal with its Tasks underneath (each with its own column), in the column they add up to: To do while none has started, Done when all are done, In progress otherwise. Other Tasks are listed as before. |
 
 ## Agent tools and MCP
 
@@ -90,7 +92,8 @@ In Cursor the extension writes this entry into `.cursor/mcp.json` itself.
 | `trama_paths`, `trama_analyze`, `trama_search`, `trama_validate`, `trama_board` | Like the commands of the same name |
 | `trama_proposal_new`, `trama_proposal_show`, `trama_proposal_delete_file` | Like `proposal new` (`requires`, `import`), `show`, `delete` |
 | `trama_proposal_write` | `proposal edit` plus writing the complete new Model or Requirement file; answers with the validation of the Model and Requirements with the Proposal applied |
+| `trama_proposal_submit` | Validates and hands a finished Draft over to the developer; new, write and delete tools leave it Draft until this succeeds |
 | `trama_task_new`, `trama_task_show`, `trama_task_move` | Like `task new`, `show`, `move` |
 | `trama_drift_new`, `trama_drift_show` | Like `drift new`, `show` |
 
-There is no tool for `proposal approve`, `proposal reject`, `drift resolve` or `task take-back`.
+There is no tool for `proposal approve`, `proposal reject`, `proposal discard`, `drift resolve` or `task take-back`.

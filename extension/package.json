@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.3.3",
+  "version": "0.3.5",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -204,7 +204,7 @@
         "toolReferenceName": "trama_board",
         "canBeReferencedInPrompt": true,
         "userDescription": "Board",
-        "modelDescription": "The work board: open Proposals and Drifts waiting for the developer's decision, then Tasks to do, in progress and done.",
+        "modelDescription": "The work board: Draft Proposals in writing, handed-over (open) Proposals and Drifts waiting for the developer's decision, then Tasks to do, in progress and done.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -221,7 +221,7 @@
         "toolReferenceName": "trama_validate",
         "canBeReferencedInPrompt": true,
         "userDescription": "Validate",
-        "modelDescription": "Checks the internal consistency of the Model and its Requirements (every Requirement section must name an existing element), or of both with an open Proposal applied. Never looks at code.",
+        "modelDescription": "Checks the internal consistency of the Model and its Requirements (every Requirement section must name an existing element), or of both with a Draft or open Proposal applied. Never looks at code.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -239,11 +239,11 @@
       },
       {
         "name": "trama_proposal_new",
-        "displayName": "Trama: Open a Proposal",
+        "displayName": "Trama: Create a Draft Proposal",
         "toolReferenceName": "trama_proposal_new",
         "canBeReferencedInPrompt": true,
-        "userDescription": "Open a Proposal",
-        "modelDescription": "Opens a new Proposal: the only way to change the Model or its Requirements. Then write each changed Model or Requirement file with trama_proposal_write. Only the developer can approve it. A large change can be split into Proposals that build on each other: list the earlier ones in `requires`; this one is then written and validated on top of them, and can only be approved after them.",
+        "userDescription": "Create a Draft Proposal",
+        "modelDescription": "Creates a Draft Proposal: the only way to change the Model or its Requirements. Write each changed Model or Requirement file with trama_proposal_write, then validate, review the changes and hand it over with trama_proposal_submit when finished. Only the developer can approve it after submission. A large change can be split into Proposals that build on each other: list the earlier ones in `requires`; this one is written and validated on top of them and can only be approved after them.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -264,7 +264,7 @@
               "items": {
                 "type": "string"
               },
-              "description": "IDs of open or approved Proposals this one builds on"
+              "description": "IDs of Draft, open or approved Proposals this one builds on"
             },
             "import": {
               "type": "boolean",
@@ -283,7 +283,7 @@
         "toolReferenceName": "trama_proposal_write",
         "canBeReferencedInPrompt": true,
         "userDescription": "Write a Model or Requirement file in a Proposal",
-        "modelDescription": "Writes the complete new version of one Model or Requirement file inside an open Proposal (nothing changes until the developer approves). `path`: Model file relative to `.trama/model/` (`checkout/order.md`, `actors/user.md`), or a Requirement Area `requirements/<area>.md`. Returns the validation of the Model and Requirements with the Proposal applied; a Requirement section naming a State the Proposal removes or renames is an error, so update the Requirement file in the same Proposal.",
+        "modelDescription": "Writes the complete new version of one Model or Requirement file inside a Draft or open Proposal (nothing changes until the developer approves). An open Proposal returns to Draft before the write; hand it over again with trama_proposal_submit when finished. `path`: Model file relative to `.trama/model/` (`checkout/order.md`, `actors/user.md`), or a Requirement Area `requirements/<area>.md`. Returns validation; a Requirement section naming a State the Proposal removes or renames is an error, so update that Requirement in the same Proposal.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -318,7 +318,7 @@
         "toolReferenceName": "trama_proposal_delete_file",
         "canBeReferencedInPrompt": true,
         "userDescription": "Delete a Model or Requirement file in a Proposal",
-        "modelDescription": "Marks a Model or Requirement file for deletion in an open Proposal. `path`: Model file relative to `.trama/model/` (`checkout/order.md`, `actors/user.md`), or a Requirement Area `requirements/<area>.md`.",
+        "modelDescription": "Marks a Model or Requirement file for deletion in a Draft or open Proposal. An open Proposal returns to Draft; hand it over again with trama_proposal_submit when finished. `path`: Model file relative to `.trama/model/` (`checkout/order.md`, `actors/user.md`), or a Requirement Area `requirements/<area>.md`.",
         "icon": "$(type-hierarchy)",
         "tags": [
           "trama"
@@ -338,6 +338,31 @@
           "required": [
             "proposal",
             "path"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "trama_proposal_submit",
+        "displayName": "Trama: Hand a Proposal over",
+        "toolReferenceName": "trama_proposal_submit",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Hand a Proposal over",
+        "modelDescription": "Hands a Draft Proposal over to the developer, making it open for review. Call only after finishing every file, validating and reviewing the changes. Refuses invalid Model or Requirements and unregistered files, leaving it Draft; staleness and waiting for required approvals do not prevent submission.",
+        "icon": "$(type-hierarchy)",
+        "tags": [
+          "trama"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "proposal": {
+              "type": "string",
+              "description": "Draft Proposal ID"
+            }
+          },
+          "required": [
+            "proposal"
           ],
           "additionalProperties": false
         }

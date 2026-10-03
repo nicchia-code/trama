@@ -4,7 +4,7 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { editInProposal, newProposal } from "../src/core/proposals";
+import { editInProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { projectAt } from "../src/core/store";
 import { moveTask, newDrift, newTask } from "../src/core/work";
@@ -55,12 +55,14 @@ writeFileSync(
   editInProposal(p, proposal.id, "checkout/return.md"),
   "# Return\n\nA package coming back.\n\n## States\n\n### Requested (initial)\n- `user.RETURN` → In transit\n\n### In transit\n- `courier.PICKED_UP` → Received\n\n### Received (final)\n",
 );
+submitProposal(p, proposal.id);
 
 // Drifts: one plain, one with its own Proposal.
 newDrift(p, { title: "Code refunds after the package is picked up", refs: ["order/Shipped"], body: "src/refund.ts refunds even when the courier already picked the package up." });
 const forgotten = newProposal(p, "Orders can be lost in transit", "The code handles a lost package; the Model forgot it.");
 const lost = editInProposal(p, forgotten.id, "checkout/payment.md");
 writeFileSync(lost, readFileSync(lost, "utf8").replace("### Declined (final)", "### Declined (final)\n### Written off (final)"));
+submitProposal(p, forgotten.id);
 newDrift(p, { title: "Code has a Written off payment", refs: ["payment"], proposal: forgotten.id, body: "worker/lost.ts writes the payment off after 30 days." });
 
 // Tasks in every column.
@@ -73,9 +75,14 @@ moveTask(p, done.id, "done", "developer");
 // Taken by the agent: alone, and as one Task of a design.
 moveTask(p, newTask(p, { title: "Refund after pickup", refs: ["order/Refunding"], technical: false }).id, "doing", "agent");
 const returns = newProposal(p, "Returns after shipping");
+submitProposal(p, returns.id);
 const returnTask = (title: string) => newTask(p, { title, refs: ["order/Shipped"], technical: false, proposal: returns.id }).id;
 returnTask("Return request");
 moveTask(p, returnTask("Refund on return"), "doing", "agent");
+
+// A draft still being written, shown separately from what awaits the developer.
+const draft = newProposal(p, "Inventory checks", "The agent is still writing this change.");
+newDrift(p, { title: "Inventory Model is incomplete", refs: ["cart"], proposal: draft.id, body: "The attached Proposal is still being written." });
 
 const snapshot = buildSnapshot(p);
 if (keep) syncInPlace(join(dir, ".trama"), join(keep, ".trama"));

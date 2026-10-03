@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
-import { approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
+import { approveProposal, discardProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { takenBlocker } from "../../../src/core/design";
@@ -190,6 +190,13 @@ export class Controller implements vscode.Disposable {
         });
         if (feedback === undefined) return;
         rejectProposal(project, message.id, feedback);
+        this.refresh();
+        return;
+      }
+      case "discardProposal": {
+        const choice = await vscode.window.showWarningMessage("Discard this draft? The agent will not be told.", { modal: true }, "Discard");
+        if (choice !== "Discard") return;
+        discardProposal(project, message.id);
         this.refresh();
         return;
       }

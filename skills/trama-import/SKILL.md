@@ -19,13 +19,16 @@ If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, 
 | `trama proposal new --import [--requires <id>]` | `trama_proposal_new` with `import: true` and `requires` |
 | `trama proposal edit`, then editing the printed file | `trama_proposal_write` with the complete new file |
 | `trama proposal show` | `trama_proposal_show` |
+| `trama proposal submit <id>` | `trama_proposal_submit` |
 
-There is no tool for approving or rejecting: that is the developer's decision.
+There is no tool for approving, rejecting or discarding: those are the developer's decisions.
+
+A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>` (or `trama_proposal_submit`). If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` or `trama_proposal_write` again: it returns an open Proposal to Draft, so submit again when finished.
 
 ## Hard rules
 
 - NEVER edit code, `.trama/model/` or `.trama/requirements/` directly. Everything goes through Proposals opened with `--import`.
-- NEVER run `trama proposal approve`, `trama proposal reject` or `trama drift resolve`.
+- NEVER run `trama proposal approve`, `trama proposal reject`, `trama proposal discard` or `trama drift resolve`.
 - **The code wins.** Model what the code does. Where the documentation (README, `docs/`, comments, API descriptions) says something else, model the code and record the difference as a doubt. Where the code looks buggy or misses a case, model it as it is and record a doubt.
 - **Never change what is already modelled.** If the Model already has Machines, do not edit their files. You may add new Features, Machines, Actors, Events of existing Actors and Requirement sections. If the code contradicts an existing Machine, do not fix it: list it in your report and suggest a Scan of that Feature.
 - The Model has no code words: no variable, field, function, class, table, endpoint or file names in States, Transitions or Events. Write conditions and consequences in domain words. Code locations belong only in the doubts.
@@ -45,7 +48,8 @@ There is no tool for approving or rejecting: that is the developer's decision.
    - behaviour you could not determine.
    Write "None." if there are none.
 8. **Validate every Proposal.** `trama validate --proposal <id>` must report no errors. Then `trama proposal show <id>`: the changes must describe the code and nothing else.
-9. **Report and stop.** List the Proposals in the order to approve them, with how many doubts each has, the folders you skipped, and any contradiction with Machines that were already modelled (suggest a Scan for those Features). Approving an import Proposal starts no Scan: the Model already matches the code.
+9. **Hand every Proposal over.** After validation and review, run `trama proposal submit <id>` for each. A dependency need not be approved for submission. Correct any refusal, validate and review again, then retry before continuing.
+10. **Report and stop.** After every submission succeeds, list the Proposals in the order to approve them, with how many doubts each has, the folders you skipped, and any contradiction with Machines that were already modelled (suggest a Scan for those Features). Approving an import Proposal starts no Scan: the Model already matches the code.
 
 ## Asking
 

@@ -2,7 +2,7 @@ import type { Snapshot } from "../../../../src/core/snapshot";
 import type { MountView } from "../types";
 import css from "./board.css" with { type: "text" };
 import { buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, dropTarget, runAllBlocker, type TaskCard } from "./logic";
-import { type CardEnv, renderCard, setDesignPending, setPending } from "./render";
+import { type CardEnv, renderCard, renderDraft, setDesignPending, setPending } from "./render";
 
 /** The host answers a move with a snapshot; if it fails it sends an error instead, so dimmed cards are released after this long. */
 const PENDING_TIMEOUT_MS = 5000;
@@ -31,8 +31,11 @@ export const mountBoard: MountView = (root, context) => {
   const toolbar = el("div", "board-toolbar");
   toolbar.setAttribute("role", "toolbar");
   toolbar.setAttribute("aria-label", "Board actions");
+  const draftsEl = el("section", "board-drafts");
+  draftsEl.setAttribute("aria-label", "Proposals in writing");
+  draftsEl.hidden = true;
   const columnsEl = el("div", "board-columns");
-  board.append(toolbar, columnsEl);
+  board.append(toolbar, draftsEl, columnsEl);
   root.append(board);
 
   const toolbarButton = (label: string, onClick: () => void, primary = false) => {
@@ -128,6 +131,18 @@ export const mountBoard: MountView = (root, context) => {
     const focused = active instanceof HTMLElement && board.contains(active) ? { key: active.closest<HTMLElement>("[data-key]")?.dataset["key"], action: active.dataset["action"] } : null;
 
     const live = new Set<string>();
+    draftsEl.hidden = snapshot.drafts.length === 0;
+    reconcile(draftsEl, snapshot.drafts.map((card) => {
+      const key = `draft:${card.id}`;
+      live.add(key);
+      const signature = JSON.stringify(card);
+      let entry = cache.get(key);
+      if (entry?.signature !== signature) {
+        entry = { signature, node: renderDraft(card, env) };
+        cache.set(key, entry);
+      }
+      return entry.node;
+    }));
     for (const column of buildBoard(snapshot)) {
       const part = parts[column.id];
       part.count.textContent = String(column.cards.length);

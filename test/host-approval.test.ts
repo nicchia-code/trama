@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ApprovalOptions, applyApprovedProposal } from "../extension/src/host/approval";
 import { approveProposal, editInProposal, getProposal, newProposal } from "../src/core/proposals";
+import { handOver } from "./handover";
 import { type Project, projectAt } from "../src/core/store";
 import { newDrift, resolveDrift } from "../src/core/work";
 
@@ -35,6 +36,7 @@ function proposalEditing(path: string, transform: (text: string) => string): str
   const prop = newProposal(p, "Change");
   const file = editInProposal(p, prop.id, path);
   writeFileSync(file, transform(readFileSync(file, "utf8")));
+  handOver(p, prop.id);
   return prop.id;
 }
 
@@ -53,6 +55,7 @@ describe("one Scan after every approved Proposal", () => {
     const prop = newProposal(p, "Import: checkout", "", { kind: "import" });
     const file = editInProposal(p, prop.id, "checkout/order.md");
     writeFileSync(file, orderChange(readFileSync(file, "utf8")));
+    handOver(p, prop.id);
     await applyApprovedProposal(options(), prop.id, () => approveProposal(p, prop.id));
     expect(scans).toEqual([]);
     expect(getProposal(p, prop.id).data.status).toBe("approved");

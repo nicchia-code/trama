@@ -22,15 +22,18 @@ If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, 
 | `trama proposal new` | `trama_proposal_new` |
 | `trama proposal edit`, then editing the printed file | `trama_proposal_write` with the complete new file |
 | `trama proposal delete`, `trama proposal show` | `trama_proposal_delete_file`, `trama_proposal_show` |
+| `trama proposal submit <id>` | `trama_proposal_submit` |
 | `trama task new`, `trama task show`, `trama task move` | `trama_task_new`, `trama_task_show`, `trama_task_move` |
 | `trama drift new`, `trama drift show` | `trama_drift_new`, `trama_drift_show` |
 
-There is no tool for approving, rejecting or resolving: those are the developer's decisions.
+There is no tool for approving, rejecting, discarding or resolving: those are the developer's decisions.
+
+A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>` (or `trama_proposal_submit`). If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds attach it to a Drift and tell the developer to review it. Before every later file change, call `trama proposal edit` or `trama_proposal_write` again: it returns an open Proposal to Draft, so submit again when finished.
 
 ## Hard rules
 
 - NEVER edit code, `.trama/model/`, `.trama/requirements/` or the generated `trama-req-*` skills.
-- NEVER run `trama proposal approve`, `trama proposal reject` or `trama drift resolve`.
+- NEVER run `trama proposal approve`, `trama proposal reject`, `trama proposal discard` or `trama drift resolve`.
 - NEVER file a Task you could not tie to the problem the developer described. Do not widen the Fix into a Scan of everything around it.
 - NEVER link the Tasks you file to a Proposal: do not pass `--proposal` to `trama task new`. A Fix's Tasks belong to no design. (Only a Drift you file with a Proposal carries one; see below.)
 - Compare behaviour at the level of the **Diagram**: States, Transitions, Events. Variable names, structure and style that no Requirement mentions are not worth a Task.
@@ -53,7 +56,7 @@ There is no tool for approving, rejecting or resolving: those are the developer'
 6. **File Tasks.** One Task per coherent unit of work, as specific as possible in `--ref`:
    `trama task new "<what must be fixed>" --ref order/Paid/user.CANCEL --ref requirements/ui#order/Paid --body "<in domain words>"`.
    Reference the Requirement sections the Task must satisfy next to the Model elements. The body says *what*, in domain words, never which files to touch: for a Task tied to the Model, what must be true when done; for a Technical Task with no references, the symptom, the behaviour expected instead, and how to reproduce it. Write down any assumption you made. If the developer's description holds several unrelated problems, file separate Tasks.
-7. **File a Drift only when the Model has to decide.** Run `trama drift new "<title>" --ref <nearest Model element or Requirement> --body "<what the developer reports, what the Model or Requirement says (or does not), where in the code you saw it>"`. Code paths belong here, and only here. Do not choose the resolution. When the code handles an **important** case the Model forgot (real user-visible or data-affecting behaviour), first create a Proposal by following the `trama-design` skill without its interview (`trama proposal new`, `edit`, `validate --proposal`; list your choices in the Proposal body), then run `trama drift new … --proposal <id>` once. `trama drift new` always creates a new card, so never run it twice for the same difference. A Drift that blocks the described fix also stops the Tasks that depend on it: do not file Tasks for that piece.
+7. **File a Drift only when the Model has to decide.** Run `trama drift new "<title>" --ref <nearest Model element or Requirement> --body "<what the developer reports, what the Model or Requirement says (or does not), where in the code you saw it>"`. Code paths belong here, and only here. Do not choose the resolution. When the code handles an **important** case the Model forgot (real user-visible or data-affecting behaviour), first create a Proposal by following the `trama-design` skill without its interview (`trama proposal new`, `edit`, `validate --proposal`, `proposal show`, `proposal submit`; list your choices in the Proposal body). Correct and retry a refused submission before continuing; only after it succeeds run `trama drift new … --proposal <id>` once. `trama drift new` always creates a new card, so never run it twice for the same difference. A Drift that blocks the described fix also stops the Tasks that depend on it: do not file Tasks for that piece.
 8. **Report.** List the Tasks and Drifts you created with their IDs, what you assumed, and what you found out of scope. Say which Drifts need a decision and that the Tasks wait in To do. Then stop.
 
 ## Asking

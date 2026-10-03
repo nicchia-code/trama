@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildModel } from "../src/core/model";
 import { deleteInProposal, editInProposal, newProposal } from "../src/core/proposals";
+import { handOver } from "./handover";
 import { type Snapshot, buildSnapshot } from "../src/core/snapshot";
 import { projectAt } from "../src/core/store";
 import type { FileMap } from "../src/core/types";
@@ -43,6 +44,7 @@ export function shopWithProposals(): Snapshot {
     writeFileSync(payment, readFileSync(payment, "utf8").replace("### Declined (final)", "### Declined (final)\n### Written off (final)"));
     newDrift(p, { title: "Code has a Written off payment", refs: ["payment"], proposal: forgotten.id, body: "worker/lost.ts writes the payment off after 30 days." });
 
+    handOver(p, returns.id, forgotten.id);
     return buildSnapshot(p);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -61,6 +63,7 @@ export function shopWithRemovals(): Snapshot {
     deleteInProposal(p, proposal.id, "checkout/cart.md");
     writeFileSync(editInProposal(p, proposal.id, "billing/feature.md"), "# Billing\n\nInvoices.\n");
     writeFileSync(editInProposal(p, proposal.id, "billing/invoice.md"), "# Invoice\n\nA bill.\n\n## States\n\n### Open (initial)\n- `order.CONFIRMED` → Sent\n\n### Sent (final)\n");
+    handOver(p, proposal.id);
     return buildSnapshot(p);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -78,6 +81,7 @@ export function snapshotOf(files: FileMap): Snapshot {
     diagnostics: model.diagnostics,
     areas: [],
     proposals: [],
+    drafts: [],
     drifts: [],
     tasks: [],
   };

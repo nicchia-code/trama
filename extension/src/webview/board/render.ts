@@ -109,6 +109,24 @@ function head(kind: string, ...extra: HTMLElement[]): HTMLElement {
   row.append(el("span", "board-card-kind", kind), ...extra);
   return row;
 }
+/** Drafts have no navigation or decision controls other than Discard. */
+export function renderDraft(card: { id: string; title: string }, env: CardEnv): HTMLElement {
+  const node = el("article", "board-card");
+  node.dataset["key"] = `draft:${card.id}`;
+  node.setAttribute("aria-label", `Draft Proposal ${card.id}: ${card.title}`);
+  node.append(head(`Proposal ${card.id}`), el("h3", "board-card-title", card.title));
+  const writing = el("p", "board-draft-writing");
+  const indicator = el("span", "board-working-dot");
+  indicator.setAttribute("aria-hidden", "true");
+  writing.append(indicator, "The agent is writing this Proposal");
+  node.append(writing, actions(button({
+    label: "Discard",
+    aria: `Discard draft Proposal ${card.id}`,
+    action: "discard",
+    onClick: () => env.context.post({ type: "discardProposal", id: card.id }),
+  })));
+  return node;
+}
 
 function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}`);

@@ -166,9 +166,9 @@ A list item directly under a State (before any sub-State heading) that **starts 
 
 ```markdown
 ---
-status: open            # open | approved | rejected
+status: draft           # draft | open | approved | rejected | discarded; absent means open
 kind: import            # optional: import (written by trama-import); absent means an ordinary change
-requires:               # optional: open or approved Proposals this one is written on top of
+requires:               # optional: draft, open or approved Proposals this one is written on top of
   - "0006"
 base:
   checkout/order.md: 3f2a…   # sha256 of the file when the Proposal first touched it
@@ -186,11 +186,15 @@ Written by the developer on rejection.
 ```
 
 - Next to `proposal.md`, a `model/` folder holds the **full new version** of every touched Model file, at the same path it has under `.trama/model/`, and a `requirements/` folder does the same for touched Areas.
-- **Requires**: a Proposal that lists `requires` is written, diffed and validated on top of the open Proposals it requires, directly or through them, applied in order. Its `base` hashes refer to that state, so approving a required Proposal does not make it stale. It cannot be approved while any required Proposal is open, rejected or missing, or while two Proposals require each other; a rejected requirement leaves it open and blocked. `trama proposal new` refuses to require a rejected Proposal.
+- **Draft and open**: a new Proposal is a `draft` while the agent writes it. The developer cannot approve or reject it and the Board does not count it as awaiting a decision; the agent hands it over, which makes it `open`. A Proposal file without `status` is `open`.
+- **Submitting** checks the Model and Requirements with the Proposal applied, including required Proposals, and refuses every validation error or unregistered file without leaving Draft. Staleness and waiting for required approvals do not prevent submission. Only a Draft can be submitted.
+- **Editing after submission**: register the file before each change. Registering, rewriting or marking a file for deletion returns an open Proposal to Draft, even if the content ends up unchanged; submit again when finished.
+- **Requires**: a Proposal that lists `requires` is written, diffed and validated on top of the draft and open Proposals it requires, directly or through them, applied in order. Its `base` hashes refer to that state, so approving a required Proposal does not make it stale. It cannot be approved while any required Proposal is a draft, open, rejected, discarded or missing, or while two Proposals require each other; a rejected or discarded requirement leaves it blocked. `trama proposal new` refuses to require a rejected or discarded Proposal.
 - A Proposal is **stale** when any file's current hash (on top of the Proposals it requires) differs from its `base` entry. Staleness is computed, never stored. A stale Proposal cannot be approved; the agent writes a new one.
 - **Approving** checks that every required Proposal is approved and that the Proposal is not stale, validates the Model and its Requirements with the Proposal applied, copies the new files into `model/` and `requirements/`, removes the `delete` entries, sets `status: approved` and regenerates the `trama-req-*` skills. The extension scans the affected Features afterwards, except for `kind: import` Proposals, whose Model already matches the code (ADR 0008).
 - **Rejecting** sets `status: rejected` and appends `## Feedback`. The agent answers with a new Proposal.
-- Approved and rejected Proposals stay on disk as history.
+- **Discarding** a draft the agent never finished sets `status: discarded`; no feedback is written. Only drafts can be discarded.
+- Approved, rejected and discarded Proposals stay on disk as history.
 
 ## Element references
 
@@ -226,7 +230,7 @@ What to do, in prose.
 ```
 
 - A Task that is not technical references at least one Model element in `refs`, and may add Requirements. A Technical Task references no Model element; it may reference Requirements (for example `requirements/ui#General` for adopting a theme).
-- The board's **To decide** column is not a Task column: it shows open Proposals and open Drifts.
+- The board's **To decide** column is not a Task column: it shows open Proposals (never drafts) and open Drifts.
 - `proposal` is set when the agent files the Task after that Proposal was approved (the Scan is told which Proposal). It must name an existing Proposal, in any status. Tasks written before the field existed, Tasks of a Scan started by hand, Technical Tasks and Tasks that fix a Drift carry none.
 - `agent` is `true` while the agent has taken the Task: it takes it by moving it to `doing` with its tools, or with `trama task move` in the terminal Trama started (`TRAMA_AGENT` set). While it is taken the developer cannot move it; `trama task take-back`, the Take back button, or the end of the agent terminal's command clears the mark and leaves the Task in `doing`. Tasks written before the field existed are free.
 - The Tasks linked to one Proposal form a **design**. The Board shows a design of two or more Tasks as one card, closed at first, standing in the column its Tasks add up to: To do while all are in To do, Done when all are done, In progress in every other case. A design of one Task, and Tasks with no `proposal`, are plain cards.

@@ -59,6 +59,7 @@ export function parseToHost(value: unknown): Parsed {
       return id === undefined ? bad("takeBackTask needs a valid Task ID") : { ok: true, message: { type, id } };
     case "approveProposal":
     case "rejectProposal":
+    case "discardProposal":
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };
     case "resolveDrift":
       if (id === undefined) return bad("resolveDrift needs a valid Drift ID");

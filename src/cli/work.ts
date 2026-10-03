@@ -9,31 +9,33 @@ import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 
 /** One-line summary of a Proposal for lists and the board. */
 export function proposalSummary(p: Project, proposal: Proposal) {
-  const h = proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
+  const h = proposal.data.status === "draft" || proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
   return { id: proposal.id, title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, stale: h.stale.length > 0, requires: h.requires.map((r) => r.id) };
 }
 
 export function proposalListView(p: Project, all: boolean): Result {
   const items = listProposals(p)
-    .filter((x) => all || x.data.status === "open")
+    .filter((x) => all || x.data.status === "draft" || x.data.status === "open")
     .map((x) => proposalSummary(p, x));
   const flags = (i: (typeof items)[number]) =>
     [i.status, i.kind === "import" ? "import" : "", i.stale ? "stale" : "", i.requires.length > 0 ? `requires ${i.requires.join(", ")}` : ""].filter(Boolean).join(", ");
   const md = bullets(
-    items.map((i) => `- ${i.id} [${flags(i)}] ${i.title}`),
+    items.map((i) => `- ${i.id} [${flags(i)}] ${i.title}${i.status === "draft" ? " (draft)" : ""}`),
     "_No Proposals._",
   );
   return { md: `# Proposals\n\n${md}`, json: { proposals: items } };
 }
 
 export function proposalShowView(p: Project, proposal: Proposal): Result {
-  const h = proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
+  const live = proposal.data.status === "draft" || proposal.data.status === "open";
+  const h = live ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
   const fileChanges = changes(p, proposal);
-  const errors = proposal.data.status === "open" ? validateProposal(p, proposal) : [];
+  const errors = live ? validateProposal(p, proposal) : [];
   const md = [
     proposal.body.trim(),
     "",
     `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}${proposal.data.kind === "import" ? " · import" : ""}`,
+    proposal.data.status === "draft" ? "Still being written; submit when finished. The developer cannot approve or reject it yet." : "",
     proposal.data.requires.length > 0 ? `Requires: ${proposal.data.requires.join(", ")}. Changes and validation below are on top of them.` : "",
     h.requires.length > 0 ? `\nCannot be approved yet:\n${requiredReasons(h.requires).map((r) => `- ${r}`).join("\n")}` : "",
     h.stale.length > 0 ? `\nStale: the Model changed since the Proposal touched ${h.stale.join(", ")}. It cannot be approved; write a new Proposal.` : "",
@@ -46,7 +48,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
     ),
     "",
     "## Validation of the Model and Requirements with the Proposal applied",
-    errors.length === 0 ? "Valid." : errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n"),
+    !live ? "Not checked for a finished Proposal." : errors.length === 0 ? "Valid." : errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n"),
   ].join("\n");
   return {
     md,
@@ -198,6 +200,7 @@ export function driftListView(p: Project, all: boolean): Result {
 export function boardView(p: Project): Result {
   const allProposals = listProposals(p);
   const proposals = allProposals.filter((x) => x.data.status === "open").map((x) => proposalSummary(p, x));
+  const drafts = allProposals.filter((x) => x.data.status === "draft").map((x) => proposalSummary(p, x));
   const titles = new Map(allProposals.map((x) => [x.id, x.title]));
   const drifts = listDrifts(p).filter((d) => d.data.status === "open");
   const placed = placeTasks(listTasks(p).map(taskSummary));
@@ -217,6 +220,7 @@ export function boardView(p: Project): Result {
   const md = [
     "# Board",
     "",
+    ...(drafts.length === 0 ? [] : ["## In writing", bullets(drafts.map((i) => `- Proposal ${i.id} (draft): ${i.title}`)), ""]),
     "## To decide",
     bullets([
       ...proposals.map((i) => `- Proposal ${i.id}${i.stale ? " (stale)" : ""}: ${i.title}`),
@@ -235,6 +239,7 @@ export function boardView(p: Project): Result {
   return {
     md,
     json: {
+      inWriting: drafts,
       toDecide: { proposals, drifts: drifts.map(driftSummary) },
       todo: entries("todo").map((e) => e.json),
       doing: entries("doing").map((e) => e.json),

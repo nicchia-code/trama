@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { approveProposal, changes, editInProposal, getProposal, health, newProposal, rejectProposal, validateProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { loadModel, type Project, projectAt } from "../src/core/store";
+import { handOver } from "./handover";
 
 let dir: string;
 let p: Project;
@@ -26,6 +27,7 @@ function chain() {
   const billing = newProposal(p, "Billing", "", { requires: ["1"] });
   writeFileSync(editInProposal(p, billing.id, "billing/feature.md"), "# Billing\n\nInvoices.\n");
   writeFileSync(editInProposal(p, billing.id, "billing/invoice.md"), INVOICE);
+  handOver(p, actors.id, billing.id);
   return { actors: actors.id, billing: billing.id };
 }
 
@@ -80,6 +82,7 @@ test("a cycle further down the chain also blocks the Proposals that require it",
   const file = join(getProposal(p, b.id).dir, "proposal.md");
   writeFileSync(file, readFileSync(file, "utf8").replace(`  - "${a.id}"\n`, `  - "${c.id}"\n`));
   const top = newProposal(p, "Top", "", { requires: [b.id] });
+  handOver(p, top.id);
   expect(health(p, getProposal(p, top.id)).requires.map((r) => [r.id, r.status])).toContainEqual([b.id, "cycle"]);
   expect(() => approveProposal(p, top.id)).toThrow(/cycle/);
 });
@@ -97,6 +100,7 @@ test("a Proposal file that is no valid Machine leaves the snapshot readable and 
   const prop = newProposal(p, "Clash");
   writeFileSync(editInProposal(p, prop.id, "billing/user.md"), "# User\n\nx.\n\n## States\n\n### A (initial)\n");
   writeFileSync(editInProposal(p, prop.id, "billing/Invoice_Item.md"), "# Item\n\nx.\n\n## States\n\n### A (initial)\n");
+  handOver(p, prop.id);
   const view = buildSnapshot(p).proposals.find((x) => x.id === prop.id);
   expect(view?.machines).toEqual([]);
   expect(view?.errors.map((d) => d.file).sort()).toEqual(["billing/Invoice_Item.md", "billing/user.md"]);

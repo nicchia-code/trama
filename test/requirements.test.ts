@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
 import { approveProposal, editInProposal, getProposal, newProposal, validateProposal } from "../src/core/proposals";
+import { handOver } from "./handover";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
 import { loadProject, requirementsFor } from "../src/core/requirements";
 import { proposalScope } from "../src/core/scope";
@@ -73,12 +74,14 @@ describe("Proposals with Requirements", () => {
     const prop = newProposal(p, "No preparing step");
     const order = editInProposal(p, prop.id, "checkout/order.md");
     writeFileSync(order, removePreparing(readFileSync(order, "utf8")));
+    handOver(p, prop.id);
     expect(validateProposal(p, getProposal(p, prop.id)).map((d) => d.file)).toEqual(["requirements/ui.md"]);
     expect(() => approveProposal(p, prop.id)).toThrow(/order\/Preparing/);
 
     const ui = editInProposal(p, prop.id, ".trama/requirements/ui.md");
     writeFileSync(ui, UI.replace("## order/Preparing\nShow a progress bar.\n", "## order/Ready to ship\nShow the courier's name.\n"));
     expect(validateProposal(p, getProposal(p, prop.id))).toEqual([]);
+    handOver(p, prop.id);
     approveProposal(p, prop.id);
 
     expect(readFileSync(reqFile("ui"), "utf8")).toContain("## order/Ready to ship");
@@ -89,6 +92,7 @@ describe("Proposals with Requirements", () => {
   test("a Proposal that only edits Requirements shows as an Area change, not as a Machine", () => {
     const prop = newProposal(p, "Badge colour");
     writeFileSync(editInProposal(p, prop.id, "requirements/ui.md"), UI.replace("Show a green badge.", "Show a blue badge.").replace("## order/Preparing\nShow a progress bar.\n", "") + "\n## cart\nSticky total.\n");
+    handOver(p, prop.id);
     const view = buildSnapshot(p).proposals[0];
     expect(view?.machines).toEqual([]);
     expect(view?.areas.map((a) => [a.id, a.change])).toEqual([["ui", "modified"]]);

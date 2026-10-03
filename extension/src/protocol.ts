@@ -32,6 +32,8 @@ export type ToHost =
   | { type: "approveProposal"; id: string }
   /** The host asks for the feedback with an input box. */
   | { type: "rejectProposal"; id: string }
+  /** The host confirms discarding a Draft without feedback. */
+  | { type: "discardProposal"; id: string }
   | { type: "resolveDrift"; id: string; how: "fix-code" | "accept-proposal" | "dismiss" };
 
 export type ViewName = "diagram" | "board" | "requirements";
