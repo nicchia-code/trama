@@ -7,11 +7,15 @@ The editor tab that holds Trama's three views. There is at most one panel; openi
 ### Closed (initial)
 - `developer.OPEN_PANEL` → Open: only if the workspace has a Trama project, or it has none and the developer accepts the offer to initialize one and that succeeds. The panel starts on the Diagram.
 - `developer.OPEN_PANEL` → Closed: the workspace has no Trama project and the developer dismisses the offer, or initializing fails (the reason is shown).
+- `question-round.ROUND_OPENED` → Open: il pannello si apre da solo in primo piano, sul Diagramma, con il round di domande sopra.
 
 ### Open
 The panel is showing one of its tabs. Whenever the files change it is given a fresh picture of the Model, Requirements, Proposals, Tasks and Drifts, so every tab, also the hidden ones, stays current.
+
+Mentre un round di domande dell'agente è aperto, compare in un overlay sopra qualunque scheda, oppure ridotto a una barra in cima al pannello che lascia usare le schede sotto (vedi il Question round).
 - `developer.OPEN_PANEL` → Open: the panel is brought to the front, keeping its tab.
-- `developer.CLOSE_PANEL` → Closed: the panel stops following the files and forgets what it was showing.
+- `question-round.ROUND_OPENED` → Open: il pannello torna in primo piano, tenendo la sua scheda, con il round di domande sopra.
+- `developer.CLOSE_PANEL` → Closed: the panel stops following the files and forgets what it was showing. Un round di domande aperto non si chiude con il pannello: resta in attesa (vedi il Question round).
 - `developer.SHOW_DIAGRAM` → Diagram
 - `developer.SHOW_BOARD` → Board
 - `developer.SHOW_REQUIREMENTS` → Requirements

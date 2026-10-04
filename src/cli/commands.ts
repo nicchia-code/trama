@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TramaError, UsageError } from "../core/errors";
-import { ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote } from "../core/announcements";
+import { type AgentOrigin, ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote } from "../core/announcements";
 import { installSkills, missingSkills, removeRetiredSkills, skillConflicts } from "./skills";
 import {
   approveProposal,
@@ -57,10 +57,10 @@ export type Values = Record<string, string | boolean | (string | boolean)[] | un
 export interface Context {
   cwd: string;
   rootOption?: string;
-  /** True when the command runs in the terminal Trama started for the agent (`TRAMA_AGENT` is set). */
+  /** True when the command runs as the agent: in the terminal Trama started for it (`TRAMA_AGENT`) or in Cursor's chat (`CURSOR_AGENT`). */
   byAgent: boolean;
-  /** The agent terminal the command runs in (`TRAMA_TERMINAL`), when Trama started it. */
-  terminal?: string;
+  /** The agent terminal (`TRAMA_TERMINAL`) or the chat (`CURSOR_AGENT`) the command runs in, when either is known. */
+  origin: AgentOrigin;
   project(): Project;
 }
 
@@ -69,7 +69,7 @@ export interface Command {
   /** Positional arguments: `<required>` and `[optional]`. */
   args: string;
   summary: string;
-  /** Refused when run by an agent (the `TRAMA_AGENT` environment variable is set). */
+  /** Refused when run by an agent (`TRAMA_AGENT` or `CURSOR_AGENT` is set). */
   developerOnly?: true;
   options?: Record<string, OptionSpec>;
   run(ctx: Context, args: string[], opts: Values): Result;
@@ -97,12 +97,12 @@ function required(value: string | undefined, flag: string): string {
   return value;
 }
 
-export function makeContext(cwd: string, rootOption?: string, byAgent = false, terminal?: string): Context {
+export function makeContext(cwd: string, rootOption?: string, byAgent = false, origin: AgentOrigin = {}): Context {
   return {
     cwd,
     rootOption,
     byAgent,
-    terminal,
+    origin,
     project() {
       if (rootOption === undefined) return findProject(cwd);
       const project = projectAt(resolve(cwd, rootOption));
@@ -203,14 +203,17 @@ export const COMMANDS: Command[] = [
   { name: "announce", args: "<kind> <title>", summary: "Say that you are about to create a card, so the Board shows a ghost of it: kind is proposal, task or drift. Prints the announcement ID; pass it as --announcement when you create the card", run(ctx, a) {
       const kind = a[0] as string;
       if (!(ANNOUNCEMENT_KINDS as readonly string[]).includes(kind)) throw new UsageError(`The kind must be one of ${ANNOUNCEMENT_KINDS.join(", ")}, not "${kind}"`);
-      const announcement = announce(ctx.project(), { kind: kind as AnnouncementKind, title: a[1] as string, ...(ctx.terminal ? { terminal: ctx.terminal } : {}) });
+      const announcement = announce(ctx.project(), { kind: kind as AnnouncementKind, title: a[1] as string, ...ctx.origin });
       return text(announcement.id, { id: announcement.id, kind: announcement.kind, title: announcement.title });
     } },
-  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code; --announcement <id> names the announcement of this Proposal); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" }, announcement: { type: "string" } }, run(ctx, a, o) {
+  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code; --announcement <id> names the announcement of this Proposal; --request <id> binds it to the written design request it comes from); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" }, announcement: { type: "string" }, request: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       const note = announcementNote(project, str(o["announcement"]), "proposal");
-      const p = newProposal(project, a[0] as string, str(o["body"]), { requires: list(o["requires"]), kind: o["import"] === true ? "import" : "change", announcement: str(o["announcement"]), terminal: ctx.terminal });
-      return text(`Created Draft Proposal ${p.id} at ${p.dir}. Submit it when finished.${note ? `\n${note}` : ""}`, { id: p.id, path: p.dir, status: p.data.status, ...(note ? { note } : {}) });
+      const request = str(o["request"]);
+      const p = newProposal(project, a[0] as string, str(o["body"]), { requires: list(o["requires"]), kind: o["import"] === true ? "import" : "change", announcement: str(o["announcement"]), origin: ctx.origin, request });
+      const requestNote = request !== undefined && p.data.request === null ? `Design request ${request} was not found; the Proposal is not bound to any request.` : "";
+      const notes = [note, requestNote].filter(Boolean).join("\n");
+      return text(`Created Draft Proposal ${p.id} at ${p.dir}. Submit it when finished.${notes ? `\n${notes}` : ""}`, { id: p.id, path: p.dir, status: p.data.status, request: p.data.request, ...(note ? { note } : {}), ...(requestNote ? { requestNote } : {}) });
     } },
   { name: "proposal edit", args: "<id> <model-path>", summary: "Make a Model file editable inside a Proposal; prints the path to edit", run(ctx, a) {
       const project = ctx.project();
@@ -226,7 +229,8 @@ export const COMMANDS: Command[] = [
     } },
   { name: "proposal submit", args: "<id>", summary: "Hand a valid Draft over to the developer", run(ctx, a) {
       const p = submitProposal(ctx.project(), a[0] as string);
-      return text(`Submitted Proposal ${p.id} for review`, { id: p.id, status: p.data.status });
+      const consumed = p.requestConsumed ? `\nDeleted design request ${p.data.request}: it is now consumed.` : "";
+      return text(`Submitted Proposal ${p.id} for review${consumed}`, { id: p.id, status: p.data.status, request: p.data.request, requestConsumed: p.requestConsumed });
     } },
   { name: "proposal discard", args: "<id>", summary: "Discard a Draft the agent never finished", developerOnly: true, run(ctx, a) {
       const p = discardProposal(ctx.project(), a[0] as string);

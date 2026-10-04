@@ -3,11 +3,12 @@ import { basename } from "node:path";
 import { createQuestionServer, questionProjectId, type QuestionServer } from "../../../src/core/question-channel";
 import { QuestionRoundQueue } from "../../../src/core/question-rounds";
 import { unavailableQuestions } from "../../../src/core/questions";
+import type { QuestionPresenter } from "../../../src/core/question-rounds";
 import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
-import { presentQuestionRound } from "./question-ui";
 import { noticeOnQuestion } from "./question-notice";
 import { notices } from "./notice-host";
+import { receiveCursorHook } from "./cursor";
 
 interface WindowRoundService {
   identity: string;
@@ -28,7 +29,8 @@ export class EditorQuestions implements vscode.Disposable {
   private closed = false;
   private readonly subscriptions: vscode.Disposable[];
 
-  constructor(private readonly project: () => Project | undefined) {
+  /** `present` shows a round to the developer: the overlay of the Trama panel. */
+  constructor(private readonly project: () => Project | undefined, private readonly present: QuestionPresenter) {
     windowQuestions = this;
     // Directory deletion/rename does not emit separate events for its children.
     const watcher = vscode.workspace.createFileSystemWatcher("**/.trama");
@@ -74,7 +76,7 @@ export class EditorQuestions implements vscode.Disposable {
     const current = this.service;
     if (current && current.identity === identity) return current;
     this.closeService();
-    const queue = new QuestionRoundQueue(noticeOnQuestion(trackRound(presentQuestionRound), notices, basename(project.root)));
+    const queue = new QuestionRoundQueue(noticeOnQuestion(trackRound(this.present), notices, basename(project.root)));
     const service: WindowRoundService = {
       identity, queue,
       server: createQuestionServer({
@@ -84,6 +86,7 @@ export class EditorQuestions implements vscode.Disposable {
           if (this.closed || this.service !== service || questionProjectId(callerProject) !== identity) return unavailableQuestions();
           return queue.ask(request, context);
         },
+        onCursorHook: receiveCursorHook,
         onClose: () => {
           queue.dispose();
           if (this.service === service) this.service = undefined;

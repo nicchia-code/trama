@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { announce, listAnnouncements, withdrawAll } from "../src/core/announcements";
+import type { CursorHook } from "../src/core/cursor-chat";
 import { newProposal } from "../src/core/proposals";
 import { projectAt } from "../src/core/store";
 import { getTask, moveTask, newTask } from "../src/core/work";
@@ -35,6 +36,13 @@ const typed: string[] = [];
 const environments: Record<string, string>[] = [];
 /** Settings the test changes; anything else reads as the editor's default. */
 const settingValues: Record<string, unknown> = {};
+/** The editor's name: "Cursor" makes the extension behave as in Cursor. */
+const editor = { appName: "Visual Studio Code" };
+/** What the fake editor does with a command: by default nothing; a test may make it fail or return a value. */
+let commandHandler: (id: string, ...args: unknown[]) => unknown = () => undefined;
+/** Every command run and every link opened externally, in order. */
+const editorCalls: string[] = [];
+const clipboard: string[] = [];
 
 /** The open workspace folder the panel looks for a Trama project in. */
 let workspaceRoot = "";
@@ -85,12 +93,22 @@ mock.module("vscode", () => ({
     getConfiguration: () => ({ get: (key: string, fallback: unknown) => (key === "agentCommand" ? "agent {prompt}" : (settingValues[key] ?? fallback)), update: async () => {} }),
     createFileSystemWatcher: () => ({ onDidCreate() {}, onDidChange() {}, onDidDelete() {}, dispose() {} }),
   },
-  Uri: { joinPath: (base: unknown, ...parts: string[]) => ({ base, parts, toString: () => parts.join("/") }) },
+  Uri: { joinPath: (base: unknown, ...parts: string[]) => ({ base, parts, toString: () => parts.join("/") }), parse: (value: string) => ({ toString: () => value }) },
   RelativePattern: class {},
+  // Bun re-mocks "vscode" in place, keeping only these keys, for every later test file that mocks it too.
+  TabInputText: class {},
   ViewColumn: { Active: 1 },
-  commands: { executeCommand: async () => {} },
-  env: { appName: "Visual Studio Code", shell: "/bin/bash", clipboard: { writeText: async () => {} } },
-  Disposable: { from: (...items: unknown[]) => ({ dispose() { void items; } }) },
+  commands: { executeCommand: async (id: string, ...args: unknown[]) => (editorCalls.push(id), commandHandler(id, ...args)) },
+  env: {
+    get appName() { return editor.appName; },
+    shell: "/bin/bash",
+    clipboard: { writeText: async (text: string) => void clipboard.push(text) },
+    openExternal: async (uri: { toString(): string }) => (editorCalls.push(uri.toString()), true),
+  },
+  Disposable: class {
+    constructor(readonly dispose: () => void) {}
+    static from(...items: unknown[]) { return { dispose() { void items; } }; }
+  },
   ConfigurationTarget: { Global: 1 },
   extensions: { getExtension: () => undefined },
 }));
@@ -110,7 +128,7 @@ describe("taken Tasks and the agent terminals", () => {
     const p = projectAt(dir);
     watchAgentTerminal();
 
-    await launchAgent(dir, "first");
+    expect(await launchAgent(dir, "first")).toBe("terminal");
     const first = terminals[0] as FakeTerminal;
     listeners.start.forEach((fn) => fn(shell(first)));
     await launchAgent(dir, "second"); // the first is busy, so this one starts another terminal
@@ -129,6 +147,39 @@ describe("taken Tasks and the agent terminals", () => {
       const task = getTask(p, id);
       expect(task.data.agent).toBe(false);
       expect(task.data.column).toBe("todo");
+    }
+  });
+
+  test("the end of a turn of a Trama conversation in Cursor's chat, however it ends, sends every taken Task back to To do", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { receiveCursorHook } = await import("../extension/src/host/cursor");
+    const p = projectAt(dir);
+    const watching = watchAgentTerminal();
+    const hook = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ root: dir, conversation: "r1", ...h });
+    const take = () => {
+      const t = newTask(p, { title: "T", refs: ["order/Paid"], technical: false });
+      moveTask(p, t.id, "doing", "agent");
+      return t.id;
+    };
+    const taken = (id: string) => [getTask(p, id).data.column, getTask(p, id).data.agent];
+    try {
+      const a = take();
+      hook({ hook: "stop", status: "completed", conversation: "not-trama" });
+      hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
+      expect(taken(a)).toEqual(["doing", true]);
+      hook({ hook: "stop", status: "completed" });
+      expect(taken(a)).toEqual(["todo", false]);
+
+      const b = take();
+      hook({ hook: "stop", status: "error" });
+      expect(taken(b)).toEqual(["todo", false]);
+
+      const c = take();
+      hook({ hook: "sessionEnd", reason: "window_close" });
+      expect(taken(c)).toEqual(["todo", false]);
+    } finally {
+      watching.dispose();
     }
   });
 });
@@ -209,6 +260,65 @@ describe("announcing a design request", () => {
       delete settingValues["agentLauncher"];
     }
     expect(listAnnouncements(p)).toHaveLength(before);
+  });
+});
+
+describe("the launcher in Cursor", () => {
+  test("auto is the chat in Cursor, which tries a self-sending chat, then the deeplink, then the clipboard, each once", async () => {
+    // Dynamic, as above: the module must load after mock.module replaced "vscode".
+    const { agentLauncher, launchAgent } = await import("../extension/src/host/agent");
+    const typedBefore = typed.length;
+    expect(agentLauncher()).toBe("terminal");
+    editor.appName = "Cursor";
+    try {
+      expect(agentLauncher()).toBe("chat");
+      settingValues["agentLauncher"] = "terminal";
+      expect(agentLauncher()).toBe("terminal");
+      delete settingValues["agentLauncher"];
+
+      editorCalls.length = 0;
+      commandHandler = (id) => (id === "composer.createNew" ? { composerId: "c" } : undefined);
+      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.")).toBe("sent");
+      expect(editorCalls).toEqual(["composer.createNew"]);
+
+      // Cursor's command returns nothing even when it created and sent the chat: only an error moves to the deeplink.
+      editorCalls.length = 0;
+      commandHandler = () => undefined;
+      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.")).toBe("sent");
+      expect(editorCalls).toEqual(["composer.createNew"]);
+      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", undefined, true)).toBe("sent");
+
+      editorCalls.length = 0;
+      commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
+      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.")).toBe("confirm");
+      expect(editorCalls).toEqual(["composer.createNew", `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent("Use the trama-scan skill on the whole System.")}&workspace=${encodeURIComponent(basename(dir))}&mode=agent`]);
+
+      editorCalls.length = 0;
+      clipboard.length = 0;
+      expect(await launchAgent(dir, "Use the trama-design skill. Read .env")).toBe("clipboard");
+      expect(editorCalls).toEqual(["composer.createNew"]);
+      expect(clipboard).toEqual(["Use the trama-design skill. Read .env"]);
+      expect(typed.length).toBe(typedBefore);
+
+      // The automatic scan: only a chat that sends by itself, never a chat left waiting nor the clipboard.
+      editorCalls.length = 0;
+      clipboard.length = 0;
+      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", undefined, true)).toBe("not-sent");
+      expect(editorCalls).toEqual(["composer.createNew"]);
+      expect(clipboard).toEqual([]);
+    } finally {
+      editor.appName = "Visual Studio Code";
+      commandHandler = () => undefined;
+    }
+  });
+
+  test("the instruction to Cursor's chat says where the shipped trama program is, and stays one line without one", async () => {
+    // Dynamic, as above: the module must load after mock.module replaced "vscode".
+    const { withTramaPath } = await import("../extension/src/host/cursor");
+    expect(withTramaPath("Use the trama-scan skill on the whole System. Write in Italian.", "/ext/bin/trama")).toBe(
+      'Use the trama-scan skill on the whole System. Write in Italian.\nThe trama command may not be on your PATH. Before anything else run: export PATH="/ext/bin:$PATH"',
+    );
+    expect(withTramaPath("Use the trama-scan skill on the whole System.")).toBe("Use the trama-scan skill on the whole System.");
   });
 });
 
@@ -315,6 +425,45 @@ describe("withdrawing the ghosts", () => {
   });
 });
 
+describe("the ghosts of Cursor's chat agent", () => {
+  test("an interrupted turn of a Trama conversation withdraws them with the notice, closing it withdraws them silently, a normal end keeps them", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { onAnnouncementsWithdrawn, watchAnnouncements } = await import("../extension/src/host/announcements");
+    const { receiveCursorHook } = await import("../extension/src/host/cursor");
+    const p = projectAt(dir);
+    withdrawAll(p);
+    const watching = watchAnnouncements(() => undefined);
+    const told: string[] = [];
+    const subscription = onAnnouncementsWithdrawn((views) => told.push(...views.map((v) => v.title)));
+    const hook = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ conversation: "t", root: dir, ...h });
+    const chatGhost = (title: string) => announce(p, { kind: "task", title, chat: "cursor" });
+    try {
+      chatGhost("Chat");
+      announce(p, { kind: "task", title: "Terminal", terminal: "ab12cd" });
+      announce(p, { kind: "task", title: "Nobody's" });
+      const titles = () => listAnnouncements(p).map((a) => a.title);
+
+      hook({ hook: "stop", status: "aborted" }); // not yet a Trama conversation
+      hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
+      hook({ hook: "stop", status: "completed" });
+      expect(titles()).toEqual(["Chat", "Terminal", "Nobody's"]);
+
+      hook({ hook: "stop", status: "error" });
+      expect(titles()).toEqual(["Terminal", "Nobody's"]);
+      expect(told).toEqual(["Chat"]);
+
+      chatGhost("Closed");
+      hook({ hook: "sessionEnd", reason: "user_close" });
+      expect(titles()).toEqual(["Terminal", "Nobody's"]);
+      expect(told).toEqual(["Chat"]);
+    } finally {
+      subscription.dispose();
+      watching.dispose();
+      withdrawAll(p);
+    }
+  });
+});
+
 describe("the notice on the end of the agent's command", () => {
   test("only the end of the command Trama typed makes one, with the terminal's status; any instruction really written takes back the waiting ones", async () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
@@ -370,6 +519,33 @@ describe("the notice on the end of the agent's command", () => {
       expect(born).not.toHaveBeenCalled();
     } finally {
       born.mockRestore();
+    }
+  });
+
+  test("in Cursor's chat every end of a Trama conversation's turn makes one, closing makes none, a new prompt takes back the waiting ones", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { chatEndNotices, endNotices, watchCursorChatNotices } = await import("../extension/src/host/notice-host");
+    const { receiveCursorHook } = await import("../extension/src/host/cursor");
+    const born = spyOn(chatEndNotices, "born").mockImplementation(() => {});
+    const cancelAll = spyOn(chatEndNotices, "cancelAll").mockImplementation(() => {});
+    const terminalCancel = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
+    const watching = watchCursorChatNotices();
+    const hook = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ root: dir, conversation: "n1", ...h });
+    try {
+      hook({ hook: "stop", status: "completed", conversation: "other" });
+      hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
+      hook({ hook: "beforeSubmitPrompt", tramaPrompt: true, conversation: "n2" });
+      expect(cancelAll).toHaveBeenCalledTimes(2);
+      hook({ hook: "stop", status: "completed" });
+      hook({ hook: "stop", status: "aborted", conversation: "n2" });
+      hook({ hook: "sessionEnd", reason: "user_close" });
+      expect(born.mock.calls.map((c) => [c[0], c[1]])).toEqual([[basename(dir), { kind: "chat-stopped" }], [basename(dir), { kind: "chat-interrupted" }]]);
+      expect(terminalCancel).not.toHaveBeenCalled();
+    } finally {
+      watching.dispose();
+      born.mockRestore();
+      cancelAll.mockRestore();
+      terminalCancel.mockRestore();
     }
   });
 });

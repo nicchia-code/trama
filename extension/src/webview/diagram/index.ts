@@ -25,7 +25,8 @@ const TEMPLATE = `
       <button type="button" class="trama-btn" data-zoom-in aria-label="Zoom in" title="Zoom in (+)">+</button>
       <button type="button" class="trama-btn" data-fit aria-label="Fit to view" title="Fit to view (0)">Fit</button>
     </span>
-    <button type="button" class="trama-btn" data-design title="Ask an agent to design a change">Design…</button>
+    <button type="button" class="trama-btn" data-quick-design title="Ask an agent to design a change in one line">Quick request…</button>
+    <button type="button" class="trama-btn" data-design title="Write a design request in Markdown and send it to an agent">Design…</button>
     <button type="button" class="trama-btn" data-scan>Scan</button>
   </div>
   <div class="dg-main">
@@ -226,7 +227,8 @@ export const mountDiagram: MountView = (root, context) => {
   $("button[data-zoom-in]").addEventListener("click", () => canvas.zoomBy(1.25));
   $("button[data-zoom-out]").addEventListener("click", () => canvas.zoomBy(0.8));
   $("button[data-fit]").addEventListener("click", () => canvas.fit());
-  $("button[data-design]").addEventListener("click", () => context.post({ type: "launch", action: { kind: "design" } }));
+  $("button[data-quick-design]").addEventListener("click", () => context.post({ type: "launch", action: { kind: "design" } }));
+  $("button[data-design]").addEventListener("click", () => context.post({ type: "writeDesignRequest" }));
   scan.addEventListener("click", () => {
     const feature = scene ? scanFeature(scene, level) : undefined;
     context.post({ type: "launch", action: feature ? { kind: "scan", feature } : { kind: "scan" } });

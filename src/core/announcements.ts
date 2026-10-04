@@ -28,8 +28,10 @@ export interface Announcement {
   created: string;
   /** When the agent last did something about an announced card, as an ISO date and time. */
   touched: string;
-  /** The agent terminal it belongs to (see `TERMINAL_ENV`), or null: made from the chat or by an agent Trama did not start, or written before this field existed. */
+  /** The agent terminal it belongs to (see `TERMINAL_ENV`), or null: made from a chat or by an agent Trama did not start, or written before this field existed. */
   terminal: string | null;
+  /** `cursor` when Cursor's chat agent made it (see `CURSOR_AGENT_ENV`); null otherwise and in announcements written before this field existed. Never set together with `terminal`. */
+  chat: Chat | null;
   /** The title as announced; the ghost of a bound Draft shows the Draft's own title instead. */
   title: string;
 }
@@ -59,6 +61,26 @@ export function terminalFromEnv(env: Record<string, string | undefined>): string
   return value !== undefined && TERMINAL_PATTERN.test(value) ? value : undefined;
 }
 
+/** Set to `1` by Cursor in the shell of its chat agent, and not in the developer's terminals. */
+export const CURSOR_AGENT_ENV = "CURSOR_AGENT";
+
+/** The editor chat whose agent made an announcement. */
+export type Chat = "cursor";
+const CHATS: readonly Chat[] = ["cursor"];
+
+/** Where an agent's command runs: the agent terminal Trama started, Cursor's chat, or neither (the developer, or an agent Trama cannot tell). */
+export interface AgentOrigin {
+  terminal?: string;
+  chat?: Chat;
+}
+
+/** The agent terminal wins: Cursor's chat counts only for a command run without `TRAMA_TERMINAL`. */
+export function originFromEnv(env: Record<string, string | undefined>): AgentOrigin {
+  const terminal = terminalFromEnv(env);
+  if (terminal) return { terminal };
+  return env[CURSOR_AGENT_ENV] === "1" ? { chat: "cursor" } : {};
+}
+
 function newId(dir: string): string {
   for (;;) {
     let id = "";
@@ -81,6 +103,7 @@ function parse(raw: Raw, body: string, id: string, where: string): Announcement 
     created: stamp("created"),
     touched: stamp("touched"),
     terminal: terminalField(raw, where),
+    chat: raw["chat"] === undefined || raw["chat"] === null ? null : enumField(raw, "chat", CHATS, "cursor", where),
     title: /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? id,
   };
 }
@@ -97,8 +120,9 @@ function write(p: Project, a: Announcement) {
   // The folder ignores itself and everything in it, so announcements are never versioned.
   const ignore = join(dir, ".gitignore");
   if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
-  const { id, title, ...data } = a;
-  writeDocument(join(dir, `${id}.md`), data, `# ${title}\n`);
+  const { id, title, chat, ...data } = a;
+  // `chat` is written only when set, so announcements of a terminal or of the developer look as before.
+  writeDocument(join(dir, `${id}.md`), chat ? { ...data, chat } : data, `# ${title}\n`);
 }
 
 function remove(p: Project, id: string) {
@@ -131,7 +155,7 @@ export const getAnnouncement = (p: Project, id: string): Announcement | null => 
 /** Announces a card as soon as it is known it will be created. Refreshes the quiet period of every announcement. */
 export function announce(
   p: Project,
-  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; terminal?: string },
+  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string } & AgentOrigin,
   now = new Date(),
 ): Announcement {
   const title = input.title.trim().replace(/\s+/g, " ");
@@ -148,6 +172,7 @@ export function announce(
     created: stamp,
     touched: stamp,
     terminal: input.terminal ?? null,
+    chat: input.terminal ? null : (input.chat ?? null),
     title,
   };
   write(p, announcement);
@@ -177,7 +202,7 @@ export function announcementNote(p: Project, id: string | undefined, kind: Annou
  * A Draft was started: it is bound to the announcement the agent named; failing that to the oldest announcement of a
  * design request still Preparing; failing that it makes an announcement of its own, already Writing.
  */
-export function bindDraft(p: Project, proposal: { id: string; title: string }, announcementId?: string, terminal?: string, now = new Date()): Announcement {
+export function bindDraft(p: Project, proposal: { id: string; title: string }, announcementId?: string, origin: AgentOrigin = {}, now = new Date()): Announcement {
   markActivity(p, now);
   const all = listAnnouncements(p);
   const named = announcementId ? all.find((a) => a.id === announcementId && a.kind === "proposal" && a.proposal === null) : undefined;
@@ -187,7 +212,7 @@ export function bindDraft(p: Project, proposal: { id: string; title: string }, a
     write(p, bound);
     return bound;
   }
-  return announce(p, { kind: "proposal", title: proposal.title, proposal: proposal.id, ...(terminal ? { terminal } : {}) }, now);
+  return announce(p, { kind: "proposal", title: proposal.title, proposal: proposal.id, ...origin }, now);
 }
 
 /**

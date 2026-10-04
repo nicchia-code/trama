@@ -125,6 +125,14 @@ test("the window learns whether a round comes from a Trama terminal by how it wa
   expect(origins).toEqual([true, false]);
 });
 
+test("a round asked from the shell of Cursor's chat agent tells the window so", async () => {
+  const origins: Array<[boolean | undefined, boolean | undefined]> = [];
+  await server(async (_project, _request, context) => { origins.push([context.fromTramaTerminal, context.fromCursorChat]); return answer("choice"); });
+  await askEditor(projectAt(projectRoot), round(), {}, { runtimeDir, env: { CURSOR_AGENT: "1" } });
+  await askEditor(projectAt(projectRoot), round(), {}, { runtimeDir, env: {} });
+  expect(origins).toEqual([[false, true], [false, false]]);
+});
+
 test("explicit project routing works from an unrelated caller working directory", async () => {
   await server(async () => answer("choice", "explicit project"));
   const elsewhere = join(root, "elsewhere");

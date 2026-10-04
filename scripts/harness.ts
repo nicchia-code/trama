@@ -106,6 +106,10 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><title>Trama harn
   // The real host answers "ready" with a snapshot.
   window.addEventListener("load", () => setTimeout(() => window.postMessage({ type: "snapshot", snapshot: window.__snapshot }, "*"), 0));
 </script>
+<script src="harness-questions.js"></script>
 <script src="webview.js"></script></body></html>`;
 writeFileSync("extension/dist/harness.html", html);
+const questions = await Bun.build({ entrypoints: ["scripts/harness-questions.ts"], outdir: "extension/dist", naming: "harness-questions.js", target: "browser", format: "iife" });
+for (const log of questions.logs) console.error(String(log));
+if (!questions.success) process.exit(1);
 console.log("wrote extension/dist/harness.html");

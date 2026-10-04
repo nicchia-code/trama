@@ -1,5 +1,5 @@
 ---
-status: open
+status: approved
 base:
   actors/cursor-chat.md: new
   agent-launching/feature.md: 4196e7638deeb74ca15a351c10d368ae27797ebed225e66938a77a2273528eaa

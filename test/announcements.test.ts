@@ -239,3 +239,22 @@ describe("the terminal an announcement belongs to", () => {
     expect(listAnnouncements(p).map((a) => [a.title, a.proposal !== null, a.terminal])).toEqual([["Request", true, "ab12cd"]]);
   });
 });
+
+describe("an announcement made by Cursor's chat agent", () => {
+  test("carries chat: cursor only without TRAMA_TERMINAL, writes the field only when set, and reads old files", () => {
+    const chat = run(["announce", "task", "From the chat"], dir, { CURSOR_AGENT: "1" }).out;
+    const both = run(["announce", "task", "Terminal wins"], dir, { CURSOR_AGENT: "1", TRAMA_TERMINAL: "ab12cd" }).out;
+    const neither = run(["announce", "task", "Developer"], dir, { CURSOR_AGENT: "0" }).out;
+    expect([chat, both, neither].map((id) => [getAnnouncement(p, id)?.chat, getAnnouncement(p, id)?.terminal])).toEqual([["cursor", null], [null, "ab12cd"], [null, null]]);
+    expect(readFileSync(join(announcementsDir(p), `${chat}.md`), "utf8")).toContain("chat: cursor");
+    expect(readFileSync(join(announcementsDir(p), `${both}.md`), "utf8")).not.toContain("chat");
+
+    withdrawAll(p);
+    run(["proposal", "new", "Own ghost"], dir, { CURSOR_AGENT: "1" });
+    expect(listAnnouncements(p).map((a) => [a.title, a.chat])).toEqual([["Own ghost", "cursor"]]);
+
+    // Written before the field existed: no `chat` line at all.
+    writeFileSync(join(announcementsDir(p), "old001.md"), "---\nkind: task\nsource: agent\nproposal: null\ncreated: 2026-01-01T10:00:00.000Z\ntouched: 2026-01-01T10:00:00.000Z\n---\n# Old\n");
+    expect(getAnnouncement(p, "old001")?.chat).toBeNull();
+  });
+});

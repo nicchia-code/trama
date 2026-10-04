@@ -4,7 +4,9 @@ A card the agent is about to create, announced so that the Board can show a ghos
 
 An announcement is created Preparing, as soon as the agent knows it will create the card, by the agent announcing it with the kind and the title of the card. Trama itself creates one when the developer asks the agent for a design (also to rework the stale Proposal of a Drift) from the terminal launcher; the title is then the developer's request. A Proposal the agent starts that no announcement is waiting for, as happens with the chat launcher, creates its own announcement already Writing. An announcement lasts only as long as the agent's work: once the real card has arrived, or the work is over without it, it is gone.
 
-An announcement belongs to the agent terminal in which its agent runs, when there is one: the terminal Trama typed a design request into, or the terminal of the agent that announced it. What happens in another agent terminal, or to a command other than the one Trama typed, never touches it. An announcement made from the editor's chat, or by an agent Trama did not start, belongs to no terminal and is withdrawn only by the clock or by the editor starting up.
+An announcement belongs to the agent terminal in which its agent runs, when there is one: the terminal Trama typed a design request into, or the terminal of the agent that announced it. What happens in another agent terminal, or to a command other than the one Trama typed, never touches it. An announcement made from the chat of an editor other than Cursor, or by an agent Trama did not start, belongs to no terminal and is withdrawn only by the clock or by the editor starting up.
+
+Un annuncio fatto dall'agente della chat di Cursor non appartiene a nessun terminale ma al progetto: lo ritira anche l'interruzione o la chiusura di una conversazione di Trama dello stesso progetto (vedi l'Actor cursor-chat). Un turno concluso normalmente non lo ritira, perché in una chat l'agente può essersi fermato solo per aspettare una risposta a testo del developer e poi riprendere: in quel caso il timer dei quindici minuti resta la rete di sicurezza.
 
 ## States
 
@@ -16,6 +18,8 @@ The card has not arrived yet. The Board shows its ghost. Whatever the agent or t
 - `developer.DISCARD_PROPOSAL` → Withdrawn: only if the Proposal bound to the announcement is the one discarded; the developer gave up the draft on purpose, so no notice is shown.
 - `terminal.COMMAND_ENDED` → Withdrawn: only the end of the command Trama typed into the agent terminal the announcement belongs to counts, so no agent can still be working there; every announcement of that terminal still waiting is withdrawn at once and the developer is told the agent finished without delivering what it announced. When Trama cannot tell that the command that ended is the one it typed, nothing is withdrawn for this reason.
 - `terminal.CLOSED` → Withdrawn: the agent terminal the announcement belongs to was closed; withdrawn as when the command ends, with the same notice. Closing another terminal changes nothing.
+- `cursor-chat.AGENT_INTERRUPTED` → Withdrawn: solo per un annuncio fatto dall'agente della chat di Cursor dello stesso progetto; il turno dell'agente è stato interrotto o è andato in errore, quindi nessun agente lavora più a quella consegna. Il ghost sparisce subito e il developer è avvisato che l'agente si è fermato senza consegnare quanto aveva annunciato, come alla fine del comando.
+- `cursor-chat.CONVERSATION_CLOSED` → Withdrawn: come sopra, per la chiusura di una conversazione di Trama dello stesso progetto; il developer ha chiuso la chat di sua scelta, quindi nessun avviso.
 - `time.QUIET_PERIOD_ELAPSED` → Withdrawn: nothing happened for fifteen minutes, so the agent is taken to have stopped; the developer is told, as when the command ends.
 
 #### Preparing (initial)

@@ -2,10 +2,21 @@
 import { TramaError, UsageError } from "../core/errors";
 import { questionAborted, questionFailure } from "../core/questions";
 import { completeFixChoice } from "./fix-prompt";
-import { AGENT_ENV, asyncCommand, run, runAsk } from "./main";
+import { agentVariable, asyncCommand, run, runAsk, runCursorHook } from "./main";
 
 try {
   const argv = process.argv.slice(2);
+  if (argv.length === 1 && argv[0] === "cursor-hook") {
+    // Run by Cursor on every prompt: whatever happens, answer it and exit with 0, writing nothing else.
+    let out = "{}";
+    try {
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      out = await runCursorHook(Buffer.concat(chunks).toString("utf8"));
+    } catch { /* Cursor is answered all the same. */ }
+    await new Promise<void>((resolve) => process.stdout.write(`${out}\n`, () => resolve()));
+    process.exit(0);
+  }
   const selected = asyncCommand(argv);
   if (selected?.command === "ask") {
     const controller = new AbortController();
@@ -39,7 +50,7 @@ try {
     process.exit(result.exit);
   }
   // An agent never decides on a Drift, and without a terminal there is nobody to ask: `run` then refuses a fix without an option.
-  const interactive = process.stdin.isTTY && process.stdout.isTTY && !process.env[AGENT_ENV];
+  const interactive = process.stdin.isTTY && process.stdout.isTTY && !agentVariable(process.env);
   const { out, exit } = run(interactive ? await completeFixChoice(argv, process.cwd(), { input: process.stdin, output: process.stdout }) : argv, process.cwd());
   console.log(out);
   process.exit(exit);

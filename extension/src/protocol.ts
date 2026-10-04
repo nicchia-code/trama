@@ -1,4 +1,6 @@
 import type { AnnouncementView, Snapshot } from "../../src/core/snapshot";
+import type { QuestionRoundView } from "./host/question-session";
+import type { QuestionAction } from "./host/question-state";
 
 export type Column = "todo" | "doing" | "done";
 
@@ -22,6 +24,10 @@ export type AgentAction =
 export type ToHost =
   | { type: "ready" }
   | { type: "launch"; action: AgentAction }
+  /** Design…: the host opens the Markdown document of a written design request. */
+  | { type: "writeDesignRequest" }
+  /** What the developer did on the overlay of question round `round`; the host answers with the new state. */
+  | { type: "questionAction"; round: number; action: QuestionAction }
   /** Tracked path: relative to `.trama/model/`, or `requirements/<area>.md`. */
   | { type: "openModelFile"; path: string }
   /** Path relative to `.trama/` (for example `tasks/0003-x.md`). */
@@ -55,4 +61,6 @@ export type ToWebview =
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */
   | { type: "error"; message: string }
-  | ({ type: "navigate"; view: ViewName } & NavigateOptions);
+  | ({ type: "navigate"; view: ViewName } & NavigateOptions)
+  /** The question round being answered, drawn over the tabs; null when none is. */
+  | { type: "questions"; round: QuestionRoundView | null };

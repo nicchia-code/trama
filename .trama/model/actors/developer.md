@@ -37,6 +37,11 @@ The developer takes back a Task that the agent has taken, with the command of th
 ### ASK_AGENT
 The developer asks the coding agent to work, from a button or a command: design a change (with a request typed in), scan the whole System or one Feature, implement one Task, implement every Task in To do, implement the Tasks in To do that come from one design, rework the stale Proposal attached to a Drift, or import the existing code as Proposals.
 
+Una richiesta di design arriva in due modi: come richiesta rapida di una riga, scritta nella casella che si apre con Quick request, oppure come richiesta scritta, un documento Markdown che il developer compone in una scheda dell'editor e invia con il pulsante Send to agent della scheda o chiudendo la scheda (vedi la Design request).
+
+### CLOSE_REQUEST
+Il developer chiude la scheda di una richiesta di design scritta che non ha mai inviato, quando nessun'altra scheda mostra più quella richiesta. Chiudere la finestra dell'editor con la scheda aperta non è questo Event, né lo è chiudere la scheda di una richiesta già inviata.
+
 ### INITIALIZE_PROJECT
 The developer asks to set up Trama in a workspace folder.
 
@@ -71,22 +76,31 @@ The developer shows one Machine in the Diagram, by opening it, with the breadcru
 The developer zooms into a State that has sub-States, in the Diagram.
 
 ### CHOOSE_ANSWER
-The developer accepts one choice or a set of choices for the current question.
-
-### CHOOSE_OTHER
-The developer chooses to write a free answer, alone or alongside choices in a multiple-choice question.
-
-### WRITE_ANSWER
-The developer accepts the free answer written for the current question.
+Il developer conferma la domanda corrente con le scelte selezionate, con la risposta scritta o con entrambe.
 
 ### GO_BACK
-The developer returns to the preceding question, or from writing an answer or confirming a skip to the same question.
-
-### PRESS_ESCAPE
-The developer closes the current question to choose whether to skip, or returns from writing an answer or confirming a skip without accepting or skipping anything.
+Il developer torna alla domanda precedente, oppure annulla la conferma di Skip all e torna dove era.
 
 ### SKIP_QUESTION
-The developer confirms skipping only the current question.
+Il developer salta solo la domanda corrente, con il pulsante Skip della domanda e senza conferma.
 
 ### SKIP_ALL_QUESTIONS
-The developer confirms skipping the current question and every question still remaining in the round.
+Il developer conferma di saltare tutte le domande del round che non hanno ancora una risposta confermata.
+
+### OPEN_QUESTION
+Il developer apre una domanda del round dall'indice o dal riepilogo.
+
+### OPEN_SUMMARY
+Il developer apre il riepilogo del round dall'indice.
+
+### SEND_ANSWERS
+Il developer invia all'agente le risposte del round dal riepilogo.
+
+### CLOSE_QUESTIONS
+Il developer chiude l'overlay delle domande o preme Skip all, e gli viene chiesto di confermare.
+
+### MINIMIZE_QUESTIONS
+Il developer riduce l'overlay delle domande a una barra per guardare il pannello sotto.
+
+### RESTORE_QUESTIONS
+Il developer riapre le domande in attesa, dalla barra nel pannello o dal pulsante della notifica dell'editor.

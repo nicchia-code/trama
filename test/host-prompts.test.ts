@@ -3,6 +3,9 @@ import { buildPrompt, buildScanPrompt, withLanguage } from "../extension/src/hos
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "design", prompt: "  Add refunds to checkout \n" })).toBe("Use the trama-design skill. Add refunds to checkout");
+  expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
+    "Use the trama-design skill on the design request in `.trama/requests/2026-10-04T19-05-12.md`. Bind the first Proposal you open to it with `--request 2026-10-04T19-05-12`.",
+  );
   expect(buildPrompt({ kind: "scan" })).toBe("Use the trama-scan skill on the whole System.");
   expect(buildPrompt({ kind: "scan", feature: "checkout" })).toBe("Use the trama-scan skill on the Feature `checkout`.");
   expect(buildPrompt({ kind: "implement", task: "0012" })).toBe("Use the trama-implement skill on Task 0012.");

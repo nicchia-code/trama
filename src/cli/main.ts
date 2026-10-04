@@ -1,7 +1,8 @@
 import { parseArgs } from "node:util";
-import { terminalFromEnv } from "../core/announcements";
+import { CURSOR_AGENT_ENV, originFromEnv } from "../core/announcements";
 import { TramaError, UsageError } from "../core/errors";
-import { askEditor } from "../core/question-channel";
+import { askEditor, sendCursorHook } from "../core/question-channel";
+import { hookAnswer, parseCursorHook } from "../core/cursor-chat";
 import { parseQuestionRequest, questionAborted, questionFailure, type QuestionHandler } from "../core/questions";
 import { arity, COMMANDS, type Command, makeContext, type Values } from "./commands";
 import type { Result } from "./result";
@@ -20,6 +21,7 @@ function help(): string {
     "",
     "Options: --json prints JSON instead of Markdown; --root <dir> uses <dir>/.trama.",
     "trama ask [--root <dir>] reads a question round as JSON from stdin and waits for the editor; stdout is JSON.",
+    "trama cursor-hook is run by Cursor's hooks: it reads the hook's JSON from stdin and tells the editor; it always exits with 0.",
     "Exit codes: 0 ok, 1 failure (validation errors, unknown element, stale Proposal), 2 usage.",
   ].join("\n");
 }
@@ -55,6 +57,15 @@ export function pickCommand(rest: string[]): { command: Command; tail: string[] 
 /** Set by the Trama extension in every agent it launches. */
 export const AGENT_ENV = "TRAMA_AGENT";
 
+/**
+ * The variable that makes a command the agent's, or undefined for the developer: `TRAMA_AGENT` in the terminal Trama
+ * started, `CURSOR_AGENT=1` in the shell of Cursor's chat agent (ADR 0010). A guard against mistakes, not a boundary (ADR 0005).
+ */
+export function agentVariable(env: Record<string, string | undefined>): string | undefined {
+  if (env[AGENT_ENV]) return AGENT_ENV;
+  return env[CURSOR_AGENT_ENV] === "1" ? CURSOR_AGENT_ENV : undefined;
+}
+
 export function run(argv: string[], cwd: string, env: Record<string, string | undefined> = process.env): { out: string; exit: number } {
   const { rest, json, root } = splitGlobals(argv);
   if (rest.length === 0 || rest[0] === "--help" || rest[0] === "-h" || rest[0] === "help") return { out: help(), exit: rest.length === 0 ? 2 : 0 };
@@ -69,10 +80,11 @@ export function run(argv: string[], cwd: string, env: Record<string, string | un
   const { min, max } = arity(command);
   if (parsed.positionals.length < min || parsed.positionals.length > max)
     throw new UsageError(`Usage: trama ${command.name} ${command.args}`.trimEnd());
-  if (command.developerOnly && env[AGENT_ENV])
-    throw new TramaError(`"trama ${command.name}" is the developer's decision and cannot be run by an agent (${AGENT_ENV} is set). Ask the developer to decide on the board.`);
+  const agent = agentVariable(env);
+  if (command.developerOnly && agent)
+    throw new TramaError(`"trama ${command.name}" is the developer's decision and cannot be run by an agent (${agent} is set). Ask the developer to decide on the board.`);
 
-  const result: Result = command.run(makeContext(cwd, root, Boolean(env[AGENT_ENV]), terminalFromEnv(env)), parsed.positionals, parsed.values);
+  const result: Result = command.run(makeContext(cwd, root, agent !== undefined, originFromEnv(env)), parsed.positionals, parsed.values);
   return { out: json ? JSON.stringify(result.json, null, 2) : result.md.replace(/\n{3,}/g, "\n\n").trimEnd(), exit: result.exit ?? 0 };
 }
 
@@ -96,5 +108,17 @@ export async function runAsk(argv: string[], cwd: string, input: string, options
   } catch (error) {
     return { out: JSON.stringify(questionFailure(error)), exit: error instanceof UsageError || error instanceof SyntaxError ? 2 : 1 };
   }
+}
+
+/**
+ * `trama cursor-hook`: forwards one of Cursor's hooks to the editor of its project and answers Cursor. It never holds
+ * Cursor up and never fails: without an editor, a Trama project or valid input it still answers and exits with 0.
+ */
+export async function runCursorHook(input: string, options: { runtimeDir?: string } = {}): Promise<string> {
+  let raw: unknown;
+  try { raw = JSON.parse(input); } catch { return "{}"; }
+  const hook = parseCursorHook(raw);
+  if (hook) await sendCursorHook(hook, options);
+  return JSON.stringify(hookAnswer((raw as { hook_event_name?: unknown } | null)?.hook_event_name));
 }
 

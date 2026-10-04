@@ -1,7 +1,22 @@
 /** What a notice says is composed from facts alone, when it is sent: no editor and no network are needed to check it. */
 
-/** How the command the agent was started with ended, as the terminal reported it. */
-export type CommandOutcome = { kind: "finished" } | { kind: "failed"; exitCode: number } | { kind: "unreported" };
+/**
+ * How the agent stopped: the command it was started with, as the terminal reported it, or a turn of a Trama
+ * conversation in Cursor's chat, ended normally or interrupted (or failed).
+ */
+export type CommandOutcome =
+  | { kind: "finished" }
+  | { kind: "failed"; exitCode: number }
+  | { kind: "unreported" }
+  | { kind: "chat-stopped" }
+  | { kind: "chat-interrupted" };
+
+const VERDICTS: Record<Exclude<CommandOutcome["kind"], "failed">, string> = {
+  finished: "The agent finished.",
+  unreported: "The agent command ended.",
+  "chat-stopped": "The agent stopped and may be waiting for you.",
+  "chat-interrupted": "The agent was interrupted or failed.",
+};
 
 export type NoticeFacts =
   | {
@@ -64,10 +79,9 @@ export function composeNotice(facts: NoticeFacts): NoticeText {
     return { title: "Trama: the agent asks", message: limitMessage(lines.join("\n")), priority: 4, tags: ["question"] };
   }
   const { outcome } = facts;
-  const verdict =
-    outcome.kind === "finished" ? "The agent finished." : outcome.kind === "failed" ? `The agent failed (exit code ${outcome.exitCode}).` : "The agent command ended.";
+  const verdict = outcome.kind === "failed" ? `The agent failed (exit code ${outcome.exitCode}).` : VERDICTS[outcome.kind];
   const lines = [facts.project, verdict, `To decide: ${facts.toDecide}`, `To do: ${facts.todo}`, `In progress: ${facts.inProgress}`];
-  const failed = outcome.kind === "failed";
+  const failed = outcome.kind === "failed" || outcome.kind === "chat-interrupted";
   return {
     title: "Trama: the agent stopped",
     message: limitMessage(lines.join("\n")),

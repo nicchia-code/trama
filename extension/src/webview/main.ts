@@ -2,6 +2,7 @@ import type { Snapshot } from "../../../src/core/snapshot";
 import type { NavigateOptions, ToHost, ToWebview, ViewName } from "../protocol";
 import { mountBoard } from "./board";
 import { mountDiagram } from "./diagram";
+import { mountQuestions } from "./questions";
 import { mountRequirements } from "./requirements";
 import css from "./shell.css" with { type: "text" };
 import type { View, ViewContext } from "./types";
@@ -51,6 +52,8 @@ const mounted: Record<ViewName, View> = {
   requirements: mountRequirements(roots.requirements, context),
 };
 
+const questions = mountQuestions(app, post, context.openLink);
+
 const errorBox = app.querySelector("[data-error]") as HTMLElement;
 const showError = (message: string | null) => {
   errorBox.hidden = message === null;
@@ -99,6 +102,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   } else if (message.type === "error") {
     showError(message.message);
   } else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal });
+  else if (message.type === "questions") questions.update(message.round);
 });
 
 navigate(current);

@@ -1,5 +1,6 @@
 import type { Raw } from "../../../src/core/schema";
 import type { AgentAction, ToHost } from "../protocol";
+import type { QuestionAction } from "./question-state";
 import { safeLink } from "../../../src/core/links";
 
 export type Parsed = { ok: true; message: ToHost } | { ok: false; reason: string };
@@ -34,6 +35,27 @@ function parseAction(value: unknown): AgentAction | string {
   }
 }
 
+const BARE_QUESTION_ACTIONS: readonly string[] = ["next", "skip", "back", "openSummary", "closeQuestions", "cancelSkipAll", "confirmSkipAll", "send", "minimize", "restore"];
+const TEXT_LIMIT = 100_000;
+
+function parseQuestionAction(value: unknown): QuestionAction | string {
+  if (typeof value !== "object" || value === null) return "questionAction needs an action";
+  const raw = value as Raw;
+  const type = raw["type"];
+  if (typeof type !== "string") return "questionAction needs an action type";
+  if (BARE_QUESTION_ACTIONS.includes(type)) return { type } as QuestionAction;
+  switch (type) {
+    case "toggleOption":
+      return Number.isInteger(raw["option"]) ? { type, option: raw["option"] as number } : "toggleOption needs an option index";
+    case "openQuestion":
+      return Number.isInteger(raw["index"]) ? { type, index: raw["index"] as number } : "openQuestion needs a question index";
+    case "setText":
+      return typeof raw["text"] === "string" && raw["text"].length <= TEXT_LIMIT ? { type, text: raw["text"] } : "setText needs a text";
+    default:
+      return `unknown question action "${type}"`;
+  }
+}
+
 /** Checks a message from the webview, which is untrusted input, against the `ToHost` contract. */
 export function parseToHost(value: unknown): Parsed {
   if (typeof value !== "object" || value === null) return bad("not a message");
@@ -43,6 +65,7 @@ export function parseToHost(value: unknown): Parsed {
   const id = typeof raw["id"] === "string" && ID.test(raw["id"]) ? raw["id"] : undefined;
   switch (type) {
     case "ready":
+    case "writeDesignRequest":
       return { ok: true, message: { type } };
     case "launch": {
       const action = parseAction(raw["action"]);
@@ -63,6 +86,11 @@ export function parseToHost(value: unknown): Parsed {
       return { ok: true, message: { type, id, how: "fix-code", ...(raw["option"] !== undefined ? { option: raw["option"] as number } : {}), ...(raw["note"] !== undefined ? { note: raw["note"] as string } : {}) } };
     case "driftBlocked":
       return id === undefined ? bad("driftBlocked needs a valid Drift ID") : { ok: true, message: { type, id } };
+    case "questionAction": {
+      if (!Number.isInteger(raw["round"])) return bad("questionAction needs a round");
+      const action = parseQuestionAction(raw["action"]);
+      return typeof action === "string" ? bad(action) : { ok: true, message: { type, round: raw["round"] as number, action } };
+    }
     case "openLink": {
       const url = typeof raw["url"] === "string" ? safeLink(raw["url"]) : null;
       return url === null ? bad("openLink needs an http or https address") : { ok: true, message: { type, url } };

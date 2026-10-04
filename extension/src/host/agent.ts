@@ -5,7 +5,7 @@ import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
 import { QUESTION_ENDPOINT_ENV } from "../../../src/core/question-channel";
-import { isCursor } from "./cursor";
+import { type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, toClipboard, withTramaPath } from "./cursor";
 import { withdrawWaiting } from "./announcements";
 import { agentCommandLine, shellFamily } from "./quote";
 import { questionEndpoint } from "./questions";
@@ -26,29 +26,42 @@ export const configuredSkillsDir = (): string => settings().get<string>("skillsD
 /** The language the agent writes in (`trama.language`), as typed; empty when none is chosen. Read at every launch. */
 export const configuredLanguage = (): string => settings().get<string>("language", "").trim();
 
-/** Where the buttons send their prompt: a terminal command, or the agent chat built into the editor. */
-export const agentLauncher = (): "terminal" | "chat" => (settings().get<string>("agentLauncher", "terminal") === "chat" ? "chat" : "terminal");
+/**
+ * The agent that asked a question round, when it can be told: Cursor's chat agent, or the program of the agent command
+ * for one started in a terminal of Trama.
+ */
+export function agentName(context: { fromTramaTerminal?: boolean; fromCursorChat?: boolean }): string | null {
+  if (context.fromCursorChat === true) return "Cursor";
+  if (context.fromTramaTerminal !== true) return null;
+  const program = configuredAgentCommand().split(/\s+/)[0] ?? "";
+  return program === "" ? null : basename(program);
+}
+
+/** Where the buttons send their prompt: `auto` (the default) is the chat in Cursor and the terminal elsewhere; `terminal` or `chat` chosen by hand always win. */
+export function agentLauncher(): "terminal" | "chat" {
+  const chosen = settings().get<string>("agentLauncher", "auto");
+  if (chosen === "terminal" || chosen === "chat") return chosen;
+  return isCursor() ? "chat" : "terminal";
+}
 
 /** Whether a launch can happen without asking the developer anything first (used to decide on automatic scans). */
 export const agentReady = (): boolean => agentLauncher() === "chat" || configuredAgentCommand() !== "";
 
 /**
- * Starts a new agent-mode conversation in the editor's chat with `prompt` and sends it. `workbench.action.chat.open`
- * with `{ query, mode }` is how VS Code's own actions do it, but it is not a documented API, and Cursor's agent is a
- * different panel: in those cases, or if the command fails, the prompt goes to the clipboard instead.
+ * Starts a new agent-mode conversation in the editor's chat with `prompt`. Cursor has its own chain of steps. Elsewhere
+ * `workbench.action.chat.open` with `{ query, mode }` is how VS Code's own actions do it, but it is not a documented
+ * API: if it fails, the prompt goes to the clipboard instead.
  */
-async function openChat(prompt: string): Promise<void> {
-  if (!isCursor()) {
-    try {
-      await vscode.commands.executeCommand("workbench.action.chat.newChat");
-      await vscode.commands.executeCommand("workbench.action.chat.open", { query: prompt, mode: "agent" });
-      return;
-    } catch {
-      // Chat missing or disabled in this editor: the clipboard below still gets the prompt to the agent.
-    }
+async function openChat(root: string, prompt: string, selfSendingOnly: boolean): Promise<ChatDelivery> {
+  if (isCursor()) return openCursorChat(root, withTramaPath(prompt), selfSendingOnly);
+  try {
+    await vscode.commands.executeCommand("workbench.action.chat.newChat");
+    await vscode.commands.executeCommand("workbench.action.chat.open", { query: prompt, mode: "agent" });
+    return "sent";
+  } catch {
+    // Chat missing or disabled in this editor: the clipboard still gets the prompt to the agent.
+    return toClipboard(prompt);
   }
-  await vscode.env.clipboard.writeText(prompt);
-  void vscode.window.showInformationMessage("Trama: the prompt is on the clipboard. Paste it into your agent chat.");
 }
 
 /**
@@ -77,7 +90,11 @@ function releaseTakenTasks(root: string): void {
   }
 }
 
-/** Follows the commands that start and end in the terminal Trama launches agents in. */
+/**
+ * Follows the commands that start and end in the terminal Trama launches agents in, and the turns of Trama's
+ * conversations in Cursor's chat: the end of either releases every Task the agent has taken in the project (one agent
+ * at a time is assumed, so a turn ending in the chat also frees a terminal agent's Tasks).
+ */
 export function watchAgentTerminal(): vscode.Disposable {
   return vscode.Disposable.from(
     vscode.window.onDidStartTerminalShellExecution((e) => {
@@ -94,13 +111,16 @@ export function watchAgentTerminal(): vscode.Disposable {
       // without a command line, changes nothing here.
       if (!isTypedCommand(e.terminal, e.execution.commandLine.value)) return;
       if (e.terminal === lastTerminal) commandRunning = false;
-      withdrawWaiting(info.root, info.id);
+      withdrawWaiting(info.root, (a) => a.terminal === info.id);
       endNotices.born(basename(info.root), commandOutcome(e.exitCode), () => boardCounts(projectAt(info.root)));
+    }),
+    onCursorChatEvent((e) => {
+      if (e.event !== "PROMPT_SUBMITTED") releaseTakenTasks(e.root);
     }),
     vscode.window.onDidCloseTerminal((t) => {
       const info = agentTerminals.get(t);
       agentTerminals.delete(t);
-      if (info !== undefined) withdrawWaiting(info.root, info.id);
+      if (info !== undefined) withdrawWaiting(info.root, (a) => a.terminal === info.id);
       if (t === lastTerminal) {
         lastTerminal = undefined;
         commandRunning = false;
@@ -124,15 +144,24 @@ function announceDesignRequest(root: string, title: string, terminal: string): v
   }
 }
 
+/** How an instruction left Trama: one of the chat's deliveries, or typed into the agent terminal. */
+export type Launch = ChatDelivery | "terminal";
+
+/** The instruction really left Trama: neither cancelled nor refused to a chat that had to send by itself. */
+export const launched = (launch: Launch | undefined): boolean => launch !== undefined && launch !== "not-sent";
+
 /**
- * Sends `prompt` to the developer's agent: the editor's chat when `trama.agentLauncher` is "chat", otherwise the
+ * Sends `prompt` to the developer's agent: the editor's chat when the launcher is the chat, otherwise the
  * agent command in the "Trama agent" terminal (a new one while the last is busy), asking for the command first if none is set.
  * `announceProposal` is the title of the Proposal a design request will make: with the terminal launcher it is announced
  * once the instruction is sent, so the Board shows its ghost at once. The chat has no end to follow, so it announces nothing.
+ * `selfSendingOnly` (the automatic scan) lets Cursor's chat use only a new chat that sends by itself.
+ * Returns how the chat received the instruction, "terminal" once it is typed into the terminal, or undefined when the
+ * developer cancelled the prompt for the agent command.
  */
-export async function launchAgent(root: string, instruction: string, announceProposal?: string): Promise<void> {
+export async function launchAgent(root: string, instruction: string, announceProposal?: string, selfSendingOnly = false): Promise<Launch | undefined> {
   const prompt = withLanguage(instruction, configuredLanguage());
-  if (agentLauncher() === "chat") return openChat(prompt);
+  if (agentLauncher() === "chat") return openChat(root, prompt, selfSendingOnly);
   let template = configuredAgentCommand();
   if (template === "") {
     const entered = await vscode.window.showInputBox({
@@ -142,7 +171,7 @@ export async function launchAgent(root: string, instruction: string, announcePro
       ignoreFocusOut: true,
       validateInput: (value) => (value.trim() === "" ? "Enter the command that starts your agent" : undefined),
     });
-    if (entered === undefined) return;
+    if (entered === undefined) return undefined;
     template = entered.trim();
     await settings().update("agentCommand", template, vscode.ConfigurationTarget.Global);
   }
@@ -166,4 +195,5 @@ export async function launchAgent(root: string, instruction: string, announcePro
   lastQuestionEndpoint = endpoint;
   commandRunning = true;
   if (announceProposal !== undefined) announceDesignRequest(root, announceProposal, terminalId);
+  return "terminal";
 }

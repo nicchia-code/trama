@@ -176,6 +176,7 @@ base:
   checkout/refund.md: new
 delete:
   - checkout/legacy.md
+request: 2026-10-04T19-05-12 # optional: the written design request it was born from; kept after the request is consumed
 ---
 # Refunds
 
@@ -194,6 +195,7 @@ Written by the developer on rejection, only when they gave some.
 - **Approving** checks that every required Proposal is approved and that the Proposal is not stale, validates the Model and its Requirements with the Proposal applied, copies the new files into `model/` and `requirements/`, removes the `delete` entries, sets `status: approved` and regenerates the `trama-req-*` skills. The extension scans the affected Features afterwards, except for `kind: import` Proposals, whose Model already matches the code (ADR 0008).
 - **Rejecting** sets `status: rejected` and appends `## Feedback` when the developer gave feedback; it is optional, and an empty or blank one adds nothing. The agent answers with a new Proposal.
 - **Discarding** a draft the agent never finished sets `status: discarded`; no feedback is written. Only drafts can be discarded.
+- **Bound to a written design request**: `request` names the request the agent opened the Proposal for (`trama proposal new --request <id>`); only the first Proposal of a design is bound. Handing it over deletes the request file. Proposals written before the field existed have none.
 - Approved, rejected and discarded Proposals stay on disk as history.
 
 ## Element references
@@ -232,7 +234,7 @@ What to do, in prose.
 - A Task that is not technical references at least one Model element in `refs`, and may add Requirements. A Technical Task references no Model element; it may reference Requirements (for example `requirements/ui#General` for adopting a theme).
 - The board's **To decide** column is not a Task column: it shows open Proposals (never drafts) and open Drifts.
 - `proposal` is set when the agent files the Task after that Proposal was approved (the Scan is told which Proposal). It must name an existing Proposal, in any status. Tasks written before the field existed, Tasks of a Scan started by hand, Technical Tasks and Tasks that fix a Drift carry none.
-- `agent` is `true` while the agent has taken the Task: it takes it by moving it to `doing` with `trama task move` in the terminal Trama started (`TRAMA_AGENT` set). While it is taken the developer cannot move it, and the Board has no way to move a Task; `trama task take-back` clears the mark and leaves the Task in `doing`. When the agent terminal's command ends, every Task that carries the mark goes back to `todo` with the mark cleared, so it can be run again. Tasks written before the field existed are free.
+- `agent` is `true` while the agent has taken the Task: it takes it by moving it to `doing` with `trama task move` in the terminal Trama started (`TRAMA_AGENT` set) or in Cursor's chat (`CURSOR_AGENT=1`). While it is taken the developer cannot move it, and the Board has no way to move a Task; `trama task take-back` clears the mark and leaves the Task in `doing`. When the agent terminal's command ends, or a turn of a Trama conversation in Cursor's chat ends or that conversation is closed, every Task of the project that carries the mark goes back to `todo` with the mark cleared, so it can be run again. Tasks written before the field existed are free.
 - The Tasks linked to one Proposal form a **design**. The Board shows a design of two or more Tasks as one card, closed at first, standing in the column its Tasks add up to: To do while all are in To do, Done when all are done, In progress in every other case. A design of one Task, and Tasks with no `proposal`, are plain cards.
 
 ## Drift
@@ -294,6 +296,7 @@ kind: proposal          # proposal | task | drift
 source: agent           # agent | request (announced by Trama when a design request was sent)
 proposal: "0021"        # the Draft bound to it; absent until the Draft exists
 terminal: ab12cd        # the agent terminal it belongs to; none when there is none
+chat: cursor            # only when Cursor's chat agent announced it; absent otherwise
 created: 2026-01-01T12:00:00.000Z
 touched: 2026-01-01T12:03:10.000Z
 ---
@@ -304,7 +307,18 @@ touched: 2026-01-01T12:03:10.000Z
 - The title is the H1. Once a Draft is bound to it, the ghost shows the Draft's own title instead.
 - An announcement with no Draft is **Preparing**, with one it is **Writing**; both are shown as ghosts. A file that cannot be read is skipped, not reported.
 - `terminal` is the ID (six lowercase letters and digits) the extension gives each agent terminal it starts, in the `TRAMA_TERMINAL` environment variable. Only that terminal's command ending or closing withdraws the announcement; without a terminal (announced from the chat or by an agent Trama did not start, or written before the field existed, which has no `terminal` line) only the quiet period and the editor starting up do.
+- `chat` is `cursor` when the announcement was made by Cursor's chat agent: the command ran with `CURSOR_AGENT=1` and without `TRAMA_TERMINAL`. It is written only then, so an announcement with `chat` has no `terminal`; announcements written before the field existed have no `chat` line and read as before. Such an announcement belongs to the project: an interrupted or failed turn of a Trama conversation in Cursor's chat for that project withdraws it with the notice, closing such a conversation withdraws it with none, and a turn that ends normally leaves it to the card's arrival or the quiet period.
 - The folder holds a `.gitignore` that ignores everything in it, written with the first announcement, so announcements are never versioned.
+
+## Written design request
+
+`requests/<id>.md`: a design request the developer writes in the editor. **Design…** creates it empty and the extension saves it while the developer writes; **Send to agent**, or closing its last tab, sends it to the agent. It is temporary, not project information: it lasts until the Proposal bound to it is handed over.
+
+- The ID is the file name: the local date and time of creation with seconds, `YYYY-MM-DDTHH-MM-SS` (for example `2026-10-04T19-05-12`), with the suffix `-2`, `-3`, … up to the first free one when that file already exists.
+- The file holds only the developer's Markdown, exactly as written: no front matter, and it may have no title. Its title, used only for the ghost of the terminal launcher, is the first level-one `#` heading outside code blocks, or else the first non-empty line.
+- Which requests were sent is not in the file nor under `.trama/`: the extension keeps the sent IDs in its workspace state, which survives restarts, and drops an ID whose file is gone. A file whose ID is not in that list is still being written. A request is sent at most once; closing a request never sent with an empty text deletes it.
+- The successful hand-over of the first Proposal bound to it (`request` in `proposal.md`) deletes it; a file deleted by hand is simply gone. Either way the extension closes its tab when it has no unsaved changes.
+- The folder holds a `.gitignore` that ignores everything in it, written with the first request, so requests are never versioned.
 
 ## Requirements
 

@@ -338,7 +338,7 @@ describe("Tasks and Drifts", () => {
     expect(cli("task", "next", "--proposal", prop.id).out).toBe(`Next Task in Proposal ${prop.id}: ${blockedFirst} Return flow`);
   });
 
-  test("the command line takes the Task only inside the terminal Trama started", async () => {
+  test("the command line takes the Task only inside the terminal Trama started or Cursor's chat", async () => {
     const run2 = (env: Record<string, string>, ...args: string[]) => run(["--root", dir, "task", "move", ...args], process.cwd(), env);
     const [a, b, c] = [1, 2, 3].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string];
 
@@ -353,6 +353,11 @@ describe("Tasks and Drifts", () => {
 
     run2({ TRAMA_AGENT: "1" }, c, "doing");
     expect(getTask(p, c).data.agent).toBe(true);
+
+    run2({ CURSOR_AGENT: "0" }, a, "todo");
+    run2({ CURSOR_AGENT: "1" }, a, "doing");
+    expect(getTask(p, a).data.agent).toBe(true);
+    expect(() => run2({}, a, "done")).toThrow(/agent is working on Task/);
   });
 
   test("the textual board shows a design once with its Tasks, while task list stays flat", () => {
@@ -666,8 +671,10 @@ describe("CLI", () => {
     expect(() => cli("machine", "ghost")).toThrow(/Unknown Machine "ghost"/);
   });
 
-  test("an agent (TRAMA_AGENT set) cannot approve, reject or resolve; the developer can", () => {
+  test("an agent (TRAMA_AGENT, or CURSOR_AGENT=1 in Cursor's chat) cannot approve, reject or resolve; the developer can", () => {
     const agent = { TRAMA_AGENT: "1" };
+    expect(() => run(["--root", dir, "task", "take-back", "1"], dir, { CURSOR_AGENT: "1" })).toThrow(/developer's decision.*CURSOR_AGENT/);
+    expect(() => run(["--root", dir, "proposal", "discard", "1"], dir, { CURSOR_AGENT: "1" })).toThrow(/developer's decision/);
     const lost = newProposal(p, "Lost");
     editOrder(lost.id, (t) => t.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
     handOver(p, lost.id);

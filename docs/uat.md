@@ -70,7 +70,7 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 ### A1. First open
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Four commands: **Trama: Open**, **Trama: Initialize Project**, **Trama: Design with Agent…**, **Trama: Scan System** | ☐ |
+| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Initialize Project**, **Trama: Quick Design Request…**, **Trama: Design…**, **Trama: Scan System**. **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
 | 2 | Run **Trama: Open** | One new editor tab titled `Trama`, in the editor area | ☐ |
 | 3 | Look at the tab header inside the panel | Two tabs: **Diagram** (selected, underlined) and **Board** with a grey badge `4` | ☐ |
 | 4 | Look under the tabs | No red banner | ☐ |
@@ -110,7 +110,7 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 | 2 | Look at the box on the right | `Checkout` with the text `3 machines · ⚠ 2 drifts inside`, a **red** outline, and a small ↗ icon at its right edge | ☐ |
 | 3 | Look at the edges | Four grey edges Actor → Checkout, labelled `1` (Courier), `3` (Stripe), `3` (User), `1` (Warehouse) | ☐ |
 | 4 | Look under Checkout | Two red dashed pill nodes `Drift 0001` and `Drift 0002`, each with a dashed red edge going up to Checkout | ☐ |
-| 5 | Look at the toolbar | Left: `System`. Right: `Proposal` selector, buttons `−`, `+`, `Fit`, `Design…`, `Scan` | ☐ |
+| 5 | Look at the toolbar | Left: `System`. Right: `Proposal` selector, buttons `−`, `+`, `Fit`, `Quick request…`, `Design…`, `Scan`. Hovering `Quick request…` shows `Ask an agent to design a change in one line`, hovering `Design…` shows `Write a design request in Markdown and send it to an agent` | ☐ |
 | 6 | Look at the panel | `SYSTEM`, `Shop`, `An online shop selling printed books to private customers.`, then `FEATURES` with the link `Checkout` and `3 machines` under it | ☐ |
 | 7 | Look at the bottom-left legend | `Legend` (collapsible, open) with six entries: Proposal adds it, Proposal removes it, Proposal changes it, Drift, Initial State, Final State | ☐ |
 | 8 | Click the `Legend` header | It collapses to its title; click again to expand | ☐ |
@@ -313,7 +313,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 ### E1. Layout
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Click the **Board** tab | Toolbar: **Run all To do** (blue), **Scan System**, **Design…** | ☐ |
+| 1 | Click the **Board** tab | Toolbar: **Run all To do** (blue), **Scan System**, **Quick request…**, **Design…**, with the same tooltips as in B1.5 | ☐ |
 | 2 | Look at the columns | `TO DECIDE 4`, `TO DO 2`, `IN PROGRESS 1`, `DONE 1`, each with a count badge | ☐ |
 
 ### E2. To decide
@@ -404,7 +404,7 @@ Needs the agent of E12 for row 6 (`trama.agentCommand` as `bash -c "sleep 600" {
 Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": "bash -c \\"sleep 600\\" {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, and reload the window so the extension reads the settings. `j` below is the verification shell's.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Board: **Design…**, type `Add refunds after pickup`, Enter. Note the To decide count and the number on the Board tab | Within about a second a dashed, translucent skeleton appears in To decide after the last real Proposal and before the first Drift: kind `Proposal`, title `Add refunds after pickup`, the line `Preparing`, and a shimmer on its text lines | ☐ |
+| 1 | Board: **Quick request…**, type `Add refunds after pickup`, Enter. Note the To decide count and the number on the Board tab | Within about a second a dashed, translucent skeleton appears in To decide after the last real Proposal and before the first Drift: kind `Proposal`, title `Add refunds after pickup`, the line `Preparing`, and a shimmer on its text lines | ☐ |
 | 2 | Look at the To decide count and the number on the Board tab again | Both are as in row 1: a ghost is not counted | ☐ |
 | 3 | Press Tab through the Board, then click the ghost | Focus never lands on it, the click does nothing, it has no buttons or links and cannot be dragged. Its accessible name is `Proposal the agent is creating, preparing: Add refunds after pickup` | ☐ |
 | 4 | `ls -A $D/announcements` and `cat $D/announcements/*.md`, then `T=$(sed -n 's/^terminal: //p' $D/announcements/*.md)` | `.gitignore` and one `<id>.md` with `kind: proposal`, `source: request`, a `terminal:` line with six lowercase letters and digits (kept in `$T`) and the H1 `Add refunds after pickup`; `cat $D/announcements/.gitignore` prints `*` | ☐ |
@@ -419,7 +419,7 @@ Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": 
 | 13 | `j proposal new "Never finished"`, read the ghost, then `j proposal discard <ID it printed>` | A `Writing` ghost titled `Never finished`; after the discard it disappears and **no** notice is shown | ☐ |
 | 14 | `j announce task "Gone quiet"`, then edit its file under `$D/announcements` and set `touched` to a time 20 minutes ago, save | Within about 30 seconds the ghost disappears and the notice `The agent finished without delivering Task Gone quiet.` appears; the `Drift` ghost of row 9, which also belongs to no terminal, goes with it, with its own notice | ☐ |
 | 15 | `j announce task "Before reload"`, then Developer: Reload Window and open the Board | The ghost is not there and no notice is shown: leftovers are withdrawn at startup | ☐ |
-| 16 | Set `printf '{"trama.agentLauncher": "chat", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, reload, **Design…** with any text | The prompt goes to the chat (or the clipboard) and **no** ghost appears | ☐ |
+| 16 | Set `printf '{"trama.agentLauncher": "chat", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, reload, **Quick request…** with any text | The prompt goes to the chat (or the clipboard) and **no** ghost appears | ☐ |
 | 17 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with the chat launcher the ghost starts with the Draft | ☐ |
 | 18 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
 | 19 | Restore S2. ↻, then `j task move 1 doing` | The card moves to In progress without ever looking busy; no dashed copy of it appears in In progress at any moment | ☐ |
@@ -563,25 +563,51 @@ Each launch sends one command to the terminal named **Trama agent** (cwd = the d
 | H2 | Diagram, System level: **Scan** | `Use the trama-scan skill on the whole System.` | ☐ |
 | H3 | Diagram, Feature level `checkout`: **Scan** | ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
 | H4 | Diagram, Machine level `order`: **Scan** | Same as H3 (the current Feature) | ☐ |
-| H5 | Board: **Design…** | Input box titled `Design with Agent`, prompt `What should the agent design or change in the Model?`, placeholder `Add a cancelled state to orders…` | ☐ |
+| H5 | Board: **Quick request…** | Input box titled `Quick Design Request`, prompt `What should the agent design or change in the Model?`, placeholder `Add a cancelled state to orders…` | ☐ |
 | H6 | In H5 press Enter with the box empty | `Describe what to design` | ☐ |
 | H7 | In H5 type `Add refunds with $HOME and 'quotes'`, Enter | The printed line is exactly `Use the trama-design skill. Add refunds with $HOME and 'quotes'` (the `$HOME` is **not** expanded, the quotes survive) | ☐ |
-| H8 | Click **Design…** and press Esc | Nothing is printed | ☐ |
-| H9 | Diagram toolbar **Design…** | Same input box and result as H5–H7 | ☐ |
+| H8 | Click **Quick request…** and press Esc | Nothing is printed | ☐ |
+| H9 | Diagram toolbar **Quick request…**, then the Requirements toolbar **Quick request…** | Same input box and result as H5–H7 | ☐ |
 | H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
 | H11 | Board: **Run all To do** | ``Use the trama-implement skill on every Task in the "todo" column. Take each one from `trama task next`, one after the other, until it says there is none.`` | ☐ |
 | H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task take-back 5` and `j task take-back 7`, then look at **Run all To do** and at the **Run this design** button of `Proposal 0003` | **Run all To do** is **disabled** with the tooltip and accessible description `All the Tasks in To do are blocked: Task 0001 is blocked by Drift 0006`; **Run this design** is disabled with `All the Tasks of this design in To do are blocked: Task 0006 is blocked by Drift 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run all To do** | ☐ |
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
-| H15 | Palette: **Trama: Design with Agent…** | Same input box as H5 | ☐ |
+| H15 | Palette: **Trama: Quick Design Request…** | Same input box as H5 | ☐ |
 | H16 | After H1 to H15, open the terminal dropdown | **One** terminal named `Trama agent`: each of these launches ended before the next, so every launch reused it. If an earlier command is still running (for example an agent), the next launch opens a new terminal instead | ☐ |
 | H17 | Set `printf '{"trama.agentCommand": "echo"}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (no `{prompt}`), click **Scan System** | The prompt is appended: `Use the trama-scan skill on the whole System.` | ☐ |
 | H18 | Set `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, click **Scan System** | An input box `Trama: agent command`, placeholder `claude {prompt}    or    codex {prompt}`. With empty text: `Enter the command that starts your agent`. **Press Esc**: nothing is launched. (Typing a command would save it in your *user* settings.) | ☐ |
 | H19 | Restore S2. Set `printf '{"trama.agentCommand": "echo {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, approve Proposal 0001 | The Proposal is approved (G1.1, G1.4–G1.8 hold) but **no** command is sent to the terminal | ☐ |
 | H20 | Restore S2 (settings back to `echo {prompt}`) | | ☐ |
-| H21 | Set `printf '{"trama.agentCommand": "echo {prompt}", "trama.autoScan": false, "trama.language": " Italian "}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, click **Scan System** | One line, ending `Use the trama-scan skill on the whole System. Write everything you generate in Italian, except code, which always stays in English.` (the typed text is trimmed). The same ending appears after **Run all To do**, **Run** on a Task, **Design…** (after the request) and **Rework** of a stale Proposal | ☐ |
+| H21 | Set `printf '{"trama.agentCommand": "echo {prompt}", "trama.autoScan": false, "trama.language": " Italian "}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, click **Scan System** | One line, ending `Use the trama-scan skill on the whole System. Write everything you generate in Italian, except code, which always stays in English.` (the typed text is trimmed). The same ending appears after **Run all To do**, **Run** on a Task, **Quick request…** (after the request), **Send to agent** on a written design request and **Rework** of a stale Proposal | ☐ |
 | H22 | Change `trama.language` to `"   "` (spaces only), ↻, click **Scan System** | The line is exactly `Use the trama-scan skill on the whole System.`, with nothing about language | ☐ |
 | H23 | Restore S2 (settings back to `echo {prompt}`, no `trama.language`) | | ☐ |
+
+### H32–H50. Written design requests
+
+Echo mode (S2). In the verification shell, `ls -A $D/requests` lists the requests. A request ID is the local date and time it was created, like `2026-10-04T19-05-12`.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| H32 | Board: **Design…** | A new tab `<id>.md`, language Markdown, not in preview (title not italic), completely empty. Its editor title has a **Send to agent** button with the send icon and the tooltip `Send to agent (closing the tab sends it too)` | ☐ |
+| H33 | `ls -A $D/requests` and `cat $D/requests/.gitignore` | `.gitignore` and the empty `<id>.md` already exist; the `.gitignore` prints `*`. `git status` in the demo shows nothing under `.trama/requests/` | ☐ |
+| H34 | Switch to any other file tab, then back | **Send to agent** is shown only on the request's tab | ☐ |
+| H35 | On the empty tab, type only spaces and blank lines, then **Send to agent** | Warning `Trama: write the design request before sending it.`; nothing is printed in the terminal and the tab stays open | ☐ |
+| H36 | With `files.autoSave` set to `off`, type five lines: a code fence (three backticks), `# Not a title`, a closing code fence, `# Returns after shipping`, `Customers may send an order back.`; wait a second | The tab never stays marked as unsaved for more than a moment; `cat $D/requests/<id>.md` prints exactly the text typed | ☐ |
+| H37 | **Send to agent** | The tab closes without asking to save. The terminal prints ``Use the trama-design skill on the design request in `.trama/requests/<id>.md`. Bind the first Proposal you open to it with `--request <id>`.`` A ghost titled `Returns after shipping` appears in To decide. No other message | ☐ |
+| H38 | Reopen `<id>.md` from the Explorer, add a line, wait, then close the tab. Reopen it, delete all its text, wait and close it again | No **Send to agent** button; the line is saved by itself. Closing prints nothing, even when empty, and the file stays | ☐ |
+| H39 | Palette: **Trama: Design…**, type `Cancel orders`, wait, close the tab | Closing sends it: the same instruction for the new ID is printed and a ghost `Cancel orders` appears. Reopened from the Explorer, the file has no **Send to agent** | ☐ |
+| H40 | **Design…**, then close the empty tab at once | No message, nothing printed; the new file is gone from `$D/requests` | ☐ |
+| H41 | Set `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (no agent command), ↻. **Design…**, type `Refunds`, **Send to agent**, and press Esc in the `Trama: agent command` box | Nothing is printed; the tab stays open with **Send to agent** | ☐ |
+| H42 | Close the tab and press Esc again in the box | The tab is closed and nothing is printed; the file stays. Reopened from the Explorer it has **Send to agent**. Restore S2 | ☐ |
+| H43 | Run **Developer: Reload Window** with the H42 request open | Nothing is printed. After the reload the tab is back with **Send to agent**; the H37 request, reopened, still has none | ☐ |
+| H44 | **Send to agent** on the H42 request, then reopen it and close it | One instruction is printed for the send, none for the close | ☐ |
+| H45 | `j proposal new "Lost" --request 2026-01-01T00-00-00` | `Created Draft Proposal …` followed by `Design request 2026-01-01T00-00-00 was not found; the Proposal is not bound to any request.` The Proposal file has no `request` line | ☐ |
+| H46 | Reopen the H37 request. `j proposal new "Returns" --request <id>`; note `<P>`. In `proposal.md`, look at the front matter | `request: <id>` | ☐ |
+| H47 | Make `<P>` invalid (`j proposal edit <P> checkout/order.md`, point a Transition at a missing State) and `j proposal submit <P>` | Refused; `$D/requests/<id>.md` still exists and its tab is still open | ☐ |
+| H48 | Fix the file and `j proposal submit <P>` again | Output `Submitted Proposal <P> for review` and `Deleted design request <id>: it is now consumed.`; the file is gone and its tab closes. `request: <id>` stays in `proposal.md` | ☐ |
+| H49 | Reopen the H39 request (its ID is `<id2>`), `chmod a-w $D/requests/<id2>.md`, add a line (the editor cannot save it), then `rm $D/requests/<id2>.md`. Then **Design…**, type `Gone`, wait and `rm` that file | The first tab stays open, marked as deleted, with the unsaved change, and the file is not written back. The second tab closes; nothing is printed for either | ☐ |
+| H50 | With the Trama panel closed, repeat the second half of H49 | The tab still closes | ☐ |
 
 ### H24–H31. Away notifications (ntfy)
 
@@ -591,7 +617,7 @@ Each launch sends one command to the terminal named **Trama agent** (cwd = the d
 |---|---|---|---|
 | H24 | Start the stand-in server. Add `"trama.ntfy": "http://127.0.0.1:8099/trama-test"` to the user settings, with S2 in the demo settings, ↻, click **Scan System** and wait | About 10 seconds after the echo command ends, the server prints **one** `POST /trama-test` with title `Trama: the agent stopped`, priority `3`, tags `white_check_mark` and a body of five lines: `shop`, `The agent finished.`, `To decide: 4`, `To do: 2`, `In progress: 1` | ☐ |
 | H25 | Click **Scan System** twice, the second time less than 10 seconds after the first command ended | The server prints nothing for the first end: the second instruction took it back. After the second command ends, **one** request arrives | ☐ |
-| H26 | In the **Trama agent** terminal run `trama ask < round.json` and leave it unanswered | Ten seconds after the Quick Pick opens, **one** request arrives: title `Trama: the agent asks`, priority `4`, tags `question`, body lines `shop`, `Question 1 of 2: <text>` and one `- <label>` per option, with no descriptions and no `(recommended)` | ☐ |
+| H26 | In the **Trama agent** terminal run `trama ask < round.json` and leave it unanswered | Ten seconds after the overlay opens, **one** request arrives: title `Trama: the agent asks`, priority `4`, tags `question`, body lines `shop`, `Question 1 of 2: <text>` and one `- <label>` per option, with no descriptions and no `(recommended)` | ☐ |
 | H27 | Repeat H26. Answer the first question after 5 seconds and leave the second | The request arrives 10 seconds after the round opened, not after the answer, and names `Question 2 of 2` | ☐ |
 | H28 | Repeat H26 and answer or skip every question within 10 seconds. Then run `trama ask --root /tmp/trama-demo/shop < round.json` from the verification shell, outside the Trama terminal, and leave it for 20 seconds | No request for either: the first round closed in time, the second does not come from a terminal Trama started | ☐ |
 | H29 | Set `"trama.ntfy": "bad topic"` in the user settings, click **Scan System** and wait | No request. After about 10 seconds a warning `Trama could not send the ntfy notification: the setting is not a topic name or an http(s) URL. Check the trama.ntfy setting and your connection.`, with no buttons. The warning does not show again for the next notice | ☐ |
@@ -614,7 +640,7 @@ Switch modes with the script, from the repo (it works from any shell, fish inclu
 | I5 | Let the scan finish. In the verification shell: `j board` | Tasks 0005 to 0008 were created (about four, one per Machine or group of States; the demo has no code, so everything not covered by Tasks 0001 to 0004 is missing) and **no Drift**. **Proposals 0001 and 0002 are still open**: the agent must not have run `proposal approve`, `proposal reject` or `drift resolve`. `j validate` is still valid and `.trama/model/` is unchanged. Ran against a real omp: passed | ☐ |
 | I6 | While the scan runs watch the board | The new Tasks appear in To do by themselves while the agent works (seen: 2 to 5 cards after about 27 s, 6 after 33 s). Ran against a real omp: passed | ☐ |
 | I7 | While omp is still running in the terminal, click **Scan System** again | A **new** terminal named `Trama agent` opens and runs the command there; the running omp receives nothing. (Before this was fixed the command line was typed into omp as a message.) Once every command has finished, the next launch reuses the last terminal instead of opening another. Reproduced the old bug twice and verified the fix with a slow command; not yet repeated with omp itself | ☐ |
-| I8 | Quit omp. **Design…** with `Orders can also be returned` | omp reads the `trama-design` skill and explores the Model. Because Proposal 0001 already covers part of this, it asks you with a menu (options such as replacing or extending 0001) and **waits for your answer**. Pick an option; omp then writes a Proposal that appears in To decide as soon as the file exists, with its changes listed. Ran against a real omp as far as the question; the answer and the new Proposal still need a human | ☐ |
+| I8 | Quit omp. **Quick request…** with `Orders can also be returned` | omp reads the `trama-design` skill and explores the Model. Because Proposal 0001 already covers part of this, it asks you with a menu (options such as replacing or extending 0001) and **waits for your answer**. Pick an option; omp then writes a Proposal that appears in To decide as soon as the file exists, with its changes listed. Ran against a real omp as far as the question; the answer and the new Proposal still need a human | ☐ |
 | I9 | ↻ (Task 0002 must be in To do: **Run** only exists on To do cards). Quit omp, then Board: **Run** on Task 0002 | The terminal shows `… omp 'Use the trama-implement skill on Task 0002.'`. omp reads the Task (`trama task show 0002`) and moves it to In progress. The demo has no code and no stack, so it asks you what to build with and, if you do not answer, puts the Task back in To do. Nothing is written in `.trama/model/`. Ran against a real omp: passed up to that point | ☐ |
 
 ---
@@ -711,21 +737,44 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 ## P. Agent question rounds
 
-Use the [question request contract](./cli.md#question-rounds) with `trama ask --root /tmp/trama-demo/shop < round.json`. Include single-choice and multiple-choice questions, with different recommendations.
+Use the [question request contract](./cli.md#question-rounds) with `trama ask --root /tmp/trama-demo/shop < round.json`. Include single-choice and multiple-choice questions, with different recommendations, a `context` and an option with `details`. Run P1–P6e in VS Code and again in Cursor.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| P1 | Submit a valid round, then switch focus away and back | Native top-of-window Quick Pick opens without clicking a notification and remains open across focus loss. Title is `trama ask — Question <step> of <total>`; supplied text and descriptions are unchanged | ☐ |
+| P1 | With the Trama panel closed, or behind another editor tab, submit a valid round, then switch focus away and back | The panel comes to the front by itself (or opens) with the overlay over the current tab and a dimmed background; no notification has to be clicked. The header reads `Questions from the agent`, the agent's name and `Question 1 of <total>`, with **Minimize** and **Close**; focus loss leaves it open. The question, its context and the option descriptions are rendered as Markdown and unchanged | ☐ |
 | P2 | Submit a round whose later question has an out-of-range recommendation | Identified `invalid-input` error; no earlier question is presented | ☐ |
-| P3 | Accept a non-recommended choice, advance, then use Back | The preceding answer is restored rather than resetting to its recommendation; accepting a revision replaces it | ☐ |
-| P4 | Select ordinary multi-choice options and Other; accept blank text, then enter text | Blank text stays in the input with visible feedback; the completed answer contains both original selected labels and free text, without recommendation markers | ☐ |
-| P5 | Escape from free input; Escape from the question; Escape from skip confirmation | Each returns to the same question without accepting text or skipping it | ☐ |
-| P6 | Accept the first question; skip one; then Skip all | Prior accepted answer is preserved; only explicitly skipped questions have skipped entries. Result returns immediately, without Send | ☐ |
-| P7 | Start two rounds in one window; cancel the queued caller, then cancel the active caller with another round queued | Cancelling the queued caller preserves the active controls. Cancelling the active caller disposes them and opens the next FIFO round, with no orphan prompt | ☐ |
-| P8 | Leave a multi-question round at free input after one accepted answer; queue two more `trama ask` rounds; remove or rename `.trama/` in the fixture | All three return `editor-interrupted`, no answers, and the controls disappear; queued questions never appear | ☐ |
+| P3 | Choose a non-recommended option, press **Next**, then **Back** | On the first visit the recommended option was chosen; after Back the earlier choice is still there rather than the recommendation. **Back** is absent on the first question. Choosing again and **Next** replaces the answer | ☐ |
+| P4 | On a multiple-choice question press **1** and **3**, then click in **Your answer (optional)**, type a few lines and press **2** | Keys 1 and 3 tick those options; typing `2` in the text area writes the digit instead of choosing. The area grows with the text up to ten rows. On a single-choice question clicking the chosen option clears it, and **Next** is disabled with the tooltip `Choose an option or write an answer first` until there is a choice or a text | ☐ |
+| P5 | Press **Esc** on a question, on the summary and on the Skip all confirmation; press **Tab** repeatedly | Esc does nothing anywhere. Tab cycles inside the overlay (inside the confirmation while it is open) and never reaches the panel behind | ☐ |
+| P5b | Click questions in the index, then open an option's **Show details**, go to another question and back | The index highlights the current question and shows `Answered`, `Skipped` or `Missing` with an icon; its text is shortened, the full text in the tooltip. Details were closed again on the second visit | ☐ |
+| P6 | Answer the first question, **Skip** the second, then **Skip all**; first press **Go back** in the confirmation, then repeat and confirm | The confirmation reads `Skip all unanswered questions?` and `The agent will use its recommendation for each of them.`, with focus on **Go back**; Go back returns to the same question with nothing changed. Confirming returns the result at once: the first answer, and `skipped` for every other question | ☐ |
+| P6b | Answer every question but the last, open **Summary**, then **Edit** an answer and press **Next** | The summary lists each question with its answer (labels, the written text with its line breaks, `Skipped`, or `Missing` in the warning colour with an icon). **Send to agent** is disabled under `Answer or skip 1 more question(s) to send.`. After Edit, Next (labelled **Review**) returns to the summary. Answering the last question enables **Send to agent**, which returns the answers and closes the overlay | ☐ |
+| P6c | Start a round, press **Minimize**, then **Open questions** in the bar | A bar at the top of the panel reads `The agent is waiting for your answers (question <n> of <total>)`; the tabs behind are usable. Open questions brings back the same question with what was typed | ☐ |
+| P6d | With a round open, close the Trama panel, then press **Reopen** | The notice `Trama has questions from the agent waiting.` appears; Reopen opens the panel on the same question. Pressing **Close** (×) in the overlay asks the Skip all confirmation instead of closing | ☐ |
+| P6e | Narrow the panel below 600 px | The index becomes a row of numbered dots coloured by state, ending with `Σ` for the summary; each dot's tooltip names its state and question | ☐ |
+| P7 | Start two rounds in one window; cancel the queued caller, then cancel the active caller with another round queued | Cancelling the queued caller leaves the active overlay as it is. Cancelling the active caller closes it and opens the next FIFO round, with no orphan overlay | ☐ |
+| P8 | Leave a multi-question round with text typed after one confirmed answer; queue two more `trama ask` rounds; remove or rename `.trama/` in the fixture | All three return `editor-interrupted`, no answers, and the overlay disappears; queued questions never appear | ☐ |
 | P9 | Close the editor with one `trama ask` round active and another queued | Both return `editor-interrupted`; a later new request without an editor returns `unavailable`, not an interruption or skipped answers | ☐ |
 | P10 | Keep a round pending in one window while completing one in another; change focus between same-project windows | Windows remain independent. Discovery chooses the most recently focused live window; an endpoint supplied by a Trama-launched terminal takes precedence | ☐ |
 | P11 | Read the three shipped interview skills and exercise an explicit skip, initial absence and admitted-round interruption | Skips are reported as assumptions, initial absence alone permits agent-specific fallback, and interruption stops the workflow without retry or creating work from unanswered decisions | ☐ |
+
+---
+
+## R. Cursor
+
+Run R1–R4 on **every new Cursor version** before declaring it supported (smoke test). Tested: 3.22.12 and 3.23.12. Open the demo with the packaged extension in Cursor's editor window (not the Agents Window), with no `trama.agentLauncher` in any settings, and run **Trama: Update Agent Skills** once.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| R1 | `cat ~/.cursor/hooks.json` | `version: 1` and, under each of `beforeSubmitPrompt`, `stop` and `sessionEnd`, one entry `"<extension folder>/bin/trama" cursor-hook`; entries you had before are still there | ☐ |
+| R2 | Board: **Quick request…** with `Orders can also be returned` | A **new** chat opens and sends `Use the trama-design skill. Orders can also be returned` by itself, with a second line `The trama command may not be on your PATH. Before anything else run: export PATH="…/bin:$PATH"`. No «Create chat with prompt» confirmation and no clipboard notice | ☐ |
+| R3 | Let the agent ask its questions | `trama ask` brings the Trama panel forward in this window with the overlay of P1, the agent named `Cursor`. If the agent first gets `unavailable` inside Cursor's sandbox, it retries once outside it after asking permission; it keeps waiting when Cursor moves the command to the background | ☐ |
+| R4 | In the chat's terminal output, check that `trama proposal approve 1` run by the agent would be refused | The agent reports `"trama proposal approve" is the developer's decision … (CURSOR_AGENT is set)` | ☐ |
+| R5 | Interrupt the agent (Stop) while a ghost it announced is on the Board | The ghost disappears and the notice `The agent finished without delivering …` appears. Closing the chat instead removes such a ghost without a notice | ☐ |
+| R5b | Have the agent run `trama task move 1 doing`, then let its turn end | Task 0001 goes back to To do, no longer marked `(agent working)` | ☐ |
+| R6 | With `trama.ntfy` set to the stand-in of H24, let a turn end normally and wait | One request: title `Trama: the agent stopped`, priority `3`, second line `The agent stopped and may be waiting for you.`. Sending a new prompt within 10 seconds sends nothing | ☐ |
+| R7 | Approve a Proposal with `trama.autoScan` on | A new chat starts the scan by itself, with no «Create chat with prompt» confirmation and no **Scan now** notice. Only if Cursor could only fall back, the notice `Trama: Proposal <id> was approved. Scan the Features it affects?` with **Scan now** appears instead, and nothing was put on the clipboard | ☐ |
+| R8 | Set `"trama.agentLauncher": "terminal"` and `"trama.agentCommand": "agent {prompt}"`, click **Scan System** | Cursor's CLI starts in the **Trama agent** terminal, as any terminal agent | ☐ |
 
 ---
 

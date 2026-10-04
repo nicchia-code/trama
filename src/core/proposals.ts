@@ -1,12 +1,13 @@
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { bindDraft, markActivity, markDraftActivity, removeBoundTo } from "./announcements";
+import { type AgentOrigin, bindDraft, markActivity, markDraftActivity, removeBoundTo } from "./announcements";
+import { consumeRequest, requestExists } from "./design-requests";
 import { diffFile, type FileChange } from "./diff";
 import { TramaError } from "./errors";
 import { formatDiagnostic } from "./model";
 import { buildProject } from "./requirements";
 import { syncRequirementSkills } from "./requirement-skills";
-import { enumField, type Raw, stringList, stringMap } from "./schema";
+import { enumField, type Raw, stringList, stringMap, textOrNull } from "./schema";
 import {
   findNumbered,
   listNumbered,
@@ -42,6 +43,8 @@ interface ProposalData {
   /** Tracked path -> sha256 of the file, or "new", when the Proposal first touched it (on top of `requires`). */
   base: Record<string, string>;
   delete: string[];
+  /** The written design request the Proposal was born from; kept after the request is consumed. */
+  request: string | null;
 }
 
 export interface Proposal {
@@ -65,6 +68,7 @@ function parseData(raw: Raw, where: string): ProposalData {
     requires: stringList(raw, "requires", where),
     base: stringMap(raw, "base", where),
     delete: stringList(raw, "delete", where),
+    request: textOrNull(raw, "request", where),
   };
   for (const id of data.requires) if (!/^\d+$/.test(id)) throw new TramaError(`${where}: "requires" lists Proposal IDs, not "${id}"`);
   for (const path of [...Object.keys(data.base), ...data.delete]) {
@@ -86,9 +90,16 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
 }
 
 function save(proposal: Proposal) {
-  const { kind, requires, ...rest } = proposal.data;
+  const { kind, requires, request, ...rest } = proposal.data;
   // Defaults stay out of the file, so Proposals without dependencies look as they always did.
-  const data = { status: rest.status, ...(kind === "change" ? {} : { kind }), ...(requires.length === 0 ? {} : { requires }), base: rest.base, delete: rest.delete };
+  const data = {
+    status: rest.status,
+    ...(kind === "change" ? {} : { kind }),
+    ...(requires.length === 0 ? {} : { requires }),
+    base: rest.base,
+    delete: rest.delete,
+    ...(request === null ? {} : { request }),
+  };
   writeDocument(join(proposal.dir, "proposal.md"), data, proposal.body);
 }
 
@@ -104,7 +115,7 @@ export function newProposal(
   p: Project,
   title: string,
   body = "",
-  options: { requires?: string[]; kind?: ProposalKind; announcement?: string; terminal?: string } = {},
+  options: { requires?: string[]; kind?: ProposalKind; announcement?: string; origin?: AgentOrigin; request?: string } = {},
 ): Proposal {
   const requires = (options.requires ?? []).map((r) => {
     const required = getProposal(p, r);
@@ -119,11 +130,19 @@ export function newProposal(
     name,
     dir: join(proposalsDir(p), name),
     title,
-    data: { status: "draft", kind: options.kind ?? "change", requires: [...new Set(requires)], base: {}, delete: [] },
+    data: {
+      status: "draft",
+      kind: options.kind ?? "change",
+      requires: [...new Set(requires)],
+      base: {},
+      delete: [],
+      // A request that does not exist binds nothing; the Proposal is created all the same.
+      request: options.request !== undefined && requestExists(p, options.request) ? options.request : null,
+    },
     body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
   };
   save(proposal);
-  bindDraft(p, proposal, options.announcement, options.terminal);
+  bindDraft(p, proposal, options.announcement, options.origin);
   return proposal;
 }
 
@@ -371,8 +390,9 @@ export function rejectProposal(p: Project, id: string, feedback = ""): Proposal 
  * The agent hands a Draft over to the developer. Refused, leaving it a Draft, when the Model and Requirements
  * with it applied would have errors or when a file it holds was never registered. Being stale or requiring
  * Proposals that are not approved yet does not refuse it: writing cannot fix those.
+ * A successful hand-over consumes the design request the Proposal is bound to: `requestConsumed` is true when its file was deleted.
  */
-export function submitProposal(p: Project, id: string): Proposal {
+export function submitProposal(p: Project, id: string): Proposal & { requestConsumed: boolean } {
   const proposal = getProposal(p, id);
   requireStatus(proposal, "draft", "handed over");
   const problems: string[] = [];
@@ -385,7 +405,8 @@ export function submitProposal(p: Project, id: string): Proposal {
   save(proposal);
   removeBoundTo(p, proposal.id);
   markActivity(p);
-  return proposal;
+  const requestConsumed = proposal.data.request !== null && consumeRequest(p, proposal.data.request);
+  return { ...proposal, requestConsumed };
 }
 
 /** The developer gives up a Draft the agent never finished. Nothing is asked of the agent and nothing is appended. */

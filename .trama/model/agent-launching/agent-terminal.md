@@ -2,7 +2,11 @@
 
 The terminal in which Trama runs the developer's agent command. Trama remembers only the last terminal it started. Typing a new command into a terminal where an agent is still running would send the command line to the agent as a message, so a busy terminal is never reused.
 
-Only the terminal launcher moves this Machine. With the chat launcher the instruction goes to the editor's chat in a new agent conversation instead (in Cursor, or when the chat cannot be opened, it is copied to the clipboard and the developer is told to paste it), and nothing here changes.
+Questa Machine si muove solo con il launcher del terminale. Con il launcher della chat l'istruzione va invece alla chat dell'editor, in una nuova conversazione dell'agente, e qui non cambia nulla. Il launcher «auto», che è la scelta predefinita, usa la chat in Cursor e il terminale in ogni altro editor; scegliere «terminal» o «chat» a mano vince sempre.
+
+In Cursor la chat riceve l'istruzione e la invia da sola, senza che il developer debba fare altro. Se Cursor non lo permette, l'istruzione resta pronta nella chat e aspetta la conferma e l'Invio del developer, oppure, se nemmeno questo è possibile (per esempio il testo è rifiutato da Cursor), va negli appunti e il developer è avvisato di incollarla. Non c'è mai un fallimento silenzioso. Cursor ha anche un'altra interfaccia per gli agenti, la finestra degli agenti: Trama non la usa, perché il pannello vive nell'editor.
+
+Nella chat di Cursor l'agente non trova da solo il programma `trama`: l'istruzione gli dice dove si trova. Anche la scansione automatica dopo l'approvazione di una Proposal parte da sola solo se la chat invia da sola; se la consegna ripiega sulla conferma o sugli appunti, non resta aperta nessuna chat in attesa, e il developer riceve invece un avviso con un pulsante per lanciare la scansione quando vuole.
 
 Only the command Trama typed into a terminal counts as the agent's command: its start and end are what move this Machine. Another command that starts or ends in the same terminal, such as a shell start-up command or one the developer types, does not. Every terminal Trama starts has an identity of its own, so that what the agent announces from it is known to belong to it.
 
@@ -11,6 +15,8 @@ When the developer has chosen a language in the editor settings, every instructi
 A design request, which includes asking the agent to rework the stale Proposal of a Drift, announces a Proposal (see the Announcement) as soon as it is sent, because the agent will create one. This holds only with the terminal launcher: with the chat launcher nothing here changes, and the Board shows a ghost from the moment the agent starts the Proposal's Draft.
 
 Se il developer ha indicato un argomento ntfy nelle impostazioni dell'editor, la fine del comando che Trama ha scritto nel terminale fa nascere un avviso (vedi il Notice) per far sapere al developer lontano dal computer che l'agente si è fermato. Ogni istruzione che Trama scrive davvero in un terminale per l'agente annulla gli avvisi sulla fine del comando ancora in attesa.
+
+Lo stesso vale per la chat di Cursor: ogni fine di turno dell'agente di una conversazione di Trama fa nascere un avviso, e un nuovo prompt inviato a quella conversazione annulla gli avvisi sulla fine ancora in attesa (vedi l'Actor cursor-chat).
 
 ## States
 

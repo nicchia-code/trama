@@ -41,6 +41,31 @@ test("an invalid later question prevents admission and identifies the offending 
   expect(JSON.parse(cli.out)).toMatchObject({ error: { code: "invalid-input", message: expect.stringContaining("questions[1].recommended") } });
 });
 
+test("context and details are optional, reach the editor, and must not be blank when present", async () => {
+  const rich: QuestionRequest = { questions: [{ ...round().questions[0]!, context: "We ship **twice** a week.", options: [{ label: "North", description: "Through the woods", details: "- longer\n- safer" }, { label: "South", description: "Along the coast" }] }] };
+  let received: QuestionRequest | undefined;
+  server = await createQuestionServer({ project, runtimeDir: runtimeDir, handler: async (_p, request) => {
+    received = request;
+    return { status: "answered", answers: { direction: { status: "answered", selected: ["North"] } } };
+  } });
+  const cli = await runAsk(["ask", "--root", dir], tmpdir(), JSON.stringify(rich), { env: { [QUESTION_ENDPOINT_ENV]: server.endpoint } });
+  expect(cli.exit).toBe(0);
+  expect(JSON.parse(cli.out)).toEqual({ status: "answered", answers: { direction: { status: "answered", selected: ["North"] } } });
+  expect(received).toEqual(rich);
+
+  for (const [bad, field] of [
+    [{ questions: [{ ...round().questions[0]!, context: "  \n" }] }, "questions[0].context"],
+    [{ questions: [{ ...round().questions[0]!, context: 3 }] }, "questions[0].context"],
+    [{ questions: [{ ...round().questions[0]!, options: [{ label: "A", description: "a", details: " " }, { label: "B", description: "b" }] }] }, "questions[0].options[0].details"],
+  ] as const) {
+    let admitted = false;
+    const refused = await runAsk(["ask", "--root", dir], tmpdir(), JSON.stringify(bad), { handler: async () => { admitted = true; throw new Error("Invalid rounds must not be admitted"); } });
+    expect(admitted).toBe(false);
+    expect(refused.exit).toBe(2);
+    expect(JSON.parse(refused.out)).toMatchObject({ error: { code: "invalid-input", message: expect.stringContaining(field) } });
+  }
+});
+
 test("`trama ask` prints the editor's answers as JSON", async () => {
   server = await createQuestionServer({ project, runtimeDir: runtimeDir, handler: async (_p, request) => (
     { status: "answered", answers: { [request.questions[0]!.id]: { status: "answered", selected: ["South"] } } }

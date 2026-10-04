@@ -286,6 +286,17 @@ test("a round from any other agent sends nothing, however long it waits", async 
   }
 });
 
+test("a round from Cursor's chat agent gets the same notice", async () => {
+  const t = harness();
+  const p = presenter();
+  const done = noticeOnQuestion(p.present, t.service, "shop")(round, { signal: new AbortController().signal, fromCursorChat: true });
+  await t.advance(10_000);
+  expect(t.calls).toHaveLength(1);
+  expect(t.calls[0]?.init.body).toBe("shop\nQuestion 1 of 2: Which database?\n- SQLite\n- Postgres");
+  p.answer();
+  await done;
+});
+
 test("a round with no topic set when it is shown never gets a notice, even if one is set later", async () => {
   const t = harness({ topic: "" });
   const p = presenter();

@@ -35,16 +35,18 @@ export const mountBoard: MountView = (root, context) => {
   board.append(toolbar, noticesEl, columnsEl);
   root.append(board);
 
-  const toolbarButton = (label: string, onClick: () => void, primary = false) => {
+  const toolbarButton = (label: string, onClick: () => void, primary = false, title?: string) => {
     const node = el("button", `trama-btn${primary ? " primary" : ""}`, label);
     node.type = "button";
+    if (title !== undefined) node.title = title;
     node.addEventListener("click", onClick);
     toolbar.append(node);
     return node;
   };
   const runAll = toolbarButton("Run all To do", () => context.post({ type: "launch", action: { kind: "implement-all" } }), true);
   toolbarButton("Scan System", () => context.post({ type: "launch", action: { kind: "scan" } }));
-  toolbarButton("Design…", () => context.post({ type: "launch", action: { kind: "design" } }));
+  toolbarButton("Quick request…", () => context.post({ type: "launch", action: { kind: "design" } }), false, "Ask an agent to design a change in one line");
+  toolbarButton("Design…", () => context.post({ type: "writeDesignRequest" }), false, "Write a design request in Markdown and send it to an agent");
 
   let snapshot: Snapshot | null = null;
   /** Whether a question round is open: the ghosts then say the agent waits for the developer's answers. */

@@ -17,6 +17,7 @@ import { resolveMarkdownFile } from "./paths";
 import { findProject, initializeProject, updateSkills } from "./project";
 import { buildPrompt, buildScanPrompt } from "./prompts";
 import { type ApprovalOptions, applyApprovedProposal } from "./approval";
+import type { QuestionSession } from "./question-session";
 
 const DEBOUNCE_MS = 150;
 
@@ -29,6 +30,9 @@ function runTasks(project: Project) {
   return listTasks(project).map((t) => ({ id: t.id, proposal: t.data.proposal, column: t.data.column, agent: t.data.agent, blockedBy: blocked.get(t.id) ?? [] }));
 }
 
+const QUESTIONS_WAITING = "Trama has questions from the agent waiting.";
+const REOPEN = "Reopen";
+
 const notBlank = (message: string) => (value: string) => (value.trim() === "" ? message : undefined);
 
 /** Owns the single Trama panel, feeds it snapshots and carries out what the developer asks of it. */
@@ -37,11 +41,26 @@ export class Controller implements vscode.Disposable {
   private project: Project | undefined;
   private watcher: vscode.FileSystemWatcher | undefined;
   private timer: NodeJS.Timeout | undefined;
+  private disposed = false;
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor(private readonly extensionUri: vscode.Uri, private readonly questions?: QuestionSession) {}
+
+  /**
+   * A question round entered Asking: the panel opens in front, on the Diagram, or comes to the front keeping its tab.
+   * Without a project there is no panel to open.
+   */
+  revealForQuestions(): void {
+    if (this.panel) {
+      this.panel.reveal(undefined, false);
+      return;
+    }
+    const project = findProject();
+    if (project) this.create(project);
+  }
 
   /** Creates the panel, or reveals it. Offers to initialize the workspace when there is no `.trama/`. */
   async open(): Promise<void> {
+    this.questions?.restore();
     if (this.revealPanel()) return;
     let project = findProject();
     if (!project) {
@@ -100,6 +119,7 @@ export class Controller implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.panel?.dispose();
     this.watcher?.dispose();
     clearTimeout(this.timer);
@@ -127,6 +147,7 @@ export class Controller implements vscode.Disposable {
     const subscriptions = [
       onAnnouncementsWithdrawn((announcements) => this.post({ type: "withdrawn", announcements })),
       onQuestionRoundChange(() => this.refresh()),
+      ...(this.questions ? [this.questions.onChange((round) => this.post({ type: "questions", round }))] : []),
     ];
 
     panel.onDidDispose(() => {
@@ -134,10 +155,24 @@ export class Controller implements vscode.Disposable {
       for (const subscription of subscriptions) subscription.dispose();
       clearTimeout(this.timer);
       this.panel = this.watcher = this.project = undefined;
+      // The round stays open and the agent keeps waiting; the developer is offered a way back to it.
+      if (!this.disposed && this.questions?.current()) this.offerReopen();
     });
     this.panel = panel;
     this.watcher = watcher;
     this.project = project;
+  }
+
+  /** The message cannot be withdrawn, so Reopen checks whether the round still exists: without one it only opens the panel. */
+  private offerReopen(): void {
+    void vscode.window.showInformationMessage(QUESTIONS_WAITING, REOPEN).then(async (choice) => {
+      if (choice !== REOPEN) return;
+      try {
+        await this.open();
+      } catch (err) {
+        void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
+      }
+    });
   }
 
   private post(message: ToWebview): void {
@@ -178,9 +213,16 @@ export class Controller implements vscode.Disposable {
     switch (message.type) {
       case "ready":
         this.refresh();
+        if (this.questions) this.post({ type: "questions", round: this.questions.current() });
+        return;
+      case "questionAction":
+        this.questions?.act(message.round, message.action);
         return;
       case "launch":
         await this.launchAction(project, message.action);
+        return;
+      case "writeDesignRequest":
+        await vscode.commands.executeCommand("trama.design");
         return;
       case "openModelFile": {
         const req = message.path.startsWith(REQUIREMENTS_PREFIX);
@@ -243,7 +285,19 @@ export class Controller implements vscode.Disposable {
       project,
       autoScan: settings().get<boolean>("autoScan", true),
       agentConfigured: agentReady(),
-      launchScan: (features, proposal) => launchAgent(project.root, buildScanPrompt(features, proposal)),
+      launchScan: async (features, proposal) => {
+        const instruction = buildScanPrompt(features, proposal);
+        if ((await launchAgent(project.root, instruction, undefined, true)) !== "not-sent") return;
+        // Cursor could not send it by itself: no chat is left waiting; the developer starts the scan when they want.
+        void vscode.window.showInformationMessage(`Trama: Proposal ${proposal} was approved. Scan the Features it affects?`, "Scan now").then(async (choice) => {
+          if (choice !== "Scan now") return;
+          try {
+            await launchAgent(project.root, instruction);
+          } catch (err) {
+            void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
+          }
+        });
+      },
     };
   }
 
@@ -261,7 +315,7 @@ export class Controller implements vscode.Disposable {
         const request =
           action.prompt?.trim() ||
           (await vscode.window.showInputBox({
-            title: "Design with Agent",
+            title: "Quick Design Request",
             prompt: "What should the agent design or change in the Model?",
             placeHolder: "Add a cancelled state to orders…",
             ignoreFocusOut: true,

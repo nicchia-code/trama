@@ -2,9 +2,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { run } from "../../../src/cli/main";
+import { writeCursorHooks } from "../../../src/core/cursor-chat";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { TRAMA_DIR, type Project, projectAt } from "../../../src/core/store";
 import { configuredSkillsDir } from "./agent";
+import { bundledTrama, cursorHooksFile, isCursor } from "./cursor";
 
 const fileFolders = () => (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file");
 
@@ -12,6 +14,20 @@ const fileFolders = () => (vscode.workspace.workspaceFolders ?? []).filter((f) =
 export function findProject(): Project | undefined {
   const folder = fileFolders().find((f) => existsSync(join(f.uri.fsPath, TRAMA_DIR)));
   return folder && projectAt(folder.uri.fsPath);
+}
+
+/**
+ * In Cursor, writes Trama's entries into the developer's own Cursor hooks file (never the project's), running the
+ * trama program of this version. Without a program shipped for this platform there is no path to write.
+ */
+function installCursorHooks(): void {
+  const program = bundledTrama();
+  if (!isCursor() || !program) return;
+  try {
+    writeCursorHooks(cursorHooksFile(), program);
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Trama: could not write Cursor's hooks: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /** Asks which workspace folder to initialize when there are several. */
@@ -27,7 +43,8 @@ async function pickFolder(): Promise<string | undefined> {
 
 /**
  * Runs `trama init` in a workspace folder. When it refuses to overwrite customised skill files, shows why
- * and retries with `--force` only after an explicit modal confirmation. Returns the new Project, if any.
+ * and retries with `--force` only after an explicit modal confirmation. In Cursor it also installs Trama's hooks.
+ * Returns the new Project, if any.
  */
 export async function initializeProject(): Promise<Project | undefined> {
   const root = await pickFolder();
@@ -36,6 +53,7 @@ export async function initializeProject(): Promise<Project | undefined> {
   for (let force = false; ; force = true) {
     try {
       run(["--root", root, "init", "--skills-dir", skillsDir, ...(force ? ["--force"] : [])], root);
+      installCursorHooks();
       return projectAt(root);
     } catch (err) {
       if (!(err instanceof TramaError || err instanceof UsageError)) throw err;
@@ -53,10 +71,11 @@ export async function initializeProject(): Promise<Project | undefined> {
   }
 }
 
-/** Replaces the project's agent skills with the ones shipped in this version of Trama, and says what changed. */
+/** Replaces the project's agent skills with the ones shipped in this version of Trama, and says what changed; in Cursor also rewrites Trama's hooks for this version's program. */
 export function updateSkills(project: Project): void {
   const skillsDir = configuredSkillsDir();
   const { out } = run(["--root", project.root, "skills", "update", "--skills-dir", skillsDir], project.root);
   const report = out.split("\n").filter((line, i) => i === 0 || line.startsWith("Deleted "));
   void vscode.window.showInformationMessage(`Trama: ${report.join(" ")}`);
+  installCursorHooks();
 }

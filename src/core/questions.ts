@@ -1,8 +1,10 @@
 import { TramaError, UsageError } from "./errors";
 import type { Project } from "./store";
 
-export interface QuestionOption { label: string; description: string }
-export interface Question { id: string; question: string; options: QuestionOption[]; recommended: number; multi: boolean }
+/** `details`: the longer explanation of the option (pros and cons, for example), in Markdown. */
+export interface QuestionOption { label: string; description: string; details?: string }
+/** `context`: the background of the decision, in Markdown, shown under the question. */
+export interface Question { id: string; question: string; context?: string; options: QuestionOption[]; recommended: number; multi: boolean }
 export interface QuestionRequest { questions: Question[] }
 export type QuestionAnswer = { status: "answered"; selected: string[]; text?: string } | { status: "skipped" };
 export type QuestionResult = { status: "answered"; answers: Record<string, QuestionAnswer> } | { status: "unavailable"; reason: string };
@@ -10,6 +12,8 @@ export interface QuestionContext {
   signal?: AbortSignal;
   /** The round comes from an agent in a terminal Trama started: it reached the window by the address Trama put in that terminal, not by discovery. */
   fromTramaTerminal?: boolean;
+  /** The round comes from Cursor's chat agent (`CURSOR_AGENT=1`); it reached the most recently active window of the project. */
+  fromCursorChat?: boolean;
 }
 export type QuestionHandler = (project: Project, request: QuestionRequest, context: QuestionContext) => Promise<QuestionResult>;
 
@@ -21,6 +25,9 @@ function text(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim() === "") throw new UsageError(`${field} must be a non-empty string`);
   return value;
 }
+
+/** An optional field: absent is fine, present must be a non-empty string. */
+const optionalText = (value: unknown, field: string): string | undefined => (value === undefined ? undefined : text(value, field));
 
 function fields(value: Record<string, unknown>, allowed: readonly string[], field: string): void {
   for (const key of Object.keys(value)) {
@@ -37,20 +44,26 @@ export function parseQuestionRequest(value: unknown): QuestionRequest {
   const questions = request.questions.map((value, index): Question => {
     const field = `questions[${index}]`;
     const q = object(value, field);
-    fields(q, ["id", "question", "options", "recommended", "multi"], field);
+    fields(q, ["id", "question", "context", "options", "recommended", "multi"], field);
     const id = text(q.id, `${field}.id`);
     if (ids.has(id)) throw new UsageError(`${field}.id duplicates ${JSON.stringify(id)}`);
     ids.add(id);
     const question = text(q.question, `${field}.question`);
+    const context = optionalText(q.context, `${field}.context`);
     if (!Array.isArray(q.options) || q.options.length < 2) throw new UsageError(`${field}.options must contain at least two options`);
     const options = q.options.map((value, n): QuestionOption => {
       const option = object(value, `${field}.options[${n}]`);
-      fields(option, ["label", "description"], `${field}.options[${n}]`);
-      return { label: text(option.label, `${field}.options[${n}].label`), description: text(option.description, `${field}.options[${n}].description`) };
+      fields(option, ["label", "description", "details"], `${field}.options[${n}]`);
+      const details = optionalText(option.details, `${field}.options[${n}].details`);
+      return {
+        label: text(option.label, `${field}.options[${n}].label`),
+        description: text(option.description, `${field}.options[${n}].description`),
+        ...(details === undefined ? {} : { details }),
+      };
     });
     if (!Number.isInteger(q.recommended) || (q.recommended as number) < 0 || (q.recommended as number) >= options.length) throw new UsageError(`${field}.recommended must be an option index`);
     if (typeof q.multi !== "boolean") throw new UsageError(`${field}.multi must be a boolean`);
-    return { id, question, options, recommended: q.recommended as number, multi: q.multi };
+    return { id, question, ...(context === undefined ? {} : { context }), options, recommended: q.recommended as number, multi: q.multi };
   });
   return { questions };
 }

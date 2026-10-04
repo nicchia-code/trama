@@ -4,6 +4,8 @@ import { TramaError } from "../../../src/core/errors";
 import { listProposals } from "../../../src/core/proposals";
 import { type AnnouncementView, announcementView } from "../../../src/core/snapshot";
 import { projectAt, type Project } from "../../../src/core/store";
+import type { CursorChatEvent } from "../../../src/core/cursor-chat";
+import { onCursorChatEvent } from "./cursor";
 import { questionRoundClosedAt, questionRoundOpen } from "./question-activity";
 
 const CHECK_EVERY_MS = 30_000;
@@ -32,18 +34,29 @@ function guarded(action: () => void): void {
 }
 
 /**
- * The agent went quiet, or the command Trama typed into an agent terminal ended or that terminal was closed: the
- * announcements still waiting are withdrawn at once and the panel is told, so the developer learns that the agent
- * finished without delivering. With `terminal` only that terminal's announcements go; without it, every one.
+ * The agent went quiet, the command Trama typed into an agent terminal ended or that terminal was closed, or a turn of
+ * a Trama conversation in Cursor's chat was interrupted: the announcements still waiting are withdrawn at once and,
+ * with `notify`, the panel is told, so the developer learns that the agent finished without delivering. With `which`
+ * only the announcements it picks go; without it, every one.
  */
-export function withdrawWaiting(root: string, terminal?: string): void {
+export function withdrawWaiting(root: string, which?: (a: Announcement) => boolean, notify = true): void {
   guarded(() => {
     const p = projectAt(root);
-    const ids = terminal === undefined ? undefined : listAnnouncements(p).filter((a) => a.terminal === terminal).map((a) => a.id);
+    const ids = which === undefined ? undefined : listAnnouncements(p).filter(which).map((a) => a.id);
     const views = describe(p, withdrawAll(p, ids));
-    if (views.length === 0) return;
+    if (views.length === 0 || !notify) return;
     for (const listener of [...listeners]) listener(views);
   });
+}
+
+/**
+ * The announcements of Cursor's chat agent belong to the project, not to a terminal: an interrupted or failed turn of a
+ * Trama conversation withdraws them with the notice, closing one withdraws them silently (the developer chose to).
+ */
+function onCursorChat(event: CursorChatEvent): void {
+  const fromChat = (a: Announcement) => a.chat !== null;
+  if (event.event === "AGENT_INTERRUPTED") withdrawWaiting(event.root, fromChat);
+  else if (event.event === "CONVERSATION_CLOSED") withdrawWaiting(event.root, fromChat, false);
 }
 
 /**
@@ -63,5 +76,6 @@ export function watchAnnouncements(root: () => string | undefined): vscode.Dispo
     });
     if (quiet) withdrawWaiting(current);
   }, CHECK_EVERY_MS);
-  return new vscode.Disposable(() => clearInterval(timer));
+  const chat = onCursorChatEvent(onCursorChat);
+  return new vscode.Disposable(() => (clearInterval(timer), chat.dispose()));
 }

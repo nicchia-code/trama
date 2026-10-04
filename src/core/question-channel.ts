@@ -5,8 +5,10 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { TramaError, UsageError } from "./errors";
+import { CURSOR_AGENT_ENV } from "./announcements";
+import type { CursorHook } from "./cursor-chat";
 import { parseQuestionRequest, questionAborted, questionFailure, QuestionInterruptedError, unavailableQuestions, type QuestionContext, type QuestionHandler, type QuestionRequest, type QuestionResult } from "./questions";
-import type { Project } from "./store";
+import { type Project, projectAt } from "./store";
 
 export const QUESTION_ENDPOINT_ENV = "TRAMA_QUESTION_ENDPOINT";
 
@@ -29,6 +31,8 @@ interface ServerOptions {
   handler: QuestionHandler;
   runtimeDir?: string;
   focusedAt?: number;
+  /** A hook of Cursor's chat, forwarded by `trama cursor-hook`. */
+  onCursorHook?: (hook: CursorHook) => void;
   onClose?: () => void;
 }
 
@@ -231,8 +235,20 @@ function submit(editor: EditorConnection, projectId: string, request: QuestionRe
     socket.on("close", lost);
     // From this write onwards the validated round belongs to this editor: never reroute it.
     submitted = true;
-    socket.write(`${JSON.stringify({ type: "ask", projectId, request, fromTramaTerminal: context.fromTramaTerminal === true })}\n`);
+    socket.write(`${JSON.stringify({ type: "ask", projectId, request, fromTramaTerminal: context.fromTramaTerminal === true, fromCursorChat: context.fromCursorChat === true })}\n`);
   });
+}
+
+/** The live editor of the project that was focused last, found through the local discovery records; null without one. */
+async function liveEditor(projectId: string, signal: AbortSignal | undefined, sockets: Set<Socket>, runtimeDir?: string): Promise<EditorConnection | null> {
+  const directory = runtimeDirectory(runtimeDir);
+  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory, signal) : privateUnixDirectory(directory, false);
+  if (!privateDirectory) return null;
+  const live = (await Promise.all(records(directory, projectId).map((record) => connectEditor(record.endpoint, projectId, signal, sockets))))
+    .filter((connection): connection is EditorConnection => connection !== null && !connection.socket.destroyed && !connection.socket.readableEnded)
+    .sort((a, b) => b.record.focusedAt - a.record.focusedAt || a.record.windowId.localeCompare(b.record.windowId));
+  for (const unused of live.slice(1)) unused.socket.destroy();
+  return live[0] ?? null;
 }
 
 /** Connect and identify editors before sending the validated round to exactly one window. */
@@ -244,28 +260,44 @@ export async function askEditor(project: Project, request: QuestionRequest, cont
   const abort = () => { for (const socket of sockets) socket.destroy(); };
   context.signal?.addEventListener("abort", abort, { once: true });
   try {
-    const endpoint = (options.env ?? process.env)[QUESTION_ENDPOINT_ENV];
-    let editor: EditorConnection | null;
-    if (endpoint !== undefined) {
-      editor = await connectEditor(endpoint, projectId, context.signal, sockets);
-    } else {
-      const directory = runtimeDirectory(options.runtimeDir);
-      const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory, context.signal) : privateUnixDirectory(directory, false);
-      if (!privateDirectory) return unavailableQuestions();
-      const candidates = records(directory, projectId);
-      const live = (await Promise.all(candidates.map((record) => connectEditor(record.endpoint, projectId, context.signal, sockets))))
-        .filter((connection): connection is EditorConnection => connection !== null && !connection.socket.destroyed && !connection.socket.readableEnded)
-        .sort((a, b) => b.record.focusedAt - a.record.focusedAt || a.record.windowId.localeCompare(b.record.windowId));
-      editor = live[0] ?? null;
-      for (const unused of live.slice(1)) unused.socket.destroy();
-    }
+    const env = options.env ?? process.env;
+    const endpoint = env[QUESTION_ENDPOINT_ENV];
+    const editor = endpoint !== undefined
+      ? await connectEditor(endpoint, projectId, context.signal, sockets)
+      : await liveEditor(projectId, context.signal, sockets, options.runtimeDir);
     if (context.signal?.aborted) throw questionAborted();
     if (!editor) return unavailableQuestions();
-    return await submit(editor, projectId, validated, { ...context, fromTramaTerminal: endpoint !== undefined });
+    return await submit(editor, projectId, validated, { ...context, fromTramaTerminal: endpoint !== undefined, fromCursorChat: env[CURSOR_AGENT_ENV] === "1" });
   } finally {
     context.signal?.removeEventListener("abort", abort);
     for (const socket of sockets) socket.destroy();
     sockets.clear();
+  }
+}
+
+/**
+ * Hands a hook of Cursor's chat to the editor of its project and waits until the editor has taken it, for at most
+ * `timeoutMs`. Returns whether an editor took it; never throws, since Cursor must not be held up.
+ */
+export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: number; runtimeDir?: string } = {}): Promise<boolean> {
+  const controller = new AbortController();
+  const sockets = new Set<Socket>();
+  const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, options.timeoutMs ?? 1000);
+  try {
+    const projectId = questionProjectId(projectAt(hook.root));
+    const editor = await liveEditor(projectId, controller.signal, sockets, options.runtimeDir);
+    if (!editor || controller.signal.aborted) return false;
+    return await new Promise<boolean>((done) => {
+      const { socket } = editor;
+      socket.once("data", () => done(true));
+      socket.once("close", () => done(false));
+      socket.write(`${JSON.stringify({ type: "cursor-hook", projectId, hook })}\n`);
+    });
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+    for (const socket of sockets) socket.destroy();
   }
 }
 
@@ -357,13 +389,21 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
           connection.send({ type: "ready", ...record });
           return;
         }
+        if (phase === "ready" && message.type === "cursor-hook") {
+          const hook = message.hook as CursorHook | undefined;
+          if (!hook || typeof hook !== "object" || typeof hook.conversation !== "string" || typeof hook.root !== "string") throw new UsageError("A Cursor hook needs a conversation and a project folder");
+          options.onCursorHook?.(hook);
+          finish({ type: "taken" });
+          return;
+        }
         if (phase !== "ready" || message.type !== "ask") throw new UsageError("Identify the editor before submitting a question round");
         const request = parseQuestionRequest(message.request);
         const fromTramaTerminal = message.fromTramaTerminal === true;
+        const fromCursorChat = message.fromCursorChat === true;
         phase = "waiting";
         void Promise.resolve().then(() => {
           if (controller.signal.aborted || closed) throw questionAborted();
-          return options.handler(options.project, request, { signal: controller.signal, fromTramaTerminal });
+          return options.handler(options.project, request, { signal: controller.signal, fromTramaTerminal, fromCursorChat });
         }).then((result) => finish(result.status === "unavailable" ? questionFailure(new QuestionInterruptedError()) : result), (error) => finish(questionFailure(error)));
       } catch (error) { finish(questionFailure(error)); }
     });

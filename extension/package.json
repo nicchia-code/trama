@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.3.16",
+  "version": "1.0.0",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -30,9 +30,22 @@
         "category": "Trama"
       },
       {
-        "command": "trama.design",
-        "title": "Design with Agent…",
+        "command": "trama.quickDesign",
+        "title": "Quick Design Request…",
         "category": "Trama"
+      },
+      {
+        "command": "trama.design",
+        "title": "Design…",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.sendDesignRequest",
+        "title": "Send to agent (closing the tab sends it too)",
+        "shortTitle": "Send to agent",
+        "category": "Trama",
+        "icon": "$(send)",
+        "enablement": "trama.designRequest"
       },
       {
         "command": "trama.scan",
@@ -50,6 +63,21 @@
         "category": "Trama"
       }
     ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "trama.sendDesignRequest",
+          "when": "trama.designRequest",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "trama.sendDesignRequest",
+          "when": "trama.designRequest"
+        }
+      ]
+    },
     "configuration": {
       "title": "Trama",
       "properties": {
@@ -61,15 +89,17 @@
         "trama.agentLauncher": {
           "type": "string",
           "enum": [
+            "auto",
             "terminal",
             "chat"
           ],
           "enumDescriptions": [
-            "Run `#trama.agentCommand#` in a terminal (omp, claude, codex, copilot CLI, cursor-agent…).",
-            "Send the prompt to the agent chat built into the editor (Copilot in VS Code). In Cursor, or if the chat is not available, the prompt is copied to the clipboard."
+            "The chat in Cursor, the terminal in every other editor. In Cursor `#trama.agentCommand#` is not needed.",
+            "Run `#trama.agentCommand#` in a terminal (omp, claude, codex, copilot CLI, Cursor's `agent`…).",
+            "Send the prompt to the agent chat built into the editor. In Cursor a new chat sends it by itself; if Cursor does not allow that, the chat waits for your confirmation and Enter, or the prompt is copied to the clipboard. In VS Code it goes to Copilot's chat, or to the clipboard if the chat is not available."
           ],
-          "default": "terminal",
-          "markdownDescription": "Where the Design, Scan and Run buttons send their prompt."
+          "default": "auto",
+          "markdownDescription": "Where the Design, Scan and Run buttons send their prompt. `auto` (the default) uses the chat in Cursor and the terminal elsewhere; choosing `terminal` or `chat` always wins."
         },
         "trama.autoScan": {
           "type": "boolean",
@@ -90,7 +120,7 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Name (for example `my-trama-alerts`) or full URL of an [ntfy](https://ntfy.sh) topic. When set, Trama sends a notification when an agent question goes unanswered for 10 seconds and when the agent command ends without another instruction starting within 10 seconds. It only covers agents that Trama starts in a terminal, not the chat or an agent you start yourself. Empty (the default) sends nothing. It only applies in your user settings. On the public service `https://ntfy.sh` anyone who knows the topic can read the notifications, which contain questions and Board counts, so use a long, hard-to-guess topic or your own server."
+          "markdownDescription": "Name (for example `my-trama-alerts`) or full URL of an [ntfy](https://ntfy.sh) topic. When set, Trama sends a notification when an agent question goes unanswered for 10 seconds and when the agent command ends (in Cursor's chat, when the agent ends its turn) without another instruction starting within 10 seconds. It only covers agents that Trama starts in a terminal and Trama's conversations in Cursor's chat, not the chat of other editors or an agent you start yourself. Empty (the default) sends nothing. It only applies in your user settings. On the public service `https://ntfy.sh` anyone who knows the topic can read the notifications, which contain questions and Board counts, so use a long, hard-to-guess topic or your own server."
         }
       }
     }
