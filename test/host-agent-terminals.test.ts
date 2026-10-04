@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
+import { basename, join } from "node:path";
+import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { announce, listAnnouncements, withdrawAll } from "../src/core/announcements";
 import { newProposal } from "../src/core/proposals";
 import { projectAt } from "../src/core/store";
@@ -36,6 +36,13 @@ const environments: Record<string, string>[] = [];
 /** Settings the test changes; anything else reads as the editor's default. */
 const settingValues: Record<string, unknown> = {};
 
+/** The open workspace folder the panel looks for a Trama project in. */
+let workspaceRoot = "";
+/** The answers to the offer to initialize a project, in the order the offers were shown. */
+const answerOffer: Array<(choice: string | undefined) => void> = [];
+let panelsCreated = 0;
+let reveals = 0;
+
 mock.module("vscode", () => ({
   window: {
     onDidStartTerminalShellExecution: subscribe(listeners.start),
@@ -57,8 +64,30 @@ mock.module("vscode", () => ({
       return terminal;
     },
     showErrorMessage: () => undefined,
+    showInformationMessage: () => {
+      const offer = Promise.withResolvers<string | undefined>();
+      answerOffer.push(offer.resolve);
+      return offer.promise;
+    },
+    createWebviewPanel: () => {
+      panelsCreated++;
+      return {
+        reveal: () => void reveals++,
+        onDidDispose: () => ({ dispose() {} }),
+        webview: { html: "", cspSource: "", asWebviewUri: (uri: unknown) => uri, onDidReceiveMessage: () => ({ dispose() {} }), postMessage: async () => true },
+      };
+    },
   },
-  workspace: { getConfiguration: () => ({ get: (key: string, fallback: unknown) => (key === "agentCommand" ? "agent {prompt}" : (settingValues[key] ?? fallback)), update: async () => {} }) },
+  workspace: {
+    get workspaceFolders() {
+      return [{ uri: { scheme: "file", fsPath: workspaceRoot } }];
+    },
+    getConfiguration: () => ({ get: (key: string, fallback: unknown) => (key === "agentCommand" ? "agent {prompt}" : (settingValues[key] ?? fallback)), update: async () => {} }),
+    createFileSystemWatcher: () => ({ onDidCreate() {}, onDidChange() {}, onDidDelete() {}, dispose() {} }),
+  },
+  Uri: { joinPath: (base: unknown, ...parts: string[]) => ({ base, parts, toString: () => parts.join("/") }) },
+  RelativePattern: class {},
+  ViewColumn: { Active: 1 },
   commands: { executeCommand: async () => {} },
   env: { appName: "Visual Studio Code", shell: "/bin/bash", clipboard: { writeText: async () => {} } },
   Disposable: { from: (...items: unknown[]) => ({ dispose() { void items; } }) },
@@ -283,5 +312,94 @@ describe("withdrawing the ghosts", () => {
     withdrawWaiting(dir);
     subscription.dispose();
     expect(told).toEqual(["writing:Real title"]);
+  });
+});
+
+describe("the notice on the end of the agent's command", () => {
+  test("only the end of the command Trama typed makes one, with the terminal's status; any instruction really written takes back the waiting ones", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { endNotices } = await import("../extension/src/host/notice-host");
+    const born = spyOn(endNotices, "born").mockImplementation(() => {});
+    const cancelAll = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
+    listeners.end.length = 0;
+    watchAgentTerminal();
+    try {
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.");
+      expect(cancelAll).toHaveBeenCalledTimes(1);
+      const terminal = terminals.at(-1) as FakeTerminal;
+
+      listeners.end.forEach((fn) => fn(shell(terminal, "ls")));
+      listeners.end.forEach((fn) => fn(shell(terminal, "")));
+      expect(born).not.toHaveBeenCalled();
+
+      listeners.end.forEach((fn) => fn({ ...shell(terminal), exitCode: 3 } as ShellEvent));
+      expect(born).toHaveBeenCalledTimes(1);
+      expect(born.mock.calls[0]?.[0]).toBe(basename(dir));
+      expect(born.mock.calls[0]?.[1]).toEqual({ kind: "failed", exitCode: 3 });
+
+      listeners.end.forEach((fn) => fn(shell(terminal)));
+      expect(born.mock.calls[1]?.[1]).toEqual({ kind: "unreported" });
+
+      // The terminal is free again, so the next instruction reuses it and takes back what waits.
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.");
+      expect(cancelAll).toHaveBeenCalledTimes(2);
+
+      // The chat gets no terminal: nothing is written, so nothing is taken back.
+      settingValues["agentLauncher"] = "chat";
+      try {
+        await launchAgent(dir, "Use the trama-scan skill on the whole System.");
+      } finally {
+        delete settingValues["agentLauncher"];
+      }
+      expect(cancelAll).toHaveBeenCalledTimes(2);
+    } finally {
+      born.mockRestore();
+      cancelAll.mockRestore();
+    }
+  });
+
+  test("closing the terminal makes no notice", async () => {
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { endNotices } = await import("../extension/src/host/notice-host");
+    const born = spyOn(endNotices, "born").mockImplementation(() => {});
+    watchAgentTerminal();
+    try {
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.");
+      listeners.close.forEach((fn) => fn(terminals.at(-1) as FakeTerminal));
+      expect(born).not.toHaveBeenCalled();
+    } finally {
+      born.mockRestore();
+    }
+  });
+});
+
+describe("opening the panel", () => {
+  test("a second open while the offer to initialize waits brings the one panel forward instead of making another", async () => {
+    // Dynamic, as above: the module must load after mock.module replaced "vscode".
+    const { Controller } = await import("../extension/src/host/controller");
+    const empty = mkdtempSync(join(tmpdir(), "trama-panel-"));
+    workspaceRoot = empty;
+    answerOffer.length = 0;
+    const panelsBefore = panelsCreated;
+    const revealsBefore = reveals;
+    try {
+      const controller = new Controller({ scheme: "file" } as never);
+      const first = controller.open();
+      const second = controller.open();
+      expect(answerOffer).toHaveLength(2);
+      answerOffer[0]?.("Initialize Project");
+      await first;
+      expect(existsSync(join(empty, ".trama"))).toBe(true);
+      expect(panelsCreated - panelsBefore).toBe(1);
+
+      // The developer accepts the second offer too: the project already exists and the panel is open.
+      answerOffer[1]?.("Initialize Project");
+      await second;
+      expect(panelsCreated - panelsBefore).toBe(1);
+      expect(reveals - revealsBefore).toBe(1);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 });

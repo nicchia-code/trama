@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { basename } from "node:path";
 import { announce, newTerminalId, TERMINAL_ENV } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
@@ -9,6 +10,9 @@ import { withdrawWaiting } from "./announcements";
 import { agentCommandLine, shellFamily } from "./quote";
 import { questionEndpoint } from "./questions";
 import { withLanguage } from "./prompts";
+import { boardCounts } from "./board-counts";
+import { commandOutcome } from "./end-notices";
+import { endNotices } from "./notice-host";
 
 const TERMINAL_NAME = "Trama agent";
 
@@ -91,6 +95,7 @@ export function watchAgentTerminal(): vscode.Disposable {
       if (!isTypedCommand(e.terminal, e.execution.commandLine.value)) return;
       if (e.terminal === lastTerminal) commandRunning = false;
       withdrawWaiting(info.root, info.id);
+      endNotices.born(basename(info.root), commandOutcome(e.exitCode), () => boardCounts(projectAt(info.root)));
     }),
     vscode.window.onDidCloseTerminal((t) => {
       const info = agentTerminals.get(t);
@@ -153,6 +158,9 @@ export async function launchAgent(root: string, instruction: string, announcePro
   agentTerminals.set(terminal, { id: terminalId, root, line });
   terminal.show();
   terminal.sendText(line);
+  // The instruction is really written: the developer has put the agent back to work, so no notice about an earlier end
+  // that still waits is needed (this is the model's agent-terminal.INSTRUCTION_SENT; the chat launcher never gets here).
+  endNotices.cancelAll();
   lastTerminal = terminal;
   lastRoot = root;
   lastQuestionEndpoint = endpoint;

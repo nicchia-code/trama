@@ -7,33 +7,13 @@ description: Use when the user wants to add, change or think through behaviour o
 
 The **Model** in `.trama/model/` is the source of truth for how the System behaves. Next to it, the **Requirements** in `.trama/requirements/` say how it must be built: one file per **Area** (by default `ui`, `tech`, `quality`, `data`, `rules`). You change both only through a **Proposal** that the developer approves as a whole. You never write code in this skill.
 
-## Tools or CLI
+## Hand-over
 
-If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, …, offered by VS Code or by an MCP server), use them; otherwise run the `trama` CLI in a terminal. The steps below name the CLI command; this is the tool that does the same:
-
-| CLI | Tool |
-|---|---|
-| `trama system`, `trama feature <id>`, `trama machine <id>`, `trama state <ref>`, `trama event <ref>` | `trama_view` with `ref` (no `ref` for the System); Feature, Machine and State views end with the Requirements attached |
-| `trama requirements`, `trama requirements <area>`, `trama requirements <ref>` | `trama_view` with `ref` `requirements`, `requirements/<area>`, or the Model `ref` |
-| `trama paths`, `trama analyze`, `trama search`, `trama validate` | `trama_paths`, `trama_analyze`, `trama_search`, `trama_validate` |
-| `trama board`, `trama task list`, `trama drift list`, `trama proposal list` | `trama_board` |
-| `trama announce <kind> "<title>"` (kind: `proposal`, `task`, `drift`) | `trama_announce` |
-| `trama proposal new` | `trama_proposal_new` |
-| `trama proposal edit`, then editing the printed file | `trama_proposal_write` with the complete new file |
-| `trama proposal delete`, `trama proposal show` | `trama_proposal_delete_file`, `trama_proposal_show` |
-| `trama proposal submit <id>` | `trama_proposal_submit` |
-| `trama task new`, `trama task show`, `trama task move` | `trama_task_new`, `trama_task_show`, `trama_task_move` |
-| `trama drift new`, `trama drift show` | `trama_drift_new`, `trama_drift_show` |
-| `trama drift replace-proposal <id> --proposal <p>` | `trama_drift_replace_proposal` |
-| `trama ask --root <project>` (JSON request on stdin) | `trama_ask` |
-
-There is no tool for approving, rejecting, discarding or resolving: those are the developer's decisions.
-
-A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>` (or `trama_proposal_submit`). If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` or `trama_proposal_write` again: it returns an open Proposal to Draft, so submit again when finished.
+A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>`. If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` again: it returns an open Proposal to Draft, so submit again when finished.
 
 ## Announcing cards
 
-When the developer asked for a design from Trama's terminal, Trama has already announced the first Proposal on the Board, so you do not announce it. When you write more Proposals after the first (a large change split into Proposals that build on each other), announce each one as soon as you know you will write it: `trama announce proposal "<title>"` (or `trama_announce`) prints an announcement ID. Pass it when you open that Proposal: `trama proposal new … --announcement <id>` (the `announcement` field of `trama_proposal_new`). The Board shows a ghost of the card meanwhile. Never wait for the ghost to show and never skip or delay a card because of it; an unknown ID is only noted in the output.
+When the developer asked for a design from Trama's terminal, Trama has already announced the first Proposal on the Board, so you do not announce it. When you write more Proposals after the first (a large change split into Proposals that build on each other), announce each one as soon as you know you will write it: `trama announce proposal "<title>"` prints an announcement ID. Pass it when you open that Proposal: `trama proposal new … --announcement <id>`. The Board shows a ghost of the card meanwhile. Never wait for the ghost to show and never skip or delay a card because of it; an unknown ID is only noted in the output.
 
 ## Hard rules
 
@@ -67,7 +47,7 @@ Skip the interview only when the developer says so ("don't ask, decide"), or whe
 
 ### Asking
 
-Use **`trama_ask` first**, whether offered natively by VS Code or through MCP. If it is not offered, run **`trama ask --root <project>`** with the same JSON request on stdin.
+Run **`trama ask --root <project>`** with the JSON request on stdin, for every round of questions.
 
 - Send one complete round as `{questions: [...]}`. Every question has a unique non-empty `id`, `question`, `options` as `{label, description}`, a zero-based `recommended` index, and an explicit `multi` boolean. Set `multi: true` only when several answers can genuinely hold together. Do not supply "Other": Trama adds it.
 - A result with `status: "answered"` contains `answers` keyed by question id. An answered entry has the original `selected` labels and optional free-form `text`; a `status: "skipped"` entry is an explicit developer skip. Use the recommendation for that skipped decision, report it as an assumption for review, and do not ask it again.
@@ -85,7 +65,7 @@ If the developer rejected it, the reason, when they gave one, is under `## Feedb
 
 ### Reworking the stale Proposal of a Drift
 
-When the prompt says that Proposal `<p>`, attached to Drift `<d>`, is stale, do not interview the developer. Write a new Proposal that makes the same change on the current Model and Requirements (read `trama proposal show <p>` for what it did; list your choices in the new Proposal body), validate it and submit it as usual. Only after the submission succeeds run `trama drift replace-proposal <d> --proposal <new id>` (or `trama_drift_replace_proposal`): it attaches the new Proposal to the Drift and rejects the stale one as replaced. Run it once. If it is refused, report why and stop.
+When the prompt says that Proposal `<p>`, attached to Drift `<d>`, is stale, do not interview the developer. Write a new Proposal that makes the same change on the current Model and Requirements (read `trama proposal show <p>` for what it did; list your choices in the new Proposal body), validate it and submit it as usual. Only after the submission succeeds run `trama drift replace-proposal <d> --proposal <new id>`: it attaches the new Proposal to the Drift and rejects the stale one as replaced. Run it once. If it is refused, report why and stop.
 
 ## Good Model habits
 

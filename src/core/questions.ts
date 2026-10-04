@@ -6,7 +6,11 @@ export interface Question { id: string; question: string; options: QuestionOptio
 export interface QuestionRequest { questions: Question[] }
 export type QuestionAnswer = { status: "answered"; selected: string[]; text?: string } | { status: "skipped" };
 export type QuestionResult = { status: "answered"; answers: Record<string, QuestionAnswer> } | { status: "unavailable"; reason: string };
-export interface QuestionContext { signal?: AbortSignal }
+export interface QuestionContext {
+  signal?: AbortSignal;
+  /** The round comes from an agent in a terminal Trama started: it reached the window by the address Trama put in that terminal, not by discovery. */
+  fromTramaTerminal?: boolean;
+}
 export type QuestionHandler = (project: Project, request: QuestionRequest, context: QuestionContext) => Promise<QuestionResult>;
 
 function object(value: unknown, field: string): Record<string, unknown> {

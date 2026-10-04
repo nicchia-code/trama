@@ -231,7 +231,7 @@ function submit(editor: EditorConnection, projectId: string, request: QuestionRe
     socket.on("close", lost);
     // From this write onwards the validated round belongs to this editor: never reroute it.
     submitted = true;
-    socket.write(`${JSON.stringify({ type: "ask", projectId, request })}\n`);
+    socket.write(`${JSON.stringify({ type: "ask", projectId, request, fromTramaTerminal: context.fromTramaTerminal === true })}\n`);
   });
 }
 
@@ -261,7 +261,7 @@ export async function askEditor(project: Project, request: QuestionRequest, cont
     }
     if (context.signal?.aborted) throw questionAborted();
     if (!editor) return unavailableQuestions();
-    return await submit(editor, projectId, validated, context);
+    return await submit(editor, projectId, validated, { ...context, fromTramaTerminal: endpoint !== undefined });
   } finally {
     context.signal?.removeEventListener("abort", abort);
     for (const socket of sockets) socket.destroy();
@@ -359,10 +359,11 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         }
         if (phase !== "ready" || message.type !== "ask") throw new UsageError("Identify the editor before submitting a question round");
         const request = parseQuestionRequest(message.request);
+        const fromTramaTerminal = message.fromTramaTerminal === true;
         phase = "waiting";
         void Promise.resolve().then(() => {
           if (controller.signal.aborted || closed) throw questionAborted();
-          return options.handler(options.project, request, { signal: controller.signal });
+          return options.handler(options.project, request, { signal: controller.signal, fromTramaTerminal });
         }).then((result) => finish(result.status === "unavailable" ? questionFailure(new QuestionInterruptedError()) : result), (error) => finish(questionFailure(error)));
       } catch (error) { finish(questionFailure(error)); }
     });

@@ -117,6 +117,14 @@ test("discovery selects focus recency among live same-project windows, never sen
   expect(presented).toEqual(["later", "earlier"]);
 });
 
+test("the window learns whether a round comes from a Trama terminal by how it was addressed, never from discovery", async () => {
+  const origins: Array<boolean | undefined> = [];
+  const editor = await server(async (_project, _request, context) => { origins.push(context.fromTramaTerminal); return answer("choice"); });
+  await ask(round(), editor.endpoint);
+  await ask(round());
+  expect(origins).toEqual([true, false]);
+});
+
 test("explicit project routing works from an unrelated caller working directory", async () => {
   await server(async () => answer("choice", "explicit project"));
   const elsewhere = join(root, "elsewhere");

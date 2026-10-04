@@ -50,3 +50,10 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 - Initial editor unavailability is a distinct result, not an empty completed round or a collection of skipped answers. Editor loss after admission is a distinct interruption error, identified as `editor-interrupted`, with a message and no answers; it must not be represented as initial editor unavailability. Invalid input is a distinct error with the offending question or field identified.
 - Pending questions, navigation position, choices and free answers remain in memory only for the lifetime of their round. Do not write them to `.trama/`, the Board or discovery files.
 - Editor-discovery records contain the project identity, window identity, local endpoint and focus recency needed to route requests. Store them outside the repository in user-local runtime storage, never in project-versioned files.
+
+## notice
+
+- Gli avvisi stanno solo nella memoria dell'host dell'estensione. Non sono scritti in `.trama/`, né su altri file, né mostrati sulla Board; spariscono con la finestra, e al riavvio non ne riparte nessuno.
+- Un avviso ha un tipo (domanda o fine del comando), il nome del progetto (il nome della cartella del progetto), il round a cui si riferisce (domanda) oppure l'esito del comando riportato dal terminale (finito bene, finito con errore e relativo codice, oppure non riportato). Titolo, testo, priorità (da 1 a 5) e tag si compongono solo al momento dell'invio.
+- Il testo di una domanda e le etichette delle sue opzioni sono quelli che l'agente ha fornito, nella sua lingua, senza traduzioni. Le risposte del developer non fanno mai parte di un avviso.
+- Per ogni finestra l'host dell'estensione tiene solo in memoria un fatto: se l'avviso di errore dell'editor è già stato mostrato dopo l'ultimo invio riuscito.

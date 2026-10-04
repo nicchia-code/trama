@@ -63,4 +63,4 @@ The editor was lost while the round was queued or being answered. The round is r
 ## Events
 
 ### ROUND_CLOSED
-Emitted when a round leaves Asking for Answered or Abandoned. Allows the oldest round still queued in the same window to open, if any. Closing a queued round does not emit this event or interrupt the active round.
+Emitted when a round leaves Asking for Answered or Abandoned. Allows the oldest round still queued in the same window to open, if any. Closing a queued round does not emit this event or interrupt the active round. Annulla anche l'avviso al developer su quel round, se ancora in attesa (vedi il Notice).

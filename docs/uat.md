@@ -590,6 +590,21 @@ Each launch sends one command to the terminal named **Trama agent** (cwd = the d
 | H22 | Change `trama.language` to `"   "` (spaces only), ↻, click **Scan System** | The line is exactly `Use the trama-scan skill on the whole System.`, with nothing about language | ☐ |
 | H23 | Restore S2 (settings back to `echo {prompt}`, no `trama.language`) | | ☐ |
 
+### H24–H31. Away notifications (ntfy)
+
+`trama.ntfy` has scope `application`: put it in the **user** settings (`~/.config/Code/User/settings.json`, or the user settings of the build in use). A value in `/tmp/trama-demo/shop/.vscode/settings.json` is ignored. A stand-in for the ntfy server prints every request it gets: `bun -e 'Bun.serve({port: 8099, fetch: async (r) => { console.log(r.method, r.url, JSON.stringify(Object.fromEntries(["title", "priority", "tags"].map((h) => [h, r.headers.get(h)]))), JSON.stringify(await r.text())); return new Response("ok"); }})'`. `round.json` is any valid round of two questions, for example the one of P1.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| H24 | Start the stand-in server. Add `"trama.ntfy": "http://127.0.0.1:8099/trama-test"` to the user settings, with S2 in the demo settings, ↻, click **Scan System** and wait | About 10 seconds after the echo command ends, the server prints **one** `POST /trama-test` with title `Trama: the agent stopped`, priority `3`, tags `white_check_mark` and a body of five lines: `shop`, `The agent finished.`, `To decide: 4`, `To do: 2`, `In progress: 1` | ☐ |
+| H25 | Click **Scan System** twice, the second time less than 10 seconds after the first command ended | The server prints nothing for the first end: the second instruction took it back. After the second command ends, **one** request arrives | ☐ |
+| H26 | In the **Trama agent** terminal run `trama ask < round.json` and leave it unanswered | Ten seconds after the Quick Pick opens, **one** request arrives: title `Trama: the agent asks`, priority `4`, tags `question`, body lines `shop`, `Question 1 of 2: <text>` and one `- <label>` per option, with no descriptions and no `(recommended)` | ☐ |
+| H27 | Repeat H26. Answer the first question after 5 seconds and leave the second | The request arrives 10 seconds after the round opened, not after the answer, and names `Question 2 of 2` | ☐ |
+| H28 | Repeat H26 and answer or skip every question within 10 seconds. Then run `trama ask --root /tmp/trama-demo/shop < round.json` from the verification shell, outside the Trama terminal, and leave it for 20 seconds | No request for either: the first round closed in time, the second does not come from a terminal Trama started | ☐ |
+| H29 | Set `"trama.ntfy": "bad topic"` in the user settings, click **Scan System** and wait | No request. After about 10 seconds a warning `Trama could not send the ntfy notification: the setting is not a topic name or an http(s) URL. Check the trama.ntfy setting and your connection.`, with no buttons. The warning does not show again for the next notice | ☐ |
+| H30 | Set the topic back, stop the stand-in server, click **Scan System**, wait 30 seconds | A first failed attempt, one more attempt 10 seconds later and then a warning with the reason (for example `connect ECONNREFUSED`), which never contains the topic or the URL. The agent and the terminal are not affected | ☐ |
+| H31 | Remove `trama.ntfy` from the user settings, click **Scan System** and wait | No request and no warning. Restore S2 | ☐ |
+
 ---
 
 ## I. Real agent: omp 🪙

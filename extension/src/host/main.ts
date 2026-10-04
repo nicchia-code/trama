@@ -3,6 +3,7 @@ import { delimiter, dirname, join } from "node:path";
 import * as vscode from "vscode";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { watchAnnouncements } from "./announcements";
+import { notices } from "./notice-host";
 import { watchAgentTerminal, configuredSkillsDir } from "./agent";
 import { Controller, describeError } from "./controller";
 import { findProject } from "./project";
@@ -40,6 +41,7 @@ export function activate(context: vscode.ExtensionContext): void {
     watchAgentTerminal(),
     watchAnnouncements(() => findProject()?.root),
     questions,
+    notices,
     watchRequirements(),
   );
   exposeBundledCli(context);

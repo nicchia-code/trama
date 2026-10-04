@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -85,6 +85,12 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Language the agent writes in, for example `Italian` or `Deutsch`. When set, every instruction Trama sends to the agent asks it to write everything it generates in that language, except code, which always stays in English. Empty (the default) asks nothing about language. It only reaches agents that Trama starts, changes nothing already written, and the Trama interface stays in English."
+        },
+        "trama.ntfy": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Name (for example `my-trama-alerts`) or full URL of an [ntfy](https://ntfy.sh) topic. When set, Trama sends a notification when an agent question goes unanswered for 10 seconds and when the agent command ends without another instruction starting within 10 seconds. It only covers agents that Trama starts in a terminal, not the chat or an agent you start yourself. Empty (the default) sends nothing. It only applies in your user settings. On the public service `https://ntfy.sh` anyone who knows the topic can read the notifications, which contain questions and Board counts, so use a long, hard-to-guess topic or your own server."
         }
       }
     }

@@ -21,6 +21,7 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 - The extension targets VS Code (engine `^1.95.0`), also works in Cursor, and is packaged as one `.vsix` per platform (`linux-x64`, `darwin-arm64`), each with the command-line binary inside. Tagged releases (`v*`) are built and published by a GitHub Actions workflow on Bun 1.4.0, which type-checks, runs the tests and smoke-tests the packaged binary.
 - Agent skills live in `skills/` (trama-design, trama-scan, trama-implement, trama-import) and are installed into the project's `.agents/skills` by default, or `.claude/skills` for Claude Code.
 - `examples/shop` is a complete sample Trama project (Model and Requirements of an online shop) used by the demo scripts, the harness and the manual acceptance run; it is data, not part of the System.
+- L'unica comunicazione di rete che Trama fa da sé è la richiesta HTTP a ntfy per gli avvisi al developer (vedi `notice`), e solo se il developer ha indicato un argomento. Nessun'altra chiamata di rete, nessuna telemetria.
 
 ## agent-terminal
 
@@ -72,3 +73,12 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 - Propagate the interruption of `trama ask` (SIGINT or SIGTERM) and its disconnection to the round's lifecycle. Close controls only for the affected round and release its queue position. Client-side timeouts that are not signalled to Trama cannot be detected; observable cancellation or disconnection is required to remove those rounds.
 - Distinguish initial editor connection failure from loss of an established editor connection after sending a validated round. Connection failure before submission returns initial editor unavailability. Closure or failure of the editor connection after submission and before a complete result returns the shared `editor-interrupted` error without answers; do not wait for a response timeout or translate it into the fallback result.
 - For `editor-interrupted`, `trama ask` prints the error with its code and message as JSON on stdout and exits with failure, keeping diagnostics on stderr. This ends the waiting operation, not external agent processes. The agent skills enforce stopping the workflow awaiting those decisions.
+
+## notice
+
+- L'impostazione `trama.ntfy` è una stringa, vuota per default (vuota o di soli spazi vuol dire non impostata, come `trama.language`), dichiarata con scope `application`: vale solo nelle impostazioni utente e viene ignorata nelle impostazioni del workspace, così l'argomento non finisce in un `.vscode/settings.json` versionato con il progetto. Non è salvata in `.trama/` né altrove nel progetto.
+- L'impostazione è letta ogni volta: quando sta per nascere un avviso, quando scadono i dieci secondi e quando scade l'attesa del secondo tentativo. Il valore, tolti gli spazi ai bordi, è valido se è un nome di argomento che rispetta `^[A-Za-z0-9_-]{1,64}$`, inviato a `https://ntfy.sh/<argomento>`, oppure un URL assoluto `http://` o `https://` di un argomento (per un server proprio) usato così com'è e senza credenziali dentro. Qualunque altro valore è non valido. Trama non controlla che l'argomento esista.
+- L'invio è fatto dall'host dell'estensione, che già osserva i terminali, i round di domande e l'invio delle istruzioni, con la `fetch` globale di Node: nessuna nuova libreria runtime. La riga di comando non partecipa.
+- Ogni tentativo è una sola richiesta `POST` all'URL dell'argomento, con il testo UTF-8 come corpo e le intestazioni `Title` (solo ASCII), `Priority` (da 1 a 5) e `Tags`. È un successo solo una risposta HTTP 2xx; ogni altro stato, errore di rete o mancata risposta entro 10 secondi è un fallimento. Non usare credenziali, token né azioni di ntfy.
+- Il ritardo di dieci secondi e l'attesa del secondo tentativo sono fissi, non impostazioni. I timer vivono nell'host dell'estensione e sono fermati quando l'avviso viene annullato o l'estensione è disattivata.
+- La composizione del testo è una funzione pura dai fatti (tipo di avviso, nome del progetto, domanda, esito, conteggi) a titolo, messaggio, priorità e tag, verificabile senza editor né rete.

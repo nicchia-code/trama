@@ -103,6 +103,7 @@ export const presentQuestionRound: QuestionPresenter = async (request: QuestionR
   try {
     while (step < request.questions.length) {
       if (context.signal.aborted) throw context.signal.reason ?? questionAborted();
+      context.onQuestion?.(step);
       const question = request.questions[step];
       if (!question) throw new Error("Question position is outside this round");
       const title = `trama ask — Question ${step + 1} of ${request.questions.length}`;

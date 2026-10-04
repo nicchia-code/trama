@@ -38,18 +38,25 @@ export class Controller implements vscode.Disposable {
 
   /** Creates the panel, or reveals it. Offers to initialize the workspace when there is no `.trama/`. */
   async open(): Promise<void> {
-    if (this.panel) {
-      this.panel.reveal();
-      return;
-    }
+    if (this.revealPanel()) return;
     let project = findProject();
     if (!project) {
       const choice = await vscode.window.showInformationMessage("This workspace has no Trama project yet.", "Initialize Project");
       if (choice === undefined) return;
-      project = await initializeProject();
+      // Another open command may have initialized the project, or even opened the panel, while the offer waited.
+      project = findProject() ?? (await initializeProject());
       if (!project) return;
     }
+    // Another open command may have created the panel while the offer or the initialization waited for the developer.
+    if (this.revealPanel()) return;
     this.create(project);
+  }
+
+  /** Brings the panel forward if there is one: there is at most one. */
+  private revealPanel(): boolean {
+    if (!this.panel) return false;
+    this.panel.reveal();
+    return true;
   }
 
   async init(): Promise<void> {
