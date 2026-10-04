@@ -1,3 +1,4 @@
+import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -81,7 +82,7 @@ test("the snapshot carries the Model, open Proposals as ghost overlays, Drifts a
   const order = editInProposal(p, prop.id, "checkout/order.md");
   writeFileSync(order, readFileSync(order, "utf8").replace("### Shipped (final)", "### Shipped\n- `user.CANCEL` → Returned\n\n### Returned (final)"));
   writeFileSync(editInProposal(p, prop.id, "actors/user.md"), readFileSync(join(dir, ".trama/model/actors/user.md"), "utf8") + "\n### RETURN\nAsks to return.\n");
-  newDrift(p, { title: "Code refunds late", refs: ["order/Shipped"], happens: "see refund.ts", should: "The Model says another." });
+  newDrift(p, { options: FIX_OPTIONS, title: "Code refunds late", refs: ["order/Shipped"], happens: "see refund.ts", should: "The Model says another." });
   newTask(p, { title: "Build cart", refs: ["cart"], technical: false });
   handOver(p, prop.id);
   const done = newProposal(p, "Closed");
@@ -115,8 +116,8 @@ test("an open Drift carries its two sides and why its attached Proposal cannot b
   const prop = newProposal(p, "Lost orders");
   const payment = editInProposal(p, prop.id, "checkout/payment.md");
   writeFileSync(payment, readFileSync(payment, "utf8").replace("### Declined (final)", "### Declined (final)\n### Written off (final)"));
-  newDrift(p, { title: "Lost", refs: ["payment"], proposal: prop.id, happens: "Code writes it off.", should: "Nothing writes it off." });
-  newDrift(p, { title: "Theme", refs: ["requirements/ui#General"], happens: "Material 2.", should: "Material 3." });
+  newDrift(p, { options: FIX_OPTIONS, title: "Lost", refs: ["payment"], proposal: prop.id, happens: "Code writes it off.", should: "Nothing writes it off." });
+  newDrift(p, { options: FIX_OPTIONS, title: "Theme", refs: ["requirements/ui#General"], happens: "Material 2.", should: "Material 3." });
   const drifts = () => buildSnapshot(p).drifts;
 
   expect(drifts()[0]).toMatchObject({ sides: { happens: "Code writes it off.", should: "Nothing writes it off." }, requirementsOnly: false, proposalBlock: { kind: "draft" } });
@@ -127,10 +128,28 @@ test("an open Drift carries its two sides and why its attached Proposal cannot b
   expect(drifts()[0]?.proposalBlock).toMatchObject({ kind: "stale", reason: `Proposal ${prop.id} is stale: the Model changed since it was written.` });
 });
 
+test("a Drift's fix options, chosen option and note reach the snapshot in written order; a Drift without them has none", () => {
+  const old = newDrift(p, { options: FIX_OPTIONS, title: "Old", refs: ["payment"], happens: "Code does it.", should: "Model says so." });
+  writeFileSync(old.path, readFileSync(old.path, "utf8").replace(/^(option|note):.*\n/gm, "").replace(/\n## Fix options[\s\S]*/, "\n"));
+  const resolved = newDrift(p, { options: [{ title: "Change the step", text: "Rewrite the **step**.\n\n- keeps data" }, { title: "Remove the step", text: "Drop it." }], title: "New", refs: ["payment"], happens: "Code does it.", should: "Model says so.", where: "`src/x.ts`" });
+  writeFileSync(resolved.path, readFileSync(resolved.path, "utf8").replace("option: null", "option: 2").replace("note: null", "note: Mind the refunds."));
+  const drifts = buildSnapshot(p).drifts;
+  expect(drifts[0]).toMatchObject({ id: old.id, options: [], option: null, note: null });
+  expect(drifts[1]).toMatchObject({
+    options: [
+      { title: "Change the step", text: "Rewrite the **step**.\n\n- keeps data" },
+      { title: "Remove the step", text: "Drop it." },
+    ],
+    option: 2,
+    note: "Mind the refunds.",
+    sides: { happens: "Code does it.", should: "Model says so.", where: "`src/x.ts`" },
+  });
+});
+
 test("a Task's blockers travel in the snapshot: the open Drifts that concern it, and none once it is Done", () => {
   const task = newTask(p, { title: "Cart flow", refs: ["cart"], technical: false });
   const other = newTask(p, { title: "Payment flow", refs: ["payment"], technical: false });
-  const drift = newDrift(p, { title: "Cart differs", refs: ["cart"], happens: "The code does it one way.", should: "The Model says another." });
+  const drift = newDrift(p, { options: FIX_OPTIONS, title: "Cart differs", refs: ["cart"], happens: "The code does it one way.", should: "The Model says another." });
   const blockers = () => Object.fromEntries(buildSnapshot(p).tasks.map((t) => [t.id, t.blockedBy]));
   expect(blockers()).toEqual({ [task.id]: [{ kind: "drift", drift: drift.id, title: "Cart differs" }], [other.id]: [] });
   moveTask(p, task.id, "done", "developer");

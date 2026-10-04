@@ -1,3 +1,4 @@
+import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -145,8 +146,8 @@ describe("Tasks and generated skills", () => {
   });
 
   test("fixing the code for a Drift against Requirements only creates a technical Task; with a Model element, an ordinary one", () => {
-    const theme = resolveDrift(p, newDrift(p, { title: "Uses Material 2", refs: ["requirements/ui#General"], happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code");
-    const badge = resolveDrift(p, newDrift(p, { title: "Red badge", refs: ["order/Paid", "requirements/ui#order/Paid"], happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code");
+    const theme = resolveDrift(p, newDrift(p, { options: FIX_OPTIONS, title: "Uses Material 2", refs: ["requirements/ui#General"], happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code", [], { option: 1 });
+    const badge = resolveDrift(p, newDrift(p, { options: FIX_OPTIONS, title: "Red badge", refs: ["order/Paid", "requirements/ui#order/Paid"], happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code", [], { option: 1 });
     const show = (id: string | null) => JSON.parse(run(["--json", "task", "show", id ?? ""], dir, {}).out);
     expect(show(theme.data.task)).toMatchObject({ technical: true, refs: ["requirements/ui#General"], drift: theme.id });
     expect(show(badge.data.task)).toMatchObject({ technical: false, refs: ["order/Paid", "requirements/ui#order/Paid"], drift: badge.id });

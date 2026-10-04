@@ -7,7 +7,7 @@ Vocabulary: [CONTEXT.md](./CONTEXT.md). Decisions: [docs/adr](./docs/adr). File 
 ## Status
 
 Implemented:
-- Model format, validation and the `trama` CLI (exploring, Proposals, Tasks, Drifts, board). A Drift is written at the level of behaviour, with an optional **Where in the code** section for files. An open Drift blocks the Tasks that concern the same thing: the agent cannot start them and runs skip them; the board marks them.
+- Model format, validation and the `trama` CLI (exploring, Proposals, Tasks, Drifts, board). A Drift is written at the level of behaviour, with two to five **fix options** the developer chooses from when keeping what should happen (and an optional note), and an optional **Where in the code** section for files. An open Drift blocks the Tasks that concern the same thing: the agent cannot start them and runs skip them; the board marks them.
 - Agent tools: native VS Code language-model tools for Copilot, and `trama mcp` for Cursor, Claude Code, Codex, omp and any MCP client (ADR 0006). No tool can approve, reject, discard or resolve.
 - Shared agent question rounds through `trama_ask` and JSON-stdin `trama ask`: native editor choices, Back, Other, confirmed skips, window-local FIFO and isolated caller cancellation. Editor loss interrupts admitted rounds with `editor-interrupted`, without partial answers or fallback; initial absence remains `unavailable`. [Question contract](./docs/cli.md#question-rounds).
 - Requirements beside the Model (ADR 0007): one file per Area in `.trama/requirements/`, sections attached to Model elements, changed through Proposals, delivered to agents as generated `trama-req-<area>` skills and inside `task show` and the element views.

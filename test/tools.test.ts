@@ -1,3 +1,4 @@
+import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -66,7 +67,7 @@ describe("callTool", () => {
 
   test("Tasks and Drifts created by tools appear on the board", async () => {
     expect((await callTool(p, "trama_task_new", { title: "Refunds", refs: ["order/Refunding"], body: "Money back" })).isError).toBe(false);
-    expect((await callTool(p, "trama_drift_new", { title: "Late refund", refs: ["order/Shipped"], happens: "The code refunds late.", should: "The Model forbids it." })).isError).toBe(false);
+    expect((await callTool(p, "trama_drift_new", { title: "Late refund", refs: ["order/Shipped"], options: FIX_OPTIONS, happens: "The code refunds late.", should: "The Model forbids it." })).isError).toBe(false);
     const board = (await callTool(p, "trama_board", {})).text;
     expect(board).toContain("Drift 0001: Late refund");
     expect(board).toContain("0001 Refunds");
@@ -78,7 +79,7 @@ describe("callTool", () => {
     const created = await callTool(p, "trama_task_new", { title: "Refunds", refs: ["order/Refunding"], announcement: taskAnnouncement });
     expect(created).toEqual({ text: "Created Task 0001.", isError: false });
     expect(listAnnouncements(p)).toEqual([]);
-    const unknown = await callTool(p, "trama_drift_new", { title: "Late refund", refs: ["order/Shipped"], happens: "The code refunds late.", should: "The Model forbids it.", announcement: "zzzzzz" });
+    const unknown = await callTool(p, "trama_drift_new", { title: "Late refund", refs: ["order/Shipped"], options: FIX_OPTIONS, happens: "The code refunds late.", should: "The Model forbids it.", announcement: "zzzzzz" });
     expect(unknown.isError).toBe(false);
     expect(unknown.text).toContain('No announcement "zzzzzz" was found');
     expect((await callTool(p, "trama_announce", { kind: "card", title: "x" })).isError).toBe(true);

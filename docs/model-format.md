@@ -248,6 +248,8 @@ refs:
 proposal: "0008"        # optional: attached when the code handles a case the Model forgot
 task: null              # set when resolved as fix-code
 origin: "0012"          # optional: the Task the agent was implementing when it filed the Drift
+option: null            # set when resolved as fix-code: the number, from 1, of the chosen fix option
+note: null              # set when the developer wrote a note with that choice
 ---
 # Code refunds orders after shipping
 
@@ -259,14 +261,24 @@ What the code does today, in terms of behaviour.
 
 What the Model or the Requirement says.
 
+## Fix options
+
+### The way the agent recommends
+
+What changes in behaviour and what it costs.
+
+### Another way
+
+The same, for a different way to reach what should happen.
+
 ## Where in the code
 
 Optional: the files where the difference was seen.
 ```
 
-The body is Markdown. The first two sections come in this order and both need text; a Drift cannot be filed without them. The third, `## Where in the code`, is optional but needs text when present. Drifts resolved before the sections existed keep a free body and are shown as one block. `resolution: dismissed` means the developer kept the code and no Proposal was attached.
+The body is Markdown. The first two sections come in this order and both need text; a Drift cannot be filed without them. `## Fix options` follows with from two to five options, each a `###` heading with its title and then its text; the first is the agent's recommendation, titles differ, and a new Drift cannot be filed without them. `## Where in the code` comes last, is optional, but needs text when present. Drifts written before options existed have no `## Fix options`: their code is fixed without choosing an option, and `option` and `note` stay empty. Drifts resolved before the sections existed keep a free body and are shown as one block. `resolution: dismissed` means the developer kept the code and no Proposal was attached.
 
-A Drift is not part of the Model, so it may name code, but only where it helps. The two sides are written for a programmer reading at a glance, not as a code review: behaviour in domain words, no variable, function, class, field or file names unless the difference cannot be understood without them (then one or two, as inline code), short paragraphs, a bulleted list for several points, bold for the key terms, no headings or tables, about 100 words per side. Files and code elements go in `## Where in the code`, with no line numbers. Nothing refuses a Drift for its style. The Task created when the code is fixed carries all the sections.
+A Drift is not part of the Model, so it may name code, but only where it helps. The two sides are written for a programmer reading at a glance, not as a code review: behaviour in domain words, no variable, function, class, field or file names unless the difference cannot be understood without them (then one or two, as inline code), short paragraphs, a bulleted list for several points, bold for the key terms, no headings or tables, about 100 words per side. Files and code elements go in `## Where in the code`, with no line numbers. Nothing refuses a Drift for its style. The Task created when the code is fixed carries both sides, the chosen option with its title and text, the developer's note when given, and the Where in the code section. Fixing the code of a Drift that has options needs the number of one of them; the number goes into `option`, counted from 1 in the order the options are written, and the note into `note`. A Drift without options accepts no `option`, and a note is accepted in both cases; keeping what happens (accepting the Proposal or dismissing) takes neither.
 
 - `origin` is the Task the agent was implementing when it filed the Drift (`drift new --task`). It must name an existing Task. A Drift filed by a Scan or a Fix has none, and Drifts written before the field existed have none.
 - Whether a Task is **blocked** is never stored: it is worked out from the Drifts, the Tasks and their `refs` whenever it is asked. An open Drift blocks its origin Task and every Task that is not Done and concerns the same thing, that is, when a reference of one is the same as, or inside, a reference of the other (a Machine contains its States and Transitions, a Feature its Machines; a Requirement section of an element counts as that element; the General section of an Area only equals itself). A Drift resolved as `fix-code` leaves its origin Task, if not Done, waiting for the fix Task (the Drift's `task`) until that Task is Done. A Done Task is never blocked.

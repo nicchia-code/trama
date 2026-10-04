@@ -5,7 +5,7 @@ import type { Project } from "../core/store";
 import { formatDiagnostic } from "../core/model";
 import { placeTasks } from "../core/design";
 import type { Blocker } from "../core/blocking";
-import { blockedTasks, COLUMNS, type Drift, driftSides, listDrifts, listTasks, type Task } from "../core/work";
+import { blockedTasks, COLUMNS, type Drift, driftOptions, driftSides, listDrifts, listTasks, type Task } from "../core/work";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 
 /** One-line summary of a Proposal for lists and the board. */
@@ -182,9 +182,20 @@ export function driftShowView(p: Project, drift: Drift): Result {
   const project = loadProject(p);
   const sides = driftSides(drift);
   const bodyText = drift.body.replace(/^#\s+.+\n+/, "").trim();
+  const options = driftOptions(drift);
+  const numbered = options.flatMap((o, i) => ["", `${i + 1}. **${o.title}**${i === 0 ? " (recommended)" : ""}`, "", ...o.text.split("\n").map((l) => (l ? `   ${l}` : l))]);
+  const chosen = drift.data.option === null ? undefined : options[drift.data.option - 1];
   const description = sides
-    ? ["## What happens", "", sides.happens, "", "## What should happen", "", sides.should, ...(sides.where ? ["", "## Where in the code", "", sides.where] : [])]
+    ? [
+        "## What happens", "", sides.happens, "", "## What should happen", "", sides.should,
+        ...(options.length > 0 ? ["", "## Fix options", ...numbered] : []),
+        ...(sides.where ? ["", "## Where in the code", "", sides.where] : []),
+      ]
     : ["## Description", "", bodyText];
+  const decision = [
+    ...(drift.data.option !== null ? ["", "## Chosen option", "", `${drift.data.option}${chosen ? `. ${chosen.title}` : ""}`] : []),
+    ...(drift.data.note ? ["", "## Note", "", drift.data.note] : []),
+  ];
   const attached = drift.data.proposal;
   let attachedLine = "";
   let block: { kind: string; reason: string } | null = null;
@@ -202,6 +213,7 @@ export function driftShowView(p: Project, drift: Drift): Result {
     `# ${drift.title}`,
     "",
     ...description,
+    ...decision,
     "",
     `Status: **${drift.data.status}**${drift.data.resolution ? ` (${drift.data.resolution})` : ""}`,
     attachedLine,
@@ -211,7 +223,7 @@ export function driftShowView(p: Project, drift: Drift): Result {
     refsBlock(project, drift.data.refs),
     ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, drift.data.refs)] : []),
   ].join("\n");
-  return { md, json: { ...driftSummary(drift), body: drift.body, happens: sides?.happens ?? null, should: sides?.should ?? null, where: sides?.where ?? null, proposalBlock: block } };
+  return { md, json: { ...driftSummary(drift), body: drift.body, happens: sides?.happens ?? null, should: sides?.should ?? null, where: sides?.where ?? null, options, option: drift.data.option, note: drift.data.note, proposalBlock: block } };
 }
 
 export function driftListView(p: Project, all: boolean): Result {

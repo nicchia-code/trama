@@ -67,6 +67,17 @@ function texts(input: Record<string, unknown>, key: string): string[] {
   if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) throw new UsageError(`"${key}" must be a list of strings`);
   return v as string[];
 }
+function fixOptions(input: Record<string, unknown>): { title: string; text: string }[] {
+  const v = input["options"];
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) throw new UsageError('"options" must be a list of {title, text}');
+  return v.map((o, n) => {
+    if (typeof o !== "object" || o === null || Array.isArray(o)) throw new UsageError(`"options" item ${n + 1} must be an object with a title and a text`);
+    const { title, text } = o as Record<string, unknown>;
+    if ((title !== undefined && typeof title !== "string") || (text !== undefined && typeof text !== "string")) throw new UsageError(`"options" item ${n + 1}: title and text must be strings`);
+    return { title: title ?? "", text: text ?? "" };
+  });
+}
 const md = (r: Result) => r.md.replace(/\n{3,}/g, "\n\n").trimEnd();
 
 function view(project: Project, ref: string | undefined): string {
@@ -324,16 +335,28 @@ export const TOOLS: ToolSpec[] = [
         task: string("ID of the Task you were implementing when you found the difference; leave out for a Scan or a Fix"),
         happens: string("What happens: what the code does, in terms of behaviour and domain words, for a programmer reading at a glance. Short Markdown, about 100 words. Name a variable, function, class, field or file only when the difference cannot be understood without it, as inline code; code locations go in `where`"),
         should: string("What should happen: what the Model or the Requirement says, in the same style"),
+        options: {
+          type: "array",
+          minItems: 2,
+          maxItems: 5,
+          description: "From two to five different ways to fix the code so it does what should happen, the one you recommend first. Each is a different way to reach it, not a step of one plan, and says in terms of behaviour what changes and what it costs. Titles differ",
+          items: {
+            type: "object",
+            properties: { title: string("A few words naming this way to fix the code"), text: string("Short Markdown, about 60 words: what changes and what it costs. No headings or tables") },
+            required: ["title", "text"],
+            additionalProperties: false,
+          },
+        },
         where: string("Optional: where in the code the difference was seen (files, and the code element when it helps; no line numbers, no long code). The only place for code locations"),
         announcement: string("ID given by trama_announce for this Drift, if you announced it"),
       },
-      required: ["title", "refs", "happens", "should"],
+      required: ["title", "refs", "happens", "should", "options"],
       additionalProperties: false,
     },
     writes: true,
     run: (p, i) => {
       const note = announcementNote(p, optionalText(i, "announcement"), "drift");
-      const d = newDrift(p, { title: text(i, "title"), refs: texts(i, "refs"), proposal: optionalText(i, "proposal"), origin: optionalText(i, "task"), happens: text(i, "happens"), should: text(i, "should"), announcement: optionalText(i, "announcement"), ...(i["where"] != null ? { where: text(i, "where") } : {}) });
+      const d = newDrift(p, { title: text(i, "title"), refs: texts(i, "refs"), proposal: optionalText(i, "proposal"), origin: optionalText(i, "task"), happens: text(i, "happens"), should: text(i, "should"), options: fixOptions(i), announcement: optionalText(i, "announcement"), ...(i["where"] != null ? { where: text(i, "where") } : {}) });
       return `Recorded Drift ${d.id}. The developer will decide on it.${note ? ` ${note}` : ""}`;
     },
   },

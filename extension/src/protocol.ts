@@ -34,7 +34,8 @@ export type ToHost =
   | { type: "approveProposal"; id: string }
   /** The host asks for the feedback with an input box. */
   | { type: "rejectProposal"; id: string }
-  | { type: "resolveDrift"; id: string; how: "fix-code" | "accept-proposal" | "dismiss" }
+  /** Keeping what should happen (`fix-code`) carries the number of the selected fix option, from 1, and the note when the developer wrote one; keeping what happens carries neither. */
+  | { type: "resolveDrift"; id: string; how: "fix-code" | "accept-proposal" | "dismiss"; option?: number; note?: string }
   /** The developer clicked "Keep this" on the side of a Drift whose attached Proposal cannot be approved: the host explains why, with a warning. */
   | { type: "driftBlocked"; id: string }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */

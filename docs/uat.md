@@ -57,8 +57,8 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 | `order` States | Draft (initial), Awaiting payment, Paid [Preparing (initial), Ready to ship], Refunding, Shipped (final), Cancelled (final) |
 | Proposal 0001 "Returns after shipping" | `actors/user.md` (+1), `checkout/order.md` (+2 ~2), `checkout/return.md` (+5, new Machine) |
 | Proposal 0002 "Orders can be lost in transit" | `checkout/payment.md` (+1: State `Written off (final)`) |
-| Drift 0001 | "Code refunds after the package is picked up", points at `order/Shipped`, no Proposal; its texts use **bold**, *italic*, a bulleted list and a link, and it has a Where in the code section (two files) |
-| Drift 0002 | "Code has a Written off payment", points at `payment`, Proposal 0002 attached |
+| Drift 0001 | "Code refunds after the package is picked up", points at `order/Shipped`, no Proposal; its texts use **bold**, *italic*, a bulleted list and a link, it has two fix options, **Refuse the refund** (recommended; its text has bold and a bulleted list) and **Refund only after the return**, and a Where in the code section (two files) |
+| Drift 0002 | "Code has a Written off payment", points at `payment`, Proposal 0002 attached, two fix options **Change the code** (recommended) and **Remove the code** |
 | Task 0001 To do | "Implement refunds for prepared orders", refs `order/Refunding`, `order/Paid/user.CANCEL`; its body is Markdown (an introduction, a two-item list with bold, an inline code span) |
 | Task 0002 To do | "Payment declined email", ref `order/Awaiting payment/payment.DECLINED` |
 | Task 0003 In progress | "Cart confirmation", ref `cart/Has items/user.CHECKOUT` |
@@ -285,9 +285,14 @@ j proposal submit <id>           # exit code 1; stays Draft
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Machine level `order`, click the red `Drift 0001` ghost | Panel `DRIFT 0001`, title `Code refunds after the package is picked up`, two boxes: **WHAT HAPPENS** with `A shipped order is still refunded after the courier has picked the package up.` (**shipped** in bold) and a two-item bulleted list, and **WHAT SHOULD HAPPEN** `Model` with `A shipped order can no longer be refunded…` (bold) and a `the refund policy` link; under the boxes a collapsed block **Where in the code**; `POINTS AT` `order/Shipped` | ☐ |
-| 2 | Look at the buttons and the lines under them | Each box has one **Keep this**. Under the left one `Closes the Drift; nothing changes`, under the right one (blue) `A Task is created for the agent to fix the code`. No Fix code, Accept Proposal or Dismiss | ☐ |
+| 2 | Look at the buttons and the lines under them | Each box has one **Keep this**. Under the left one `Closes the Drift; nothing changes`, under the right one (blue) `A Task is created for the agent to fix the code with the chosen option`. No Fix code, Accept Proposal or Dismiss | ☐ |
 | 3 | Click **Where in the code**; select another element and select the Drift again | It opens across the whole width under the two boxes and lists `src/refund.ts` and `src/courier.ts` as code; after selecting the Drift again it is closed. It never holds anything the Keep this buttons depend on | ☐ |
 | 4 | Click the link in **WHAT SHOULD HAPPEN** (harness: `window.__posts`) | The webview does not navigate; it posts `{ type: "openLink", url: "https://example.com/policy" }`. In VS Code the system browser opens the address | ☐ |
+| 5 | Look at the right box between its text and **Keep this** | A group headed **FIX OPTIONS** with two radio buttons: **Refuse the refund** `(recommended)`, selected, with its text (bold, bulleted list), and **Refund only after the return**; under it a multi-line field labelled `Note (optional)`. The left box has neither | ☐ |
+| 6 | Click **Refund only after the return**; then in the group press the up and down arrow keys | Exactly one option is selected each time; the arrows move the selection. Leave **Refund only after the return** selected | ☐ |
+| 7 | Read the accessible names (`ariaSnapshot` or the browser's accessibility tree) | The right button is `Keep what should happen for Code refunds after the package is picked up with option Refund only after the return` and changes with the selection; the left one is `Keep what happens for …`; the group is `Fix options for Code refunds after the package is picked up` and the field `Note for Code refunds after the package is picked up` | ☐ |
+| 8 | Type `Keep the audit log` in the note, select another element and select the Drift again | The selection and the text are as you left them (they survive refreshes of the Diagram and the Board during the session); closing and reopening the panel forgets them | ☐ |
+| 9 | Click the right **Keep this** (harness: `window.__posts`) | It posts `{ type: "resolveDrift", id: "0001", how: "fix-code", option: 2, note: "Keep the audit log" }`; with an empty note the `note` field is absent. The left **Keep this** posts `{ type: "resolveDrift", id: "0001", how: "dismiss" }` with neither | ☐ |
 
 ### D2. A Drift with an attached Proposal
 | # | Action | Expected | ✓ |
@@ -318,7 +323,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 |---|---|---|---|
 | 1 | Read the first card | `Proposal 0001`, `Returns after shipping`, rows `actors/user.md +1`, `checkout/order.md +2 ~2`, `checkout/return.md +5`, buttons **View on diagram**, **Approve** (blue), **Reject**; a blue left border | ☐ |
 | 2 | Read the second card | `Proposal 0002`, `Orders can be lost in transit`, `checkout/payment.md +1` | ☐ |
-| 3 | Read the third card | `Drift 0001`, title, chip `order/Shipped`, the two boxes with their **Keep this** buttons and lines, **View on diagram**; a red left border | ☐ |
+| 3 | Read the third card | `Drift 0001`, title, chip `order/Shipped`, the two boxes with their **Keep this** buttons and lines, the **Fix options** group and the note field in the right box, **View on diagram**; a red left border | ☐ |
 | 4 | Read the fourth card | `Drift 0002`, chip `payment`, a link `Proposal 0002 attached`, the two boxes; the left line says `Approves Proposal 0002 and changes the Model to match`; **View on diagram** | ☐ |
 
 ### E3. Task cards
@@ -388,7 +393,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 11 | Create a fourth Task with `--proposal 2` only (a second Proposal) | A design of one Task stays a plain card | ☐ |
 
 ### E11. Blocked Tasks
-↻ first. Seed it from the verification shell: `j drift new "Refund amount differs" --ref order/Refunding --task 1 --happens "The code refunds late." --should "The Model refunds at once."`, then `j drift new "Cancel differs" --ref order/Paid --happens "The code cancels twice." --should "The Model cancels once."`. The harness seed already has blocked Tasks too (Tasks inside the design card, Task `0008` waiting for the fix Task `0009`); the new Drifts are 0006 and 0007. Task `0005`, taken by the agent, also gets the badge `blocked 0006`: blocking does not release it.
+↻ first. Seed it from the verification shell: `j drift new "Refund amount differs" --ref order/Refunding --task 1 --happens "The code refunds late." --should "The Model refunds at once." --option "Refund at once" --option-text "Refund when the order is cancelled." --option "Queue the refund" --option-text "Keep the queue but refund within a minute."`, then `j drift new "Cancel differs" --ref order/Paid --happens "The code cancels twice." --should "The Model cancels once." --option "Cancel once" --option-text "Ignore a second cancel." --option "Reject the second cancel" --option-text "Answer it with an error."`. The harness seed already has blocked Tasks too (Tasks inside the design card, Task `0008` waiting for the fix Task `0009`); the new Drifts are 0006 and 0007. Task `0005`, taken by the agent, also gets the badge `blocked 0006`: blocking does not release it.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Look at Task `0001` on the Board | Red badges `blocked 0006` (the Drift filed with `--task 1`) and `blocked 0007` (it refs `order/Paid/user.CANCEL`, inside `order/Paid`); both arrows and **Run** stay enabled | ☐ |
@@ -400,7 +405,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 7 | `j drift show 6` | It does not list Task 0001 | ☐ |
 | 8 | Click **Keep this** under **WHAT SHOULD HAPPEN** on Drift 0006 | Task `0001` goes back to To do and its badges become `waiting 0010` and `blocked 0007`; clicking `waiting 0010` scrolls to the fix Task's card and focuses it | ☐ |
 | 9 | Move the fix Task `0010` to Done and click **Keep this** under **WHAT HAPPENS** on Drift 0007 | Task `0001` has no badge any more | ☐ |
-| 10 | `j --json drift show 7`, then `j drift new "x" --ref order --task 99 --happens a --should b` | The first has `"origin": null` (filed without `--task`) and the two texts; the second fails with `No Task with ID "99"` and creates nothing | ☐ |
+| 10 | `j --json drift show 7`, then `j drift new "x" --ref order --task 99 --happens a --should b --option A --option-text a --option B --option-text b` | The first has `"origin": null` (filed without `--task`) and the two texts; the second fails with `No Task with ID "99"` and creates nothing | ☐ |
 
 ### E12. Ghosts of announced cards
 Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": "bash -c \\"sleep 600\\" {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, and reload the window so the extension reads the settings. `j` below is the verification shell's.
@@ -502,12 +507,24 @@ For every G test, ↻ first, then open the panel and the "Trama agent" terminal 
 ### G6. Fix the code (Drift → Task)
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | ↻. Board: **Keep this** under **WHAT SHOULD HAPPEN** on Drift 0001 | Drift 0001 leaves To decide (count 3) | ☐ |
+| 1 | ↻. Board: in Drift 0001 select **Refund only after the return**, type `Keep the audit log` in the note and click **Keep this** under **WHAT SHOULD HAPPEN** | Drift 0001 leaves To decide (count 3) | ☐ |
 | 2 | Look at To do | A new card `0005` `Fix code to match the Model: Code refunds after the package is picked up`, chip `order/Shipped`, text `from Drift 0001` | ☐ |
 | 3 | `ls $D/tasks` | Includes `0005-fix-code-to-match-the-model-code-refunds.md` | ☐ |
 | 4 | `sed -n 1,8p $D/tasks/0005-*.md` | `column: todo`, `technical: false`, refs `order/Shipped`, `drift: "0001"` | ☐ |
-| 5 | `sed -n 1,8p $D/drifts/0001-*.md` | `status: resolved`, `resolution: fix-code`, `task: "0005"` | ☐ |
+| 5 | `sed -n 1,10p $D/drifts/0001-*.md` | `status: resolved`, `resolution: fix-code`, `task: "0005"`, `option: 2`, `note: Keep the audit log` | ☐ |
+| 5b | `cat $D/tasks/0005-*.md` | The body holds, in this order, `## What happens`, `## What should happen`, `## Chosen option` (**Refund only after the return** with its text), `## Note` (`Keep the audit log`) and `## Where in the code` | ☐ |
+| 5c | `j drift show 1` | After the two sides, `## Fix options` as a numbered list (`1. **Refuse the refund** (recommended)`, `2. …`), the Where in the code, then `## Chosen option` `2. Refund only after the return` and `## Note` | ☐ |
 | 6 | Terminal | Nothing was launched | ☐ |
+
+### G6b. Fix options on the command line
+Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." --should "The Model says so." --option "Change it" --option-text "Make the code do it." --option "Drop it" --option-text "Remove the behaviour."` (its ID below is `<id>`).
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | `j drift new "Few" --ref order --happens a --should b --option "Only" --option-text one`, then the same with `--option "A" --option-text a --option "B"` (no text), then with two options titled `A` | Each is refused, naming the problem (from 2 to 5 options; option 2 needs its text; two options titled `A`); no Drift is created | ☐ |
+| 2 | `j drift resolve <id> --fix-code` with the input not a terminal (for example `j drift resolve <id> --fix-code < /dev/null`) | Refused: `An option must be chosen …`; the Drift stays open | ☐ |
+| 3 | `j drift resolve <id> --fix-code --option 9`, then `--accept-proposal --option 1` and `--dismiss --note x` | The first is refused (an option must be chosen, from 1 to 2); the others are refused (an option or a note only goes with fixing the code); the Drift stays open | ☐ |
+| 4 | 🔍 In a real terminal: `j drift resolve <id> --fix-code` | A numbered menu of the options with `(recommended)` on the first and the prompt `Option [1]:`; typing `9` asks again; pressing Enter takes option 1; then `Note (optional, Enter for none):`. Typing a note and Enter resolves the Drift | ☐ |
+| 5 | `j drift show <id>` | `## Chosen option` `1. Change it` and the note, if you typed one | ☐ |
 
 ### G7. Keep what happens with no Proposal
 | # | Action | Expected | ✓ |

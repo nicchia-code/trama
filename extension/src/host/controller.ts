@@ -205,7 +205,7 @@ export class Controller implements vscode.Disposable {
         return;
       }
       case "resolveDrift": {
-        const resolve = () => resolveDrift(project, message.id, message.how, [configuredSkillsDir()]);
+        const resolve = () => resolveDrift(project, message.id, message.how, [configuredSkillsDir()], { option: message.option, note: message.note });
         const attached = getDrift(project, message.id).data.proposal;
         if (message.how === "accept-proposal" && attached !== null) await this.approving(project, attached, resolve);
         else {

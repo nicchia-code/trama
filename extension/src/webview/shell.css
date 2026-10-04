@@ -40,6 +40,14 @@ button.trama-btn.is-blocked { opacity: .5; cursor: default; }
 .drift-compare-where-text { margin-top: 6px; }
 .drift-compare-col > button { align-self: flex-start; }
 .drift-compare-consequence { margin: 0; font-size: 12px; opacity: .8; }
+.drift-fix { display: flex; flex-direction: column; gap: 6px; }
+.drift-fix-head { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.drift-options { display: flex; flex-direction: column; gap: 6px; }
+.drift-option { display: grid; grid-template-columns: auto 1fr; column-gap: 6px; align-items: baseline; }
+.drift-option-title { cursor: pointer; }
+.drift-option-text { grid-column: 2; margin: 0; min-width: 0; overflow-wrap: anywhere; opacity: .85; }
+.drift-note { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.drift-note-field { font: inherit; resize: vertical; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #444)); border-radius: 2px; padding: 4px 6px; }
 .md, .md-inline { overflow-wrap: anywhere; user-select: text; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }

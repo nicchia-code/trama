@@ -1,3 +1,4 @@
+import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,7 +8,10 @@ import { handOver } from "./handover";
 import { approveProposal, editInProposal, getProposal, health, newProposal, rejectProposal } from "../src/core/proposals";
 import { loadModel, type Project, projectAt } from "../src/core/store";
 import { callTool } from "../src/tools/catalog";
-import { driftSides, getDrift, getTask, listDrifts, moveTask, newDrift, newTask, releaseTasks, replaceDriftProposal, resolveDrift, takeBackTask } from "../src/core/work";
+import { driftOptions, driftSides, getDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask, releaseTasks, replaceDriftProposal, resolveDrift, takeBackTask } from "../src/core/work";
+
+/** The same options as FIX_OPTIONS, as the command line takes them. */
+const CLI_OPTIONS = FIX_OPTIONS.flatMap((o) => ["--option", o.title, "--option-text", o.text]);
 
 let dir: string;
 let p: Project;
@@ -178,7 +182,7 @@ describe("Tasks and Drifts", () => {
 
   test("the agent cannot start a blocked Task, from any column; the developer and the agent's other moves are free", async () => {
     const id = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
-    const drift = newDrift(p, { title: "Refunds differ", refs: ["order"], origin: id, happens: "The code does it one way.", should: "The Model says another." });
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Refunds differ", refs: ["order"], origin: id, happens: "The code does it one way.", should: "The Model says another." });
     const agent = (column: string) => run(["--root", dir, "task", "move", id, column], process.cwd(), { TRAMA_AGENT: "1" });
 
     expect(() => moveTask(p, id, "doing", "agent")).toThrow(new RegExp(`Drift ${drift.id} "Refunds differ".*developer must decide`));
@@ -195,7 +199,7 @@ describe("Tasks and Drifts", () => {
     expect(moveTask(p, id, "doing", "agent").data).toMatchObject({ column: "doing", agent: true });
     expect(moveTask(p, id, "todo", "agent").data.column).toBe("todo");
 
-    resolveDrift(p, drift.id, "fix-code");
+    resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
     const fix = getDrift(p, drift.id).data.task as string;
     expect(() => moveTask(p, id, "doing", "agent")).toThrow(new RegExp(`Task ${fix} .*fixes the code for Drift ${drift.id}`));
   });
@@ -206,17 +210,17 @@ describe("Tasks and Drifts", () => {
       moveTask(p, id, column, "agent");
       return id;
     };
-    const drift = (id: string | undefined) => newDrift(p, { title: "Refunds differ", refs: ["order"], origin: id, happens: "The code does it one way.", should: "The Model says another." }).id;
+    const drift = (id: string | undefined) => newDrift(p, { options: FIX_OPTIONS, title: "Refunds differ", refs: ["order"], origin: id, happens: "The code does it one way.", should: "The Model says another." }).id;
 
     const working = origin("doing");
-    const fixed = resolveDrift(p, drift(working), "fix-code");
+    const fixed = resolveDrift(p, drift(working), "fix-code", [], { option: 1 });
     expect(getTask(p, working).data).toMatchObject({ column: "todo", agent: false });
     expect(() => moveTask(p, working, "doing", "agent")).toThrow(new RegExp(`Task ${fixed.data.task} `));
     moveTask(p, fixed.data.task as string, "done", "developer");
     expect(moveTask(p, working, "doing", "agent").data.agent).toBe(true);
 
     const finished = origin("done");
-    resolveDrift(p, drift(finished), "fix-code");
+    resolveDrift(p, drift(finished), "fix-code", [], { option: 1 });
     expect(getTask(p, finished).data.column).toBe("done");
 
     const dismissedOrigin = origin("doing");
@@ -224,7 +228,7 @@ describe("Tasks and Drifts", () => {
     expect(getTask(p, dismissedOrigin).data).toMatchObject({ column: "doing", agent: true });
 
     const noOrigin = origin("doing");
-    resolveDrift(p, drift(undefined), "fix-code");
+    resolveDrift(p, drift(undefined), "fix-code", [], { option: 1 });
     expect(getTask(p, noOrigin).data).toMatchObject({ column: "doing", agent: true });
   });
 
@@ -282,10 +286,10 @@ describe("Tasks and Drifts", () => {
     const blockedTask = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
     const waiting = newTask(p, { title: "Waiting flow", refs: ["cart"], technical: false }).id;
     const free = newTask(p, { title: "Free flow", refs: ["payment"], technical: false }).id;
-    const d1 = newDrift(p, { title: "Refunds differ", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
-    const d2 = newDrift(p, { title: "Cancel differs", refs: ["order/Paid"], happens: "The code does it one way.", should: "The Model says another." });
-    const d3 = newDrift(p, { title: "Waiting origin", refs: ["cart"], origin: waiting, happens: "The code does it one way.", should: "The Model says another." });
-    resolveDrift(p, d3.id, "fix-code");
+    const d1 = newDrift(p, { options: FIX_OPTIONS, title: "Refunds differ", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
+    const d2 = newDrift(p, { options: FIX_OPTIONS, title: "Cancel differs", refs: ["order/Paid"], happens: "The code does it one way.", should: "The Model says another." });
+    const d3 = newDrift(p, { options: FIX_OPTIONS, title: "Waiting origin", refs: ["cart"], origin: waiting, happens: "The code does it one way.", should: "The Model says another." });
+    resolveDrift(p, d3.id, "fix-code", [], { option: 1 });
     const fix = getDrift(p, d3.id).data.task as string;
     const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
 
@@ -351,18 +355,79 @@ describe("Tasks and Drifts", () => {
   });
 
   test("resolving a Drift with fix-code creates a linked Task with the same references", () => {
-    const drift = newDrift(p, { title: "Refund too late", refs: ["order/Shipped"], happens: "Seen in refund.ts", should: "The Model says another." });
-    const resolved = resolveDrift(p, drift.id, "fix-code");
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Refund too late", refs: ["order/Shipped"], happens: "Seen in refund.ts", should: "The Model says another." });
+    const resolved = resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
     const task = getTask(p, resolved.data.task as string);
     expect(task.data).toMatchObject({ column: "todo", refs: ["order/Shipped"], drift: drift.id, technical: false });
     expect(getDrift(p, drift.id).data).toMatchObject({ status: "resolved", resolution: "fix-code" });
     expect(() => resolveDrift(p, drift.id, "dismiss")).toThrow(/already resolved/);
   });
 
+  test("fixing the code of a Drift with options needs one of them; the Task carries it with the note, and the Drift keeps both", () => {
+    const make = (where?: string) => newDrift(p, { options: FIX_OPTIONS, title: "Refund too late", refs: ["order/Shipped"], happens: "Refunds after pickup.", should: "No refund after pickup.", ...(where ? { where } : {}) });
+    const drift = make("`src/refund.ts`");
+    for (const choice of [{}, { note: "Mind it." }, { option: 0 }, { option: 3 }, { option: 1.5 }, { option: Number.NaN }])
+      expect(() => resolveDrift(p, drift.id, "fix-code", [], choice)).toThrow(/An option must be chosen/);
+    expect(getDrift(p, drift.id).data).toMatchObject({ status: "open", resolution: null, task: null, option: null, note: null });
+    expect(listTasks(p)).toHaveLength(0);
+
+    const resolved = resolveDrift(p, drift.id, "fix-code", [], { option: 2, note: "  Keep the audit log.  " });
+    expect(getDrift(p, drift.id).data).toMatchObject({ status: "resolved", resolution: "fix-code", option: 2, note: "Keep the audit log." });
+    expect(getTask(p, resolved.data.task as string).body).toBe(
+      "# Fix code to match the Model: Refund too late\n\n## What happens\n\nRefunds after pickup.\n\n## What should happen\n\nNo refund after pickup.\n\n## Chosen option\n\n**Remove the code**\n\nDrop the behaviour altogether.\n\n## Note\n\nKeep the audit log.\n\n## Where in the code\n\n`src/refund.ts`\n",
+    );
+
+    const plain = resolveDrift(p, make().id, "fix-code", [], { option: 1 });
+    expect(getTask(p, plain.data.task as string).body).not.toContain("## Note");
+    expect(getTask(p, plain.data.task as string).body).toContain("## Chosen option\n\n**Change the code**\n\nMake the code do what the Model says.");
+  });
+
+  test("a Drift without options is fixed without choosing, with or without a note; keeping what happens takes neither option nor note", () => {
+    const bare = (title: string) => {
+      const d = newDrift(p, { options: FIX_OPTIONS, title, refs: ["order"], happens: "Code does it.", should: "Model says so." });
+      writeFileSync(d.path, readFileSync(d.path, "utf8").replace(/\n## Fix options[\s\S]*/, "\n"));
+      return d;
+    };
+    const old = bare("Old");
+    expect(() => resolveDrift(p, old.id, "fix-code", [], { option: 1 })).toThrow(/no fix options/);
+    const fixed = resolveDrift(p, old.id, "fix-code", [], { note: "Careful." });
+    expect(getDrift(p, old.id).data).toMatchObject({ option: null, note: "Careful." });
+    expect(getTask(p, fixed.data.task as string).body).toBe("# Fix code to match the Model: Old\n\n## What happens\n\nCode does it.\n\n## What should happen\n\nModel says so.\n\n## Note\n\nCareful.\n");
+    expect(getDrift(p, bare("Plain").id).data.note).toBeNull();
+    resolveDrift(p, "0002", "fix-code");
+    expect(getDrift(p, "0002").data).toMatchObject({ resolution: "fix-code", option: null, note: null });
+
+    const prop = newProposal(p, "Model forgot this");
+    editOrder(prop.id, (t) => t.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
+    const withProposal = newDrift(p, { options: FIX_OPTIONS, title: "Lost", refs: ["order"], proposal: prop.id, happens: "Code does it.", should: "Model says so." });
+    handOver(p, prop.id);
+    const plain = newDrift(p, { options: FIX_OPTIONS, title: "Plain", refs: ["order"], happens: "Code does it.", should: "Model says so." });
+    for (const choice of [{ option: 1 }, { note: "Why." }]) {
+      expect(() => resolveDrift(p, withProposal.id, "accept-proposal", [], choice)).toThrow(/only goes with fixing the code/);
+      expect(() => resolveDrift(p, plain.id, "dismiss", [], choice)).toThrow(/only goes with fixing the code/);
+    }
+    expect(getProposal(p, prop.id).data.status).toBe("open");
+    expect(getDrift(p, plain.id).data.status).toBe("open");
+    expect(resolveDrift(p, plain.id, "dismiss").data.resolution).toBe("dismissed");
+  });
+
+  test("drift resolve --fix-code takes --option and --note on the command line; the other resolutions refuse them", () => {
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Refund too late", refs: ["order/Shipped"], happens: "Refunds after pickup.", should: "No refund after pickup." });
+    const resolve = (...args: string[]) => run(["--root", dir, "drift", "resolve", drift.id, ...args], process.cwd(), {});
+    expect(() => resolve("--fix-code")).toThrow(/An option must be chosen/);
+    expect(() => resolve("--fix-code", "--option", "two")).toThrow(/An option must be chosen/);
+    expect(() => resolve("--fix-code", "--option", "9")).toThrow(/An option must be chosen/);
+    expect(() => resolve("--dismiss", "--option", "1")).toThrow(/only goes with fixing the code/);
+    expect(() => resolve("--dismiss", "--note", "Why")).toThrow(/only goes with fixing the code/);
+    expect(getDrift(p, drift.id).data.status).toBe("open");
+    resolve("--fix-code", "--option", "2", "--note", "Keep the log");
+    expect(getDrift(p, drift.id).data).toMatchObject({ resolution: "fix-code", option: 2, note: "Keep the log" });
+  });
+
   test("accepting the attached Proposal approves it", () => {
     const prop = newProposal(p, "Model forgot this");
     editOrder(prop.id, (t) => t.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
-    const drift = newDrift(p, { title: "Code has Lost", refs: ["order"], proposal: prop.id, happens: "The code does it one way.", should: "The Model says another." });
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Code has Lost", refs: ["order"], proposal: prop.id, happens: "The code does it one way.", should: "The Model says another." });
     handOver(p, prop.id);
     resolveDrift(p, drift.id, "accept-proposal");
     expect(getProposal(p, prop.id).data.status).toBe("approved");
@@ -370,60 +435,62 @@ describe("Tasks and Drifts", () => {
   });
 
   test("accepting without an attached Proposal fails and leaves the Drift open", () => {
-    const drift = newDrift(p, { title: "Plain", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Plain", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
     expect(() => resolveDrift(p, drift.id, "accept-proposal")).toThrow(/no attached Proposal/);
     expect(getDrift(p, drift.id).data.status).toBe("open");
   });
 
   test("a Drift remembers the Task it was filed from, which must exist; Drifts without one still load", async () => {
     const task = newTask(p, { title: "Cancel flow", refs: ["order"], technical: false });
-    expect(() => newDrift(p, { title: "x", refs: ["order"], origin: "42", happens: "The code does it one way.", should: "The Model says another." })).toThrow(/No Task/);
-    const viaCore = newDrift(p, { title: "Core", refs: ["order"], origin: task.id, happens: "The code does it one way.", should: "The Model says another." });
+    expect(() => newDrift(p, { options: FIX_OPTIONS, title: "x", refs: ["order"], origin: "42", happens: "The code does it one way.", should: "The Model says another." })).toThrow(/No Task/);
+    const viaCore = newDrift(p, { options: FIX_OPTIONS, title: "Core", refs: ["order"], origin: task.id, happens: "The code does it one way.", should: "The Model says another." });
     expect(getDrift(p, viaCore.id).data.origin).toBe(task.id);
 
-    const viaCli = run(["--root", dir, "drift", "new", "Cli", "--ref", "order", "--task", task.id, "--happens", "Code does it.", "--should", "Model says so."], process.cwd());
+    const viaCli = run(["--root", dir, "drift", "new", "Cli", "--ref", "order", "--task", task.id, "--happens", "Code does it.", "--should", "Model says so.", ...CLI_OPTIONS], process.cwd());
     const cliId = /Created Drift (\d+)/.exec(viaCli.out)?.[1] ?? "";
     expect(getDrift(p, cliId).data.origin).toBe(task.id);
 
-    const viaTool = await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], task: task.id, happens: "Code does it.", should: "Model says so." });
+    const viaTool = await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], options: FIX_OPTIONS, task: task.id, happens: "Code does it.", should: "Model says so." });
     expect(viaTool.isError).toBe(false);
     const toolId = /Recorded Drift (\d+)/.exec(viaTool.text)?.[1] ?? "";
     expect(getDrift(p, toolId).data.origin).toBe(task.id);
-    expect((await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], task: "42", happens: "Code does it.", should: "Model says so." })).isError).toBe(true);
+    expect((await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], options: FIX_OPTIONS, task: "42", happens: "Code does it.", should: "Model says so." })).isError).toBe(true);
 
-    const scanned = newDrift(p, { title: "From a scan", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
+    const scanned = newDrift(p, { options: FIX_OPTIONS, title: "From a scan", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
     expect(getDrift(p, scanned.id).data.origin).toBeNull();
     writeFileSync(scanned.path, readFileSync(scanned.path, "utf8").replace(/^origin:.*\n/m, ""));
     expect(getDrift(p, scanned.id).data.origin).toBeNull();
   });
 
   test("a Drift may say where in the code it was seen: kept as a third section, carried by the fix Task, shown by drift show", async () => {
-    const drift = newDrift(p, { title: "Where", refs: ["order"], happens: "Refunds after pickup.", should: "No refund after pickup.", where: "  `src/refund.ts`, the refund step\n\n## Not a section\n" });
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Where", refs: ["order"], happens: "Refunds after pickup.", should: "No refund after pickup.", where: "  `src/refund.ts`, the refund step\n\n## Not a section\n" });
     expect(driftSides(getDrift(p, drift.id))).toEqual({ happens: "Refunds after pickup.", should: "No refund after pickup.", where: "`src/refund.ts`, the refund step\n\n## Not a section" });
 
     const shown = run(["--root", dir, "drift", "show", drift.id], process.cwd()).out;
     expect(shown).toMatch(/## What should happen[\s\S]*## Where in the code\n\n`src\/refund.ts`/);
     expect(shown.indexOf("## Where in the code")).toBeLessThan(shown.indexOf("Status:"));
 
-    const fixed = resolveDrift(p, drift.id, "fix-code");
+    const fixed = resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
     expect(getTask(p, fixed.data.task as string).body).toContain("## Where in the code\n\n`src/refund.ts`, the refund step");
 
-    expect(() => newDrift(p, { title: "x", refs: ["order"], happens: "Code does it.", should: "Model says so.", where: "  " })).toThrow(/Where in the code/);
-    expect(() => run(["--root", dir, "drift", "new", "x", "--ref", "order", "--happens", "a", "--should", "b", "--where", ""], process.cwd())).toThrow(/Where in the code/);
-    const viaTool = await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], happens: "Code does it.", should: "Model says so.", where: "src/x.ts" });
+    expect(() => newDrift(p, { options: FIX_OPTIONS, title: "x", refs: ["order"], happens: "Code does it.", should: "Model says so.", where: "  " })).toThrow(/Where in the code/);
+    expect(() => run(["--root", dir, "drift", "new", "x", "--ref", "order", "--happens", "a", "--should", "b", "--where", "", ...CLI_OPTIONS], process.cwd())).toThrow(/Where in the code/);
+    const viaTool = await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], options: FIX_OPTIONS, happens: "Code does it.", should: "Model says so.", where: "src/x.ts" });
     expect(viaTool.isError).toBeFalsy();
     expect(driftSides(listDrifts(p).at(-1) as never)?.where).toBe("src/x.ts");
   });
 
   test("a Drift needs both sides, stores them as two sections and cannot be filed without one", async () => {
-    const drift = newDrift(p, { title: "Two sides", refs: ["order"], happens: " Refunds after pickup. ", should: "No refund after pickup." });
-    expect(drift.body).toBe("# Two sides\n\n## What happens\n\nRefunds after pickup.\n\n## What should happen\n\nNo refund after pickup.\n");
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Two sides", refs: ["order"], happens: " Refunds after pickup. ", should: "No refund after pickup." });
+    expect(drift.body).toBe(
+      "# Two sides\n\n## What happens\n\nRefunds after pickup.\n\n## What should happen\n\nNo refund after pickup.\n\n## Fix options\n\n### Change the code\n\nMake the code do what the Model says.\n\n### Remove the code\n\nDrop the behaviour altogether.\n",
+    );
     expect(driftSides(getDrift(p, drift.id))).toEqual({ happens: "Refunds after pickup.", should: "No refund after pickup.", where: null });
 
-    expect(() => newDrift(p, { title: "x", refs: ["order"], happens: "  ", should: "Model says so." })).toThrow(/"What happens"/);
-    expect(() => newDrift(p, { title: "x", refs: ["order"], happens: "Code does it.", should: "" })).toThrow(/"What should happen"/);
-    expect(() => run(["--root", dir, "drift", "new", "x", "--ref", "order", "--should", "Model says so."], process.cwd())).toThrow(/"What happens"/);
-    const viaTool = await callTool(p, "trama_drift_new", { title: "x", refs: ["order"], happens: "Code does it." });
+    expect(() => newDrift(p, { options: FIX_OPTIONS, title: "x", refs: ["order"], happens: "  ", should: "Model says so." })).toThrow(/"What happens"/);
+    expect(() => newDrift(p, { options: FIX_OPTIONS, title: "x", refs: ["order"], happens: "Code does it.", should: "" })).toThrow(/"What should happen"/);
+    expect(() => run(["--root", dir, "drift", "new", "x", "--ref", "order", "--should", "Model says so.", ...CLI_OPTIONS], process.cwd())).toThrow(/"What happens"/);
+    const viaTool = await callTool(p, "trama_drift_new", { title: "x", refs: ["order"], options: FIX_OPTIONS, happens: "Code does it." });
     expect(viaTool.isError).toBe(true);
     expect(listDrifts(p)).toHaveLength(1);
 
@@ -431,9 +498,41 @@ describe("Tasks and Drifts", () => {
     expect(driftSides(getDrift(p, drift.id))).toBeNull();
   });
 
+  test("a new Drift needs two to five distinct fix options, each with title and text, in the order given, from core, command line and tool", async () => {
+    const file = (options: { title: string; text: string }[]) => newDrift(p, { title: "x", refs: ["order"], happens: "Code does it.", should: "Model says so.", options });
+    const five = ["A", "B", "C", "D", "E"].map((t) => ({ title: t, text: `Way ${t}.` }));
+    expect(driftOptions(file(five))).toEqual(five);
+    const kept = getDrift(p, "0001");
+    expect(driftOptions(kept).map((o) => o.title)).toEqual(["A", "B", "C", "D", "E"]);
+    expect(driftSides(kept)).toMatchObject({ should: "Model says so.", where: null });
+
+    expect(() => file([])).toThrow(/from 2 to 5 fix options.*found 0/);
+    expect(() => file(FIX_OPTIONS.slice(0, 1))).toThrow(/from 2 to 5 fix options.*found 1/);
+    expect(() => file([...five, { title: "F", text: "Way F." }])).toThrow(/from 2 to 5 fix options.*found 6/);
+    expect(() => file([{ title: "A", text: "Way A." }, { title: "", text: "Way B." }])).toThrow(/Fix option 2 needs its title/);
+    expect(() => file([{ title: "A", text: "Way A." }, { title: "B", text: " " }])).toThrow(/Fix option 2 \("B"\) needs its text/);
+    expect(() => file([{ title: "A", text: "Way A." }, { title: " A ", text: "Way B." }])).toThrow(/Two fix options are titled "A"/);
+    expect(() => file([{ title: "A", text: "Way A." }, { title: "B", text: "Way B.\n### C\nWay C." }])).toThrow(/cannot contain headings/);
+    expect(listDrifts(p)).toHaveLength(1);
+
+    const args = ["--root", dir, "drift", "new", "Cli", "--ref", "order", "--happens", "Code does it.", "--should", "Model says so."];
+    expect(() => run([...args, "--option", "A", "--option-text", "Way A."], process.cwd())).toThrow(/from 2 to 5 fix options.*found 1/);
+    expect(() => run([...args, "--option", "A", "--option-text", "Way A.", "--option", "B"], process.cwd())).toThrow(/Fix option 2 \("B"\) needs its text/);
+    expect(() => run([...args, "--option", "A", "--option-text", "Way A.", "--option-text", "Way B."], process.cwd())).toThrow(/Fix option 2 needs its title/);
+    expect(() => run(args, process.cwd())).toThrow(/from 2 to 5 fix options.*found 0/);
+    const created = /Created Drift (\d+)/.exec(run([...args, ...CLI_OPTIONS], process.cwd()).out)?.[1] ?? "";
+    expect(driftOptions(getDrift(p, created))).toEqual(FIX_OPTIONS);
+
+    expect((await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], happens: "Code does it.", should: "Model says so." })).isError).toBe(true);
+    expect((await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: [{ title: "A" }, { title: "B", text: "Way B." }] })).isError).toBe(true);
+    const viaTool = await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: five.slice(0, 3) });
+    expect(viaTool.isError).toBeFalsy();
+    expect(driftOptions(listDrifts(p).at(-1) as never)).toEqual(five.slice(0, 3));
+  });
+
   test("drift show lists the two sides as two blocks, says why an attached Proposal cannot be approved, and shows an old Drift as one block", async () => {
     const draft = newProposal(p, "Lost orders");
-    const drift = newDrift(p, { title: "Lost in transit", refs: ["order"], proposal: draft.id, happens: "worker/lost.ts writes it off.", should: "Nothing writes it off." });
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Lost in transit", refs: ["order"], proposal: draft.id, happens: "worker/lost.ts writes it off.", should: "Nothing writes it off." });
     const shown = run(["--root", dir, "drift", "show", drift.id], process.cwd()).out;
     expect(shown).toContain("## What happens\n\nworker/lost.ts writes it off.\n\n## What should happen\n\nNothing writes it off.");
     expect(shown).toContain(`Attached Proposal: ${draft.id} (draft)\nCannot be approved: Proposal ${draft.id} is still being written.`);
@@ -449,9 +548,39 @@ describe("Tasks and Drifts", () => {
     expect(old).not.toContain("What happens");
   });
 
+  test("drift show and the tool list the fix options as a numbered list after the sides, then the chosen option and the note once the code is fixed; a Drift without options has no such block", async () => {
+    const drift = newDrift(p, {
+      options: [{ title: "Change the step", text: "Rewrite the **step**.\n\n- keeps data" }, { title: "Remove the step", text: "Drop it." }],
+      title: "Refund",
+      refs: ["order"],
+      happens: "Refunds after pickup.",
+      should: "No refund after pickup.",
+      where: "`src/refund.ts`",
+    });
+    const show = () => run(["--root", dir, "drift", "show", drift.id], process.cwd()).out;
+    const listing = "## What should happen\n\nNo refund after pickup.\n\n## Fix options\n\n1. **Change the step** (recommended)\n\n   Rewrite the **step**.\n\n   - keeps data\n\n2. **Remove the step**\n\n   Drop it.\n\n## Where in the code\n\n`src/refund.ts`";
+    expect(show()).toContain(listing);
+    expect(show()).not.toMatch(/## Chosen option|## Note/);
+    expect((await callTool(p, "trama_drift_show", { drift: drift.id })).text).toContain(listing);
+
+    resolveDrift(p, drift.id, "fix-code", [], { option: 2, note: "Keep the log." });
+    expect(show()).toMatch(/## Where in the code\n\n`src\/refund.ts`\n\n## Chosen option\n\n2\. Remove the step\n\n## Note\n\nKeep the log\.\n\nStatus: \*\*resolved\*\* \(fix-code\)/);
+    expect((await callTool(p, "trama_drift_show", { drift: drift.id })).text).toContain("## Chosen option\n\n2. Remove the step");
+    expect(JSON.parse(run(["--root", dir, "--json", "drift", "show", drift.id], process.cwd()).out)).toMatchObject({ option: 2, note: "Keep the log.", options: [{ title: "Change the step" }, { title: "Remove the step" }] });
+
+    const bare = newDrift(p, { options: FIX_OPTIONS, title: "Bare", refs: ["order"], happens: "Code does it.", should: "Model says so." });
+    writeFileSync(bare.path, readFileSync(bare.path, "utf8").replace(/\n## Fix options[\s\S]*/, "\n"));
+    const shown = run(["--root", dir, "drift", "show", bare.id], process.cwd()).out;
+    expect(shown).not.toMatch(/Fix options|Chosen option|## Note/);
+    resolveDrift(p, bare.id, "fix-code", [], { note: "Only a note." });
+    const noted = run(["--root", dir, "drift", "show", bare.id], process.cwd()).out;
+    expect(noted).toContain("## Note\n\nOnly a note.");
+    expect(noted).not.toContain("Chosen option");
+  });
+
   test("a Drift with an attached Proposal cannot be dismissed whatever the Proposal's state; accepting names why it cannot be approved", () => {
     const proposal = newProposal(p, "Lost orders");
-    const drift = newDrift(p, { title: "Lost in transit", refs: ["order"], proposal: proposal.id, happens: "Code writes it off.", should: "Nothing writes it off." });
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Lost in transit", refs: ["order"], proposal: proposal.id, happens: "Code writes it off.", should: "Nothing writes it off." });
     const dismiss = () => resolveDrift(p, drift.id, "dismiss");
     expect(dismiss).toThrow(new RegExp(`accept that Proposal.*fix the code`));
     expect(() => resolveDrift(p, drift.id, "accept-proposal")).toThrow(/still being written/);
@@ -466,7 +595,7 @@ describe("Tasks and Drifts", () => {
     const old = newProposal(p, "Lost orders");
     editOrder(old.id, (t) => `${t}\n`);
     handOver(p, old.id);
-    const drift = newDrift(p, { title: "Lost in transit", refs: ["order"], proposal: old.id, happens: "Code writes it off.", should: "Nothing writes it off." });
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Lost in transit", refs: ["order"], proposal: old.id, happens: "Code writes it off.", should: "Nothing writes it off." });
     const fresh = newProposal(p, "Lost orders again");
     const asAgent = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), { TRAMA_AGENT: "1" });
 
@@ -487,7 +616,7 @@ describe("Tasks and Drifts", () => {
     expect(getProposal(p, old.id).body).toContain(`## Feedback\n\nReplaced by Proposal ${fresh.id}`);
     expect(() => replaceDriftProposal(p, drift.id, turnedDown.id)).toThrow(/only an open, stale Proposal/);
 
-    resolveDrift(p, drift.id, "fix-code");
+    resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
     const closed = await callTool(p, "trama_drift_replace_proposal", { drift: drift.id, proposal: fresh.id });
     expect(closed.isError).toBe(true);
   });
@@ -521,7 +650,7 @@ describe("CLI", () => {
     const lost = newProposal(p, "Lost");
     editOrder(lost.id, (t) => t.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
     handOver(p, lost.id);
-    newDrift(p, { title: "d", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
+    newDrift(p, { options: FIX_OPTIONS, title: "d", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
     expect(() => run(["--root", dir, "proposal", "approve", "1"], dir, agent)).toThrow(/developer's decision/);
     expect(() => run(["--root", dir, "proposal", "reject", "1", "--feedback", "no"], dir, agent)).toThrow(/developer's decision/);
     expect(() => run(["--root", dir, "drift", "resolve", "1", "--dismiss"], dir, agent)).toThrow(/developer's decision/);
@@ -532,7 +661,7 @@ describe("CLI", () => {
   });
 
   test("drift resolve demands exactly one resolution", () => {
-    newDrift(p, { title: "d", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
+    newDrift(p, { options: FIX_OPTIONS, title: "d", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
     expect(() => cli("drift", "resolve", "1")).toThrow(/exactly one/);
     expect(() => cli("drift", "resolve", "1", "--dismiss", "--fix-code")).toThrow(/exactly one/);
   });

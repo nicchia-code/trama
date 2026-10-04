@@ -14,7 +14,7 @@ export interface PanelActions {
   toggle(state: string): void;
   approve(proposal: string): void;
   reject(proposal: string): void;
-  resolveDrift(drift: string, how: "fix-code" | "accept-proposal" | "dismiss"): void;
+  resolveDrift(drift: string, how: "fix-code" | "accept-proposal" | "dismiss", carries: { option?: number; note?: string }): void;
   /** "Keep this" clicked on a Drift whose attached Proposal cannot be approved. */
   driftBlocked(drift: string): void;
   /** An http or https link of a rendered text was followed. */
@@ -117,7 +117,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       root.append(head);
       if (detail.drift) {
         const d = detail.drift;
-        root.append(renderDriftCompare(d, { keep: (how) => actions.resolveDrift(d.id, how), blocked: () => actions.driftBlocked(d.id), openLink: actions.openLink }));
+        root.append(renderDriftCompare(d, { keep: (how, carries) => actions.resolveDrift(d.id, how, carries), blocked: () => actions.driftBlocked(d.id), openLink: actions.openLink }));
       }
 
       if (detail.description) root.append(body(detail.description));

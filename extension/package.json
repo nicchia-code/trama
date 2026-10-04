@@ -667,6 +667,30 @@
               "type": "string",
               "description": "What should happen: what the Model or the Requirement says, in the same style"
             },
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 5,
+              "description": "From two to five different ways to fix the code so it does what should happen, the one you recommend first. Each is a different way to reach it, not a step of one plan, and says in terms of behaviour what changes and what it costs. Titles differ",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "description": "A few words naming this way to fix the code"
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "Short Markdown, about 60 words: what changes and what it costs. No headings or tables"
+                  }
+                },
+                "required": [
+                  "title",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            },
             "where": {
               "type": "string",
               "description": "Optional: where in the code the difference was seen (files, and the code element when it helps; no line numbers, no long code). The only place for code locations"
@@ -680,7 +704,8 @@
             "title",
             "refs",
             "happens",
-            "should"
+            "should",
+            "options"
           ],
           "additionalProperties": false
         }

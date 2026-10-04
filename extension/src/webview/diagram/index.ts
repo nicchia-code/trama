@@ -78,7 +78,7 @@ export const mountDiagram: MountView = (root, context) => {
     toggle: (state) => toggleState(state),
     approve: (id) => context.post({ type: "approveProposal", id }),
     reject: (id) => context.post({ type: "rejectProposal", id }),
-    resolveDrift: (id, how) => context.post({ type: "resolveDrift", id, how }),
+    resolveDrift: (id, how, carries) => context.post({ type: "resolveDrift", id, how, ...carries }),
     driftBlocked: (id) => context.post({ type: "driftBlocked", id }),
     openLink: context.openLink,
   });

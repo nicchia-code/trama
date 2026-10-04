@@ -4,7 +4,8 @@ import { TramaError, UsageError } from "../core/errors";
 import { questionAborted, questionFailure } from "../core/questions";
 import { serveMcp } from "../tools/mcp";
 import { makeContext } from "./commands";
-import { asyncCommand, run, runAsk } from "./main";
+import { completeFixChoice } from "./fix-prompt";
+import { AGENT_ENV, asyncCommand, run, runAsk } from "./main";
 import { VERSION } from "./version";
 
 try {
@@ -46,7 +47,9 @@ try {
     }
     process.exit(result.exit);
   }
-  const { out, exit } = run(process.argv.slice(2), process.cwd());
+  // An agent never decides on a Drift, and without a terminal there is nobody to ask: `run` then refuses a fix without an option.
+  const interactive = process.stdin.isTTY && process.stdout.isTTY && !process.env[AGENT_ENV];
+  const { out, exit } = run(interactive ? await completeFixChoice(argv, process.cwd(), { input: process.stdin, output: process.stdout }) : argv, process.cwd());
   console.log(out);
   process.exit(exit);
 } catch (err) {

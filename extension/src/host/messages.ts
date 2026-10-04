@@ -66,7 +66,10 @@ export function parseToHost(value: unknown): Parsed {
     case "resolveDrift":
       if (id === undefined) return bad("resolveDrift needs a valid Drift ID");
       if (typeof raw["how"] !== "string" || !HOWS.includes(raw["how"])) return bad(`unknown resolution "${String(raw["how"])}"`);
-      return { ok: true, message: { type, id, how: raw["how"] as "fix-code" | "accept-proposal" | "dismiss" } };
+      if (raw["how"] !== "fix-code") return { ok: true, message: { type, id, how: raw["how"] as "accept-proposal" | "dismiss" } };
+      if (raw["option"] !== undefined && !(typeof raw["option"] === "number" && Number.isInteger(raw["option"]))) return bad("resolveDrift option must be a whole number");
+      if (raw["note"] !== undefined && typeof raw["note"] !== "string") return bad("resolveDrift note must be text");
+      return { ok: true, message: { type, id, how: "fix-code", ...(raw["option"] !== undefined ? { option: raw["option"] as number } : {}), ...(raw["note"] !== undefined ? { note: raw["note"] as string } : {}) } };
     case "driftBlocked":
       return id === undefined ? bad("driftBlocked needs a valid Drift ID") : { ok: true, message: { type, id } };
     case "openLink": {

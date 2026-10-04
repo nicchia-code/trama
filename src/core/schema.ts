@@ -55,3 +55,19 @@ export function stringMap(raw: Raw, key: string, where: string): Record<string, 
     throw new TramaError(`${where}: "${key}" must map file paths to hashes (or "new"), found ${describe(v)}`);
   return v as Record<string, string>;
 }
+
+/** A whole number from 1 up (an option's number); absent or null is none. */
+export function positiveIntOrNull(raw: Raw, key: string, where: string): number | null {
+  const v = raw[key];
+  if (v === undefined || v === null) return null;
+  if (typeof v === "number" && Number.isInteger(v) && v >= 1) return v;
+  throw new TramaError(`${where}: "${key}" must be a whole number from 1, found ${JSON.stringify(v)}`);
+}
+
+/** Free text; absent or null is none. */
+export function textOrNull(raw: Raw, key: string, where: string): string | null {
+  const v = raw[key];
+  if (v === undefined || v === null) return null;
+  if (typeof v === "string") return v;
+  throw new TramaError(`${where}: "${key}" must be text, found ${describe(v)}`);
+}

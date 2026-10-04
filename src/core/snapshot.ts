@@ -7,7 +7,7 @@ import { type Area, buildProject, parseRequirementRef, type ProjectModel } from 
 import { type Project, readTrackedFiles, REQUIREMENTS_PREFIX } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
-import { type Column, type DriftSides, driftSides, listDrifts, listTasks } from "./work";
+import { type Column, type DriftOption, type DriftSides, driftOptions, driftSides, listDrifts, listTasks } from "./work";
 
 export interface ActorChange {
   id: string;
@@ -80,6 +80,12 @@ export interface DriftView {
   body: string;
   /** What the code does, what the Model or Requirement says and where in the code it was seen; null for a Drift written before the two sections existed. */
   sides: DriftSides | null;
+  /** The fix options in their written order, the first being the recommended one; empty for a Drift written before options existed. */
+  options: DriftOption[];
+  /** Number, from 1, of the option chosen when the code was fixed; null while Open and in Drifts without options. */
+  option: number | null;
+  /** The developer's note kept with the choice; null when there is none. */
+  note: string | null;
   /** True when the Drift points only to Requirements: the "should" side is then what the Requirements say. */
   requirementsOnly: boolean;
   refs: string[];
@@ -243,6 +249,9 @@ export function buildSnapshot(p: Project): Snapshot {
         title: d.title,
         body: stripTitle(d.body),
         sides: driftSides(d),
+        options: driftOptions(d),
+        option: d.data.option,
+        note: d.data.note,
         requirementsOnly: d.data.refs.every((r) => parseRequirementRef(r) !== null),
         refs: d.data.refs,
         proposal: d.data.proposal,

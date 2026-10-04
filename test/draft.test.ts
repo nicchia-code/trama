@@ -1,3 +1,4 @@
+import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,7 +41,7 @@ describe("a Proposal the agent is still writing", () => {
     expect(getProposal(p, prop.id).data.status).toBe("draft");
     expect(() => approveProposal(p, prop.id)).toThrow(/still being written/);
     expect(() => rejectProposal(p, prop.id, "no")).toThrow(/still being written/);
-    const drift = newDrift(p, { title: "Lost", refs: ["order"], proposal: prop.id, happens: "The code does it one way.", should: "The Model says another." });
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Lost", refs: ["order"], proposal: prop.id, happens: "The code does it one way.", should: "The Model says another." });
     expect(() => resolveDrift(p, drift.id, "accept-proposal")).toThrow(/still being written/);
     expect(getProposal(p, prop.id).data.status).toBe("draft");
   });
@@ -149,7 +150,7 @@ describe("discarding", () => {
     writeOrder(base.id);
     const top = newProposal(p, "Top", "", { requires: [base.id] });
     submitProposal(p, top.id);
-    const drift = newDrift(p, { title: "Lost", refs: ["order"], proposal: base.id, happens: "The code does it one way.", should: "The Model says another." });
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Lost", refs: ["order"], proposal: base.id, happens: "The code does it one way.", should: "The Model says another." });
     discardProposal(p, base.id);
 
     expect(health(p, getProposal(p, top.id)).requires).toEqual([{ id: "0001", title: "Base", status: "discarded" }]);

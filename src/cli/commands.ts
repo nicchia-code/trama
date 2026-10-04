@@ -84,6 +84,8 @@ function explore(ctx: Context, target: string, view: (model: Model, ref: string)
 
 const str = (v: Values[string]): string | undefined => (typeof v === "string" ? v : undefined);
 const list = (v: Values[string]): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+/** Each `--option <title>` is followed by its `--option-text <text>`: the n-th title goes with the n-th text. A title without text, or text without a title, is left empty for the Drift to refuse. */
+const fixOptions = (titles: string[], texts: string[]) => Array.from({ length: Math.max(titles.length, texts.length) }, (_, i) => ({ title: titles[i] ?? "", text: texts[i] ?? "" }));
 
 function text(md: string, json: unknown = { message: md }): Result {
   return { md, json };
@@ -255,19 +257,22 @@ export const COMMANDS: Command[] = [
       return text(`Task ${t.id} is yours again (still ${t.data.column})`, { id: t.id, column: t.data.column, agent: t.data.agent });
     } },
 
-  { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; --where (optional) says where in the code it was seen, the only place for files and code names; --task <id> names the Task you were implementing when you found it; --announcement <id> names the announcement of this Drift", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, where: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
+  { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; two to five fix options, each --option <title> followed by its --option-text <text>, the first being the one you recommend; --where (optional) says where in the code it was seen, the only place for files and code names; --task <id> names the Task you were implementing when you found it; --announcement <id> names the announcement of this Drift", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, option: ref, "option-text": ref, where: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       const note = announcementNote(project, str(o["announcement"]), "drift");
-      const d = newDrift(project, { title: a[0] as string, refs: list(o["ref"]), proposal: str(o["proposal"]), origin: str(o["task"]), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", announcement: str(o["announcement"]), ...(o["where"] !== undefined ? { where: str(o["where"]) ?? "" } : {}) });
+      const d = newDrift(project, { title: a[0] as string, refs: list(o["ref"]), proposal: str(o["proposal"]), origin: str(o["task"]), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", options: fixOptions(list(o["option"]), list(o["option-text"])), announcement: str(o["announcement"]), ...(o["where"] !== undefined ? { where: str(o["where"]) ?? "" } : {}) });
       return text(`Created Drift ${d.id} at ${d.path}${note ? `\n${note}` : ""}`, { id: d.id, path: d.path, ...(note ? { note } : {}) });
     } },
   { name: "drift list", args: "", summary: "Open Drifts (--all for every one)", options: { all: { type: "boolean" } }, run: (ctx, _a, o) => driftListView(ctx.project(), o["all"] === true) },
   { name: "drift show", args: "<id>", summary: "A Drift with its references and attached Proposal", run: (ctx, a) => driftShowView(ctx.project(), getDrift(ctx.project(), a[0] as string)) },
-  { name: "drift resolve", args: "<id>", summary: "Resolve with --fix-code, --accept-proposal or --dismiss (--skills-dir adds the configured skills folder for the approval of --accept-proposal)", developerOnly: true, options: { "fix-code": { type: "boolean" }, "accept-proposal": { type: "boolean" }, dismiss: { type: "boolean" }, "skills-dir": ref }, run(ctx, a, o) {
+  { name: "drift resolve", args: "<id>", summary: "Resolve with --fix-code, --accept-proposal or --dismiss. --fix-code takes --option <n> (the number of the chosen fix option, from 1) and the optional --note <text>; the other two take neither. --skills-dir adds the configured skills folder for the approval of --accept-proposal", developerOnly: true, options: { "fix-code": { type: "boolean" }, "accept-proposal": { type: "boolean" }, dismiss: { type: "boolean" }, option: { type: "string" }, note: { type: "string" }, "skills-dir": ref }, run(ctx, a, o) {
       const chosen = (["fix-code", "accept-proposal", "dismiss"] as const).filter((k) => o[k] === true);
       if (chosen.length !== 1) throw new UsageError("Choose exactly one of --fix-code, --accept-proposal, --dismiss");
-      const d = resolveDrift(ctx.project(), a[0] as string, chosen[0] as (typeof chosen)[number], list(o["skills-dir"]));
-      return text(`Drift ${d.id} resolved (${d.data.resolution})${d.data.task ? `; Task ${d.data.task} created` : ""}`, { id: d.id, resolution: d.data.resolution, task: d.data.task });
+      const d = resolveDrift(ctx.project(), a[0] as string, chosen[0] as (typeof chosen)[number], list(o["skills-dir"]), {
+        ...(o["option"] !== undefined ? { option: Number(str(o["option"])) } : {}),
+        ...(o["note"] !== undefined ? { note: str(o["note"]) ?? "" } : {}),
+      });
+      return text(`Drift ${d.id} resolved (${d.data.resolution})${d.data.task ? `; Task ${d.data.task} created` : ""}`, { id: d.id, resolution: d.data.resolution, task: d.data.task, option: d.data.option, note: d.data.note });
     } },
   { name: "drift replace-proposal", args: "<id>", summary: "Attach a newer Proposal (--proposal <id>) to an open Drift in place of its stale one, which is rejected", options: { proposal: { type: "string" } }, run(ctx, a, o) {
       const old = getDrift(ctx.project(), a[0] as string).data.proposal;

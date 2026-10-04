@@ -1,6 +1,7 @@
 // Builds extension/dist/harness.html: the webview running in a plain browser against a demo snapshot,
 // with a mocked acquireVsCodeApi. Open it with Chrome to look at the UI without VS Code.
 // Every message the webview posts is appended to window.__posts.
+import { FIX_OPTIONS } from "../test/fix-options";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,12 +60,12 @@ writeFileSync(
 submitProposal(p, proposal.id);
 
 // Drifts: one plain, one with its own Proposal.
-newDrift(p, { title: "Code refunds after the package is picked up", refs: ["order/Shipped"], happens: "A **shipped** order is still refunded after the courier has picked the package up.\n\n- The customer gets the money back *and* keeps the parcel.\n- Finance sees a refund with no return.", should: "A shipped order can **no longer be refunded** once the courier has picked the package up. See [the refund policy](https://example.com/policy).", where: "- `src/refund.ts`, the refund step\n- `src/courier.ts`" });
+newDrift(p, { options: [{ title: "Refuse the refund", text: "Check the **courier status** before refunding.\n\n- Customers lose the refund after pickup." }, { title: "Refund only after the return", text: "Hold the money until the parcel is **back**; slower for customers." }], title: "Code refunds after the package is picked up", refs: ["order/Shipped"], happens: "A **shipped** order is still refunded after the courier has picked the package up.\n\n- The customer gets the money back *and* keeps the parcel.\n- Finance sees a refund with no return.", should: "A shipped order can **no longer be refunded** once the courier has picked the package up. See [the refund policy](https://example.com/policy).", where: "- `src/refund.ts`, the refund step\n- `src/courier.ts`" });
 const forgotten = newProposal(p, "Orders can be lost in transit", "The code handles a lost package; the Model forgot it.");
 const lost = editInProposal(p, forgotten.id, "checkout/payment.md");
 writeFileSync(lost, readFileSync(lost, "utf8").replace("### Declined (final)", "### Declined (final)\n### Written off (final)"));
 submitProposal(p, forgotten.id);
-newDrift(p, { title: "Code has a Written off payment", refs: ["payment"], proposal: forgotten.id, happens: "worker/lost.ts writes the payment off after 30 days.", should: "A payment ends as Declined or Refunded; nothing writes it off." });
+newDrift(p, { options: FIX_OPTIONS, title: "Code has a Written off payment", refs: ["payment"], proposal: forgotten.id, happens: "worker/lost.ts writes the payment off after 30 days.", should: "A payment ends as Declined or Refunded; nothing writes it off." });
 
 // Tasks in every column.
 newTask(p, { title: "Implement refunds for prepared orders", refs: ["order/Refunding", "order/Paid/user.CANCEL"], technical: false, body: "When a paid order is cancelled after preparation has started:\n\n- the customer is **refunded**\n- the courier is told\n\nSee `order/Refunding`." });
@@ -82,14 +83,14 @@ returnTask("Return request");
 moveTask(p, returnTask("Refund on return"), "doing", "agent");
 
 // An open Drift blocks the Tasks that concern the same thing, alone or inside the design (filed after the agent took them, which a blocked Task would refuse); a Drift fixed in the code makes its origin wait.
-newDrift(p, { title: "Code never closes a return", refs: ["order/Cancelled"], happens: "src/return.ts leaves a returned order open.", should: "A returned order ends as Cancelled." });
+newDrift(p, { options: FIX_OPTIONS, title: "Code never closes a return", refs: ["order/Cancelled"], happens: "src/return.ts leaves a returned order open.", should: "A returned order ends as Cancelled." });
 const origin = newTask(p, { title: "Order confirmation email", refs: ["cart/Has items/user.CHECKOUT"], technical: false });
 moveTask(p, origin.id, "doing", "developer");
-resolveDrift(p, newDrift(p, { title: "Code sends the email twice", refs: ["cart/Has items/user.CHECKOUT"], origin: origin.id, happens: "The confirmation email goes out twice.", should: "The customer gets one confirmation email." }).id, "fix-code");
+resolveDrift(p, newDrift(p, { options: FIX_OPTIONS, title: "Code sends the email twice", refs: ["cart/Has items/user.CHECKOUT"], origin: origin.id, happens: "The confirmation email goes out twice.", should: "The customer gets one confirmation email." }).id, "fix-code", [], { option: 1 });
 
 // A draft still being written, shown separately from what awaits the developer.
 const draft = newProposal(p, "Inventory checks", "The agent is still writing this change.");
-newDrift(p, { title: "Inventory Model is incomplete", refs: ["cart"], proposal: draft.id, happens: "The code checks inventory before checkout.", should: "The Model does not mention inventory checks; the attached Proposal is still being written." });
+newDrift(p, { options: FIX_OPTIONS, title: "Inventory Model is incomplete", refs: ["cart"], proposal: draft.id, happens: "The code checks inventory before checkout.", should: "The Model does not mention inventory checks; the attached Proposal is still being written." });
 
 withdrawAll(p); // The Drafts above made ghosts of their own; the demo starts with none.
 const snapshot = buildSnapshot(p);

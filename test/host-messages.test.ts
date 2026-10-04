@@ -29,6 +29,14 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "driftBlocked", id: "0002" })).toEqual({ type: "driftBlocked", id: "0002" });
 });
 
+test("a fix carries the selected option and the note; keeping what happens carries neither; a malformed choice is rejected", () => {
+  expect(ok({ type: "resolveDrift", id: "0002", how: "fix-code", option: 2, note: "Keep the log" })).toEqual({ type: "resolveDrift", id: "0002", how: "fix-code", option: 2, note: "Keep the log" });
+  expect(ok({ type: "resolveDrift", id: "0002", how: "fix-code" })).toEqual({ type: "resolveDrift", id: "0002", how: "fix-code" });
+  expect(ok({ type: "resolveDrift", id: "0002", how: "dismiss", option: 2, note: "x" })).toEqual({ type: "resolveDrift", id: "0002", how: "dismiss" });
+  expect(ok({ type: "resolveDrift", id: "0002", how: "accept-proposal", option: 1 })).toEqual({ type: "resolveDrift", id: "0002", how: "accept-proposal" });
+  for (const choice of [{ option: "2" }, { option: 1.5 }, { note: 3 }]) expect(parseToHost({ type: "resolveDrift", id: "0002", how: "fix-code", ...choice }).ok).toBe(false);
+});
+
 test("drops fields that are not part of the contract", () => {
   expect(ok({ type: "approveProposal", id: "0001", force: true })).toEqual({ type: "approveProposal", id: "0001" });
 });

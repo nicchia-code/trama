@@ -1,13 +1,16 @@
 import { expect, test } from "bun:test";
 import type { DriftView } from "../src/core/snapshot";
 import { driftBlockedMessage } from "../extension/src/host/drift-blocked";
-import { driftComparison } from "../extension/src/webview/drift-compare";
+import { driftComparison, fixSelection, rememberNote, rememberOption } from "../extension/src/webview/drift-compare";
 
 const drift = (over: Partial<DriftView> = {}): DriftView => ({
   id: "0003",
   title: "Code refunds late",
   body: "",
   sides: { happens: "Refunds go through after pickup.", should: "No refund after pickup.", where: null },
+  options: [],
+  option: null,
+  note: null,
   requirementsOnly: false,
   refs: ["order/Shipped"],
   proposal: null,
@@ -59,4 +62,50 @@ test("the editor warning tells the developer what to do for each kind of blocked
   expect(block("discarded", "Proposal 0002 was discarded.")).toContain("keep what should happen");
   expect(block("stale", "Proposal 0002 is stale: the Model changed since it was written.")).toBe("Proposal 0002 is stale: the Model changed since it was written.");
   expect(block("waiting", "Proposal 0002 waits for other Proposals: 0001.")).toBe("Proposal 0002 waits for other Proposals: 0001.");
+});
+
+const options = [
+  { title: "Change the step", text: "Rewrite the **step**." },
+  { title: "Remove the step", text: "Drop it." },
+  { title: "Guard the step", text: "Add a check." },
+];
+
+test("with options, the first is recommended and selected at first; the right Keep this names it and takes it; a Drift without options takes nothing", () => {
+  const c = driftComparison(drift({ id: "0010", options }));
+  expect(c.options.map((o) => [o.number, o.recommended, o.selected])).toEqual([[1, true, true], [2, false, false], [3, false, false]]);
+  expect(c.keepShould).toMatchObject({
+    consequence: "A Task is created for the agent to fix the code with the chosen option",
+    aria: "Keep what should happen for Code refunds late with option Change the step",
+    carries: { option: 1 },
+  });
+  expect(c.optionsName).toBe("Fix options for Code refunds late");
+  expect(c.noteName).toBe("Note for Code refunds late");
+  expect(c.keepHappens.carries).toEqual({});
+
+  const bare = driftComparison(drift({ id: "0011" }));
+  expect(bare.options).toEqual([]);
+  expect(bare.keepShould).toMatchObject({ consequence: "A Task is created for the agent to fix the code", aria: "Keep what should happen for Code refunds late", carries: {} });
+});
+
+test("the right Keep this takes the selected option and the note when it is not empty; the left takes neither", () => {
+  const d = drift({ id: "0012", options, proposal: "0002" });
+  rememberOption("0012", 3);
+  rememberNote("0012", "Keep the audit log.");
+  const c = driftComparison(d);
+  expect(c.options.filter((o) => o.selected).map((o) => o.number)).toEqual([3]);
+  expect(c.note).toBe("Keep the audit log.");
+  expect(c.keepShould).toMatchObject({ aria: "Keep what should happen for Code refunds late with option Guard the step", carries: { option: 3, note: "Keep the audit log." } });
+  expect(c.keepHappens.carries).toEqual({});
+
+  rememberNote("0012", "   ");
+  expect(driftComparison(d).keepShould.carries).toEqual({ option: 3 });
+});
+
+test("what was selected survives a refresh of the same Drift; exactly one option stays selected if the options changed", () => {
+  rememberOption("0013", 2);
+  expect(fixSelection(drift({ id: "0013", options }))).toEqual({ option: 2, note: "" });
+  expect(fixSelection(drift({ id: "0013", title: "Renamed", options }))).toEqual({ option: 2, note: "" });
+  const fewer = driftComparison(drift({ id: "0013", options: options.slice(0, 1) }));
+  expect(fewer.options.filter((o) => o.selected).map((o) => o.number)).toEqual([1]);
+  expect(fixSelection(drift({ id: "0014", options }))).toEqual({ option: 1, note: "" });
 });

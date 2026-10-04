@@ -26,7 +26,7 @@ function help(): string {
 }
 
 /** Pulls the global options out of argv, wherever they appear. */
-function splitGlobals(argv: string[]): { rest: string[]; json: boolean; root?: string } {
+export function splitGlobals(argv: string[]): { rest: string[]; json: boolean; root?: string } {
   const rest: string[] = [];
   let json = false;
   let root: string | undefined;
@@ -42,7 +42,7 @@ function splitGlobals(argv: string[]): { rest: string[]; json: boolean; root?: s
   return { rest, json, root };
 }
 
-function pickCommand(rest: string[]): { command: Command; tail: string[] } {
+export function pickCommand(rest: string[]): { command: Command; tail: string[] } {
   const [first, second] = rest;
   const name = first !== undefined && GROUPS.includes(first) ? `${first} ${second ?? ""}`.trim() : first;
   const command = COMMANDS.find((c) => c.name === name);

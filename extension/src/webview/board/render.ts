@@ -160,7 +160,7 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
   const whereKey = `${card.key}:where`;
   node.append(
     renderDriftCompare(card.drift, {
-      keep: (how) => env.context.post({ type: "resolveDrift", id: card.id, how }),
+      keep: (how, carries) => env.context.post({ type: "resolveDrift", id: card.id, how, ...carries }),
       blocked: () => env.context.post({ type: "driftBlocked", id: card.id }),
       openLink: env.context.openLink,
       where: { open: env.isExpanded(whereKey), toggled: (open) => env.setExpanded(whereKey, open) },
