@@ -1,13 +1,11 @@
-import { delimiter, dirname } from "node:path";
+import { existsSync } from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 import * as vscode from "vscode";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { watchAnnouncements } from "./announcements";
 import { watchAgentTerminal, configuredSkillsDir } from "./agent";
 import { Controller, describeError } from "./controller";
-import { isCursor } from "./cursor";
-import { ensureCursorMcp, tramaExecutable } from "./mcp-config";
 import { findProject } from "./project";
-import { registerTramaTools } from "./tools";
 import { EditorQuestions } from "./questions";
 
 const SKILL_SYNC_DEBOUNCE_MS = 300;
@@ -25,15 +23,6 @@ function guarded(action: () => Promise<void>): () => Promise<void> {
   };
 }
 
-/** In Cursor the agent finds Trama's tools through `.cursor/mcp.json`; write it once a project exists. */
-function setUpCursor(extensionPath: string): void {
-  const project = findProject();
-  if (!isCursor() || !project) return;
-  const outcome = ensureCursorMcp(project, tramaExecutable(extensionPath));
-  if (outcome === "written") void vscode.window.showInformationMessage("Trama: added the Trama MCP server to .cursor/mcp.json, so Cursor's agent can use Trama's tools. Enable it in Cursor Settings → MCP if Cursor asks.");
-  if (outcome === "unreadable") void vscode.window.showWarningMessage("Trama: .cursor/mcp.json is not valid JSON, so the Trama MCP server was not added.");
-}
-
 export function activate(context: vscode.ExtensionContext): void {
   const trama = new Controller(context.extensionUri);
   controller = trama;
@@ -42,10 +31,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("trama.open", guarded(() => trama.open())),
     vscode.commands.registerCommand(
       "trama.init",
-      guarded(async () => {
-        await trama.init();
-        setUpCursor(context.extensionPath);
-      }),
+      guarded(() => trama.init()),
     ),
     vscode.commands.registerCommand("trama.design", guarded(() => trama.launch({ kind: "design" }))),
     vscode.commands.registerCommand("trama.scan", guarded(() => trama.pickAndScan())),
@@ -54,10 +40,8 @@ export function activate(context: vscode.ExtensionContext): void {
     watchAgentTerminal(),
     watchAnnouncements(() => findProject()?.root),
     questions,
-    registerTramaTools(findProject, questions.ask),
     watchRequirements(),
   );
-  setUpCursor(context.extensionPath);
   exposeBundledCli(context);
 }
 
@@ -91,10 +75,10 @@ function watchRequirements(): vscode.Disposable {
  * package ships a binary for this platform, its folder is put first on those terminals' PATH.
  */
 function exposeBundledCli(context: vscode.ExtensionContext): void {
-  const executable = tramaExecutable(context.extensionPath);
+  const executable = join(context.extensionPath, "bin", process.platform === "win32" ? "trama.exe" : "trama");
   const env = context.environmentVariableCollection;
   env.clear();
-  if (executable === "trama") return;
+  if (!existsSync(executable)) return;
   env.description = "Puts the trama CLI shipped with the Trama extension on the PATH, for agents.";
   env.prepend("PATH", `${dirname(executable)}${delimiter}`);
 }

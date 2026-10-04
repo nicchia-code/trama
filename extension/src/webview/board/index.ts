@@ -4,7 +4,7 @@ import css from "./board.css" with { type: "text" };
 import { announcedGhosts, buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, dropTarget, interleave, runAllBlocker, type TaskCard, withdrawnNotice } from "./logic";
 import { type CardEnv, renderAnnounced, renderCard, setDesignPending, setPending } from "./render";
 
-/** The host answers a move with a snapshot, or with an error that releases the dimmed cards at once; if neither comes, they are released after this long. */
+/** The host answers a move with a snapshot, or with an error that releases the dimmed cards at once; if neither comes, they are released after this long and the error is shown. */
 const PENDING_TIMEOUT_MS = 5000;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -83,7 +83,9 @@ export const mountBoard: MountView = (root, context) => {
       pending.set(card.id, column);
       clearTimeout(pendingTimer);
       pendingTimer = window.setTimeout(() => {
+        const ids = [...pending.keys()];
         pending.clear();
+        context.showError(`The editor did not answer the move of Task${ids.length === 1 ? "" : "s"} ${ids.join(", ")}: it may not have been moved. Check the Board and try again.`);
         render();
       }, PENDING_TIMEOUT_MS);
       render();

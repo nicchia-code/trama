@@ -1,5 +1,5 @@
 import type { Change, MergedMachine, MergedState, MergedTransition } from "../../../../src/core/merge";
-import type { DriftView, ProposalView } from "../../../../src/core/snapshot";
+import type { AreaView, DriftView, ProposalView } from "../../../../src/core/snapshot";
 import { type UnresolvedRef, unresolvedRefs } from "./drifts";
 import { type Element, resolveElement } from "./elements";
 import type { GEdge, GNode, GraphSpec, Level } from "./graph";
@@ -12,6 +12,8 @@ export interface DetailItem {
   change: Change;
   /** Element the item can jump to. */
   ref: string | null;
+  /** The note is a Markdown text rendered in full (paragraphs, lists, code blocks, quotes), not only inline. */
+  block: boolean;
 }
 
 export interface DetailSection {
@@ -38,7 +40,7 @@ export interface Detail {
   drift: DriftView | null;
 }
 
-const item = (text: string, extra: Partial<DetailItem> = {}): DetailItem => ({ text, note: "", change: "same", ref: null, ...extra });
+const item = (text: string, extra: Partial<DetailItem> = {}): DetailItem => ({ text, note: "", change: "same", ref: null, block: false, ...extra });
 
 function detail(init: Partial<Detail> & Pick<Detail, "kind" | "title">): Detail {
   return { change: "same", description: "", changes: [], sections: [], file: null, drill: null, toggle: null, proposal: null, drift: null, ...init };
@@ -231,6 +233,17 @@ export function detailOfLevel(scene: Scene, level: Level): Detail {
       });
     }
   }
+}
+
+/** The Requirement sections written for any of the Model references, in the order of the references, as items shown in full Markdown. */
+export function requirementItems(areas: AreaView[], refs: string[]): DetailItem[] {
+  return refs.flatMap((ref) =>
+    areas.flatMap((a) =>
+      a.sections
+        .filter((s) => s.ref !== null && s.text !== "" && s.ref.toLowerCase() === ref.toLowerCase())
+        .map((s) => item(a.title, { note: s.text, ref: `requirements/${a.id}#${s.ref}`, block: true })),
+    ),
+  );
 }
 
 /**

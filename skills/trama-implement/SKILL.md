@@ -7,31 +7,13 @@ description: Use when asked to implement, work on or execute a Trama Task (or th
 
 You implement one **Task** so that the code behaves as the **Model** says and is built as the **Requirements** say. The Model wins. If following it or a Requirement is impossible, or you discover it is wrong or incomplete in an important way, you **stop working on that Task** and file a **Drift**: you never silently deviate and you never edit the Model or the Requirements. The Drift blocks the Task and the other Tasks that concern the same thing, and it ends the run: you take no further Task, blocked or not.
 
-## Tools or CLI
+## Hand-over
 
-If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, …, offered by VS Code or by an MCP server), use them; otherwise run the `trama` CLI in a terminal. The steps below name the CLI command; this is the tool that does the same:
-
-| CLI | Tool |
-|---|---|
-| `trama system`, `trama feature <id>`, `trama machine <id>`, `trama state <ref>`, `trama event <ref>` | `trama_view` with `ref` (no `ref` for the System); Feature, Machine and State views end with the Requirements attached |
-| `trama requirements`, `trama requirements <area>`, `trama requirements <ref>` | `trama_view` with `ref` `requirements`, `requirements/<area>`, or the Model `ref` |
-| `trama paths`, `trama analyze`, `trama search`, `trama validate` | `trama_paths`, `trama_analyze`, `trama_search`, `trama_validate` |
-| `trama board`, `trama task list`, `trama drift list`, `trama proposal list` | `trama_board` |
-| `trama announce <kind> "<title>"` (kind: `proposal`, `task`, `drift`) | `trama_announce` |
-| `trama proposal new` | `trama_proposal_new` |
-| `trama proposal edit`, then editing the printed file | `trama_proposal_write` with the complete new file |
-| `trama proposal delete`, `trama proposal show` | `trama_proposal_delete_file`, `trama_proposal_show` |
-| `trama proposal submit <id>` | `trama_proposal_submit` |
-| `trama task new`, `trama task show`, `trama task move` | `trama_task_new`, `trama_task_show`, `trama_task_move` |
-| `trama drift new`, `trama drift show` | `trama_drift_new`, `trama_drift_show` |
-
-There is no tool for approving, rejecting, discarding or resolving: those are the developer's decisions.
-
-A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>` (or `trama_proposal_submit`). If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds attach it to a Drift and tell the developer to review it. Before every later file change, call `trama proposal edit` or `trama_proposal_write` again: it returns an open Proposal to Draft, so submit again when finished.
+A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>`. If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds attach it to a Drift and tell the developer to review it. Before every later file change, call `trama proposal edit` again: it returns an open Proposal to Draft, so submit again when finished.
 
 ## Announcing cards
 
-When you know you must file a Drift (see "When you must file a Drift"), announce it before you write it up: `trama announce drift "<title>"` (or `trama_announce`) prints an announcement ID. Pass it when you file the Drift: `trama drift new … --announcement <id>` (the `announcement` field of `trama_drift_new`); if the Drift carries a Proposal, announce that too and pass its ID to `trama proposal new`. The Board shows a ghost of each card meanwhile. Never wait for a ghost to show and never skip or delay a card because of it; an unknown ID is only noted in the output.
+When you know you must file a Drift (see "When you must file a Drift"), announce it before you write it up: `trama announce drift "<title>"` prints an announcement ID. Pass it when you file the Drift: `trama drift new … --announcement <id>`; if the Drift carries a Proposal, announce that too and pass its ID to `trama proposal new`. The Board shows a ghost of each card meanwhile. Never wait for a ghost to show and never skip or delay a card because of it; an unknown ID is only noted in the output.
 
 ## Hard rules
 
@@ -61,7 +43,7 @@ Stop working on the Task at once and file a Drift when any of these is true:
 Then:
 
 1. Decide which case applies. If the code is right and the Model forgot a case, first create a Proposal with the `trama-design` skill, without its interview (list your choices in the Proposal body). Finish its files, validate, read it and submit it before attaching it to the Drift; correct and retry any refusal. Otherwise there is no Proposal.
-2. File the Drift **once**: `trama drift new "<title>" --ref <nearest Model element or Requirement> --task <id of the Task you are implementing> --happens "<what the code does or what you would do instead, in terms of behaviour>" --should "<what the Model or Requirement says and why it cannot be followed>" --option "<title of the way you recommend>" --option-text "<what it changes and costs>" --option "<title of another way>" --option-text "<…>" [up to five] [--where "<where in the code>"]` (the tool's `task`, `happens`, `should`, `where` and `options` fields are the same, `options` being a list of `{title, text}`), adding `--proposal <id>` only in the first case. The two texts and the options are required; `--where` is optional and the only place for code locations. Write them as described in "Writing a Drift". `--task` records the origin: the Drift blocks that Task. `trama drift new` always creates a new card, so never run it twice for the same problem.
+2. File the Drift **once**: `trama drift new "<title>" --ref <nearest Model element or Requirement> --task <id of the Task you are implementing> --happens "<what the code does or what you would do instead, in terms of behaviour>" --should "<what the Model or Requirement says and why it cannot be followed>" --option "<title of the way you recommend>" --option-text "<what it changes and costs>" --option "<title of another way>" --option-text "<…>" [up to five] [--where "<where in the code>"]`, adding `--proposal <id>` only in the first case. The two texts and the options are required; `--where` is optional and the only place for code locations. Write them as described in "Writing a Drift". `--task` records the origin: the Drift blocks that Task. `trama drift new` always creates a new card, so never run it twice for the same problem.
 3. Leave the Task in `doing`; the developer decides whether the code or the Model changes. Stop the run here: take no further Task, blocked or not, even one that concerns something else.
 4. Report. Say what you implemented and the Drift that stopped the run, with the Task it concerns.
 
@@ -73,6 +55,6 @@ The developer reads a Drift at a glance, as a programmer, but not as a code revi
 
 - **Say what the System does and what it should do**, in the words of the domain ("the cart total ignores the coupon"), not how the code does it.
 - **Name no variable, function, class, field or file** in `--happens`, `--should` or the options, unless the difference cannot be understood without it. Then name only the one or two that matter, as `inline code`.
-- **Code locations go only in `--where`** (the tool's `where` field), which is optional: the files, and the code element when it helps. No line numbers, which go stale, and no long pieces of code.
-- **Give two to five fix options**, the one you recommend first: each `--option "<title>"` is followed by its `--option-text "<text>"` (the tool takes an `options` list of `{title, text}`). Each is a different way to reach what should happen, not a step of one plan, and says in terms of behaviour what changes and what it costs. About 60 words each, short Markdown, no headings or tables inside an option. Titles differ. A Drift filed with fewer than two, more than five, or an option missing its title or text is refused.
+- **Code locations go only in `--where`**, which is optional: the files, and the code element when it helps. No line numbers, which go stale, and no long pieces of code.
+- **Give two to five fix options**, the one you recommend first: each `--option "<title>"` is followed by its `--option-text "<text>"`. Each is a different way to reach what should happen, not a step of one plan, and says in terms of behaviour what changes and what it costs. About 60 words each, short Markdown, no headings or tables inside an option. Titles differ. A Drift filed with fewer than two, more than five, or an option missing its title or text is refused.
 - **Use short Markdown:** short paragraphs, a bulleted list when there are several separate points, **bold** for the one or two terms that carry the difference. No headings inside a section, no tables, about 100 words per side.

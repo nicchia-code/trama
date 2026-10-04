@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0009
 ---
 # Agents use Trama through tools: native in VS Code, MCP elsewhere
 

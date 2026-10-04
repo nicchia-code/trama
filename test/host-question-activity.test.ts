@@ -4,7 +4,7 @@ import type { QuestionRequest } from "../src/core/questions";
 import { onQuestionRoundChange, questionRoundClosedAt, questionRoundOpen, trackRound } from "../extension/src/host/question-activity";
 
 const request: QuestionRequest = { questions: [] };
-const context = { agent: "Test", signal: new AbortController().signal };
+const context = { signal: new AbortController().signal };
 const answered: CompletedQuestionRound = { status: "answered", answers: {} };
 
 test("a round counts as open from the moment it is shown until it closes, also when it fails, and each change is announced", async () => {

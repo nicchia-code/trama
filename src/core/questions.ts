@@ -6,29 +6,8 @@ export interface Question { id: string; question: string; options: QuestionOptio
 export interface QuestionRequest { questions: Question[] }
 export type QuestionAnswer = { status: "answered"; selected: string[]; text?: string } | { status: "skipped" };
 export type QuestionResult = { status: "answered"; answers: Record<string, QuestionAnswer> } | { status: "unavailable"; reason: string };
-export interface QuestionContext { agent: string; signal?: AbortSignal }
+export interface QuestionContext { signal?: AbortSignal }
 export type QuestionHandler = (project: Project, request: QuestionRequest, context: QuestionContext) => Promise<QuestionResult>;
-
-export const QUESTION_SCHEMA = {
-  type: "object" as const,
-  properties: {
-    questions: {
-      type: "array", minItems: 1, description: "All questions in this round, in presentation order.",
-      items: {
-        type: "object", additionalProperties: false,
-        required: ["id", "question", "options", "recommended", "multi"],
-        properties: {
-          id: { type: "string", minLength: 1, description: "Unique question ID." },
-          question: { type: "string", minLength: 1 },
-          options: { type: "array", minItems: 2, items: { type: "object", additionalProperties: false, required: ["label", "description"], properties: { label: { type: "string", minLength: 1 }, description: { type: "string", minLength: 1 } } } },
-          recommended: { type: "integer", minimum: 0, description: "Zero-based index of the recommended option." },
-          multi: { type: "boolean", description: "Allow multiple options together." },
-        },
-      },
-    },
-  },
-  required: ["questions"], additionalProperties: false as const,
-};
 
 function object(value: unknown, field: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new UsageError(`${field} must be an object`);
@@ -94,7 +73,7 @@ export interface QuestionFailure {
   error: { code: string; message: string };
 }
 
-/** One JSON error contract for the local channel, agent tools and CLI. */
+/** One JSON error contract for the local channel and the `trama ask` command. */
 export function questionFailure(error: unknown): QuestionFailure {
   const code = error instanceof QuestionInterruptedError ? error.code
     : error instanceof UsageError || error instanceof SyntaxError ? "invalid-input"

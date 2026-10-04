@@ -4,4 +4,4 @@ A tool for programming from a visual and textual Model of every state a software
 
 The Model and the Requirements are plain files kept with the project. Changes to them are Proposals that the developer approves or rejects as a whole. Differences between code and Model become Drifts, and work for the agent becomes Tasks, all shown on a Board. The developer sees the Model as a Diagram and the Requirements as a list in an editor panel, and can start the agent's work (design, scan, implement, import) from there.
 
-Trama is used from three surfaces that share one behaviour: a command line, tools the agent calls directly, and the editor extension.
+Trama is used from two surfaces that share one behaviour: a command line, which is how the agent reaches Trama, and the editor extension.

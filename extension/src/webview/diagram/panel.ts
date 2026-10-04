@@ -67,7 +67,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     if (item.change !== "same") li.append(el("span", "dg-tag", item.change));
     if (item.note) {
       const note = el("div", "dg-note");
-      note.append(renderInline(item.note, actions.openLink));
+      note.append(item.block ? renderMarkdown(item.note, actions.openLink) : renderInline(item.note, actions.openLink));
       li.append(note);
     }
     return li;

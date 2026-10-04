@@ -58,7 +58,7 @@ async function server(handler: QuestionHandler, options: { projectRoot?: string;
 }
 
 function ask(request: QuestionRequest, endpoint?: string, signal?: AbortSignal) {
-  return askEditor(projectAt(projectRoot), request, { agent: "trama ask", signal }, { runtimeDir, env: endpoint === undefined ? {} : { [QUESTION_ENDPOINT_ENV]: endpoint } });
+  return askEditor(projectAt(projectRoot), request, { signal }, { runtimeDir, env: endpoint === undefined ? {} : { [QUESTION_ENDPOINT_ENV]: endpoint } });
 }
 
 function outcome<T>(promise: Promise<T>): Promise<T | Error> {
@@ -123,7 +123,7 @@ test("explicit project routing works from an unrelated caller working directory"
   mkdirSync(elsewhere);
   const script = `import { askEditor } from ${JSON.stringify(join(import.meta.dir, "../src/core/question-channel.ts"))};
 import { projectAt } from ${JSON.stringify(join(import.meta.dir, "../src/core/store.ts"))};
-console.log(JSON.stringify(await askEditor(projectAt(${JSON.stringify(projectRoot)}), ${JSON.stringify(round())}, {agent:'trama ask'}, {env:{},runtimeDir:${JSON.stringify(runtimeDir)}})));`;
+console.log(JSON.stringify(await askEditor(projectAt(${JSON.stringify(projectRoot)}), ${JSON.stringify(round())}, {}, {env:{},runtimeDir:${JSON.stringify(runtimeDir)}})));`;
   const child = spawn(process.execPath, ["-e", script], { cwd: elsewhere, stdio: ["pipe", "pipe", "pipe"] });
   children.push(child);
   let stdout = "";
@@ -320,7 +320,7 @@ test("the server rejects an invalid wire round before presenting even its valid 
   const failure = deferred<unknown>();
   output.on("line", (line) => {
     const value = JSON.parse(line);
-    if (value.type === "ready") socket.write(`${JSON.stringify({ type: "ask", projectId: questionProjectId(projectAt(projectRoot)), request: invalid, agent: "trama ask" })}\n`);
+    if (value.type === "ready") socket.write(`${JSON.stringify({ type: "ask", projectId: questionProjectId(projectAt(projectRoot)), request: invalid })}\n`);
     else failure.resolve(value);
   });
   await once(socket, "connect");

@@ -146,7 +146,7 @@ export function newTask(
 /** The blocked Tasks and why, by Task ID, worked out from the Drifts and Tasks as they are now. */
 export const blockedTasks = (p: Project): Map<string, Blocker[]> => computeBlocked(loadProject(p), listTasks(p), listDrifts(p));
 
-/** Who moves a Task: the agent (through its tools, or the command line in the terminal Trama started) or the developer. */
+/** Who moves a Task: the agent (the command line run in the terminal Trama started for it) or the developer. */
 export type Mover = "agent" | "developer";
 
 /**

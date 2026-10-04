@@ -18,11 +18,11 @@ Agents run the `trama` CLI, so it must be on their `PATH`. `trama.autoScan` scan
 
 ## Agent questions
 
-Agents use `trama_ask`, registered natively for Copilot and through MCP for Cursor and terminal clients. Without agent tools, `trama ask --root <project>` accepts the same JSON request on stdin; see the [request and result contract](https://github.com/nicchia-code/trama/blob/main/docs/cli.md#question-rounds).
+Agents ask with `trama ask --root <project>`, which accepts the JSON request on stdin; see the [request and result contract](https://github.com/nicchia-code/trama/blob/main/docs/cli.md#question-rounds).
 
 The active round opens immediately at the top of the window in native Quick Picks, one question at a time. Recommendations are active or checked on the first visit; Back restores preceding answers. Other opens an input box and can accompany ordinary multi-choice selections. Empty free text shows validation feedback. Escape offers **Skip this one**, **Skip all** or **Go back**, never a silent skip. Focus loss does not dismiss the controls.
 
-Each window has one FIFO shared by all three surfaces, with no response deadline. Caller cancellation removes only that round. Closing the window, losing its channel, or removing its project interrupts every admitted active and queued round with `editor-interrupted`, disposes the controls and returns no partial answers. The agent must stop its workflow without fallback or retry. Initial editor absence instead returns `unavailable`, allowing its own question interface.
+Each window has one FIFO shared by every `trama ask` caller, with no response deadline. Caller cancellation removes only that round. Closing the window, losing its channel, or removing its project interrupts every admitted active and queued round with `editor-interrupted`, disposes the controls and returns no partial answers. The agent must stop its workflow without fallback or retry. Initial editor absence instead returns `unavailable`, allowing its own question interface.
 
 Local discovery chooses the most recently focused live window for the project unless a launching endpoint was supplied. Its records contain no question content and stay outside the repository. Unix sockets and Windows named pipes are user-private; Windows requires its built-in Windows PowerShell 5.1/.NET Framework bridge, not an additional runtime library.
 

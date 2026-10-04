@@ -7,7 +7,6 @@ import { run } from "../src/cli/main";
 import { handOver } from "./handover";
 import { approveProposal, editInProposal, getProposal, health, newProposal, rejectProposal } from "../src/core/proposals";
 import { loadModel, type Project, projectAt } from "../src/core/store";
-import { callTool } from "../src/tools/catalog";
 import { driftOptions, driftSides, getDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask, releaseTasks, replaceDriftProposal, resolveDrift, takeBackTask } from "../src/core/work";
 
 /** The same options as FIX_OPTIONS, as the command line takes them. */
@@ -187,9 +186,6 @@ describe("Tasks and Drifts", () => {
 
     expect(() => moveTask(p, id, "doing", "agent")).toThrow(new RegExp(`Drift ${drift.id} "Refunds differ".*developer must decide`));
     expect(() => agent("doing")).toThrow(/Drift .* "Refunds differ"/);
-    const viaTool = await callTool(p, "trama_task_move", { task: id, column: "doing" });
-    expect(viaTool.isError).toBe(true);
-    expect(viaTool.text).toContain(`Drift ${drift.id} "Refunds differ"`);
     expect(getTask(p, id).data).toMatchObject({ column: "todo", agent: false });
 
     expect(moveTask(p, id, "doing", "developer").data).toMatchObject({ column: "doing", agent: false });
@@ -259,7 +255,7 @@ describe("Tasks and Drifts", () => {
     expect(releaseTasks(p)).toEqual([]);
   });
 
-  test("a taken Task is marked (agent working) in the board, the task list, task show and the agent tools", async () => {
+  test("a taken Task is marked (agent working) in the board, the task list and task show", async () => {
     const prop = newProposal(p, "Returns");
     const mk = (title: string, proposal?: string) => newTask(p, { title, refs: ["order"], technical: false, proposal }).id;
     const [taken, free, a, b] = [mk("Taken"), mk("Free"), mk("In design", prop.id), mk("Other in design", prop.id)] as [string, string, string, string];
@@ -277,12 +273,10 @@ describe("Tasks and Drifts", () => {
     expect(cli("task", "list")).not.toContain(`${free} Free (agent working)`);
     expect(cli("task", "show", taken)).toContain("(agent working)");
     expect(cli("task", "show", free)).not.toContain("(agent working)");
-    expect((await callTool(p, "trama_board", {})).text).toContain(`${taken} Taken (agent working)`);
-    expect((await callTool(p, "trama_task_show", { task: taken })).text).toContain("(agent working)");
     expect(JSON.parse(run(["--root", dir, "--json", "task", "list"], process.cwd(), {}).out).tasks.find((t: { id: string }) => t.id === taken).agent).toBe(true);
   });
 
-  test("a blocked Task is marked in the board, the task list, task show and the agent tools, with every blocker; Drift views list no Tasks", async () => {
+  test("a blocked Task is marked in the board, the task list and task show, with every blocker; Drift views list no Tasks", async () => {
     const blockedTask = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
     const waiting = newTask(p, { title: "Waiting flow", refs: ["cart"], technical: false }).id;
     const free = newTask(p, { title: "Free flow", refs: ["payment"], technical: false }).id;
@@ -302,8 +296,6 @@ describe("Tasks and Drifts", () => {
     expect(shown).toContain(`${marks}\nBlocked by Drift ${d1.id}: Refunds differ\nBlocked by Drift ${d2.id}: Cancel differs`);
     expect(cli("task", "show", waiting).out).toContain(`Waiting for Task ${fix}: Fix code to match the Model: Waiting origin`);
     expect(cli("task", "show", free).out).not.toContain("locked");
-    expect((await callTool(p, "trama_board", {})).text).toContain(`${blockedTask} Return flow${marks}`);
-    expect((await callTool(p, "trama_task_show", { task: blockedTask })).text).toContain(`Blocked by Drift ${d1.id}: Refunds differ`);
     const json = JSON.parse(cli("--json", "task", "list").out).tasks.find((t: { id: string }) => t.id === blockedTask);
     expect(json.blockedBy.map((b: { drift: string }) => b.drift)).toEqual([d1.id, d2.id]);
 
@@ -314,7 +306,7 @@ describe("Tasks and Drifts", () => {
     expect(driftView).not.toContain("locked");
   });
 
-  test("the command line takes the Task only inside the terminal Trama started, and the agent tools always do", async () => {
+  test("the command line takes the Task only inside the terminal Trama started", async () => {
     const run2 = (env: Record<string, string>, ...args: string[]) => run(["--root", dir, "task", "move", ...args], process.cwd(), env);
     const [a, b, c] = [1, 2, 3].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string];
 
@@ -327,7 +319,7 @@ describe("Tasks and Drifts", () => {
     run2({ TRAMA_AGENT: "1" }, b, "done");
     expect(getTask(p, b).data).toMatchObject({ column: "done", agent: false });
 
-    expect((await callTool(p, "trama_task_move", { task: c, column: "doing" })).isError).toBe(false);
+    run2({ TRAMA_AGENT: "1" }, c, "doing");
     expect(getTask(p, c).data.agent).toBe(true);
   });
 
@@ -450,11 +442,7 @@ describe("Tasks and Drifts", () => {
     const cliId = /Created Drift (\d+)/.exec(viaCli.out)?.[1] ?? "";
     expect(getDrift(p, cliId).data.origin).toBe(task.id);
 
-    const viaTool = await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], options: FIX_OPTIONS, task: task.id, happens: "Code does it.", should: "Model says so." });
-    expect(viaTool.isError).toBe(false);
-    const toolId = /Recorded Drift (\d+)/.exec(viaTool.text)?.[1] ?? "";
-    expect(getDrift(p, toolId).data.origin).toBe(task.id);
-    expect((await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], options: FIX_OPTIONS, task: "42", happens: "Code does it.", should: "Model says so." })).isError).toBe(true);
+    expect(() => run(["--root", dir, "drift", "new", "Missing", "--ref", "order", "--task", "42", "--happens", "Code does it.", "--should", "Model says so.", ...CLI_OPTIONS], process.cwd())).toThrow(/No Task/);
 
     const scanned = newDrift(p, { options: FIX_OPTIONS, title: "From a scan", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
     expect(getDrift(p, scanned.id).data.origin).toBeNull();
@@ -475,8 +463,7 @@ describe("Tasks and Drifts", () => {
 
     expect(() => newDrift(p, { options: FIX_OPTIONS, title: "x", refs: ["order"], happens: "Code does it.", should: "Model says so.", where: "  " })).toThrow(/Where in the code/);
     expect(() => run(["--root", dir, "drift", "new", "x", "--ref", "order", "--happens", "a", "--should", "b", "--where", "", ...CLI_OPTIONS], process.cwd())).toThrow(/Where in the code/);
-    const viaTool = await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], options: FIX_OPTIONS, happens: "Code does it.", should: "Model says so.", where: "src/x.ts" });
-    expect(viaTool.isError).toBeFalsy();
+    run(["--root", dir, "drift", "new", "Where", "--ref", "order", "--happens", "Code does it.", "--should", "Model says so.", "--where", "src/x.ts", ...CLI_OPTIONS], process.cwd());
     expect(driftSides(listDrifts(p).at(-1) as never)?.where).toBe("src/x.ts");
   });
 
@@ -490,15 +477,13 @@ describe("Tasks and Drifts", () => {
     expect(() => newDrift(p, { options: FIX_OPTIONS, title: "x", refs: ["order"], happens: "  ", should: "Model says so." })).toThrow(/"What happens"/);
     expect(() => newDrift(p, { options: FIX_OPTIONS, title: "x", refs: ["order"], happens: "Code does it.", should: "" })).toThrow(/"What should happen"/);
     expect(() => run(["--root", dir, "drift", "new", "x", "--ref", "order", "--should", "Model says so.", ...CLI_OPTIONS], process.cwd())).toThrow(/"What happens"/);
-    const viaTool = await callTool(p, "trama_drift_new", { title: "x", refs: ["order"], options: FIX_OPTIONS, happens: "Code does it." });
-    expect(viaTool.isError).toBe(true);
     expect(listDrifts(p)).toHaveLength(1);
 
     writeFileSync(drift.path, "---\nstatus: resolved\nrefs: [order]\n---\n# Old\n\nFree text.\n");
     expect(driftSides(getDrift(p, drift.id))).toBeNull();
   });
 
-  test("a new Drift needs two to five distinct fix options, each with title and text, in the order given, from core, command line and tool", async () => {
+  test("a new Drift needs two to five distinct fix options, each with title and text, in the order given, from core and command line", async () => {
     const file = (options: { title: string; text: string }[]) => newDrift(p, { title: "x", refs: ["order"], happens: "Code does it.", should: "Model says so.", options });
     const five = ["A", "B", "C", "D", "E"].map((t) => ({ title: t, text: `Way ${t}.` }));
     expect(driftOptions(file(five))).toEqual(five);
@@ -523,11 +508,8 @@ describe("Tasks and Drifts", () => {
     const created = /Created Drift (\d+)/.exec(run([...args, ...CLI_OPTIONS], process.cwd()).out)?.[1] ?? "";
     expect(driftOptions(getDrift(p, created))).toEqual(FIX_OPTIONS);
 
-    expect((await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], happens: "Code does it.", should: "Model says so." })).isError).toBe(true);
-    expect((await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: [{ title: "A" }, { title: "B", text: "Way B." }] })).isError).toBe(true);
-    const viaTool = await callTool(p, "trama_drift_new", { title: "Tool", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: five.slice(0, 3) });
-    expect(viaTool.isError).toBeFalsy();
-    expect(driftOptions(listDrifts(p).at(-1) as never)).toEqual(five.slice(0, 3));
+    const three = run([...args, ...five.slice(0, 3).flatMap((o) => ["--option", o.title, "--option-text", o.text])], process.cwd()).out;
+    expect(driftOptions(getDrift(p, /Created Drift (\d+)/.exec(three)?.[1] ?? ""))).toEqual(five.slice(0, 3));
   });
 
   test("drift show lists the two sides as two blocks, says why an attached Proposal cannot be approved, and shows an old Drift as one block", async () => {
@@ -537,8 +519,6 @@ describe("Tasks and Drifts", () => {
     expect(shown).toContain("## What happens\n\nworker/lost.ts writes it off.\n\n## What should happen\n\nNothing writes it off.");
     expect(shown).toContain(`Attached Proposal: ${draft.id} (draft)\nCannot be approved: Proposal ${draft.id} is still being written.`);
     expect(shown).not.toContain("Description");
-    const viaTool = (await callTool(p, "trama_drift_show", { drift: drift.id })).text;
-    expect(viaTool).toContain("## What should happen");
     const json = JSON.parse(run(["--root", dir, "--json", "drift", "show", drift.id], process.cwd()).out);
     expect(json).toMatchObject({ happens: "worker/lost.ts writes it off.", should: "Nothing writes it off.", proposalBlock: { kind: "draft" } });
 
@@ -548,7 +528,7 @@ describe("Tasks and Drifts", () => {
     expect(old).not.toContain("What happens");
   });
 
-  test("drift show and the tool list the fix options as a numbered list after the sides, then the chosen option and the note once the code is fixed; a Drift without options has no such block", async () => {
+  test("drift show lists the fix options as a numbered list after the sides, then the chosen option and the note once the code is fixed; a Drift without options has no such block", async () => {
     const drift = newDrift(p, {
       options: [{ title: "Change the step", text: "Rewrite the **step**.\n\n- keeps data" }, { title: "Remove the step", text: "Drop it." }],
       title: "Refund",
@@ -561,11 +541,9 @@ describe("Tasks and Drifts", () => {
     const listing = "## What should happen\n\nNo refund after pickup.\n\n## Fix options\n\n1. **Change the step** (recommended)\n\n   Rewrite the **step**.\n\n   - keeps data\n\n2. **Remove the step**\n\n   Drop it.\n\n## Where in the code\n\n`src/refund.ts`";
     expect(show()).toContain(listing);
     expect(show()).not.toMatch(/## Chosen option|## Note/);
-    expect((await callTool(p, "trama_drift_show", { drift: drift.id })).text).toContain(listing);
 
     resolveDrift(p, drift.id, "fix-code", [], { option: 2, note: "Keep the log." });
     expect(show()).toMatch(/## Where in the code\n\n`src\/refund.ts`\n\n## Chosen option\n\n2\. Remove the step\n\n## Note\n\nKeep the log\.\n\nStatus: \*\*resolved\*\* \(fix-code\)/);
-    expect((await callTool(p, "trama_drift_show", { drift: drift.id })).text).toContain("## Chosen option\n\n2. Remove the step");
     expect(JSON.parse(run(["--root", dir, "--json", "drift", "show", drift.id], process.cwd()).out)).toMatchObject({ option: 2, note: "Keep the log.", options: [{ title: "Change the step" }, { title: "Remove the step" }] });
 
     const bare = newDrift(p, { options: FIX_OPTIONS, title: "Bare", refs: ["order"], happens: "Code does it.", should: "Model says so." });
@@ -617,8 +595,7 @@ describe("Tasks and Drifts", () => {
     expect(() => replaceDriftProposal(p, drift.id, turnedDown.id)).toThrow(/only an open, stale Proposal/);
 
     resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
-    const closed = await callTool(p, "trama_drift_replace_proposal", { drift: drift.id, proposal: fresh.id });
-    expect(closed.isError).toBe(true);
+    expect(() => asAgent("drift", "replace-proposal", drift.id, "--proposal", fresh.id)).toThrow();
   });
 });
 
@@ -631,6 +608,18 @@ describe("CLI", () => {
     expect(exit).toBe(1);
     expect(out).toContain("checkout/cart.md");
     expect(out).toContain("exactly one (initial) State");
+  });
+
+  test("a Proposal written through the command line is validated before submit and leaves the Model untouched; paths outside the Model are refused", () => {
+    const before = readFileSync(modelFile("checkout/order.md"), "utf8");
+    cli("proposal", "new", "Lost parcels", "--body", "Couriers lose parcels.");
+    const file = cli("proposal", "edit", "1", "checkout/order.md").out.split("\n")[0] as string;
+    writeFileSync(file, before.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)").replace("→ Paid", "→ Nowhere"));
+    expect(() => cli("proposal", "submit", "1")).toThrow(/Nowhere/);
+    expect(readFileSync(modelFile("checkout/order.md"), "utf8")).toBe(before);
+    expect(getProposal(p, "1").data.status).toBe("draft");
+    expect(() => cli("proposal", "edit", "1", "../../escape.md")).toThrow();
+    expect(existsSync(join(dir, "escape.md"))).toBe(false);
   });
 
   test("--json prints the same data as a parseable document", () => {

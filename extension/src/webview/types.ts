@@ -8,6 +8,8 @@ export interface ViewContext {
   navigate(view: ViewName, options?: NavigateOptions): void;
   /** Follow an http or https link of a rendered text: the host opens it in the system browser. */
   openLink(url: string): void;
+  /** Show an error in the shell's error bar, as for an error the host reports. */
+  showError(message: string): void;
 }
 
 export interface View {

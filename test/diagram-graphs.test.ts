@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { withDrifts } from "../extension/src/webview/diagram/drifts";
-import { detailOfSelection } from "../extension/src/webview/diagram/details";
+import { detailOfSelection, requirementItems } from "../extension/src/webview/diagram/details";
 import type { GraphSpec } from "../extension/src/webview/diagram/graph";
 import { buildGraph } from "../extension/src/webview/diagram/levels";
 import { machineGraph, visibleState } from "../extension/src/webview/diagram/machine";
@@ -234,4 +234,21 @@ test("the panel carries the Proposal for ghosts and the Drift for Drift ghosts",
   const driftPanel = detailOfSelection(s, order, "d:0001");
   expect(driftPanel.drift?.id).toBe("0001");
   expect(driftPanel.proposal).toBeNull();
+});
+
+test("the Requirement sections of the Transitions an edge draws are listed in order of the Transitions, as Markdown blocks", () => {
+  const section = (ref: string | null, text: string) => ({ ref, text, change: "same" as const, before: null });
+  const area = (id: string, title: string, sections: ReturnType<typeof section>[]) => ({ id, file: `requirements/${id}.md`, title, description: "", intro: "", change: "same" as const, sections });
+  const areas = [
+    area("ui", "Interface", [section(null, "General."), section("order/Paid/user.CANCEL", "- Ask first.\n  - Twice."), section("order/Paid", "A badge.")]),
+    area("rules", "Business rules", [section("order/Paid/stripe.REFUNDED", "Refund in full."), section("ORDER/PAID/USER.CANCEL", "Only before pickup."), section("order/Paid/user.PAY", "")]),
+  ];
+  const items = requirementItems(areas, ["order/Paid/stripe.REFUNDED", "order/Paid/user.CANCEL", "order/Paid/user.PAY"]);
+  expect(items.map((i) => [i.text, i.ref, i.block])).toEqual([
+    ["Business rules", "requirements/rules#order/Paid/stripe.REFUNDED", true],
+    ["Interface", "requirements/ui#order/Paid/user.CANCEL", true],
+    ["Business rules", "requirements/rules#ORDER/PAID/USER.CANCEL", true],
+  ]);
+  expect(items[1]?.note).toBe("- Ask first.\n  - Twice.");
+  expect(requirementItems(areas, [])).toEqual([]);
 });

@@ -2,7 +2,7 @@ import type { Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
 import type { MountView, View } from "../types";
 import { createCanvas } from "./canvas";
-import { type Detail, detailOfSelection, tooltipOf } from "./details";
+import { type Detail, detailOfSelection, requirementItems, tooltipOf } from "./details";
 import { homeLevel, resolveElement, selectionFor, showsElement } from "./elements";
 import { type GraphSpec, type Level, sameLevel } from "./graph";
 import { breadcrumb, buildGraph, drillTarget, scanFeature, validLevel } from "./levels";
@@ -139,11 +139,10 @@ export const mountDiagram: MountView = (root, context) => {
   function currentDetail(): Detail {
     const detail = detailOfSelection(scene as Scene, graph as GraphSpec, selected);
     const node = graph?.nodes.find((n) => n.id === selected);
-    const ref = node?.ref ?? (selected === null ? levelRef(level) : null);
-    if (!ref || !snapshot) return detail;
-    const items = snapshot.areas.flatMap((a) =>
-      a.sections.filter((s) => s.ref !== null && s.text !== "" && s.ref.toLowerCase() === ref.toLowerCase()).map((s) => ({ text: a.title, note: s.text, change: "same" as const, ref: `requirements/${a.id}#${s.ref}` })),
-    );
+    const edge = graph?.edges.find((e) => e.id === selected);
+    const levelOf = levelRef(level);
+    const refs = node?.ref ? [node.ref] : edge ? edge.refs : selected === null && levelOf ? [levelOf] : [];
+    const items = snapshot ? requirementItems(snapshot.areas, refs) : [];
     return items.length === 0 ? detail : { ...detail, sections: [...detail.sections, { heading: "Requirements", items }] };
   }
 

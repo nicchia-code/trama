@@ -44,7 +44,7 @@ function navigate(view: ViewName, options: NavigateOptions = {}) {
   mounted[view].show(options);
 }
 
-const context: ViewContext = { post, navigate, openLink: (url) => post({ type: "openLink", url }) };
+const context: ViewContext = { post, navigate, openLink: (url) => post({ type: "openLink", url }), showError: (message) => showError(message) };
 const mounted: Record<ViewName, View> = {
   diagram: mountDiagram(roots.diagram, context),
   board: mountBoard(roots.board, context),

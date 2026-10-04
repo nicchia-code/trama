@@ -1,25 +1,7 @@
-// Bundles the extension host (Node, CommonJS) and the webview (browser) into extension/dist/, after writing the
-// tool declarations VS Code needs (`contributes.languageModelTools`) from the shared tool catalog.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { TOOLS } from "../src/tools/catalog";
+// Bundles the extension host (Node, CommonJS) and the webview (browser) into extension/dist/.
+import { mkdirSync } from "node:fs";
 
 mkdirSync("extension/dist", { recursive: true });
-
-const manifestPath = "extension/package.json";
-const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-manifest.contributes.languageModelTools = TOOLS.map((t) => ({
-  name: t.name,
-  displayName: `Trama: ${t.title}`,
-  toolReferenceName: t.name,
-  canBeReferencedInPrompt: true,
-  userDescription: t.title,
-  modelDescription: t.description,
-  icon: "$(type-hierarchy)",
-  tags: ["trama"],
-  inputSchema: t.inputSchema,
-}));
-const updated = `${JSON.stringify(manifest, null, 2)}\n`;
-if (updated !== readFileSync(manifestPath, "utf8")) writeFileSync(manifestPath, updated);
 
 const host = await Bun.build({
   entrypoints: ["extension/src/host/main.ts"],

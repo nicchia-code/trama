@@ -7,29 +7,13 @@ description: Use when asked to import, reverse-engineer or describe existing cod
 
 You describe the **existing code** as a Trama **Model** (what the System does) plus its evident **Requirements** (how it is built), written as **Proposals** the developer approves. The Model you write describes the code **as it is**, bugs included; everything that looks wrong or that the documentation contradicts goes into the Proposal as a **doubt** for the developer, never silently "fixed".
 
-## Tools or CLI
+## Hand-over
 
-If you have the Trama tools (`trama_view`, `trama_board`, `trama_proposal_new`, …, offered by VS Code or by an MCP server), use them; otherwise run the `trama` CLI in a terminal. The steps below name the CLI command; this is the tool that does the same:
-
-| CLI | Tool |
-|---|---|
-| `trama system`, `trama feature <id>`, `trama machine <id>`, `trama state <ref>`, `trama event <ref>` | `trama_view` with `ref` (no `ref` for the System) |
-| `trama requirements`, `trama requirements <area>` | `trama_view` with `ref` `requirements` or `requirements/<area>` |
-| `trama search`, `trama validate`, `trama analyze` | `trama_search`, `trama_validate`, `trama_analyze` |
-| `trama announce proposal "<title>"` | `trama_announce` with `kind: "proposal"` |
-| `trama proposal new --import [--requires <id>]` | `trama_proposal_new` with `import: true` and `requires` |
-| `trama proposal edit`, then editing the printed file | `trama_proposal_write` with the complete new file |
-| `trama proposal show` | `trama_proposal_show` |
-| `trama proposal submit <id>` | `trama_proposal_submit` |
-| `trama ask --root <project>` (JSON request on stdin) | `trama_ask` |
-
-There is no tool for approving, rejecting or discarding: those are the developer's decisions.
-
-A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>` (or `trama_proposal_submit`). If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` or `trama_proposal_write` again: it returns an open Proposal to Draft, so submit again when finished.
+A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>`. If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` again: it returns an open Proposal to Draft, so submit again when finished.
 
 ## Announcing cards
 
-Once you have planned the Model (step 4), announce every Proposal you will write, each as soon as you know its title: `trama announce proposal "<title>"` (or `trama_announce`) prints an announcement ID. Pass it when you open that Proposal: `trama proposal new … --import --announcement <id>` (the `announcement` field of `trama_proposal_new`). The Board shows a ghost of each Proposal meanwhile. Never wait for a ghost to show and never skip or delay a Proposal because of it; an unknown ID is only noted in the output.
+Once you have planned the Model (step 4), announce every Proposal you will write, each as soon as you know its title: `trama announce proposal "<title>"` prints an announcement ID. Pass it when you open that Proposal: `trama proposal new … --import --announcement <id>`. The Board shows a ghost of each Proposal meanwhile. Never wait for a ghost to show and never skip or delay a Proposal because of it; an unknown ID is only noted in the output.
 
 ## Hard rules
 
@@ -59,7 +43,7 @@ Once you have planned the Model (step 4), announce every Proposal you will write
 
 ## Asking
 
-Use **`trama_ask` first**, whether offered natively by VS Code or through MCP. If it is not offered, run **`trama ask --root <project>`** with the same JSON request on stdin.
+Run **`trama ask --root <project>`** with the JSON request on stdin, for every round of questions.
 
 - Send one complete round as `{questions: [...]}`. Every question has a unique non-empty `id`, `question`, `options` as `{label, description}`, a zero-based `recommended` index, and an explicit `multi` boolean. Set `multi: true` only when several answers can hold together. Do not supply "Other": Trama adds it.
 - A result with `status: "answered"` contains `answers` keyed by question id. An answered entry has the original `selected` labels and optional free-form `text`; a `status: "skipped"` entry is an explicit developer skip. Use the recommendation for that skipped decision, report it as an assumption for review, and do not ask it again.

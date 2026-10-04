@@ -1,6 +1,6 @@
 # Agent
 
-A coding agent working for the developer. It explores the Model, writes Proposals, files Tasks and Drifts and implements Tasks, through Trama's tools or command line. It can never approve or reject a Proposal or resolve a Drift: those stay with the developer. The one rejection that follows from something the agent does is that of a stale Proposal it replaces on a Drift.
+A coding agent working for the developer. It explores the Model, writes Proposals, files Tasks and Drifts and implements Tasks, through Trama's command line. It can never approve or reject a Proposal or resolve a Drift: those stay with the developer. The one rejection that follows from something the agent does is that of a stale Proposal it replaces on a Drift.
 
 ## Events
 

@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { createQuestionServer, questionProjectId, type QuestionServer } from "../../../src/core/question-channel";
 import { QuestionRoundQueue } from "../../../src/core/question-rounds";
-import { unavailableQuestions, type QuestionHandler } from "../../../src/core/questions";
+import { unavailableQuestions } from "../../../src/core/questions";
 import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
 import { presentQuestionRound } from "./question-ui";
@@ -19,18 +19,11 @@ export async function questionEndpoint(root: string): Promise<string | undefined
   return windowQuestions?.endpoint(root);
 }
 
-/** The same window-owned queue serves native tools and all local connections. */
+/** The window-owned queue serves every local `trama ask` connection. */
 export class EditorQuestions implements vscode.Disposable {
   private service: WindowRoundService | undefined;
   private closed = false;
   private readonly subscriptions: vscode.Disposable[];
-
-  readonly ask: QuestionHandler = async (project, request, context) => {
-    const current = this.project();
-    if (this.closed || !current || questionProjectId(current) !== questionProjectId(project)) return unavailableQuestions();
-    const service = this.ensure(current);
-    return service.queue.ask(request, context);
-  };
 
   constructor(private readonly project: () => Project | undefined) {
     windowQuestions = this;

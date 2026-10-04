@@ -231,7 +231,7 @@ function submit(editor: EditorConnection, projectId: string, request: QuestionRe
     socket.on("close", lost);
     // From this write onwards the validated round belongs to this editor: never reroute it.
     submitted = true;
-    socket.write(`${JSON.stringify({ type: "ask", projectId, request, agent: context.agent })}\n`);
+    socket.write(`${JSON.stringify({ type: "ask", projectId, request })}\n`);
   });
 }
 
@@ -359,11 +359,10 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         }
         if (phase !== "ready" || message.type !== "ask") throw new UsageError("Identify the editor before submitting a question round");
         const request = parseQuestionRequest(message.request);
-        if (typeof message.agent !== "string") throw new UsageError("agent must be a string");
         phase = "waiting";
         void Promise.resolve().then(() => {
           if (controller.signal.aborted || closed) throw questionAborted();
-          return options.handler(options.project, request, { agent: message.agent as string, signal: controller.signal });
+          return options.handler(options.project, request, { signal: controller.signal });
         }).then((result) => finish(result.status === "unavailable" ? questionFailure(new QuestionInterruptedError()) : result), (error) => finish(questionFailure(error)));
       } catch (error) { finish(questionFailure(error)); }
     });

@@ -19,7 +19,6 @@ import { run } from "../src/cli/main";
 import { discardProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
-import { callTool } from "../src/tools/catalog";
 
 let dir: string;
 let p: Project;
@@ -211,17 +210,27 @@ describe("the terminal an announcement belongs to", () => {
     expect(newTerminalId()).toMatch(/^[a-z0-9]{6}$/);
   });
 
-  test("the command line and the tools announce from the agent's terminal, and a Draft with no waiting announcement makes its own there", async () => {
+  test("the command line announces from the agent's terminal, and a Draft with no waiting announcement makes its own there", async () => {
     const id = run(["announce", "task", "From a terminal"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
     expect(getAnnouncement(p, id)?.terminal).toBe("ab12cd");
     expect(getAnnouncement(p, run(["announce", "task", "Outside"], dir, {}).out)?.terminal).toBeNull();
 
-    await callTool(p, "trama_announce", { kind: "drift", title: "By tool" }, { terminal: "zz99yy" });
-    expect(listAnnouncements(p).find((a) => a.title === "By tool")?.terminal).toBe("zz99yy");
-
     withdrawAll(p);
     run(["proposal", "new", "Own ghost"], dir, { TRAMA_TERMINAL: "ab12cd" });
     expect(listAnnouncements(p).map((a) => [a.title, a.terminal])).toEqual([["Own ghost", "ab12cd"]]);
+  });
+
+  test("an announced Task or Drift is delivered by creating it with --announcement, and an unknown ID only adds a note", () => {
+    const announced = (kind: string, title: string) => run(["announce", kind, title], dir, {}).out;
+    const taskAnnouncement = announced("task", "Refunds");
+    expect(listAnnouncements(p).map((a) => a.kind)).toEqual(["task"]);
+    run(["--root", dir, "task", "new", "Refunds", "--ref", "order/Refunding", "--announcement", taskAnnouncement], dir, {});
+    expect(listAnnouncements(p)).toEqual([]);
+
+    const driftOptions = ["--option", "Change the code", "--option-text", "Make it so.", "--option", "Remove the code", "--option-text", "Drop it."];
+    const unknown = run(["--root", dir, "drift", "new", "Late refund", "--ref", "order/Shipped", "--happens", "The code refunds late.", "--should", "The Model forbids it.", "--announcement", "zzzzzz", ...driftOptions], dir, {});
+    expect(unknown.out).toContain('No announcement "zzzzzz" was found');
+    expect(() => run(["announce", "card", "x"], dir, {})).toThrow(/The kind must be one of/);
   });
 
   test("a Draft that takes a design request's announcement leaves it in the terminal the request was typed into", () => {

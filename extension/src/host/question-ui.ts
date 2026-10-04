@@ -94,7 +94,7 @@ function confirmSkip(title: string, signal: AbortSignal): Promise<"one" | "all" 
   ]);
 }
 
-/** Same native controls for Copilot and socket callers; no chat or terminal prompts. */
+/** The native controls for every `trama ask` round; no chat or terminal prompts. */
 export const presentQuestionRound: QuestionPresenter = async (request: QuestionRequest, context) => {
   const answers: (QuestionAnswer | undefined)[] = [];
   const drafts: (DraftAnswer | undefined)[] = [];
@@ -105,7 +105,7 @@ export const presentQuestionRound: QuestionPresenter = async (request: QuestionR
       if (context.signal.aborted) throw context.signal.reason ?? questionAborted();
       const question = request.questions[step];
       if (!question) throw new Error("Question position is outside this round");
-      const title = `${context.agent} — Question ${step + 1} of ${request.questions.length}`;
+      const title = `trama ask — Question ${step + 1} of ${request.questions.length}`;
       const draft = editing ?? drafts[step] ?? { indices: [question.recommended], other: false };
       const action = await choose(question, title, step, draft, context.signal);
       if (action.kind === "back") {
