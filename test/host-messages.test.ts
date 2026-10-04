@@ -10,8 +10,6 @@ const ok = (message: unknown) => {
 test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "ready" })).toEqual({ type: "ready" });
   expect(ok({ type: "launch", action: { kind: "design" } })).toEqual({ type: "launch", action: { kind: "design" } });
-  expect(ok({ type: "launch", action: { kind: "fix" } })).toEqual({ type: "launch", action: { kind: "fix" } });
-  expect(ok({ type: "launch", action: { kind: "fix", prompt: "x" } })).toEqual({ type: "launch", action: { kind: "fix", prompt: "x" } });
   expect(ok({ type: "launch", action: { kind: "design", prompt: "x" } })).toEqual({ type: "launch", action: { kind: "design", prompt: "x" } });
   expect(ok({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ type: "launch", action: { kind: "scan", feature: "checkout" } });
   expect(ok({ type: "launch", action: { kind: "scan" } })).toEqual({ type: "launch", action: { kind: "scan" } });
@@ -54,7 +52,7 @@ test("rejects unknown types, wrong shapes, unknown columns and IDs that are not 
     { type: "launch" },
     { type: "launch", action: { kind: "run", command: "rm -rf /" } },
     { type: "launch", action: { kind: "design", prompt: 3 } },
-    { type: "launch", action: { kind: "fix", prompt: 3 } },
+    { type: "launch", action: { kind: "fix", prompt: "The cart total ignores the coupon" } },
     { type: "launch", action: { kind: "scan", feature: "a`; rm -rf /; `" } },
     { type: "launch", action: { kind: "implement", task: 3 } },
     { type: "launch", action: { kind: "implement-design" } },

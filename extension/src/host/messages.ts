@@ -15,11 +15,9 @@ function parseAction(value: unknown): AgentAction | string {
   if (typeof value !== "object" || value === null) return "launch needs an action";
   const raw = value as Raw;
   switch (raw["kind"]) {
-    case "design":
-    case "fix": {
-      const kind = raw["kind"];
-      if (raw["prompt"] !== undefined && typeof raw["prompt"] !== "string") return `${kind} prompt must be a string`;
-      return raw["prompt"] === undefined ? { kind } : { kind, prompt: raw["prompt"] };
+    case "design": {
+      if (raw["prompt"] !== undefined && typeof raw["prompt"] !== "string") return "design prompt must be a string";
+      return raw["prompt"] === undefined ? { kind: "design" } : { kind: "design", prompt: raw["prompt"] };
     }
     case "scan":
       if (raw["feature"] === undefined) return { kind: "scan" };

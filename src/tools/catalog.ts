@@ -332,7 +332,7 @@ export const TOOLS: ToolSpec[] = [
         title: string("Short title"),
         refs: stringList(`The Model elements or Requirements closest to the difference. ${REF} ${REQ_REF}`),
         proposal: string("ID of a Proposal that would fix the Model, if the code is right"),
-        task: string("ID of the Task you were implementing when you found the difference; leave out for a Scan or a Fix"),
+        task: string("ID of the Task you were implementing when you found the difference; leave out for a Scan"),
         happens: string("What happens: what the code does, in terms of behaviour and domain words, for a programmer reading at a glance. Short Markdown, about 100 words. Name a variable, function, class, field or file only when the difference cannot be understood without it, as inline code; code locations go in `where`"),
         should: string("What should happen: what the Model or the Requirement says, in the same style"),
         options: {

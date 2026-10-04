@@ -254,23 +254,18 @@ export class Controller implements vscode.Disposable {
 
   private async launchAction(project: Project, action: AgentAction): Promise<void> {
     switch (action.kind) {
-      case "design":
-      case "fix": {
-        const asking =
-          action.kind === "design"
-            ? { title: "Design with Agent", prompt: "What should the agent design or change in the Model?", placeHolder: "Add a cancelled state to orders…", missing: "Describe what to design" }
-            : { title: "Fix with Agent", prompt: "What is wrong? The agent turns it into Tasks, or a Drift if the Model is wrong.", placeHolder: "The cart total ignores the discount code…", missing: "Describe the problem" };
+      case "design": {
         const request =
           action.prompt?.trim() ||
           (await vscode.window.showInputBox({
-            title: asking.title,
-            prompt: asking.prompt,
-            placeHolder: asking.placeHolder,
+            title: "Design with Agent",
+            prompt: "What should the agent design or change in the Model?",
+            placeHolder: "Add a cancelled state to orders…",
             ignoreFocusOut: true,
-            validateInput: notBlank(asking.missing),
+            validateInput: notBlank("Describe what to design"),
           }));
         if (request === undefined || request.trim() === "") return;
-        await launchAgent(project.root, buildPrompt({ kind: action.kind, prompt: request }), action.kind === "design" ? request.trim() : undefined);
+        await launchAgent(project.root, buildPrompt({ kind: "design", prompt: request }), request.trim());
         return;
       }
       case "scan":

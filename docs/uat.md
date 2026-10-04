@@ -315,7 +315,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 ### E1. Layout
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Click the **Board** tab | Toolbar: **Run all To do** (blue), **Scan System**, **Design…**, **Fix…** | ☐ |
+| 1 | Click the **Board** tab | Toolbar: **Run all To do** (blue), **Scan System**, **Design…** | ☐ |
 | 2 | Look at the columns | `TO DECIDE 4`, `TO DO 2`, `IN PROGRESS 1`, `DONE 1`, each with a count badge | ☐ |
 
 ### E2. To decide
@@ -548,15 +548,10 @@ Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." -
 | 3 | `j drift replace-proposal 2 --proposal <new id>` after a new Proposal exists | Drift 0002 shows the new Proposal; Proposal 0002 is rejected with `Replaced by Proposal <new id>` under `## Feedback` | ☐ |
 | 4 | On a Drift whose Proposal is still a Draft, click the left **Keep this** | A warning `… is still being written. Wait until the agent hands it over.` | ☐ |
 
-### G9. Fix
+### G9. Technical Tasks
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Board: **Fix…** | An input box titled `Fix with Agent`, prompt `What is wrong? The agent turns it into Tasks, or a Drift if the Model is wrong.` | ☐ |
-| 2 | Press Enter with the box empty | `Describe the problem` | ☐ |
-| 3 | Press Esc | Nothing is sent to the agent | ☐ |
-| 4 | Type `The cart total ignores the coupon`, Enter | The printed line is exactly `Use the trama-fix skill. The cart total ignores the coupon` | ☐ |
-| 5 | Palette: **Trama: Fix with Agent…** | Same input box as step 1 | ☐ |
-| 6 | The Board has no **New technical task** button | Technical Tasks are filed by the agent (`trama task new --technical`) | ☐ |
+| 1 | The Board has no **New technical task** button | Technical Tasks are filed by the agent (`trama task new --technical`) | ☐ |
 
 ### G10. Stale approval is refused
 | # | Action | Expected | ✓ |

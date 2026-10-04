@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import design from "../../skills/trama-design/SKILL.md" with { type: "text" };
 import designFormat from "../../skills/trama-design/FORMAT.md" with { type: "text" };
-import fix from "../../skills/trama-fix/SKILL.md" with { type: "text" };
 import implement from "../../skills/trama-implement/SKILL.md" with { type: "text" };
 import importSkill from "../../skills/trama-import/SKILL.md" with { type: "text" };
 import scan from "../../skills/trama-scan/SKILL.md" with { type: "text" };
@@ -15,7 +14,6 @@ export const SKILLS: Record<string, string> = {
   "trama-scan/SKILL.md": scan,
   "trama-implement/SKILL.md": implement,
   "trama-import/SKILL.md": importSkill,
-  "trama-fix/SKILL.md": fix,
 };
 
 /** Existing skill files under `dir` whose content differs from ours, i.e. what an install would destroy. */

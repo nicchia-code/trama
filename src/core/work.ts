@@ -46,7 +46,7 @@ interface DriftData {
   refs: string[];
   proposal: string | null;
   task: string | null;
-  /** The Task the agent was implementing when it filed the Drift; none for a Scan or a Fix, and absent in Drifts written before the field existed. */
+  /** The Task the agent was implementing when it filed the Drift; none for a Scan, and absent in Drifts written before the field existed. */
   origin: string | null;
   /** Number, counted from 1 in the order of the Fix options section, of the option chosen when the code was fixed; none otherwise and in Drifts without options. */
   option: number | null;

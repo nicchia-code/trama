@@ -26,7 +26,6 @@ const TEMPLATE = `
       <button type="button" class="trama-btn" data-fit aria-label="Fit to view" title="Fit to view (0)">Fit</button>
     </span>
     <button type="button" class="trama-btn" data-design title="Ask an agent to design a change">Design…</button>
-    <button type="button" class="trama-btn" data-fix title="Describe a problem; an agent turns it into Tasks">Fix…</button>
     <button type="button" class="trama-btn" data-scan>Scan</button>
   </div>
   <div class="dg-main">
@@ -229,7 +228,6 @@ export const mountDiagram: MountView = (root, context) => {
   $("button[data-zoom-out]").addEventListener("click", () => canvas.zoomBy(0.8));
   $("button[data-fit]").addEventListener("click", () => canvas.fit());
   $("button[data-design]").addEventListener("click", () => context.post({ type: "launch", action: { kind: "design" } }));
-  $("button[data-fix]").addEventListener("click", () => context.post({ type: "launch", action: { kind: "fix" } }));
   scan.addEventListener("click", () => {
     const feature = scene ? scanFeature(scene, level) : undefined;
     context.post({ type: "launch", action: feature ? { kind: "scan", feature } : { kind: "scan" } });

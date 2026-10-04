@@ -35,11 +35,6 @@
         "category": "Trama"
       },
       {
-        "command": "trama.fix",
-        "title": "Fix with Agent…",
-        "category": "Trama"
-      },
-      {
         "command": "trama.scan",
         "title": "Scan System",
         "category": "Trama"
@@ -657,7 +652,7 @@
             },
             "task": {
               "type": "string",
-              "description": "ID of the Task you were implementing when you found the difference; leave out for a Scan or a Fix"
+              "description": "ID of the Task you were implementing when you found the difference; leave out for a Scan"
             },
             "happens": {
               "type": "string",

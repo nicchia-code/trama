@@ -47,7 +47,6 @@ export const mountBoard: MountView = (root, context) => {
   const runAll = toolbarButton("Run all To do", () => context.post({ type: "launch", action: { kind: "implement-all" } }), true);
   toolbarButton("Scan System", () => context.post({ type: "launch", action: { kind: "scan" } }));
   toolbarButton("Design…", () => context.post({ type: "launch", action: { kind: "design" } }));
-  toolbarButton("Fix…", () => context.post({ type: "launch", action: { kind: "fix" } }));
 
   let dragged: TaskCard | null = null;
   /** Tasks whose move waits for the host's next snapshot, with the column each is going to. */

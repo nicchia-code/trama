@@ -48,7 +48,6 @@ export function activate(context: vscode.ExtensionContext): void {
       }),
     ),
     vscode.commands.registerCommand("trama.design", guarded(() => trama.launch({ kind: "design" }))),
-    vscode.commands.registerCommand("trama.fix", guarded(() => trama.launch({ kind: "fix" }))),
     vscode.commands.registerCommand("trama.scan", guarded(() => trama.pickAndScan())),
     vscode.commands.registerCommand("trama.import", guarded(() => trama.launch({ kind: "import" }))),
     vscode.commands.registerCommand("trama.updateSkills", guarded(async () => trama.updateSkills())),

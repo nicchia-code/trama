@@ -2,8 +2,8 @@ import type { AgentAction } from "../protocol";
 
 /** An action whose free text has been collected: the host asks for a missing design request first. */
 export type ResolvedAction =
-  | Exclude<AgentAction, { kind: "design" | "fix" | "rework-drift" }>
-  | { kind: "design" | "fix"; prompt: string }
+  | Exclude<AgentAction, { kind: "design" | "rework-drift" }>
+  | { kind: "design"; prompt: string }
   /** `proposal` is the stale Proposal attached to the Drift, found by the host. */
   | { kind: "rework-drift"; drift: string; proposal: string };
 
@@ -12,8 +12,6 @@ export function buildPrompt(action: ResolvedAction): string {
   switch (action.kind) {
     case "design":
       return `Use the trama-design skill. ${action.prompt.trim()}`;
-    case "fix":
-      return `Use the trama-fix skill. ${action.prompt.trim()}`;
     case "rework-drift":
       return `Use the trama-design skill, without asking questions. Proposal ${action.proposal}, attached to Drift ${action.drift}, is stale: write a new Proposal that makes the same change on the current Model and Requirements, hand it over, and attach it to the Drift in place of the stale one.`;
     case "scan":

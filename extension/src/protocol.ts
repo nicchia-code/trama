@@ -6,8 +6,6 @@ export type Column = "todo" | "doing" | "done";
 export type AgentAction =
   /** `prompt` absent: the host asks the developer with an input box. */
   | { kind: "design"; prompt?: string }
-  /** A problem described in a line; the agent turns it into Tasks (or a Drift). The host asks for the description when it is missing. */
-  | { kind: "fix"; prompt?: string }
   /** `feature` absent: the whole System. */
   | { kind: "scan"; feature?: string }
   | { kind: "implement"; task: string }
