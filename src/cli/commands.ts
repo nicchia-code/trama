@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TramaError, UsageError } from "../core/errors";
 import { ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote } from "../core/announcements";
-import { installSkills, missingSkills, skillConflicts } from "./skills";
+import { installSkills, missingSkills, removeRetiredSkills, skillConflicts } from "./skills";
 import {
   approveProposal,
   deleteInProposal,
@@ -147,14 +147,16 @@ export const COMMANDS: Command[] = [
       const skillsDir = resolve(project.root, str(o["skills-dir"]) ?? ".agents/skills");
       const changed = skillConflicts(skillsDir).concat(missingSkills(skillsDir));
       installSkills(skillsDir);
+      const removed = removeRetiredSkills(project.root, [skillsDir]);
       const areas = existsSync(requirementsDir(project)) ? [] : createDefaultAreas(project);
       const generated = syncRequirementSkills(project, [skillsDir]);
       const lines = [
         changed.length === 0 ? `Skills in ${skillsDir} are already up to date.` : `Updated ${changed.length} skill file(s) in ${skillsDir}:\n${changed.map((c) => `- ${c}`).join("\n")}`,
+        removed.length > 0 ? `Deleted the retired trama-fix skill: ${removed.join(", ")}` : "",
         areas.length > 0 ? `Created ${areas.length} Requirement Areas in ${requirementsDir(project)}: ${areas.join(", ")}` : "",
         generated.length > 0 ? `Regenerated ${generated.length} Requirement skill(s):\n${generated.map((c) => `- ${c}`).join("\n")}` : "",
       ];
-      return text(lines.filter(Boolean).join("\n"), { skillsDir, changed, areas, generated });
+      return text(lines.filter(Boolean).join("\n"), { skillsDir, changed, removed, areas, generated });
     },
   },
 

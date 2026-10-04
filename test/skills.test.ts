@@ -49,3 +49,27 @@ test("init --force replaces customised skills, and identical existing files are 
     rmSync(same, { recursive: true, force: true });
   }
 });
+
+test("skills update deletes the retired trama-fix folder from every skill folder, reports it, and finds nothing the second time", () => {
+  const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
+  try {
+    run(["--root", root, "init"], root);
+    const fixes = [".agents/skills", ".claude/skills", "tools/agent-skills"].map((d) => join(root, d, "trama-fix"));
+    for (const fix of fixes) {
+      mkdirSync(join(fix, "notes"), { recursive: true });
+      writeFileSync(join(fix, "SKILL.md"), "old fix skill\n");
+      writeFileSync(join(fix, "notes/mine.md"), "customised\n");
+    }
+
+    const first = run(["--root", root, "skills", "update", "--skills-dir", "tools/agent-skills"], root).out;
+    for (const fix of fixes) {
+      expect(existsSync(fix)).toBe(false);
+      expect(first).toContain(fix);
+    }
+    expect(existsSync(join(root, ".agents/skills/trama-design/SKILL.md"))).toBe(true);
+
+    expect(run(["--root", root, "skills", "update", "--skills-dir", "tools/agent-skills"], root).out).not.toContain("Deleted");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

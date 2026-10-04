@@ -57,5 +57,6 @@ export async function initializeProject(): Promise<Project | undefined> {
 export function updateSkills(project: Project): void {
   const skillsDir = configuredSkillsDir();
   const { out } = run(["--root", project.root, "skills", "update", "--skills-dir", skillsDir], project.root);
-  void vscode.window.showInformationMessage(`Trama: ${out.split("\n")[0]}`);
+  const report = out.split("\n").filter((line, i) => i === 0 || line.startsWith("Deleted "));
+  void vscode.window.showInformationMessage(`Trama: ${report.join(" ")}`);
 }

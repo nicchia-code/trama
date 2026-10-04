@@ -16,7 +16,7 @@
 | Command | Effect |
 |---|---|
 | `init [--skills-dir <dir>] [--force]` | Creates `.trama/` in `--root` (or the current directory) with `model/system.md`, `model/actors/`, `requirements/` with five empty Areas (`ui`, `tech`, `quality`, `data`, `rules`), `proposals/`, `tasks/` and `drifts/`, and installs the agent skills (embedded in the binary) into `<dir>`, default `.agents/skills`. It never walks up. Fails, creating nothing, if `.trama/` already exists or if any skill file to install already exists with different content; `--force` overwrites those. Identical files are not a conflict. |
-| `skills update [--skills-dir <dir>]` | Writes this version's agent skills into an existing project's `<dir>` (default `.agents/skills`), replacing older or edited copies, and lists the files it changed. Creates the five starting Areas if the project has no `requirements/` folder, and regenerates the `trama-req-*` skills from the Areas. The extension runs it from **Trama: Update Agent Skills**. |
+| `skills update [--skills-dir <dir>]` | Writes this version's agent skills into an existing project's `<dir>` (default `.agents/skills`), replacing older or edited copies, and lists the files it changed. Deletes the folder of the retired `trama-fix` skill, whatever it holds, from `.agents/skills`, `.claude/skills`, `.github/skills` and `<dir>`, and lists the folders it deleted. Creates the five starting Areas if the project has no `requirements/` folder, and regenerates the `trama-req-*` skills from the Areas. The extension runs it from **Trama: Update Agent Skills**. |
 
 ## Exploring
 
