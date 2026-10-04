@@ -1,10 +1,9 @@
 import type { Raw } from "../../../src/core/schema";
-import type { AgentAction, Column, ToHost } from "../protocol";
+import type { AgentAction, ToHost } from "../protocol";
 import { safeLink } from "../../../src/core/links";
 
 export type Parsed = { ok: true; message: ToHost } | { ok: false; reason: string };
 
-const COLUMNS: readonly string[] = ["todo", "doing", "done"];
 const HOWS: readonly string[] = ["fix-code", "accept-proposal", "dismiss"];
 /** Task, Proposal, Drift and Feature IDs: no path separators, no spaces, no quotes. */
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
@@ -52,12 +51,6 @@ export function parseToHost(value: unknown): Parsed {
     case "openModelFile":
     case "openFile":
       return typeof raw["path"] === "string" && raw["path"] !== "" ? { ok: true, message: { type, path: raw["path"] } } : bad(`${type} needs a path`);
-    case "moveTask":
-      if (id === undefined) return bad("moveTask needs a valid Task ID");
-      if (typeof raw["column"] !== "string" || !COLUMNS.includes(raw["column"])) return bad(`unknown column "${String(raw["column"])}"`);
-      return { ok: true, message: { type, id, column: raw["column"] as Column } };
-    case "takeBackTask":
-      return id === undefined ? bad("takeBackTask needs a valid Task ID") : { ok: true, message: { type, id } };
     case "approveProposal":
     case "rejectProposal":
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };

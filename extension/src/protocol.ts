@@ -26,9 +26,6 @@ export type ToHost =
   | { type: "openModelFile"; path: string }
   /** Path relative to `.trama/` (for example `tasks/0003-x.md`). */
   | { type: "openFile"; path: string }
-  | { type: "moveTask"; id: string; column: Column }
-  /** The developer takes a Task back from the agent that has it. */
-  | { type: "takeBackTask"; id: string }
   | { type: "approveProposal"; id: string }
   /** The host asks for the feedback with an input box. */
   | { type: "rejectProposal"; id: string }

@@ -11,8 +11,6 @@ import { proposalTouches } from "../requirements/logic";
 export type ColumnId = "decide" | Column;
 
 export const COLUMN_ORDER: readonly ColumnId[] = ["decide", "todo", "doing", "done"];
-/** The columns a Task can live in, left to right. */
-export const TASK_COLUMNS: readonly Column[] = ["todo", "doing", "done"];
 
 export const COLUMN_TITLES: Record<ColumnId, string> = {
   decide: "To decide",
@@ -110,9 +108,6 @@ export interface TaskCard {
   /** Path relative to `.trama/`. */
   file: string;
   column: Column;
-  /** Neighbouring Task columns; null at the ends. */
-  left: Column | null;
-  right: Column | null;
 }
 
 /** The Tasks of one design (Proposal) shown as a single card; it stands in the column its Tasks add up to. */
@@ -140,20 +135,6 @@ export interface BoardColumn {
 
 const MAX_FILES = 4;
 const MAX_TOOLTIP_ITEMS = 3;
-
-/** Why a Task the agent has taken cannot be moved, dragged or run; shown as the tooltip and the accessible description of the disabled controls. */
-export const AGENT_WORKING = "The agent is working on this Task. Take it back to move it.";
-
-/** The Task column next to `column` in the given direction, or null at the ends. */
-export function neighbour(column: Column, direction: "left" | "right"): Column | null {
-  const index = TASK_COLUMNS.indexOf(column) + (direction === "left" ? -1 : 1);
-  return TASK_COLUMNS[index] ?? null;
-}
-
-/** Where dropping a card from `from` onto `target` moves it; null when the drop is refused or pointless. */
-export function dropTarget(from: Column, target: ColumnId): Column | null {
-  return target === "decide" || target === from ? null : target;
-}
 
 /** `+2 ~1 -1`, zeros left out. */
 export function formatCounts(added: number, changed: number, removed: number): string {
@@ -230,8 +211,6 @@ export function taskCard(t: TaskView): TaskCard {
     body: t.body,
     file: t.file,
     column: t.column,
-    left: neighbour(t.column, "left"),
-    right: neighbour(t.column, "right"),
   };
 }
 

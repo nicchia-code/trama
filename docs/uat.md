@@ -10,10 +10,8 @@ A real VS Code (code-oss, same extension build, fish shell) was driven through t
 
 | Area | Rows | Input used |
 |---|---|---|
-| Board text, badges, arrows, columns | E1 to E3 | Read from the DOM |
+| Board text, badges, columns | E1 to E3 | Read from the DOM |
 | Navigation from the board to the Diagram | E4 | DOM `.click()` on chips and links |
-| Moving a Task | E5 (file results), E6 (name, move), E7 (nothing moved) | `DragEvent`s dispatched from script (synthetic), and a real Enter keypress. Native drag with a real mouse was verified only in headless Chrome: dropping on In progress posts `moveTask`, dropping on To decide posts nothing |
-| Pending state of a moved card | E6.2, E6.3 logic | Headless Chrome, real Enter key: `aria-busy="true"`, class `is-pending`, opacity 0.5, `draggable=false`; a second Enter and a click send no second `moveTask`; released after about 5 s when the host never answers. Not seen on screen in VS Code, where the host answers in about 300 ms |
 | Live updates and error banners | F1 to F7, F9, F10 | Files written from outside; DOM read. **F8 was not run** |
 | Developer decisions | G1 to G10 | Buttons activated with DOM `.click()`; input boxes typed with real key events; results read from the files on disk |
 | Agent launches | H1 to H19 | Buttons with DOM `.click()`; prompts read back from the log file |
@@ -24,7 +22,7 @@ A real VS Code (code-oss, same extension build, fish shell) was driven through t
 
 Buttons were activated through the DOM, not clicked with the real mouse, so a button that is covered, clipped or too small to hit is not covered by this run.
 
-**Still to do by eye, or with a real agent:** B2.2, B4.6 (hover tooltips), B7.1 and B8.2 and C6.3 (how sub-States, the State level and a removed State look in VS Code; seen in Chrome only), B10.4 (does the wheel feel right), B10.9 and K3 (readability when wide or narrow), C4.2, D3.3, E5 and E7 with a real mouse in VS Code, how the pending card looks (E5.1, E6.2), F8, K1 for the Feature level in a light theme and the State level in both themes, a real-mouse click on each button, and all of part I.
+**Still to do by eye, or with a real agent:** B2.2, B4.6 (hover tooltips), B7.1 and B8.2 and C6.3 (how sub-States, the State level and a removed State look in VS Code; seen in Chrome only), B10.4 (does the wheel feel right), B10.9 and K3 (readability when wide or narrow), C4.2, D3.3, E5.2 with a real mouse in VS Code, F8, K1 for the Feature level in a light theme and the State level in both themes, a real-mouse click on each button, and all of part I.
 
 **Findings:** (1) deleting and recreating `.trama/` made VS Code's file watcher stop reporting changes in some subfolders, so the demo reset now updates files in place; (2) the last breadcrumb is a button with `aria-current="page"`, clicking it does nothing, so B9.3 means "marked as current".
 
@@ -329,12 +327,12 @@ j proposal submit <id>           # exit code 1; stays Draft
 ### E3. Task cards
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Read `0001` in To do | Title `Implement refunds for prepared orders`, chips `order/Refunding` and `order/Paid/user.CANCEL`, no excerpt, buttons **Show details**, **Run** (blue) and **Open**, arrows ← (disabled) and → | ☐ |
+| 1 | Read `0001` in To do | Title `Implement refunds for prepared orders`, chips `order/Refunding` and `order/Paid/user.CANCEL`, no excerpt, buttons **Show details**, **Run** (blue) and **Open**, and no move arrows | ☐ |
 | 1b | Click **Show details** on `0001` | The body shows as Markdown in the card: `When a paid order is cancelled after preparation has started:`, a two-item list with **refunded** in bold, and `order/Refunding` in a code span; the button reads **Hide details** and its accessible name is `Hide details of task 0001` | ☐ |
-| 1c | With the details open, make the Board refresh (move another Task) | `0001` stays open. Closing the panel and reopening it shows every card closed again | ☐ |
+| 1c | With the details open, make the Board refresh (`j task move 2 doing`) | `0001` stays open. Closing the panel and reopening it shows every card closed again | ☐ |
 | 1d | Read `0002` in To do | No **Show details** button (the Task has no body). Task rows inside a design card have no details toggle either | ☐ |
-| 2 | Read `0004` in Done | Badge `technical`, no chips, only **Open**, arrow ← enabled and → disabled | ☐ |
-| 3 | Read `0003` in In progress | Chip `cart/Has items/user.CHECKOUT`, both arrows enabled | ☐ |
+| 2 | Read `0004` in Done | Badge `technical`, no chips, only **Open**, no move buttons | ☐ |
+| 3 | Read `0003` in In progress | Chip `cart/Has items/user.CHECKOUT`, no move buttons | ☐ |
 
 ### E4. Links into the Diagram
 | # | Action | Expected | ✓ |
@@ -345,26 +343,17 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 4 | Board, Drift 0001: **View on diagram** 🔍 | By design the Diagram opens at `order` with `Shipped` selected. Not observed | ☐ |
 | 5 | Board, Task 0001: click the chip `order/Paid/user.CANCEL` 🔍 | By design the Diagram opens at `order` with the Transition(s) of Paid on `user.CANCEL` selected. Not observed: note what you see | ☐ |
 
-### E5. Move a Task by dragging
+### E5. The Board has no way to move a Task
+Needs the agent of E12 for row 6 (`trama.agentCommand` as `bash -c "sleep 600" {prompt}`); the other rows need none.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | ↻. Drag Task 0001 from To do and drop it on the In progress column | The card dims right away, then moves into In progress within about a second | ☐ |
-| 2 | In the verification shell run `grep column $D/tasks/0001-*.md` | `column: doing` | ☐ |
-| 3 | Drag it onto Done | Moves; file says `column: done` | ☐ |
-
-### E6. Move a Task with the keyboard
-| # | Action | Expected | ✓ |
-|---|---|---|---|
-| 1 | ↻. Tab until the → button of Task 0002 is focused; read its accessible name (hover title or screen reader) | `Move task 0002 to In progress` | ☐ |
-| 2 | Press Enter | The card dims, then moves to In progress; the focus stays on that card's buttons | ☐ |
-| 3 | Press Enter twice quickly on another arrow | The second press is ignored while the first is pending | ☐ |
-| 4 | `grep column $D/tasks/0002-*.md` | `column: doing` | ☐ |
-
-### E7. Refused drop
-| # | Action | Expected | ✓ |
-|---|---|---|---|
-| 1 | Drag a Task over the To decide column | Red dashed outline on the column while hovering | ☐ |
-| 2 | Release | Nothing moves; no file changes | ☐ |
+| 1 | ↻. Look at every Task card, every Task row of a design card and every design card | No ← → buttons, no **Take back** button and no button that removes a card; no card has the `draggable` attribute | ☐ |
+| 2 | Try to drag Task 0001 over In progress, over To decide and over its own column | Nothing is dragged: no outline appears on any column and `grep column $D/tasks/0001-*.md` still says `column: todo` | ☐ |
+| 3 | Press Tab through the Board | Focus reaches only **Show details**, **Run**, **Open**, **Run this design**, the design card's toggle, the links and badges, and the buttons of Proposals and Drifts; none of them moves a Task | ☐ |
+| 4 | `j task move 1 doing` | Within about a second the card is in In progress. At no moment is it dimmed or marked busy, and no error appears | ☐ |
+| 5 | `TRAMA_AGENT=1 j task move 2 doing` | The dot of Task 0002 pulses in the accent colour and its label is `Agent working`; there is no badge and no **Take back** button. **Run all To do** is disabled with the tooltip `An agent is working on Task 0002` | ☐ |
+| 6 | `j task move 2 done` (as the developer), then `j task take-back 2` | The first is refused: the message says the agent is working on Task 0002 and points to `trama task take-back 2` only. The second clears the mark: the dot stops pulsing, Task 0002 stays In progress and **Run all To do** is enabled again | ☐ |
+| 7 | Start an agent that does not end by itself (E12), `TRAMA_AGENT=1 j task move 2 doing`, then press Ctrl+C in the **Trama agent** terminal | Task 0002 goes back to To do with its dot no longer pulsing; no Take back is needed | ☐ |
 
 ### E8. Open a Task
 | # | Action | Expected | ✓ |
@@ -381,13 +370,13 @@ j proposal submit <id>           # exit code 1; stays Draft
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Look at the Board after the three commands | The three Tasks are **one** card in To do: `Proposal 0001`, a badge `0/3 done`, the title `Returns after shipping`, buttons **Run this design** (blue) and **Show 3 tasks**; no separate cards for the three Tasks | ☐ |
-| 2 | Click **Show 3 tasks** | The button reads **Hide tasks**; three rows in creation order, each with a status dot, its ID, its title and ← → buttons (← disabled). Hovering a dot shows `To do` | ☐ |
-| 3 | In the first row click → | The row's dot changes to `In progress`; the card moves to the In progress column, stays open, and its badge still says `0/3 done` | ☐ |
-| 4 | In that row click → again | Badge `1/3 done`, the row's dot is `Done`; the card stays in In progress (a mix of To do and Done) | ☐ |
+| 2 | Click **Show 3 tasks** | The button reads **Hide tasks**; three rows in creation order, each with a status dot, its ID and its title, and no buttons. Hovering a dot shows `To do` | ☐ |
+| 3 | `j task move <id of the first row> doing` | Within about a second the row's dot changes to `In progress`; the card moves to the In progress column, stays open, and its badge still says `0/3 done` | ☐ |
+| 4 | `j task move <id of the first row> done` | Badge `1/3 done`, the row's dot is `Done`; the card stays in In progress (a mix of To do and Done) | ☐ |
 | 5 | Edit any file under `$D/tasks/` from outside (see F1) | The card stays open and in place after the refresh | ☐ |
 | 6 | Try to drag the card onto another column | It cannot be dragged; nothing moves | ☐ |
 | 7 | **Run this design** | The launch prints ``Use the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column. Take each one from `trama task next --proposal 0001`, one after the other, until it says there is none.`` | ☐ |
-| 8 | Move the other two Tasks to Done (→ twice each) | The card moves to Done, badge `3/3 done`, **Run this design** is disabled with the tooltip `No Task of this design is in To do` | ☐ |
+| 8 | `j task move <id> done` for the other two Tasks | The card moves to Done, badge `3/3 done`, **Run this design** is disabled with the tooltip `No Task of this design is in To do` | ☐ |
 | 9 | Close the panel and open it again | The card is closed again | ☐ |
 | 10 | `trama --root $D board` and `trama --root $D task list` | `board` lists `Proposal 0001 "Returns after shipping" (3/3 done)` once, in Done, with the three Tasks under it and their columns; `task list` lists the three Tasks flat, each with `(Proposal 0001)` | ☐ |
 | 11 | Create a fourth Task with `--proposal 2` only (a second Proposal) | A design of one Task stays a plain card | ☐ |
@@ -396,10 +385,10 @@ j proposal submit <id>           # exit code 1; stays Draft
 ↻ first. Seed it from the verification shell: `j drift new "Refund amount differs" --ref order/Refunding --task 1 --happens "The code refunds late." --should "The Model refunds at once." --option "Refund at once" --option-text "Refund when the order is cancelled." --option "Queue the refund" --option-text "Keep the queue but refund within a minute."`, then `j drift new "Cancel differs" --ref order/Paid --happens "The code cancels twice." --should "The Model cancels once." --option "Cancel once" --option-text "Ignore a second cancel." --option "Reject the second cancel" --option-text "Answer it with an error."`. The harness seed already has blocked Tasks too (Tasks inside the design card, Task `0008` waiting for the fix Task `0009`); the new Drifts are 0006 and 0007. Task `0005`, taken by the agent, also gets the badge `blocked 0006`: blocking does not release it.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Look at Task `0001` on the Board | Red badges `blocked 0006` (the Drift filed with `--task 1`) and `blocked 0007` (it refs `order/Paid/user.CANCEL`, inside `order/Paid`); both arrows and **Run** stay enabled | ☐ |
+| 1 | Look at Task `0001` on the Board | Red badges `blocked 0006` (the Drift filed with `--task 1`) and `blocked 0007` (it refs `order/Paid/user.CANCEL`, inside `order/Paid`); **Run** stays enabled | ☐ |
 | 2 | Hover a badge, and read its accessible name | The tooltip says `Blocked by Drift 0006: Refund amount differs. Show it on the diagram.` | ☐ |
 | 3 | Click `blocked 0006` | The Diagram tab opens at the `order` Machine with the red ghost `Drift 0006` selected and its panel shown | ☐ |
-| 4 | Back on the Board, move `0001` with → | It moves to In progress and keeps its badges: the developer is never refused | ☐ |
+| 4 | `j task move 1 doing` as the developer (no `TRAMA_AGENT`) | It moves to In progress and keeps its badges: the developer is never refused | ☐ |
 | 5 | `j task move 1 doing`, and the same with `TRAMA_AGENT=1 j task move 1 doing` | The first prints `Task 0001 is now doing`; the second is refused naming `Drift 0006 "Refund amount differs"` and `Drift 0007`, saying the developer must decide; the Task is unchanged | ☐ |
 | 6 | `j board`, `j task list`, `j task show 1` | `(blocked by Drift 0006) (blocked by Drift 0007)` after the title; `task show` also lists `Blocked by Drift 0006: Refund amount differs` and the same for 0007 | ☐ |
 | 7 | `j drift show 6` | It does not list Task 0001 | ☐ |
@@ -433,7 +422,7 @@ Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": 
 | 16 | Set `printf '{"trama.agentLauncher": "chat", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, reload, **Design…** with any text | The prompt goes to the chat (or the clipboard) and **no** ghost appears | ☐ |
 | 17 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with the chat launcher the ghost starts with the Draft | ☐ |
 | 18 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
-| 19 | Restore S2. ↻, drag Task 0001 onto In progress (E5) | The card dims and moves; no dashed copy of it appears in In progress at any moment | ☐ |
+| 19 | Restore S2. ↻, then `j task move 1 doing` | The card moves to In progress without ever looking busy; no dashed copy of it appears in In progress at any moment | ☐ |
 
 ---
 
@@ -581,7 +570,7 @@ Each launch sends one command to the terminal named **Trama agent** (cwd = the d
 | H9 | Diagram toolbar **Design…** | Same input box and result as H5–H7 | ☐ |
 | H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
 | H11 | Board: **Run all To do** | ``Use the trama-implement skill on every Task in the "todo" column. Take each one from `trama task next`, one after the other, until it says there is none.`` | ☐ |
-| H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take back Tasks 0005 and 0007 with their **Take back** buttons, then look at **Run all To do** and at the **Run this design** button of `Proposal 0003` | **Run all To do** is **disabled** with the tooltip and accessible description `All the Tasks in To do are blocked: Task 0001 is blocked by Drift 0006`; **Run this design** is disabled with `All the Tasks of this design in To do are blocked: Task 0006 is blocked by Drift 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. Moving Task 0002 back to To do (←) enables **Run all To do** | ☐ |
+| H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task take-back 5` and `j task take-back 7`, then look at **Run all To do** and at the **Run this design** button of `Proposal 0003` | **Run all To do** is **disabled** with the tooltip and accessible description `All the Tasks in To do are blocked: Task 0001 is blocked by Drift 0006`; **Run this design** is disabled with `All the Tasks of this design in To do are blocked: Task 0006 is blocked by Drift 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run all To do** | ☐ |
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
 | H15 | Palette: **Trama: Design with Agent…** | Same input box as H5 | ☐ |
@@ -657,7 +646,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | K2 | Switch back to a dark theme | Same | ☐ |
 | K3 | Narrow the editor group to about 700 px | Board scrolls horizontally (columns keep a minimum width); the Diagram canvas is not hidden by the panel | ☐ |
 | K4 | Use only the keyboard on the Board (Tab, Shift+Tab, Enter) | Every button is reachable and shows a visible focus ring | ☐ |
-| K5 | Hover disabled buttons | Disabled **Approve** shows its reason; disabled → arrows do not react | ☐ |
+| K5 | Hover disabled buttons | Disabled **Approve** shows its reason; so does a disabled **Run all To do** or **Run this design** | ☐ |
 
 ---
 

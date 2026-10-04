@@ -2,17 +2,13 @@
 import { runBlocker } from "../../../../src/core/design";
 import type { ViewContext } from "../types";
 import type { AnnouncedCard, Badge, BlockBadge, Card, DesignCard, DriftCard, ProposalCard, TaskCard } from "./logic";
-import { AGENT_WORKING, COLUMN_TITLES } from "./logic";
+import { COLUMN_TITLES } from "./logic";
 import { renderDriftCompare } from "../drift-compare";
 import { renderMarkdown } from "../markdown";
 import { viewOfRef } from "../requirements/logic";
 
 export interface CardEnv {
   context: ViewContext;
-  /** Ask the host to move a Task; the card stays put until the next snapshot. */
-  moveTask(card: TaskCard, column: TaskCard["column"]): void;
-  /** Called when a Task card starts or stops being dragged. */
-  drag(card: TaskCard | null): void;
   /** Whether a design card was left open; kept for the session, so a refresh does not close it. */
   isExpanded(key: string): boolean;
   setExpanded(key: string, expanded: boolean): void;
@@ -70,16 +66,6 @@ function blockBadgeLink(b: BlockBadge, env: CardEnv): HTMLElement {
   node.setAttribute("aria-label", b.tooltip);
   node.addEventListener("click", () => (b.target.kind === "drift" ? env.context.navigate("diagram", { drift: b.target.id }) : env.showTask(b.target.id)));
   return node;
-}
-
-/** Gives the Task back to the developer; shown only on Tasks the agent has taken. */
-function takeBack(card: TaskCard, env: CardEnv): HTMLElement {
-  return button({
-    label: "Take back",
-    aria: `Take back task ${card.id} from the agent`,
-    action: "take-back",
-    onClick: () => env.context.post({ type: "takeBackTask", id: card.id }),
-  });
 }
 
 function chips(refs: string[], env: CardEnv): HTMLElement {
@@ -205,21 +191,8 @@ function taskDetails(card: TaskCard, env: CardEnv): { body: HTMLElement; toggle:
 
 function task(card: TaskCard, env: CardEnv): HTMLElement {
   const node = shell(card, `Task ${card.id}: ${card.title}`);
-  node.draggable = !card.agent;
-  node.dataset["agent"] = String(card.agent);
-  node.addEventListener("dragstart", (event) => {
-    event.dataTransfer?.setData("text/plain", card.key);
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-    node.classList.add("is-dragging");
-    env.drag(card);
-  });
-  node.addEventListener("dragend", () => {
-    node.classList.remove("is-dragging");
-    env.drag(null);
-  });
-
   const badges = [...(card.technical && card.refs.length === 0 ? [badge({ label: "technical" })] : []), ...card.blocks.map((b) => blockBadgeLink(b, env))];
-  const top = head(card.id, ...badges, moveButtons(card, env));
+  const top = head(card.id, ...badges);
   top.prepend(statusDot(card));
   node.append(top, el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
@@ -230,28 +203,11 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
   node.append(
     actions(
       ...(details ? [details.toggle] : []),
-      ...(card.agent ? [takeBack(card, env)] : []),
       ...(card.column === "todo" ? [button({ label: "Run", aria: `Run task ${card.id}`, action: "run", primary: true, onClick: () => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } }) })] : []),
       open,
     ),
   );
   return node;
-}
-
-/** The two arrows that move a Task to its neighbouring column. */
-function moveButtons(card: TaskCard, env: CardEnv): HTMLElement {
-  const move = (direction: "left" | "right", target: TaskCard["column"] | null) =>
-    button({
-      label: direction === "left" ? "←" : "→",
-      aria: card.agent ? `Task ${card.id} cannot move: the agent is working on it` : target === null ? `Task ${card.id} cannot move ${direction}` : `Move task ${card.id} to ${COLUMN_TITLES[target]}`,
-      action: `move-${direction}`,
-      className: "board-move",
-      disabled: card.agent ? AGENT_WORKING : target === null,
-      onClick: () => target !== null && env.moveTask(card, target),
-    });
-  const moves = el("span", "board-moves");
-  moves.append(move("left", card.left), move("right", card.right));
-  return moves;
 }
 
 /** A dot for a Task: its column's colour, or the pulsing accent dot while the agent has taken it. Named for screen readers and tooltips. */
@@ -264,7 +220,7 @@ function statusDot(task: Pick<TaskCard, "column" | "agent">): HTMLElement {
   return dot;
 }
 
-/** The Tasks of one design as a single card, closed until the developer expands it. It cannot be dragged. */
+/** The Tasks of one design as a single card, closed until the developer expands it. */
 function design(card: DesignCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}, ${card.done} of ${card.tasks.length} tasks done`);
   node.append(
@@ -276,11 +232,8 @@ function design(card: DesignCard, env: CardEnv): HTMLElement {
   list.id = `board-design-${card.id}`;
   for (const t of card.tasks) {
     const item = el("li", "board-design-task");
-    item.dataset["task"] = t.id;
     item.append(statusDot(t), el("span", "board-card-kind", t.id), el("span", "board-design-title", t.title));
-    if (t.agent) item.append(takeBack(t, env));
     item.append(...t.blocks.map((b) => blockBadgeLink(b, env)));
-    item.append(moveButtons(t, env));
     list.append(item);
   }
 
@@ -309,22 +262,6 @@ function design(card: DesignCard, env: CardEnv): HTMLElement {
   });
   node.append(actions(run, toggle), list);
   return node;
-}
-
-/** Dims a Task card while its move waits for the host's next snapshot. */
-export function setPending(node: HTMLElement, pending: boolean) {
-  node.draggable = !pending && node.dataset["agent"] !== "true";
-  node.classList.toggle("is-pending", pending);
-  node.setAttribute("aria-busy", String(pending));
-}
-
-/** Dims the Tasks of a design card whose move waits for the host's next snapshot. */
-export function setDesignPending(node: HTMLElement, pending: { has(id: string): boolean }) {
-  for (const item of node.querySelectorAll<HTMLElement>("[data-task]")) {
-    const busy = pending.has(item.dataset["task"] as string);
-    item.classList.toggle("is-pending", busy);
-    item.setAttribute("aria-busy", String(busy));
-  }
 }
 
 /**

@@ -1,6 +1,6 @@
 # Trama for VS Code
 
-Shows the Trama Model of your project (`.trama/model/`) as a read-only Diagram, its Requirements (`.trama/requirements/`) in a read-only Requirements tab, and a Board of Proposals, Drifts and Tasks. Descriptions, Requirements, Proposal bodies, Task bodies and Drift texts are shown as Markdown. You never edit the Diagram: you ask your coding agent, then approve or reject its Proposals. Requirement files you may also edit by hand; the extension regenerates the `trama-req-*` agent skills whenever they change.
+Shows the Trama Model of your project (`.trama/model/`) as a read-only Diagram, its Requirements (`.trama/requirements/`) in a read-only Requirements tab, and a Board of Proposals, Drifts and Tasks. The Board is read-only for Tasks: it offers no arrows, dragging or Take back button, and the editor accepts no message to move a Task or take it back; moving a Task and taking it back stay in the command line (`trama task move`, `trama task take-back`). Descriptions, Requirements, Proposal bodies, Task bodies and Drift texts are shown as Markdown. You never edit the Diagram: you ask your coding agent, then approve or reject its Proposals. Requirement files you may also edit by hand; the extension regenerates the `trama-req-*` agent skills whenever they change.
 
 - **Trama: Open** opens the Diagram/Board/Requirements tab (offers **Initialize Project** when the workspace has no `.trama/`).
 - **Trama: Design with Agent…**, **Trama: Scan System** and the Design, Scan and Run buttons send a prompt to your agent.

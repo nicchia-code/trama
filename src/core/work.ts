@@ -159,7 +159,7 @@ export function moveTask(p: Project, id: string, column: string, by: Mover): Tas
     throw new TramaError(`Unknown column "${column}" (expected ${COLUMNS.join(", ")})`);
   const task = getTask(p, id);
   if (by === "developer" && task.data.agent)
-    throw new TramaError(`The agent is working on Task ${task.id}, so it cannot be moved. Take it back first ("trama task take-back ${task.id}", or the Take back button on its card).`);
+    throw new TramaError(`The agent is working on Task ${task.id}, so it cannot be moved. Take it back first with "trama task take-back ${task.id}".`);
   if (by === "agent" && column === "doing") {
     const blockers = blockedTasks(p).get(task.id);
     if (blockers) throw new TramaError(refusalFor(task, blockers));
@@ -200,11 +200,12 @@ export function takeBackTask(p: Project, id: string): Task {
   return task;
 }
 
-/** The agent's command ended, so no agent can still be working: every Task it took is released, where it is. */
+/** The agent's command ended, so no agent can still be working: every Task it took is released and goes back to To do. */
 export function releaseTasks(p: Project): Task[] {
   const released = listTasks(p).filter((t) => t.data.agent);
   for (const task of released) {
     task.data.agent = false;
+    task.data.column = "todo";
     writeDocument(task.path, task.data, task.body);
   }
   return released;

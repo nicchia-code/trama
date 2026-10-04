@@ -104,7 +104,7 @@ beforeAll(() => {
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("taken Tasks and the agent terminals", () => {
-  test("a command ending in an earlier terminal still releases the Tasks taken while a later one runs", async () => {
+  test("a command ending in an earlier terminal still sends the Tasks taken while a later one runs back to To do", async () => {
     // Dynamic: the module must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const p = projectAt(dir);
@@ -128,7 +128,7 @@ describe("taken Tasks and the agent terminals", () => {
     for (const id of [a.id, b.id]) {
       const task = getTask(p, id);
       expect(task.data.agent).toBe(false);
-      expect(task.data.column).toBe("doing");
+      expect(task.data.column).toBe("todo");
     }
   });
 });

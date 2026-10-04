@@ -19,8 +19,6 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "launch", action: { kind: "rework-drift", drift: "0003" } })).toEqual({ type: "launch", action: { kind: "rework-drift", drift: "0003" } });
   expect(ok({ type: "openModelFile", path: "checkout/order.md" })).toEqual({ type: "openModelFile", path: "checkout/order.md" });
   expect(ok({ type: "openFile", path: "tasks/0003-x.md" })).toEqual({ type: "openFile", path: "tasks/0003-x.md" });
-  expect(ok({ type: "moveTask", id: "0003", column: "doing" })).toEqual({ type: "moveTask", id: "0003", column: "doing" });
-  expect(ok({ type: "takeBackTask", id: "0003" })).toEqual({ type: "takeBackTask", id: "0003" });
   expect(ok({ type: "approveProposal", id: "0001" })).toEqual({ type: "approveProposal", id: "0001" });
   expect(ok({ type: "rejectProposal", id: "0001" })).toEqual({ type: "rejectProposal", id: "0001" });
   expect(ok({ type: "resolveDrift", id: "0002", how: "accept-proposal" })).toEqual({ type: "resolveDrift", id: "0002", how: "accept-proposal" });
@@ -39,8 +37,10 @@ test("drops fields that are not part of the contract", () => {
   expect(ok({ type: "approveProposal", id: "0001", force: true })).toEqual({ type: "approveProposal", id: "0001" });
 });
 
-test("rejects unknown types, wrong shapes, unknown columns and IDs that are not plain IDs", () => {
+test("rejects unknown types, wrong shapes and IDs that are not plain IDs; moving and taking back a Task are unknown messages", () => {
   const rejected: unknown[] = [
+    { type: "moveTask", id: "0003", column: "doing" },
+    { type: "takeBackTask", id: "0003" },
     { type: "driftBlocked" },
     { type: "driftBlocked", id: "0002`; rm -rf /; `" },
     null,
@@ -62,10 +62,6 @@ test("rejects unknown types, wrong shapes, unknown columns and IDs that are not 
     { type: "openFile" },
     { type: "openFile", path: "" },
     { type: "openModelFile", path: 7 },
-    { type: "moveTask", id: "0003", column: "archive" },
-    { type: "moveTask", id: 3, column: "todo" },
-    { type: "moveTask", id: "../x", column: "todo" },
-    { type: "takeBackTask", id: "../x" },
     { type: "approveProposal", id: "" },
     { type: "rejectProposal", id: { toString: "x" } },
     { type: "resolveDrift", id: "0002", how: "delete" },

@@ -2,11 +2,8 @@ import { runBlocker } from "../../../../src/core/design";
 import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
 import type { MountView } from "../types";
 import css from "./board.css" with { type: "text" };
-import { announcedGhosts, buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, dropTarget, interleave, type TaskCard, withdrawnNotice } from "./logic";
-import { type CardEnv, renderAnnounced, renderCard, setDesignPending, setPending } from "./render";
-
-/** The host answers a move with a snapshot, or with an error that releases the dimmed cards at once; if neither comes, they are released after this long and the error is shown. */
-const PENDING_TIMEOUT_MS = 5000;
+import { announcedGhosts, buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, interleave, withdrawnNotice } from "./logic";
+import { type CardEnv, renderAnnounced, renderCard } from "./render";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -49,10 +46,6 @@ export const mountBoard: MountView = (root, context) => {
   toolbarButton("Scan System", () => context.post({ type: "launch", action: { kind: "scan" } }));
   toolbarButton("Design…", () => context.post({ type: "launch", action: { kind: "design" } }));
 
-  let dragged: TaskCard | null = null;
-  /** Tasks whose move waits for the host's next snapshot, with the column each is going to. */
-  const pending = new Map<string, TaskCard["column"]>();
-  let pendingTimer: number | undefined;
   let snapshot: Snapshot | null = null;
   /** Whether a question round is open: the ghosts then say the agent waits for the developer's answers. */
   let asking = false;
@@ -64,10 +57,6 @@ export const mountBoard: MountView = (root, context) => {
 
   const env: CardEnv = {
     context,
-    drag: (card) => {
-      dragged = card;
-      if (card === null) for (const column of Object.values(parts)) column.section.classList.remove("drop-ok", "drop-refused");
-    },
     isExpanded: (key) => expanded.has(key),
     setExpanded: (key, open) => {
       if (open) expanded.add(key);
@@ -77,19 +66,6 @@ export const mountBoard: MountView = (root, context) => {
       const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === `task:${id}`);
       card?.scrollIntoView({ block: "nearest" });
       card?.focus();
-    },
-    moveTask: (card, column) => {
-      if (card.agent || pending.has(card.id)) return;
-      context.post({ type: "moveTask", id: card.id, column });
-      pending.set(card.id, column);
-      clearTimeout(pendingTimer);
-      pendingTimer = window.setTimeout(() => {
-        const ids = [...pending.keys()];
-        pending.clear();
-        context.showError(`The editor did not answer the move of Task${ids.length === 1 ? "" : "s"} ${ids.join(", ")}: it may not have been moved. Check the Board and try again.`);
-        render();
-      }, PENDING_TIMEOUT_MS);
-      render();
     },
   };
 
@@ -108,31 +84,6 @@ export const mountBoard: MountView = (root, context) => {
     section.append(heading, body);
     columnsEl.append(section);
     parts[id] = { section, count, body, hint: el("p", "board-hint") };
-
-    const allowed = () => (dragged === null ? undefined : dropTarget(dragged.column, id));
-    const over = (event: DragEvent) => {
-      const target = allowed();
-      if (target === undefined) return;
-      const accepts = target !== null;
-      if (accepts) event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = accepts ? "move" : "none";
-      section.classList.toggle("drop-ok", accepts);
-      section.classList.toggle("drop-refused", !accepts && id === "decide");
-    };
-    section.addEventListener("dragenter", over);
-    section.addEventListener("dragover", over);
-    section.addEventListener("dragleave", (event) => {
-      if (!(event.relatedTarget instanceof Node) || !section.contains(event.relatedTarget)) section.classList.remove("drop-ok", "drop-refused");
-    });
-    section.addEventListener("drop", (event) => {
-      section.classList.remove("drop-ok", "drop-refused");
-      const target = allowed();
-      const card = dragged;
-      if (!target || !card) return;
-      event.preventDefault();
-      dragged = null;
-      env.moveTask(card, target);
-    });
   }
 
   const cache = new Map<string, { signature: string; node: HTMLElement }>();
@@ -159,8 +110,6 @@ export const mountBoard: MountView = (root, context) => {
           entry = { signature, node: renderCard(card, env) };
           cache.set(card.key, entry);
         }
-        if (card.kind === "task") setPending(entry.node, pending.has(card.id));
-        if (card.kind === "design") setDesignPending(entry.node, pending);
         return entry.node;
       });
       const withAnnounced = interleave(
@@ -190,8 +139,7 @@ export const mountBoard: MountView = (root, context) => {
     if (focused?.key !== undefined && (document.activeElement === document.body || document.activeElement === null)) {
       const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === focused.key);
       const enabled = [...(card?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
-      const other = focused.action?.startsWith("move-") ? `move-${focused.action === "move-left" ? "right" : "left"}` : undefined;
-      const target = enabled.find((b) => b.dataset["action"] === focused.action) ?? enabled.find((b) => b.dataset["action"] === other) ?? enabled[0] ?? card;
+      const target = enabled.find((b) => b.dataset["action"] === focused.action) ?? enabled[0] ?? card;
       target?.focus();
     }
   }
@@ -217,13 +165,6 @@ export const mountBoard: MountView = (root, context) => {
     update(next, isAsking = false) {
       snapshot = next;
       asking = isAsking;
-      pending.clear();
-      clearTimeout(pendingTimer);
-      render();
-    },
-    fail() {
-      pending.clear();
-      clearTimeout(pendingTimer);
       render();
     },
     withdrawn(gone: AnnouncementView[]) {

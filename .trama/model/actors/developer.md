@@ -23,16 +23,16 @@ The developer keeps the side of an open Drift that says what happens, when a Pro
 The developer keeps the side of an open Drift that says what happens, when no Proposal is attached: the code is right and nothing changes.
 
 ### MOVE_TASK_TO_TODO
-The developer moves a Task to the To do column, by dragging it or with the card's buttons.
+The developer moves a Task to the To do column, with the command line. The Board offers no way to do it.
 
 ### MOVE_TASK_TO_DOING
-The developer moves a Task to the In progress column.
+The developer moves a Task to the In progress column, with the command line.
 
 ### MOVE_TASK_TO_DONE
-The developer moves a Task to the Done column.
+The developer moves a Task to the Done column, with the command line.
 
 ### TAKE_BACK_TASK
-The developer takes back a Task that the agent has taken, with the Take back button on its card or the command of the same name. The Task stays In progress and is the developer's again.
+The developer takes back a Task that the agent has taken, with the command of the same name; the Board has no button for it. The Task stays In progress and is the developer's again.
 
 ### ASK_AGENT
 The developer asks the coding agent to work, from a button or a command: design a change (with a request typed in), scan the whole System or one Feature, implement one Task, implement every Task in To do, implement the Tasks in To do that come from one design, rework the stale Proposal attached to a Drift, or import the existing code as Proposals.

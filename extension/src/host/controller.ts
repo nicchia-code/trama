@@ -5,7 +5,7 @@ import { approvalBlock, approveProposal, getProposal, rejectProposal } from "../
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { runBlocker } from "../../../src/core/design";
-import { blockedTasks, getDrift, getTask, listTasks, moveTask, resolveDrift, staleAttachedProposal, takeBackTask } from "../../../src/core/work";
+import { blockedTasks, getDrift, getTask, listTasks, resolveDrift, staleAttachedProposal } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn } from "./announcements";
 import { agentReady, configuredSkillsDir, launchAgent, settings } from "./agent";
@@ -192,14 +192,6 @@ export class Controller implements vscode.Disposable {
         return;
       case "openLink":
         await vscode.env.openExternal(vscode.Uri.parse(message.url, true));
-        return;
-      case "moveTask":
-        moveTask(project, message.id, message.column, "developer");
-        this.refresh();
-        return;
-      case "takeBackTask":
-        takeBackTask(project, message.id);
-        this.refresh();
         return;
       case "approveProposal":
         await this.approving(project, message.id, () => approveProposal(project, message.id, [configuredSkillsDir()]));

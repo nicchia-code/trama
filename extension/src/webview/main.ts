@@ -44,7 +44,7 @@ function navigate(view: ViewName, options: NavigateOptions = {}) {
   mounted[view].show(options);
 }
 
-const context: ViewContext = { post, navigate, openLink: (url) => post({ type: "openLink", url }), showError: (message) => showError(message) };
+const context: ViewContext = { post, navigate, openLink: (url) => post({ type: "openLink", url }) };
 const mounted: Record<ViewName, View> = {
   diagram: mountDiagram(roots.diagram, context),
   board: mountBoard(roots.board, context),
@@ -98,7 +98,6 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     mounted.board.withdrawn?.(message.announcements);
   } else if (message.type === "error") {
     showError(message.message);
-    for (const view of Object.values(mounted)) view.fail?.();
   } else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal });
 });
 

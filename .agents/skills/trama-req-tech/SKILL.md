@@ -34,6 +34,7 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 
 - Markdown in the panel is rendered by a small renderer of our own in the webview code, with no new runtime library. One renderer serves the Diagram, the Board and the Requirements tabs, and it is a plain function from text to DOM nodes that can be tested without a browser page.
 - The renderer builds elements with the DOM API and sets text with `textContent`; it never uses `innerHTML` or similar, so no text from a file can inject markup or script. Links are only given an `href` when they are http or https, and are opened by the editor host in the system browser, not by navigating the webview.
+- The messages between the Board and the editor host have no move and no take-back message: the host does not accept a request to move a Task or to take one back from the panel, and the Board never sends one. The panel's Task actions are only the launch messages (run a Task, run every Task in To do, run a design), the decisions on Proposals and Drifts, and opening links. Moving a Task and taking it back stay in the command line (`trama task move`, `trama task take-back`), which the panel does not wrap.
 
 ## proposal
 

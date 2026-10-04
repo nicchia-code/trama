@@ -8,8 +8,6 @@ export interface ViewContext {
   navigate(view: ViewName, options?: NavigateOptions): void;
   /** Follow an http or https link of a rendered text: the host opens it in the system browser. */
   openLink(url: string): void;
-  /** Show an error in the shell's error bar, as for an error the host reports. */
-  showError(message: string): void;
 }
 
 export interface View {
@@ -20,8 +18,6 @@ export interface View {
   update(snapshot: Snapshot, asking?: boolean): void;
   /** Called when the view becomes visible or is navigated to. */
   show(options: NavigateOptions): void;
-  /** Called when the host reports an error: drops whatever the view was waiting on the host for, such as a move in flight. */
-  fail?(): void;
   /** Called when announced cards were withdrawn without being delivered, so the view tells the developer. */
   withdrawn?(announcements: AnnouncementView[]): void;
 }

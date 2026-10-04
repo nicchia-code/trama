@@ -1,0 +1,92 @@
+# Developer
+
+The person who owns the project. Decides what enters the Model, resolves differences between code and Model, steers the agent and looks at the Diagram, the Board and the Requirements in the editor panel.
+
+## Events
+
+### APPROVE_PROPOSAL
+The developer approves an open Proposal, from the Board or from the Diagram's detail panel.
+
+### REJECT_PROPOSAL
+The developer rejects an open Proposal and may give feedback for the agent. Cancelling the feedback prompt rejects nothing; confirming it empty rejects without feedback.
+
+### DISCARD_PROPOSAL
+The developer discards a Proposal the agent is still writing, with the command line. It is for drafts the agent never finished; a Proposal already handed over is rejected instead.
+
+### FIX_DRIFT_CODE
+The developer keeps the side of an open Drift that says what should happen: the Model or the Requirement is right and the code must change.
+
+### ACCEPT_DRIFT_PROPOSAL
+The developer keeps the side of an open Drift that says what happens, when a Proposal is attached: the code is right and the Proposal is accepted.
+
+### DISMISS_DRIFT
+The developer keeps the side of an open Drift that says what happens, when no Proposal is attached: the code is right and nothing changes.
+
+### MOVE_TASK_TO_TODO
+The developer moves a Task to the To do column, with the command line. The Board offers no way to do it.
+
+### MOVE_TASK_TO_DOING
+The developer moves a Task to the In progress column, with the command line.
+
+### MOVE_TASK_TO_DONE
+The developer moves a Task to the Done column, with the command line.
+
+### TAKE_BACK_TASK
+The developer takes back a Task that the agent has taken, with the command of the same name; the Board has no button for it. The Task stays In progress and is the developer's again.
+
+### ASK_AGENT
+The developer asks the coding agent to work, from a button or a command: design a change (with a request typed in), scan the whole System or one Feature, implement one Task, implement every Task in To do, implement the Tasks in To do that come from one design, rework the stale Proposal attached to a Drift, or import the existing code as Proposals.
+
+### INITIALIZE_PROJECT
+The developer asks to set up Trama in a workspace folder.
+
+### UPDATE_SKILLS
+The developer asks to refresh the agent skills of the project with the ones shipped with this version of Trama.
+
+### OPEN_PANEL
+The developer opens the Trama panel, or brings it to the front.
+
+### CLOSE_PANEL
+The developer closes the Trama panel.
+
+### SHOW_DIAGRAM
+The developer switches to the Diagram tab, or follows a link from another tab to an element or to a Proposal drawn over the Model.
+
+### SHOW_BOARD
+The developer switches to the Board tab.
+
+### SHOW_REQUIREMENTS
+The developer switches to the Requirements tab, or follows a link to a Requirement.
+
+### OPEN_SYSTEM_LEVEL
+The developer zooms the Diagram out to the whole System, with the breadcrumb or by following a link to a Feature or an Actor.
+
+### OPEN_FEATURE_LEVEL
+The developer shows one Feature in the Diagram, by opening it, with the breadcrumb or by following a link to one of its Machines.
+
+### OPEN_MACHINE_LEVEL
+The developer shows one Machine in the Diagram, by opening it, with the breadcrumb or by following a link to one of its States or Transitions.
+
+### OPEN_STATE_LEVEL
+The developer zooms into a State that has sub-States, in the Diagram.
+
+### CHOOSE_ANSWER
+The developer accepts one choice or a set of choices for the current question.
+
+### CHOOSE_OTHER
+The developer chooses to write a free answer, alone or alongside choices in a multiple-choice question.
+
+### WRITE_ANSWER
+The developer accepts the free answer written for the current question.
+
+### GO_BACK
+The developer returns to the preceding question, or from writing an answer or confirming a skip to the same question.
+
+### PRESS_ESCAPE
+The developer closes the current question to choose whether to skip, or returns from writing an answer or confirming a skip without accepting or skipping anything.
+
+### SKIP_QUESTION
+The developer confirms skipping only the current question.
+
+### SKIP_ALL_QUESTIONS
+The developer confirms skipping the current question and every question still remaining in the round.

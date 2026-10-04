@@ -169,7 +169,9 @@ describe("Tasks and Drifts", () => {
 
     expect(moveTask(p, id, "doing", "agent").data).toMatchObject({ column: "doing", agent: true });
     expect(getTask(p, id).data.agent).toBe(true);
-    for (const column of ["todo", "doing", "done"]) expect(() => moveTask(p, id, column, "developer")).toThrow(/agent is working on Task .*take-back/);
+    for (const column of ["todo", "doing", "done"]) {
+      expect(() => moveTask(p, id, column, "developer")).toThrow(new RegExp(`^(?!.*(button|card|Board)).*agent is working on Task ${id}.*"trama task take-back ${id}"`, "i"));
+    }
     expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: true });
 
     expect(moveTask(p, id, "doing", "agent").data.agent).toBe(true);
@@ -241,13 +243,13 @@ describe("Tasks and Drifts", () => {
     expect(moveTask(p, id, "done", "developer").data.column).toBe("done");
   });
 
-  test("releasing frees every taken Task and leaves each one where it is", () => {
+  test("releasing sends every taken Task back to To do and leaves the others where they are", () => {
     const [a, b, c] = [1, 2, 3].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string];
     moveTask(p, a, "doing", "agent");
     moveTask(p, b, "doing", "developer");
     expect(releaseTasks(p).map((t) => t.id)).toEqual([a]);
     expect([a, b, c].map((id) => getTask(p, id).data)).toMatchObject([
-      { column: "doing", agent: false },
+      { column: "todo", agent: false },
       { column: "doing", agent: false },
       { column: "todo", agent: false },
     ]);

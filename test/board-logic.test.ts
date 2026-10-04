@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, dropTarget, formatCounts, interleave, neighbour, proposalBadges, summarizeChanges, summarizeFile, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, formatCounts, interleave, proposalBadges, summarizeChanges, summarizeFile, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { runBlocker } from "../src/core/design";
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
@@ -51,27 +51,6 @@ test("keys differ across kinds that share an ID", () => {
   const board = buildBoard(snapshot({ proposals: [proposal({ id: "0003" })], drifts: [drift({ id: "0003" })], tasks: [task({ id: "0003" })] }));
   const keys = board.flatMap((c) => c.cards.map((card) => card.key));
   expect(new Set(keys).size).toBe(3);
-});
-
-test("neighbour moves along To do, In progress, Done and stops at the ends", () => {
-  expect(neighbour("todo", "left")).toBeNull();
-  expect(neighbour("todo", "right")).toBe("doing");
-  expect(neighbour("doing", "left")).toBe("todo");
-  expect(neighbour("doing", "right")).toBe("done");
-  expect(neighbour("done", "left")).toBe("doing");
-  expect(neighbour("done", "right")).toBeNull();
-});
-
-test("task cards carry their neighbours", () => {
-  const cards = buildBoard(snapshot({ tasks: [task({ column: "doing" })] }))[2]?.cards;
-  expect(cards?.[0]).toMatchObject({ kind: "task", left: "todo", right: "done" });
-});
-
-test("a drop is refused on To decide and on the card's own column", () => {
-  expect(dropTarget("todo", "decide")).toBeNull();
-  expect(dropTarget("todo", "todo")).toBeNull();
-  expect(dropTarget("todo", "doing")).toBe("doing");
-  expect(dropTarget("done", "todo")).toBe("todo");
 });
 
 test("formatCounts leaves out zeros", () => {
@@ -149,10 +128,10 @@ test("the design card stands in the column its Tasks add up to", () => {
 test("the card counts finished Tasks and keeps each Task's own column", () => {
   const card = buildBoard(snapshot({ tasks: [design("0001", "done"), design("0002", "doing"), design("0003", "todo")] }))[2]?.cards[0];
   expect(card).toMatchObject({ kind: "design", done: 1, column: "doing" });
-  expect(card?.kind === "design" && card.tasks.map((t) => [t.id, t.column, t.left, t.right])).toEqual([
-    ["0001", "done", "doing", null],
-    ["0002", "doing", "todo", "done"],
-    ["0003", "todo", null, "doing"],
+  expect(card?.kind === "design" && card.tasks.map((t) => [t.id, t.column])).toEqual([
+    ["0001", "done"],
+    ["0002", "doing"],
+    ["0003", "todo"],
   ]);
 });
 
@@ -200,8 +179,6 @@ test("a blocked Task, alone or inside a design, gets one badge per blocker that 
   const inDesign = buildBoard(snapshot({ tasks: [design("0001", "todo"), { ...design("0002", "todo"), blockedBy: [blockedBy[0] as TaskView["blockedBy"][number]] }] }))[1]?.cards[0];
   expect(inDesign?.kind === "design" && inDesign.tasks.map((t) => t.blocks.map((b) => b.label))).toEqual([[], ["blocked 0003"]]);
   expect(blockBadge(blockedBy[0] as TaskView["blockedBy"][number]).target.kind).toBe("drift");
-  // Blocking disables nothing: the move arrows follow the column only.
-  expect(card?.kind === "task" && [card.left, card.right]).toEqual([null, "doing"]);
 });
 
 const announcement = (over: Partial<AnnouncementView> = {}): AnnouncementView => ({ id: "abc123", kind: "proposal", title: "Refunds", phase: "preparing", ...over });
