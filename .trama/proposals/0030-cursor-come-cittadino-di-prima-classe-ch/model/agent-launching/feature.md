@@ -1,0 +1,5 @@
+# Agent launching
+
+How Trama gets the developer's coding agent to work. Trama never calls a model: it sends a one-line instruction that names a Trama skill (design, scan, implement or import) to the agent the developer uses, either in a terminal or in the editor's chat. After an ordinary Proposal is approved, a scan of the Features it affects is started the same way.
+
+Cursor è un editor di prima classe, come gli altri agenti: con il launcher «auto», che è la scelta predefinita, i pulsanti di Trama mandano l'istruzione alla chat integrata di Cursor e la chat la invia da sola, mentre in ogni altro editor lavorano nel terminale. Chi preferisce il terminale può usare il Cursor CLI come qualunque altro comando dell'agente. Trama segue la chat di Cursor con gli hook di Cursor (vedi l'Actor cursor-chat), così avvisi, Task presi e annunci si comportano come con il terminale.
