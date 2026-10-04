@@ -1,7 +1,8 @@
 // DOM builders for Board cards. Every piece of data goes in through textContent, never innerHTML.
+import { runBlocker } from "../../../../src/core/design";
 import type { ViewContext } from "../types";
 import type { AnnouncedCard, Badge, BlockBadge, Card, DesignCard, DriftCard, ProposalCard, TaskCard } from "./logic";
-import { AGENT_WORKING, COLUMN_TITLES, designRunBlocker } from "./logic";
+import { AGENT_WORKING, COLUMN_TITLES } from "./logic";
 import { renderDriftCompare } from "../drift-compare";
 import { renderMarkdown } from "../markdown";
 import { viewOfRef } from "../requirements/logic";
@@ -303,7 +304,7 @@ function design(card: DesignCard, env: CardEnv): HTMLElement {
     aria: `Run the Tasks of ${card.heading} that are in To do`,
     action: "run-design",
     primary: true,
-    disabled: designRunBlocker(card.tasks) ?? false,
+    disabled: runBlocker(card.tasks, "design") ?? false,
     onClick: () => env.context.post({ type: "launch", action: { kind: "implement-design", proposal: card.id } }),
   });
   node.append(actions(run, toggle), list);

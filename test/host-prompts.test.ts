@@ -7,10 +7,10 @@ test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "scan", feature: "checkout" })).toBe("Use the trama-scan skill on the Feature `checkout`.");
   expect(buildPrompt({ kind: "implement", task: "0012" })).toBe("Use the trama-implement skill on Task 0012.");
   expect(buildPrompt({ kind: "implement-all" })).toBe(
-    'Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Stop at the first Drift you file.',
+    'Use the trama-implement skill on every Task in the "todo" column. Take each one from `trama task next`, one after the other, until it says there is none.',
   );
   expect(buildPrompt({ kind: "implement-design", proposal: "0007" })).toBe(
-    'Use the trama-implement skill on every Task of Proposal 0007 that is in the "todo" column, in order, one after the other. Stop at the first Drift you file.',
+    'Use the trama-implement skill on every Task of Proposal 0007 that is in the "todo" column. Take each one from `trama task next --proposal 0007`, one after the other, until it says there is none.',
   );
   expect(buildPrompt({ kind: "rework-drift", drift: "0003", proposal: "0002" })).toBe(
     "Use the trama-design skill, without asking questions. Proposal 0002, attached to Drift 0003, is stale: write a new Proposal that makes the same change on the current Model and Requirements, hand it over, and attach it to the Drift in place of the stale one.",

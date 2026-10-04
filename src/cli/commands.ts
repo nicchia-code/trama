@@ -47,6 +47,7 @@ import {
   proposalListView,
   proposalShowView,
   taskListView,
+  taskNextView,
   taskShowView,
 } from "./work";
 
@@ -249,6 +250,7 @@ export const COMMANDS: Command[] = [
       return text(`Created Task ${t.id} at ${t.path}${note ? `\n${note}` : ""}`, { id: t.id, path: t.path, ...(note ? { note } : {}) });
     } },
   { name: "task list", args: "", summary: "Tasks grouped by column", options: { column: { type: "string" } }, run: (ctx, _a, o) => taskListView(ctx.project(), str(o["column"])) },
+  { name: "task next", args: "", summary: "The next runnable Task (in To do, not blocked, lowest number), moving nothing; --proposal <id> considers only the Tasks of that design. When none is runnable it says so and lists the Tasks in To do with what blocks them", options: { proposal: { type: "string" } }, run: (ctx, _a, o) => taskNextView(ctx.project(), str(o["proposal"])) },
   { name: "task show", args: "<id>", summary: "A Task with the current Model text of its references", run: (ctx, a) => taskShowView(ctx.project(), getTask(ctx.project(), a[0] as string)) },
   { name: "task move", args: "<id> <column>", summary: "Move a Task to todo, doing or done", run(ctx, a) {
       const t = moveTask(ctx.project(), a[0] as string, a[1] as string, ctx.byAgent ? "agent" : "developer");

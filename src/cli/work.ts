@@ -5,7 +5,7 @@ import type { Project } from "../core/store";
 import { formatDiagnostic } from "../core/model";
 import { placeTasks } from "../core/design";
 import type { Blocker } from "../core/blocking";
-import { blockedTasks, COLUMNS, type Drift, driftOptions, driftSides, listDrifts, listTasks, type Task } from "../core/work";
+import { blockedTasks, COLUMNS, type Drift, driftOptions, driftSides, listDrifts, listTasks, nextTask, type Task } from "../core/work";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 
 /** One-line summary of a Proposal for lists and the board. */
@@ -169,13 +169,27 @@ export function taskShowView(p: Project, task: Task): Result {
   return { md, json: { ...taskSummary(task, blocked), body: task.body } };
 }
 
+/** A Task's line in the textual lists: its marks, and what blocks it. */
+const taskLine = (t: Task, blocked: Map<string, Blocker[]>) => `- ${t.id} ${t.title}${t.data.technical ? " (technical)" : ""}${t.data.proposal ? ` (Proposal ${t.data.proposal})` : ""}${t.data.agent ? WORKING : ""}${blockedMarks(blocked.get(t.id) ?? [])}`;
+
 export function taskListView(p: Project, column?: string): Result {
   const blocked = blockedTasks(p);
   const tasks = listTasks(p).filter((t) => !column || t.data.column === column);
   const md = COLUMNS.filter((c) => !column || c === column)
-    .map((c) => `## ${c}\n${bullets(tasks.filter((t) => t.data.column === c).map((t) => `- ${t.id} ${t.title}${t.data.technical ? " (technical)" : ""}${t.data.proposal ? ` (Proposal ${t.data.proposal})` : ""}${t.data.agent ? WORKING : ""}${blockedMarks(blocked.get(t.id) ?? [])}`))}`)
+    .map((c) => `## ${c}\n${bullets(tasks.filter((t) => t.data.column === c).map((t) => taskLine(t, blocked)))}`)
     .join("\n\n");
   return { md: `# Tasks\n\n${md}`, json: { tasks: tasks.map((t) => taskSummary(t, blocked)) } };
+}
+
+/** The next runnable Task, or the statement that there is none with the Tasks in To do that wait. Moves nothing. */
+export function taskNextView(p: Project, proposal?: string): Result {
+  const { next, waiting } = nextTask(p, proposal);
+  const blocked = new Map(waiting.map((w) => [w.task.id, w.blockers]));
+  const scope = proposal === undefined ? "" : ` in Proposal ${getProposal(p, proposal).id}`;
+  const waitingJson = waiting.map((w) => taskSummary(w.task, blocked));
+  if (next) return { md: `Next Task${scope}: ${next.id} ${next.title}`, json: { next: { id: next.id, title: next.title }, waiting: waitingJson } };
+  const md = [`No Task is runnable${scope}.`, ...(waiting.length > 0 ? ["", "Still in To do:", ...waiting.map((w) => taskLine(w.task, blocked))] : [])].join("\n");
+  return { md, json: { next: null, waiting: waitingJson } };
 }
 
 export function driftShowView(p: Project, drift: Drift): Result {

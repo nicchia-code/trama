@@ -4,7 +4,7 @@ import { formatDiagnostic } from "../../../../src/core/model";
 import type { Blocker } from "../../../../src/core/blocking";
 import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
 import type { Column } from "../../protocol";
-import { designColumn, placeTasks, takenBlocker } from "../../../../src/core/design";
+import { designColumn, placeTasks } from "../../../../src/core/design";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import { proposalTouches } from "../requirements/logic";
 
@@ -103,6 +103,8 @@ export interface TaskCard {
   agent: boolean;
   /** One badge per thing that blocks the Task; empty when it is free. */
   blocks: BlockBadge[];
+  /** What blocks the Task, as the snapshot carries it; Run this design reads it. */
+  blockedBy: Blocker[];
   /** The Task's text after its title, in Markdown; empty when it has none. */
   body: string;
   /** Path relative to `.trama/`. */
@@ -141,16 +143,6 @@ const MAX_TOOLTIP_ITEMS = 3;
 
 /** Why a Task the agent has taken cannot be moved, dragged or run; shown as the tooltip and the accessible description of the disabled controls. */
 export const AGENT_WORKING = "The agent is working on this Task. Take it back to move it.";
-
-/** Why Run all To do is unavailable, or null: a Task is taken by the agent, or nothing is in To do (design cards' Tasks count). */
-export function runAllBlocker(tasks: Pick<TaskView, "id" | "column" | "agent">[]): string | null {
-  return takenBlocker(tasks) ?? (tasks.some((t) => t.column === "todo") ? null : "No Task is in To do");
-}
-
-/** Why Run this design is unavailable, or null: one of its Tasks is taken by the agent, or none is in To do. */
-export function designRunBlocker(tasks: Pick<TaskCard, "id" | "column" | "agent">[]): string | null {
-  return takenBlocker(tasks) ?? (tasks.some((t) => t.column === "todo") ? null : "No Task of this design is in To do");
-}
 
 /** The Task column next to `column` in the given direction, or null at the ends. */
 export function neighbour(column: Column, direction: "left" | "right"): Column | null {
@@ -234,6 +226,7 @@ export function taskCard(t: TaskView): TaskCard {
     proposal: t.proposal,
     agent: t.agent,
     blocks: t.blockedBy.map(blockBadge),
+    blockedBy: t.blockedBy,
     body: t.body,
     file: t.file,
     column: t.column,

@@ -22,6 +22,26 @@ export function takenBlocker(tasks: { id: string; agent: boolean }[]): string | 
   return taken.length === 1 ? `An agent is working on Task ${taken[0]}` : `An agent is working on Tasks ${taken.join(", ")}`;
 }
 
+/** What a Task waits for, as far as a run's availability cares: an open Drift, or the Task that fixes its Drift. */
+export type Waits = { kind: "drift"; drift: string } | { kind: "fix"; task: string };
+
+/**
+ * Why a run over these Tasks, in creation order, is unavailable, or null. Run all To do gets every Task, Run this
+ * design the design's. Unavailable when the agent has taken one of them (this reason comes first), when none is in
+ * To do, or when every one in To do is blocked, naming the Drift or the fix Task of the first of them.
+ */
+export function runBlocker(tasks: { id: string; column: TaskColumn; agent: boolean; blockedBy: readonly Waits[] }[], scope: "all" | "design"): string | null {
+  const taken = takenBlocker(tasks);
+  if (taken !== null) return taken;
+  const todo = tasks.filter((t) => t.column === "todo");
+  const first = todo[0];
+  if (first === undefined) return scope === "all" ? "No Task is in To do" : "No Task of this design is in To do";
+  if (!todo.every((t) => t.blockedBy.length > 0)) return null;
+  const why = first.blockedBy[0];
+  const reason = why?.kind === "fix" ? `waiting for Task ${why.task}, which fixes its Drift` : `blocked by Drift ${why?.drift}`;
+  return `All the Tasks ${scope === "all" ? "in To do" : "of this design in To do"} are blocked: Task ${first.id} is ${reason}`;
+}
+
 /** What stands in a column of the Board: a Task on its own, or a design with its Tasks in creation order. */
 export type Placed<T> =
   | { design: false; task: T; column: TaskColumn }

@@ -4,8 +4,8 @@ import { TramaError, UsageError } from "../../../src/core/errors";
 import { approvalBlock, approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
-import { takenBlocker } from "../../../src/core/design";
-import { getDrift, getTask, listTasks, moveTask, resolveDrift, staleAttachedProposal, takeBackTask } from "../../../src/core/work";
+import { runBlocker } from "../../../src/core/design";
+import { blockedTasks, getDrift, getTask, listTasks, moveTask, resolveDrift, staleAttachedProposal, takeBackTask } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn } from "./announcements";
 import { agentReady, configuredSkillsDir, launchAgent, settings } from "./agent";
@@ -23,7 +23,11 @@ const DEBOUNCE_MS = 150;
 export const describeError = (err: unknown): string =>
   err instanceof TramaError || err instanceof UsageError ? err.message : `Unexpected error: ${err instanceof Error ? err.message : String(err)}`;
 
-const taken = (t: { id: string; data: { agent: boolean } }) => ({ id: t.id, agent: t.data.agent });
+/** The Tasks as a run sees them, in creation order: where they stand, whether the agent has them, and what blocks them. */
+function runTasks(project: Project) {
+  const blocked = blockedTasks(project);
+  return listTasks(project).map((t) => ({ id: t.id, proposal: t.data.proposal, column: t.data.column, agent: t.data.agent, blockedBy: blocked.get(t.id) ?? [] }));
+}
 
 const notBlank = (message: string) => (value: string) => (value.trim() === "" ? message : undefined);
 
@@ -285,13 +289,13 @@ export class Controller implements vscode.Disposable {
         return;
       case "implement-design": {
         const proposal = getProposal(project, action.proposal).id;
-        const blocker = takenBlocker(listTasks(project).filter((t) => t.data.proposal === proposal).map(taken));
+        const blocker = runBlocker(runTasks(project).filter((t) => t.proposal === proposal), "design");
         if (blocker !== null) throw new TramaError(`Run this design is unavailable: ${blocker}.`);
         await launchAgent(project.root, buildPrompt({ kind: "implement-design", proposal }));
         return;
       }
       case "implement-all": {
-        const blocker = takenBlocker(listTasks(project).map(taken));
+        const blocker = runBlocker(runTasks(project), "all");
         if (blocker !== null) throw new TramaError(`Run all To do is unavailable: ${blocker}.`);
         await launchAgent(project.root, buildPrompt(action));
         return;

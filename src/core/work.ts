@@ -170,6 +170,27 @@ export function moveTask(p: Project, id: string, column: string, by: Mover): Tas
   return task;
 }
 
+/** What a run can take: the next runnable Task, and the Tasks in To do that wait, each with what blocks it. */
+export interface RunQueue {
+  next: Task | null;
+  /** Every Task in To do within the scope that is blocked, in order. */
+  waiting: { task: Task; blockers: Blocker[] }[];
+}
+
+/**
+ * The next runnable Task: the lowest-numbered Task in To do that is not blocked, worked out from the Tasks and
+ * Drifts as they are now. With a Proposal it only considers the Tasks linked to it; the Proposal must exist.
+ */
+export function nextTask(p: Project, proposal?: string): RunQueue {
+  const scope = proposal === undefined ? null : getProposal(p, proposal).id;
+  const blocked = blockedTasks(p);
+  const todo = listTasks(p).filter((t) => t.data.column === "todo" && (scope === null || t.data.proposal === scope));
+  return {
+    next: todo.find((t) => !blocked.has(t.id)) ?? null,
+    waiting: todo.flatMap((task) => (blocked.has(task.id) ? [{ task, blockers: blocked.get(task.id) as Blocker[] }] : [])),
+  };
+}
+
 /** The developer's decision to get a Task back from the agent: the mark is cleared and the Task stays In progress. */
 export function takeBackTask(p: Project, id: string): Task {
   const task = getTask(p, id);

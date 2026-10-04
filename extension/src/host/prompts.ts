@@ -19,9 +19,9 @@ export function buildPrompt(action: ResolvedAction): string {
     case "implement":
       return `Use the trama-implement skill on Task ${action.task}.`;
     case "implement-all":
-      return 'Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Stop at the first Drift you file.';
+      return 'Use the trama-implement skill on every Task in the "todo" column. Take each one from `trama task next`, one after the other, until it says there is none.';
     case "implement-design":
-      return `Use the trama-implement skill on every Task of Proposal ${action.proposal} that is in the "todo" column, in order, one after the other. Stop at the first Drift you file.`;
+      return `Use the trama-implement skill on every Task of Proposal ${action.proposal} that is in the "todo" column. Take each one from \`trama task next --proposal ${action.proposal}\`, one after the other, until it says there is none.`;
     case "import":
       return "Use the trama-import skill on this repository.";
   }

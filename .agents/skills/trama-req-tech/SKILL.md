@@ -47,7 +47,9 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 
 ## task
 
-- The command line that moves a Task to In progress as the agent, and `trama task show`, report the blocking Drifts or fix Task by ID and title. `trama drift new` accepts the origin Task (`--task <id>`). The skill `trama-implement` files its Drift with it, leaves the Task In progress and stops: it takes no further Task in the same run, blocked or not. When a move to In progress is refused because the Task is blocked, the skill stops too, names the Task and the Drift (or fix Task) the refusal names, and takes no further Task. Its final report says what it implemented and which Drift stopped the run. The skill `trama-scan` files Drifts without an origin.
+- The command line that moves a Task to In progress as the agent, and `trama task show`, report the blocking Drifts or fix Task by ID and title. `trama drift new` accepts the origin Task (`--task <id>`). The skill `trama-scan` files Drifts without an origin.
+- `trama task next` prints the next runnable Task, with its ID and title, and moves nothing. With `--proposal <id>` it considers only the Tasks linked to that Proposal, and is refused when the Proposal does not exist. When no Task is runnable it says so on its first line and lists each Task still in To do within that scope, with the Drift or the fix Task that blocks it, marked as in `trama task list`. Both outcomes end successfully.
+- The skill `trama-implement`, asked for several Tasks, takes each one from `trama task next` (with `--proposal <id>` when asked for a design), implements it, and asks again until the command says there is none. It files its Drift with the origin Task, leaves that Task In progress and asks `trama task next` again: a Drift does not end the run. Asked for one named Task, it stops at once when the move to In progress is refused because the Task is blocked, names the Task and the Drift (or fix Task) the refusal names, and takes no other Task. Its final report says what it implemented, which Drifts it filed, and which Tasks in To do were left unrun, each with the Drift or fix Task that blocks it.
 
 ## announcement
 

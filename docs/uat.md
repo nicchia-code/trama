@@ -386,7 +386,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 4 | In that row click → again | Badge `1/3 done`, the row's dot is `Done`; the card stays in In progress (a mix of To do and Done) | ☐ |
 | 5 | Edit any file under `$D/tasks/` from outside (see F1) | The card stays open and in place after the refresh | ☐ |
 | 6 | Try to drag the card onto another column | It cannot be dragged; nothing moves | ☐ |
-| 7 | **Run this design** | The launch prints `Use the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column, in order, one after the other. Stop at the first Drift you file.` | ☐ |
+| 7 | **Run this design** | The launch prints ``Use the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column. Take each one from `trama task next --proposal 0001`, one after the other, until it says there is none.`` | ☐ |
 | 8 | Move the other two Tasks to Done (→ twice each) | The card moves to Done, badge `3/3 done`, **Run this design** is disabled with the tooltip `No Task of this design is in To do` | ☐ |
 | 9 | Close the panel and open it again | The card is closed again | ☐ |
 | 10 | `trama --root $D board` and `trama --root $D task list` | `board` lists `Proposal 0001 "Returns after shipping" (3/3 done)` once, in Done, with the three Tasks under it and their columns; `task list` lists the three Tasks flat, each with `(Proposal 0001)` | ☐ |
@@ -406,6 +406,10 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 8 | Click **Keep this** under **WHAT SHOULD HAPPEN** on Drift 0006 | Task `0001` goes back to To do and its badges become `waiting 0010` and `blocked 0007`; clicking `waiting 0010` scrolls to the fix Task's card and focuses it | ☐ |
 | 9 | Move the fix Task `0010` to Done and click **Keep this** under **WHAT HAPPENS** on Drift 0007 | Task `0001` has no badge any more | ☐ |
 | 10 | `j --json drift show 7`, then `j drift new "x" --ref order --task 99 --happens a --should b --option A --option-text a --option B --option-text b` | The first has `"origin": null` (filed without `--task`) and the two texts; the second fails with `No Task with ID "99"` and creates nothing | ☐ |
+| 11 | ↻, seed the two Drifts again, then `j task next`, then `j task list --column todo` | `Next Task: 0002 Payment declined email`: the lowest Task in To do that is not blocked, skipping `0001`. The command moved nothing: `task list` still shows `0001`, `0002`, `0006`, `0008` and `0009` in `todo` | ☐ |
+| 12 | `j task next --proposal 3`, then `j task next --proposal 99` | The first prints `No Task is runnable in Proposal 0003.`, a blank line, `Still in To do:` and `- 0006 Return request (Proposal 0003) (blocked by Drift 0003)`, and exits with `0`. The second fails with `No Proposal with ID "99"` and exits with `1` | ☐ |
+| 13 | `j task move 2 doing` as the developer (no `TRAMA_AGENT`), then `j task next` | The second prints `No Task is runnable.`, a blank line, `Still in To do:` and one line for each of `0001`, `0006`, `0008` and `0009`, each with its marks, for example `- 0008 Order confirmation email (waiting for Task 0009) (blocked by Drift 0005)`. It exits with `0` | ☐ |
+| 14 | `j --json task next` | `"next": null` and a `waiting` list with the same four Tasks, each with its `blockedBy` | ☐ |
 
 ### E12. Ghosts of announced cards
 Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": "bash -c \\"sleep 600\\" {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, and reload the window so the extension reads the settings. `j` below is the verification shell's.
@@ -576,8 +580,8 @@ Each launch sends one command to the terminal named **Trama agent** (cwd = the d
 | H8 | Click **Design…** and press Esc | Nothing is printed | ☐ |
 | H9 | Diagram toolbar **Design…** | Same input box and result as H5–H7 | ☐ |
 | H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
-| H11 | Board: **Run all To do** | `Use the trama-implement skill on every Task in the "todo" column, in order, one after the other. Stop at the first Drift you file.` | ☐ |
-| H12 | Move Task 0001 and 0002 to In progress (E5), look at **Run all To do**, then ↻ | The button is **disabled** while To do is empty | ☐ |
+| H11 | Board: **Run all To do** | ``Use the trama-implement skill on every Task in the "todo" column. Take each one from `trama task next`, one after the other, until it says there is none.`` | ☐ |
+| H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take back Tasks 0005 and 0007 with their **Take back** buttons, then look at **Run all To do** and at the **Run this design** button of `Proposal 0003` | **Run all To do** is **disabled** with the tooltip and accessible description `All the Tasks in To do are blocked: Task 0001 is blocked by Drift 0006`; **Run this design** is disabled with `All the Tasks of this design in To do are blocked: Task 0006 is blocked by Drift 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. Moving Task 0002 back to To do (←) enables **Run all To do** | ☐ |
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
 | H15 | Palette: **Trama: Design with Agent…** | Same input box as H5 | ☐ |

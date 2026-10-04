@@ -1,7 +1,8 @@
+import { runBlocker } from "../../../../src/core/design";
 import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
 import type { MountView } from "../types";
 import css from "./board.css" with { type: "text" };
-import { announcedGhosts, buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, dropTarget, interleave, runAllBlocker, type TaskCard, withdrawnNotice } from "./logic";
+import { announcedGhosts, buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, dropTarget, interleave, type TaskCard, withdrawnNotice } from "./logic";
 import { type CardEnv, renderAnnounced, renderCard, setDesignPending, setPending } from "./render";
 
 /** The host answers a move with a snapshot, or with an error that releases the dimmed cards at once; if neither comes, they are released after this long and the error is shown. */
@@ -178,7 +179,7 @@ export const mountBoard: MountView = (root, context) => {
       reconcile(part.body, withAnnounced.length > 0 ? withAnnounced : [part.hint]);
     }
     // Run all To do covers the Tasks inside design cards too, which may stand in another column.
-    const blocker = runAllBlocker(snapshot.tasks);
+    const blocker = runBlocker(snapshot.tasks, "all");
     runAll.disabled = blocker !== null;
     runAll.title = blocker ?? "";
     if (blocker === null) runAll.removeAttribute("aria-description");

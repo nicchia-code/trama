@@ -306,6 +306,36 @@ describe("Tasks and Drifts", () => {
     expect(driftView).not.toContain("locked");
   });
 
+  test("task next names the lowest runnable Task, recomputed each time, within a design when asked, and moves nothing", () => {
+    const prop = newProposal(p, "Design");
+    const blockedFirst = newTask(p, { title: "Return flow", refs: ["order"], technical: false, proposal: prop.id }).id;
+    const outside = newTask(p, { title: "Outside flow", refs: ["payment"], technical: false }).id;
+    const inDesign = newTask(p, { title: "Cart flow", refs: ["cart"], technical: false, proposal: prop.id }).id;
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Refunds differ", refs: ["order"], origin: blockedFirst, happens: "The code does it one way.", should: "The Model says another." });
+    const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
+
+    expect(cli("task", "next").out).toBe(`Next Task: ${outside} Outside flow`);
+    expect(cli("task", "next", "--proposal", prop.id).out).toBe(`Next Task in Proposal ${prop.id}: ${inDesign} Cart flow`);
+    expect(JSON.parse(cli("--json", "task", "next").out).next).toEqual({ id: outside, title: "Outside flow" });
+    expect(listTasks(p).every((t) => t.data.column === "todo" && !t.data.agent)).toBe(true);
+    expect(() => cli("task", "next", "--proposal", "9999")).toThrow(/No Proposal/);
+
+    moveTask(p, outside, "done", "developer");
+    moveTask(p, inDesign, "done", "developer");
+    const none = cli("task", "next", "--proposal", prop.id);
+    expect(none.exit).toBe(0);
+    expect(none.out.split("\n")[0]).toBe(`No Task is runnable in Proposal ${prop.id}.`);
+    expect(none.out).toContain(`- ${blockedFirst} Return flow (Proposal ${prop.id}) (blocked by Drift ${drift.id})`);
+    expect(none.out).not.toContain("Outside flow");
+
+    resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
+    const fix = getDrift(p, drift.id).data.task as string;
+    expect(cli("task", "next").out).toBe(`Next Task: ${fix} ${getTask(p, fix).title}`);
+    expect(cli("task", "next", "--proposal", prop.id).out).toContain(`(waiting for Task ${fix})`);
+    moveTask(p, fix, "done", "developer");
+    expect(cli("task", "next", "--proposal", prop.id).out).toBe(`Next Task in Proposal ${prop.id}: ${blockedFirst} Return flow`);
+  });
+
   test("the command line takes the Task only inside the terminal Trama started", async () => {
     const run2 = (env: Record<string, string>, ...args: string[]) => run(["--root", dir, "task", "move", ...args], process.cwd(), env);
     const [a, b, c] = [1, 2, 3].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string];

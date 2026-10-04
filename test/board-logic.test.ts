@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, designRunBlocker, dropTarget, formatCounts, interleave, neighbour, proposalBadges, runAllBlocker, summarizeChanges, summarizeFile, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, dropTarget, formatCounts, interleave, neighbour, proposalBadges, summarizeChanges, summarizeFile, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { runBlocker } from "../src/core/design";
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "0007",
@@ -162,18 +163,28 @@ test("two designs give two cards; a design whose Proposal is gone is named after
   expect(orphan).toMatchObject({ kind: "design", title: "Proposal 0009" });
 });
 
-test("Run all To do and Run this design are unavailable while a Task is taken, naming it, and otherwise need a Task in To do", () => {
-  const t = (id: string, column: TaskView["column"], agent = false) => ({ id, column, agent });
-  expect(runAllBlocker([t("0001", "todo"), t("0002", "doing")])).toBeNull();
-  expect(runAllBlocker([t("0001", "done")])).toMatch(/No Task is in To do/);
+test("Run all To do and Run this design are unavailable while a Task is taken, when none is in To do, and when every one in To do is blocked", () => {
+  const drift: TaskView["blockedBy"] = [{ kind: "drift", drift: "0003", title: "Refunds differ" }];
+  const fix: TaskView["blockedBy"] = [{ kind: "fix", task: "0009", title: "Fix refunds", drift: "0004" }];
+  const t = (id: string, column: TaskView["column"], agent = false, blockedBy: TaskView["blockedBy"] = []) => ({ id, column, agent, blockedBy });
+  expect(runBlocker([t("0001", "todo"), t("0002", "doing")], "all")).toBeNull();
+  expect(runBlocker([t("0001", "done")], "all")).toMatch(/No Task is in To do/);
   // A taken Task blocks even when To do has Tasks, also one that belongs to a design card.
-  expect(runAllBlocker([t("0001", "todo"), t("0002", "doing", true)])).toBe("An agent is working on Task 0002");
-  expect(runAllBlocker([t("0001", "doing", true), t("0002", "doing", true)])).toBe("An agent is working on Tasks 0001, 0002");
+  expect(runBlocker([t("0001", "todo"), t("0002", "doing", true)], "all")).toBe("An agent is working on Task 0002");
+  expect(runBlocker([t("0001", "doing", true), t("0002", "doing", true)], "all")).toBe("An agent is working on Tasks 0001, 0002");
 
-  const card = (tasks: ReturnType<typeof t>[]) => designRunBlocker(tasks);
-  expect(card([t("0001", "todo"), t("0002", "doing")])).toBeNull();
-  expect(card([t("0001", "todo"), t("0002", "doing", true)])).toBe("An agent is working on Task 0002");
-  expect(card([t("0001", "done"), t("0002", "doing")])).toMatch(/No Task of this design is in To do/);
+  expect(runBlocker([t("0001", "todo"), t("0002", "doing")], "design")).toBeNull();
+  expect(runBlocker([t("0001", "todo"), t("0002", "doing", true)], "design")).toBe("An agent is working on Task 0002");
+  expect(runBlocker([t("0001", "done"), t("0002", "doing")], "design")).toMatch(/No Task of this design is in To do/);
+
+  // Blocked Tasks outside To do do not matter; one free Task in To do keeps the button available.
+  expect(runBlocker([t("0001", "todo", false, drift), t("0002", "todo")], "all")).toBeNull();
+  expect(runBlocker([t("0001", "doing", false, drift), t("0002", "todo")], "design")).toBeNull();
+  // Every Task in To do blocked: the tooltip names the Drift, or the fix Task, of the first of them.
+  expect(runBlocker([t("0001", "doing"), t("0002", "todo", false, drift), t("0003", "todo", false, fix)], "all")).toBe("All the Tasks in To do are blocked: Task 0002 is blocked by Drift 0003");
+  expect(runBlocker([t("0001", "todo", false, fix), t("0002", "todo", false, drift)], "design")).toBe("All the Tasks of this design in To do are blocked: Task 0001 is waiting for Task 0009, which fixes its Drift");
+  // When both reasons hold, the agent working comes first.
+  expect(runBlocker([t("0001", "doing", true), t("0002", "todo", false, drift)], "all")).toBe("An agent is working on Task 0001");
 });
 
 test("a blocked Task, alone or inside a design, gets one badge per blocker that says why and where it leads", () => {
