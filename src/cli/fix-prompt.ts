@@ -3,6 +3,7 @@ import type { Readable, Writable } from "node:stream";
 import { parseArgs } from "node:util";
 import { TramaError } from "../core/errors";
 import { type DriftOption, driftOptions, getDrift } from "../core/work";
+import { cardName } from "../core/short-numbers";
 import { makeContext, type Values } from "./commands";
 import { pickCommand, splitGlobals } from "./main";
 
@@ -34,10 +35,11 @@ export async function completeFixChoice(argv: string[], cwd: string, io: PromptI
   let options: DriftOption[];
   let heading: string;
   try {
-    const drift = getDrift(makeContext(cwd, root).project(), positionals[0] as string, true);
+    const project = makeContext(cwd, root).project();
+    const drift = getDrift(project, positionals[0] as string, true);
     if (drift.data.status !== "open") return argv;
     options = driftOptions(drift);
-    heading = `Drift ${drift.id}: ${drift.title}`;
+    heading = `Drift ${cardName(project, "drift", drift.id)}: ${drift.title}`;
   } catch {
     return argv;
   }

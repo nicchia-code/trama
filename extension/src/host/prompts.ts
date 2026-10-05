@@ -44,6 +44,29 @@ export function buildScanPrompt(features: string[], proposal?: string): string {
 }
 
 /**
+ * The name of the agent terminal that receives `action`'s instruction: the short number of the Task or Proposal to
+ * implement, as `short` gives it in this working copy, or a fixed English word. A free terminal is reused only for the same name.
+ */
+export function terminalName(action: ResolvedAction, short: (kind: "task" | "proposal", id: string) => string): string {
+  switch (action.kind) {
+    case "implement":
+      return short("task", action.task);
+    case "implement-design":
+      return short("proposal", action.proposal);
+    case "implement-all":
+      return "All tasks";
+    case "import":
+      return "Import";
+    case "scan":
+      return "Scan";
+    case "design":
+    case "written-design":
+    case "rework-drift":
+      return "Design";
+  }
+}
+
+/**
  * Ends an instruction with the request to write in `language` (`trama.language`), on the same line. Empty or blank text
  * asks nothing, so the instruction is exactly as built. The language is used trimmed, as typed.
  */

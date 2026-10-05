@@ -4,6 +4,8 @@ A change to the Model and its Requirements suggested by the agent, with the full
 
 Una Proposal nuova nasce con un'identità propria, non presa da un contatore condiviso con le altre, e ricorda l'istante in cui è stata creata. Quell'istante ne fissa il posto: la più vecchia prima. Due Proposal create nello stesso istante si ordinano per identità. Una Proposal già numerata, che non ricorda l'istante, resta leggibile e sta prima di quelle che lo ricordano; fra le numerate l'ordine è il numero.
 
+Dalla nascita, anche da Draft, una Proposal ha un numero breve temporaneo, `P3`, che il developer usa per leggere la Board e per citarla, al posto dell'identità permanente. La Proposal lo tiene finché non è approvata, rifiutata o scartata (anche mentre è in un worktree) e allora lo libera; da quel momento si mostra con la sua identità permanente.
+
 A Proposal is created by the agent as a Draft, either as an ordinary change or as an import that describes existing code. It may be written on top of other Proposals that are drafts, open or approved (never rejected or discarded ones); it is then drawn, checked and approved on top of them. Only when the agent has finished writing it does the agent hand it over, and only then does it await the developer.
 
 Una Proposal può nascere da una richiesta di design scritta (vedi la Design request): l'agente la lega a quella richiesta quando la crea. Solo la prima Proposal di un design è legata alla richiesta; quelle che la seguono la richiedono e non sono legate a nulla.

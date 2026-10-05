@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildPrompt, buildScanPrompt, withLanguage } from "../extension/src/host/prompts";
+import { buildPrompt, buildScanPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "design", prompt: "  Add refunds to checkout \n" })).toBe("Use the trama-design skill. Add refunds to checkout");
@@ -30,6 +30,18 @@ test("a scan after an approval names the approved Proposal, and a scan by hand n
     "Use the trama-scan skill on the Feature `checkout`. The scan follows the approval of Proposal 0007: link every Task you file to it with --proposal 0007.",
   );
   expect(buildPrompt({ kind: "scan", feature: "checkout" })).not.toContain("Proposal");
+});
+
+test("the agent terminal is named after the work: the card's short number, or a fixed word", () => {
+  const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
+  expect(terminalName({ kind: "implement", task: "abc" }, short)).toBe("T3");
+  expect(terminalName({ kind: "implement-design", proposal: "ab" }, short)).toBe("P2");
+  expect(terminalName({ kind: "design", prompt: "x" }, short)).toBe("Design");
+  expect(terminalName({ kind: "written-design", request: "r" }, short)).toBe("Design");
+  expect(terminalName({ kind: "rework-drift", drift: "d", proposal: "p" }, short)).toBe("Design");
+  expect(terminalName({ kind: "scan", feature: "checkout" }, short)).toBe("Scan");
+  expect(terminalName({ kind: "implement-all" }, short)).toBe("All tasks");
+  expect(terminalName({ kind: "import" }, short)).toBe("Import");
 });
 
 test("a chosen language ends the instruction on the same line, trimmed; blank asks nothing", () => {

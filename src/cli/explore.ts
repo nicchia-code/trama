@@ -1,7 +1,8 @@
 import { TramaError } from "../core/errors";
-import { analyze, findPaths, lineage } from "../core/graph";
+import { analyze, findPaths, lineage, type Warning } from "../core/graph";
 import { flattenStates, formatDiagnostic } from "../core/model";
 import { receivers, resolveRef } from "../core/refs";
+import { warningsText } from "../core/proposals";
 import type { ProjectModel } from "../core/requirements";
 import type { Diagnostic, Machine, Model, State } from "../core/types";
 import { bullets, dash, eventKey, firstLine, marker, modelNote, prose, type Result } from "./result";
@@ -210,8 +211,9 @@ export function pathsView(model: Model, machineId: string, from: string, to: str
   return { md, json: { machine: machineId, from, to, limited, paths } };
 }
 
-export function analyzeView(model: Model, machineId?: string): Result {
-  const warnings = analyze(model, machineId);
+/** `extra` are the warnings about the project beyond the Model, such as fragments larger than 12 KB; they join a whole-Model analysis only. */
+export function analyzeView(model: Model, machineId?: string, extra: Warning[] = []): Result {
+  const warnings = [...analyze(model, machineId), ...(machineId === undefined ? extra : [])];
   const md = [
     `# Analysis${machineId ? ` of \`${machineId}\`` : ""}`,
     "",
@@ -255,8 +257,9 @@ function firstMatchingLine(text: string, q: string): string {
   return text.split("\n").find((l) => l.toLowerCase().includes(q))?.trim() ?? text.trim();
 }
 
-export function validateView(diagnostics: Diagnostic[], subject: string): Result {
+/** Errors decide validity and the exit code; warnings are written after them, apart, and never change either. */
+export function validateView(diagnostics: Diagnostic[], subject: string, warnings: Diagnostic[] = []): Result {
   const ok = diagnostics.length === 0;
   const md = ok ? `${subject} are valid.` : [`${subject} have ${diagnostics.length} error(s):`, "", ...diagnostics.map((d) => `- ${formatDiagnostic(d)}`)].join("\n");
-  return { md, json: { valid: ok, errors: diagnostics }, exit: ok ? 0 : 1 };
+  return { md: `${md}${warningsText(warnings)}`, json: { valid: ok, errors: diagnostics, warnings }, exit: ok ? 0 : 1 };
 }

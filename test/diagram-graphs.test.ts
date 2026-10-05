@@ -6,6 +6,7 @@ import { buildGraph } from "../extension/src/webview/diagram/levels";
 import { machineGraph, visibleState } from "../extension/src/webview/diagram/machine";
 import { featureGraph, flows, shortNames, systemGraph } from "../extension/src/webview/diagram/overview";
 import { buildScene } from "../extension/src/webview/diagram/scene";
+import type { AreaView, FragmentView, SectionView } from "../src/core/snapshot";
 import type { FileMap } from "../src/core/types";
 import { shopSnapshot, shopWithProposals, shopWithRemovals, snapshotOf } from "./diagram-fixture";
 
@@ -244,8 +245,17 @@ test("the panel carries the Proposal for ghosts and the Drift for Drift ghosts",
 });
 
 test("the Requirement sections of the Transitions an edge draws are listed in order of the Transitions, as Markdown blocks", () => {
-  const section = (ref: string | null, text: string) => ({ ref, text, change: "same" as const, before: null });
-  const area = (id: string, title: string, sections: ReturnType<typeof section>[]) => ({ id, file: `requirements/${id}.md`, title, description: "", intro: "", change: "same" as const, sections });
+  const section = (ref: string | null, text: string): SectionView => ({ ref, text, change: "same", before: null, movedFrom: null });
+  const fragment = (id: string, sections: SectionView[]): FragmentView => ({ id, file: `requirements/x/${id}.md`, title: id, description: "", change: "same", sections });
+  const area = (id: string, title: string, sections: SectionView[]): AreaView => ({
+    id,
+    file: `requirements/${id}/area.md`,
+    title,
+    description: "",
+    intro: "",
+    change: "same",
+    fragments: [fragment("a", sections.slice(0, 1)), fragment("b", sections.slice(1))],
+  });
   const areas = [
     area("ui", "Interface", [section(null, "General."), section("order/Paid/user.CANCEL", "- Ask first.\n  - Twice."), section("order/Paid", "A badge.")]),
     area("rules", "Business rules", [section("order/Paid/stripe.REFUNDED", "Refund in full."), section("ORDER/PAID/USER.CANCEL", "Only before pickup."), section("order/Paid/user.PAY", "")]),

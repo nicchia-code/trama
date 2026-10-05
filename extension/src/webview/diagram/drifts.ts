@@ -1,3 +1,4 @@
+import { cardLabel } from "../../../../src/core/card-names";
 import { type Element, anchorIn, resolveElement } from "./elements";
 import type { GEdge, GNode, GraphSpec } from "./graph";
 import { node } from "./graph";
@@ -44,7 +45,7 @@ export function withDrifts(graph: GraphSpec, scene: Scene): GraphSpec {
       }
       if (placed) continue;
       placed = true;
-      ghosts.push(node({ id: `d:${drift.id}`, kind: "drift", label: `Drift ${drift.id}`, drift: drift.id }));
+      ghosts.push(node({ id: `d:${drift.id}`, kind: "drift", label: `Drift ${cardLabel(scene.numbers, "drift", drift.id)}`, drift: drift.id }));
       if (anchor !== "self") {
         edges.push({ id: `de:${drift.id}`, kind: "drift", source: `d:${drift.id}`, target: anchor.node, label: "", change: "same", refs: [], items: [] });
       }

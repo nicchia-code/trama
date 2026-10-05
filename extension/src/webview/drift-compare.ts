@@ -1,3 +1,4 @@
+import { identityNamer, type Namer } from "../../../src/core/card-names";
 import type { DriftView } from "../../../src/core/snapshot";
 import { renderMarkdown } from "./markdown";
 
@@ -79,7 +80,7 @@ export interface DriftComparison {
 const LEGACY_SHOULD = "Not stated: this Drift was written before the two sides existed.";
 
 /** The comparison shown for an open Drift in the Diagram and on the Board. */
-export function driftComparison(d: DriftView, selection: FixSelection = fixSelection(d)): DriftComparison {
+export function driftComparison(d: DriftView, selection: FixSelection = fixSelection(d), name: Namer = identityNamer): DriftComparison {
   const options = d.options.map((o, i) => ({ number: i + 1, title: o.title, text: o.text, recommended: i === 0, selected: i + 1 === selection.option }));
   const selected = options.find((o) => o.selected);
   const note = selection.note.trim() === "" ? undefined : selection.note;
@@ -94,7 +95,7 @@ export function driftComparison(d: DriftView, selection: FixSelection = fixSelec
   let keepHappens: DriftChoice;
   if (d.proposal === null) keepHappens = { how: "dismiss", consequence: "Closes the Drift; nothing changes", aria, blocked: false, carries: {} };
   else if (d.proposalBlock !== null) keepHappens = { how: "accept-proposal", consequence: d.proposalBlock.reason, aria, blocked: true, carries: {} };
-  else keepHappens = { how: "accept-proposal", consequence: `Approves Proposal ${d.proposal} and changes the Model to match`, aria, blocked: false, carries: {} };
+  else keepHappens = { how: "accept-proposal", consequence: `Approves Proposal ${name("proposal", d.proposal)} and changes the Model to match`, aria, blocked: false, carries: {} };
   if (d.merge === true) {
     keepShould.consequence = "A Task is created to reconcile the conflicts";
     keepHappens = { how: "dismiss", consequence: "Every Proposal in the round returns to To decide and the worktrees are deleted", aria, blocked: false, carries: {} };
@@ -122,6 +123,8 @@ export interface DriftHandlers {
   openLink(url: string): void;
   /** The "Where in the code" block: whether it starts open, and told when the developer opens or closes it. Closed, and forgotten, when absent. */
   where?: { open: boolean; toggled(open: boolean): void };
+  /** How a card is written in the lines under "Keep this": by its short number while live. Identities when absent. */
+  name?: Namer;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ""): HTMLElementTagNameMap[K] {
@@ -156,7 +159,7 @@ let groups = 0;
 
 /** The "Fix options" radio group (when the Drift has options) and the note field: what the developer selects and types is remembered for the session. */
 function fixControls(d: DriftView, handlers: DriftHandlers, sync: () => void): HTMLElement {
-  const c = driftComparison(d);
+  const c = driftComparison(d, fixSelection(d), handlers.name);
   const box = el("div", "drift-fix");
   if (c.options.length > 0) {
     const group = el("div", "drift-options");
@@ -217,12 +220,12 @@ function column(heading: string, source: string | null, text: string, keep: () =
 
 /** The two sides of a Drift side by side (stacked when narrow), each with its own "Keep this", and under them the collapsible "Where in the code" when the Drift has it. */
 export function renderDriftCompare(d: DriftView, handlers: DriftHandlers): HTMLElement {
-  const c = driftComparison(d);
+  const c = driftComparison(d, fixSelection(d), handlers.name);
   const block = el("div", "drift-compare-block");
   const grid = el("div", "drift-compare");
   grid.append(
-    column("What happens", null, c.happens, () => driftComparison(d).keepHappens, handlers, false),
-    column("What should happen", c.shouldSource, c.should, () => driftComparison(d).keepShould, handlers, true, (sync) => fixControls(d, handlers, sync)),
+    column("What happens", null, c.happens, () => driftComparison(d, fixSelection(d), handlers.name).keepHappens, handlers, false),
+    column("What should happen", c.shouldSource, c.should, () => driftComparison(d, fixSelection(d), handlers.name).keepShould, handlers, true, (sync) => fixControls(d, handlers, sync)),
   );
   block.append(grid);
   if (c.where !== null) {

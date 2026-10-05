@@ -74,7 +74,7 @@ export function reachableStates(machine: Machine): Set<string> {
 
 export interface Warning {
   machine: string | null;
-  kind: "unreachable-state" | "dead-end" | "unreceived-event";
+  kind: "unreachable-state" | "dead-end" | "unreceived-event" | "large-fragment";
   subject: string;
   message: string;
 }

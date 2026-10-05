@@ -38,3 +38,10 @@
 .rq-badge.added { color: var(--rq-added); }
 .rq-badge.changed, .rq-badge.modified { color: var(--rq-changed); }
 .rq-badge.removed { color: var(--rq-removed); }
+.rq-badge.moved { color: var(--rq-changed); }
+.rq-fragment { border-top: 1px solid var(--rq-border); margin-top: 10px; padding-top: 8px; }
+.rq-fragment.added { border-top-color: var(--rq-added); }
+.rq-fragment.removed { border-top-color: var(--rq-removed); opacity: .75; }
+.rq-fragment-head { display: flex; align-items: baseline; gap: 8px; }
+.rq-fragment-title { margin: 0; font-size: 1em; }
+.rq-fragment-file { color: var(--rq-muted); font-size: .9em; }

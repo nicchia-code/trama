@@ -19,7 +19,7 @@ Almeno una Proposal ha un worktree. Un'altra accettazione idonea entra nello ste
 - `workspace.WORKTREE_LOST` → No round: non resta nessun worktree di Proposal. Il developer è avvisato.
 - `terminal.COMMAND_ENDED` → In progress: è finito il comando di un worktree del giro, ma qualche Task di una Proposal ancora nel giro non è in Done. Non si unisce nulla. Se il comando finito è la scansione e ha creato dei Task, Trama manda nello stesso terminale l'esecuzione di quella Proposal.
 - `terminal.COMMAND_ENDED` → Merging: è finito un comando del giro e ogni Task delle Proposal ancora nel giro è in Done. Trama committa in ciascun worktree le modifiche rimaste e prova l'unione in un worktree di merge.
-- `developer.FIX_DRIFT_CODE` → In progress: solo per un Drift di un worktree del giro, deciso dalla Board del progetto aperto. La decisione è scritta nel worktree e Trama rilancia lì l'esecuzione dei Task rimasti.
+- `developer.FIX_DRIFT_CODE` → In progress: solo per un Drift di un worktree del giro, deciso dalla Board del progetto aperto. La decisione è scritta nel worktree e Trama rilancia lì l'esecuzione dei Task rimasti della Proposal di quel worktree, compreso il Task di correzione, che appartiene a quella Proposal.
 - `developer.ACCEPT_DRIFT_PROPOSAL` → In progress: come sopra. L'accettazione della Proposal attaccata vale dentro quel worktree e non apre un altro giro.
 - `developer.DISMISS_DRIFT` → In progress: come sopra.
 

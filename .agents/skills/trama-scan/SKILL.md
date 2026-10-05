@@ -22,6 +22,13 @@ As soon as you know you will file a Task or a Drift, announce it: `trama announc
 - Compare behaviour at the level of the **Diagram**: States, Transitions, Events, who reacts to what. Compare construction against what the Requirements actually state. Variable names, structure, style and performance that no Requirement mentions are not Drifts.
 - The Model matters far more than the code. By default the code is wrong, not the Model.
 
+## Naming cards
+
+Every live Proposal, Task and Drift has a temporary **short number** (`P3`, `T3`, `D3`) besides its **permanent identity** of eight characters.
+
+- Name cards to the developer by short number and title, for example "Task T3 – title" or "Drift D2 – title", also in the final report. A closed card has no number: use its permanent identity.
+- In every command you run and every file you write (`--proposal`, `--task`, card bodies, references) use **only the permanent identity**, taken from `--json` (field `id`; the number is the field `number`) or from the file name. **Never write a short number in a file**: it changes from one working copy to another.
+
 ## Steps
 
 1. **Scope.** Use the Feature you were given, or `trama system` for the list. For each Machine: `trama feature <id>`, `trama machine <id>`, `trama state <machine/State>`, `trama event <owner.EVENT>`, `trama paths …` as needed; these views end with the Requirements attached. Read the Areas with `trama requirements` and `trama requirements <area>`, and keep their `## General` sections in mind for everything. Also run `trama analyze <machine>`: warnings are Model problems to tell the developer about, not code problems.
@@ -45,7 +52,7 @@ As soon as you know you will file a Task or a Drift, announce it: `trama announc
    **The design link.** When the prompt says the scan follows the approval of a Proposal, add `--proposal <id>` to every Task you file, so the Board shows the Tasks of one design together. File Tasks with no `--proposal` when the prompt names no Proposal (a scan the developer started by hand).
 6. **File each Drift exactly once, in one of two ways.** `trama drift new` always creates a new card, so decide which way applies before running it.
    - **Ordinary Drift** (the default): `trama drift new "<title>" --ref <nearest Model element or Requirement> --happens "<what the code does, in terms of behaviour>" --should "<what the Model or Requirement says>" --option "<title of the way you recommend>" --option-text "<what it changes and costs>" --option "<title of another way>" --option-text "<…>" [up to five] [--where "<where in the code you saw it>"]`. The two texts and the options are required; `--where` is optional and the only place for code locations. Write them as described in "Writing a Drift". Do not pass `--task`: a Drift filed by a Scan has no origin Task. Do not choose the resolution.
-   - **Drift with a Proposal**, only when the code handles an important case the Model forgot: first create the Proposal by following the `trama-design` skill without its interview (`trama proposal new`, `edit`, `validate --proposal`, `proposal show`, `proposal submit`; list your choices in the Proposal body). Correct and retry a refused submission before continuing; only after it succeeds run `trama drift new … --proposal <id>` once, with the same texts and options. Never run `drift new` a second time for the same difference.
+   - **Drift with a Proposal**, only when the code handles an important case the Model forgot: first create the Proposal by following the `trama-design` skill without its interview (`trama proposal new`, `edit`, `validate --proposal`, `proposal show`, `proposal submit`; list your choices in the Proposal body). If `validate` warns that a Requirement fragment the Proposal writes into is larger than 12 KB, split it in the same Proposal before submitting, as `trama-design` describes under "Good Requirement habits". Correct and retry a refused submission before continuing; only after it succeeds run `trama drift new … --proposal <id>` once, with the same texts and options. Never run `drift new` a second time for the same difference.
 
    Do not open a Proposal for small differences: the default is that the code gets fixed.
 7. **Report.** List the Tasks and Drifts you created with their IDs, Machines you could not find any code for, and Model warnings from `analyze`. Say which Drifts need a decision. Then stop.

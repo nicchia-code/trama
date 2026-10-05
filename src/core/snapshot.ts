@@ -1,16 +1,18 @@
+import type { CardNumbers } from "./card-names";
 import { type Announcement, type AnnouncementKind, listAnnouncements } from "./announcements";
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
 import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type ProposalKind } from "./proposals";
-import { inWorktreeProposals, type InWorktreeProposal, openProposalsAwaitingDecision, roundWorktrees } from "./worktree-round";
+import { inWorktreeProposals, type InWorktreeProposal, openProposalsAwaitingDecision } from "./worktree-round";
 import { mergeDriftDocument } from "./worktree-merge";
 import { appliesUnder, type RequiredProposal } from "./required";
-import { type Area, buildProject, parseRequirementRef, type ProjectModel } from "./requirements";
+import { type Area, areaIdOf, buildProject, type Fragment, parseRequirementRef, type ProjectModel } from "./requirements";
 import { multiBranchOn, readMultiBranch } from "./multi-branch";
-import { byCreation, type Project, readTrackedFiles, REQUIREMENTS_PREFIX } from "./store";
+import { byCreation, type Project, readTrackedFiles } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
-import { type Column, type Drift, type DriftOption, type DriftSides, driftOptions, driftSides, listDrifts, listTasks, type Task } from "./work";
+import { syncShortNumbers } from "./short-numbers";
+import { type Column, type Drift, type DriftOption, type DriftSides, driftOptions, driftSides, listDrifts, listTasks, roundWork, type Task } from "./work";
 
 export interface ActorChange {
   id: string;
@@ -26,18 +28,32 @@ export interface SectionView {
   change: Change;
   /** The text before the Proposal, when it changed or was removed. */
   before: string | null;
+  /** The fragment the Proposal moves the section from; null when it stays where it was (or is new). */
+  movedFrom: string | null;
 }
 
-/** An Area of Requirements; outside Proposals every change is `same`. */
-export interface AreaView {
+/** A fragment of an Area as shown: its sections, General first, with what a Proposal does to them. */
+export interface FragmentView {
   id: string;
   /** Path relative to `.trama/`, for opening the file. */
   file: string;
   title: string;
   description: string;
-  intro: string;
   change: "added" | "removed" | "modified" | "same";
   sections: SectionView[];
+}
+
+/** An Area of Requirements; outside Proposals every change is `same`. */
+export interface AreaView {
+  id: string;
+  /** Path of the Area's `area.md` relative to `.trama/`, for opening the file. */
+  file: string;
+  title: string;
+  description: string;
+  intro: string;
+  change: "added" | "removed" | "modified" | "same";
+  /** By fragment name. A section a Proposal moves is shown only in the fragment it moves to. */
+  fragments: FragmentView[];
 }
 
 /** The Model and Requirements as the Diagram and the Requirements tab draw them. */
@@ -146,6 +162,8 @@ export interface Snapshot extends ModelView {
   announcements: AnnouncementView[];
   /** This working copy's multi-branch switch. On only when its file reads as `on`. */
   multiBranch: boolean;
+  /** The short numbers of this working copy's live cards: the panel writes `T3` where a card is live and its identity where it is closed. */
+  numbers: CardNumbers;
 }
 
 function actorChange(id: string, before: Actor | undefined, after: Actor | undefined): ActorChange {
@@ -162,18 +180,35 @@ function actorChange(id: string, before: Actor | undefined, after: Actor | undef
 
 const sectionKey = (ref: string | null) => (ref === null ? "" : ref.toLowerCase());
 
-/** One Area drawn with what a change does to it; at least one side exists. */
+/**
+ * One Area drawn with what a change does to it; at least one side exists. Sections are matched by reference across
+ * the whole Area: one that changes fragment is shown only in its new fragment, with the fragment it comes from.
+ */
 function areaView(shown: Area, before: Area | undefined, after: Area | undefined): AreaView {
+  const fragmentOf = new Map([...(before?.fragments ?? []), ...(after?.fragments ?? [])].map((f) => [f.file, f.id]));
   const was = new Map((before?.sections ?? []).map((s) => [sectionKey(s.ref), s]));
   const is = new Set((after?.sections ?? []).map((s) => sectionKey(s.ref)));
-  const sections: SectionView[] = [];
+  const sections = new Map<string, SectionView[]>();
+  const add = (fragment: string, view: SectionView) => sections.set(fragment, [...(sections.get(fragment) ?? []), view]);
   for (const s of after?.sections ?? []) {
     const o = was.get(sectionKey(s.ref));
     const change: Change = !o ? "added" : o.text !== s.text ? "changed" : "same";
-    sections.push({ ref: s.ref, text: s.text, change, before: change === "changed" && o ? o.text : null });
+    const from = o ? (fragmentOf.get(o.file) as string) : null;
+    const here = fragmentOf.get(s.file) as string;
+    add(here, { ref: s.ref, text: s.text, change, before: change === "changed" && o ? o.text : null, movedFrom: from !== null && from !== here ? from : null });
   }
   for (const s of before?.sections ?? [])
-    if (!is.has(sectionKey(s.ref))) sections.push({ ref: s.ref, text: s.text, change: "removed", before: s.text });
+    if (!is.has(sectionKey(s.ref))) add(fragmentOf.get(s.file) as string, { ref: s.ref, text: s.text, change: "removed", before: s.text, movedFrom: null });
+  const oldFragments = new Map((before?.fragments ?? []).map((f) => [f.id, f]));
+  const newFragments = new Map((after?.fragments ?? []).map((f) => [f.id, f]));
+  const fragments = [...new Set([...oldFragments.keys(), ...newFragments.keys()])].sort().map((id): FragmentView => {
+    const o = oldFragments.get(id);
+    const n = newFragments.get(id);
+    const f = (n ?? o) as Fragment;
+    const views = (sections.get(id) ?? []).sort((a, b) => Number(a.ref !== null) - Number(b.ref !== null));
+    const change = !o ? "added" : !n ? "removed" : before === after ? "same" : "modified";
+    return { id, file: f.file, title: f.title, description: f.description, change, sections: views };
+  });
   return {
     id: shown.id,
     file: shown.file,
@@ -181,7 +216,7 @@ function areaView(shown: Area, before: Area | undefined, after: Area | undefined
     description: shown.description,
     intro: shown.intro,
     change: !before ? "added" : !after ? "removed" : before === after ? "same" : "modified",
-    sections,
+    fragments,
   };
 }
 
@@ -195,10 +230,12 @@ const modelView = (project: ProjectModel): ModelView => ({
 
 /** Everything the extension shows, as plain JSON. Malformed Task or Drift files throw, naming the file. */
 export function buildSnapshot(p: Project): Snapshot {
+  const numbers = syncShortNumbers(p).all();
   const project = buildProject(readTrackedFiles(p));
 
   const tasks = listTasks(p);
-  const blocked = computeBlocked(project, tasks, listDrifts(p));
+  const drifts = listDrifts(p);
+  const blocked = computeBlocked(project, tasks, drifts);
 
   const allProposals = listProposals(p);
   const proposals = openProposalsAwaitingDecision(p, allProposals).map((proposal): ProposalView => {
@@ -213,8 +250,9 @@ export function buildSnapshot(p: Project): Snapshot {
       const actorIds = new Set<string>();
       const areaIds = new Set<string>();
       for (const c of touched) {
-        if (c.path.startsWith(REQUIREMENTS_PREFIX)) {
-          areaIds.add(c.path.slice(REQUIREMENTS_PREFIX.length).replace(/\.md$/, ""));
+        const areaId = areaIdOf(c.path);
+        if (areaId !== null) {
+          areaIds.add(areaId);
           continue;
         }
         const parts = c.path.split("/");
@@ -250,7 +288,7 @@ export function buildSnapshot(p: Project): Snapshot {
       };
     });
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
-  const folders = roundWorktrees(p);
+  const folders = roundWork(p);
   const viewDrift = (home: Project, d: Drift, worktree: string | null): DriftView => ({
     id: d.id,
     title: d.title,
@@ -280,14 +318,14 @@ export function buildSnapshot(p: Project): Snapshot {
     file: `tasks/${t.name}`,
     worktree,
   });
-  const openDrifts = listDrifts(p).filter((d) => d.data.status === "open").map((drift) => ({ drift, home: p, worktree: null as string | null }));
-  const awayDrifts = folders.flatMap(({ proposal, project: home }) =>
-    listDrifts(home).filter((d) => d.data.status === "open").map((drift) => ({ drift, home, worktree: proposal })),
+  const openDrifts = drifts.filter((d) => d.data.status === "open").map((drift) => ({ drift, home: p, worktree: null as string | null }));
+  const awayDrifts = folders.flatMap(({ proposal, project: home, drifts: born }) =>
+    born.filter((d) => d.data.status === "open").map((drift) => ({ drift, home, worktree: proposal })),
   );
-  const awayTasks = folders.flatMap(({ proposal, project: home }) => {
-    const there = listTasks(home);
-    const why = computeBlocked(buildProject(readTrackedFiles(home)), there, listDrifts(home));
-    return there.map((task) => ({ task, why, worktree: proposal }));
+  const awayTasks = folders.flatMap(({ proposal, project: home, tasks: born }) => {
+    // What blocks a Task is what the agent in that worktree sees: every Task and Drift there, copies included.
+    const why = computeBlocked(buildProject(readTrackedFiles(home)), listTasks(home), listDrifts(home));
+    return born.map((task) => ({ task, why, worktree: proposal }));
   });
   const orderedTasks = byCreation(
     [...tasks.map((task) => ({ task, why: blocked, worktree: null as string | null })), ...awayTasks],
@@ -305,6 +343,7 @@ export function buildSnapshot(p: Project): Snapshot {
     tasks: orderedTasks.map((item) => viewTask(item.task, item.why, item.worktree)),
     announcements: listAnnouncements(p).map((a) => announcementView(a, a.proposal === null ? undefined : proposalById.get(a.proposal)?.title)),
     multiBranch: multiBranchOn(readMultiBranch(p)),
+    numbers,
   };
 }
 

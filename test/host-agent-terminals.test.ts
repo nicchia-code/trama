@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
 import { basename, join } from "node:path";
-import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { announce, listAnnouncements, withdrawAll } from "../src/core/announcements";
 import type { CursorHook } from "../src/core/cursor-chat";
@@ -16,14 +16,21 @@ interface FakeTerminal {
   shellIntegration: object;
   /** The last command line typed into it. */
   line: string;
-  show(): void;
+  /** Whether each `show` kept the focus where it was. */
+  shown: (boolean | undefined)[];
+  show(preserveFocus?: boolean): void;
   sendText(text: string): void;
 }
 interface ShellEvent {
   terminal: FakeTerminal;
   execution: { commandLine: { value: string } };
 }
-const listeners: { start: Listener<ShellEvent>[]; end: Listener<ShellEvent>[]; close: Listener<FakeTerminal>[] } = { start: [], end: [], close: [] };
+/** A tab the editor opened: a terminal tab with its label and the column of its group. */
+interface TabChange {
+  opened: { input: unknown; label: string; group: { viewColumn: number } }[];
+}
+const listeners: { start: Listener<ShellEvent>[]; end: Listener<ShellEvent>[]; close: Listener<FakeTerminal>[]; tabs: Listener<TabChange>[] } = { start: [], end: [], close: [], tabs: [] };
+class TabInputTerminal {}
 /** What the editor reports about a command in `terminal`: by default the line Trama typed into it. */
 const shell = (terminal: FakeTerminal, commandLine = terminal.line): ShellEvent => ({ terminal, execution: { commandLine: { value: commandLine } } });
 const subscribe = <T>(list: Listener<T>[]) => (fn: Listener<T>) => {
@@ -35,8 +42,10 @@ const terminals: FakeTerminal[] = [];
 const typed: string[] = [];
 /** The environment each fake terminal was created with, in the order created. */
 const environments: Record<string, string>[] = [];
-/** Every terminal Trama created, in order, including the folder and the name. */
-const created: { name?: string; cwd?: string; env: Record<string, string> }[] = [];
+/** Every terminal Trama created, in order, including the folder, the name and where it opened. */
+const created: { name?: string; cwd?: string; env: Record<string, string>; location?: unknown }[] = [];
+/** The editor's tab groups by column. */
+const tabGroups = { columns: [1] };
 /** What `inspect` reports for a setting key. */
 const inspected: Record<string, { globalValue?: unknown; workspaceValue?: unknown; workspaceFolderValue?: unknown }> = {};
 /** Values written with `update`. */
@@ -63,14 +72,17 @@ mock.module("vscode", () => ({
     onDidStartTerminalShellExecution: subscribe(listeners.start),
     onDidEndTerminalShellExecution: subscribe(listeners.end),
     onDidCloseTerminal: subscribe(listeners.close),
-    createTerminal: (options: { name?: string; cwd?: string; env: Record<string, string> }) => {
+    createTerminal: (options: { name?: string; cwd?: string; env: Record<string, string>; location?: unknown }) => {
       environments.push(options.env);
       created.push(options);
       const terminal: FakeTerminal = {
         exitStatus: undefined,
         shellIntegration: {},
         line: "",
-        show() {},
+        shown: [],
+        show(preserveFocus?: boolean) {
+          this.shown.push(preserveFocus);
+        },
         sendText(text: string) {
           this.line = text;
           typed.push(text);
@@ -85,6 +97,10 @@ mock.module("vscode", () => ({
       const offer = Promise.withResolvers<string | undefined>();
       answerOffer.push(offer.resolve);
       return offer.promise;
+    },
+    tabGroups: {
+      get all() { return tabGroups.columns.map((viewColumn) => ({ viewColumn })); },
+      onDidChangeTabs: subscribe(listeners.tabs),
     },
     createWebviewPanel: () => {
       panelsCreated++;
@@ -110,7 +126,8 @@ mock.module("vscode", () => ({
   RelativePattern: class {},
   // Bun re-mocks "vscode" in place, keeping only these keys, for every later test file that mocks it too.
   TabInputText: class {},
-  ViewColumn: { Active: 1 },
+  TabInputTerminal,
+  ViewColumn: { Active: 1, Beside: -2 },
   commands: { executeCommand: async (id: string, ...args: unknown[]) => (editorCalls.push(id), commandHandler(id, ...args)) },
   env: {
     get appName() { return editor.appName; },
@@ -141,10 +158,10 @@ describe("taken Tasks and the agent terminals", () => {
     const p = projectAt(dir);
     watchAgentTerminal();
 
-    expect(await launchAgent(dir, "first")).toBe("terminal");
+    expect(await launchAgent(dir, "first", "Scan")).toBe("terminal");
     const first = terminals[0] as FakeTerminal;
     listeners.start.forEach((fn) => fn(shell(first)));
-    await launchAgent(dir, "second"); // the first is busy, so this one starts another terminal
+    await launchAgent(dir, "second", "Scan"); // the first is busy, so this one starts another terminal
     const second = terminals[1] as FakeTerminal;
     expect(second).not.toBe(first);
     listeners.start.forEach((fn) => fn(shell(second)));
@@ -205,12 +222,12 @@ describe("the identity of an agent terminal", () => {
     watchAgentTerminal();
     withdrawAll(p);
 
-    await launchAgent(dir, "Use the trama-design skill. One", "One");
+    await launchAgent(dir, "Use the trama-design skill. One", "Design", "One");
     const firstId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
     expect(firstId).toMatch(/^[a-z0-9]{6}$/);
     expect(listAnnouncements(p).map((a) => [a.title, a.terminal])).toEqual([["One", firstId]]);
 
-    await launchAgent(dir, "Use the trama-design skill. Two", "Two"); // the first is busy: another terminal
+    await launchAgent(dir, "Use the trama-design skill. Two", "Design", "Two"); // the first is busy: another terminal
     const second = terminals.at(-1) as FakeTerminal;
     const secondId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
     expect(secondId).toMatch(/^[a-z0-9]{6}$/);
@@ -220,10 +237,87 @@ describe("the identity of an agent terminal", () => {
     withdrawAll(p);
     listeners.end.forEach((fn) => fn(shell(second))); // its command ended: free to reuse
     const created = terminals.length;
-    await launchAgent(dir, "Use the trama-design skill. Three", "Three");
+    await launchAgent(dir, "Use the trama-design skill. Three", "Design", "Three");
     expect(terminals).toHaveLength(created);
     expect(listAnnouncements(p).map((a) => [a.title, a.terminal])).toEqual([["Three", secondId]]);
     withdrawAll(p);
+  });
+
+  test("a free terminal is reused only for an instruction with the same name; another name opens a terminal of its own", async () => {
+    // Dynamic: the module must load after mock.module replaced "vscode".
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    watchAgentTerminal();
+    const end = () => listeners.end.forEach((fn) => fn(shell(terminals.at(-1) as FakeTerminal)));
+
+    await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3");
+    const first = terminals.at(-1);
+    expect(created.at(-1)?.name).toBe("T3");
+    end();
+
+    await launchAgent(dir, "Use the trama-implement skill on Task efgh5678.", "T4");
+    expect(terminals.at(-1)).not.toBe(first);
+    expect(created.at(-1)?.name).toBe("T4");
+    end();
+
+    const count = terminals.length;
+    await launchAgent(dir, "Use the trama-implement skill on Task efgh5678.", "T4");
+    expect(terminals).toHaveLength(count);
+  });
+});
+
+describe("the agent terminal as an editor tab", () => {
+  test("terminal-tab opens beside the active group without the focus, then in the group where the previous tab opened while it and its group exist", async () => {
+    // Dynamic: the module must load after mock.module replaced "vscode".
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    watchAgentTerminal();
+    const instruction = "Use the trama-scan skill on the whole System.";
+    const closeAll = () => terminals.forEach((t) => listeners.close.forEach((fn) => fn(t)));
+    /** The editor reports that a tab opened in `viewColumn`, labelled `label`. */
+    const opened = (label: string, viewColumn: number, input: unknown = new TabInputTerminal()) =>
+      listeners.tabs.forEach((fn) => fn({ opened: [{ input, label, group: { viewColumn } }] }));
+    closeAll(); // no earlier terminal to reuse
+    settingValues["agentLauncher"] = "terminal-tab";
+    tabGroups.columns = [1, 2, 3];
+    try {
+      await launchAgent(dir, instruction, "Scan");
+      expect(created.at(-1)).toMatchObject({ name: "Scan", cwd: dir, env: { TRAMA_AGENT: "1" }, location: { viewColumn: -2, preserveFocus: true } });
+      expect(terminals.at(-1)?.shown).toEqual([true]);
+      // Not the agent's tab: another label, or not a terminal. Then the agent's tab, then a later one with its label.
+      opened("Scan", 3, {});
+      opened("Other", 3);
+      opened("Scan", 2);
+      opened("Scan", 3);
+
+      await launchAgent(dir, instruction, "Scan"); // the first is busy: a new tab in its group
+      expect(created.at(-1)?.location).toEqual({ viewColumn: 2, preserveFocus: true });
+      opened("Scan", 2);
+
+      tabGroups.columns = [1]; // that group is gone
+      await launchAgent(dir, instruction, "Scan");
+      expect(created.at(-1)?.location).toEqual({ viewColumn: -2, preserveFocus: true });
+      opened("Scan", 2);
+
+      tabGroups.columns = [1, 2];
+      const free = terminals.at(-1) as FakeTerminal;
+      listeners.end.forEach((fn) => fn(shell(free))); // free: reused without the focus, no new tab
+      const count = created.length;
+      await launchAgent(dir, instruction, "Scan");
+      expect(created).toHaveLength(count);
+      expect(free.shown).toEqual([true, true]);
+
+      closeAll(); // the previous tab is closed
+      await launchAgent(dir, instruction, "Scan");
+      expect(created.at(-1)?.location).toEqual({ viewColumn: -2, preserveFocus: true });
+
+      delete settingValues["agentLauncher"];
+      closeAll();
+      await launchAgent(dir, instruction, "Scan"); // the plain terminal stays in the terminal area and is shown as before
+      expect(created.at(-1)?.location).toBeUndefined();
+      expect(terminals.at(-1)?.shown).toEqual([false]);
+    } finally {
+      delete settingValues["agentLauncher"];
+      tabGroups.columns = [1];
+    }
   });
 });
 
@@ -233,17 +327,17 @@ describe("the language the agent writes in", () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const instruction = "Use the trama-scan skill on the whole System.";
 
-    await launchAgent(dir, instruction);
+    await launchAgent(dir, instruction, "Scan");
     expect(typed.at(-1)).not.toContain("Write everything");
 
     settingValues["language"] = " Italian ";
     try {
-      await launchAgent(dir, instruction);
+      await launchAgent(dir, instruction, "Scan");
       expect(typed.at(-1)).toContain(`${instruction} Write everything you generate in Italian, except code, which always stays in English.`);
       expect(typed.at(-1)?.split("\n")).toHaveLength(1);
 
       settingValues["language"] = "   ";
-      await launchAgent(dir, instruction);
+      await launchAgent(dir, instruction, "Scan");
       expect(typed.at(-1)).not.toContain("Write everything");
     } finally {
       delete settingValues["language"];
@@ -256,9 +350,9 @@ describe("announcing a design request", () => {
     // Dynamic, as above: the module must load after mock.module replaced "vscode".
     const { launchAgent } = await import("../extension/src/host/agent");
     const p = projectAt(dir);
-    await launchAgent(dir, "Use the trama-scan skill on the whole System.");
+    await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
     expect(listAnnouncements(p)).toEqual([]);
-    await launchAgent(dir, "Use the trama-design skill. Add refunds", "Add refunds");
+    await launchAgent(dir, "Use the trama-design skill. Add refunds", "Design", "Add refunds");
     expect(listAnnouncements(p).map((a) => ({ kind: a.kind, source: a.source, title: a.title, proposal: a.proposal }))).toEqual([{ kind: "proposal", source: "request", title: "Add refunds", proposal: null }]);
   });
 
@@ -268,7 +362,7 @@ describe("announcing a design request", () => {
     const before = listAnnouncements(p).length;
     settingValues["agentLauncher"] = "chat";
     try {
-      await launchAgent(dir, "Use the trama-design skill. Another change", "Another change");
+      await launchAgent(dir, "Use the trama-design skill. Another change", "Design", "Another change");
     } finally {
       delete settingValues["agentLauncher"];
     }
@@ -288,27 +382,33 @@ describe("the launcher in Cursor", () => {
       settingValues["agentLauncher"] = "terminal";
       expect(agentLauncher()).toBe("terminal");
       delete settingValues["agentLauncher"];
+      // Chosen by hand, the external terminal and the editor tab win even in Cursor; auto never picks them.
+      settingValues["agentLauncher"] = "terminal-tab";
+      expect(agentLauncher()).toBe("terminal-tab");
+      settingValues["agentLauncher"] = "external-terminal";
+      expect(agentLauncher()).toBe("external-terminal");
+      delete settingValues["agentLauncher"];
 
       editorCalls.length = 0;
       commandHandler = (id) => (id === "composer.createNew" ? { composerId: "c" } : undefined);
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.")).toBe("sent");
+      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan")).toBe("sent");
       expect(editorCalls).toEqual(["composer.createNew"]);
 
       // Cursor's command returns nothing even when it created and sent the chat: only an error moves to the deeplink.
       editorCalls.length = 0;
       commandHandler = () => undefined;
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.")).toBe("sent");
+      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan")).toBe("sent");
       expect(editorCalls).toEqual(["composer.createNew"]);
-      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", undefined, true)).toBe("sent");
+      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", "Scan", undefined, true)).toBe("sent");
 
       editorCalls.length = 0;
       commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.")).toBe("confirm");
+      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan")).toBe("confirm");
       expect(editorCalls).toEqual(["composer.createNew", `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent("Use the trama-scan skill on the whole System.")}&workspace=${encodeURIComponent(basename(dir))}&mode=agent`]);
 
       editorCalls.length = 0;
       clipboard.length = 0;
-      expect(await launchAgent(dir, "Use the trama-design skill. Read .env")).toBe("clipboard");
+      expect(await launchAgent(dir, "Use the trama-design skill. Read .env", "Scan")).toBe("clipboard");
       expect(editorCalls).toEqual(["composer.createNew"]);
       expect(clipboard).toEqual(["Use the trama-design skill. Read .env"]);
       expect(typed.length).toBe(typedBefore);
@@ -316,7 +416,7 @@ describe("the launcher in Cursor", () => {
       // The automatic scan: only a chat that sends by itself, never a chat left waiting nor the clipboard.
       editorCalls.length = 0;
       clipboard.length = 0;
-      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", undefined, true)).toBe("not-sent");
+      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", "Scan", undefined, true)).toBe("not-sent");
       expect(editorCalls).toEqual(["composer.createNew"]);
       expect(clipboard).toEqual([]);
     } finally {
@@ -346,7 +446,7 @@ describe("withdrawing the ghosts", () => {
     const subscription = onAnnouncementsWithdrawn((views) => told.push(views.map((v) => `${v.kind}:${v.title}`)));
     withdrawAll(p);
 
-    await launchAgent(dir, "Use the trama-design skill. Cancel orders", "Cancel orders");
+    await launchAgent(dir, "Use the trama-design skill. Cancel orders", "Design", "Cancel orders");
     const terminal = terminals.at(-1) as FakeTerminal;
     const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
     announce(p, { kind: "task", title: "A Task", terminal: id });
@@ -378,10 +478,10 @@ describe("withdrawing the ghosts", () => {
     watchAgentTerminal();
     withdrawAll(p);
 
-    await launchAgent(dir, "Use the trama-design skill. One", "One");
+    await launchAgent(dir, "Use the trama-design skill. One", "Design", "One");
     const first = terminals.at(-1) as FakeTerminal;
     const firstId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
-    await launchAgent(dir, "Use the trama-design skill. Two", "Two");
+    await launchAgent(dir, "Use the trama-design skill. Two", "Design", "Two");
     const second = terminals.at(-1) as FakeTerminal;
     const secondId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
     announce(p, { kind: "task", title: "Nobody's" });
@@ -405,7 +505,7 @@ describe("withdrawing the ghosts", () => {
     const told: string[][] = [];
     const subscription = onAnnouncementsWithdrawn((views) => told.push(views.map((v) => v.title)));
 
-    await launchAgent(dir, "Use the trama-design skill. Alone", "Alone");
+    await launchAgent(dir, "Use the trama-design skill. Alone", "Design", "Alone");
     const terminal = terminals.at(-1) as FakeTerminal;
     listeners.end.forEach((fn) => fn(shell(terminal, "ls")));
     listeners.end.forEach((fn) => fn(shell(terminal, "")));
@@ -415,7 +515,7 @@ describe("withdrawing the ghosts", () => {
 
     // Still busy: the next launch opens another terminal instead of typing into this one.
     const created = terminals.length;
-    await launchAgent(dir, "Use the trama-scan skill on the whole System.");
+    await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
     expect(terminals).toHaveLength(created + 1);
 
     // The line, trimmed, is the typed command: its end withdraws.
@@ -487,7 +587,7 @@ describe("the notice on the end of the agent's command", () => {
     listeners.end.length = 0;
     watchAgentTerminal();
     try {
-      await launchAgent(dir, "Use the trama-scan skill on the whole System.");
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
       expect(cancelAll).toHaveBeenCalledTimes(1);
       const terminal = terminals.at(-1) as FakeTerminal;
 
@@ -504,13 +604,13 @@ describe("the notice on the end of the agent's command", () => {
       expect(born.mock.calls[1]?.[1]).toEqual({ kind: "unreported" });
 
       // The terminal is free again, so the next instruction reuses it and takes back what waits.
-      await launchAgent(dir, "Use the trama-scan skill on the whole System.");
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
       expect(cancelAll).toHaveBeenCalledTimes(2);
 
       // The chat gets no terminal: nothing is written, so nothing is taken back.
       settingValues["agentLauncher"] = "chat";
       try {
-        await launchAgent(dir, "Use the trama-scan skill on the whole System.");
+        await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
       } finally {
         delete settingValues["agentLauncher"];
       }
@@ -527,7 +627,7 @@ describe("the notice on the end of the agent's command", () => {
     const born = spyOn(endNotices, "born").mockImplementation(() => {});
     watchAgentTerminal();
     try {
-      await launchAgent(dir, "Use the trama-scan skill on the whole System.");
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
       listeners.close.forEach((fn) => fn(terminals.at(-1) as FakeTerminal));
       expect(born).not.toHaveBeenCalled();
     } finally {
@@ -569,7 +669,7 @@ describe("worktree agent terminal", () => {
     const watching = watchAgentTerminal();
     settingValues.worktreeAgent = "echo {prompt}";
     try {
-      expect(await launchAgent(dir, "open-folder-marker")).toBe("terminal");
+      expect(await launchAgent(dir, "open-folder-marker", "Scan")).toBe("terminal");
       const open = [...terminals].reverse().find((t) => t.line.includes("open-folder-marker")) as FakeTerminal;
       listeners.start.forEach((fn) => fn(shell(open)));
       listeners.end.forEach((fn) => fn(shell(open)));
@@ -583,7 +683,7 @@ describe("worktree agent terminal", () => {
       expect(created.at(-1)?.env.TRAMA_AGENT).toBe("1");
       expect(work.line).toBe("echo 'scan checkout'");
 
-      await launchAgent(dir, "open-again-marker");
+      await launchAgent(dir, "open-again-marker", "Scan");
       expect(open.line).toContain("open-again-marker");
       expect(work.line).toBe("echo 'scan checkout'");
     } finally {
@@ -628,7 +728,7 @@ describe("worktree agent terminal", () => {
       const workTask = newTask(workProject, { title: "There", refs: ["order/Paid"], technical: false });
       moveTask(workProject, workTask.id, "doing", "agent");
 
-      await launchAgent(dir, "busy-in-the-open-folder");
+      await launchAgent(dir, "busy-in-the-open-folder", "Scan");
       await launchWorktreeAgent(dir, work, "scan", "0001");
       const workTerminal = terminals.at(-1) as FakeTerminal;
       listeners.end.forEach((fn) => fn(shell(workTerminal)));
@@ -640,7 +740,7 @@ describe("worktree agent terminal", () => {
       expect(workTerminal.line).toBe("echo 'scan'");
       // The open folder's terminal is still busy: ending the worktree does not free it.
       const count = terminals.length;
-      await launchAgent(dir, "still-not-reused");
+      await launchAgent(dir, "still-not-reused", "Scan");
       expect(terminals.length).toBe(count + 1);
 
       const takenAgain = newTask(workProject, { title: "Stays", refs: ["order/Paid"], technical: false });
@@ -720,7 +820,7 @@ describe("worktree agent terminal", () => {
     }
   });
 
-  test("after a worktree Drift is decided, the Tasks still in To do are typed into that worktree, and a busy terminal is not reused", async () => {
+  test("after a worktree Drift is decided, the Tasks of that worktree's Proposal still in To do are typed into it, and a busy terminal is not reused", async () => {
     const { launchWorktreeAgent, resumeWorktreeTasks, watchAgentTerminal } = await import("../extension/src/host/agent");
     listeners.end.length = 0;
     const watching = watchAgentTerminal();
@@ -738,11 +838,302 @@ describe("worktree agent terminal", () => {
       const before = terminals.length;
       await resumeWorktreeTasks(dir, work, "0004");
       expect(terminals.length).toBe(before);
-      const again = 'Use the trama-implement skill on every Task in the "todo" column. Take each one from `trama task next`, one after the other, until it says there is none.';
+      const again = 'Use the trama-implement skill on every Task of Proposal 0004 that is in the "todo" column. Take each one from `trama task next --proposal 0004`, one after the other, until it says there is none.';
       expect((terminals.at(-1) as FakeTerminal).line).toBe(`echo '${again}'`);
     } finally {
       delete settingValues.worktreeAgent;
       watching.dispose();
+    }
+  });
+});
+
+describe("the end of an external window's command", () => {
+  test("the marker of the run in progress releases the taken Tasks, withdraws that window's ghosts and makes the notice; a marker of a run no longer followed does nothing", async () => {
+    const { startExternalRun, watchExternalRuns } = await import("../extension/src/host/agent");
+    const { endNotices } = await import("../extension/src/host/notice-host");
+    const p = projectAt(dir);
+    const markers = mkdtempSync(join(tmpdir(), "trama-markers-"));
+    let noticed = Promise.withResolvers<void>();
+    const born = spyOn(endNotices, "born").mockImplementation(() => noticed.resolve());
+    const cancelAll = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
+    const watching = watchExternalRuns(markers);
+    const leave = (name: string, status: string) => {
+      writeFileSync(join(markers, `${name}.tmp`), status);
+      renameSync(join(markers, `${name}.tmp`), join(markers, name));
+    };
+    try {
+      withdrawAll(p);
+      const first = startExternalRun(dir, "win111", "agent {prompt}", "Use the trama-scan skill on the whole System.");
+      expect(first.line).toContain(join(markers, "win111-1.end"));
+      first.sent();
+      expect(cancelAll).toHaveBeenCalledTimes(1);
+
+      const task = newTask(p, { title: "External", refs: ["order/Paid"], technical: false });
+      moveTask(p, task.id, "doing", "agent");
+      announce(p, { kind: "task", title: "A Task", terminal: "win111" });
+      announce(p, { kind: "task", title: "Another window", terminal: "other1" });
+
+      leave("win111-1.end", "3\n");
+      await noticed.promise;
+      expect(born).toHaveBeenCalledTimes(1);
+      expect(born.mock.calls[0]?.[0]).toBe(basename(dir));
+      expect(born.mock.calls[0]?.[1]).toEqual({ kind: "failed", exitCode: 3 });
+      expect(getTask(p, task.id).data.column).toBe("todo");
+      expect(getTask(p, task.id).data.agent).toBe(false);
+      expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Another window"]);
+
+      // A new window while the run goes on: the old window's marker no longer counts, so its ghost stays.
+      startExternalRun(dir, "win222", "agent {prompt}", "Use the trama-scan skill on the whole System.").sent();
+      startExternalRun(dir, "win333", "agent {prompt}", "Use the trama-scan skill on the whole System.").sent();
+      expect(cancelAll).toHaveBeenCalledTimes(3);
+      announce(p, { kind: "task", title: "Window two", terminal: "win222" });
+      announce(p, { kind: "task", title: "Window three", terminal: "win333" });
+      noticed = Promise.withResolvers<void>();
+      leave("win222-1.end", "0\n");
+      leave("win333-1.end", "0\n");
+      await noticed.promise;
+      expect(readdirSync(markers)).toEqual([]);
+      expect(born).toHaveBeenCalledTimes(2);
+      expect(listAnnouncements(p).map((a) => a.title).sort()).toEqual(["Another window", "Window two"]);
+    } finally {
+      watching.dispose();
+      born.mockRestore();
+      cancelAll.mockRestore();
+      rmSync(markers, { recursive: true, force: true });
+      withdrawAll(p);
+    }
+  });
+
+  test("a design request sent to an external window announces a Proposal that belongs to that window and the end of its command withdraws it; a plain request announces nothing", async () => {
+    const { startExternalRun, watchExternalRuns } = await import("../extension/src/host/agent");
+    const { endNotices } = await import("../extension/src/host/notice-host");
+    const p = projectAt(dir);
+    const markers = mkdtempSync(join(tmpdir(), "trama-markers-"));
+    const noticed = Promise.withResolvers<void>();
+    const born = spyOn(endNotices, "born").mockImplementation(() => noticed.resolve());
+    const watching = watchExternalRuns(markers);
+    try {
+      withdrawAll(p);
+      startExternalRun(dir, "plain1", "agent {prompt}", "Use the trama-scan skill on the whole System.").sent();
+      expect(listAnnouncements(p)).toEqual([]);
+
+      startExternalRun(dir, "desgn1", "agent {prompt}", "Use the trama-design skill. Cancel orders").sent("Cancel orders");
+      const [ghost] = listAnnouncements(p);
+      expect(listAnnouncements(p)).toHaveLength(1);
+      expect([ghost?.kind, ghost?.title, ghost?.terminal]).toEqual(["proposal", "Cancel orders", "desgn1"]);
+
+      writeFileSync(join(markers, "desgn1-1.end.tmp"), "0\n");
+      renameSync(join(markers, "desgn1-1.end.tmp"), join(markers, "desgn1-1.end"));
+      await noticed.promise;
+      expect(listAnnouncements(p)).toEqual([]);
+    } finally {
+      watching.dispose();
+      born.mockRestore();
+      rmSync(markers, { recursive: true, force: true });
+      withdrawAll(p);
+    }
+  });
+});
+
+describe("reusing a free external window", () => {
+  test("only a finished run of the same project, in the detected terminal, with no terminal command set, is written into; a failure forgets the window and says why", async () => {
+    const { rememberExternalWindow, reuseExternalWindow, startExternalRun, warnExternalReuseFailed, watchExternalRuns } = await import("../extension/src/host/agent");
+    const { endNotices } = await import("../extension/src/host/notice-host");
+    const vscode = await import("vscode");
+    const bin = mkdtempSync(join(tmpdir(), "trama-fake-kitten-"));
+    const markers = mkdtempSync(join(tmpdir(), "trama-markers-"));
+    const log = join(bin, "log");
+    const fail = join(bin, "fail");
+    writeFileSync(join(bin, "kitten"), `#!/bin/sh\nprintf 'CALL %s\\n' "$*" >> ${log}\ncat >> ${log}\nif [ -e ${fail} ]; then echo boom >&2; exit 1; fi\n`, { mode: 0o755 });
+    const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("CALL ").length - 1 : 0);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    let noticed = Promise.withResolvers<void>();
+    const born = spyOn(endNotices, "born").mockImplementation(() => noticed.resolve());
+    const cancelAll = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
+    const warning = spyOn(vscode.window, "showWarningMessage");
+    const watching = watchExternalRuns(markers);
+    const finish = async (name: string) => {
+      noticed = Promise.withResolvers<void>();
+      writeFileSync(join(markers, `${name}.tmp`), "0\n");
+      renameSync(join(markers, `${name}.tmp`), join(markers, name));
+      await noticed.promise;
+    };
+    const window = { terminal: "kitty", address: "unix:/tmp/trama-test-kitty", windowId: 1 } as const;
+    const reuse = (detected: "kitty" | "wezterm" | undefined, root = dir, name = "Scan") => reuseExternalWindow(root, name, "agent {prompt}", "Use the trama-scan skill on the whole System.", detected);
+    try {
+      // No window opened yet.
+      expect(await reuse("kitty")).toEqual({ kind: "new-window" });
+
+      startExternalRun(dir, "kw1111", "agent {prompt}", "Use the trama-scan skill on the whole System.").sent();
+      rememberExternalWindow("kw1111", dir, "Scan", window);
+
+      // The run has not finished: its marker has not come.
+      expect(await reuse("kitty")).toEqual({ kind: "new-window" });
+      await finish("kw1111-1.end");
+
+      // A condition missing at the start: a new window, no scripting run, no warning.
+      expect(await reuse("wezterm")).toEqual({ kind: "new-window" });
+      expect(await reuse(undefined)).toEqual({ kind: "new-window" });
+      expect(await reuse("kitty", join(dir, "other"))).toEqual({ kind: "new-window" });
+      expect(await reuse("kitty", dir, "T3")).toEqual({ kind: "new-window" }); // another name: a window of its own
+      settingValues["externalTerminalCommand"] = "alacritty -e {command}";
+      try {
+        expect(await reuse("kitty")).toEqual({ kind: "new-window" });
+      } finally {
+        delete settingValues["externalTerminalCommand"];
+      }
+      expect(calls()).toBe(0);
+      expect(warning).not.toHaveBeenCalled();
+
+      // Free window: the same line as a new window, with the same identity and a new run number, goes through the scripting.
+      const before = cancelAll.mock.calls.length;
+      expect(await reuse("kitty")).toEqual({ kind: "reused" });
+      expect(calls()).toBe(1);
+      const written = readFileSync(log, "utf8");
+      expect(written).toContain("@ --to unix:/tmp/trama-test-kitty send-text --match id:1 --stdin");
+      expect(written).toContain("sh -c 'export TRAMA_AGENT=1 TRAMA_TERMINAL=");
+      expect(written).toContain("kw1111");
+      expect(written).toContain(join(markers, "kw1111-2.end"));
+      expect(cancelAll.mock.calls.length).toBe(before + 1);
+
+      // The new run is the one that counts, and until it ends the window is busy.
+      expect(await reuse("kitty")).toEqual({ kind: "new-window" });
+      expect(calls()).toBe(1);
+      await finish("kw1111-2.end");
+      expect(born).toHaveBeenCalledTimes(2);
+
+      // The scripting fails: the reason is the scripting's, the window is forgotten, nothing is warned until the caller says so.
+      writeFileSync(fail, "");
+      expect(await reuse("kitty")).toEqual({ kind: "new-window", failure: "boom" });
+      expect(calls()).toBe(2);
+      expect(await reuse("kitty")).toEqual({ kind: "new-window" });
+      expect(calls()).toBe(2);
+      expect(warning).not.toHaveBeenCalled();
+      warnExternalReuseFailed("boom");
+      expect(warning).toHaveBeenCalledWith("Trama could not reuse the external terminal window: boom. A new window was opened.");
+    } finally {
+      process.env.PATH = path;
+      watching.dispose();
+      born.mockRestore();
+      cancelAll.mockRestore();
+      warning.mockRestore();
+      rmSync(bin, { recursive: true, force: true });
+      rmSync(markers, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("launching into an external window", () => {
+  test("a design request opens a window through the developer's command, announces a Proposal that belongs to it, and the end of its command withdraws it; the editor opens no terminal", async () => {
+    const { launchAgent, watchExternalRuns } = await import("../extension/src/host/agent");
+    const { endNotices } = await import("../extension/src/host/notice-host");
+    const { onAnnouncementsWithdrawn } = await import("../extension/src/host/announcements");
+    const p = projectAt(dir);
+    const bin = mkdtempSync(join(tmpdir(), "trama-fake-terminal-"));
+    const markers = mkdtempSync(join(tmpdir(), "trama-markers-"));
+    // A terminal like alacritty: after -e a program and its arguments, which it runs.
+    const terminal = join(bin, "faketerm");
+    writeFileSync(terminal, `#!/bin/sh\n[ "$1" = -e ] || exit 9\nshift\nexec "$@"\n`, { mode: 0o755 });
+    const noticed = Promise.withResolvers<unknown[]>();
+    const born = spyOn(endNotices, "born").mockImplementation((...args: unknown[]) => noticed.resolve(args));
+    const cancelAll = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
+    const watching = watchExternalRuns(markers);
+    const told: string[] = [];
+    const subscription = onAnnouncementsWithdrawn((views) => told.push(...views.map((v) => `${v.kind}:${v.title}`)));
+    const shell = process.env["SHELL"];
+    process.env["SHELL"] = "/bin/true";
+    settingValues["agentLauncher"] = "external-terminal";
+    settingValues["externalTerminalCommand"] = `${terminal} -e {command}`;
+    const openedBefore = created.length;
+    try {
+      withdrawAll(p);
+      expect(await launchAgent(dir, "Use the trama-design skill. Cancel orders", "Design", "Cancel orders")).toBe("terminal");
+      expect(cancelAll).toHaveBeenCalledTimes(1);
+      expect(created).toHaveLength(openedBefore);
+      // `agent` does not exist here, so the command fails at once (127) and its marker may come before the window is known
+      // to be open: the ghost is announced first all the same, and withdrawn by that end.
+      const [project, outcome] = await noticed.promise;
+      expect(project).toBe(basename(dir));
+      expect(outcome).toEqual({ kind: "failed", exitCode: 127 });
+      expect(told).toEqual(["proposal:Cancel orders"]);
+      expect(listAnnouncements(p)).toEqual([]);
+      expect(readdirSync(markers)).toEqual([]);
+    } finally {
+      subscription.dispose();
+      delete settingValues["agentLauncher"];
+      delete settingValues["externalTerminalCommand"];
+      if (shell === undefined) delete process.env["SHELL"];
+      else process.env["SHELL"] = shell;
+      watching.dispose();
+      born.mockRestore();
+      cancelAll.mockRestore();
+      rmSync(bin, { recursive: true, force: true });
+      rmSync(markers, { recursive: true, force: true });
+      withdrawAll(p);
+    }
+  });
+
+  test("when no window can be opened nothing starts: the instruction is on the clipboard with the reason, no notice is taken back, nothing is announced and no terminal opens", async () => {
+    const { launched, launchAgent, watchExternalRuns } = await import("../extension/src/host/agent");
+    const { endNotices } = await import("../extension/src/host/notice-host");
+    const vscode = await import("vscode");
+    const p = projectAt(dir);
+    const markers = mkdtempSync(join(tmpdir(), "trama-markers-"));
+    const cancelAll = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
+    const error = spyOn(vscode.window, "showErrorMessage");
+    const watching = watchExternalRuns(markers);
+    const platform = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
+    const env = vscode.env as { remoteName?: string };
+    const path = process.env["PATH"];
+    const terminalVariable = process.env["TERMINAL"];
+    const openedBefore = created.length;
+    const instruction = "Use the trama-design skill. Cancel orders";
+    settingValues["agentLauncher"] = "external-terminal";
+    /** Launches with the given setting up and returns what the developer was told. */
+    const attempt = async (): Promise<string> => {
+      error.mockClear();
+      const clipboardBefore = clipboard.length;
+      const result = await launchAgent(dir, instruction, "Design", "Cancel orders");
+      expect(launched(result)).toBe(false);
+      expect(clipboard.slice(clipboardBefore)).toEqual([instruction]);
+      expect(listAnnouncements(p)).toEqual([]);
+      expect(error).toHaveBeenCalledTimes(1);
+      return String(error.mock.calls[0]?.[0]);
+    };
+    const told = (reason: string) => `Trama could not open an external terminal: ${reason}. The instruction was copied to the clipboard.`;
+    try {
+      withdrawAll(p);
+      Object.defineProperty(process, "platform", { value: "win32" });
+      expect(await attempt()).toBe(told("external terminals are not supported on this platform"));
+      Object.defineProperty(process, "platform", platform);
+
+      env.remoteName = "ssh-remote";
+      expect(await attempt()).toBe(told("external terminals are not available in a remote workspace"));
+      delete env.remoteName;
+
+      process.env["PATH"] = join(markers, "nothing");
+      delete process.env["TERMINAL"];
+      if (process.platform === "linux") expect(await attempt()).toBe(told("no terminal was found; set trama.externalTerminalCommand"));
+
+      process.env["PATH"] = path;
+      settingValues["externalTerminalCommand"] = "/nonexistent/terminal {command}";
+      expect(await attempt()).toBe(told("the terminal could not be started"));
+
+      expect(cancelAll).not.toHaveBeenCalled();
+      expect(created).toHaveLength(openedBefore);
+    } finally {
+      delete settingValues["agentLauncher"];
+      delete settingValues["externalTerminalCommand"];
+      Object.defineProperty(process, "platform", platform);
+      delete env.remoteName;
+      process.env["PATH"] = path;
+      if (terminalVariable !== undefined) process.env["TERMINAL"] = terminalVariable;
+      watching.dispose();
+      cancelAll.mockRestore();
+      error.mockRestore();
+      rmSync(markers, { recursive: true, force: true });
+      withdrawAll(p);
     }
   });
 });

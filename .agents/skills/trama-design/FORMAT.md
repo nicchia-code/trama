@@ -1,13 +1,14 @@
 # Model and Requirements file format (quick reference)
 
-Model paths below are relative to `.trama/model/`; Requirement files are `requirements/<area>.md` (in `.trama/requirements/`). `trama validate --proposal <id>` checks all of this.
+Model paths below are relative to `.trama/model/`; Requirement files are `requirements/<area>/area.md` and `requirements/<area>/<fragment>.md` (in `.trama/requirements/`). `trama validate --proposal <id>` checks all of this.
 
 ```
 system.md              the System
 actors/<actor>.md      one file per Actor (only emits Events)
 <feature>/feature.md   one folder per Feature (no nesting)
 <feature>/<machine>.md one file per Machine
-requirements/<area>.md one file per Area of Requirements (no subfolders)
+requirements/<area>/area.md       one folder per Area of Requirements: its description, title and intro
+requirements/<area>/<fragment>.md the Area's sections, split into fragments (no subfolders)
 ```
 
 - IDs are file or folder names, kebab-case (`order`, `payment-gateway`). Features, Machines and Actors share **one namespace**; `system`, `feature`, `actors` and `requirements` are reserved.
@@ -85,13 +86,26 @@ Emitted when the order leaves Draft.
 
 `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State, any depth), `order/Paid/user.CANCEL` (Transitions on that Event), `user.CANCEL` (Event).
 
-## Requirements (`requirements/<area>.md`)
+## Requirements (`requirements/<area>/`)
+
+An Area is a folder. `area.md` holds what is true of the whole Area, and no sections:
 
 ```markdown
 ---
 description: Use when building or changing screens, layout, styling or texts.
 ---
 # Interface
+
+Prose here applies to the whole Area (optional).
+```
+
+Every other `.md` file in the folder is a **fragment** holding some of the Area's sections:
+
+```markdown
+---
+description: Use when building the checkout and order screens.
+---
+# Checkout and orders
 
 ## General
 - Material 3, light and dark theme following the system.
@@ -103,8 +117,15 @@ description: Use when building or changing screens, layout, styling or texts.
 - A green "Paid" badge next to the order number.
 ```
 
-- Front matter with `description` (required): when an agent needs this Area. It becomes the description of the generated `trama-req-<area>` skill.
-- One H1 with the Area's title. Prose before the first `##` applies to the whole Area.
+- `area.md` is required: front matter with `description` (when an agent needs this Area), one H1 with the Area's title, optional prose. No `##` sections.
+- A fragment's name is kebab-case (`area` is reserved). Front matter with `description` (required): when an agent needs this fragment. One H1 with the fragment's title. **No prose before the first section**; then only sections.
 - `## General`: applies everywhere. Every other `##` is titled with exactly one element reference (see above) and applies to that element and everything inside it (a Machine's sections apply to all its States; a Feature's to all its Machines).
-- A section must name an element that exists once the Proposal is applied, and appear once per file. Anything under it (lists, `###`, code) is free text.
-- Reference a Requirement from a Task or Drift with `requirements/<area>` or `requirements/<area>#<section>`, for example `requirements/ui#order/Paid` or `requirements/ui#General`.
+- A section must name an element that exists once the Proposal is applied, and appear **once in the whole Area**, in one fragment. Anything under it (lists, `###`, code) is free text.
+- No subfolders in an Area. A `.md` file directly in `requirements/` is an error: `trama skills update` converts it into a folder with `area.md` and one fragment, `main.md`.
+- Reference a Requirement from a Task or Drift with `requirements/<area>` or `requirements/<area>#<section>`, for example `requirements/ui#order/Paid` or `requirements/ui#General`. The fragment is never part of the reference: a section is unique in its Area.
+
+### Generated skills and when to split a fragment
+
+- Trama generates the `trama-req-*` skills in one of two modes, the same for every Area. The **budget** is the sum, over the fragments with at least one non-empty section, of the characters of `trama-req-<area>-<fragment>` and of the fragment's description. Up to **4,000** characters: one skill per fragment, `trama-req-<area>-<fragment>`, with the fragment's description. Beyond: one **index** skill per Area, `trama-req-<area>`, with the Area's description, its General section in full and a list of its fragments, each in its own file next to the index.
+- `trama validate` also prints **warnings**, which never fail validation or the hand-over: a fragment larger than **12 KB** (12,288 bytes of the file, front matter included), and, with `--proposal`, the switch between the two modes the Proposal would cause.
+- When a Proposal writes into a fragment that is or becomes larger than 12 KB, split it in the same Proposal before handing it over: cut where it suits the project (usually by Feature or by a group of nearby Machines), give every new fragment a name and a description that say when it is needed, and move the sections without changing their text. Mind the budget: prefer a few medium fragments to many tiny ones.

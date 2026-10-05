@@ -3,6 +3,7 @@ import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { TramaError } from "./errors";
 import { enumField, idField, type Raw } from "./schema";
+import { cardName } from "./short-numbers";
 import { type Project, readDocument, writeDocument, writeFileEnsuringDir } from "./store";
 
 /**
@@ -194,7 +195,7 @@ export function announcementNote(p: Project, id: string | undefined, kind: Annou
   const a = getAnnouncement(p, id);
   if (!a) return `No announcement "${id}" was found (unknown, or already delivered or withdrawn); the ${kind} was created without a ghost.`;
   if (a.kind !== kind) return `Announcement "${id}" is for a ${a.kind}, not a ${kind}; the ${kind} was created without using it.`;
-  if (a.proposal !== null) return `Announcement "${id}" is already bound to Proposal ${a.proposal}; the ${kind} was created without using it.`;
+  if (a.proposal !== null) return `Announcement "${id}" is already bound to Proposal ${cardName(p, "proposal", a.proposal)}; the ${kind} was created without using it.`;
   return null;
 }
 

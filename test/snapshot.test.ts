@@ -1,3 +1,4 @@
+import { cardName } from "../src/core/short-numbers";
 import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -125,7 +126,7 @@ test("an open Drift carries its two sides and why its attached Proposal cannot b
   handOver(p, prop.id);
   expect(drifts()[0]?.proposalBlock).toBeNull();
   writeFileSync(join(dir, ".trama/model/checkout/payment.md"), `${readFileSync(join(dir, ".trama/model/checkout/payment.md"), "utf8")}\n`);
-  expect(drifts()[0]?.proposalBlock).toMatchObject({ kind: "stale", reason: `Proposal ${prop.id} is stale: the Model changed since it was written.` });
+  expect(drifts()[0]?.proposalBlock).toMatchObject({ kind: "stale", reason: `Proposal ${cardName(p, "proposal", prop.id)} is stale: the Model changed since it was written.` });
 });
 
 test("a Drift's fix options, chosen option and note reach the snapshot in written order; a Drift without them has none", () => {

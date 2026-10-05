@@ -1,3 +1,4 @@
+import { cardLabel, noNumbers } from "../../../../src/core/card-names";
 import { createMultiBranchSwitch } from "../multi-branch-switch";
 import type { Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
@@ -129,7 +130,7 @@ export const mountDiagram: MountView = (root, context) => {
     select.replaceChildren(new Option("None", ""));
     for (const p of snapshot.proposals) {
       const marks = [p.stale.length > 0 ? "stale" : "", p.unbased.length > 0 ? "unbased" : "", p.errors.length > 0 ? "invalid" : ""].filter(Boolean);
-      select.append(new Option(`${p.id} · ${p.title}${marks.length > 0 ? ` ⚠ ${marks.join(", ")}` : ""}`, p.id));
+      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} · ${p.title}${marks.length > 0 ? ` ⚠ ${marks.join(", ")}` : ""}`, p.id));
     }
     select.value = proposalId ?? "";
 

@@ -7,6 +7,7 @@ import type { Column } from "../../protocol";
 import { designColumn, placeTasks } from "../../../../src/core/design";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import { proposalTouches } from "../requirements/logic";
+import { type CardName, cardNameOf, type CardNumbers, namerOf, noNumbers } from "../../../../src/core/card-names";
 
 export type ColumnId = "decide" | Column;
 
@@ -26,18 +27,30 @@ export const EMPTY_HINTS: Record<ColumnId, string> = {
   done: "Nothing done yet",
 };
 
-/** The badge of one blocker: "blocked 0003" goes to the Drift on the Diagram, "waiting 0004" to the card of the fix Task. */
+/** The key of a Drift or Task card on the Board; a card of a worktree is keyed by its Proposal too. */
+const cardKey = (kind: "drift" | "task", id: string, worktree: string | null) => (worktree ? `worktree:${worktree}:${kind}:${id}` : `${kind}:${id}`);
+
+/**
+ * The badge of one blocker: "blocked D2" goes to the Drift on the Diagram, "waiting T4" to the card of the fix Task.
+ * The Diagram does not draw the Drifts of a worktree, so "blocked" for a Task of a worktree goes to the Drift's card.
+ * Each card is written by its number while live.
+ */
 export interface BlockBadge {
   label: string;
   /** Tooltip and accessible name: why the Task is blocked, and where the badge leads. */
   tooltip: string;
-  target: { kind: "drift" | "task"; id: string };
+  target: { kind: "diagram"; drift: string } | { kind: "card"; key: string };
 }
 
-export function blockBadge(b: Blocker): BlockBadge {
-  return b.kind === "drift"
-    ? { label: `blocked ${b.drift}`, tooltip: `Blocked by Drift ${b.drift}: ${b.title}. Show it on the diagram.`, target: { kind: "drift", id: b.drift } }
-    : { label: `waiting ${b.task}`, tooltip: `Waiting for Task ${b.task}: ${b.title}, which fixes the code for Drift ${b.drift}. Go to its card.`, target: { kind: "task", id: b.task } };
+/** `worktree` is the Proposal whose worktree holds the blocked Task; its blockers live in the same worktree. */
+export function blockBadge(b: Blocker, numbers: CardNumbers = noNumbers, worktree: string | null = null): BlockBadge {
+  const name = namerOf(numbers);
+  if (b.kind === "fix")
+    return { label: `waiting ${name("task", b.task)}`, tooltip: `Waiting for Task ${name("task", b.task)}: ${b.title}, which fixes the code for Drift ${name("drift", b.drift)}. Go to its card.`, target: { kind: "card", key: cardKey("task", b.task, worktree) } };
+  const why = `Blocked by Drift ${name("drift", b.drift)}: ${b.title}.`;
+  return worktree
+    ? { label: `blocked ${name("drift", b.drift)}`, tooltip: `${why} Go to its card.`, target: { kind: "card", key: cardKey("drift", b.drift, worktree) } }
+    : { label: `blocked ${name("drift", b.drift)}`, tooltip: `${why} Show it on the diagram.`, target: { kind: "diagram", drift: b.drift } };
 }
 
 export interface Badge {
@@ -66,6 +79,8 @@ export interface WorktreeCard {
   kind: "worktree";
   key: string;
   id: string;
+  /** How the Proposal is written: its short number, or its identity once it is closed. */
+  name: CardName;
   heading: string;
   title: string;
   removable: boolean;
@@ -75,6 +90,8 @@ export interface ProposalCard {
   kind: "proposal";
   key: string;
   id: string;
+  /** How the Proposal is written: its short number, or its identity once it is closed. */
+  name: CardName;
   heading: string;
   title: string;
   badges: Badge[];
@@ -89,10 +106,14 @@ export interface DriftCard {
   kind: "drift";
   key: string;
   id: string;
+  /** How the Drift is written; null for the merge Drift, which has none. */
+  name: CardName | null;
   heading: string;
   title: string;
   refs: string[];
   proposal: string | null;
+  /** How the attached Proposal is written. */
+  proposalName: string | null;
   /** Proposal whose worktree this Drift lives in, or null when it lives in the open folder. */
   worktree: string | null;
   /** The Drift as the snapshot carries it: the card shows its two sides and its choices (see `driftComparison`). */
@@ -103,10 +124,14 @@ export interface TaskCard {
   kind: "task";
   key: string;
   id: string;
+  /** How the Task is written: its short number while it is in To do or In progress, otherwise its identity. */
+  name: CardName;
   title: string;
   technical: boolean;
   refs: string[];
   drift: string | null;
+  /** How the Drift the Task came from is written. */
+  driftName: string | null;
   /** ID of the Proposal (the design) the Task comes from, if any. */
   proposal: string | null;
   /** True while the agent has taken the Task. */
@@ -130,6 +155,8 @@ export interface DesignCard {
   key: string;
   /** The Proposal's ID. */
   id: string;
+  /** How the Proposal is written: its short number, or its identity once it is closed. */
+  name: CardName;
   heading: string;
   title: string;
   /** The design's Tasks in creation order, each with its own column. */
@@ -172,19 +199,19 @@ export function summarizeChanges(changes: FileChange[], maxFiles = MAX_FILES): C
 const listed = (items: string[]) => (items.length > MAX_TOOLTIP_ITEMS ? `${items.slice(0, MAX_TOOLTIP_ITEMS).join("\n")}\nand ${items.length - MAX_TOOLTIP_ITEMS} more` : items.join("\n"));
 
 /** The reason a Proposal cannot be approved, or null. Mirrors what the host refuses. */
-export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "requires">): string | null {
-  if (p.requires.length > 0) return `Approve the required Proposals first:\n${requiredReasons(p.requires).join("\n")}`;
+export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "requires">, numbers: CardNumbers = noNumbers): string | null {
+  if (p.requires.length > 0) return `Approve the required Proposals first:\n${requiredReasons(p.requires, (id) => namerOf(numbers)("proposal", id)).join("\n")}`;
   if (p.stale.length > 0) return "Stale: the Model changed since this Proposal touched it. Ask the agent for a new Proposal.";
   if (p.unbased.length > 0) return "Some files were never registered with the Proposal.";
   if (p.errors.length > 0) return "Applying this Proposal would leave the Model or its Requirements invalid.";
   return null;
 }
 
-export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "requires" | "kind">): Badge[] {
+export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "requires" | "kind">, numbers: CardNumbers = noNumbers): Badge[] {
   const badges: Badge[] = [];
   if (p.kind === "import") badges.push({ label: "import", tone: "info", tooltip: "Describes existing code; approving it starts no Scan" });
   for (const r of p.requires)
-    badges.push({ label: `requires ${r.id}`, tone: appliesUnder(r.status) ? "info" : "error", tooltip: requiredReasons([r]).join("") });
+    badges.push({ label: `requires ${namerOf(numbers)("proposal", r.id)}`, tone: appliesUnder(r.status) ? "info" : "error", tooltip: requiredReasons([r], (id) => namerOf(numbers)("proposal", id)).join("") });
   if (p.stale.length > 0) badges.push({ label: "stale", tone: "warning", tooltip: `The Model changed since the Proposal touched:\n${listed(p.stale)}` });
   if (p.errors.length > 0) badges.push({ label: "invalid", tone: "error", tooltip: `The Model or its Requirements would be invalid:\n${listed(p.errors.map(formatDiagnostic))}` });
   if (p.unbased.length > 0) badges.push({ label: "unregistered files", tone: "warning", tooltip: `Never registered with the Proposal:\n${listed(p.unbased)}` });
@@ -193,56 +220,68 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
 
 /** The In worktree group. These Proposals are not cards of To decide. */
 export function worktreeCards(snapshot: Snapshot): WorktreeCard[] {
-  return snapshot.inWorktree.map((item) => ({
-    kind: "worktree",
-    key: `worktree:${item.id}`,
-    id: item.id,
-    heading: `Proposal ${item.id}`,
-    title: item.title,
-    removable: item.removable,
-  }));
+  return snapshot.inWorktree.map((item) => {
+    const name = cardNameOf(snapshot.numbers ?? noNumbers, "proposal", item.id);
+    return {
+      kind: "worktree",
+      key: `worktree:${item.id}`,
+      id: item.id,
+      name,
+      heading: `Proposal ${name.text}`,
+      title: item.title,
+      removable: item.removable,
+    };
+  });
 }
 
-export function proposalCard(p: ProposalView): ProposalCard {
+export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers): ProposalCard {
+  const name = cardNameOf(numbers, "proposal", p.id);
   return {
     kind: "proposal",
     key: `proposal:${p.id}`,
     id: p.id,
-    heading: `Proposal ${p.id}`,
+    name,
+    heading: `Proposal ${name.text}`,
     title: p.title,
-    badges: proposalBadges(p),
+    badges: proposalBadges(p, numbers),
     changes: summarizeChanges(p.changes),
-    blocker: approveBlocker(p),
+    blocker: approveBlocker(p, numbers),
     touches: proposalTouches(p),
   };
 }
 
-export function driftCard(d: DriftView): DriftCard {
+export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers): DriftCard {
+  const name = d.merge === true ? null : cardNameOf(numbers, "drift", d.id);
   return {
     kind: "drift",
-    key: d.worktree ? `worktree:${d.worktree}:drift:${d.id}` : `drift:${d.id}`,
+    key: cardKey("drift", d.id, d.worktree),
     id: d.id,
-    heading: d.merge === true ? "Merge Drift" : `Drift ${d.id}`,
+    name,
+    heading: name === null ? "Merge Drift" : `Drift ${name.text}`,
     title: d.title,
     refs: d.refs,
     proposal: d.proposal,
+    proposalName: d.proposal === null ? null : namerOf(numbers)("proposal", d.proposal),
     worktree: d.worktree,
     drift: d,
   };
 }
 
-export function taskCard(t: TaskView): TaskCard {
+export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers): TaskCard {
+  const name = namerOf(numbers);
   return {
     kind: "task",
-    key: t.worktree ? `worktree:${t.worktree}:task:${t.id}` : `task:${t.id}`,
+    key: cardKey("task", t.id, t.worktree),
     id: t.id,
+    name: cardNameOf(numbers, "task", t.id),
     title: t.title,
     technical: t.technical,
     refs: t.refs,
     drift: t.drift,
+    driftName: t.drift === null ? null : name("drift", t.drift),
     proposal: t.proposal,
     agent: t.agent,
-    blocks: t.blockedBy.map(blockBadge),
+    blocks: t.blockedBy.map((b) => blockBadge(b, numbers, t.worktree)),
     blockedBy: t.blockedBy,
     body: t.body,
     file: t.file,
@@ -251,13 +290,15 @@ export function taskCard(t: TaskView): TaskCard {
   };
 }
 
-export function designCard(proposal: string, title: string | null, tasks: TaskCard[]): DesignCard {
+export function designCard(proposal: string, title: string | null, tasks: TaskCard[], numbers: CardNumbers = noNumbers): DesignCard {
+  const name = cardNameOf(numbers, "proposal", proposal);
   return {
     kind: "design",
     key: `design:${proposal}`,
     id: proposal,
-    heading: `Proposal ${proposal}`,
-    title: title ?? `Proposal ${proposal}`,
+    name,
+    heading: `Proposal ${name.text}`,
+    title: title ?? `Proposal ${name.text}`,
     tasks,
     done: tasks.filter((t) => t.column === "done").length,
     column: designColumn(tasks.map((t) => t.column)),
@@ -266,16 +307,17 @@ export function designCard(proposal: string, title: string | null, tasks: TaskCa
 
 /** The four columns of the Board: open Proposals then open Drifts to decide, Tasks by column. */
 export function buildBoard(snapshot: Snapshot): BoardColumn[] {
+  const numbers = snapshot.numbers ?? noNumbers;
   const cards: Record<ColumnId, Card[]> = {
-    decide: [...snapshot.proposals.map(proposalCard), ...snapshot.drifts.map(driftCard)],
+    decide: [...snapshot.proposals.map((p) => proposalCard(p, numbers)), ...snapshot.drifts.map((d) => driftCard(d, numbers))],
     todo: [],
     doing: [],
     done: [],
   };
   // Tasks of one design are shown together once there are enough of them (see `placeTasks`).
   for (const placed of placeTasks(snapshot.tasks)) {
-    if (!placed.design) cards[placed.column].push(taskCard(placed.task));
-    else cards[placed.column].push(designCard(placed.proposal, placed.tasks[0]?.proposalTitle ?? null, placed.tasks.map(taskCard)));
+    if (!placed.design) cards[placed.column].push(taskCard(placed.task, numbers));
+    else cards[placed.column].push(designCard(placed.proposal, placed.tasks[0]?.proposalTitle ?? null, placed.tasks.map((t) => taskCard(t, numbers)), numbers));
   }
   return COLUMN_ORDER.map((id) => ({ id, title: COLUMN_TITLES[id], hint: EMPTY_HINTS[id], cards: cards[id] }));
 }
@@ -298,14 +340,24 @@ const ANNOUNCED_KIND_LABELS: Record<AnnouncementView["kind"], string> = { propos
 
 export const announcedPhase = (phase: AnnouncementView["phase"], asking: boolean): string => (asking ? "Waiting for your answers" : phase === "writing" ? "Writing" : "Preparing");
 
-export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCard {
+const REWORK_TITLE = /^Rework of Proposal ([a-z0-9]+)$/;
+
+/** The file of a rework announcement names the Proposal by its identity; the Board writes it by its number while it is live. */
+function shownTitle(title: string, numbers: CardNumbers): string {
+  const id = REWORK_TITLE.exec(title)?.[1];
+  return id === undefined ? title : `Rework of Proposal ${namerOf(numbers)("proposal", id)}`;
+}
+
+export function announcedCard(a: AnnouncementView, asking: boolean, numbers: CardNumbers = noNumbers): AnnouncedCard {
   const kindLabel = ANNOUNCED_KIND_LABELS[a.kind];
   const phase = announcedPhase(a.phase, asking);
-  return { key: `announced:${a.id}`, kind: a.kind, kindLabel, title: a.title, phase, label: `${kindLabel} the agent is creating, ${phase.toLowerCase()}: ${a.title}` };
+  const title = shownTitle(a.title, numbers);
+  return { key: `announced:${a.id}`, kind: a.kind, kindLabel, title, phase, label: `${kindLabel} the agent is creating, ${phase.toLowerCase()}: ${title}` };
 }
 
 /** The sentence the notice of a withdrawn announcement shows. */
-export const withdrawnNotice = (a: AnnouncementView): string => `The agent finished without delivering ${ANNOUNCED_KIND_LABELS[a.kind]} ${a.title}.`;
+export const withdrawnNotice = (a: AnnouncementView, numbers: CardNumbers = noNumbers): string =>
+  `The agent finished without delivering ${ANNOUNCED_KIND_LABELS[a.kind]} ${shownTitle(a.title, numbers)}.`;
 
 export interface PlacedGhost {
   card: AnnouncedCard;
@@ -318,12 +370,12 @@ export interface PlacedGhost {
  * takes Tasks. A ghost stands after the real cards of its kind (Proposals before Drifts), where its real card will take
  * its place, so no other card jumps when it arrives.
  */
-export function announcedGhosts(columns: BoardColumn[], announcements: AnnouncementView[], asking: boolean): Record<ColumnId, PlacedGhost[]> {
+export function announcedGhosts(columns: BoardColumn[], announcements: AnnouncementView[], asking: boolean, numbers: CardNumbers = noNumbers): Record<ColumnId, PlacedGhost[]> {
   const real = (id: ColumnId) => columns.find((c) => c.id === id)?.cards ?? [];
   const proposals = real("decide").filter((c) => c.kind === "proposal").length;
   const out: Record<ColumnId, PlacedGhost[]> = { decide: [], todo: [], doing: [], done: [] };
   for (const a of announcements) {
-    const card = announcedCard(a, asking);
+    const card = announcedCard(a, asking, numbers);
     if (a.kind === "task") out.todo.push({ card, index: real("todo").length });
     else out.decide.push({ card, index: a.kind === "proposal" ? proposals : real("decide").length });
   }

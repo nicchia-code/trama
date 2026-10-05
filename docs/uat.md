@@ -35,6 +35,7 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 - Click means a single left click. Double-click means two quick clicks on the same node.
 - Tests marked 🪙 spend model tokens. Everything else is free.
 - Tests marked 🔍 are exploratory: the behaviour was never run, so note what you see even if it is not a failure.
+- **Short numbers.** Wherever the panel or the command line names a Proposal, Task or Drift, it shows its temporary short number (`P1`, `T1`, `D1`) while the card is live, and its permanent identity only when it has no number (a closed card). Never both. The demo's cards are still named `NNNN-<slug>`, so they take their numbers in number order: Proposals 0001 and 0002 are `P1` and `P2`, Drifts 0001 and 0002 are `D1` and `D2`, Tasks 0001, 0002 and 0003 are `T1`, `T2` and `T3`; Task 0004 is Done and has no number. Rows written before short numbers still say "Proposal 0001", "Task 0003" and so on: they mean the same card, whose short number is the one in this list. The commands accept either form. Section U tests the numbers themselves.
 
 ## 1. Setup
 
@@ -44,7 +45,7 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 | S2 | Run `printf '{\n  "trama.agentCommand": "echo {prompt}"\n}\n' > /tmp/trama-demo/shop/.vscode/settings.json` | File contains `"trama.agentCommand": "echo {prompt}"`. From now on the "agent" only prints its prompt | ☐ |
 | S3 | Run `code --extensionDevelopmentPath=/home/luca/Developer/Trama/extension --new-window /tmp/trama-demo/shop` (skip if the window is already open) | A VS Code window titled `shop`. If a Welcome dialog appears, close it | ☐ |
 | S4 | In the verification shell paste: `j() { /home/luca/Developer/Trama/dist/trama --root /tmp/trama-demo/shop "$@"; }` and `D=/tmp/trama-demo/shop/.trama` | No output. `j board` prints the board (see S5) | ☐ |
-| S5 | Run `j board` | `To decide`: Proposal 0001, Proposal 0002, Drift 0001, Drift 0002 (Proposal 0002). `To do`: 0001, 0002. `In progress`: 0003. `Done`: 0004 | ☐ |
+| S5 | Run `j board` | `To decide`: Proposal `P1`, Proposal `P2`, Drift `D1`, Drift `D2` (Proposal `P2`). `To do`: `T1`, `T2`. `In progress`: `T3`. `Done`: `0004` (its identity, because it has no number) | ☐ |
 
 ## 2. The seeded demo (reference)
 
@@ -61,7 +62,7 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 | Task 0002 To do | "Payment declined email", ref `order/Awaiting payment/payment.DECLINED` |
 | Task 0003 In progress | "Cart confirmation", ref `cart/Has items/user.CHECKOUT` |
 | Task 0004 Done | "Upgrade dependencies", technical |
-| Requirement Areas | `data` (sections order, payment) and `ui` (General, checkout, order/Paid) |
+| Requirement Areas | `data` (fragment `main`: sections order, payment) and `ui` (fragment `main`: General, checkout, order/Paid), each a folder with `area.md` |
 
 ---
 
@@ -353,7 +354,7 @@ Needs the agent of E12 for row 6 (`trama.agentCommand` as `bash -c "sleep 600" {
 | 4 | `j task move 1 doing` | Within about a second the card is in In progress. At no moment is it dimmed or marked busy, and no error appears | ☐ |
 | 5 | `TRAMA_AGENT=1 j task move 2 doing` | The dot of Task 0002 pulses in the accent colour and its label is `Agent working`; there is no badge and no **Take back** button. **Run all To do** is disabled with the tooltip `An agent is working on Task 0002` | ☐ |
 | 6 | `j task move 2 done` (as the developer), then `j task take-back 2` | The first is refused: the message says the agent is working on Task 0002 and points to `trama task take-back 2` only. The second clears the mark: the dot stops pulsing, Task 0002 stays In progress and **Run all To do** is enabled again | ☐ |
-| 7 | Start an agent that does not end by itself (E12), `TRAMA_AGENT=1 j task move 2 doing`, then press Ctrl+C in the **Trama agent** terminal | Task 0002 goes back to To do with its dot no longer pulsing; no Take back is needed | ☐ |
+| 7 | Start an agent that does not end by itself (E12), `TRAMA_AGENT=1 j task move 2 doing`, then press Ctrl+C in the **Design** terminal | Task 0002 goes back to To do with its dot no longer pulsing; no Take back is needed | ☐ |
 
 ### E8. Open a Task
 | # | Action | Expected | ✓ |
@@ -414,7 +415,7 @@ Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": 
 | 8 | `j task new "Refund prepared orders" --ref order/Refunding --announcement $A` | The ghost gives way to the real card, at the same place; `ls -A $D/announcements` shows only `.gitignore` | ☐ |
 | 9 | `j announce drift "Cart differs"` | A `Drift` ghost stands in To decide after the last real Drift. It belongs to no terminal (`terminal: null` in its file) | ☐ |
 | 10 | `j task new "Unannounced" --ref order --announcement zzzzzz` | The Task is created and the output adds `No announcement "zzzzzz" was found …`; no ghost appears or is left | ☐ |
-| 11 | `TRAMA_TERMINAL=$T j announce task "Left behind"`, then in the **Trama agent** terminal press Ctrl+C | The `Task` ghost disappears at once. At the top of the Board one notice, `The agent finished without delivering Task Left behind.`, with a **Close** button. The `Drift` ghost of row 9 stays: it belongs to no terminal | ☐ |
+| 11 | `TRAMA_TERMINAL=$T j announce task "Left behind"`, then in the **Design** terminal press Ctrl+C | The `Task` ghost disappears at once. At the top of the Board one notice, `The agent finished without delivering Task Left behind.`, with a **Close** button. The `Drift` ghost of row 9 stays: it belongs to no terminal | ☐ |
 | 12 | Click **Close** on the notice, switch to the Diagram tab and back | The notice is gone; closing the Trama tab and opening it again shows none | ☐ |
 | 13 | `j proposal new "Never finished"`, read the ghost, then `j proposal discard <ID it printed>` | A `Writing` ghost titled `Never finished`; after the discard it disappears and **no** notice is shown | ☐ |
 | 14 | `j announce task "Gone quiet"`, then edit its file under `$D/announcements` and set `touched` to a time 20 minutes ago, save | Within about 30 seconds the ghost disappears and the notice `The agent finished without delivering Task Gone quiet.` appears; the `Drift` ghost of row 9, which also belongs to no terminal, goes with it, with its own notice | ☐ |
@@ -445,13 +446,13 @@ Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": 
 
 ## G. Developer decisions (agent mode: echo, S2)
 
-For every G test, ↻ first, then open the panel and the "Trama agent" terminal panel.
+For every G test, ↻ first, then open the panel and the terminal panel.
 
 ### G1. Approve a Proposal from the Board
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Board: **Approve** on Proposal 0001 | The card leaves To decide (count 3). No error banner | ☐ |
-| 2 | Look at the bottom panel | A terminal named **Trama agent** opens in the project folder | ☐ |
+| 2 | Look at the bottom panel | A terminal named **Scan** opens in the project folder | ☐ |
 | 3 | Read the terminal | Exactly **one** command was sent and one line printed: ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
 | 4 | Verification shell: `j validate` | `The Model and its Requirements are valid.` | ☐ |
 | 5 | `grep -c Returned $D/model/checkout/order.md` | `2` | ☐ |
@@ -555,7 +556,7 @@ Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." -
 
 ## H. Launching the agent (echo mode, S2)
 
-Each launch sends one command to the terminal named **Trama agent** (cwd = the demo folder) and the shell prints the prompt.
+Each launch sends one command to a terminal named after its work (cwd = the demo folder) and the shell prints the prompt: `Scan` for a scan, `Design` for a design request, the Task's short number (for example `T1`) for **Run**, `All tasks` for **Run all To do**.
 
 | # | Action | Expected in the terminal | ✓ |
 |---|---|---|---|
@@ -574,7 +575,7 @@ Each launch sends one command to the terminal named **Trama agent** (cwd = the d
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
 | H15 | Palette: **Trama: Quick Design Request…** | Same input box as H5 | ☐ |
-| H16 | After H1 to H15, open the terminal dropdown | **One** terminal named `Trama agent`: each of these launches ended before the next, so every launch reused it. If an earlier command is still running (for example an agent), the next launch opens a new terminal instead | ☐ |
+| H16 | After H1 to H15, open the terminal dropdown | Each run of launches with the same name reused one terminal; a launch with another name opened a new terminal and left the previous one open: `Scan` (H1–H4), `Design` (H5–H9), the short number of Task 0001 (H10), `All tasks` (H11), then a new `Scan` (H13–H14) and a new `Design` (H15). No terminal is named `Trama agent`. If an earlier command is still running (for example an agent), the next launch opens a new terminal even with the same name | ☐ |
 | H17 | Set `printf '{"trama.agentCommand": "echo"}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (no `{prompt}`), click **Scan System** | The prompt is appended: `Use the trama-scan skill on the whole System.` | ☐ |
 | H18 | Set `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, click **Scan System** | An input box `Trama: agent command`, placeholder `claude {prompt}    or    codex {prompt}`. With empty text: `Enter the command that starts your agent`. **Press Esc**: nothing is launched. (Typing a command would save it in your *user* settings.) | ☐ |
 | H19 | Restore S2. Set `printf '{"trama.agentCommand": "echo {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, approve Proposal 0001 | The Proposal is approved (G1.1, G1.4–G1.8 hold) but **no** command is sent to the terminal | ☐ |
@@ -617,12 +618,58 @@ Echo mode (S2). In the verification shell, `ls -A $D/requests` lists the request
 |---|---|---|---|
 | H24 | Start the stand-in server. Add `"trama.ntfy": "http://127.0.0.1:8099/trama-test"` to the user settings, with S2 in the demo settings, ↻, click **Scan System** and wait | About 10 seconds after the echo command ends, the server prints **one** `POST /trama-test` with title `Trama: the agent stopped`, priority `3`, tags `white_check_mark` and a body of five lines: `shop`, `The agent finished.`, `To decide: 4`, `To do: 2`, `In progress: 1` | ☐ |
 | H25 | Click **Scan System** twice, the second time less than 10 seconds after the first command ended | The server prints nothing for the first end: the second instruction took it back. After the second command ends, **one** request arrives | ☐ |
-| H26 | In the **Trama agent** terminal run `trama ask < round.json` and leave it unanswered | Ten seconds after the overlay opens, **one** request arrives: title `Trama: the agent asks`, priority `4`, tags `question`, body lines `shop`, `Question 1 of 2: <text>` and one `- <label>` per option, with no descriptions and no `(recommended)` | ☐ |
+| H26 | In the **Scan** terminal run `trama ask < round.json` and leave it unanswered | Ten seconds after the overlay opens, **one** request arrives: title `Trama: the agent asks`, priority `4`, tags `question`, body lines `shop`, `Question 1 of 2: <text>` and one `- <label>` per option, with no descriptions and no `(recommended)` | ☐ |
 | H27 | Repeat H26. Answer the first question after 5 seconds and leave the second | The request arrives 10 seconds after the round opened, not after the answer, and names `Question 2 of 2` | ☐ |
 | H28 | Repeat H26 and answer or skip every question within 10 seconds. Then run `trama ask --root /tmp/trama-demo/shop < round.json` from the verification shell, outside the Trama terminal, and leave it for 20 seconds | No request for either: the first round closed in time, the second does not come from a terminal Trama started | ☐ |
 | H29 | Set `"trama.ntfy": "bad topic"` in the user settings, click **Scan System** and wait | No request. After about 10 seconds a warning `Trama could not send the ntfy notification: the setting is not a topic name or an http(s) URL. Check the trama.ntfy setting and your connection.`, with no buttons. The warning does not show again for the next notice | ☐ |
 | H30 | Set the topic back, stop the stand-in server, click **Scan System**, wait 30 seconds | A first failed attempt, one more attempt 10 seconds later and then a warning with the reason (for example `connect ECONNREFUSED`), which never contains the topic or the URL. The agent and the terminal are not affected | ☐ |
 | H31 | Remove `trama.ntfy` from the user settings, click **Scan System** and wait | No request and no warning. Restore S2 | ☐ |
+
+### H51–H70. External terminal
+
+Written from the Requirements for the `external-terminal` launcher on Linux or macOS; the rows have not been run yet, so note what you see even when it matches. A settings file with the launcher: `printf '{"trama.agentLauncher": "external-terminal", "trama.agentCommand": "echo {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (**S2x**), then reload the window. A slow agent that does not end by itself for 30 seconds: the same with `"trama.agentCommand": "sleep 30; echo {prompt}"` (**S2y**). `trama.externalTerminalCommand` and `trama.ntfy` go in the **user** settings: they are ignored in the demo's `.vscode/settings.json`. The end markers are in the `external-terminals/` folder of the extension's global storage (`find ~/.config/Code/User/globalStorage -name external-terminals`, or the equivalent for the build in use); call it `$M`.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| H51 | Set S2x, reload, Board: **Scan System** | A window of the system terminal opens outside the editor, in `/tmp/trama-demo/shop`, titled `Scan` when the terminal allows it. It prints `Use the trama-scan skill on the whole System.` and stays open at the prompt of your login shell. The editor's terminal panel gets **no** `Scan` terminal | ☐ |
+| H52 | In that window run `echo $TRAMA_AGENT $TRAMA_TERMINAL` and `trama proposal approve 1` | `1` and six lowercase letters and digits; the approval is refused as the developer's decision. With a packaged extension (which has the `trama` binary inside), `echo $PATH` starts with the folder of that binary | ☐ |
+| H53 | `ls -A $M` right after H51 | Empty: the marker the script left was read and deleted. No file holds the instruction | ☐ |
+| H54 | Set S2y, reload, Board: **Quick request…**, type `Add refunds after pickup`, Enter | A new window opens, titled `Design` when the terminal allows it. Within about a second the Board shows the `Proposal` ghost `Add refunds after pickup`, `Preparing`; `sed -n 's/^terminal: //p' $D/announcements/*.md` prints the same six characters as `echo $TRAMA_TERMINAL` in the window | ☐ |
+| H55 | Wait for the command to end (30 seconds) | The ghost disappears and the notice `The agent finished without delivering Proposal Add refunds after pickup.` appears at the top of the Board. The window stays open with a shell and `ls -A $M` is empty | ☐ |
+| H56 | With S2y click **Scan System**, then run `TRAMA_AGENT=1 j task move 1 doing` in the verification shell and wait for the command to end | Task 0001 shows the agent dot while the command runs and goes back to To do, with no Take back, when it ends | ☐ |
+| H57 | With S2y click **Scan System** twice, the second time while the first command still runs | Two windows. The first window's end is not counted: its marker, when it arrives, is deleted and changes nothing (no notice, `ls -A $M` empty). The end of the second window is counted | ☐ |
+| H58 | With S2x, change `echo {prompt}` to `sh -c 'exit 3' {prompt}`, reload, click **Scan System** | The window shows nothing from the agent and stays open at a shell; `ls -A $M` is empty, and the exit status 3 reached the extension (see H61) | ☐ |
+| H59 | S2y, click **Scan System**, close the window by hand while the command runs, wait 40 seconds | Nothing happens in the editor: no end, no notice. Task 0001 taken with `TRAMA_AGENT=1 j task move 1 doing` before the click stays taken (agent dot); a ghost announced from the window stays until the fifteen minutes of quiet | ☐ |
+| H60 | S2y, click **Scan System**, then Developer: Reload Window while the command runs and wait 40 seconds | No notice for that end: its marker was deleted at startup or, if it came while the window was closed, when the extension started. `ls -A $M` is empty | ☐ |
+| H61 | Start the stand-in server of H24 and add `"trama.ntfy": "http://127.0.0.1:8099/trama-test"` to the user settings. With S2x and `sh -c 'exit 3' {prompt}` as the command, click **Scan System** | About 10 seconds after the command ends, **one** `POST /trama-test` with title `Trama: the agent stopped`, priority `4`, tags `warning` and a first body line `shop` and second line `The agent failed (exit code 3).` | ☐ |
+| H62 | With the same setup and `echo {prompt}`, click **Scan System** twice, the second time less than 10 seconds after the first command ended | The first end sends nothing: the second instruction took it back. After the second end, **one** request arrives with `The agent finished.` | ☐ |
+| H63 | Add `"trama.externalTerminalCommand": "/nonexistent/terminal {command}"` to the **user** settings, click **Scan System** | No window. Error `Trama could not open an external terminal: <reason>. The instruction was copied to the clipboard.` with no buttons, `<reason>` being `the terminal could not be started` or the system's error message. Pasting gives `Use the trama-scan skill on the whole System.`. No terminal opens in the editor either, and no ghost or Task changes | ☐ |
+| H64 | With H63 still set, **Quick request…** `Never sent` | The same error; no ghost appears; **Design…** then **Send to agent** with some text fails the same way and the request is not marked as sent: it stays in `$D/requests` and **Send to agent** works again later | ☐ |
+| H65 | Put `"trama.externalTerminalCommand": "xterm -e {command}"` in the **workspace** settings (`.vscode/settings.json`) and remove it from the user settings, click **Scan System** | The workspace value is ignored: the detected terminal opens, not `xterm`. Put it in the user settings instead: a new `xterm` window runs the command and stays open. Remove it again | ☐ |
+| H66 | With `$TERMINAL` unset on Linux, `xdg-terminal-exec` and `x-terminal-emulator` absent and none of the listed terminals on the `PATH` (for example start the editor with `PATH=/usr/bin/nonexistent`), click **Scan System** | Error `Trama could not open an external terminal: no terminal was found; set trama.externalTerminalCommand. The instruction was copied to the clipboard.` | ☐ |
+| H67 | 🔍 Open the demo through Remote - SSH, WSL or a container, click **Scan System** | Error `Trama could not open an external terminal: external terminals are not available in a remote workspace. The instruction was copied to the clipboard.` | ☐ |
+| H68 | 🔍 With kitty detected (`TERMINAL=kitty`), click **Scan System** with S2x, wait for the end, click it again, then wait and click **Quick request…** `Named apart` | The first click opens a kitty window titled `Scan`, started with remote control on its own socket. The second writes the instruction into **the same window**, which shows both runs one after the other and a second prompt; no new window opens. `echo $TRAMA_TERMINAL` there still prints the same six characters, and `$M` holds no marker once each run ended. The design request has another name: a new window titled `Design` opens without a warning and the `Scan` window stays open | ☐ |
+| H69 | 🔍 With the `Design` window of H68 free, close it by hand and click **Quick request…** `Closed by hand` | A new kitty window opens and the warning `Trama could not reuse the external terminal window: <reason>. A new window was opened.` appears with no buttons. If the kitty process itself is gone the reason is the scripting's error; if only the window was closed, kitty's `send-text` reports no error, so look at what you get and write it in the defect log | ☐ |
+| H70 | 🔍 Repeat H68 with WezTerm (`TERMINAL=wezterm`) and, on macOS, with Terminal.app; then with any other terminal (for example `TERMINAL=xterm`) and with `trama.externalTerminalCommand` set | WezTerm and Terminal.app reuse the free window as kitty does, only for the same name; the Terminal.app window is titled `Scan`, then `Design`. With any other terminal, or with the command set, every click opens a new window and no warning appears | ☐ |
+
+After H55, H57 and H62, restore S2 (settings back to `echo {prompt}`, no launcher) and remove `trama.ntfy`, `trama.externalTerminalCommand` and the stand-in server.
+
+### H71–H78. Agent terminal as an editor tab
+
+Written from the Requirements for the `terminal-tab` launcher; the rows have not been run yet, so note what you see even when it matches. A settings file with the launcher: `printf '{"trama.agentLauncher": "terminal-tab", "trama.agentCommand": "echo {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (**S2t**), then reload the window. A slow agent: the same with `"trama.agentCommand": "sleep 30; echo {prompt}"` (**S2u**). Open the Trama panel alone in one editor group before each row.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| H71 | Set S2t, reload, click in the panel's search box (or any editor), then Board: **Scan System** | A tab titled `Scan` opens in a new editor group beside the panel's and prints `Use the trama-scan skill on the whole System.`; it does **not** take the focus: the keyboard stays where it was. The panel stays visible; the terminal area gets **no** `Scan` terminal. `echo $TRAMA_AGENT` in the tab prints `1` | ☐ |
+| H72 | Click on the panel, then **Scan System** again (the first command has ended) | No new tab: the same tab comes to the front of its group, without taking the focus, and prints the line a second time | ☐ |
+| H73 | Set S2u, reload, **Scan System**, then **Scan System** again while the first command runs | A second `Scan` tab opens in the **same** group as the first, not in a third group; the first tab is left alone. Each tab's end is counted as with the integrated terminal (the ntfy notice of H24, taken Tasks back to To do as in H56). Then, with both ended, **Run all To do**: a tab titled `All tasks` opens in the same group; the `Scan` tabs stay open | ☐ |
+| H74 | With S2u, close every agent tab and the group of H73, click **Scan System**, then close the group of the new tab while it runs and click **Scan System** again | Each time a new group opens beside the active one, since the previous tab's group is gone | ☐ |
+| H75 | With S2u, **Quick request…** `Tabbed request`, then close the tab while the command runs | The `Tabbed request` ghost appears at once and is withdrawn when the tab closes, as when the integrated terminal closes; the next **Scan System** opens a new tab beside the active group | ☐ |
+| H76 | Drag the `Scan` tab of H71 into another group, then click **Scan System** twice with S2u | The second new tab opens in the group where Trama had opened the first one, not where you dragged it: Trama does not follow a moved tab | ☐ |
+| H77 | Remove `trama.agentLauncher` from the settings (`auto`), reload, **Scan System** in VS Code; then open the demo in Cursor and click it with `"trama.agentLauncher": "auto"` | VS Code: the `Scan` terminal opens in the terminal area, never as a tab. Cursor: the instruction goes to the chat, never to a tab | ☐ |
+| H78 | With S2t, turn **Multi-branch** on, set `trama.worktreeAgent` in the user settings and approve a Proposal | The worktree's `Trama agent` terminal opens in the terminal area, not as a tab | ☐ |
+
+After H71–H78, restore S2 and turn Multi-branch off.
 
 ---
 
@@ -639,7 +686,7 @@ Switch modes with the script, from the repo (it works from any shell, fish inclu
 | I4 | Ask it to run `trama board` | The same board as S5 | ☐ |
 | I5 | Let the scan finish. In the verification shell: `j board` | Tasks 0005 to 0008 were created (about four, one per Machine or group of States; the demo has no code, so everything not covered by Tasks 0001 to 0004 is missing) and **no Drift**. **Proposals 0001 and 0002 are still open**: the agent must not have run `proposal approve`, `proposal reject` or `drift resolve`. `j validate` is still valid and `.trama/model/` is unchanged. Ran against a real omp: passed | ☐ |
 | I6 | While the scan runs watch the board | The new Tasks appear in To do by themselves while the agent works (seen: 2 to 5 cards after about 27 s, 6 after 33 s). Ran against a real omp: passed | ☐ |
-| I7 | While omp is still running in the terminal, click **Scan System** again | A **new** terminal named `Trama agent` opens and runs the command there; the running omp receives nothing. (Before this was fixed the command line was typed into omp as a message.) Once every command has finished, the next launch reuses the last terminal instead of opening another. Reproduced the old bug twice and verified the fix with a slow command; not yet repeated with omp itself | ☐ |
+| I7 | While omp is still running in the terminal, click **Scan System** again | A **new** terminal named `Scan` opens and runs the command there; the running omp receives nothing. (Before this was fixed the command line was typed into omp as a message.) Once every command has finished, the next launch with the same name reuses the last terminal instead of opening another. Reproduced the old bug twice and verified the fix with a slow command; not yet repeated with omp itself | ☐ |
 | I8 | Quit omp. **Quick request…** with `Orders can also be returned` | omp reads the `trama-design` skill and explores the Model. Because Proposal 0001 already covers part of this, it asks you with a menu (options such as replacing or extending 0001) and **waits for your answer**. Pick an option; omp then writes a Proposal that appears in To decide as soon as the file exists, with its changes listed. Ran against a real omp as far as the question; the answer and the new Proposal still need a human | ☐ |
 | I9 | ↻ (Task 0002 must be in To do: **Run** only exists on To do cards). Quit omp, then Board: **Run** on Task 0002 | The terminal shows `… omp 'Use the trama-implement skill on Task 0002.'`. omp reads the Task (`trama task show 0002`) and moves it to In progress. The demo has no code and no stack, so it asks you what to build with and, if you do not answer, puts the Task back in To do. Nothing is written in `.trama/model/`. Ran against a real omp: passed up to that point | ☐ |
 
@@ -693,18 +740,24 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| M1 | Click the **Requirements** tab | Two Areas, **Data** (`requirements/data`) and **Interface** (`requirements/ui`), each with its italic "Use when…" line, its sections and **Open file**. The Proposal selector is disabled (no open Proposal touches Requirements) | ☐ |
+| M1 | Click the **Requirements** tab | Two Areas, **Data** (`requirements/data`) and **Interface** (`requirements/ui`), each with its italic "Use when…" line and **Open file**, then one fragment group **main.md** (title, file name in grey, its italic description, a small **Open file** link) holding the sections, General first. The Proposal selector is disabled (no open Proposal touches Requirements) | ☐ |
 | M2 | Click the section title **order/Paid** | The Diagram opens on `order` with Paid selected; the panel ends with **Requirements → Interface** and the two Paid lines | ☐ |
 | M3 | In the panel, click **Interface** | The Requirements tab shows only `order/Paid`, with "Showing requirements/ui#order/Paid" and **Show all** | ☐ |
 | M4 | Verification shell: `j state order/Preparing` | Ends with `## Requirements`: `requirements/ui#order/Paid (via order/Paid)`, `requirements/data#order (via order)`, `requirements/ui#checkout (via checkout)` | ☐ |
-| M5 | `ls /tmp/trama-demo/shop/.agents/skills` after `j skills update` | `trama-req-data` and `trama-req-ui` next to the three Trama skills; `trama-req-ui/SKILL.md` has `description: Use when building or changing screens…` | ☐ |
+| M5 | `ls /tmp/trama-demo/shop/.agents/skills` after `j skills update` | `trama-req-data-main` and `trama-req-ui-main` next to the Trama skills; `trama-req-ui-main/SKILL.md` has `description: Use when building or changing screens…`. The output has the line `Requirement skills: one skill per fragment (budget <n>/4000 characters).` | ☐ |
 | M5b | `mkdir /tmp/trama-demo/shop/.agents/skills/trama-fix` with a file inside, and the same under `.claude/skills`, then `j skills update` | The output has a line `Deleted the retired trama-fix skill:` naming both folders; neither exists any more. Running it again prints no `Deleted` line. In the editor, **Trama: Update Agent Skills** shows the same line in its notification | ☐ |
-| M6 | Edit `.trama/requirements/ui.md` by hand: change "Mobile first" to "Mobile first, always" and save | Within a second `.agents/skills/trama-req-ui/SKILL.md` says "Mobile first, always". The Requirements tab shows the new text | ☐ |
-| M7 | Append `## order/Lost` and a line to `ui.md`, save | The yellow bar: "The Model or its Requirements have 1 validation error"; the link `requirements/ui.md:<line>` opens `ui.md`. Remove the section again: the bar disappears | ☐ |
-| M8 | `j proposal new "Blue badge"`, then `j proposal edit <id> requirements/ui.md`, change "green" to "blue" in the printed file and `j proposal submit <id>` | On the Board the submitted card lists `requirements/ui.md ~1` and has **View requirements**, not **View on diagram** | ☐ |
+| M6 | Edit `.trama/requirements/ui/main.md` by hand: change "Mobile first" to "Mobile first, always" and save | Within a second `.agents/skills/trama-req-ui-main/SKILL.md` says "Mobile first, always". The Requirements tab shows the new text | ☐ |
+| M7 | Append `## order/Lost` and a line to `ui/main.md`, save | The yellow bar: "The Model or its Requirements have 1 validation error"; the link `requirements/ui/main.md:<line>` opens the fragment. Remove the section again: the bar disappears | ☐ |
+| M8 | `j proposal new "Blue badge"`, then `j proposal edit <id> requirements/ui/main.md`, change "green" to "blue" in the printed file and `j proposal submit <id>` | On the Board the submitted card lists `requirements/ui/main.md ~1` and has **View requirements**, not **View on diagram**. `j proposal show <id>` labels the file with Area `ui` and fragment `main` | ☐ |
 | M9 | Click **View requirements** | Requirements tab with the Proposal selected: `order/Paid` has a **changed** badge, the old text struck through above the new one | ☐ |
 | M10 | `j proposal edit <id> checkout/order.md`, delete the `### Paid` State and its sub-States in the printed file, then `j validate --proposal <id>` and `j proposal submit <id>` | The edit withdraws it into Draft. Both commands fail with the missing State and Requirement errors; it is absent from the selectors and decision count | ☐ |
-| M11 | `j proposal discard <id>` | The Draft is discarded; `ui.md` and the skill unchanged | ☐ |
+| M11 | `j proposal discard <id>` | The Draft is discarded; `ui/main.md` and the skill unchanged | ☐ |
+| M12 | `j proposal new "Order screens"`; `j proposal edit <id> requirements/ui/main.md` and remove the `## order/Paid` section; `j proposal edit <id> requirements/ui/orders.md` and write a front matter `description: Use when building the order screens.`, `# Order screens` and the `## order/Paid` section with "green" changed to "blue"; `j proposal submit <id>`; select it in the Requirements tab | Interface shows **main.md** without order/Paid, then **Order screens** `orders.md` with the badge **new fragment**; inside it `order/Paid` carries **moved from main** and **changed**, the old text struck through above the new one. `order/Paid` appears nowhere else | ☐ |
+| M13 | `j proposal edit <id> requirements/ui.md`, then `j proposal edit <id> requirements/ui/x/y.md` | Both are refused, saying Areas are folders and an Area has no subfolders | ☐ |
+| M14 | Reject the Proposal of M12. Append 1,300 lines `- A rule.` to `ui/main.md`, then `j validate` and `j analyze` | `validate` says the Model and its Requirements are valid, exits `0`, then `1 warning(s)…` naming `requirements/ui/main.md` with its size over 12288 (12 KB). `analyze` lists `[large-fragment] requirements/ui/main.md: …`. Undo the lines | ☐ |
+| M15 | Make the description of `ui/main.md` longer than 4,000 characters and run `j skills update` | `Requirement skills: one index skill per Area (budget <n>/4000 characters).` and `Switched from one skill per fragment to one index skill per Area.`; `.agents/skills` holds `trama-req-data` and `trama-req-ui` (with `SKILL.md` and `main.md`) and no `trama-req-*-main`. `j requirements ui` ends its header with ``Load: skill `trama-req-ui` ``. Restore the description and run it again: the fragment skills come back with `Switched from one index skill per Area to one skill per fragment.` | ☐ |
+| M16 | Migration: in the verification shell `rm -r $D/requirements/data && printf -- '---\ndescription: "Data."\n---\n# Data\n\nAll amounts.\n\n## order\nCents.\n' > $D/requirements/data.md`, then `j validate` | One error on `requirements/data.md` telling to run `trama skills update` | ☐ |
+| M17 | `j skills update`, then `ls $D/requirements/data` and `cat` both files | The output says `Converted 1 single-file Requirement Area(s) … : data`. `area.md` holds the description, `# Data` and `All amounts.`; `main.md` the same description and title with `## order` and `Cents.`; `requirements/data.md` is gone and `j validate` is clean. A Task referencing `requirements/data#order` still shows its text. Recreate a `requirements/data.md` next to the folder and run it again: `Left 1 single-file Requirement Area(s) as they were: data (requirements/data/ already exists)` | ☐ |
 
 ---
 
@@ -774,7 +827,34 @@ Run R1–R4 on **every new Cursor version** before declaring it supported (smoke
 | R5b | Have the agent run `trama task move 1 doing`, then let its turn end | Task 0001 goes back to To do, no longer marked `(agent working)` | ☐ |
 | R6 | With `trama.ntfy` set to the stand-in of H24, let a turn end normally and wait | One request: title `Trama: the agent stopped`, priority `3`, second line `The agent stopped and may be waiting for you.`. Sending a new prompt within 10 seconds sends nothing | ☐ |
 | R7 | Approve a Proposal with `trama.autoScan` on | A new chat starts the scan by itself, with no «Create chat with prompt» confirmation and no **Scan now** notice. Only if Cursor could only fall back, the notice `Trama: Proposal <id> was approved. Scan the Features it affects?` with **Scan now** appears instead, and nothing was put on the clipboard | ☐ |
-| R8 | Set `"trama.agentLauncher": "terminal"` and `"trama.agentCommand": "agent {prompt}"`, click **Scan System** | Cursor's CLI starts in the **Trama agent** terminal, as any terminal agent | ☐ |
+| R8 | Set `"trama.agentLauncher": "terminal"` and `"trama.agentCommand": "agent {prompt}"`, click **Scan System** | Cursor's CLI starts in the **Scan** terminal, as any terminal agent | ☐ |
+
+## U. Short numbers
+
+Start each block with ↻. `$D` and `j` are the ones of S4.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| U1 | `j task list` | `To do`: `T1 Implement refunds for prepared orders`, `T2 Payment declined email`; `In progress`: `T3 Cart confirmation`; `Done`: `0004 Upgrade dependencies`. Each card shows its number or its identity, never both | ☐ |
+| U2 | `j --json task list` | Every Task has `id` (the permanent identity, `"0001"` …) and `number` (`"T1"`, `"T2"`, `"T3"`); Task `0004` has an `id` and no number. The same holds for `j --json proposal list --all` (`P1`, `P2`) and `j --json drift list --all` (`D1`, `D2`) | ☐ |
+| U3 | `cat $D/short-numbers/assigned` and `cat $D/short-numbers/.gitignore` | One line per live card, `<kind> <identity> <number>`: `proposal 0001 1`, `proposal 0002 2`, `drift 0001 1`, `drift 0002 2`, `task 0001 1`, `task 0002 2`, `task 0003 3` (in any order), and no line for Task `0004`. The `.gitignore` holds only `*`. No number appears in any file under `$D/tasks`, `$D/drifts` or `$D/proposals` (`grep -rn 'T1\|D1\|P1' $D/tasks $D/drifts $D/proposals` finds no card number) | ☐ |
+| U4 | `j task show T1`, then `j task show t1`, then `j task show 0001` | The same Task three times. The heading names it by its number `T1` | ☐ |
+| U5 | `j task move T1 doing`, then `ls $D/tasks` and `sed -n 1,8p $D/tasks/0001-*.md` | Task `0001` moved to In progress; the file kept its name and holds no `T1` | ☐ |
+| U6 | `j proposal show T1`, `j drift show T1`, `j task show P1` | Each is refused, changes nothing and says why: `T1` is a Task, not a Proposal or a Drift; `P1` is a Proposal, not a Task | ☐ |
+| U7 | `j task show T99`, `j task move T99 done`, `j proposal show P99` | Each is refused, changes nothing and says that no live card of that kind has that number | ☐ |
+| U8 | `j task show 0004` | Task `0004` is found by its identity, although it is Done and has no number | ☐ |
+| U9 | `j task move T2 done`, then `j task list` and `cat $D/short-numbers/assigned` | Task `0002` is listed in Done by its identity and has lost its line; `T1` and `T3` keep their numbers | ☐ |
+| U10 | `j task new "Extra" --technical --ref requirements/ui#General` | The new Task takes the lowest free number, `T2`, which Task `0002` released. `j task list` shows it as `T2` in To do | ☐ |
+| U11 | `j task move 0004 todo` | Task `0004` leaves Done and takes the lowest free number, `T4` | ☐ |
+| U12 | `j proposal reject P1 --feedback x` (with `TRAMA_AGENT` and `CURSOR_AGENT` unset) | Proposal `0001` is rejected. `j proposal list --all` shows it by its identity `0001`, with no number, and Proposal `P2` keeps its number. `j drift resolve D1 --dismiss` behaves the same way for the Drift | ☐ |
+| U13 | Follow G8b to the end (rework of the stale Proposal of Drift `D2`, naming the new Proposal by its short number), then `grep -rn 'Replaced by' $D/proposals` | The rejected Proposal's feedback reads `Replaced by Proposal <identity>` with the permanent identity, never a `P…` number | ☐ |
+| U14 | ↻, then `rm $D/short-numbers/assigned` and `j task list` | No error. The live cards get their numbers again in creation order (`T1`, `T2`, `T3`, as in U1) and `assigned` exists again | ☐ |
+| U15 | Write a line twice: add `task 0003 1` to `assigned` with `echo 'task 0003 1' >> $D/short-numbers/assigned`, then `j task list` | No error and no duplicate number among the Tasks; the numbers were rebuilt from zero in creation order | ☐ |
+| U16 | Board: read the badge of `0001` in To do and of `0004` in Done | The live Task shows `T…` and the Done Task shows its eight-character or four-digit identity, in the same place, in the same monospaced font; never both on one card | ☐ |
+| U17 | Hover each, and read the accessible name (DevTools, Accessibility) | Tooltip and name are `Short number (temporary)` for the number and `Permanent ID` for the identity | ☐ |
+| U18 | Read the buttons of a Proposal in To decide | Their text uses the number: `Approves Proposal P1 and changes the Model to match` (tooltip), not the identity | ☐ |
+| U19 | Run **Trama: Update Agent Skills**, then `grep -l 'Never write a short number in a file' /tmp/trama-demo/shop/.agents/skills/trama-*/SKILL.md` | Four files: `trama-design`, `trama-scan`, `trama-implement`, `trama-import` | ☐ |
+| U20 | Start a run of `trama-implement` on a Task (✓ with a real agent 🪙) and read its report | The agent names Tasks and Drifts as `Task T3 – title`, and every command it ran and every file it wrote uses the permanent identity: `ls $D/drifts` and the Task and Drift files hold no short number | ☐ |
 
 ---
 

@@ -1,5 +1,5 @@
-import { buildModel, flattenStates } from "./model";
-import { parseArea } from "./requirements";
+import { flattenStates } from "./model";
+import { AREA_FILE, parseRequirementDoc } from "./requirements";
 import { REQUIREMENTS_PREFIX } from "./store";
 import { parseActor, parseDocument, parseMachine } from "./parse";
 import type { Actor, Diagnostic, EventDecl, Machine } from "./types";
@@ -9,6 +9,8 @@ export interface FileChange {
   change: "added" | "removed" | "modified";
   /** Human-readable structural changes; `+` added, `-` removed, `~` changed. */
   details: string[];
+  /** For a Requirement file: its Area, and its fragment, or null for the Area's own `area.md`. */
+  requirement?: { area: string; fragment: string | null };
 }
 
 type Parsed = { kind: "machine"; value: Machine } | { kind: "actor"; value: Actor } | { kind: "doc"; name: string; description: string };
@@ -84,23 +86,22 @@ function diffMachines(before: Machine | undefined, after: Machine | undefined, o
   diffEvents(before?.events ?? [], after?.events ?? [], out);
 }
 
-/** Sections added, removed or changed between two versions of a Requirement Area. */
+/** Sections added, removed or changed between two versions of an Area's `area.md` or of one of its fragments. */
 function diffArea(path: string, before: string | undefined, after: string | undefined, out: string[]) {
-  const empty = buildModel(new Map());
-  const parse = (content: string | undefined) => (content === undefined ? undefined : parseArea("", path, content, empty, []));
+  const parse = (content: string | undefined) => (content === undefined ? undefined : parseRequirementDoc(path, content, []));
   const a = parse(before);
   const b = parse(after);
-  const title = (ref: string | null) => ref ?? "General";
-  const was = new Map((a?.sections ?? []).map((s) => [title(s.ref).toLowerCase(), s]));
-  const is = new Map((b?.sections ?? []).map((s) => [title(s.ref).toLowerCase(), s]));
+  const was = new Map((a?.sections ?? []).map((s) => [s.heading.toLowerCase(), s]));
+  const is = new Map((b?.sections ?? []).map((s) => [s.heading.toLowerCase(), s]));
+  if (a && b && a.title !== b.title) out.push(`~ title: "${a.title}" → "${b.title}"`);
   if (a && b && a.description !== b.description) out.push("~ description changed");
-  if (a && b && a.intro !== b.intro) out.push("~ text before the sections changed");
+  if (a && b && a.intro !== b.intro) out.push("~ introduction changed");
   for (const [key, s] of is) {
     const o = was.get(key);
-    if (!o) out.push(`+ Requirements for ${title(s.ref)}`);
-    else if (o.text !== s.text) out.push(`~ Requirements for ${title(s.ref)}`);
+    if (!o) out.push(`+ Requirements for ${s.heading}`);
+    else if (o.text !== s.text) out.push(`~ Requirements for ${s.heading}`);
   }
-  for (const [key, s] of was) if (!is.has(key)) out.push(`- Requirements for ${title(s.ref)}`);
+  for (const [key, s] of was) if (!is.has(key)) out.push(`- Requirements for ${s.heading}`);
 }
 
 export function diffFile(path: string, before: string | undefined, after: string | undefined): FileChange {
@@ -108,7 +109,9 @@ export function diffFile(path: string, before: string | undefined, after: string
   const details: string[] = [];
   if (path.startsWith(REQUIREMENTS_PREFIX)) {
     diffArea(path, before, after, details);
-    return { path, change, details };
+    const [area, file] = path.slice(REQUIREMENTS_PREFIX.length).split("/") as [string, string | undefined];
+    const fragment = file === undefined || file === AREA_FILE ? null : file.replace(/\.md$/, "");
+    return { path, change, details, requirement: { area: area.replace(/\.md$/, ""), fragment } };
   }
   const a = before === undefined ? undefined : parseFile(path, before);
   const b = after === undefined ? undefined : parseFile(path, after);

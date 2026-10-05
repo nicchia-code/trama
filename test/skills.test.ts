@@ -88,3 +88,13 @@ test("trama-implement reads each Task once from task show and checks the run onc
   expect(skill).not.toContain("load the `trama-req-");
   expect(skill).not.toContain("Understand the surroundings");
 });
+
+test("the four skills name cards by short number and title but write only the permanent identity", () => {
+  for (const name of ["trama-design", "trama-scan", "trama-implement", "trama-import"]) {
+    const skill = SKILLS[`${name}/SKILL.md`] as string;
+    expect(skill).toContain("## Naming cards");
+    expect(skill).toContain("by short number and title");
+    expect(skill).toContain("use **only the permanent identity**");
+    expect(skill).toContain("**Never write a short number in a file**");
+  }
+});

@@ -1,5 +1,6 @@
 import { type ProjectModel, lineageRefs, parseRequirementRef } from "./requirements";
 import { type Element, resolveRef } from "./refs";
+import type { ShortNumbers } from "./short-numbers";
 import type { Drift, Task } from "./work";
 
 /** Why a Task is blocked: an open Drift blocks it, or it waits for the Task that fixes the code of its own Drift. */
@@ -81,8 +82,12 @@ export function computeBlocked(project: ProjectModel, tasks: Task[], drifts: Dri
   return blocked;
 }
 
-/** What the agent is told when it tries to start a blocked Task: each blocker by ID and title, and whose decision it is. */
-export function refusalFor(task: Task, blockers: Blocker[]): string {
-  const why = blockers.map((b) => (b.kind === "drift" ? `Drift ${b.drift} "${b.title}"` : `Task ${b.task} "${b.title}", which fixes the code for Drift ${b.drift}`));
-  return `Task ${task.id} is blocked, so it was not started: it is blocked by ${why.join("; ")}. The developer must decide.`;
+/** What the agent is told when it tries to start a blocked Task: each blocker by name (short number, else identity) and title, and whose decision it is. */
+export function refusalFor(task: Task, blockers: Blocker[], numbers: ShortNumbers): string {
+  const why = blockers.map((b) =>
+    b.kind === "drift"
+      ? `Drift ${numbers.name("drift", b.drift)} "${b.title}"`
+      : `Task ${numbers.name("task", b.task)} "${b.title}", which fixes the code for Drift ${numbers.name("drift", b.drift)}`,
+  );
+  return `Task ${numbers.name("task", task.id)} is blocked, so it was not started: it is blocked by ${why.join("; ")}. The developer must decide.`;
 }

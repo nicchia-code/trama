@@ -1,4 +1,5 @@
-import type { AreaView, SectionView, Snapshot } from "../../../../src/core/snapshot";
+import { cardLabel, noNumbers } from "../../../../src/core/card-names";
+import type { AreaView, FragmentView, SectionView, Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
 import { renderMarkdown } from "../markdown";
 import type { MountView } from "../types";
@@ -8,6 +9,7 @@ import css from "./requirements.css" with { type: "text" };
 
 const CHANGE_LABEL: Record<SectionView["change"], string> = { added: "added", removed: "removed", changed: "changed", same: "" };
 const AREA_LABEL: Record<AreaView["change"], string> = { added: "new Area", removed: "Area removed", modified: "", same: "" };
+const FRAGMENT_LABEL: Record<FragmentView["change"], string> = { added: "new fragment", removed: "fragment removed", modified: "", same: "" };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -64,7 +66,7 @@ export const mountRequirements: MountView = (root, context) => {
   function renderToolbar() {
     if (!snapshot) return;
     select.replaceChildren(new Option("None", ""));
-    for (const p of snapshot.proposals.filter((x) => x.areas.length > 0)) select.append(new Option(`${p.id} ${p.title}`, p.id));
+    for (const p of snapshot.proposals.filter((x) => x.areas.length > 0)) select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} ${p.title}`, p.id));
     select.value = proposalId ?? "";
     select.disabled = select.options.length === 1;
     filterBox.replaceChildren();
@@ -81,6 +83,7 @@ export const mountRequirements: MountView = (root, context) => {
     const head = el("div", "rq-section-head");
     if (section.ref === null) head.append(el("span", "rq-section-title", "General"));
     else head.append(button(section.ref, "rq-ref", `Show ${section.ref} on the diagram`, () => context.navigate("diagram", { ref: section.ref ?? undefined })));
+    if (section.movedFrom !== null) head.append(el("span", "rq-badge moved", `moved from ${section.movedFrom}`));
     if (CHANGE_LABEL[section.change]) head.append(el("span", `rq-badge ${section.change}`, CHANGE_LABEL[section.change]));
     node.append(head);
     if (section.change === "changed" && section.before !== null) node.append(markdown(section.before, context.openLink, "rq-text rq-before"));
@@ -89,11 +92,26 @@ export const mountRequirements: MountView = (root, context) => {
     return node;
   }
 
+  function fragmentNode(area: AreaView, fragment: FragmentView, sections: SectionView[]): HTMLElement {
+    const group = el("section", `rq-fragment ${fragment.change}`);
+    const head = el("header", "rq-fragment-head");
+    head.append(el("h3", "rq-fragment-title", fragment.title || fragment.id), el("span", "rq-fragment-file", `${fragment.id}.md`));
+    if (FRAGMENT_LABEL[fragment.change]) head.append(el("span", `rq-badge ${fragment.change}`, FRAGMENT_LABEL[fragment.change]));
+    if (fragment.change !== "removed") head.append(el("span", "rq-spacer"), button("Open file", "rq-link", `Open .trama/${fragment.file}`, () => context.post({ type: "openFile", path: fragment.file })));
+    group.append(head);
+    if (fragment.description) group.append(markdown(fragment.description, context.openLink, "rq-text rq-when"));
+    if (sections.length === 0) group.append(el("p", "rq-muted", "No Requirements in this fragment yet."));
+    for (const s of sections) group.append(sectionNode(area, s));
+    return group;
+  }
+
   function areaNode(area: AreaView): HTMLElement | null {
     const focus = target ? parseTarget(target) : null;
     if (focus?.area && focus.area !== area.id) return null;
-    const sections = visibleSections(area).filter((s) => !focus?.section || sectionMatches(s.ref, focus.section));
-    if (focus?.section && sections.length === 0) return null;
+    const fragments = area.fragments
+      .map((f) => ({ fragment: f, sections: visibleSections(f.sections).filter((s) => !focus?.section || sectionMatches(s.ref, focus.section)) }))
+      .filter((f) => !focus?.section || f.sections.length > 0);
+    if (focus?.section && fragments.length === 0) return null;
 
     const card = el("article", `rq-area ${area.change}`);
     const head = el("header", "rq-area-head");
@@ -103,9 +121,9 @@ export const mountRequirements: MountView = (root, context) => {
     head.append(el("span", "rq-spacer"), button("Open file", "trama-btn", `Open .trama/${area.file}`, () => context.post({ type: "openFile", path: area.file })));
     card.append(head);
     if (area.description) card.append(el("p", "rq-when", area.description));
+    if (area.fragments.length === 0) card.append(el("p", "rq-muted", "No fragments."));
     if (area.intro) card.append(markdown(area.intro, context.openLink, "rq-text"));
-    if (sections.length === 0) card.append(el("p", "rq-muted", "No Requirements yet. Write them in the file, or ask an agent with Design…"));
-    for (const s of sections) card.append(sectionNode(area, s));
+    for (const f of fragments) card.append(fragmentNode(area, f.fragment, f.sections));
     return card;
   }
 

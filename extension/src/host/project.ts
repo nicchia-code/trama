@@ -75,7 +75,8 @@ export async function initializeProject(): Promise<Project | undefined> {
 export function updateSkills(project: Project): void {
   const skillsDir = configuredSkillsDir();
   const { out } = run(["--root", project.root, "skills", "update", "--skills-dir", skillsDir], project.root);
-  const report = out.split("\n").filter((line, i) => i === 0 || line.startsWith("Deleted "));
+  const shown = ["Deleted ", "Converted ", "Left ", "Requirement skills: ", "Switched "];
+  const report = out.split("\n").filter((line, i) => i === 0 || shown.some((start) => line.startsWith(start)));
   void vscode.window.showInformationMessage(`Trama: ${report.join(" ")}`);
   installCursorHooks();
 }

@@ -90,6 +90,8 @@
 .board-dot.is-done { background: var(--vscode-testing-iconPassed, #73c991); border-color: var(--vscode-testing-iconPassed, #73c991); }
 .board-card-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .board-card-kind { font-size: 11px; font-weight: 600; color: var(--board-muted); font-variant-numeric: tabular-nums; }
+/* The short number or the identity of a card: one place, one monospaced font; the tooltip and the accessible name tell them apart. */
+.board-card-id { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; font-weight: 600; color: var(--board-muted); font-variant-numeric: tabular-nums; }
 .board-card-title { margin: 0; font-size: 1em; font-weight: 600; overflow-wrap: anywhere; }
 
 .board-badge {

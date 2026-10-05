@@ -4,6 +4,8 @@ A difference the agent found between the code and the Model, or between the code
 
 Un Drift nuovo nasce con un'identità propria, non presa da un contatore condiviso con gli altri, e ricorda l'istante in cui è stato creato. Quell'istante ne fissa il posto: il più vecchio prima. Due Drift creati nello stesso istante si ordinano per identità. Un Drift già numerato, che non ricorda l'istante, resta leggibile e sta prima di quelli che lo ricordano; fra i numerati l'ordine è il numero.
 
+Finché è aperto, un Drift ha anche un numero breve temporaneo, `D3`, che il developer usa per leggere la Board e per citarlo, al posto dell'identità permanente. Il Drift lo prende appena la copia di lavoro lo vede e lo libera quando è risolto, in qualunque modo; da quel momento si mostra con la sua identità permanente.
+
 A Drift is created Open by the agent and always points to at least one Model element or Requirement. A Drift the agent files while implementing a Task remembers that Task, its origin.
 
 A Drift always states two sides: what happens (what the code does) and what should happen (what the Model or the Requirement says). The developer always decides by keeping one of the two sides: keeping what should happen has the code fixed; keeping what happens means the Model is left to match the code, through the attached Proposal when there is one and by changing nothing when there is none. There is no way to leave a Drift without keeping a side.

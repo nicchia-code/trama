@@ -60,14 +60,30 @@ describe("proposalScope for Requirements", () => {
   });
 
   test("a change to an Area's description, introduction or General section affects every Feature", () => {
-    const area = "requirements/ui.md";
+    const area = "requirements/ui/area.md";
     expect(proposalScope(p, proposalEditing(area, (t) => t.replace("shown to customers", "shown to customers and couriers")))).toEqual(["billing", "checkout"]);
     expect(proposalScope(p, proposalEditing(area, (t) => t.replace("# Interface\n", "# Interface\n\nApplies everywhere.\n")))).toEqual(["billing", "checkout"]);
-    expect(proposalScope(p, proposalEditing(area, (t) => t.replace("- Mobile first;", "- Mobile first, always;")))).toEqual(["billing", "checkout"]);
+    expect(proposalScope(p, proposalEditing("requirements/ui/main.md", (t) => t.replace("- Mobile first;", "- Mobile first, always;")))).toEqual(["billing", "checkout"]);
   });
 
   test("a change to another section affects only the Features of the element it names", () => {
-    expect(proposalScope(p, proposalEditing("requirements/ui.md", (t) => `${t.trimEnd()}\n- One more rule.\n`))).toEqual(["checkout"]);
+    expect(proposalScope(p, proposalEditing("requirements/ui/main.md", (t) => `${t.trimEnd()}\n- One more rule.\n`))).toEqual(["checkout"]);
+  });
+
+  test("sections are compared by Area and reference whichever fragment holds them; fragment titles, descriptions and new fragments affect nothing", () => {
+    const split = newProposal(p, "Split");
+    const main = readFileSync(join(dir, ".trama/requirements/ui/main.md"), "utf8");
+    const [head, rest] = main.split("## General\n") as [string, string];
+    const [general, others] = rest.split("## checkout\n") as [string, string];
+    writeFileSync(editInProposal(p, split.id, "requirements/ui/main.md"), `${head.replace("# Interface", "# Screens").replace("shown to customers", "shown anywhere")}## checkout\n${others}`);
+    writeFileSync(editInProposal(p, split.id, "requirements/ui/general.md"), `---\ndescription: "Everywhere."\n---\n# Everywhere\n\n## General\n${general}`);
+    writeFileSync(editInProposal(p, split.id, "requirements/ui/empty.md"), `---\ndescription: "Nothing yet."\n---\n# Empty\n`);
+    expect(proposalScope(p, split.id)).toEqual([]);
+
+    const moved = newProposal(p, "Move and change General");
+    writeFileSync(editInProposal(p, moved.id, "requirements/ui/main.md"), `${head}## checkout\n${others}`);
+    writeFileSync(editInProposal(p, moved.id, "requirements/ui/general.md"), `---\ndescription: "Everywhere."\n---\n# Everywhere\n\n## General\n${general.replace("Mobile first", "Desktop first")}`);
+    expect(proposalScope(p, moved.id)).toEqual(["billing", "checkout"]);
   });
 });
 

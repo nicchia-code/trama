@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -91,20 +91,30 @@
           "enum": [
             "auto",
             "terminal",
+            "terminal-tab",
+            "external-terminal",
             "chat"
           ],
           "enumDescriptions": [
-            "The chat in Cursor, the terminal in every other editor. In Cursor `#trama.agentCommand#` is not needed.",
-            "Run `#trama.agentCommand#` in a terminal (omp, claude, codex, copilot CLI, Cursor's `agent`…).",
+            "The chat in Cursor, the integrated terminal in every other editor. In Cursor `#trama.agentCommand#` is not needed. Never the external terminal.",
+            "Run `#trama.agentCommand#` in the editor's integrated terminal (omp, claude, codex, copilot CLI, Cursor's `agent`…).",
+            "Run `#trama.agentCommand#` in the editor's integrated terminal, opened as an editor tab beside the active one.",
+            "Run `#trama.agentCommand#` in a window of your system's default terminal, outside the editor (Linux and macOS only, and only for a project opened locally).",
             "Send the prompt to the agent chat built into the editor. In Cursor a new chat sends it by itself; if Cursor does not allow that, the chat waits for your confirmation and Enter, or the prompt is copied to the clipboard. In VS Code it goes to Copilot's chat, or to the clipboard if the chat is not available."
           ],
           "default": "auto",
-          "markdownDescription": "Where the Design, Scan and Run buttons send their prompt. `auto` (the default) uses the chat in Cursor and the terminal elsewhere; choosing `terminal` or `chat` always wins."
+          "markdownDescription": "Where the Design, Scan and Run buttons send their prompt. `auto` (the default) uses the chat in Cursor and the integrated terminal elsewhere; `terminal` is the editor's integrated terminal; `terminal-tab` is the editor's integrated terminal, opened as an editor tab beside the active one; `external-terminal` is a window of your system's default terminal, outside the editor (Linux and macOS only); `chat` is the agent chat built into the editor. Choosing `terminal`, `terminal-tab`, `external-terminal` or `chat` always wins."
+        },
+        "trama.externalTerminalCommand": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Command that opens the external terminal when `#trama.agentLauncher#` is `external-terminal`, instead of the detected one. `{command}` is replaced by the agent's command line, which is appended if `{command}` is missing; for example `alacritty -e {command}`. Empty (the default) detects your system's terminal. With a value set, every instruction opens a new window. It only applies in your user settings."
         },
         "trama.autoScan": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "After you approve a Proposal, launch the agent to Scan the Features it touched. With the terminal launcher it only applies when `#trama.agentCommand#` is set."
+          "markdownDescription": "After you approve a Proposal, launch the agent to Scan the Features it touched. With a terminal launcher (integrated or external) it only applies when `#trama.agentCommand#` is set."
         },
         "trama.skillsDir": {
           "type": "string",

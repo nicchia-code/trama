@@ -5,6 +5,8 @@ import { TramaError } from "./errors";
 import { approveProposal, getProposal, health, type Proposal, rejectProposal } from "./proposals";
 import { loadProject, parseRequirementRef, resolveProjectRef } from "./requirements";
 import { boolField, createdField, enumField, enumOrNull, idField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
+import { cardName, identityOfShortNumber, syncShortNumbers } from "./short-numbers";
+import { roundWorktrees } from "./worktree-round";
 import {
   compareByCreation,
   createdNow,
@@ -140,9 +142,10 @@ export function listTasks(p: Project): Task[] {
     .sort((a, b) => compareByCreation({ id: a.id, created: a.data.created }, { id: b.id, created: b.data.created }));
 }
 
-/** The Task `id` names. `asArgument` applies the command rules: digits cite only a numbered Task. */
+/** The Task `id` names. `asArgument` applies the command rules: digits cite only a numbered Task, and a short number (`T3`) cites the live Task that has it. */
 export function getTask(p: Project, id: string, asArgument = false): Task {
-  return load(tasksDir(p), findCard(tasksDir(p), id, "Task", "file", asArgument), parseTask);
+  const cited = asArgument ? identityOfShortNumber(p, "task", id) : null;
+  return load(tasksDir(p), findCard(tasksDir(p), cited ?? id, "Task", "file", asArgument && cited === null), parseTask);
 }
 
 export function newTask(
@@ -152,9 +155,10 @@ export function newTask(
   checkTaskRefs(input.technical, input.refs);
   checkRefs(p, input.refs);
   const drift = input.drift ? getDrift(p, input.drift).id : null;
-  // The Proposal must exist, but a Technical Task is never part of a design, so it keeps no link to it.
+  // The Proposal must exist, but a Technical Task is never part of a design, so it keeps no link to it,
+  // unless it fixes a Drift: then it belongs to the design of the Task the Drift came from.
   const linked = input.proposal ? getProposal(p, input.proposal).id : null;
-  const proposal = input.technical ? null : linked;
+  const proposal = input.technical && drift === null ? null : linked;
   const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift, proposal, agent: false, created: createdNow() };
   const task = create(tasksDir(p), input.title, data, input.body ?? "", "Task");
   deliverCard(p, input.announcement, "task");
@@ -176,11 +180,13 @@ export function moveTask(p: Project, id: string, column: string, by: Mover): Tas
   if (!COLUMNS.includes(column as Column))
     throw new TramaError(`Unknown column "${column}" (expected ${COLUMNS.join(", ")})`);
   const task = getTask(p, id);
-  if (by === "developer" && task.data.agent)
-    throw new TramaError(`The agent is working on Task ${task.id}, so it cannot be moved. Take it back first with "trama task take-back ${task.id}".`);
+  if (by === "developer" && task.data.agent) {
+    const name = cardName(p, "task", task.id);
+    throw new TramaError(`The agent is working on Task ${name}, so it cannot be moved. Take it back first with "trama task take-back ${name}".`);
+  }
   if (by === "agent" && column === "doing") {
     const blockers = blockedTasks(p).get(task.id);
-    if (blockers) throw new TramaError(refusalFor(task, blockers));
+    if (blockers) throw new TramaError(refusalFor(task, blockers, syncShortNumbers(p)));
   }
   task.data.column = column as Column;
   if (by === "agent") task.data.agent = column === "doing";
@@ -212,7 +218,7 @@ export function nextTask(p: Project, proposal?: string): RunQueue {
 /** The developer's decision to get a Task back from the agent: the mark is cleared and the Task stays In progress. */
 export function takeBackTask(p: Project, id: string): Task {
   const task = getTask(p, id);
-  if (!task.data.agent) throw new TramaError(`The agent has not taken Task ${task.id}`);
+  if (!task.data.agent) throw new TramaError(`The agent has not taken Task ${cardName(p, "task", task.id)}`);
   task.data.agent = false;
   saveItem(task.path, task.data, task.body);
   return task;
@@ -235,9 +241,25 @@ export function listDrifts(p: Project): Drift[] {
     .sort((a, b) => compareByCreation({ id: a.id, created: a.data.created }, { id: b.id, created: b.data.created }));
 }
 
-/** The Drift `id` names. `asArgument` applies the command rules: digits cite only a numbered Drift. */
+/**
+ * The Tasks and Drifts born in each worktree of the round. A worktree starts from a commit of the open folder and holds
+ * copies of its Tasks and Drifts: those belong to the open folder, not to the round.
+ */
+export function roundWork(p: Project): { proposal: string; project: Project; tasks: Task[]; drifts: Drift[] }[] {
+  const ownTasks = new Set(listTasks(p).map((t) => t.id));
+  const ownDrifts = new Set(listDrifts(p).map((d) => d.id));
+  return roundWorktrees(p).map(({ proposal, project }) => ({
+    proposal,
+    project,
+    tasks: listTasks(project).filter((t) => !ownTasks.has(t.id)),
+    drifts: listDrifts(project).filter((d) => !ownDrifts.has(d.id)),
+  }));
+}
+
+/** The Drift `id` names. `asArgument` applies the command rules: digits cite only a numbered Drift, and a short number (`D3`) cites the live Drift that has it. */
 export function getDrift(p: Project, id: string, asArgument = false): Drift {
-  return load(driftsDir(p), findCard(driftsDir(p), id, "Drift", "file", asArgument), parseDrift);
+  const cited = asArgument ? identityOfShortNumber(p, "drift", id) : null;
+  return load(driftsDir(p), findCard(driftsDir(p), cited ?? id, "Drift", "file", asArgument && cited === null), parseDrift);
 }
 
 const HAPPENS_HEADING = "What happens";
@@ -360,14 +382,14 @@ function fixTaskBody(drift: Drift, option: DriftOption | null, note: string | nu
 }
 
 /** The option the developer chose for a Drift that has options, or none for one that has none. Refuses a missing or unknown number, and an option for a Drift without options. */
-function chosenOption(drift: Drift, option: number | undefined): DriftOption | null {
+function chosenOption(p: Project, drift: Drift, option: number | undefined): DriftOption | null {
   const options = driftOptions(drift);
   if (options.length === 0) {
-    if (option !== undefined) throw new TramaError(`Drift ${drift.id} has no fix options: fix its code without choosing one`);
+    if (option !== undefined) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has no fix options: fix its code without choosing one`);
     return null;
   }
   const chosen = option === undefined || !Number.isInteger(option) ? undefined : options[option - 1];
-  if (!chosen) throw new TramaError(`An option must be chosen to fix the code of Drift ${drift.id}: give its number, from 1 to ${options.length}`);
+  if (!chosen) throw new TramaError(`An option must be chosen to fix the code of Drift ${cardName(p, "drift", drift.id)}: give its number, from 1 to ${options.length}`);
   return chosen;
 }
 
@@ -378,19 +400,22 @@ function chosenOption(drift: Drift, option: number | undefined): DriftOption | n
  */
 export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-proposal" | "dismiss", skillsDirs: string[] = [], choice: FixChoice = {}): Drift {
   const drift = getDrift(p, id);
-  if (drift.data.status !== "open") throw new TramaError(`Drift ${drift.id} is already resolved`);
+  if (drift.data.status !== "open") throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is already resolved`);
   const note = choice.note?.trim() || null;
   if (how !== "fix-code" && (choice.option !== undefined || note !== null))
-    throw new TramaError(`Drift ${drift.id}: ${choice.option !== undefined ? "an option" : "a note"} only goes with fixing the code, not with ${how === "dismiss" ? "dismissing" : "accepting the Proposal"}`);
+    throw new TramaError(`Drift ${cardName(p, "drift", drift.id)}: ${choice.option !== undefined ? "an option" : "a note"} only goes with fixing the code, not with ${how === "dismiss" ? "dismissing" : "accepting the Proposal"}`);
   if (how === "fix-code") {
-    const option = chosenOption(drift, choice.option);
+    const option = chosenOption(p, drift, choice.option);
     // A Drift that only contradicts Requirements changes no behaviour, so its Task is technical.
     const touchesModel = drift.data.refs.some((r) => parseRequirementRef(r) === null);
+    // The fix belongs to the design of the Task the Drift came from, if any, even when it is technical.
+    const origin = drift.data.origin ? getTask(p, drift.data.origin) : null;
     const task = newTask(p, {
       title: `Fix code to match the ${touchesModel ? "Model" : "Requirements"}: ${drift.title}`,
       refs: drift.data.refs,
       technical: !touchesModel,
       drift: drift.id,
+      ...(origin?.data.proposal ? { proposal: origin.data.proposal } : {}),
       body: fixTaskBody(drift, option, note),
     });
     drift.data.task = task.id;
@@ -398,21 +423,18 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
     drift.data.option = option ? (choice.option as number) : null;
     drift.data.note = note;
     // The Task the Drift came from goes back to To do and, until the fix Task is Done, is blocked (see computeBlocked).
-    if (drift.data.origin) {
-      const origin = getTask(p, drift.data.origin);
-      if (origin.data.column !== "done") {
-        origin.data.column = "todo";
-        origin.data.agent = false;
-        saveItem(origin.path, origin.data, origin.body);
-      }
+    if (origin && origin.data.column !== "done") {
+      origin.data.column = "todo";
+      origin.data.agent = false;
+      saveItem(origin.path, origin.data, origin.body);
     }
   } else if (how === "accept-proposal") {
-    if (!drift.data.proposal) throw new TramaError(`Drift ${drift.id} has no attached Proposal`);
+    if (!drift.data.proposal) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has no attached Proposal`);
     approveProposal(p, drift.data.proposal, skillsDirs);
     drift.data.resolution = "proposal";
   } else {
     if (drift.data.proposal)
-      throw new TramaError(`Drift ${drift.id} has an attached Proposal (${drift.data.proposal}): accept that Proposal to keep the code, or fix the code`);
+      throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has an attached Proposal (${cardName(p, "proposal", drift.data.proposal)}): accept that Proposal to keep the code, or fix the code`);
     drift.data.resolution = "dismissed";
   }
   drift.data.status = "resolved";
@@ -422,11 +444,11 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
 
 /** The open, stale Proposal attached to an open Drift: the only kind that can be reworked and replaced. Refuses otherwise, saying why. */
 export function staleAttachedProposal(p: Project, drift: Drift): Proposal {
-  if (drift.data.status !== "open") throw new TramaError(`Drift ${drift.id} is already resolved`);
-  if (!drift.data.proposal) throw new TramaError(`Drift ${drift.id} has no attached Proposal to replace`);
+  if (drift.data.status !== "open") throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is already resolved`);
+  if (!drift.data.proposal) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has no attached Proposal to replace`);
   const old = getProposal(p, drift.data.proposal);
-  if (old.data.status !== "open") throw new TramaError(`Proposal ${old.id} is ${old.data.status}: only an open, stale Proposal can be replaced`);
-  if (health(p, old).stale.length === 0) throw new TramaError(`Proposal ${old.id} is not stale: only a stale Proposal can be replaced`);
+  if (old.data.status !== "open") throw new TramaError(`Proposal ${cardName(p, "proposal", old.id)} is ${old.data.status}: only an open, stale Proposal can be replaced`);
+  if (health(p, old).stale.length === 0) throw new TramaError(`Proposal ${cardName(p, "proposal", old.id)} is not stale: only a stale Proposal can be replaced`);
   return old;
 }
 
@@ -438,9 +460,9 @@ export function replaceDriftProposal(p: Project, id: string, proposalId: string)
   const drift = getDrift(p, id);
   const old = staleAttachedProposal(p, drift);
   const replacement = getProposal(p, proposalId);
-  if (replacement.id === old.id) throw new TramaError(`Proposal ${old.id} is the one already attached; name a newer one`);
+  if (replacement.id === old.id) throw new TramaError(`Proposal ${cardName(p, "proposal", old.id)} is the one already attached; name a newer one`);
   if (replacement.data.status === "rejected" || replacement.data.status === "discarded")
-    throw new TramaError(`Proposal ${replacement.id} was ${replacement.data.status}: it cannot replace the attached one`);
+    throw new TramaError(`Proposal ${cardName(p, "proposal", replacement.id)} was ${replacement.data.status}: it cannot replace the attached one`);
   rejectProposal(p, old.id, `Replaced by Proposal ${replacement.id}`);
   drift.data.proposal = replacement.id;
   saveItem(drift.path, drift.data, drift.body);

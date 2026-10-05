@@ -1,5 +1,7 @@
 // DOM builders for Board cards. Every piece of data goes in through textContent, never innerHTML.
+import { type CardName, type CardNumbers, namerOf } from "../../../../src/core/card-names";
 import { runBlocker } from "../../../../src/core/design";
+import { idTag } from "../id-tag";
 import type { ViewContext } from "../types";
 import type { AnnouncedCard, Badge, BlockBadge, Card, DesignCard, DriftCard, ProposalCard, TaskCard, WorktreeCard } from "./logic";
 import { COLUMN_TITLES } from "./logic";
@@ -12,8 +14,10 @@ export interface CardEnv {
   /** Whether a design card was left open; kept for the session, so a refresh does not close it. */
   isExpanded(key: string): boolean;
   setExpanded(key: string, expanded: boolean): void;
-  /** Scrolls to the card of a Task and focuses it. */
-  showTask(id: string): void;
+  /** Scrolls to a card, by its key, and focuses it. */
+  showCard(key: string): void;
+  /** The short numbers of the snapshot being drawn. */
+  numbers(): CardNumbers;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -59,14 +63,15 @@ function badge(b: { label: string; tone?: Badge["tone"]; tooltip?: string }): HT
   return node;
 }
 
-/** "blocked 0003" / "waiting 0004": a link to the Drift on the Diagram or to the fix Task's card. It disables nothing. */
+/** "blocked D2" / "waiting T4": a link to the Drift on the Diagram or to a card of the Board. It disables nothing. */
 function blockBadgeLink(b: BlockBadge, env: CardEnv): HTMLElement {
   const node = el("button", "board-badge board-blocked", b.label);
   node.type = "button";
-  node.dataset["action"] = `blocked:${b.target.kind}:${b.target.id}`;
+  const target = b.target;
+  node.dataset["action"] = target.kind === "diagram" ? `blocked:diagram:${target.drift}` : `blocked:${target.key}`;
   node.title = b.tooltip;
   node.setAttribute("aria-label", b.tooltip);
-  node.addEventListener("click", () => (b.target.kind === "drift" ? env.context.navigate("diagram", { drift: b.target.id }) : env.showTask(b.target.id)));
+  node.addEventListener("click", () => (target.kind === "diagram" ? env.context.navigate("diagram", { drift: target.drift }) : env.showCard(target.key)));
   return node;
 }
 
@@ -98,16 +103,19 @@ function shell(card: { kind: string; key: string }, name: string): HTMLElement {
   return node;
 }
 
-function head(kind: string, ...extra: HTMLElement[]): HTMLElement {
+/** The top row of a card: its kind in words (none for a Task), its number or identity, then the badges. */
+function head(kind: string | null, name: CardName | null, ...extra: HTMLElement[]): HTMLElement {
   const row = el("div", "board-card-head");
-  row.append(el("span", "board-card-kind", kind), ...extra);
+  if (kind !== null) row.append(el("span", "board-card-kind", kind));
+  if (name !== null) row.append(idTag(name));
+  row.append(...extra);
   return row;
 }
 
 /** Title and Remove from round. Approve and Reject are not offered: the Proposal is already in a worktree. */
 export function renderWorktreeCard(card: WorktreeCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}`);
-  node.append(head(card.heading), el("h3", "board-card-title", card.title));
+  node.append(head("Proposal", card.name), el("h3", "board-card-title", card.title));
   if (card.removable) {
     node.append(actions(button({
       label: "Remove from round",
@@ -121,7 +129,7 @@ export function renderWorktreeCard(card: WorktreeCard, env: CardEnv): HTMLElemen
 
 function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}`);
-  node.append(head(card.heading, ...card.badges.map(badge)), el("h3", "board-card-title", card.title));
+  node.append(head("Proposal", card.name, ...card.badges.map(badge)), el("h3", "board-card-title", card.title));
   if (card.changes.files.length > 0) {
     const list = el("ul", "board-changes");
     for (const file of card.changes.files) {
@@ -150,14 +158,14 @@ function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
 
 function drift(card: DriftCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}`);
-  node.append(head(card.heading, ...(card.worktree ? [badge(WORKTREE_BADGE)] : [])), el("h3", "board-card-title", card.title));
+  node.append(head(card.name === null ? "Merge Drift" : "Drift", card.name, ...(card.worktree ? [badge(WORKTREE_BADGE)] : [])), el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
   const proposalId = card.proposal;
   if (proposalId !== null) {
-    const link = el("button", "board-link", `Proposal ${proposalId} attached`);
+    const link = el("button", "board-link", `Proposal ${card.proposalName ?? proposalId} attached`);
     link.type = "button";
     link.dataset["action"] = "proposal-link";
-    link.title = `Show Proposal ${proposalId} on the diagram`;
+    link.title = `Show Proposal ${card.proposalName ?? proposalId} on the diagram`;
     link.addEventListener("click", () => env.context.navigate("diagram", { proposal: proposalId }));
     node.append(link);
   }
@@ -168,6 +176,7 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
       blocked: () => env.context.post({ type: "driftBlocked", id: card.id, ...(card.worktree ? { worktree: card.worktree } : {}) }),
       openLink: env.context.openLink,
       where: { open: env.isExpanded(whereKey), toggled: (open) => env.setExpanded(whereKey, open) },
+      name: namerOf(env.numbers()),
     }),
   );
   const firstRef = card.refs[0];
@@ -193,7 +202,7 @@ function taskDetails(card: TaskCard, env: CardEnv): { body: HTMLElement; toggle:
   const show = () => {
     body.hidden = !isOpen;
     toggle.textContent = isOpen ? "Hide details" : "Show details";
-    toggle.setAttribute("aria-label", `${toggle.textContent} of task ${card.id}`);
+    toggle.setAttribute("aria-label", `${toggle.textContent} of task ${card.name.text}`);
     toggle.setAttribute("aria-expanded", String(isOpen));
   };
   toggle.setAttribute("aria-controls", body.id);
@@ -207,22 +216,22 @@ function taskDetails(card: TaskCard, env: CardEnv): { body: HTMLElement; toggle:
 }
 
 function task(card: TaskCard, env: CardEnv): HTMLElement {
-  const node = shell(card, `Task ${card.id}: ${card.title}`);
+  const node = shell(card, `Task ${card.name.text}: ${card.title}`);
   const badges = [
     ...(card.worktree ? [badge(WORKTREE_BADGE)] : []),
     ...(card.technical && card.refs.length === 0 ? [badge({ label: "technical" })] : []),
     ...card.blocks.map((b) => blockBadgeLink(b, env)),
   ];
-  const top = head(card.id, ...badges);
+  const top = head(null, card.name, ...badges);
   top.prepend(statusDot(card));
   node.append(top, el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
-  if (card.drift !== null) node.append(el("p", "board-muted board-origin", `from Drift ${card.drift}`));
+  if (card.drift !== null) node.append(el("p", "board-muted board-origin", `from Drift ${card.driftName ?? card.drift}`));
   const details = card.body ? taskDetails(card, env) : null;
   if (details) node.append(details.body);
   const open = button({
     label: "Open",
-    aria: `Open file of task ${card.id}`,
+    aria: `Open file of task ${card.name.text}`,
     action: "open",
     onClick: () => env.context.post({ type: "openFile", path: card.file, ...(card.worktree ? { worktree: card.worktree } : {}) }),
   });
@@ -231,7 +240,7 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
   node.append(
     actions(
       ...(details ? [details.toggle] : []),
-      ...(runnable ? [button({ label: "Run", aria: `Run task ${card.id}`, action: "run", primary: true, onClick: () => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } }) })] : []),
+      ...(runnable ? [button({ label: "Run", aria: `Run task ${card.name.text}`, action: "run", primary: true, onClick: () => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } }) })] : []),
       open,
     ),
   );
@@ -254,7 +263,8 @@ function design(card: DesignCard, env: CardEnv): HTMLElement {
   const inWorktree = card.tasks.length > 0 && card.tasks.every((t) => t.worktree);
   node.append(
     head(
-      card.heading,
+      "Proposal",
+      card.name,
       badge({ label: `${card.done}/${card.tasks.length} done`, tooltip: `${card.done} of ${card.tasks.length} Tasks are done` }),
       ...(inWorktree ? [badge(WORKTREE_BADGE)] : []),
     ),
@@ -265,7 +275,7 @@ function design(card: DesignCard, env: CardEnv): HTMLElement {
   list.id = `board-design-${card.id}`;
   for (const t of card.tasks) {
     const item = el("li", "board-design-task");
-    item.append(statusDot(t), el("span", "board-card-kind", t.id), el("span", "board-design-title", t.title), ...(t.worktree ? [badge(WORKTREE_BADGE)] : []));
+    item.append(statusDot(t), idTag(t.name, "board-card-kind board-card-id"), el("span", "board-design-title", t.title), ...(t.worktree ? [badge(WORKTREE_BADGE)] : []));
     item.append(...t.blocks.map((b) => blockBadgeLink(b, env)));
     list.append(item);
   }
@@ -290,7 +300,7 @@ function design(card: DesignCard, env: CardEnv): HTMLElement {
     aria: `Run the Tasks of ${card.heading} that are in To do`,
     action: "run-design",
     primary: true,
-    disabled: runBlocker(card.tasks.filter((t) => !t.worktree), "design") ?? false,
+    disabled: runBlocker(card.tasks.filter((t) => !t.worktree), "design", namerOf(env.numbers())) ?? false,
     onClick: () => env.context.post({ type: "launch", action: { kind: "implement-design", proposal: card.id } }),
   });
   node.append(actions(run, toggle), list);

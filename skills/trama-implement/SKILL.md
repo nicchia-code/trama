@@ -22,6 +22,13 @@ When you know you must file a Drift (see "When you must file a Drift"), announce
 - NEVER implement behaviour that contradicts the Model, or code that contradicts a Requirement, to get something working.
 - Do not touch code unrelated to the Task.
 
+## Naming cards
+
+Every live Proposal, Task and Drift has a temporary **short number** (`P3`, `T3`, `D3`) besides its **permanent identity** of eight characters.
+
+- Name cards to the developer by short number and title, for example "Task T3 – title" or "Drift D2 – title", also in the final report. A closed card (for example a Task in Done) has no number: use its permanent identity.
+- In every command you run and every file you write (`trama task move`, `--task`, `--proposal`, the body of a Proposal) use **only the permanent identity**, taken from `--json` (field `id`; the number is the field `number`) or from the file name. **Never write a short number in a file**: it changes from one working copy to another.
+
 ## Steps
 
 1. **Pick the Task.** Asked for one named Task, use the ID you were given. Asked for several Tasks, take each one from `trama task next`, and with `--proposal <id>` when asked for the Tasks of a design: it prints `Next Task: <id> <title>`, skips the blocked Tasks, moves nothing, and recomputes the answer each time, so a Task that waited for the Task fixing its Drift comes back, after it, once that Task is Done. When its first line says no Task is runnable, the run is over: go to the final check (step 6). Read the Task once, with `trama task show <id>`. That text is the Model and the Requirements for this Task. A Machine reference includes the State tree and the Events with who receives them. A State reference includes the outgoing Transitions, including those inherited from the States that contain it, marked as inherited. An Event reference includes the Transitions that react to it. A reference to a whole Area includes the text of every section. Under `## Requirements` are the Requirements attached to the referenced elements, and every General section that has text, written in full. A Technical Task references no Model element; implement it as a normal engineering task from the Requirements in that text.

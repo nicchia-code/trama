@@ -1,3 +1,4 @@
+import { cardName } from "../../../src/core/short-numbers";
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import * as vscode from "vscode";
@@ -6,10 +7,11 @@ import { lostWorktreeMessage, reconcileLostWorktrees, worktreesHome } from "../.
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { watchAnnouncements } from "./announcements";
 import { notices, watchCursorChatNotices } from "./notice-host";
-import { agentName, watchAgentTerminal, configuredSkillsDir, ensureWorktreeAgentSetting, settleWaitingRound } from "./agent";
+import { agentName, watchAgentTerminal, watchExternalRuns, configuredSkillsDir, ensureWorktreeAgentSetting, settleWaitingRound } from "./agent";
 import { Controller, describeError } from "./controller";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./cursor";
+import { MARKER_FOLDER } from "./external-terminal";
 import { findProject } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
@@ -59,6 +61,11 @@ export function activate(context: vscode.ExtensionContext): void {
     watchApproveRequests(),
   );
   exposeBundledCli(context);
+  try {
+    context.subscriptions.push(watchExternalRuns(join(context.globalStorageUri.fsPath, MARKER_FOLDER)));
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Trama: could not watch the external terminal's end markers: ${describeError(err)}`);
+  }
   void ensureWorktreeAgentSetting().catch((err: unknown) => {
     void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
   });
@@ -87,10 +94,10 @@ function watchApproveRequests(): vscode.Disposable {
 
 /**
  * The developer edits Requirement files directly, so the generated `trama-req-*` skills are regenerated on every
- * change under `.trama/requirements/`, also when the Trama panel is closed.
+ * change under `.trama/requirements/`, inside the Area folders too, also when the Trama panel is closed.
  */
 function watchRequirements(): vscode.Disposable {
-  const watcher = vscode.workspace.createFileSystemWatcher("**/.trama/requirements/*.md");
+  const watcher = vscode.workspace.createFileSystemWatcher("**/.trama/requirements/**");
   let timer: NodeJS.Timeout | undefined;
   const sync = () => {
     clearTimeout(timer);
@@ -123,7 +130,7 @@ function watchLostWorktrees(onLost: () => void): vscode.Disposable {
     if (!project) return;
     try {
       const lost = reconcileLostWorktrees(project);
-      for (const item of lost) void vscode.window.showWarningMessage(lostWorktreeMessage(item));
+      for (const item of lost) void vscode.window.showWarningMessage(lostWorktreeMessage(item, cardName(project, "proposal", item.id)));
       if (lost.length > 0) onLost();
     } catch (err) {
       void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
@@ -193,7 +200,7 @@ function watchReadyRound(onMerged: () => void): vscode.Disposable {
 }
 
 /**
- * Agents run `trama` in the editor's terminals (the "Trama agent" terminal, Copilot's terminal tool). When the
+ * Agents run `trama` in the editor's terminals (the agent terminals Trama opens, Copilot's terminal tool). When the
  * package ships a binary for this platform, its folder is put first on those terminals' PATH.
  */
 function exposeBundledCli(context: vscode.ExtensionContext): void {

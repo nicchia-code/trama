@@ -117,7 +117,7 @@ export class DesignRequests implements vscode.Disposable {
 
   /** Sends the instruction naming request `id`; true, with the request marked as sent, once it has really left. */
   private async deliver(project: Project, id: string, text: string): Promise<boolean> {
-    const launch = await this.launch(project.root, buildPrompt({ kind: "written-design", request: id }), requestTitle(text));
+    const launch = await this.launch(project.root, buildPrompt({ kind: "written-design", request: id }), "Design", requestTitle(text));
     if (!launched(launch)) return false;
     await this.state.update(SENT_KEY, [...this.sentIds(), id]);
     return true;

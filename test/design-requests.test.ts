@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
 import { createRequest, isEmptyRequest, requestExists, requestIdAt, requestStamp, requestsDir, requestTitle } from "../src/core/design-requests";
+import { cardName } from "../src/core/short-numbers";
 import { editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { type Project, projectAt } from "../src/core/store";
 
@@ -158,7 +159,7 @@ describe("the command line", () => {
     const prop = newProposal(p, "Lost", "", { request: ID });
     writeOrder(prop.id);
     const out = run(["proposal", "submit", prop.id], dir, {}).out;
-    expect(out).toContain(`Submitted Proposal ${prop.id} for review`);
+    expect(out).toContain(`Submitted Proposal ${cardName(p, "proposal", prop.id)} for review`);
     expect(out).toContain(`Deleted design request ${ID}`);
   });
 });

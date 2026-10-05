@@ -1,3 +1,4 @@
+import { cardName } from "../src/core/short-numbers";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -12,7 +13,7 @@ import { boardCounts } from "../extension/src/host/board-counts";
 import { boardView } from "../src/cli/work";
 import { applyWorktreeDecision } from "../extension/src/host/worktree-decision";
 import { getTask, listTasks, newDrift, nextTask, newTask, resolveDrift } from "../src/core/work";
-import { approvalBlock, approveProposal, editInProposal, getProposal, newProposal, rejectProposal } from "../src/core/proposals";
+import { approvalBlock, approveProposal, deleteInProposal, editInProposal, getProposal, newProposal, rejectProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
 import { abandonRound, applyWaitingMerge, finishReconciliation, mergeRound, reconcileMerge } from "../src/core/worktree-merge";
@@ -272,7 +273,7 @@ describe("accepting an ordinary Proposal into a worktree", () => {
     const beforeDecide = board.split("## To decide")[0] ?? "";
     const decide = board.split("## To decide")[1]?.split("## To do")[0] ?? "";
     expect(beforeDecide).toContain("## In worktree");
-    expect(beforeDecide).toContain(`Proposal ${id}: Change`);
+    expect(beforeDecide).toContain(`Proposal ${cardName(p, "proposal", id)}: Change`);
     expect(decide).not.toContain("Change");
   }, 20_000);
 
@@ -421,7 +422,7 @@ describe("accepting an ordinary Proposal into a worktree", () => {
 
     writeFileSync(join(dir, ".trama/model/checkout/order.md"), `${readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8")}\n`);
     const stale = acceptIntoWorktree(p, id, ready);
-    expect(stale).toEqual({ ok: false, message: `Proposal ${id} is stale: the Model changed since it was written.` });
+    expect(stale).toEqual({ ok: false, message: `Proposal ${cardName(p, "proposal", id)} is stale: the Model changed since it was written.` });
     expect(getProposal(p, id).data.status).toBe("open");
   });
 
@@ -451,10 +452,16 @@ describe("removing a Proposal from the round", () => {
     const id = changeOrder();
     commit("proposal");
     expect(acceptIntoWorktree(p, id, ready).ok).toBe(true);
-    expect(() => approveProposal(p, id)).toThrow(`Proposal ${id} is in a worktree.`);
-    expect(() => rejectProposal(p, id, "no")).toThrow(`Proposal ${id} is in a worktree.`);
-    expect(acceptIntoWorktree(p, id, ready)).toEqual({ ok: false, message: `Proposal ${id} is in a worktree.` });
+    expect(() => approveProposal(p, id)).toThrow(`Proposal ${cardName(p, "proposal", id)} is in a worktree.`);
+    expect(() => rejectProposal(p, id, "no")).toThrow(`Proposal ${cardName(p, "proposal", id)} is in a worktree.`);
+    expect(acceptIntoWorktree(p, id, ready)).toEqual({ ok: false, message: `Proposal ${cardName(p, "proposal", id)} is in a worktree.` });
+    // Editing it, from the open folder or from its own worktree, would send it back to Draft inside the round.
+    const editing = `Proposal ${cardName(p, "proposal", id)} is in a worktree; remove it from the round before editing it.`;
+    expect(() => editInProposal(p, id, "checkout/order.md")).toThrow(editing);
+    expect(() => deleteInProposal(p, id, "checkout/payment.md")).toThrow(editing);
+    expect(() => editInProposal(projectAt(worktreePath(dir, id)), id, "checkout/order.md")).toThrow("is in a worktree; remove it from the round");
     expect(getProposal(p, id).data.status).toBe("open");
+    expect(getProposal(projectAt(worktreePath(dir, id)), id).data.status).toBe("open");
 
     expect(withdrawFromRound(p, id)).toEqual({ remaining: 0 });
     expect(worktreeProposalIds(p)).toEqual([]);
@@ -530,7 +537,7 @@ describe("deciding a Drift that lives in a worktree", () => {
     expect(snap.proposals.map((item) => item.id)).not.toContain(id);
     const board = boardView(p).md;
     expect(board.indexOf("Born there (worktree)")).toBeLessThan(board.indexOf("Born here"));
-    expect(board.indexOf(`Drift ${drift.id} (worktree): Seen there`)).toBeLessThan(board.indexOf(`Drift ${openDrift.id}: Seen here`));
+    expect(board.indexOf(`Drift ${cardName(p, "drift", drift.id)} (worktree): Seen there`)).toBeLessThan(board.indexOf(`Drift ${cardName(p, "drift", openDrift.id)}: Seen here`));
   }, 20_000);
 
   test("keeping a side writes the decision in the worktree and does not open another round", () => {
@@ -637,6 +644,15 @@ describe("merging a round when every Task is Done", () => {
     expect(roundOrigin(dir)).toBeNull();
   }, 20_000);
 
+  test("a Proposal that changes only a Requirement section has the check scan the Features of that section", () => {
+    initRepo();
+    const id = secondChange("requirements/data/main.md", "Totals are stored in cents.", "Totals are stored in cents, with the currency.", "Currency");
+    commit("proposal");
+    expect(acceptIntoWorktree(p, id, ready).ok).toBe(true);
+    expect(mergeRound(p)).toEqual({ kind: "merged", features: ["checkout"] });
+    expect(readFileSync(join(dir, ".trama/requirements/data/main.md"), "utf8")).toContain("with the currency");
+  }, 20_000);
+
   test("a dirty folder waits, the worktrees stay, and a new acceptance is refused while the round is merging", () => {
     initRepo();
     const id = changeOrder();
@@ -653,7 +669,7 @@ describe("merging a round when every Task is Done", () => {
     expect(acceptIntoWorktree(p, another, ready)).toEqual({ ok: false, message: "A worktree round is already merging. Wait until it finishes." });
   }, 20_000);
 
-  test("a conflict leaves the branch untouched, keeps the worktrees, and writes the Merge Drift", () => {
+  test("a conflict leaves the branch untouched, keeps the worktrees, and leaves the conflicts in the merge worktree with the Merge Drift", () => {
     initRepo();
     const first = changeOrder("First");
     commit("first");
@@ -666,7 +682,14 @@ describe("merging a round when every Task is Done", () => {
     expect(mergeRound(p)).toEqual({ kind: "conflict" });
     expect(readFileSync(join(worktreePath(dir, "merge"), ".trama/merge-drift.md"), "utf8")).toContain("### Reconcile keeping every behaviour");
     expect(readFileSync(join(worktreePath(dir, "merge"), ".trama/merge-drift.md"), "utf8")).toContain("### Reconcile from the conflict markers");
-    expect(runGit(worktreePath(dir, "merge"), ["rev-parse", "HEAD"])).toBe(origin.commit);
+    const merge = worktreePath(dir, "merge");
+    expect(runGit(merge, ["rev-parse", "HEAD"])).not.toBe(origin.commit);
+    // Branches merge in id order, so the conflict stops at whichever of the two ids sorts last.
+    const last = [first, second].sort()[1];
+    expect(runGit(merge, ["rev-parse", "--verify", "MERGE_HEAD"])).toBe(runGit(dir, ["rev-parse", `trama/${last}`]));
+    expect(readFileSync(join(merge, ".trama/model/checkout/order.md"), "utf8")).toContain("<<<<<<<");
+    expect(mergeRound(p)).toEqual({ kind: "conflict", again: true });
+    expect(applyWaitingMerge(p)).toEqual({ kind: "pending" });
     expect(readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8")).not.toContain("### Lost (final)");
     expect(existsSync(worktreePath(dir, first))).toBe(true);
     expect(existsSync(worktreePath(dir, second))).toBe(true);
@@ -681,6 +704,27 @@ describe("merging a round when every Task is Done", () => {
     newTask(projectAt(worktreePath(dir, id)), { title: "Still open", refs: ["order/Paid"], technical: false, proposal: id });
     expect(mergeRound(p)).toEqual({ kind: "pending" });
     expect(existsSync(worktreePath(dir, "merge"))).toBe(false);
+  }, 20_000);
+
+  test("the open folder's own Tasks and Drifts, copied into the worktree, are not the round's: they neither hold the merge nor show as worktree cards", () => {
+    initRepo();
+    const old = newTask(p, { title: "Old work", refs: ["order/Paid"], technical: false });
+    newDrift(p, { options: FIX_OPTIONS, title: "Old drift", refs: ["order"], happens: "One way.", should: "Another." });
+    const id = changeOrder();
+    commit("proposal");
+    expect(acceptIntoWorktree(p, id, ready).ok).toBe(true);
+    const work = projectAt(worktreePath(dir, id));
+    const born = newTask(work, { title: "Born there", refs: ["order/Paid"], technical: false, proposal: id });
+
+    const snapshot = buildSnapshot(p);
+    expect(snapshot.tasks.map((t) => [t.title, t.worktree])).toEqual([["Old work", null], ["Born there", id]]);
+    expect(snapshot.drifts.map((d) => [d.title, d.worktree])).toEqual([["Old drift", null]]);
+    expect(boardCounts(p)).toMatchObject({ toDecide: 1, todo: 2 });
+
+    expect(getTask(work, old.id).data.column).toBe("todo");
+    expect(mergeRound(p)).toEqual({ kind: "pending" });
+    run(["--root", worktreePath(dir, id), "task", "move", born.id, "done"], worktreePath(dir, id), {});
+    expect(mergeRound(p).kind).not.toBe("pending");
   }, 20_000);
 
   test("a waiting merge lands once the folder is that branch and clean again", () => {
@@ -781,11 +825,15 @@ describe("merging a round when every Task is Done", () => {
     expect(task.data.proposal).toBeNull();
     expect(readFileSync(task.path, "utf8")).toContain("merge: true");
     expect(task.body).toContain("Reconcile keeping every behaviour");
+    expect(task.body).toContain("resolve every conflict here");
+    expect(mergeRound(p)).toEqual({ kind: "pending" });
     expect(() => reconcileMerge(p, 2)).toThrow("The round is already being reconciled.");
     expect(finishReconciliation(p)).toEqual({ kind: "stayed" });
     expect(readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8")).not.toContain("### Lost (final)");
 
-    const resolved = readFileSync(join(started.worktree, ".trama/model/checkout/order.md"), "utf8").replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)\n\n### Found (final)");
+    const conflictedFile = readFileSync(join(started.worktree, ".trama/model/checkout/order.md"), "utf8");
+    expect(conflictedFile).toContain("<<<<<<<");
+    const resolved = conflictedFile.split("\n").filter((line) => !/^(<<<<<<<|=======|>>>>>>>)/.test(line)).join("\n");
     writeFileSync(join(started.worktree, ".trama/model/checkout/order.md"), resolved);
     writeFileSync(task.path, readFileSync(task.path, "utf8").replace("column: todo", "column: done"));
     expect(finishReconciliation(p)).toEqual({ kind: "merged", features: ["checkout"] });
@@ -803,11 +851,10 @@ describe("merging a round when every Task is Done", () => {
     conflicted();
     const started = reconcileMerge(p, 1);
     const task = getTask(projectAt(started.worktree), started.task);
-    const marked = readFileSync(join(started.worktree, ".trama/model/checkout/order.md"), "utf8").replace("### Cancelled (final)", "### Cancelled (final)\n<<<<<<< HEAD\n### Lost (final)\n=======\n### Found (final)\n>>>>>>> other");
-    writeFileSync(join(started.worktree, ".trama/model/checkout/order.md"), marked);
     writeFileSync(task.path, readFileSync(task.path, "utf8").replace("column: todo", "column: done"));
     expect(finishReconciliation(p)).toEqual({ kind: "conflict" });
     expect(readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8")).not.toContain("<<<<<<<");
+    expect(readFileSync(join(started.worktree, ".trama/model/checkout/order.md"), "utf8")).toContain("<<<<<<<");
     expect(existsSync(join(worktreePath(dir, "merge"), ".trama/merge-drift.md"))).toBe(true);
     expect(existsSync(task.path)).toBe(false);
   }, 20_000);

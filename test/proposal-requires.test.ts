@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approveProposal, changes, editInProposal, getProposal, health, newProposal, rejectProposal, validateProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
+import { cardName } from "../src/core/short-numbers";
 import { loadModel, type Project, projectAt } from "../src/core/store";
 import { handOver } from "./handover";
 
@@ -44,7 +45,7 @@ test("a Proposal is validated on top of the one it requires and shows only its o
 
 test("it can be approved only after what it requires, and approving that does not make it stale", () => {
   const { actors, billing } = chain();
-  expect(() => approveProposal(p, billing)).toThrow(new RegExp(`Proposal ${actors} "Bank" is not approved yet`));
+  expect(() => approveProposal(p, billing)).toThrow(new RegExp(`Proposal ${cardName(p, "proposal", actors)} "Bank" is not approved yet`));
   approveProposal(p, actors);
   expect(health(p, getProposal(p, billing))).toEqual({ stale: [], unbased: [], requires: [] });
   approveProposal(p, billing);

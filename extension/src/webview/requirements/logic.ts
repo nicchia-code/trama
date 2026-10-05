@@ -1,4 +1,4 @@
-import type { AreaView, ProposalView, Snapshot } from "../../../../src/core/snapshot";
+import type { AreaView, ProposalView, SectionView, Snapshot } from "../../../../src/core/snapshot";
 import type { ViewName } from "../../protocol";
 
 export const REQUIREMENTS_PREFIX = "requirements/";
@@ -37,5 +37,5 @@ export function proposalTouches(p: Pick<ProposalView, "changes">): { model: bool
   return { model, requirements };
 }
 
-/** Sections of an Area that say something, or that a Proposal adds, changes or removes. */
-export const visibleSections = (area: AreaView) => area.sections.filter((s) => s.text !== "" || s.change !== "same" || s.before !== null);
+/** Sections of a fragment that say something, or that a Proposal adds, changes, moves or removes. */
+export const visibleSections = (sections: SectionView[]) => sections.filter((s) => s.text !== "" || s.change !== "same" || s.before !== null || s.movedFrom !== null);

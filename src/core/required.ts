@@ -20,9 +20,9 @@ const REQUIRED_STATUS: Record<RequiredProposal["status"], string> = {
   cycle: "requires this one back, in a cycle",
 };
 
-/** Why the required Proposals keep a Proposal from being approved, one line each. */
-export const requiredReasons = (requires: RequiredProposal[]): string[] =>
-  requires.map((r) => `Proposal ${r.id}${r.title ? ` "${r.title}"` : ""} ${REQUIRED_STATUS[r.status]}`);
+/** Why the required Proposals keep a Proposal from being approved, one line each. `name` says how a Proposal is written: by its short number, or by its identity by default. */
+export const requiredReasons = (requires: RequiredProposal[], name: (id: string) => string = (id) => id): string[] =>
+  requires.map((r) => `Proposal ${name(r.id)}${r.title ? ` "${r.title}"` : ""} ${REQUIRED_STATUS[r.status]}`);
 
 /** Whether a Proposal that requires this one is written, drawn and validated on top of it: only live Proposals are applied. */
 export const appliesUnder = (status: RequiredProposal["status"]): boolean => status === "draft" || status === "open";

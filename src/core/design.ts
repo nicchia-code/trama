@@ -1,4 +1,5 @@
 // No Node imports: the Board in the webview and the textual board group Tasks with the same rules.
+import { identityNamer, type Namer } from "./card-names";
 
 export type TaskColumn = "todo" | "doing" | "done";
 
@@ -16,8 +17,8 @@ export function designColumn(columns: TaskColumn[]): TaskColumn {
  * Why Run all To do, or Run this design (given the design's Tasks), is unavailable because the agent has taken a
  * Task: the message names the Task, or says an agent is working. Null when none is taken.
  */
-export function takenBlocker(tasks: { id: string; agent: boolean }[]): string | null {
-  const taken = tasks.filter((t) => t.agent).map((t) => t.id);
+export function takenBlocker(tasks: { id: string; agent: boolean }[], name: Namer = identityNamer): string | null {
+  const taken = tasks.filter((t) => t.agent).map((t) => name("task", t.id));
   if (taken.length === 0) return null;
   return taken.length === 1 ? `An agent is working on Task ${taken[0]}` : `An agent is working on Tasks ${taken.join(", ")}`;
 }
@@ -30,16 +31,16 @@ export type Waits = { kind: "drift"; drift: string } | { kind: "fix"; task: stri
  * design the design's. Unavailable when the agent has taken one of them (this reason comes first), when none is in
  * To do, or when every one in To do is blocked, naming the Drift or the fix Task of the first of them.
  */
-export function runBlocker(tasks: { id: string; column: TaskColumn; agent: boolean; blockedBy: readonly Waits[] }[], scope: "all" | "design"): string | null {
-  const taken = takenBlocker(tasks);
+export function runBlocker(tasks: { id: string; column: TaskColumn; agent: boolean; blockedBy: readonly Waits[] }[], scope: "all" | "design", name: Namer = identityNamer): string | null {
+  const taken = takenBlocker(tasks, name);
   if (taken !== null) return taken;
   const todo = tasks.filter((t) => t.column === "todo");
   const first = todo[0];
   if (first === undefined) return scope === "all" ? "No Task is in To do" : "No Task of this design is in To do";
   if (!todo.every((t) => t.blockedBy.length > 0)) return null;
   const why = first.blockedBy[0];
-  const reason = why?.kind === "fix" ? `waiting for Task ${why.task}, which fixes its Drift` : `blocked by Drift ${why?.drift}`;
-  return `All the Tasks ${scope === "all" ? "in To do" : "of this design in To do"} are blocked: Task ${first.id} is ${reason}`;
+  const reason = why?.kind === "fix" ? `waiting for Task ${name("task", why.task)}, which fixes its Drift` : `blocked by Drift ${why === undefined ? "" : name("drift", why.drift)}`;
+  return `All the Tasks ${scope === "all" ? "in To do" : "of this design in To do"} are blocked: Task ${name("task", first.id)} is ${reason}`;
 }
 
 /** What stands in a column of the Board: a Task on its own, or a design with its Tasks in creation order. */

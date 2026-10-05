@@ -1,3 +1,4 @@
+import { namerOf, noNumbers } from "../../../../src/core/card-names";
 import { runBlocker } from "../../../../src/core/design";
 import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
 import { createMultiBranchSwitch } from "../multi-branch-switch";
@@ -74,13 +75,14 @@ export const mountBoard: MountView = (root, context) => {
 
   const env: CardEnv = {
     context,
+    numbers: () => snapshot?.numbers ?? noNumbers,
     isExpanded: (key) => expanded.has(key),
     setExpanded: (key, open) => {
       if (open) expanded.add(key);
       else expanded.delete(key);
     },
-    showTask: (id) => {
-      const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === `task:${id}`);
+    showCard: (key) => {
+      const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === key);
       card?.scrollIntoView({ block: "nearest" });
       card?.focus();
     },
@@ -128,7 +130,7 @@ export const mountBoard: MountView = (root, context) => {
       return entry.node;
     }));
     const columns = buildBoard(snapshot);
-    const placedGhosts = announcedGhosts(columns, snapshot.announcements, asking);
+    const placedGhosts = announcedGhosts(columns, snapshot.announcements, asking, snapshot.numbers ?? noNumbers);
     const liveAnnounced = new Set<string>();
     for (const column of columns) {
       const part = parts[column.id];
@@ -160,7 +162,7 @@ export const mountBoard: MountView = (root, context) => {
       reconcile(part.body, withAnnounced.length > 0 ? withAnnounced : [part.hint]);
     }
     // Run all To do covers the Tasks inside design cards too, which may stand in another column.
-    const blocker = runBlocker(snapshot.tasks.filter((t) => !t.worktree), "all");
+    const blocker = runBlocker(snapshot.tasks.filter((t) => !t.worktree), "all", namerOf(snapshot.numbers ?? noNumbers));
     runAll.disabled = blocker !== null;
     runAll.title = blocker ?? "";
     if (blocker === null) runAll.removeAttribute("aria-description");
@@ -201,7 +203,7 @@ export const mountBoard: MountView = (root, context) => {
       render();
     },
     withdrawn(gone: AnnouncementView[]) {
-      for (const a of gone) notices.push({ id: nextNotice++, text: withdrawnNotice(a) });
+      for (const a of gone) notices.push({ id: nextNotice++, text: withdrawnNotice(a, snapshot?.numbers ?? noNumbers) });
       renderNotices();
     },
     show() {},

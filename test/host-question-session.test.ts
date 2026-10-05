@@ -76,6 +76,19 @@ test("the state survives the panel: a later reader sees the round exactly as it 
   expect(s.current()?.state.drafts[0]).toEqual({ selected: [1], text: "half typed" });
 });
 
+test("closing the panel during the Skip all confirmation brings the overlay back on the question, with nothing skipped", () => {
+  const { s } = session();
+  void s.present(request(), { signal: new AbortController().signal });
+  const id = s.current()?.id as number;
+  s.act(id, { type: "setText", text: "half typed" });
+  s.act(id, { type: "closeQuestions" });
+  expect(s.current()?.state.confirming).toBe("question");
+  s.panelClosed();
+  s.restore();
+  expect(s.current()?.state).toMatchObject({ confirming: null, view: "question", current: 0, minimized: false });
+  expect(s.current()?.state.drafts[0]?.text).toBe("half typed");
+});
+
 test("restoring without a round changes nothing", () => {
   const { s, seen } = session();
   s.restore();

@@ -5,8 +5,8 @@ import { consumeRequest, requestExists } from "./design-requests";
 import { diffFile, type FileChange } from "./diff";
 import { TramaError } from "./errors";
 import { formatDiagnostic } from "./model";
-import { buildProject } from "./requirements";
-import { syncRequirementSkills } from "./requirement-skills";
+import { buildProject, largeFragmentMessage, largeFragments, REQUIREMENT_SKILLS_BUDGET } from "./requirements";
+import { requirementSkillMode, syncRequirementSkills } from "./requirement-skills";
 import { canonicalCardId, createdField, enumField, type Raw, stringList, stringMap, textOrNull } from "./schema";
 import {
   compareByCreation,
@@ -27,6 +27,7 @@ import {
 } from "./store";
 import type { Diagnostic, FileMap } from "./types";
 import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
+import { cardName, identityOfShortNumber } from "./short-numbers";
 import { proposalIsInWorktree } from "./worktree-round";
 
 /**
@@ -80,7 +81,7 @@ function parseData(raw: Raw, where: string): ProposalData {
     if (!/^[a-z0-9]{8}$/.test(id) && !/^\d+$/.test(id)) throw new TramaError(`${where}: "requires" lists Proposal IDs, not "${id}"`);
   for (const path of [...Object.keys(data.base), ...data.delete]) {
     try {
-      normalizeModelPath(path);
+      normalizeModelPath(path, false);
     } catch (err) {
       throw new TramaError(`${where}: ${(err as Error).message}`);
     }
@@ -118,9 +119,13 @@ export function listProposals(p: Project): Proposal[] {
     .sort((a, b) => compareByCreation({ id: a.id, created: a.data.created }, { id: b.id, created: b.data.created }));
 }
 
-/** The Proposal `id` names. `asArgument` applies the command rules: digits cite only a numbered Proposal. */
+/**
+ * The Proposal `id` names. `asArgument` applies the command rules: digits cite only a numbered Proposal, and a short
+ * number (`P3`) cites the live Proposal that has it.
+ */
 export function getProposal(p: Project, id: string, asArgument = false): Proposal {
-  return load(p, findCard(proposalsDir(p), id, "Proposal", "folder", asArgument));
+  const cited = asArgument ? identityOfShortNumber(p, "proposal", id) : null;
+  return load(p, findCard(proposalsDir(p), cited ?? id, "Proposal", "folder", asArgument && cited === null));
 }
 
 export function newProposal(
@@ -132,7 +137,7 @@ export function newProposal(
   const requires = (options.requires ?? []).map((r) => {
     const required = getProposal(p, r);
     if (required.data.status === "rejected" || required.data.status === "discarded")
-      throw new TramaError(`Proposal ${required.id} was ${required.data.status}; a new Proposal cannot require it`);
+      throw new TramaError(`Proposal ${cardName(p, "proposal", required.id)} was ${required.data.status}; a new Proposal cannot require it`);
     return required.id;
   });
   const id = newCardId(proposalsDir(p), "folder", "Proposal");
@@ -206,27 +211,39 @@ export function baseFiles(p: Project, proposal: Proposal): FileMap {
   return files;
 }
 
-/** A tracked path: `checkout/order.md` for the Model, `requirements/ui.md` for an Area of Requirements. */
-function normalizeModelPath(path: string): string {
+/**
+ * A tracked path: `checkout/order.md` for the Model, `requirements/ui/area.md` or `requirements/ui/<fragment>.md` for
+ * Requirements. `areaFolders` is false for paths a Proposal already recorded: those written before Areas became
+ * folders (`requirements/ui.md`) stay readable as history; only a new registration must use the folder layout.
+ */
+function normalizeModelPath(path: string, areaFolders = true): string {
   const clean = path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\.trama\/model\//, "").replace(/^\.trama\/requirements\//, REQUIREMENTS_PREFIX);
-  if (!clean.endsWith(".md")) throw new TramaError(`"${path}" is not a Model or Requirement file (expected a .md path under .trama/model/ or requirements/<area>.md)`);
-  if (clean.split("/").includes("..") || clean.startsWith("/")) throw new TramaError(`"${path}" must be relative to .trama/model/, or be requirements/<area>.md`);
-  if (clean.startsWith(REQUIREMENTS_PREFIX) && clean.slice(REQUIREMENTS_PREFIX.length).includes("/"))
-    throw new TramaError(`"${path}": Requirement files are requirements/<area>.md, without subfolders`);
+  const expected = "requirements/<area>/area.md or requirements/<area>/<fragment>.md";
+  if (!clean.endsWith(".md")) throw new TramaError(`"${path}" is not a Model or Requirement file (expected a .md path under .trama/model/, or ${expected})`);
+  if (clean.split("/").includes("..") || clean.startsWith("/")) throw new TramaError(`"${path}" must be relative to .trama/model/, or be ${expected}`);
+  if (areaFolders && clean.startsWith(REQUIREMENTS_PREFIX)) {
+    const depth = clean.slice(REQUIREMENTS_PREFIX.length).split("/").length;
+    if (depth === 1) throw new TramaError(`"${path}": Requirement Areas are folders now; write ${expected}`);
+    if (depth > 2) throw new TramaError(`"${path}": an Area has no subfolders; write ${expected}`);
+  }
   return clean;
 }
 
 /** Refuses unless the Proposal is in `status`; a Draft gets its own message, because the developer meets it as "not ready yet". */
-function requireStatus(proposal: Proposal, status: "draft" | "open", action: string) {
+function requireStatus(p: Project, proposal: Proposal, status: "draft" | "open", action: string) {
   if (proposal.data.status === status) return;
+  const name = cardName(p, "proposal", proposal.id);
   if (proposal.data.status === "draft")
-    throw new TramaError(`Proposal ${proposal.id} is still being written: the agent has not handed it over, so it cannot be ${action} yet`);
-  throw new TramaError(`Proposal ${proposal.id} is ${proposal.data.status}; only ${status === "draft" ? "a Draft" : "open Proposals"} can be ${action}`);
+    throw new TramaError(`Proposal ${name} is still being written: the agent has not handed it over, so it cannot be ${action} yet`);
+  throw new TramaError(`Proposal ${name} is ${proposal.data.status}; only ${status === "draft" ? "a Draft" : "open Proposals"} can be ${action}`);
 }
 
-function requireEditable(proposal: Proposal) {
+/** A Proposal in a worktree leaves the round only by withdrawal, a lost worktree, abandoning the round or the merge: editing it is refused. */
+function requireEditable(p: Project, proposal: Proposal) {
   if (proposal.data.status !== "draft" && proposal.data.status !== "open")
-    throw new TramaError(`Proposal ${proposal.id} is ${proposal.data.status}; only drafts and open Proposals can be edited`);
+    throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is ${proposal.data.status}; only drafts and open Proposals can be edited`);
+  if (proposalIsInWorktree(p, proposal.id))
+    throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is in a worktree; remove it from the round before editing it.`);
 }
 
 /** An edit takes a handed-over Proposal back from the developer: it is a Draft until the next submit. */
@@ -240,10 +257,10 @@ function touch(proposal: Proposal) {
  */
 export function editInProposal(p: Project, id: string, modelPath: string): string {
   const proposal = getProposal(p, id);
-  requireEditable(proposal);
+  requireEditable(p, proposal);
   const rel = normalizeModelPath(modelPath);
   const target = trackedLocation(proposal.dir, rel);
-  if (proposal.data.delete.includes(rel)) throw new TramaError(`${rel} is marked for deletion in Proposal ${proposal.id}`);
+  if (proposal.data.delete.includes(rel)) throw new TramaError(`${rel} is marked for deletion in Proposal ${cardName(p, "proposal", proposal.id)}`);
   touch(proposal);
   markDraftActivity(p, proposal.id);
   if (existsSync(target)) {
@@ -265,12 +282,12 @@ export function editInProposal(p: Project, id: string, modelPath: string): strin
 
 export function deleteInProposal(p: Project, id: string, modelPath: string) {
   const proposal = getProposal(p, id);
-  requireEditable(proposal);
+  requireEditable(p, proposal);
   const rel = normalizeModelPath(modelPath);
   const content = baseFiles(p, proposal).get(rel);
   if (content === undefined) throw new TramaError(`${rel} does not exist in the Model or its Requirements`);
   if (existsSync(trackedLocation(proposal.dir, rel)))
-    throw new TramaError(`${rel} is already edited in Proposal ${proposal.id}; remove that copy first`);
+    throw new TramaError(`${rel} is already edited in Proposal ${cardName(p, "proposal", proposal.id)}; remove that copy first`);
   touch(proposal);
   markDraftActivity(p, proposal.id);
   proposal.data.base[rel] ??= sha256(content);
@@ -320,6 +337,26 @@ export function validateProposal(p: Project, proposal: Proposal): Diagnostic[] {
   return buildProject(applied(p, proposal)).diagnostics;
 }
 
+/**
+ * Warnings that block neither validation nor hand-over, with the Proposal applied: fragments larger than 12 KB,
+ * and the switch between fragment skills and index skills the Proposal would cause.
+ */
+export function proposalWarnings(p: Project, proposal: Proposal): Diagnostic[] {
+  const after = applied(p, proposal);
+  const warnings: Diagnostic[] = largeFragments(after).map((f) => ({ file: f.file, line: 0, message: largeFragmentMessage(f) }));
+  const was = requirementSkillMode(buildProject(baseFiles(p, proposal)).areas);
+  const is = requirementSkillMode(buildProject(after).areas);
+  if (was.mode !== is.mode) {
+    const how = is.mode === "index" ? "from one skill per fragment to one index skill per Area" : "from index skills back to one skill per fragment";
+    warnings.push({ file: "requirements/", line: 0, message: `once applied, the Requirement skills switch ${how} (budget ${was.budget} → ${is.budget} of ${REQUIREMENT_SKILLS_BUDGET} characters)` });
+  }
+  return warnings;
+}
+
+/** Warnings written apart from errors, after them; "" when there are none. */
+export const warningsText = (warnings: Diagnostic[]) =>
+  warnings.length === 0 ? "" : `\n\n${warnings.length} warning(s), which do not prevent validation or the hand-over:\n${warnings.map((d) => `- ${formatDiagnostic(d)}`).join("\n")}`;
+
 /** What this Proposal itself changes, on top of the Proposals it requires. */
 export function changes(p: Project, proposal: Proposal): FileChange[] {
   const before = baseFiles(p, proposal);
@@ -342,9 +379,9 @@ export function approvalBlock(p: Project, id: string): ApprovalBlock | null {
   try {
     proposal = getProposal(p, id);
   } catch {
-    return { kind: "missing", reason: `Proposal ${id} does not exist.` };
+    return { kind: "missing", reason: `Proposal ${cardName(p, "proposal", id)} does not exist.` };
   }
-  const name = `Proposal ${proposal.id}`;
+  const name = `Proposal ${cardName(p, "proposal", proposal.id)}`;
   switch (proposal.data.status) {
     case "draft":
       return { kind: "draft", reason: `${name} is still being written.` };
@@ -358,7 +395,7 @@ export function approvalBlock(p: Project, id: string): ApprovalBlock | null {
       break;
   }
   const h = health(p, proposal);
-  if (h.requires.length > 0) return { kind: "waiting", reason: `${name} waits for other Proposals: ${h.requires.map((r) => r.id).join(", ")}.` };
+  if (h.requires.length > 0) return { kind: "waiting", reason: `${name} waits for other Proposals: ${h.requires.map((r) => cardName(p, "proposal", r.id)).join(", ")}.` };
   if (h.stale.length > 0) return { kind: "stale", reason: `${name} is stale: the Model changed since it was written.` };
   if (h.unbased.length > 0) return { kind: "unregistered", reason: `${name} holds files it never registered.` };
   if (validateProposal(p, proposal).length > 0) return { kind: "invalid", reason: `${name} would leave the Model or its Requirements invalid.` };
@@ -386,18 +423,18 @@ export function recordMergedProposal(p: Project, id: string): void {
 /** `skillsDirs` are the configured skills folders (besides the usual ones) where the generated `trama-req-*` skills are refreshed. */
 export function approveProposal(p: Project, id: string, skillsDirs: string[] = []): Proposal {
   const proposal = getProposal(p, id);
-  requireStatus(proposal, "open", "approved");
-  if (proposalIsInWorktree(p, proposal.id)) throw new TramaError(`Proposal ${proposal.id} is in a worktree.`);
+  requireStatus(p, proposal, "open", "approved");
+  if (proposalIsInWorktree(p, proposal.id)) throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is in a worktree.`);
   const h = health(p, proposal);
   if (h.requires.length > 0)
-    throw new TramaError(`Proposal ${proposal.id} requires other Proposals first:\n${requiredReasons(h.requires).map((r) => `- ${r}`).join("\n")}`);
+    throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} requires other Proposals first:\n${requiredReasons(h.requires, (id) => cardName(p, "proposal", id)).map((r) => `- ${r}`).join("\n")}`);
   if (h.stale.length > 0)
-    throw new TramaError(`Proposal ${proposal.id} is stale: the Model changed since it touched ${h.stale.join(", ")}. Write a new Proposal.`);
+    throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is stale: the Model changed since it touched ${h.stale.join(", ")}. Write a new Proposal.`);
   if (h.unbased.length > 0)
-    throw new TramaError(`Proposal ${proposal.id} contains files it never registered: ${h.unbased.join(", ")}. Use "trama proposal edit" first.`);
+    throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} contains files it never registered: ${h.unbased.join(", ")}. Use "trama proposal edit" first.`);
   const errors = validateProposal(p, proposal);
   if (errors.length > 0)
-    throw new TramaError(`Proposal ${proposal.id} would leave the Model invalid:\n${errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n")}`);
+    throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} would leave the Model invalid:\n${errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n")}`);
 
   writeProposalFiles(p, id, p.dir);
   proposal.data.status = "approved";
@@ -409,8 +446,8 @@ export function approveProposal(p: Project, id: string, skillsDirs: string[] = [
 /** Rejects an open Proposal. The feedback is optional: with text it is appended under `## Feedback`; empty or blank adds nothing. */
 export function rejectProposal(p: Project, id: string, feedback = ""): Proposal {
   const proposal = getProposal(p, id);
-  requireStatus(proposal, "open", "rejected");
-  if (proposalIsInWorktree(p, proposal.id)) throw new TramaError(`Proposal ${proposal.id} is in a worktree.`);
+  requireStatus(p, proposal, "open", "rejected");
+  if (proposalIsInWorktree(p, proposal.id)) throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is in a worktree.`);
   proposal.data.status = "rejected";
   const text = feedback.trim();
   if (text) proposal.body = `${proposal.body.trimEnd()}\n\n## Feedback\n\n${text}\n`;
@@ -421,30 +458,32 @@ export function rejectProposal(p: Project, id: string, feedback = ""): Proposal 
 /**
  * The agent hands a Draft over to the developer. Refused, leaving it a Draft, when the Model and Requirements
  * with it applied would have errors or when a file it holds was never registered. Being stale or requiring
- * Proposals that are not approved yet does not refuse it: writing cannot fix those.
+ * Proposals that are not approved yet does not refuse it: writing cannot fix those; nor do the warnings, which are returned.
  * A successful hand-over consumes the design request the Proposal is bound to: `requestConsumed` is true when its file was deleted.
  */
-export function submitProposal(p: Project, id: string): Proposal & { requestConsumed: boolean } {
+export function submitProposal(p: Project, id: string): Proposal & { requestConsumed: boolean; warnings: Diagnostic[] } {
   const proposal = getProposal(p, id);
-  requireStatus(proposal, "draft", "handed over");
+  requireStatus(p, proposal, "draft", "handed over");
   const problems: string[] = [];
   const { unbased } = health(p, proposal);
   if (unbased.length > 0) problems.push(`it contains files it never registered: ${unbased.join(", ")}. Use "trama proposal edit" first`);
   const errors = validateProposal(p, proposal);
   if (errors.length > 0) problems.push(`it would leave the Model invalid:\n${errors.map((d) => `  - ${formatDiagnostic(d)}`).join("\n")}`);
-  if (problems.length > 0) throw new TramaError(`Proposal ${proposal.id} cannot be handed over yet:\n${problems.map((x) => `- ${x}`).join("\n")}`);
+  const warnings = proposalWarnings(p, proposal);
+  if (problems.length > 0)
+    throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} cannot be handed over yet:\n${problems.map((x) => `- ${x}`).join("\n")}${warningsText(warnings)}`);
   proposal.data.status = "open";
   save(proposal);
   removeBoundTo(p, proposal.id);
   markActivity(p);
   const requestConsumed = proposal.data.request !== null && consumeRequest(p, proposal.data.request);
-  return { ...proposal, requestConsumed };
+  return { ...proposal, requestConsumed, warnings };
 }
 
 /** The developer gives up a Draft the agent never finished. Nothing is asked of the agent and nothing is appended. */
 export function discardProposal(p: Project, id: string): Proposal {
   const proposal = getProposal(p, id);
-  requireStatus(proposal, "draft", "discarded");
+  requireStatus(p, proposal, "draft", "discarded");
   proposal.data.status = "discarded";
   save(proposal);
   removeBoundTo(p, proposal.id);

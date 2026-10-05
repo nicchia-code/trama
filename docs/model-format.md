@@ -13,12 +13,14 @@ Everything Trama stores lives in `.trama/` at the root of the user's repository,
       order.md                 # one file per Machine
       payment.md
   requirements/
-    ui.md                      # one file per Area of Requirements
+    ui/                        # one folder per Area of Requirements
+      area.md                  # the Area's description, title and introduction
+      main.md                  # fragments: the Area's sections
   proposals/
     0007-refunds/
       proposal.md
       model/checkout/order.md  # full new version of every touched file
-      requirements/ui.md
+      requirements/ui/main.md
   tasks/
     0012-cancel-refund.md
   drifts/
@@ -152,13 +154,17 @@ A list item directly under a State (before any sub-State heading) that **starts 
 | Transition to an unknown State |
 | Event reference to an unknown owner, or to an Event the owner does not declare |
 | Event name not `UPPER_SNAKE_CASE`, or duplicated within its owner |
-| Requirement file not at `requirements/<area>.md` with a kebab-case Area name |
-| Requirement Area without a `description` or an H1; a section title that is not `General` or a reference to an existing element; a duplicate section |
+| A `.md` file directly in `requirements/` (run `trama skills update` to convert it), an Area folder that is not kebab-case or holds subfolders or other files, an Area without `area.md` |
+| `area.md` without a `description` or an H1, or with `##` sections; a fragment whose name is not kebab-case, without a `description` or an H1, or with prose before its first section |
+| A section title that is not `General` or a reference to an existing element; a section that appears twice in the same Area, in one fragment or in two |
+
+`trama validate` also prints **warnings**, apart from the errors; they never change the exit code nor prevent a hand-over: a fragment larger than 12 KB (12,288 bytes of the file, front matter included), with its path and size, and, with `--proposal`, the switch of the Requirement skills between fragment mode and index mode that the Proposal would cause. `trama proposal submit` prints the same warnings.
 
 `trama analyze` reports **warnings**, not errors:
 - States unreachable from the initial State;
 - non-final States with no way out, including Transitions inherited from their parents;
-- Events that nobody receives.
+- Events that nobody receives;
+- Requirement fragments larger than 12 KB, with path and size.
 
 ## Proposal
 
@@ -172,7 +178,7 @@ requires:               # optional: draft, open or approved Proposals this one i
   - "0006"
 base:
   checkout/order.md: 3f2a…   # sha256 of the file when the Proposal first touched it
-  requirements/ui.md: 9b1c…  # Requirement Areas are touched the same way
+  requirements/ui/main.md: 9b1c…  # Requirement files are touched the same way
   checkout/refund.md: new
 delete:
   - checkout/legacy.md
@@ -186,7 +192,7 @@ Why this change is needed, in prose.
 Written by the developer on rejection, only when they gave some.
 ```
 
-- Next to `proposal.md`, a `model/` folder holds the **full new version** of every touched Model file, at the same path it has under `.trama/model/`, and a `requirements/` folder does the same for touched Areas.
+- Next to `proposal.md`, a `model/` folder holds the **full new version** of every touched Model file, at the same path it has under `.trama/model/`, and a `requirements/` folder does the same for touched Requirement files, at `requirements/<area>/area.md` and `requirements/<area>/<fragment>.md`. Applying it writes new fragments and deletes those marked for deletion; validation sees the whole Area, the changed fragments and those left as they are. `trama proposal show` labels each Requirement change with its Area and fragment.
 - **Draft and open**: a new Proposal is a `draft` while the agent writes it. The developer cannot approve or reject it and the Board does not count it as awaiting a decision; the agent hands it over, which makes it `open`. A Proposal file without `status` is `open`.
 - **Submitting** checks the Model and Requirements with the Proposal applied, including required Proposals, and refuses every validation error or unregistered file without leaving Draft. Staleness and waiting for required approvals do not prevent submission. Only a Draft can be submitted.
 - **Editing after submission**: register the file before each change. Registering, rewriting or marking a file for deletion returns an open Proposal to Draft, even if the content ends up unchanged; submit again when finished.
@@ -209,7 +215,7 @@ Tasks, Drifts and the CLI point to parts of the Model with one syntax:
 | Transition | `order/Paid/user.CANCEL` (every Transition from Paid on that Event) |
 | Event | `user.CANCEL` |
 | Requirement Area | `requirements/ui` |
-| Requirement section | `requirements/ui#order/Paid`, `requirements/ui#General` |
+| Requirement section | `requirements/ui#order/Paid`, `requirements/ui#General` (the fragment is never named: a section is unique in its Area) |
 
 ## Task
 
@@ -322,7 +328,9 @@ touched: 2026-01-01T12:03:10.000Z
 
 ## Requirements
 
-`requirements/<area>.md`: how the System must be built, beside the Model (ADR 0007). `trama init` creates five empty Areas: `ui`, `tech`, `quality`, `data` and `rules`. Add, split or delete Areas freely.
+`requirements/<area>/`: how the System must be built, beside the Model (ADR 0007). `trama init` creates five Areas, `ui`, `tech`, `quality`, `data` and `rules`, each a folder with only its `area.md`. Add, split or delete Areas freely.
+
+`requirements/ui/area.md` says what is true of the whole Area:
 
 ```markdown
 ---
@@ -331,6 +339,15 @@ description: Use when building or changing screens, layout, styling or texts.
 # Interface
 
 Prose here applies to the whole Area.
+```
+
+Every other file of the folder is a **fragment**, here `requirements/ui/checkout.md`:
+
+```markdown
+---
+description: Use when building the checkout and order screens.
+---
+# Checkout and orders
 
 ## General
 - Material 3, light and dark theme following the system.
@@ -342,10 +359,16 @@ Prose here applies to the whole Area.
 - A green "Paid" badge next to the order number.
 ```
 
-- `description` (required) says when an agent needs this Area. It becomes the description of the generated skill.
-- `## General` applies everywhere. Any other `##` is titled with exactly one element reference and applies to that element and everything inside it: a Feature's sections to its Machines, a Machine's to its States, a State's to its sub-States. Content under a section is free Markdown.
-- Requirements change like the Model: an agent writes them only through a Proposal; the developer may also edit the files directly.
-- Trama writes one skill per Area that has content, `trama-req-<area>/SKILL.md`, into every skill folder holding Trama's skills (`.agents/skills`, `.claude/skills`, `.github/skills`, or the configured one). The skills are generated: commit them, never edit them. They are rewritten after an approval, by `trama skills update`, and by the extension whenever an Area file changes; Areas emptied or deleted lose their skill.
+- `area.md` is required: a `description` saying when an agent needs this Area, an H1 with its title, optional prose, and no `##` sections.
+- A fragment has a kebab-case name (`area` is reserved), a `description` saying when an agent needs it, an H1 with its title and no prose before its first section; then only sections. No subfolders in an Area.
+- `## General` applies everywhere. Any other `##` is titled with exactly one element reference and applies to that element and everything inside it: a Feature's sections to its Machines, a Machine's to its States, a State's to its sub-States. Content under a section is free Markdown. A section appears once in its Area, in one fragment.
+- Requirements change like the Model: an agent writes them only through a Proposal; the developer may also edit the files directly. When a Proposal writes into a fragment that is or becomes larger than 12 KB, the agent splits it in the same Proposal, moving sections without changing their text.
+- Trama writes the Requirement skills into every skill folder holding Trama's skills (`.agents/skills`, `.claude/skills`, `.github/skills`, or the configured one), in one of two modes, the same for every Area. The budget is the sum, over the fragments with at least one non-empty section, of the characters of `trama-req-<area>-<fragment>` and of the fragment's description. Up to 4,000 characters, **fragment mode**: one skill `trama-req-<area>-<fragment>` per fragment with content, with the fragment's description, the Area's introduction and the fragment's sections. Beyond, **index mode**: one skill `trama-req-<area>` per Area with content, with the Area's description, its introduction, its General section and the list of its fragments (title, description, section references, file); every fragment is a `<fragment>.md` file next to the index, without the General section. The skills are generated: commit them, never edit them. They are rewritten after an approval, by `trama skills update`, and by the extension whenever a file inside `requirements/` changes; every `trama-req-*` skill the current mode does not produce is removed. `trama skills update` reports the mode, the budget used out of 4,000 and any switch.
+- Wherever Trama names a Requirement skill to load (`trama requirements`, a pointer to a whole Area), it names the one the current mode produces.
+
+### Migrating from single-file Areas
+
+Earlier versions wrote each Area as one file, `requirements/<area>.md`. Such a file is now a validation error. `trama skills update` (and **Trama: Update Agent Skills**) converts it before regenerating the skills: `requirements/<area>/area.md` gets the file's description, title and introduction, `requirements/<area>/main.md` the same description and title with every section in the same order and with the same text, and the old file is deleted. An Area with no non-empty section gets only `area.md`. When the folder `requirements/<area>/` already exists the file is left alone, and the report says so. References `requirements/<area>#<section>` in Tasks, Drifts and Proposals do not change.
 
 ## Numbering
 

@@ -1,4 +1,5 @@
 import { TramaError } from "../../../src/core/errors";
+import { cardName } from "../../../src/core/short-numbers";
 import type { Project } from "../../../src/core/store";
 import { resolveDrift } from "../../../src/core/work";
 import { roundWorktrees, worktreePath } from "../../../src/core/worktree-round";
@@ -16,7 +17,7 @@ export function applyWorktreeDecision(
   choice: { option?: number; note?: string } = {},
 ): string {
   const folder = roundWorktrees(open).find((item) => item.proposal === proposalId);
-  if (!folder) throw new TramaError(`Proposal ${proposalId} is not in a worktree.`);
+  if (!folder) throw new TramaError(`Proposal ${cardName(open, "proposal", proposalId)} is not in a worktree.`);
   resolveDrift(folder.project, driftId, how, skillsDirs, choice);
   return worktreePath(open.root, proposalId);
 }

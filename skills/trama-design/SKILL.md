@@ -5,7 +5,7 @@ description: Use when the user wants to add, change or think through behaviour o
 
 # Trama: design
 
-The **Model** in `.trama/model/` is the source of truth for how the System behaves. Next to it, the **Requirements** in `.trama/requirements/` say how it must be built: one file per **Area** (by default `ui`, `tech`, `quality`, `data`, `rules`). You change both only through a **Proposal** that the developer approves as a whole. You never write code in this skill.
+The **Model** in `.trama/model/` is the source of truth for how the System behaves. Next to it, the **Requirements** in `.trama/requirements/` say how it must be built: one folder per **Area** (by default `ui`, `tech`, `quality`, `data`, `rules`), with an `area.md` and **fragments** that hold its sections. You change both only through a **Proposal** that the developer approves as a whole. You never write code in this skill.
 
 ## Hand-over
 
@@ -22,13 +22,20 @@ When the developer asked for a design from Trama's terminal, Trama has already a
 - The Model describes *what can happen*, never *how it is built*: no variables, field names, database columns, endpoints, classes or file paths. A State is a situation in domain words ("Awaiting payment"), not a combination of values. How it is built (layout, styling, libraries, limits, data fields, formulas) belongs in the Requirements.
 - Conditions and consequences of a Transition are plain prose after the colon.
 
+## Naming cards
+
+Every live Proposal, Task and Drift has a temporary **short number** (`P3`, `T3`, `D3`) besides its **permanent identity** of eight characters.
+
+- Name cards to the developer by short number and title, for example "Proposal P3 – title". A closed card has no number: use its permanent identity.
+- In every command you run and every file you write (the Proposal body, `--requires`, `--request`, reasons, references) use **only the permanent identity**, taken from `--json` (field `id`; the number is the field `number`) or from the file or folder name. **Never write a short number in a file**: it changes from one working copy to another.
+
 ## Steps
 
 1. **Explore before asking.** When the instruction names a written design request, read it first (see "Written design requests" below). Then `trama system`, then `trama search <word>` for what already exists (it searches the Requirements too), then `trama feature <id>`, `trama machine <id>`, `trama state <machine/State>`, `trama event <owner.EVENT>`, and `trama requirements` for the Areas. Reuse existing Machines, Actors and Events instead of duplicating them. Add `--json` if you need structured data. Facts are your job: never ask the developer anything the Model, the Requirements or the code can tell you.
 2. **Interview the developer in rounds** until every decision about the change is settled (see "The interview" below). Do not open a Proposal before that, and once the last round is answered open it straight away: do not ask the developer to confirm a summary first.
 3. **Open a Proposal** for one coherent change, which may touch several Machines, Features and Areas: `trama proposal new "<title>" --body "<why>"`. The body says why and summarises the decisions taken in the interview, one line each, with the assumptions you made for skipped questions. When the change is too large to review at once, split it into Proposals that build on each other: open the later ones with `--requires <id>` of the earlier ones; each is then written and validated on top of them and can only be approved after them. For a written design request, bind only the first Proposal to it with `--request <id>`.
-4. **Edit files through it.** For each Model file: `trama proposal edit <id> <model-path>` (for example `checkout/order.md`) prints the path to edit. For an Area: `trama proposal edit <id> requirements/<area>.md`. An existing file arrives pre-filled; a new file arrives empty. To remove a file: `trama proposal delete <id> <path>`. Write files as described in [FORMAT.md](./FORMAT.md). Always write the **complete** new version of a file. Put the Requirements the developer gave you in the same Proposal as the behaviour they belong to.
-5. **Validate until clean.** `trama validate --proposal <id>` must report no errors. A Requirement section titled with a State you removed or renamed is an error: update or remove that section in the same Proposal. Then `trama proposal show <id>` and read the changes: they must match what was agreed, and nothing else.
+4. **Edit files through it.** For each Model file: `trama proposal edit <id> <model-path>` (for example `checkout/order.md`) prints the path to edit. For an Area: `trama proposal edit <id> requirements/<area>/area.md` for its description, title and introduction, and `trama proposal edit <id> requirements/<area>/<fragment>.md` for a fragment, new or existing. An existing file arrives pre-filled; a new file arrives empty. To remove a file: `trama proposal delete <id> <path>`. Write files as described in [FORMAT.md](./FORMAT.md). Always write the **complete** new version of a file. Put the Requirements the developer gave you in the same Proposal as the behaviour they belong to.
+5. **Validate until clean.** `trama validate --proposal <id>` must report no errors. A Requirement section titled with a State you removed or renamed is an error: update or remove that section in the same Proposal. Its warnings do not block, but act on them: a fragment over 12 KB that the Proposal writes into is split in the same Proposal (see "Good Requirement habits"); a switch of the Requirement skills between fragment and index mode goes into your hand-over summary. Then `trama proposal show <id>` and read the changes: they must match what was agreed, and nothing else.
 6. **Hand over.** Run `trama proposal submit <id>` only after step 5. If refused, correct its problems and repeat validation and review before retrying. After submission succeeds, summarise the Proposal in a few lines, tell the developer to review it on the board or with `trama proposal show <id>`, and stop.
 
 ## The interview
@@ -87,9 +94,11 @@ When the prompt says that Proposal `<p>`, attached to Drift `<d>`, is stale, do 
 
 ## Good Requirement habits
 
-- Each Area file starts with a `description` saying when an agent needs it: Trama turns every Area into a `trama-req-<area>` skill with that description. Keep it about the kind of work ("Use when building or changing screens…").
-- `## General` holds what applies everywhere in the Area. Any other `##` section is titled with a Model reference (`checkout`, `order`, `order/Paid`, `user.CANCEL`) and applies to that element and everything inside it.
+- An Area is a folder `requirements/<area>/`. Its `area.md` holds a `description` saying when an agent needs the Area, the title and, optionally, prose for the whole Area; no sections. The sections live in **fragments**, `requirements/<area>/<fragment>.md`, each with its own `description` saying when an agent needs that fragment, its title, and only sections. Keep descriptions about the kind of work ("Use when building or changing the checkout screens…").
+- `## General` holds what applies everywhere in the Area, in whichever fragment it sits. Any other `##` section is titled with a Model reference (`checkout`, `order`, `order/Paid`, `user.CANCEL`) and applies to that element and everything inside it. A section appears once in its Area.
+- Trama turns every fragment with content into a `trama-req-<area>-<fragment>` skill while the names and descriptions of those skills fit in 4,000 characters; beyond that, every Area becomes one index skill `trama-req-<area>` that lists its fragments. Short descriptions keep the project in the first mode.
+- **Split a fragment that is or becomes larger than 12 KB** when your Proposal writes into it, in the same Proposal, before handing it over. Cut where it suits the project, usually by Feature or by a group of nearby Machines; give every new fragment a name and a description that say when it is needed; move the sections without changing their text. Prefer a few medium fragments to many tiny ones: every fragment adds a skill to the 4,000-character budget.
 - Screens and navigation are behaviour: model them as a UI Machine whose States are screens or visual states, and attach their look (layout, components, texts) as `ui` Requirements on those States.
 - Write Requirements as short, checkable statements ("Amounts show two decimals and the currency symbol"), not wishes ("nice formatting").
 - Data fields and formulas go in `data` and `rules`, attached to the Machine or State they concern, never in the Model.
-- A new Area is a new file `requirements/<area>.md` with a kebab-case name, for example to split `ui` into `ui-web` and `ui-mobile`.
+- A new Area is a new folder `requirements/<area>/` with a kebab-case name, an `area.md` and at least one fragment, for example to split `ui` into `ui-web` and `ui-mobile`.

@@ -2,12 +2,14 @@ import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { approvalBlock, approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
-import { lostWorktreeMessage, reconcileLostWorktrees, roundWorktrees, withdrawFromRound } from "../../../src/core/worktree-round";
+import { lostWorktreeMessage, reconcileLostWorktrees, roundWorktrees, withdrawFromRound, worktreePath } from "../../../src/core/worktree-round";
 import { abandonRound, reconcileMerge } from "../../../src/core/worktree-merge";
 import { approvalBySwitch, noticeForSwitch, readMultiBranch, turnMultiBranch } from "../../../src/core/multi-branch";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
+import { namerOf } from "../../../src/core/card-names";
 import { runBlocker } from "../../../src/core/design";
+import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { blockedTasks, getDrift, getTask, listTasks, resolveDrift, staleAttachedProposal } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn } from "./announcements";
@@ -21,9 +23,10 @@ import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { resolveMarkdownFile } from "./paths";
 import { findProject, initializeProject, updateSkills } from "./project";
-import { buildPrompt, buildScanPrompt, withLanguage } from "./prompts";
+import { buildPrompt, buildScanPrompt, type ResolvedAction, terminalName, withLanguage } from "./prompts";
 import { type ApprovalOptions, applyApprovedProposal } from "./approval";
 import type { QuestionSession } from "./question-session";
+import { syncFolderWatchers } from "./folder-watchers";
 
 const DEBOUNCE_MS = 150;
 
@@ -46,6 +49,8 @@ export class Controller implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
   private project: Project | undefined;
   private watcher: vscode.FileSystemWatcher | undefined;
+  /** One watcher per worktree of the round, keyed by folder: their Tasks, Drifts and Proposals are on the Board too. */
+  private readonly worktreeWatchers = new Map<string, vscode.Disposable>();
   private timer: NodeJS.Timeout | undefined;
   private disposed = false;
   /** File text last warned about as unreadable. Forgotten when the panel closes, so reopening warns again. */
@@ -130,6 +135,7 @@ export class Controller implements vscode.Disposable {
     this.disposed = true;
     this.panel?.dispose();
     this.watcher?.dispose();
+    syncFolderWatchers(this.worktreeWatchers, [], () => ({ dispose() {} }));
     clearTimeout(this.timer);
   }
 
@@ -148,10 +154,7 @@ export class Controller implements vscode.Disposable {
     panel.webview.onDidReceiveMessage((raw: unknown) => void this.handle(raw));
 
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(project.root, ".trama/**"));
-    const onChange = () => this.scheduleRefresh();
-    watcher.onDidCreate(onChange);
-    watcher.onDidChange(onChange);
-    watcher.onDidDelete(onChange);
+    this.watchChanges(watcher);
     const subscriptions = [
       onAnnouncementsWithdrawn((announcements) => this.post({ type: "withdrawn", announcements })),
       onQuestionRoundChange(() => this.refresh()),
@@ -160,11 +163,13 @@ export class Controller implements vscode.Disposable {
 
     panel.onDidDispose(() => {
       watcher.dispose();
+      syncFolderWatchers(this.worktreeWatchers, [], () => ({ dispose() {} }));
       for (const subscription of subscriptions) subscription.dispose();
       clearTimeout(this.timer);
       this.panel = this.watcher = this.project = undefined;
       this.switchWarned = null;
       // The round stays open and the agent keeps waiting; the developer is offered a way back to it.
+      this.questions?.panelClosed();
       if (!this.disposed && this.questions?.current()) this.offerReopen();
     });
     this.panel = panel;
@@ -194,6 +199,23 @@ export class Controller implements vscode.Disposable {
     this.timer = setTimeout(() => this.refresh(), DEBOUNCE_MS);
   }
 
+  private watchChanges(watcher: vscode.FileSystemWatcher): void {
+    const onChange = () => this.scheduleRefresh();
+    watcher.onDidCreate(onChange);
+    watcher.onDidChange(onChange);
+    watcher.onDidDelete(onChange);
+  }
+
+  /** Follows the cards inside the worktrees now in the round; called on every refresh, since the round changes then. */
+  private watchWorktrees(project: Project): void {
+    const folders = roundWorktrees(project).map((folder) => worktreePath(project.root, folder.proposal));
+    syncFolderWatchers(this.worktreeWatchers, folders, (folder) => {
+      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(folder), ".trama/{tasks,drifts,proposals}/**"));
+      this.watchChanges(watcher);
+      return watcher;
+    });
+  }
+
   /** A worktree disappeared while the panel may be closed. The Board, if it is open, shows the Proposal back to decide. */
   noteWorktreesLost(): void {
     if (this.panel && this.project) this.refresh();
@@ -220,7 +242,8 @@ export class Controller implements vscode.Disposable {
     if (!this.project) return;
     this.noteSwitch();
     try {
-      for (const lost of reconcileLostWorktrees(this.project)) void vscode.window.showWarningMessage(lostWorktreeMessage(lost));
+      for (const lost of reconcileLostWorktrees(this.project)) void vscode.window.showWarningMessage(lostWorktreeMessage(lost, cardName(this.project, "proposal", lost.id)));
+      this.watchWorktrees(this.project);
       this.post({ type: "snapshot", snapshot: buildSnapshot(this.project), asking: questionRoundOpen() });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
@@ -264,7 +287,7 @@ export class Controller implements vscode.Disposable {
       }
       case "openFile": {
         const home = message.worktree === undefined ? project : roundWorktrees(project).find((folder) => folder.proposal === message.worktree)?.project;
-        if (!home) throw new TramaError(`Proposal ${message.worktree} is not in a worktree.`);
+        if (!home) throw new TramaError(`Proposal ${cardName(project, "proposal", message.worktree as string)} is not in a worktree.`);
         await this.openFile(resolveMarkdownFile(home.dir, message.path));
         return;
       }
@@ -286,7 +309,7 @@ export class Controller implements vscode.Disposable {
         return;
       case "rejectProposal": {
         const feedback = await vscode.window.showInputBox({
-          title: `Reject Proposal ${message.id}`,
+          title: `Reject Proposal ${cardName(project, "proposal", message.id)}`,
           prompt: "Feedback for the agent (optional): what should the next Proposal do differently? Press Enter to reject without feedback, Esc to cancel.",
           ignoreFocusOut: true,
         });
@@ -328,7 +351,7 @@ export class Controller implements vscode.Disposable {
       }
       case "driftBlocked": {
         const home = message.worktree === undefined ? project : roundWorktrees(project).find((folder) => folder.proposal === message.worktree)?.project;
-        if (!home) throw new TramaError(`Proposal ${message.worktree} is not in a worktree.`);
+        if (!home) throw new TramaError(`Proposal ${cardName(project, "proposal", message.worktree as string)} is not in a worktree.`);
         const proposal = getDrift(home, message.id).data.proposal;
         const block = proposal === null ? null : approvalBlock(home, proposal);
         if (block === null) {
@@ -356,12 +379,12 @@ export class Controller implements vscode.Disposable {
       agentConfigured: agentReady(),
       launchScan: async (features, proposal) => {
         const instruction = buildScanPrompt(features, proposal);
-        if ((await launchAgent(project.root, instruction, undefined, true)) !== "not-sent") return;
+        if ((await launchAgent(project.root, instruction, "Scan", undefined, true)) !== "not-sent") return;
         // Cursor could not send it by itself: no chat is left waiting; the developer starts the scan when they want.
-        void vscode.window.showInformationMessage(`Trama: Proposal ${proposal} was approved. Scan the Features it affects?`, "Scan now").then(async (choice) => {
+        void vscode.window.showInformationMessage(`Trama: Proposal ${cardName(project, "proposal", proposal)} was approved. Scan the Features it affects?`, "Scan now").then(async (choice) => {
           if (choice !== "Scan now") return;
           try {
-            await launchAgent(project.root, instruction);
+            await launchAgent(project.root, instruction, "Scan");
           } catch (err) {
             void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
           }
@@ -379,7 +402,7 @@ export class Controller implements vscode.Disposable {
       try {
         const approved = approveProposal(project, proposalId, skillsDirs);
         this.refresh();
-        const line = `Approved Proposal ${approved.id}`;
+        const line = `Approved Proposal ${cardName(project, "proposal", approved.id)}`;
         return { ok: true, message: decision.notice ? `${decision.notice}\n${line}` : line };
       } catch (err) {
         const message = describeError(err);
@@ -407,7 +430,7 @@ export class Controller implements vscode.Disposable {
         proposalId,
       );
       if (!started) return { ok: false, message: warnings.at(-1) ?? "The Proposal stayed open." };
-      return { ok: true, message: `Proposal ${proposalId} is in a worktree.` };
+      return { ok: true, message: `Proposal ${cardName(project, "proposal", proposalId)} is in a worktree.` };
     } catch (err) {
       const message = describeError(err);
       void vscode.window.showErrorMessage(`Trama: ${message}`);
@@ -444,6 +467,8 @@ export class Controller implements vscode.Disposable {
   }
 
   private async launchAction(project: Project, action: AgentAction): Promise<void> {
+    const send = (resolved: ResolvedAction, announceProposal?: string) =>
+      launchAgent(project.root, buildPrompt(resolved), terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal);
     switch (action.kind) {
       case "design": {
         const request =
@@ -456,37 +481,38 @@ export class Controller implements vscode.Disposable {
             validateInput: notBlank("Describe what to design"),
           }));
         if (request === undefined || request.trim() === "") return;
-        await launchAgent(project.root, buildPrompt({ kind: "design", prompt: request }), request.trim());
+        await send({ kind: "design", prompt: request }, request.trim());
         return;
       }
       case "scan":
         if (action.feature !== undefined && !loadModel(project).features.has(action.feature))
           throw new TramaError(`No Feature "${action.feature}" in the Model`);
-        await launchAgent(project.root, buildPrompt(action));
+        await send(action);
         return;
       case "implement":
-        await launchAgent(project.root, buildPrompt({ kind: "implement", task: getTask(project, action.task).id }));
+        await send({ kind: "implement", task: getTask(project, action.task).id });
         return;
       case "implement-design": {
         const proposal = getProposal(project, action.proposal).id;
-        const blocker = runBlocker(runTasks(project).filter((t) => t.proposal === proposal), "design");
+        const blocker = runBlocker(runTasks(project).filter((t) => t.proposal === proposal), "design", namerOf(syncShortNumbers(project).all()));
         if (blocker !== null) throw new TramaError(`Run this design is unavailable: ${blocker}.`);
-        await launchAgent(project.root, buildPrompt({ kind: "implement-design", proposal }));
+        await send({ kind: "implement-design", proposal });
         return;
       }
       case "implement-all": {
-        const blocker = runBlocker(runTasks(project), "all");
+        const blocker = runBlocker(runTasks(project), "all", namerOf(syncShortNumbers(project).all()));
         if (blocker !== null) throw new TramaError(`Run all To do is unavailable: ${blocker}.`);
-        await launchAgent(project.root, buildPrompt(action));
+        await send(action);
         return;
       }
       case "import":
-        await launchAgent(project.root, buildPrompt(action));
+        await send(action);
         return;
       case "rework-drift": {
         const drift = getDrift(project, action.drift);
         const stale = staleAttachedProposal(project, drift);
-        await launchAgent(project.root, buildPrompt({ kind: "rework-drift", drift: drift.id, proposal: stale.id }), `Rework of Proposal ${stale.id}`);
+        // The title is written into the announcement's file, so it names the Proposal by its identity; the Board shows its number.
+        await send({ kind: "rework-drift", drift: drift.id, proposal: stale.id }, `Rework of Proposal ${stale.id}`);
         return;
       }
     }

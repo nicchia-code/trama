@@ -64,6 +64,14 @@ export class QuestionSession {
     this.changed();
   }
 
+  /** The panel closed: the round goes out of sight and, as when the overlay is minimized, the Skip all confirmation closes. */
+  panelClosed(): void {
+    const round = this.active;
+    if (!round || round.state.confirming === null) return;
+    round.state = { ...round.state, confirming: null };
+    this.changed();
+  }
+
   current(): QuestionRoundView | null {
     const round = this.active;
     return round ? { id: round.id, agent: round.agent, state: round.state } : null;

@@ -1,7 +1,9 @@
+import { type CardNumbers, cardLabel, cardNameOf, namerOf } from "../../../../src/core/card-names";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import type { ProposalView } from "../../../../src/core/snapshot";
 import { approveBlocker } from "../board/logic";
 import { renderDriftCompare } from "../drift-compare";
+import { idTag } from "../id-tag";
 import { renderInline, renderMarkdown } from "../markdown";
 import type { Detail, DetailItem } from "./details";
 import type { Level } from "./graph";
@@ -73,14 +75,16 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     return li;
   };
 
-  const renderProposal = (p: ProposalView): HTMLElement => {
+  const renderProposal = (p: ProposalView, numbers: CardNumbers): HTMLElement => {
     const box = el("section", "dg-proposal");
-    box.append(el("div", "dg-kind", `Proposal ${p.id}`), el("h3", "", p.title));
+    const kind = el("div", "dg-kind", "Proposal ");
+    kind.append(idTag(cardNameOf(numbers, "proposal", p.id), "dg-id"));
+    box.append(kind, el("h3", "", p.title));
     if (p.body) box.append(body(p.body));
     const open = p.requires.filter((r) => appliesUnder(r.status));
-    if (open.length > 0) box.append(el("div", "dg-note", `Drawn on top of ${open.map((r) => `Proposal ${r.id}`).join(", ")}, not yet approved: what they add is shown as if approved.`));
+    if (open.length > 0) box.append(el("div", "dg-note", `Drawn on top of ${open.map((r) => `Proposal ${cardLabel(numbers, "proposal", r.id)}`).join(", ")}, not yet approved: what they add is shown as if approved.`));
     const unusable = p.requires.filter((r) => !appliesUnder(r.status));
-    if (unusable.length > 0) box.append(el("div", "dg-problem-head", "Requires Proposals that cannot be approved"), list("dg-problems", requiredReasons(unusable)));
+    if (unusable.length > 0) box.append(el("div", "dg-problem-head", "Requires Proposals that cannot be approved"), list("dg-problems", requiredReasons(unusable, (id) => cardLabel(numbers, "proposal", id))));
     if (p.stale.length > 0) box.append(el("div", "dg-problem-head", "Stale: the Model changed since the Proposal was written"), list("dg-problems", p.stale));
     if (p.unbased.length > 0) box.append(el("div", "dg-problem-head", "Touches files it has no base for"), list("dg-problems", p.unbased));
     if (p.errors.length > 0) {
@@ -97,7 +101,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       }
       box.append(ul);
     }
-    const blocker = approveBlocker(p);
+    const blocker = approveBlocker(p, numbers);
     const row = el("div", "dg-actions");
     row.append(
       button("Approve", () => actions.approve(p.id), { primary: true, disabled: blocker !== null, title: blocker ?? "Apply this Proposal to the Model" }),
@@ -111,13 +115,16 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     render(detail) {
       root.replaceChildren();
       const head = el("header", "dg-panel-head");
-      head.append(el("div", "dg-kind", detail.kind));
+      const driftName = detail.drift && detail.drift.merge !== true ? cardNameOf(detail.numbers, "drift", detail.drift.id) : null;
+      const kind = el("div", "dg-kind", driftName === null ? detail.kind : "Drift ");
+      if (driftName !== null) kind.append(idTag(driftName, "dg-id"));
+      head.append(kind);
       head.append(el("h2", "", detail.title));
       if (detail.change !== "same") head.append(el("div", `dg-badge change-${detail.change}`, CHANGE_TEXT[detail.change]));
       root.append(head);
       if (detail.drift) {
         const d = detail.drift;
-        root.append(renderDriftCompare(d, { keep: (how, carries) => actions.resolveDrift(d.id, how, carries), blocked: () => actions.driftBlocked(d.id), openLink: actions.openLink }));
+        root.append(renderDriftCompare(d, { keep: (how, carries) => actions.resolveDrift(d.id, how, carries), blocked: () => actions.driftBlocked(d.id), openLink: actions.openLink, name: namerOf(detail.numbers) }));
       }
 
       if (detail.description) root.append(body(detail.description));
@@ -136,7 +143,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
         for (const i of s.items) ul.append(renderItem(i));
         root.append(el("div", "dg-heading", s.heading), ul);
       }
-      if (detail.proposal) root.append(renderProposal(detail.proposal));
+      if (detail.proposal) root.append(renderProposal(detail.proposal, detail.numbers));
     },
   };
 }

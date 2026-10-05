@@ -1,4 +1,5 @@
 import type { Change, MergedMachine, MergedState } from "../../../../src/core/merge";
+import { type CardNumbers, noNumbers } from "../../../../src/core/card-names";
 import type { DriftView, ProposalView, Snapshot } from "../../../../src/core/snapshot";
 import type { Machine, State } from "../../../../src/core/types";
 
@@ -37,6 +38,8 @@ export interface Scene {
   /** Model file (relative to `.trama/model/`) of every Machine that exists today. */
   files: Map<string, string>;
   proposal: ProposalView | null;
+  /** The short numbers of the live cards, to write cards the way the Board does. */
+  numbers: CardNumbers;
   drifts: DriftView[];
 }
 
@@ -119,6 +122,7 @@ export function buildScene(snapshot: Snapshot, proposalId: string | null): Scene
     files: new Map(model.machines.map((m) => [m.id, m.file])),
     proposal,
     drifts: snapshot.drifts.filter((d) => d.worktree === null && d.merge !== true),
+    numbers: snapshot.numbers ?? noNumbers,
   };
 }
 

@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { TramaError } from "./errors";
 import { approvalBlock, getProposal, writeProposalFiles } from "./proposals";
 import { proposalScope } from "./scope";
+import { cardName } from "./short-numbers";
 import { compareByCreation, loadModel, type Project, projectAt, writeFileEnsuringDir } from "./store";
 
 /**
@@ -205,7 +206,7 @@ export function withdrawFromRound(p: Project, id: string): { remaining: number }
   getProposal(p, id);
   if (mergeWorktreeOpen(p.root)) throw new TramaError("One Proposal cannot be removed while the round is merging, in conflict, reconciling or waiting.");
   const entry = listed(p.root).find((item) => PROPOSAL_BRANCH.exec(item.branch ?? "")?.[1] === id);
-  if (!entry) throw new TramaError(`Proposal ${id} is not in a worktree.`);
+  if (!entry) throw new TramaError(`Proposal ${cardName(p, "proposal", id)} is not in a worktree.`);
   const removed = git(p.root, ["worktree", "remove", "--force", entry.path]);
   if (!removed.ok) throw new TramaError(gitFailure(removed));
   const branch = git(p.root, ["branch", "-D", `trama/${id}`]);
@@ -267,9 +268,9 @@ export function reconcileLostWorktrees(p: Project): LostWorktree[] {
   });
 }
 
-/** What the editor tells the developer when a Proposal's worktree has disappeared. */
-export function lostWorktreeMessage(lost: LostWorktree): string {
-  const who = lost.title === "" ? `Proposal ${lost.id}` : `Proposal ${lost.id} "${lost.title}"`;
+/** What the editor tells the developer when a Proposal's worktree has disappeared. `name` is how the Proposal is written: its short number, or its identity. */
+export function lostWorktreeMessage(lost: LostWorktree, name: string = lost.id): string {
+  const who = lost.title === "" ? `Proposal ${name}` : `Proposal ${name} "${lost.title}"`;
   const rest = lost.remaining === 0 ? " There is no round left." : " The other Proposals stay in the round.";
   return `${who} is back to decide: its worktree is gone.${rest}`;
 }
@@ -289,7 +290,7 @@ function gitFailure(result: { stderr: string; stdout: string }): string {
 export function acceptIntoWorktree(p: Project, id: string, options: { autoScan: boolean; worktreeAgent: string }): AcceptResult {
   const block = approvalBlock(p, id);
   if (block && !OPEN_BLOCK.has(block.kind)) return refuse(block.reason);
-  if (proposalIsInWorktree(p, id)) return refuse(`Proposal ${id} is in a worktree.`);
+  if (proposalIsInWorktree(p, id)) return refuse(`Proposal ${cardName(p, "proposal", id)} is in a worktree.`);
   const proposal = getProposal(p, id);
   if (proposal.data.kind === "import") return refuse("Import proposals cannot be accepted while multi-branch is on.");
   if (!options.autoScan) return refuse("Turn automatic scan on, or turn multi-branch off, before accepting this Proposal.");

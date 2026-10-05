@@ -39,11 +39,10 @@ function commitLeftovers(path: string): void {
   if (!committed.ok) throw new TramaError(failure(committed));
 }
 
-function unionFeatures(p: Project, ids: string[]): string[] {
+/** The Features each merged Proposal would have had scanned alone, among those the merged Model still has. */
+function unionFeatures(p: Project, scoped: string[]): string[] {
   const existing = loadModel(p).features;
-  const features = new Set<string>();
-  for (const id of ids) for (const feature of proposalScope(p, id)) if (existing.has(feature)) features.add(feature);
-  return [...features].sort();
+  return [...new Set(scoped)].filter((feature) => existing.has(feature)).sort();
 }
 
 const MERGE_DRIFT = `# Merge
@@ -75,7 +74,10 @@ Read the conflict markers and keep the behaviours they show, dropping only what 
 export function mergeRound(p: Project, skillsDirs: string[] = []): MergeRoundResult {
   const ids = worktreeProposalIds(p);
   if (ids.length === 0) return { kind: "pending" };
-  for (const folder of roundWorktrees(p)) for (const task of listTasks(folder.project)) if (task.data.column !== "done") return { kind: "pending" };
+  // A worktree also holds the open folder's own Tasks, copied with the commit it started from: only the round's Tasks count.
+  const round = new Set(ids);
+  for (const folder of roundWorktrees(p))
+    for (const task of listTasks(folder.project)) if (task.data.proposal !== null && round.has(task.data.proposal) && task.data.column !== "done") return { kind: "pending" };
 
   const origin = roundOrigin(p.root);
   if (!origin) throw new TramaError("The worktree round no longer remembers the branch it started from.");
@@ -90,33 +92,26 @@ export function mergeRound(p: Project, skillsDirs: string[] = []): MergeRoundRes
   const added = git(p.root, ["worktree", "add", "-b", "trama/merge", mergePath, origin.commit]);
   if (!added.ok) return { kind: "refused", message: failure(added) };
 
-  for (const id of [...ids].sort()) {
-    const merged = git(mergePath, ["merge", "--no-edit", `trama/${id}`]);
-    if (merged.ok) continue;
-    git(mergePath, ["merge", "--abort"]);
-    git(mergePath, ["reset", "--hard", origin.commit]);
-    writeFileEnsuringDir(join(mergePath, ".trama", "merge-drift.md"), MERGE_DRIFT);
-    return { kind: "conflict" };
-  }
-
-  return landReadyMerge(p, skillsDirs, ids, origin.branch, false);
+  return mergeBranches(p, skillsDirs, ids, origin.branch);
 }
 
-/** A merge worktree already holds a result. `ready` can be applied; `conflict` was reset to the start; `none` is not there yet. */
+/** A merge worktree already holds a result. `ready` can be applied; `conflict` holds an unfinished merge; `none` is not there yet. */
 function preparedMerge(root: string, originCommit: string): "none" | "conflict" | "ready" | "reconciling" {
   const mergePath = worktreePath(root, "merge");
   if (!existsSync(mergePath)) return "none";
+  if (reconciliationOpen(mergePath)) return "reconciling";
+  if (mergeInProgress(mergePath)) return "conflict";
   const head = git(mergePath, ["rev-parse", "HEAD"]);
   if (!head.ok) throw new TramaError(failure(head));
   if (head.stdout === originCommit) return "conflict";
-  if (reconciliationOpen(mergePath)) return "reconciling";
   return "ready";
 }
 
 /**
  * Applies a merge that is already waiting in the merge worktree, once the open folder is the branch the round
  * started from and has no uncommitted changes. A Merge Drift or its Task that was committed is removed first.
- * Does nothing while a reconciliation Task is still open, or while the merge worktree is only the untouched start.
+ * Does nothing while a reconciliation Task is still open, while the merge has conflicts, or while the merge
+ * worktree is only the untouched start.
  */
 export function applyWaitingMerge(p: Project, skillsDirs: string[] = []): MergeRoundResult {
   const origin = roundOrigin(p.root);
@@ -124,7 +119,7 @@ export function applyWaitingMerge(p: Project, skillsDirs: string[] = []): MergeR
   if (!origin || !existsSync(mergePath)) return { kind: "pending" };
   const head = git(mergePath, ["rev-parse", "HEAD"]);
   if (!head.ok || head.stdout === origin.commit) return { kind: "pending" };
-  if (reconciliationOpen(mergePath)) return { kind: "pending" };
+  if (reconciliationOpen(mergePath) || mergeInProgress(mergePath)) return { kind: "pending" };
   const ids = worktreeProposalIds(p);
   if (ids.length === 0) return { kind: "pending" };
   return landReadyMerge(p, skillsDirs, ids, origin.branch, true);
@@ -137,13 +132,15 @@ function landReadyMerge(p: Project, skillsDirs: string[], ids: string[], branch:
   if (!head.ok || !status.ok) throw new TramaError(failure(head.ok ? status : head));
   if (head.stdout !== branch || status.stdout !== "") return again ? { kind: "waiting", branch, again } : { kind: "waiting", branch };
 
+  // Scoped against the folder before the merge lands, the rule of an acceptance: afterwards the Requirements no longer differ.
+  const scoped = ids.flatMap((id) => proposalScope(p, id));
   const landing = git(p.root, ["merge", "--no-edit", "trama/merge"]);
   if (!landing.ok) {
     git(p.root, ["merge", "--abort"]);
     return again ? { kind: "waiting", branch, again } : { kind: "waiting", branch };
   }
 
-  const features = unionFeatures(p, ids);
+  const features = unionFeatures(p, scoped);
   for (const id of ids) recordMergedProposal(p, id);
   syncRequirementSkills(p, skillsDirs);
   for (const id of [...ids, "merge"]) {
@@ -200,8 +197,8 @@ export function mergeDriftDocument(root: string): Drift | null {
 }
 
 /**
- * The developer keeps the side that reconciles. A Technical Task is born in the merge worktree, linked to no Proposal.
- * The Merge Drift stays until the round is merged or abandoned.
+ * The developer keeps the side that reconciles. A Technical Task is born in the merge worktree, linked to no Proposal,
+ * where the merge waits with its conflicts. The Merge Drift stays until the round is merged or abandoned.
  */
 export function reconcileMerge(p: Project, option: number): { task: string; worktree: string } {
   const mergePath = worktreePath(p.root, "merge");
@@ -216,7 +213,7 @@ export function reconcileMerge(p: Project, option: number): { task: string; work
     title: "Reconcile the worktree round",
     refs: [],
     technical: true,
-    body: `${chosen.title}\n\n${chosen.text}`,
+    body: `${chosen.title}\n\n${chosen.text}\n\nThis folder holds the round's merge, stopped on its conflicts: resolve every conflict here and leave no conflict markers. Trama commits the result and merges the round's remaining branches.`,
   });
   const doc = readDocument(task.path);
   writeDocument(task.path, { ...doc.data, merge: true }, doc.body);
@@ -243,41 +240,40 @@ export function abandonRound(p: Project): void {
 }
 
 /**
- * The reconciliation command ended. When its Task is Done, what remains is committed without the Merge Drift
- * or that Task, and the merge is tried again. Otherwise the round stays and the merge is not tried.
+ * The reconciliation command ended. When its Task is Done and no conflict marker is left, what remains is committed
+ * without the Merge Drift or that Task, and the merge is tried again. Otherwise the round stays and the merge is not tried.
  */
 export function finishReconciliation(p: Project, skillsDirs: string[] = []): MergeRoundResult | { kind: "stayed" } {
   const mergePath = worktreePath(p.root, "merge");
   if (!existsSync(mergePath) || mergeTaskRels(mergePath).length === 0) return { kind: "pending" };
   if (reconciliationOpen(mergePath)) return { kind: "stayed" };
-  commitReconciliation(mergePath);
   const origin = roundOrigin(p.root);
   if (!origin) throw new TramaError("The worktree round no longer remembers the branch it started from.");
-  if (conflictMarkers(mergePath)) {
-    git(mergePath, ["reset", "--hard", origin.commit]);
-    clearReconciliationTasks(mergePath);
-    writeFileEnsuringDir(join(mergePath, ".trama", "merge-drift.md"), MERGE_DRIFT);
-    return { kind: "conflict" };
-  }
-  const ids = worktreeProposalIds(p);
-  const head = git(mergePath, ["rev-parse", "HEAD"]);
-  if (!head.ok) throw new TramaError(failure(head));
-  if (head.stdout === origin.commit) return mergeBranches(p, skillsDirs, ids, origin.commit, origin.branch);
-  return landReadyMerge(p, skillsDirs, ids, origin.branch, false);
+  if (conflictMarkers(mergePath)) return conflictLeft(mergePath);
+  commitReconciliation(mergePath);
+  return mergeBranches(p, skillsDirs, worktreeProposalIds(p), origin.branch);
 }
 
-function mergeBranches(p: Project, skillsDirs: string[], ids: string[], originCommit: string, branch: string): MergeRoundResult {
+/** Merges every branch of the round not merged yet. A conflict stays in the merge worktree, with its markers. */
+function mergeBranches(p: Project, skillsDirs: string[], ids: string[], branch: string): MergeRoundResult {
   const mergePath = worktreePath(p.root, "merge");
   for (const id of [...ids].sort()) {
     const merged = git(mergePath, ["merge", "--no-edit", `trama/${id}`]);
     if (merged.ok) continue;
-    git(mergePath, ["merge", "--abort"]);
-    git(mergePath, ["reset", "--hard", originCommit]);
-    clearReconciliationTasks(mergePath);
-    writeFileEnsuringDir(join(mergePath, ".trama", "merge-drift.md"), MERGE_DRIFT);
-    return { kind: "conflict" };
+    if (!mergeInProgress(mergePath)) throw new TramaError(failure(merged));
+    return conflictLeft(mergePath);
   }
   return landReadyMerge(p, skillsDirs, ids, branch, false);
+}
+
+function conflictLeft(mergePath: string): MergeRoundResult {
+  clearReconciliationTasks(mergePath);
+  writeFileEnsuringDir(join(mergePath, ".trama", "merge-drift.md"), MERGE_DRIFT);
+  return { kind: "conflict" };
+}
+
+function mergeInProgress(mergePath: string): boolean {
+  return git(mergePath, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]).ok;
 }
 
 function commitReconciliation(mergePath: string): void {
@@ -290,13 +286,18 @@ function commitReconciliation(mergePath: string): void {
   }
   const staged = git(mergePath, ["diff", "--cached", "--name-only"]);
   if (!staged.ok) throw new TramaError(failure(staged));
-  if (staged.stdout === "") return;
+  // An unfinished merge is concluded even when its result equals one side.
+  if (staged.stdout === "" && !mergeInProgress(mergePath)) return;
   const committed = git(mergePath, ["commit", "-m", KEEP]);
   if (!committed.ok) throw new TramaError(failure(committed));
 }
 
+/** Markers in the Model, the Requirements, or any file the merge or the agent changed and has not committed. */
 function conflictMarkers(mergePath: string): boolean {
-  const found = git(mergePath, ["grep", "-l", "-e", "^<<<<<<<", "--", ".trama/model", ".trama/requirements"]);
+  const changed = git(mergePath, ["diff", "--name-only", "HEAD"]);
+  if (!changed.ok) throw new TramaError(failure(changed));
+  const paths = [".trama/model", ".trama/requirements", ...changed.stdout.split("\n").filter((path) => path !== "")];
+  const found = git(mergePath, ["grep", "-l", "-e", "^<<<<<<<", "--", ...paths]);
   return found.ok && found.stdout !== "";
 }
 

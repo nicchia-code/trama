@@ -14,6 +14,7 @@ import {
   rejectProposal,
   submitProposal,
 } from "../src/core/proposals";
+import { cardName } from "../src/core/short-numbers";
 import { loadModel, type Project, projectAt } from "../src/core/store";
 import { newDrift, resolveDrift } from "../src/core/work";
 
@@ -86,7 +87,7 @@ describe("handing over", () => {
     writeFileSync(join(p.dir, "model/checkout/cart.md"), `${readFileSync(join(p.dir, "model/checkout/cart.md"), "utf8")}\n`);
     expect(health(p, getProposal(p, top.id)).stale).toEqual(["checkout/cart.md"]);
     expect(submitProposal(p, top.id).data.status).toBe("open");
-    expect(() => approveProposal(p, top.id)).toThrow(new RegExp(`Proposal ${base.id} "Base" is still being written`));
+    expect(() => approveProposal(p, top.id)).toThrow(new RegExp(`Proposal ${cardName(p, "proposal", base.id)} "Base" is still being written`));
   });
 
   test("only a Draft can be handed over", () => {
@@ -154,7 +155,7 @@ describe("discarding", () => {
     discardProposal(p, base.id);
 
     expect(health(p, getProposal(p, top.id)).requires).toEqual([{ id: base.id, title: "Base", status: "discarded" }]);
-    expect(() => approveProposal(p, top.id)).toThrow(new RegExp(`Proposal ${base.id} "Base" was discarded`));
+    expect(() => approveProposal(p, top.id)).toThrow(new RegExp(`Proposal ${cardName(p, "proposal", base.id)} "Base" was discarded`));
     expect(getProposal(p, top.id).data.status).toBe("open");
     expect(() => resolveDrift(p, drift.id, "accept-proposal")).toThrow(/discarded/);
     expect(() => newProposal(p, "Later", "", { requires: [base.id] })).toThrow(/was discarded/);

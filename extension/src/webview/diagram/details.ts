@@ -1,5 +1,6 @@
 import type { Change, MergedMachine, MergedState, MergedTransition } from "../../../../src/core/merge";
 import type { AreaView, DriftView, ProposalView } from "../../../../src/core/snapshot";
+import { type CardNumbers, cardLabel, noNumbers } from "../../../../src/core/card-names";
 import { type UnresolvedRef, unresolvedRefs } from "./drifts";
 import { type Element, resolveElement } from "./elements";
 import type { GEdge, GNode, GraphSpec, Level } from "./graph";
@@ -38,12 +39,14 @@ export interface Detail {
   proposal: ProposalView | null;
   /** Drawn by the panel as the comparison of what happens and what should happen, with a Keep this for each side. */
   drift: DriftView | null;
+  /** The short numbers of the live cards, so the panel writes the cards it names the way the Board does. */
+  numbers: CardNumbers;
 }
 
 const item = (text: string, extra: Partial<DetailItem> = {}): DetailItem => ({ text, note: "", change: "same", ref: null, block: false, ...extra });
 
 function detail(init: Partial<Detail> & Pick<Detail, "kind" | "title">): Detail {
-  return { change: "same", description: "", changes: [], sections: [], file: null, drill: null, toggle: null, proposal: null, drift: null, ...init };
+  return { change: "same", description: "", changes: [], sections: [], file: null, drill: null, toggle: null, proposal: null, drift: null, numbers: noNumbers, ...init };
 }
 
 const transitionItem = (t: MergedTransition): DetailItem => item(`${t.event.owner}.${t.event.name} → ${t.target}`, { note: t.prose, change: t.change });
@@ -178,7 +181,7 @@ export function detailOfEdge(scene: Scene, graph: GraphSpec, edge: GEdge): Detai
 export function detailOfDrift(scene: Scene, drift: DriftView): Detail {
   const attached = drift.proposal !== null && scene.proposal?.id === drift.proposal;
   return detail({
-    kind: `Drift ${drift.id}`,
+    kind: `Drift ${cardLabel(scene.numbers, "drift", drift.id)}`,
     title: drift.title,
     description: "",
     sections: [
@@ -189,7 +192,7 @@ export function detailOfDrift(scene: Scene, drift: DriftView): Detail {
           return item(ref, { note: ok ? "" : "no longer resolves", ref: ok ? ref : null });
         }),
       },
-      ...(drift.proposal ? [{ heading: "Attached Proposal", items: [item(drift.proposal, { note: attached ? "drawn in the diagram" : "" })] }] : []),
+      ...(drift.proposal ? [{ heading: "Attached Proposal", items: [item(cardLabel(scene.numbers, "proposal", drift.proposal), { note: attached ? "drawn in the diagram" : "" })] }] : []),
     ],
     drift,
   });
@@ -200,13 +203,13 @@ function actorEventSection(proposal: ProposalView): DetailSection[] {
   return items.length > 0 ? [{ heading: "Actor Events changed by the Proposal", items }] : [];
 }
 
-function unresolvedSection(list: UnresolvedRef[]): DetailSection[] {
-  return list.length > 0 ? [{ heading: "Unresolved Drift references", items: list.map((u) => item(u.ref, { note: `Drift ${u.drift}` })) }] : [];
+function unresolvedSection(list: UnresolvedRef[], numbers: CardNumbers): DetailSection[] {
+  return list.length > 0 ? [{ heading: "Unresolved Drift references", items: list.map((u) => item(u.ref, { note: `Drift ${cardLabel(numbers, "drift", u.drift)}` })) }] : [];
 }
 
 /** What the panel shows when nothing is selected: the level itself, the drawn Proposal, stray Drift references. */
 export function detailOfLevel(scene: Scene, level: Level): Detail {
-  const unresolved = unresolvedSection(unresolvedRefs(scene));
+  const unresolved = unresolvedSection(unresolvedRefs(scene), scene.numbers);
   const extra = [...(scene.proposal ? actorEventSection(scene.proposal) : []), ...unresolved];
   const proposal = scene.proposal;
   switch (level.kind) {
@@ -239,7 +242,7 @@ export function detailOfLevel(scene: Scene, level: Level): Detail {
 export function requirementItems(areas: AreaView[], refs: string[]): DetailItem[] {
   return refs.flatMap((ref) =>
     areas.flatMap((a) =>
-      a.sections
+      a.fragments.flatMap((f) => f.sections)
         .filter((s) => s.ref !== null && s.text !== "" && s.ref.toLowerCase() === ref.toLowerCase())
         .map((s) => item(a.title, { note: s.text, ref: `requirements/${a.id}#${s.ref}`, block: true })),
     ),
@@ -255,12 +258,12 @@ export function detailOfSelection(scene: Scene, graph: GraphSpec, selected: stri
   const edge = graph.edges.find((x) => x.id === selected);
   if (n?.drift) {
     const drift = scene.drifts.find((d) => d.id === n.drift);
-    if (drift) return detailOfDrift(scene, drift);
+    if (drift) return { ...detailOfDrift(scene, drift), numbers: scene.numbers };
   }
   const element = n?.ref ? resolveElement(scene, n.ref) : null;
   const found = element ? detailOfElement(scene, element, n ?? null) : edge ? detailOfEdge(scene, graph, edge) : null;
-  if (!found) return detailOfLevel(scene, graph.level);
-  return { ...found, proposal: scene.proposal && found.change !== "same" ? scene.proposal : null };
+  if (!found) return { ...detailOfLevel(scene, graph.level), numbers: scene.numbers };
+  return { ...found, proposal: scene.proposal && found.change !== "same" ? scene.proposal : null, numbers: scene.numbers };
 }
 
 /** Plain text for the tooltip of a node or an edge. */

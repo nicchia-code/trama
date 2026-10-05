@@ -36,4 +36,4 @@ The Tasks of one design, when there are at least two, are shown as a single desi
 Every Task, on its own card or inside a design card, has a status dot that tells its column; while the agent is working on it, the dot is animated instead. While any Task is taken by the agent the button that implements every Task in To do is unavailable, and so is the design card's button when one of the design's Tasks is taken; each disabled control says why.
 
 #### Requirements
-The Areas of Requirements with their sections, and what an open Proposal would change in them (never one the agent is still writing).
+Le Aree dei Requisiti, ciascuna con i suoi frammenti e, dentro ogni frammento, le sue sezioni, and what an open Proposal would change in them (never one the agent is still writing), anche quando sposta una sezione da un frammento a un altro.

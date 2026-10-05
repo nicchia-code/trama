@@ -52,6 +52,10 @@ _Avoid_: spec, acceptance criterion, constraint (for the concept)
 A named group of Requirements kept together, such as the interface or the data, with a sentence saying when an agent needs it.
 _Avoid_: category, section, topic
 
+**Fragment**:
+A part of an Area holding some of its Requirements, with its own sentence saying when an agent needs it. A Requirement belongs to its Area, not to the fragment: moving it to another fragment does not change it.
+_Avoid_: sub-Area, chapter
+
 ### Changing the Model
 
 **Proposal**:

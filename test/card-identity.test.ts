@@ -7,6 +7,7 @@ import { run } from "../src/cli/main";
 import { boardView } from "../src/cli/work";
 import { getProposal, listProposals, newProposal } from "../src/core/proposals";
 import { createdNow, newCardId, type Project, projectAt } from "../src/core/store";
+import { cardName } from "../src/core/short-numbers";
 import { getDrift, getTask, listTasks, newDrift, newTask } from "../src/core/work";
 
 let dir: string;
@@ -179,7 +180,7 @@ describe("a command cites a card", () => {
     expect(cli("proposal", "show", "ijkl4444-lost").out).toContain("# lost");
     expect(cli("validate", "--proposal", "ijkl4").exit).toBe(0);
     expect(() => cli("proposal", "show", "ijkl")).toThrow('Several Proposals match "ijkl": ijkl4444, ijkl5555');
-    expect(cli("task", "next", "--proposal", "ijkl444").out).toContain("Proposal ijkl4444");
+    expect(cli("task", "next", "--proposal", "ijkl444").out).toContain(`Proposal ${cardName(p, "proposal", "ijkl4444")}`);
   });
 });
 
@@ -201,12 +202,12 @@ describe("creation order", () => {
 
     expect(listTasks(p).map((t) => t.id)).toEqual(["mmmmmmmm", "aaaaaaaa", "zzzzzzzz", "bbbbbbbb", "cccccccc"]);
     const board = boardView(p).md;
-    const designAt = board.indexOf(`Proposal ${design.id} "Returns"`);
-    const aloneAt = board.indexOf("zzzzzzzz alone");
+    const designAt = board.indexOf(`Proposal ${cardName(p, "proposal", design.id)} "Returns"`);
+    const aloneAt = board.indexOf(`${cardName(p, "task", "zzzzzzzz")} alone`);
     expect(designAt).toBeGreaterThan(-1);
     expect(aloneAt).toBeGreaterThan(designAt);
     const inside = board.slice(designAt, aloneAt);
-    expect(inside.indexOf("mmmmmmmm first")).toBeLessThan(inside.indexOf("aaaaaaaa second"));
-    expect(board.indexOf("bbbbbbbb bee")).toBeLessThan(board.indexOf("cccccccc cee"));
+    expect(inside.indexOf(`${cardName(p, "task", "mmmmmmmm")} first`)).toBeLessThan(inside.indexOf(`${cardName(p, "task", "aaaaaaaa")} second`));
+    expect(board.indexOf(`${cardName(p, "task", "bbbbbbbb")} bee`)).toBeLessThan(board.indexOf(`${cardName(p, "task", "cccccccc")} cee`));
   });
 });

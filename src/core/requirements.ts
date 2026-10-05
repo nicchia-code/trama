@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { TramaError } from "./errors";
@@ -14,20 +14,45 @@ export interface RequirementSection {
   ref: string | null;
   text: string;
   line: number;
+  /** Tracked path of the fragment the section is written in, `requirements/<area>/<fragment>.md`. */
+  file: string;
 }
 
-/** One `.trama/requirements/<id>.md` file. */
+/** One fragment of an Area, `requirements/<area>/<fragment>.md`: its own description and title, then sections only. */
+export interface Fragment {
+  id: string;
+  /** Tracked path, `requirements/<area>/<fragment>.md`. */
+  file: string;
+  title: string;
+  /** When an agent needs this fragment. */
+  description: string;
+  sections: RequirementSection[];
+}
+
+/** One Area, the folder `.trama/requirements/<id>/`: its `area.md` and its fragments. */
 export interface Area {
   id: string;
-  /** Tracked path, `requirements/<id>.md`. */
+  /** Tracked path of the Area's own file, `requirements/<id>/area.md`. */
   file: string;
   title: string;
   /** When an agent needs this Area; becomes the description of the generated skill. */
   description: string;
-  /** Prose between the H1 and the first section. */
+  /** Prose of `area.md` after its H1, which applies to the whole Area. */
   intro: string;
+  /** Fragments by name. */
+  fragments: Fragment[];
+  /** The sections of every fragment, fragment by fragment; each appears once in the Area. */
   sections: RequirementSection[];
 }
+
+/** The Area's own file inside its folder. */
+export const AREA_FILE = "area.md";
+
+/** Characters of Requirement skill descriptions the agents' skill list can take before Trama switches to index skills. */
+export const REQUIREMENT_SKILLS_BUDGET = 4000;
+
+/** Bytes of a fragment file, front matter included, past which `trama validate` and `trama analyze` warn. */
+export const FRAGMENT_MAX_BYTES = 12288;
 
 /** The Model with its Requirements, validated together. */
 export interface ProjectModel {
@@ -46,14 +71,24 @@ export const DEFAULT_AREAS: { id: string; title: string; description: string }[]
   { id: "rules", title: "Business rules", description: "Use when implementing calculations, limits, policies or other business rules behind the Model's conditions and consequences." },
 ];
 
-export const defaultAreaFile = (a: { title: string; description: string }) =>
-  `---\ndescription: ${JSON.stringify(a.description)}\n---\n# ${a.title}\n\n## General\n`;
+/** `area.md` of a starting Area: description and title, no sections. */
+export const defaultAreaFile = (a: { title: string; description: string }) => `---\ndescription: ${JSON.stringify(a.description)}\n---\n# ${a.title}\n`;
 
 const GENERAL = "general";
 
-/** Parses one Area file and checks its section references against `model`. */
-export function parseArea(id: string, file: string, content: string, model: Model, diags: Diagnostic[]): Area {
-  const area: Area = { id, file, title: "", description: "", intro: "", sections: [] };
+/** A Requirement file read as written: front matter description, H1, prose before the first section, sections. */
+export interface RequirementDoc {
+  description: string;
+  title: string;
+  intro: string;
+  /** Line of the first non-blank line of the prose before the first section; 0 when there is none. */
+  introLine: number;
+  sections: { heading: string; text: string; line: number }[];
+}
+
+/** Parses an `area.md` or a fragment without checking it against the Model; problems with its shape go to `diags`. */
+export function parseRequirementDoc(file: string, content: string, diags: Diagnostic[]): RequirementDoc {
+  const doc: RequirementDoc = { description: "", title: "", intro: "", introLine: 0, sections: [] };
   const lines = content.replace(/\r\n?/g, "\n").split("\n");
   let start = 0;
   if (lines[0] === "---") {
@@ -67,20 +102,17 @@ export function parseArea(id: string, file: string, content: string, model: Mode
         diags.push({ file, line: 1, message: `Invalid YAML front matter: ${(err as Error).message.split("\n")[0]}` });
       }
       const description = typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Record<string, unknown>)["description"] : undefined;
-      if (typeof description === "string" && description.trim() !== "") area.description = description.trim();
+      if (typeof description === "string" && description.trim() !== "") doc.description = description.trim();
       start = end + 1;
     }
   }
-  if (area.description === "") diags.push({ file, line: 1, message: 'Missing "description" in the front matter: say when an agent needs these Requirements' });
-
-  const seen = new Set<string>();
-  let current: RequirementSection | null = null;
+  let current: RequirementDoc["sections"][number] | null = null;
   const intro: string[] = [];
   let body: string[] = [];
   const close = () => {
     if (current) {
       current.text = body.join("\n").trim();
-      area.sections.push(current);
+      doc.sections.push(current);
     }
     body = [];
   };
@@ -90,35 +122,125 @@ export function parseArea(id: string, file: string, content: string, model: Mode
     if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
     const h = fenced ? null : /^(#{1,6})\s+(.*\S)\s*$/.exec(line);
     if (h && h[1] === "#") {
-      if (area.title) diags.push({ file, line: i + 1, message: "More than one H1" });
-      else area.title = h[2] as string;
+      if (doc.title) diags.push({ file, line: i + 1, message: "More than one H1" });
+      else doc.title = h[2] as string;
       continue;
     }
     if (h && h[1] === "##") {
       close();
-      const heading = (h[2] as string).trim();
-      const isGeneral = heading.toLowerCase() === GENERAL;
-      const key = isGeneral ? GENERAL : heading;
-      if (seen.has(key)) diags.push({ file, line: i + 1, message: `Duplicate section "## ${heading}"` });
-      seen.add(key);
-      if (!isGeneral) {
-        try {
-          resolveRef(model, heading);
-        } catch (err) {
-          const why = (err as Error).message.replace(/^Cannot resolve "[^"]*": /, "");
-          diags.push({ file, line: i + 1, message: `Section "## ${heading}" does not match the Model: ${why}. Use "## General" or a Model reference such as order/Paid` });
-        }
-      }
-      current = { ref: isGeneral ? null : heading, text: "", line: i + 1 };
+      current = { heading: (h[2] as string).trim(), text: "", line: i + 1 };
       continue;
     }
     if (current) body.push(line);
-    else intro.push(line);
+    else {
+      if (doc.introLine === 0 && line.trim() !== "") doc.introLine = i + 1;
+      intro.push(line);
+    }
   }
   close();
-  area.intro = intro.join("\n").trim();
-  if (!area.title) diags.push({ file, line: 0, message: "Missing H1 with the Area's title" });
-  return area;
+  doc.intro = intro.join("\n").trim();
+  return doc;
+}
+
+/** Parses `requirements/<id>/area.md`: description, title and prose for the whole Area, and no sections. */
+export function parseAreaFile(id: string, file: string, content: string, diags: Diagnostic[]): Area {
+  const doc = parseRequirementDoc(file, content, diags);
+  if (doc.description === "") diags.push({ file, line: 1, message: 'Missing "description" in the front matter: say when an agent needs this Area' });
+  if (!doc.title) diags.push({ file, line: 0, message: "Missing H1 with the Area's title" });
+  for (const s of doc.sections)
+    diags.push({ file, line: s.line, message: `area.md has no sections: move "## ${s.heading}" into a fragment, requirements/${id}/<fragment>.md` });
+  return { id, file, title: doc.title, description: doc.description, intro: doc.intro, fragments: [], sections: [] };
+}
+
+/** Parses one fragment and checks its section references against `model`. */
+export function parseFragment(id: string, file: string, content: string, model: Model, diags: Diagnostic[]): Fragment {
+  const doc = parseRequirementDoc(file, content, diags);
+  if (doc.description === "") diags.push({ file, line: 1, message: 'Missing "description" in the front matter: say when an agent needs this fragment' });
+  if (!doc.title) diags.push({ file, line: 0, message: "Missing H1 with the fragment's title" });
+  if (doc.intro !== "")
+    diags.push({ file, line: doc.introLine, message: "Text before the first section: a fragment holds only sections; prose for the whole Area goes in area.md" });
+  const sections = doc.sections.map((s): RequirementSection => {
+    const isGeneral = s.heading.toLowerCase() === GENERAL;
+    if (!isGeneral) {
+      try {
+        resolveRef(model, s.heading);
+      } catch (err) {
+        const why = (err as Error).message.replace(/^Cannot resolve "[^"]*": /, "");
+        diags.push({ file, line: s.line, message: `Section "## ${s.heading}" does not match the Model: ${why}. Use "## General" or a Model reference such as order/Paid` });
+      }
+    }
+    return { ref: isGeneral ? null : s.heading, text: s.text, line: s.line, file };
+  });
+  return { id, file, title: doc.title, description: doc.description, sections };
+}
+
+/** The Area a tracked Requirement path belongs to: `requirements/ui/area.md` → `ui`; null outside `requirements/`. */
+export function areaIdOf(path: string): string | null {
+  if (!path.startsWith(REQUIREMENTS_PREFIX)) return null;
+  return (path.slice(REQUIREMENTS_PREFIX.length).split("/")[0] as string).replace(/\.md$/, "");
+}
+
+/** Builds the Areas from the Requirement files of a tracked file map, checking their layout and sections. */
+function buildAreas(requirements: FileMap, model: Model, diagnostics: Diagnostic[]): Area[] {
+  const folders = new Map<string, Map<string, { path: string; content: string }>>();
+  for (const [path, content] of [...requirements].sort(([a], [b]) => a.localeCompare(b))) {
+    const parts = path.slice(REQUIREMENTS_PREFIX.length).split("/");
+    const [folder, name] = parts as [string, string | undefined];
+    if (name === undefined) {
+      diagnostics.push({
+        file: path,
+        line: 0,
+        message: folder.endsWith(".md")
+          ? `Requirement Areas are folders, requirements/<area>/area.md with fragments beside it: run "trama skills update" to convert this file`
+          : "Requirement files live in Area folders, requirements/<area>/",
+      });
+      continue;
+    }
+    if (!ID_PATTERN.test(folder)) {
+      diagnostics.push({ file: path, line: 0, message: `Area folder "${folder}" is not a kebab-case name` });
+      continue;
+    }
+    if (parts.length > 2) {
+      diagnostics.push({ file: path, line: 0, message: `No subfolders inside an Area: Requirement files are requirements/${folder}/area.md and requirements/${folder}/<fragment>.md` });
+      continue;
+    }
+    if (!name.endsWith(".md")) {
+      diagnostics.push({ file: path, line: 0, message: "Only .md files belong in an Area folder" });
+      continue;
+    }
+    const fragment = name.slice(0, -".md".length);
+    if (name !== AREA_FILE && !ID_PATTERN.test(fragment)) {
+      diagnostics.push({ file: path, line: 0, message: `Fragment "${fragment}" is not a kebab-case name ("area" is reserved for area.md)` });
+      continue;
+    }
+    let files = folders.get(folder);
+    if (!files) folders.set(folder, (files = new Map()));
+    files.set(name, { path, content });
+  }
+  const areas: Area[] = [];
+  for (const [id, files] of folders) {
+    const own = files.get(AREA_FILE);
+    const areaPath = `${REQUIREMENTS_PREFIX}${id}/${AREA_FILE}`;
+    if (!own) diagnostics.push({ file: areaPath, line: 0, message: `Missing area.md: Area "${id}" needs requirements/${id}/area.md with its description and title` });
+    const area = own ? parseAreaFile(id, own.path, own.content, diagnostics) : { id, file: areaPath, title: "", description: "", intro: "", fragments: [], sections: [] };
+    const seen = new Map<string, RequirementSection>();
+    for (const [name, { path, content }] of files) {
+      if (name === AREA_FILE) continue;
+      const fragment = parseFragment(name.slice(0, -".md".length), path, content, model, diagnostics);
+      for (const s of fragment.sections) {
+        const key = s.ref === null ? GENERAL : s.ref.toLowerCase();
+        const first = seen.get(key);
+        const heading = s.ref ?? "General";
+        if (first?.file === path) diagnostics.push({ file: path, line: s.line, message: `Duplicate section "## ${heading}"` });
+        else if (first) diagnostics.push({ file: path, line: s.line, message: `Section "## ${heading}" is already in ${first.file}:${first.line}: a section appears once in its Area` });
+        else seen.set(key, s);
+      }
+      area.fragments.push(fragment);
+      area.sections.push(...fragment.sections);
+    }
+    areas.push(area);
+  }
+  return areas;
 }
 
 /** Splits a tracked file map into Model files (relative to `model/`) and Area files (by tracked path). */
@@ -134,18 +256,26 @@ export function buildProject(files: FileMap): ProjectModel {
   const { model: modelFiles, requirements } = splitTracked(files);
   const model = buildModel(modelFiles);
   const diagnostics: Diagnostic[] = [];
-  const areas: Area[] = [];
-  for (const [path, content] of [...requirements].sort(([a], [b]) => a.localeCompare(b))) {
-    const rel = path.slice(REQUIREMENTS_PREFIX.length);
-    const id = rel.replace(/\.md$/, "");
-    if (rel.includes("/") || !rel.endsWith(".md") || !ID_PATTERN.test(id)) {
-      diagnostics.push({ file: path, line: 0, message: "Requirement files are requirements/<area>.md with a kebab-case Area name" });
-      continue;
-    }
-    areas.push(parseArea(id, path, content, model, diagnostics));
-  }
+  const areas = buildAreas(requirements, model, diagnostics);
   return { model, areas, diagnostics: [...model.diagnostics, ...diagnostics] };
 }
+
+/** Fragments of a tracked file map larger than `FRAGMENT_MAX_BYTES` (the whole file, front matter included), by path. */
+export function largeFragments(files: FileMap): { file: string; bytes: number }[] {
+  const encoder = new TextEncoder();
+  const out: { file: string; bytes: number }[] = [];
+  for (const [path, content] of [...files].sort(([a], [b]) => a.localeCompare(b))) {
+    const parts = path.startsWith(REQUIREMENTS_PREFIX) ? path.slice(REQUIREMENTS_PREFIX.length).split("/") : [];
+    if (parts.length !== 2 || parts[1] === AREA_FILE) continue;
+    const bytes = encoder.encode(content).length;
+    if (bytes > FRAGMENT_MAX_BYTES) out.push({ file: path, bytes });
+  }
+  return out;
+}
+
+/** The warning about a fragment larger than `FRAGMENT_MAX_BYTES`. */
+export const largeFragmentMessage = (f: { bytes: number }) =>
+  `fragment is ${f.bytes} bytes, more than ${FRAGMENT_MAX_BYTES} (12 KB): split it into smaller fragments`;
 
 /** A reference to Requirements: `requirements/<area>` or `requirements/<area>#<model reference>`. */
 export function parseRequirementRef(ref: string): { area: string; section: string | null } | null {
@@ -277,14 +407,56 @@ export const hasContent = (area: Area): boolean => area.intro !== "" || area.sec
 /** The project's Model and Requirements as they are on disk. */
 export const loadProject = (p: Project): ProjectModel => buildProject(readTrackedFiles(p));
 
-/** Writes the starting Areas into `.trama/requirements/`, skipping existing files; returns the Area IDs written. */
+/** Writes the starting Areas as `requirements/<id>/area.md` with no fragments, skipping Areas whose folder exists; returns the Area IDs written. */
 export function createDefaultAreas(p: Project): string[] {
   const written: string[] = [];
   for (const area of DEFAULT_AREAS) {
-    const file = join(requirementsDir(p), `${area.id}.md`);
-    if (existsSync(file)) continue;
-    writeFileEnsuringDir(file, defaultAreaFile(area));
+    const folder = join(requirementsDir(p), area.id);
+    if (existsSync(folder)) continue;
+    writeFileEnsuringDir(join(folder, AREA_FILE), defaultAreaFile(area));
     written.push(area.id);
   }
   return written;
+}
+
+export interface AreaConversion {
+  /** Areas moved from `requirements/<id>.md` into `requirements/<id>/`. */
+  converted: string[];
+  /** Single-file Areas left as they were, with why. */
+  skipped: { id: string; reason: string }[];
+}
+
+/**
+ * Moves every Area still written as `requirements/<id>.md` into its folder: `area.md` gets the file's front matter,
+ * title and introduction; `main.md` the same front matter and title with every section, in order and with the same
+ * text, unless no section has text. The old file is deleted. An Area whose folder already exists is not touched.
+ */
+export function convertSingleFileAreas(p: Project): AreaConversion {
+  const result: AreaConversion = { converted: [], skipped: [] };
+  const dir = requirementsDir(p);
+  if (!existsSync(dir)) return result;
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!entry.isFile() || entry.name.startsWith(".") || !entry.name.endsWith(".md")) continue;
+    const id = entry.name.slice(0, -".md".length);
+    if (!ID_PATTERN.test(id)) {
+      result.skipped.push({ id, reason: `"${id}" is not a kebab-case Area name` });
+      continue;
+    }
+    const folder = join(dir, id);
+    if (existsSync(folder)) {
+      result.skipped.push({ id, reason: `requirements/${id}/ already exists` });
+      continue;
+    }
+    const file = join(dir, entry.name);
+    const content = readFileSync(file, "utf8").replace(/\r\n?/g, "\n");
+    const frontMatter = /^---\n[\s\S]*?\n---\n/.exec(content)?.[0] ?? "";
+    const doc = parseRequirementDoc(`${REQUIREMENTS_PREFIX}${entry.name}`, content, []);
+    const head = `${frontMatter}${doc.title === "" ? "" : `# ${doc.title}\n`}`;
+    writeFileEnsuringDir(join(folder, AREA_FILE), doc.intro === "" ? head : `${head}\n${doc.intro}\n`);
+    if (doc.sections.some((s) => s.text !== ""))
+      writeFileEnsuringDir(join(folder, "main.md"), `${head}${doc.sections.map((s) => `\n## ${s.heading}\n${s.text === "" ? "" : `${s.text}\n`}`).join("")}`);
+    rmSync(file);
+    result.converted.push(id);
+  }
+  return result;
 }

@@ -160,11 +160,11 @@ class FakeMemento {
   }
 }
 
-/** Every instruction sent, with the title announced; `outcome` is how the next ones leave. */
-const launches: Array<{ root: string; instruction: string; title: string | undefined }> = [];
+/** Every instruction sent, with its terminal's name and the title announced; `outcome` is how the next ones leave. */
+const launches: Array<{ root: string; instruction: string; name: string; title: string | undefined }> = [];
 let outcome: Launch = "terminal";
-const launch = async (root: string, instruction: string, title?: string): Promise<Launch> => {
-  launches.push({ root, instruction, title });
+const launch = async (root: string, instruction: string, name: string, title?: string): Promise<Launch> => {
+  launches.push({ root, instruction, name, title });
   return outcome;
 };
 
@@ -289,6 +289,7 @@ describe("Send to agent", () => {
       {
         root: dir,
         instruction: `Use the trama-design skill on the design request in \`.trama/requests/${id}.md\`. Bind the first Proposal you open to it with \`--request ${id}\`.`,
+        name: "Design",
         title: "Returns after shipping",
       },
     ]);

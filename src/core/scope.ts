@@ -1,6 +1,6 @@
 import { flattenStates } from "./model";
 import { applied, getProposal } from "./proposals";
-import { type Area, buildProject, featuresOfRef, type ProjectModel } from "./requirements";
+import { type Area, areaIdOf, buildProject, featuresOfRef, type ProjectModel } from "./requirements";
 import { type Project, readTrackedFiles, REQUIREMENTS_PREFIX } from "./store";
 import type { Model } from "./types";
 
@@ -29,20 +29,23 @@ export function affectedFeatures(before: Model, after: Model, paths: string[]): 
 
 /**
  * Features affected by changed Requirement files: the Features of the sections that changed, or every Feature
- * when a part that applies to the whole System (General, intro, description) changed.
+ * when a part that applies to the whole System (General, intro, description of the Area) changed. Sections are
+ * compared by Area and reference, whichever fragment holds them: moving a section unchanged, or changing a
+ * fragment's title or description, or adding or removing a fragment, affects nothing by itself.
  */
 function affectedByRequirements(before: ProjectModel, after: ProjectModel, paths: string[]): string[] {
   const features = new Set<string>();
-  for (const path of paths) {
-    if (!path.startsWith(REQUIREMENTS_PREFIX)) continue;
-    const id = path.slice(REQUIREMENTS_PREFIX.length).replace(/\.md$/, "");
+  const texts = (area: Area | undefined) => new Map((area?.sections ?? []).map((s) => [s.ref === null ? "" : s.ref.toLowerCase(), s]));
+  for (const id of new Set(paths.map(areaIdOf).filter((id) => id !== null))) {
     const was = before.areas.find((a) => a.id === id);
     const is = after.areas.find((a) => a.id === id);
-    const text = (area: Area | undefined, ref: string | null) => area?.sections.find((s) => s.ref === ref)?.text ?? "";
-    if (text(was, null) !== text(is, null) || was?.intro !== is?.intro || was?.description !== is?.description) return [...after.model.features.keys()].sort();
-    const refs = new Set([...(was?.sections ?? []), ...(is?.sections ?? [])].flatMap((s) => (s.ref === null ? [] : [s.ref])));
-    for (const ref of refs) {
-      if (text(was, ref) === text(is, ref)) continue;
+    const old = texts(was);
+    const now = texts(is);
+    if ((old.get("")?.text ?? "") !== (now.get("")?.text ?? "") || was?.intro !== is?.intro || was?.description !== is?.description)
+      return [...after.model.features.keys()].sort();
+    for (const k of new Set([...old.keys(), ...now.keys()])) {
+      if (k === "" || (old.get(k)?.text ?? "") === (now.get(k)?.text ?? "")) continue;
+      const ref = (now.get(k) ?? old.get(k))?.ref as string;
       for (const f of [...featuresOfRef(before.model, ref), ...featuresOfRef(after.model, ref)]) features.add(f);
     }
   }
