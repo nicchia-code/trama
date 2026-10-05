@@ -150,7 +150,7 @@ describe("opening a window that runs the agent line", () => {
       const window = await withShell(() => openWindow({ custom: `${terminal} -e {command}`, terminal: undefined }, requestFor(script)));
       expect(window).toBeUndefined();
       expect(await ended).toMatchObject({ terminal: "own111", exitCode: 6 });
-      expect(readFileSync(out, "utf8")).toBe(dir);
+      expect(readFileSync(out, "utf8")).toBe(realpathSync(dir));
     } finally {
       runs.dispose();
     }
