@@ -132,7 +132,7 @@ describe("opening a window that runs the agent line", () => {
   const requestFor = (script: string): WindowRequest => ({ script, cwd: dir, title: "Trama agent", kittySocket: join(dir, "k.sock") });
   const withShell = async <T>(run: () => Promise<T>): Promise<T> => {
     const before = process.env["SHELL"];
-    process.env["SHELL"] = "/bin/true";
+    process.env["SHELL"] = "/usr/bin/true";
     try {
       return await run();
     } finally {

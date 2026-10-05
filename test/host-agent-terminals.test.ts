@@ -1042,7 +1042,7 @@ describe("launching into an external window", () => {
     const told: string[] = [];
     const subscription = onAnnouncementsWithdrawn((views) => told.push(...views.map((v) => `${v.kind}:${v.title}`)));
     const shell = process.env["SHELL"];
-    process.env["SHELL"] = "/bin/true";
+    process.env["SHELL"] = "/usr/bin/true";
     settingValues["agentLauncher"] = "external-terminal";
     settingValues["externalTerminalCommand"] = `${terminal} -e {command}`;
     const openedBefore = created.length;

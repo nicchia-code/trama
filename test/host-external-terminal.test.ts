@@ -15,7 +15,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 /** Runs `script` the way a terminal's `sh -c` would, with the login shell replaced by `true`. */
 function runScript(script: string) {
-  return spawnSync("sh", ["-c", script], { env: { PATH: process.env.PATH ?? "", SHELL: "/bin/true" }, encoding: "utf8" });
+  return spawnSync("sh", ["-c", script], { env: { PATH: process.env.PATH ?? "", SHELL: "/usr/bin/true" }, encoding: "utf8" });
 }
 
 describe("the script written into the external window", () => {
@@ -261,7 +261,7 @@ describe("the developer's own terminal command", () => {
     const agentLine = agentCommandLine(`sh -c 'printf %s "$0" > ${out}; exit 5' {prompt}`, instruction, "posix");
     const script = externalScript({ agentLine, terminal: "abc123", marker });
 
-    const result = spawnSync("sh", ["-c", customTerminalCommand(`${terminal} -e {command}`, script)], { cwd: dir, env: { PATH: process.env.PATH ?? "", SHELL: "/bin/true" }, encoding: "utf8" });
+    const result = spawnSync("sh", ["-c", customTerminalCommand(`${terminal} -e {command}`, script)], { cwd: dir, env: { PATH: process.env.PATH ?? "", SHELL: "/usr/bin/true" }, encoding: "utf8" });
 
     expect(result.status).toBe(0);
     expect(readFileSync(out, "utf8")).toBe(instruction);
