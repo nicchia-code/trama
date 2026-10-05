@@ -7,11 +7,13 @@ import { TramaError } from "./errors";
 import { formatDiagnostic } from "./model";
 import { buildProject } from "./requirements";
 import { syncRequirementSkills } from "./requirement-skills";
-import { enumField, type Raw, stringList, stringMap, textOrNull } from "./schema";
+import { canonicalCardId, createdField, enumField, type Raw, stringList, stringMap, textOrNull } from "./schema";
 import {
-  findNumbered,
-  listNumbered,
-  nextId,
+  compareByCreation,
+  createdNow,
+  findCard,
+  listCards,
+  newCardId,
   type Project,
   readDocument,
   readTracked,
@@ -25,6 +27,7 @@ import {
 } from "./store";
 import type { Diagnostic, FileMap } from "./types";
 import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
+import { proposalIsInWorktree } from "./worktree-round";
 
 /**
  * `draft`: the agent is still writing it; only the agent hands it over and only the developer can discard it.
@@ -45,6 +48,8 @@ interface ProposalData {
   delete: string[];
   /** The written design request the Proposal was born from; kept after the request is consumed. */
   request: string | null;
+  /** When the Proposal was created, UTC ISO 8601. Absent on numbered Proposals written before the field existed. */
+  created: string | null;
 }
 
 export interface Proposal {
@@ -69,8 +74,10 @@ function parseData(raw: Raw, where: string): ProposalData {
     base: stringMap(raw, "base", where),
     delete: stringList(raw, "delete", where),
     request: textOrNull(raw, "request", where),
+    created: createdField(raw, where),
   };
-  for (const id of data.requires) if (!/^\d+$/.test(id)) throw new TramaError(`${where}: "requires" lists Proposal IDs, not "${id}"`);
+  for (const id of data.requires)
+    if (!/^[a-z0-9]{8}$/.test(id) && !/^\d+$/.test(id)) throw new TramaError(`${where}: "requires" lists Proposal IDs, not "${id}"`);
   for (const path of [...Object.keys(data.base), ...data.delete]) {
     try {
       normalizeModelPath(path);
@@ -90,8 +97,9 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
 }
 
 function save(proposal: Proposal) {
-  const { kind, requires, request, ...rest } = proposal.data;
+  const { kind, requires, request, created, ...rest } = proposal.data;
   // Defaults stay out of the file, so Proposals without dependencies look as they always did.
+  // Numbered Proposals have no `created`; writing it would pretend they remember an instant they do not.
   const data = {
     status: rest.status,
     ...(kind === "change" ? {} : { kind }),
@@ -99,16 +107,20 @@ function save(proposal: Proposal) {
     base: rest.base,
     delete: rest.delete,
     ...(request === null ? {} : { request }),
+    ...(created === null ? {} : { created }),
   };
   writeDocument(join(proposal.dir, "proposal.md"), data, proposal.body);
 }
 
 export function listProposals(p: Project): Proposal[] {
-  return listNumbered(proposalsDir(p)).map((e) => load(p, e));
+  return listCards(proposalsDir(p), "folder")
+    .map((e) => load(p, e))
+    .sort((a, b) => compareByCreation({ id: a.id, created: a.data.created }, { id: b.id, created: b.data.created }));
 }
 
-export function getProposal(p: Project, id: string): Proposal {
-  return load(p, findNumbered(proposalsDir(p), id, "Proposal"));
+/** The Proposal `id` names. `asArgument` applies the command rules: digits cite only a numbered Proposal. */
+export function getProposal(p: Project, id: string, asArgument = false): Proposal {
+  return load(p, findCard(proposalsDir(p), id, "Proposal", "folder", asArgument));
 }
 
 export function newProposal(
@@ -123,7 +135,7 @@ export function newProposal(
       throw new TramaError(`Proposal ${required.id} was ${required.data.status}; a new Proposal cannot require it`);
     return required.id;
   });
-  const id = nextId(proposalsDir(p));
+  const id = newCardId(proposalsDir(p), "folder", "Proposal");
   const name = `${id}-${slugify(title)}`;
   const proposal: Proposal = {
     id,
@@ -138,6 +150,7 @@ export function newProposal(
       delete: [],
       // A request that does not exist binds nothing; the Proposal is created all the same.
       request: options.request !== undefined && requestExists(p, options.request) ? options.request : null,
+      created: createdNow(),
     },
     body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
   };
@@ -157,7 +170,7 @@ export function requiredProposals(p: Project, proposal: Proposal): RequiredPropo
   const cycles = new Set<string>();
   const visit = (current: Proposal, path: string[]) => {
     for (const raw of current.data.requires) {
-      const id = raw.padStart(4, "0");
+      const id = canonicalCardId(raw);
       if (path.includes(id)) {
         if (!cycles.has(id)) out.push({ id, title: "", status: "cycle" });
         cycles.add(id);
@@ -352,10 +365,29 @@ export function approvalBlock(p: Project, id: string): ApprovalBlock | null {
   return null;
 }
 
+/** Copies the Proposal's files into a `.trama` folder. Does not change its status and does not regenerate skills. */
+export function writeProposalFiles(p: Project, id: string, tramaDir: string): void {
+  const proposal = getProposal(p, id);
+  for (const path of proposal.data.delete) rmSync(trackedLocation(tramaDir, path));
+  for (const [path, content] of newFiles(proposal)) writeFileEnsuringDir(trackedLocation(tramaDir, path), content);
+}
+
+/**
+ * The round has already put this Proposal's files into the open folder by merging.
+ * The Proposal becomes approved. The files are not copied again and staleness is not checked.
+ */
+export function recordMergedProposal(p: Project, id: string): void {
+  const proposal = getProposal(p, id);
+  if (proposal.data.status !== "open") return;
+  proposal.data.status = "approved";
+  save(proposal);
+}
+
 /** `skillsDirs` are the configured skills folders (besides the usual ones) where the generated `trama-req-*` skills are refreshed. */
 export function approveProposal(p: Project, id: string, skillsDirs: string[] = []): Proposal {
   const proposal = getProposal(p, id);
   requireStatus(proposal, "open", "approved");
+  if (proposalIsInWorktree(p, proposal.id)) throw new TramaError(`Proposal ${proposal.id} is in a worktree.`);
   const h = health(p, proposal);
   if (h.requires.length > 0)
     throw new TramaError(`Proposal ${proposal.id} requires other Proposals first:\n${requiredReasons(h.requires).map((r) => `- ${r}`).join("\n")}`);
@@ -367,8 +399,7 @@ export function approveProposal(p: Project, id: string, skillsDirs: string[] = [
   if (errors.length > 0)
     throw new TramaError(`Proposal ${proposal.id} would leave the Model invalid:\n${errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n")}`);
 
-  for (const path of proposal.data.delete) rmSync(trackedLocation(p.dir, path));
-  for (const [path, content] of newFiles(proposal)) writeFileEnsuringDir(trackedLocation(p.dir, path), content);
+  writeProposalFiles(p, id, p.dir);
   proposal.data.status = "approved";
   save(proposal);
   syncRequirementSkills(p, skillsDirs);
@@ -379,6 +410,7 @@ export function approveProposal(p: Project, id: string, skillsDirs: string[] = [
 export function rejectProposal(p: Project, id: string, feedback = ""): Proposal {
   const proposal = getProposal(p, id);
   requireStatus(proposal, "open", "rejected");
+  if (proposalIsInWorktree(p, proposal.id)) throw new TramaError(`Proposal ${proposal.id} is in a worktree.`);
   proposal.data.status = "rejected";
   const text = feedback.trim();
   if (text) proposal.body = `${proposal.body.trimEnd()}\n\n## Feedback\n\n${text}\n`;

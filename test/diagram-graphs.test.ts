@@ -134,7 +134,8 @@ test("State level: the sub-Machine of one State, with the far ends of leaving Tr
 });
 
 test("a Proposal tags Machines, States, Transitions and aggregated edges", () => {
-  const p = buildScene(shopWithProposals(), "0001");
+  const snap = shopWithProposals();
+  const p = buildScene(snap, snap.proposals[0]?.id ?? "");
   const feature = featureGraph(p, "checkout");
   expect(nodeOf(feature, "m:return")?.change).toBe("added");
   expect(nodeOf(feature, "m:order")?.change).toBe("changed");
@@ -160,7 +161,8 @@ test("a Proposal tags Machines, States, Transitions and aggregated edges", () =>
 });
 
 test("removed Machines, States and Transitions stay in the graph, tagged removed", () => {
-  const p = buildScene(shopWithRemovals(), "0001");
+  const snap = shopWithRemovals();
+  const p = buildScene(snap, snap.proposals[0]?.id ?? "");
   const system = systemGraph(p);
   expect(nodeOf(system, "f:billing")).toMatchObject({ change: "added", sub: "1 machine" });
   expect(edgeOf(system, "e:f:checkout>f:billing")?.change).toBe("added");
@@ -175,32 +177,34 @@ test("removed Machines, States and Transitions stay in the graph, tagged removed
 
 test("Drifts draw a red ghost joined to the element their first resolvable reference shows at each level", () => {
   const snap = shopWithProposals();
+  const shipped = snap.drifts[0]?.id ?? "";
+  const writtenOff = snap.drifts[1]?.id ?? "";
   const sceneWithDrifts = buildScene(snap, null);
 
   const system = buildGraph(sceneWithDrifts, { kind: "system" }, new Map());
-  expect(system.nodes.filter((n) => n.kind === "drift").map((n) => n.id)).toEqual(["d:0001", "d:0002"]);
-  expect(system.edges.filter((e) => e.kind === "drift").map((e) => [e.source, e.target])).toEqual([["d:0001", "f:checkout"], ["d:0002", "f:checkout"]]);
-  expect(nodeOf(system, "f:checkout")).toMatchObject({ drifts: ["0001", "0002"], sub: "3 machines · ⚠ 2 drifts inside" });
+  expect(system.nodes.filter((n) => n.kind === "drift").map((n) => n.id)).toEqual([`d:${shipped}`, `d:${writtenOff}`]);
+  expect(system.edges.filter((e) => e.kind === "drift").map((e) => [e.source, e.target])).toEqual([[`d:${shipped}`, "f:checkout"], [`d:${writtenOff}`, "f:checkout"]]);
+  expect(nodeOf(system, "f:checkout")).toMatchObject({ drifts: [shipped, writtenOff], sub: "3 machines · ⚠ 2 drifts inside" });
 
   const feature = buildGraph(sceneWithDrifts, { kind: "feature", feature: "checkout" }, new Map());
-  expect(feature.edges.filter((e) => e.kind === "drift").map((e) => [e.source, e.target])).toEqual([["d:0001", "m:order"], ["d:0002", "m:payment"]]);
-  expect(nodeOf(feature, "m:order")).toMatchObject({ drifts: ["0001"], sub: "8 states · ⚠ 1 drift inside" });
+  expect(feature.edges.filter((e) => e.kind === "drift").map((e) => [e.source, e.target])).toEqual([[`d:${shipped}`, "m:order"], [`d:${writtenOff}`, "m:payment"]]);
+  expect(nodeOf(feature, "m:order")).toMatchObject({ drifts: [shipped], sub: "8 states · ⚠ 1 drift inside" });
   // The Drift points at the Machine itself: outlined, but nothing is inside it.
-  expect(nodeOf(feature, "m:payment")).toMatchObject({ drifts: ["0002"], sub: "6 states" });
+  expect(nodeOf(feature, "m:payment")).toMatchObject({ drifts: [writtenOff], sub: "6 states" });
 
   const order = buildGraph(sceneWithDrifts, { kind: "machine", machine: "order" }, new Map());
-  expect(order.edges.filter((e) => e.kind === "drift").map((e) => [e.source, e.target])).toEqual([["d:0001", "s:Shipped"]]);
-  expect(nodeOf(order, "s:Shipped")?.drifts).toEqual(["0001"]);
-  expect(nodeOf(order, "d:0002")).toBeUndefined();
+  expect(order.edges.filter((e) => e.kind === "drift").map((e) => [e.source, e.target])).toEqual([[`d:${shipped}`, "s:Shipped"]]);
+  expect(nodeOf(order, "s:Shipped")?.drifts).toEqual([shipped]);
+  expect(nodeOf(order, `d:${writtenOff}`)).toBeUndefined();
 
   // The Drift on the Machine being shown has no element to join: its ghost floats.
   const payment = buildGraph(sceneWithDrifts, { kind: "machine", machine: "payment" }, new Map());
-  expect(payment.nodes.some((n) => n.id === "d:0002")).toBe(true);
+  expect(payment.nodes.some((n) => n.id === `d:${writtenOff}`)).toBe(true);
   expect(payment.edges.some((e) => e.kind === "drift")).toBe(false);
 });
 
 test("a Drift on a State hidden in a collapsed State outlines the State that hides it", () => {
-  const snap = { ...shopSnapshot(), drifts: [{ id: "0007", title: "Preparing", body: "", refs: ["order/Preparing"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null }] };
+  const snap = { ...shopSnapshot(), drifts: [{ id: "0007", title: "Preparing", body: "", refs: ["order/Preparing"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, worktree: null }] };
   const s = buildScene(snap, null);
   const collapsed = buildGraph(s, { kind: "machine", machine: "order" }, new Map());
   expect(nodeOf(collapsed, "s:Paid")).toMatchObject({ drifts: ["0007"], sub: "2 sub-states · ⚠ 1 drift inside" });
@@ -211,7 +215,7 @@ test("a Drift on a State hidden in a collapsed State outlines the State that hid
 });
 
 test("unresolved Drift references are skipped for the ghost and listed in the panel", () => {
-  const snap = { ...shopSnapshot(), drifts: [{ id: "0008", title: "Gone", body: "", refs: ["order/Gone", "order/Paid"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null }, { id: "0009", title: "All gone", body: "", refs: ["nope"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null }] };
+  const snap = { ...shopSnapshot(), drifts: [{ id: "0008", title: "Gone", body: "", refs: ["order/Gone", "order/Paid"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, worktree: null }, { id: "0009", title: "All gone", body: "", refs: ["nope"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, worktree: null }] };
   const s = buildScene(snap, null);
   const order = withDrifts(machineGraph(s, "order", null, new Set()), s);
   expect(order.edges.find((e) => e.kind === "drift")).toMatchObject({ source: "d:0008", target: "s:Paid" });
@@ -224,15 +228,18 @@ test("unresolved Drift references are skipped for the ghost and listed in the pa
 });
 
 test("the panel carries the Proposal for ghosts and the Drift for Drift ghosts", () => {
-  const s = buildScene(shopWithProposals(), "0001");
+  const snap = shopWithProposals();
+  const returnsId = snap.proposals[0]?.id ?? "";
+  const shipped = snap.drifts[0]?.id ?? "";
+  const s = buildScene(snap, returnsId);
   const order = buildGraph(s, { kind: "machine", machine: "order" }, new Map());
-  expect(detailOfSelection(s, order, "s:Returned").proposal?.id).toBe("0001");
+  expect(detailOfSelection(s, order, "s:Returned").proposal?.id).toBe(returnsId);
   expect(detailOfSelection(s, order, "s:Draft").proposal).toBeNull();
-  expect(detailOfSelection(s, order, "t:s:Paid>s:Refunding#user.CANCEL").proposal?.id).toBe("0001");
+  expect(detailOfSelection(s, order, "t:s:Paid>s:Refunding#user.CANCEL").proposal?.id).toBe(returnsId);
   expect(detailOfSelection(s, order, "s:Shipped").changes).toEqual(["changed: final, description"]);
-  expect(detailOfSelection(s, order, null).proposal?.id).toBe("0001");
-  const driftPanel = detailOfSelection(s, order, "d:0001");
-  expect(driftPanel.drift?.id).toBe("0001");
+  expect(detailOfSelection(s, order, null).proposal?.id).toBe(returnsId);
+  const driftPanel = detailOfSelection(s, order, `d:${shipped}`);
+  expect(driftPanel.drift?.id).toBe(shipped);
   expect(driftPanel.proposal).toBeNull();
 });
 

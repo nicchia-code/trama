@@ -2,12 +2,15 @@ import { type Announcement, type AnnouncementKind, listAnnouncements } from "./a
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
 import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type ProposalKind } from "./proposals";
+import { inWorktreeProposals, type InWorktreeProposal, openProposalsAwaitingDecision, roundWorktrees } from "./worktree-round";
+import { mergeDriftDocument } from "./worktree-merge";
 import { appliesUnder, type RequiredProposal } from "./required";
 import { type Area, buildProject, parseRequirementRef, type ProjectModel } from "./requirements";
-import { type Project, readTrackedFiles, REQUIREMENTS_PREFIX } from "./store";
+import { multiBranchOn, readMultiBranch } from "./multi-branch";
+import { byCreation, type Project, readTrackedFiles, REQUIREMENTS_PREFIX } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
-import { type Column, type DriftOption, type DriftSides, driftOptions, driftSides, listDrifts, listTasks } from "./work";
+import { type Column, type Drift, type DriftOption, type DriftSides, driftOptions, driftSides, listDrifts, listTasks, type Task } from "./work";
 
 export interface ActorChange {
   id: string;
@@ -93,6 +96,10 @@ export interface DriftView {
   proposal: string | null;
   /** Why the attached Proposal cannot be approved now (draft, rejected, discarded, stale, waiting, invalid…), or null when it can or there is none. */
   proposalBlock: ApprovalBlock | null;
+  /** Proposal whose worktree this Drift lives in, or null when it lives in the open folder. */
+  worktree: string | null;
+  /** The round's Merge Drift: it lives in the merge worktree and is drawn with the round's own choices. */
+  merge?: boolean;
 }
 
 export interface TaskView {
@@ -113,6 +120,8 @@ export interface TaskView {
   blockedBy: Blocker[];
   /** Path relative to `.trama/`, for opening the file. */
   file: string;
+  /** Proposal whose worktree this Task lives in, or null when it lives in the open folder. */
+  worktree: string | null;
 }
 
 /** A card the agent is about to create, drawn as a ghost in the column it will land in. */
@@ -127,11 +136,16 @@ export interface AnnouncementView {
 
 export interface Snapshot extends ModelView {
   diagnostics: Diagnostic[];
+  /** Open Proposals that still await a decision. A Proposal in a worktree is not among them. */
   proposals: ProposalView[];
+  /** Proposals that have a worktree. They are a group of their own, not awaiting a decision. */
+  inWorktree: InWorktreeProposal[];
   drifts: DriftView[];
   tasks: TaskView[];
   /** The announcements that still exist, in the order they were announced. */
   announcements: AnnouncementView[];
+  /** This working copy's multi-branch switch. On only when its file reads as `on`. */
+  multiBranch: boolean;
 }
 
 function actorChange(id: string, before: Actor | undefined, after: Actor | undefined): ActorChange {
@@ -187,9 +201,7 @@ export function buildSnapshot(p: Project): Snapshot {
   const blocked = computeBlocked(project, tasks, listDrifts(p));
 
   const allProposals = listProposals(p);
-  const proposals = allProposals
-    .filter((x) => x.data.status === "open")
-    .map((proposal): ProposalView => {
+  const proposals = openProposalsAwaitingDecision(p, allProposals).map((proposal): ProposalView => {
       const afterProject = buildProject(applied(p, proposal));
       const after = afterProject.model;
       const h = health(p, proposal);
@@ -238,41 +250,83 @@ export function buildSnapshot(p: Project): Snapshot {
       };
     });
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
+  const folders = roundWorktrees(p);
+  const viewDrift = (home: Project, d: Drift, worktree: string | null): DriftView => ({
+    id: d.id,
+    title: d.title,
+    body: stripTitle(d.body),
+    sides: driftSides(d),
+    options: driftOptions(d),
+    option: d.data.option,
+    note: d.data.note,
+    requirementsOnly: d.data.refs.every((r) => parseRequirementRef(r) !== null),
+    refs: d.data.refs,
+    proposal: d.data.proposal,
+    proposalBlock: d.data.proposal === null ? null : approvalBlock(home, d.data.proposal),
+    worktree,
+  });
+  const viewTask = (t: Task, why: Map<string, Blocker[]>, worktree: string | null): TaskView => ({
+    id: t.id,
+    title: t.title,
+    body: stripTitle(t.body),
+    column: t.data.column,
+    technical: t.data.technical,
+    refs: t.data.refs,
+    drift: t.data.drift,
+    proposal: t.data.proposal,
+    proposalTitle: (t.data.proposal !== null && proposalById.get(t.data.proposal)?.title) || null,
+    agent: t.data.agent,
+    blockedBy: why.get(t.id) ?? [],
+    file: `tasks/${t.name}`,
+    worktree,
+  });
+  const openDrifts = listDrifts(p).filter((d) => d.data.status === "open").map((drift) => ({ drift, home: p, worktree: null as string | null }));
+  const awayDrifts = folders.flatMap(({ proposal, project: home }) =>
+    listDrifts(home).filter((d) => d.data.status === "open").map((drift) => ({ drift, home, worktree: proposal })),
+  );
+  const awayTasks = folders.flatMap(({ proposal, project: home }) => {
+    const there = listTasks(home);
+    const why = computeBlocked(buildProject(readTrackedFiles(home)), there, listDrifts(home));
+    return there.map((task) => ({ task, why, worktree: proposal }));
+  });
+  const orderedTasks = byCreation(
+    [...tasks.map((task) => ({ task, why: blocked, worktree: null as string | null })), ...awayTasks],
+    (item) => ({ id: item.task.id, created: item.task.data.created }),
+  );
   return {
     ...modelView(project),
     diagnostics: project.diagnostics,
     proposals,
-    drifts: listDrifts(p)
-      .filter((d) => d.data.status === "open")
-      .map((d) => ({
-        id: d.id,
-        title: d.title,
-        body: stripTitle(d.body),
-        sides: driftSides(d),
-        options: driftOptions(d),
-        option: d.data.option,
-        note: d.data.note,
-        requirementsOnly: d.data.refs.every((r) => parseRequirementRef(r) !== null),
-        refs: d.data.refs,
-        proposal: d.data.proposal,
-        proposalBlock: d.data.proposal === null ? null : approvalBlock(p, d.data.proposal),
-      })),
-    tasks: tasks.map((t) => ({
-      id: t.id,
-      title: t.title,
-      body: stripTitle(t.body),
-      column: t.data.column,
-      technical: t.data.technical,
-      refs: t.data.refs,
-      drift: t.data.drift,
-      proposal: t.data.proposal,
-      proposalTitle: (t.data.proposal !== null && proposalById.get(t.data.proposal)?.title) || null,
-      agent: t.data.agent,
-      blockedBy: blocked.get(t.id) ?? [],
-      file: `tasks/${t.name}`,
-    })),
+    inWorktree: inWorktreeProposals(p),
+    drifts: [
+      ...byCreation([...openDrifts, ...awayDrifts], (item) => ({ id: item.drift.id, created: item.drift.data.created })).map((item) => viewDrift(item.home, item.drift, item.worktree)),
+      ...mergeDriftViews(p),
+    ],
+    tasks: orderedTasks.map((item) => viewTask(item.task, item.why, item.worktree)),
     announcements: listAnnouncements(p).map((a) => announcementView(a, a.proposal === null ? undefined : proposalById.get(a.proposal)?.title)),
+    multiBranch: multiBranchOn(readMultiBranch(p)),
   };
+}
+
+/** The Merge Drift of a round, drawn in To decide. It is not a Drift file of the open folder. */
+function mergeDriftViews(p: Project): DriftView[] {
+  const drift = mergeDriftDocument(p.root);
+  if (!drift) return [];
+  return [{
+    id: drift.id,
+    title: drift.title,
+    body: stripTitle(drift.body),
+    sides: driftSides(drift),
+    options: driftOptions(drift),
+    option: null,
+    note: null,
+    requirementsOnly: false,
+    refs: [],
+    proposal: null,
+    proposalBlock: null,
+    worktree: null,
+    merge: true,
+  }];
 }
 
 /** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. */

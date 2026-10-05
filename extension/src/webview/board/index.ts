@@ -1,9 +1,10 @@
 import { runBlocker } from "../../../../src/core/design";
 import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
+import { createMultiBranchSwitch } from "../multi-branch-switch";
 import type { MountView } from "../types";
 import css from "./board.css" with { type: "text" };
-import { announcedGhosts, buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, interleave, withdrawnNotice } from "./logic";
-import { type CardEnv, renderAnnounced, renderCard } from "./render";
+import { announcedGhosts, buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, interleave, withdrawnNotice, worktreeCards } from "./logic";
+import { type CardEnv, renderAnnounced, renderCard, renderWorktreeCard } from "./render";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -31,8 +32,20 @@ export const mountBoard: MountView = (root, context) => {
   toolbar.setAttribute("aria-label", "Board actions");
   const noticesEl = el("div", "board-notices");
   noticesEl.setAttribute("role", "status");
+  const worktreesEl = el("section", "board-worktrees");
+  worktreesEl.hidden = true;
+  const worktreesHead = el("h2", "board-worktrees-head", "In worktree");
+  worktreesHead.id = "board-worktrees-heading";
+  worktreesEl.setAttribute("aria-labelledby", "board-worktrees-heading");
+  const worktreesBody = el("div", "board-worktrees-body");
+  const abandon = el("button", "trama-btn", "Abandon round");
+  abandon.type = "button";
+  abandon.hidden = true;
+  abandon.dataset["action"] = "abandon-round";
+  abandon.addEventListener("click", () => context.post({ type: "abandonRound" }));
+  worktreesEl.append(worktreesHead, abandon, worktreesBody);
   const columnsEl = el("div", "board-columns");
-  board.append(toolbar, noticesEl, columnsEl);
+  board.append(toolbar, noticesEl, worktreesEl, columnsEl);
   root.append(board);
 
   const toolbarButton = (label: string, onClick: () => void, primary = false, title?: string) => {
@@ -47,6 +60,8 @@ export const mountBoard: MountView = (root, context) => {
   toolbarButton("Scan System", () => context.post({ type: "launch", action: { kind: "scan" } }));
   toolbarButton("Quick request…", () => context.post({ type: "launch", action: { kind: "design" } }), false, "Ask an agent to design a change in one line");
   toolbarButton("Design…", () => context.post({ type: "writeDesignRequest" }), false, "Write a design request in Markdown and send it to an agent");
+  const multiBranch = createMultiBranchSwitch((on) => context.post({ type: "setMultiBranch", on }));
+  toolbar.append(multiBranch.element);
 
   let snapshot: Snapshot | null = null;
   /** Whether a question round is open: the ghosts then say the agent waits for the developer's answers. */
@@ -97,6 +112,21 @@ export const mountBoard: MountView = (root, context) => {
     const focused = active instanceof HTMLElement && board.contains(active) ? { key: active.closest<HTMLElement>("[data-key]")?.dataset["key"], action: active.dataset["action"] } : null;
 
     const live = new Set<string>();
+    const inRound = worktreeCards(snapshot);
+    worktreesEl.hidden = inRound.length === 0;
+    const waiting = inRound.length > 0 && inRound.every((card) => !card.removable) && !snapshot.drifts.some((drift) => drift.merge === true);
+    abandon.hidden = !waiting;
+    abandon.setAttribute("aria-label", "Abandon the worktree round and return every Proposal to To decide");
+    reconcile(worktreesBody, inRound.map((card) => {
+      live.add(card.key);
+      const signature = JSON.stringify(card);
+      let entry = cache.get(card.key);
+      if (entry?.signature !== signature) {
+        entry = { signature, node: renderWorktreeCard(card, env) };
+        cache.set(card.key, entry);
+      }
+      return entry.node;
+    }));
     const columns = buildBoard(snapshot);
     const placedGhosts = announcedGhosts(columns, snapshot.announcements, asking);
     const liveAnnounced = new Set<string>();
@@ -130,11 +160,12 @@ export const mountBoard: MountView = (root, context) => {
       reconcile(part.body, withAnnounced.length > 0 ? withAnnounced : [part.hint]);
     }
     // Run all To do covers the Tasks inside design cards too, which may stand in another column.
-    const blocker = runBlocker(snapshot.tasks, "all");
+    const blocker = runBlocker(snapshot.tasks.filter((t) => !t.worktree), "all");
     runAll.disabled = blocker !== null;
     runAll.title = blocker ?? "";
     if (blocker === null) runAll.removeAttribute("aria-description");
     else runAll.setAttribute("aria-description", blocker);
+    multiBranch.setOn(snapshot.multiBranch);
     for (const key of cache.keys()) if (!live.has(key)) cache.delete(key);
     for (const key of announced.keys()) if (!liveAnnounced.has(key)) announced.delete(key);
 

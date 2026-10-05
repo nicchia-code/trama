@@ -28,7 +28,7 @@ jobs:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - run: bunx tsc --noEmit
-      - run: bun test
+      - run: bun test --isolate
       - run: bun run package ${{ matrix.target }}
       - name: Smoke-test the packaged CLI
         run: |

@@ -1,3 +1,4 @@
+import { createMultiBranchSwitch } from "../multi-branch-switch";
 import type { Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
 import type { MountView, View } from "../types";
@@ -61,6 +62,8 @@ export const mountDiagram: MountView = (root, context) => {
   const crumbs = $("nav.dg-crumbs");
   const select = $<HTMLSelectElement>("select[data-proposal]");
   const scan = $<HTMLButtonElement>("button[data-scan]");
+  const multiBranch = createMultiBranchSwitch((on) => context.post({ type: "setMultiBranch", on }));
+  scan.before(multiBranch.element);
 
   let snapshot: Snapshot | null = null;
   let scene: Scene | null = null;
@@ -249,6 +252,7 @@ export const mountDiagram: MountView = (root, context) => {
   const view: View = {
     update(next) {
       snapshot = next;
+      multiBranch.setOn(next.multiBranch);
       if (pending) {
         const options = pending;
         pending = null;

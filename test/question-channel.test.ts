@@ -17,7 +17,8 @@ let runtimeDir: string;
 let servers: QuestionServer[];
 let children: ChildProcessWithoutNullStreams[];
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "trama-qtest-"));
+  // A Unix socket path is limited to about 100 bytes; the system temp directory on macOS is already most of that.
+  root = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-qtest-") : "/tmp/trama-qtest-");
   projectRoot = join(root, "project");
   runtimeDir = join(root, "runtime");
   mkdirSync(projectRoot);

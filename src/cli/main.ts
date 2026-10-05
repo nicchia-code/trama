@@ -7,7 +7,7 @@ import { parseQuestionRequest, questionAborted, questionFailure, type QuestionHa
 import { arity, COMMANDS, type Command, makeContext, type Values } from "./commands";
 import type { Result } from "./result";
 
-const GROUPS = ["proposal", "task", "drift", "skills"];
+const GROUPS = ["proposal", "task", "drift", "skills", "ids"];
 
 function help(): string {
   const width = Math.max(...COMMANDS.map((c) => `${c.name} ${c.args}`.length));

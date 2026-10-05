@@ -4,11 +4,13 @@ import { type Blocker, computeBlocked, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
 import { approveProposal, getProposal, health, type Proposal, rejectProposal } from "./proposals";
 import { loadProject, parseRequirementRef, resolveProjectRef } from "./requirements";
-import { boolField, enumField, enumOrNull, idField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
+import { boolField, createdField, enumField, enumOrNull, idField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
 import {
-  findNumbered,
-  listNumbered,
-  nextId,
+  compareByCreation,
+  createdNow,
+  findCard,
+  listCards,
+  newCardId,
   type Project,
   readDocument,
   slugify,
@@ -36,6 +38,8 @@ interface TaskData {
   proposal: string | null;
   /** True while the agent has taken the Task (it is working on it); absent in Tasks written before the mark existed, which are free. */
   agent: boolean;
+  /** When the Task was created, UTC ISO 8601. Absent on numbered Tasks written before the field existed. */
+  created: string | null;
 }
 
 export type DriftResolution = "fix-code" | "proposal" | "dismissed";
@@ -52,6 +56,8 @@ interface DriftData {
   option: number | null;
   /** The developer's note kept with the choice, when there was one. */
   note: string | null;
+  /** When the Drift was created, UTC ISO 8601. Absent on numbered Drifts written before the field existed. */
+  created: string | null;
 }
 
 export type Task = Item<TaskData>;
@@ -71,6 +77,7 @@ function parseTask(raw: Raw, where: string): TaskData {
     drift: idField(raw, "drift", where),
     proposal: idField(raw, "proposal", where),
     agent: boolField(raw, "agent", false, where),
+    created: createdField(raw, where),
   };
   checkTaskRefs(data.technical, data.refs, `${where}: `);
   return data;
@@ -86,6 +93,7 @@ function parseDrift(raw: Raw, where: string): DriftData {
     origin: idField(raw, "origin", where),
     option: positiveIntOrNull(raw, "option", where),
     note: textOrNull(raw, "note", where),
+    created: createdField(raw, where),
   };
 }
 
@@ -96,12 +104,19 @@ function load<D>(dir: string, entry: { id: string; name: string }, parse: (raw: 
   return { id: entry.id, name: entry.name, path, data: parse(doc.data, path), title, body: doc.body };
 }
 
-function create<D extends object>(dir: string, title: string, data: D, body: string): Item<D> {
-  const id = nextId(dir);
+/** Writes a card. A numbered card has no `created`; the key stays absent so a later edit does not invent an instant. */
+function saveItem(path: string, data: object, body: string) {
+  const copy: Record<string, unknown> = { ...data };
+  if (copy["created"] == null) delete copy["created"];
+  writeDocument(path, copy, body);
+}
+
+function create<D extends object>(dir: string, title: string, data: D, body: string, kind: string): Item<D> {
+  const id = newCardId(dir, "file", kind);
   const name = `${id}-${slugify(title)}.md`;
   const text = `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n");
   const path = join(dir, name);
-  writeDocument(path, data, text);
+  saveItem(path, data, text);
   return { id, name, path, data, title, body: text };
 }
 
@@ -120,11 +135,14 @@ function checkTaskRefs(technical: boolean, refs: string[], where = "") {
 }
 
 export function listTasks(p: Project): Task[] {
-  return listNumbered(tasksDir(p)).map((e) => load(tasksDir(p), e, parseTask));
+  return listCards(tasksDir(p), "file")
+    .map((e) => load(tasksDir(p), e, parseTask))
+    .sort((a, b) => compareByCreation({ id: a.id, created: a.data.created }, { id: b.id, created: b.data.created }));
 }
 
-export function getTask(p: Project, id: string): Task {
-  return load(tasksDir(p), findNumbered(tasksDir(p), id, "Task"), parseTask);
+/** The Task `id` names. `asArgument` applies the command rules: digits cite only a numbered Task. */
+export function getTask(p: Project, id: string, asArgument = false): Task {
+  return load(tasksDir(p), findCard(tasksDir(p), id, "Task", "file", asArgument), parseTask);
 }
 
 export function newTask(
@@ -137,8 +155,8 @@ export function newTask(
   // The Proposal must exist, but a Technical Task is never part of a design, so it keeps no link to it.
   const linked = input.proposal ? getProposal(p, input.proposal).id : null;
   const proposal = input.technical ? null : linked;
-  const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift, proposal, agent: false };
-  const task = create(tasksDir(p), input.title, data, input.body ?? "");
+  const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift, proposal, agent: false, created: createdNow() };
+  const task = create(tasksDir(p), input.title, data, input.body ?? "", "Task");
   deliverCard(p, input.announcement, "task");
   return task;
 }
@@ -166,7 +184,7 @@ export function moveTask(p: Project, id: string, column: string, by: Mover): Tas
   }
   task.data.column = column as Column;
   if (by === "agent") task.data.agent = column === "doing";
-  writeDocument(task.path, task.data, task.body);
+  saveItem(task.path, task.data, task.body);
   return task;
 }
 
@@ -178,8 +196,8 @@ export interface RunQueue {
 }
 
 /**
- * The next runnable Task: the lowest-numbered Task in To do that is not blocked, worked out from the Tasks and
- * Drifts as they are now. With a Proposal it only considers the Tasks linked to it; the Proposal must exist.
+ * The next runnable Task: the oldest Task in To do that is not blocked, worked out from the Tasks and Drifts as
+ * they are now. With a Proposal it only considers the Tasks linked to it; the Proposal must exist.
  */
 export function nextTask(p: Project, proposal?: string): RunQueue {
   const scope = proposal === undefined ? null : getProposal(p, proposal).id;
@@ -196,7 +214,7 @@ export function takeBackTask(p: Project, id: string): Task {
   const task = getTask(p, id);
   if (!task.data.agent) throw new TramaError(`The agent has not taken Task ${task.id}`);
   task.data.agent = false;
-  writeDocument(task.path, task.data, task.body);
+  saveItem(task.path, task.data, task.body);
   return task;
 }
 
@@ -206,17 +224,20 @@ export function releaseTasks(p: Project): Task[] {
   for (const task of released) {
     task.data.agent = false;
     task.data.column = "todo";
-    writeDocument(task.path, task.data, task.body);
+    saveItem(task.path, task.data, task.body);
   }
   return released;
 }
 
 export function listDrifts(p: Project): Drift[] {
-  return listNumbered(driftsDir(p)).map((e) => load(driftsDir(p), e, parseDrift));
+  return listCards(driftsDir(p), "file")
+    .map((e) => load(driftsDir(p), e, parseDrift))
+    .sort((a, b) => compareByCreation({ id: a.id, created: a.data.created }, { id: b.id, created: b.data.created }));
 }
 
-export function getDrift(p: Project, id: string): Drift {
-  return load(driftsDir(p), findNumbered(driftsDir(p), id, "Drift"), parseDrift);
+/** The Drift `id` names. `asArgument` applies the command rules: digits cite only a numbered Drift. */
+export function getDrift(p: Project, id: string, asArgument = false): Drift {
+  return load(driftsDir(p), findCard(driftsDir(p), id, "Drift", "file", asArgument), parseDrift);
 }
 
 const HAPPENS_HEADING = "What happens";
@@ -310,14 +331,14 @@ export function newDrift(
   checkRefs(p, input.refs);
   const proposal = input.proposal ? getProposal(p, input.proposal).id : null;
   const origin = input.origin ? getTask(p, input.origin).id : null;
-  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, option: null, note: null };
+  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, option: null, note: null, created: createdNow() };
   const sections = [
     `## ${HAPPENS_HEADING}\n\n${happens}`,
     `## ${SHOULD_HEADING}\n\n${should}`,
     `## ${OPTIONS_HEADING}\n\n${options.map((o) => `### ${o.title}\n\n${o.text}`).join("\n\n")}`,
     ...(where ? [`## ${WHERE_HEADING}\n\n${where}`] : []),
   ];
-  const drift = create(driftsDir(p), input.title, data, sections.join("\n\n"));
+  const drift = create(driftsDir(p), input.title, data, sections.join("\n\n"), "Drift");
   deliverCard(p, input.announcement, "drift");
   return drift;
 }
@@ -382,7 +403,7 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
       if (origin.data.column !== "done") {
         origin.data.column = "todo";
         origin.data.agent = false;
-        writeDocument(origin.path, origin.data, origin.body);
+        saveItem(origin.path, origin.data, origin.body);
       }
     }
   } else if (how === "accept-proposal") {
@@ -395,7 +416,7 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
     drift.data.resolution = "dismissed";
   }
   drift.data.status = "resolved";
-  writeDocument(drift.path, drift.data, drift.body);
+  saveItem(drift.path, drift.data, drift.body);
   return drift;
 }
 
@@ -422,6 +443,6 @@ export function replaceDriftProposal(p: Project, id: string, proposalId: string)
     throw new TramaError(`Proposal ${replacement.id} was ${replacement.data.status}: it cannot replace the attached one`);
   rejectProposal(p, old.id, `Replaced by Proposal ${replacement.id}`);
   drift.data.proposal = replacement.id;
-  writeDocument(drift.path, drift.data, drift.body);
+  saveItem(drift.path, drift.data, drift.body);
   return drift;
 }

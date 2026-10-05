@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { parse, stringify } from "yaml";
@@ -120,31 +120,147 @@ export function slugify(title: string): string {
   return slug || "untitled";
 }
 
-/** Entries of `dir` named `NNNN-…`, as `[number, name]`. */
-function numbered(dir: string): [number, string][] {
-  if (!existsSync(dir)) return [];
-  const out: [number, string][] = [];
-  for (const name of readdirSync(dir)) {
-    const m = /^(\d{4,})-/.exec(name);
-    if (m) out.push([Number(m[1]), name]);
+/** A Proposal folder or a Task or Drift file, named `<id>-<slug>`. */
+export interface CardEntry {
+  id: string;
+  name: string;
+}
+
+/** Proposals are folders; Tasks and Drifts are Markdown files. */
+export type CardLayout = "file" | "folder";
+
+const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
+const RANDOM_PREFIX = /^([a-z0-9]{8})-/;
+const NUMBERED_PREFIX = /^(\d{4,})-/;
+
+function stemOf(name: string): string {
+  return name.endsWith(".md") ? name.slice(0, -3) : name;
+}
+
+function cardFile(dir: string, name: string, layout: CardLayout): string {
+  return layout === "folder" ? join(dir, name, "proposal.md") : join(dir, name);
+}
+
+/** True when the card's front matter remembers when it was created. Numbered cards written before that field have none. */
+function remembersCreated(path: string): boolean {
+  if (!existsSync(path)) return false;
+  try {
+    const created = readDocument(path).data["created"];
+    return created !== undefined && created !== null;
+  } catch {
+    return false;
   }
-  return out.sort((a, b) => a[0] - b[0]);
 }
 
-export function nextId(dir: string): string {
-  const last = numbered(dir).at(-1);
-  return String((last ? last[0] : 0) + 1).padStart(4, "0");
+/**
+ * Proposal folders or Task and Drift files in `dir`. An eight-character name that is all digits is a numbered card
+ * when it has no `created`, and a random identity (kept as those eight characters) when it does.
+ */
+export function listCards(dir: string, layout: CardLayout): CardEntry[] {
+  if (!existsSync(dir)) return [];
+  const out: CardEntry[] = [];
+  for (const name of readdirSync(dir)) {
+    if (name.startsWith(".")) continue;
+    const stem = stemOf(name);
+    const randomId = RANDOM_PREFIX.exec(stem)?.[1];
+    const numberedId = NUMBERED_PREFIX.exec(stem)?.[1];
+    if (randomId && !/^\d{8}$/.test(randomId)) out.push({ id: randomId, name });
+    else if (randomId && remembersCreated(cardFile(dir, name, layout))) out.push({ id: randomId, name });
+    else if (numberedId) {
+      const n = Number(numberedId);
+      if (Number.isSafeInteger(n)) out.push({ id: String(n).padStart(4, "0"), name });
+    }
+  }
+  return out;
 }
 
-export function listNumbered(dir: string): { id: string; name: string }[] {
-  return numbered(dir).map(([n, name]) => ({ id: String(n).padStart(4, "0"), name }));
+/** Eight random lowercase letters and digits. */
+export function randomCardId(): string {
+  let id = "";
+  for (let i = 0; i < 8; i++) id += ID_CHARS[randomInt(ID_CHARS.length)];
+  return id;
 }
 
-/** Finds the entry for an ID given as `12`, `0012` or the full `0012-slug`. */
-export function findNumbered(dir: string, id: string, kind: string): { id: string; name: string } {
-  const m = /^(\d+)/.exec(id);
-  const wanted = m ? String(Number(m[1])).padStart(4, "0") : null;
-  const hit = wanted ? listNumbered(dir).find((e) => e.id === wanted) : undefined;
-  if (!hit) throw new TramaError(`No ${kind} with ID "${id}"`);
-  return hit;
+/**
+ * A fresh identity for one card in `dir`, not already used by a card of the same kind.
+ * `draw` is the source of randomness; the default draws eight lowercase letters and digits.
+ */
+export function newCardId(dir: string, layout: CardLayout, kind: string, draw: () => string = randomCardId): string {
+  const used = new Set(listCards(dir, layout).map((c) => c.id));
+  for (let attempt = 0; attempt < 64; attempt++) {
+    const id = draw();
+    if (/^[a-z0-9]{8}$/.test(id) && !used.has(id)) return id;
+  }
+  throw new TramaError(`Could not draw a free identity for a new ${kind}`);
+}
+
+let lastCreatedMs = 0;
+
+/** The creation instant in UTC, ISO 8601. A later call in the same millisecond is strictly later, so creation order is kept. */
+export function createdNow(): string {
+  let ms = Date.now();
+  if (ms <= lastCreatedMs) ms = lastCreatedMs + 1;
+  lastCreatedMs = ms;
+  return new Date(ms).toISOString();
+}
+
+/** `items` in creation order. `card` reads the identity and the instant each item remembers. */
+export function byCreation<T>(items: readonly T[], card: (item: T) => { id: string; created: string | null }): T[] {
+  return [...items].sort((a, b) => compareByCreation(card(a), card(b)));
+}
+
+/**
+ * Oldest first. A numbered card, which has no instant, comes before every card that remembers one; numbered cards
+ * are ordered by that number. Cards that remember an instant are ordered by it, and by identity when the instant is the same.
+ */
+export function compareByCreation(a: { id: string; created: string | null }, b: { id: string; created: string | null }): number {
+  const group = (c: { id: string; created: string | null }) => (c.created === null && /^\d+$/.test(c.id) ? 0 : c.created === null ? 1 : 2);
+  const byGroup = group(a) - group(b);
+  if (byGroup !== 0) return byGroup;
+  if (a.created === null && b.created === null && /^\d+$/.test(a.id) && /^\d+$/.test(b.id)) return Number(a.id) - Number(b.id);
+  if (a.created !== null && b.created !== null && a.created !== b.created) return a.created.localeCompare(b.created);
+  return a.id.localeCompare(b.id);
+}
+
+function matchingIds(kind: string, query: string, hits: CardEntry[]): never {
+  const ids = hits.map((c) => c.id).sort((a, b) => a.localeCompare(b));
+  throw new TramaError(`Several ${kind}s match "${query}": ${ids.join(", ")}`);
+}
+
+function isNumbered(dir: string, card: CardEntry, layout: CardLayout): boolean {
+  return NUMBERED_PREFIX.test(stemOf(card.name)) && !remembersCreated(cardFile(dir, card.name, layout));
+}
+
+/**
+ * The card a command or a stored reference names.
+ * `asArgument`: an all-digit query cites only a numbered card (`12` or `0012`), never a random identity that happens
+ * to be all digits. Otherwise the full identity matches even then, so a stored reference keeps its card.
+ * A query also matches the whole file or folder name, or a prefix that only one card of this kind has.
+ */
+export function findCard(dir: string, query: string, kind: string, layout: CardLayout, asArgument = false): CardEntry {
+  const cards = listCards(dir, layout);
+  const stemQuery = stemOf(query);
+  const byName = cards.filter((c) => c.name === query || stemOf(c.name) === stemQuery);
+  if (byName.length === 1) return byName[0] as CardEntry;
+  if (byName.length > 1) matchingIds(kind, query, byName);
+
+  const digits = /^\d+$/.test(query);
+  if (!(asArgument && digits)) {
+    const byId = cards.filter((c) => c.id === query);
+    if (byId.length === 1) return byId[0] as CardEntry;
+    if (byId.length > 1) matchingIds(kind, query, byId);
+  }
+
+  if (digits) {
+    const wanted = String(Number(query)).padStart(4, "0");
+    const numbered = cards.filter((c) => c.id === wanted && isNumbered(dir, c, layout));
+    if (numbered.length === 1) return numbered[0] as CardEntry;
+    if (numbered.length > 1) matchingIds(kind, query, numbered);
+    throw new TramaError(`No ${kind} with ID "${query}"`);
+  }
+
+  const prefixed = cards.filter((c) => c.id.startsWith(query));
+  if (prefixed.length === 1) return prefixed[0] as CardEntry;
+  if (prefixed.length > 1) matchingIds(kind, query, prefixed);
+  throw new TramaError(`No ${kind} with ID "${query}"`);
 }

@@ -15,6 +15,13 @@
 
 .board-toolbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--board-border); }
 
+.board-worktrees { display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 10px; border-bottom: 1px solid var(--board-border); }
+.board-worktrees[hidden] { display: none; }
+.board-worktrees-head { margin: 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.board-worktrees-body { display: flex; gap: 8px; overflow-x: auto; }
+.board-worktrees .board-card { flex: 0 0 240px; }
+.board-card-worktree { border-left-color: var(--board-accent); }
+
 .board-columns {
   flex: 1;
   min-height: 0;

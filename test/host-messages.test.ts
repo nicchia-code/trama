@@ -22,6 +22,11 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "openFile", path: "tasks/0003-x.md" })).toEqual({ type: "openFile", path: "tasks/0003-x.md" });
   expect(ok({ type: "approveProposal", id: "0001" })).toEqual({ type: "approveProposal", id: "0001" });
   expect(ok({ type: "rejectProposal", id: "0001" })).toEqual({ type: "rejectProposal", id: "0001" });
+  expect(ok({ type: "withdrawFromRound", id: "0001" })).toEqual({ type: "withdrawFromRound", id: "0001" });
+  expect(ok({ type: "abandonRound" })).toEqual({ type: "abandonRound" });
+  expect(ok({ type: "setMultiBranch", on: true })).toEqual({ type: "setMultiBranch", on: true });
+  expect(ok({ type: "setMultiBranch", on: false })).toEqual({ type: "setMultiBranch", on: false });
+  expect(ok({ type: "resolveDrift", id: "merge", how: "dismiss" })).toEqual({ type: "resolveDrift", id: "merge", how: "dismiss" });
   expect(ok({ type: "resolveDrift", id: "0002", how: "accept-proposal" })).toEqual({ type: "resolveDrift", id: "0002", how: "accept-proposal" });
   expect(ok({ type: "driftBlocked", id: "0002" })).toEqual({ type: "driftBlocked", id: "0002" });
 });
@@ -63,6 +68,8 @@ test("rejects unknown types, wrong shapes and IDs that are not plain IDs; moving
     { type: "openFile" },
     { type: "openFile", path: "" },
     { type: "openModelFile", path: 7 },
+    { type: "setMultiBranch" },
+    { type: "setMultiBranch", on: "true" },
     { type: "approveProposal", id: "" },
     { type: "rejectProposal", id: { toString: "x" } },
     { type: "resolveDrift", id: "0002", how: "delete" },

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, formatCounts, interleave, proposalBadges, summarizeChanges, summarizeFile, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, formatCounts, interleave, proposalBadges, summarizeChanges, summarizeFile, withdrawnNotice, worktreeCards } from "../extension/src/webview/board/logic";
 import { runBlocker } from "../src/core/design";
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
@@ -20,10 +20,19 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   areas: [],
   ...over,
 });
-const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, ...over });
-const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
-const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], announcements: [], ...over });
+const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, worktree: null, ...over });
+const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, blockedBy: [], file: "tasks/0012-refunds.md", worktree: null, ...over });
+const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], inWorktree: [], drifts: [], tasks: [], announcements: [], multiBranch: false, ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
+
+test("a Proposal in a worktree is its own group and is not a card to decide; Remove from round is only before the merge", () => {
+  const cards = worktreeCards(snapshot({ inWorktree: [{ id: "0008", title: "Ship", removable: true }, { id: "0009", title: "Wait", removable: false }] }));
+  expect(cards).toEqual([
+    { kind: "worktree", key: "worktree:0008", id: "0008", heading: "Proposal 0008", title: "Ship", removable: true },
+    { kind: "worktree", key: "worktree:0009", id: "0009", heading: "Proposal 0009", title: "Wait", removable: false },
+  ]);
+  expect(buildBoard(snapshot({ inWorktree: [{ id: "0008", title: "Ship", removable: true }] }))[0]?.cards).toEqual([]);
+});
 
 test("groups the snapshot into four columns, Proposals before Drifts in To decide", () => {
   const board = buildBoard(

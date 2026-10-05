@@ -1,9 +1,12 @@
-import { delimiter, dirname } from "node:path";
+import { existsSync, watch, type FSWatcher } from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 import * as vscode from "vscode";
+import { takeApproveRequest, writeApproveResult } from "../../../src/core/approve-request";
+import { lostWorktreeMessage, reconcileLostWorktrees, worktreesHome } from "../../../src/core/worktree-round";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { watchAnnouncements } from "./announcements";
 import { notices, watchCursorChatNotices } from "./notice-host";
-import { agentName, watchAgentTerminal, configuredSkillsDir } from "./agent";
+import { agentName, watchAgentTerminal, configuredSkillsDir, ensureWorktreeAgentSetting, settleWaitingRound } from "./agent";
 import { Controller, describeError } from "./controller";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./cursor";
@@ -51,8 +54,35 @@ export function activate(context: vscode.ExtensionContext): void {
     notices,
     watchCursorChatNotices(),
     watchRequirements(),
+    watchLostWorktrees(() => trama.noteWorktreesLost()),
+    watchReadyRound(() => trama.noteRoundMerged()),
+    watchApproveRequests(),
   );
   exposeBundledCli(context);
+  void ensureWorktreeAgentSetting().catch((err: unknown) => {
+    void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
+  });
+}
+
+/** `trama proposal approve` writes a request here when the switch is on. The editor runs the panel's acceptance. */
+function watchApproveRequests(): vscode.Disposable {
+  let busy = false;
+  const timer = setInterval(() => {
+    if (busy || !controller) return;
+    const project = findProject();
+    if (!project) return;
+    const request = takeApproveRequest(project);
+    if (!request) return;
+    busy = true;
+    const answer = controller;
+    void answer.approveFromCommand(project, request.id, request.skillsDirs).then(
+      (result) => writeApproveResult(project, { nonce: request.nonce, ok: result.ok, message: result.message }),
+      (err: unknown) => writeApproveResult(project, { nonce: request.nonce, ok: false, message: describeError(err) }),
+    ).finally(() => {
+      busy = false;
+    });
+  }, 200);
+  return { dispose: () => clearInterval(timer) };
 }
 
 /**
@@ -78,6 +108,88 @@ function watchRequirements(): vscode.Disposable {
   watcher.onDidChange(sync);
   watcher.onDidDelete(sync);
   return { dispose: () => (clearTimeout(timer), watcher.dispose()) };
+}
+
+/**
+ * A Proposal worktree can disappear without Trama removing it, including when Cursor deletes worktrees on its own.
+ * The Proposal goes back to decide and the developer is told, whether or not the panel is open.
+ */
+function watchLostWorktrees(onLost: () => void): vscode.Disposable {
+  let timer: NodeJS.Timeout | undefined;
+  let home = "";
+  let folder: FSWatcher | undefined;
+  const run = () => {
+    const project = findProject();
+    if (!project) return;
+    try {
+      const lost = reconcileLostWorktrees(project);
+      for (const item of lost) void vscode.window.showWarningMessage(lostWorktreeMessage(item));
+      if (lost.length > 0) onLost();
+    } catch (err) {
+      void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
+    }
+    const next = worktreesHome(project.root);
+    if (next === home) return;
+    folder?.close();
+    home = next;
+    folder = undefined;
+    if (!existsSync(next)) return;
+    try {
+      folder = watch(next, () => {
+        clearTimeout(timer);
+        timer = setTimeout(run, 200);
+      });
+    } catch {
+      folder = undefined;
+    }
+  };
+  run();
+  const poll = setInterval(run, 5000);
+  return {
+    dispose() {
+      clearInterval(poll);
+      clearTimeout(timer);
+      folder?.close();
+    },
+  };
+}
+
+/**
+ * A merge can be ready before this folder is back on the branch it started from, with a clean tree. When that
+ * happens, the waiting merge is applied even if the panel is closed.
+ */
+function watchReadyRound(onMerged: () => void): vscode.Disposable {
+  let timer: NodeJS.Timeout | undefined;
+  let gitDir = "";
+  let folder: FSWatcher | undefined;
+  const run = () => {
+    const project = findProject();
+    if (!project) return;
+    if (settleWaitingRound(project.root)) onMerged();
+    const next = join(project.root, ".git");
+    if (next === gitDir) return;
+    folder?.close();
+    gitDir = next;
+    folder = undefined;
+    if (!existsSync(next)) return;
+    try {
+      folder = watch(next, () => {
+        clearTimeout(timer);
+        timer = setTimeout(run, 200);
+      });
+    } catch {
+      folder = undefined;
+    }
+  };
+  run();
+  const poll = setInterval(run, 5000);
+  return {
+    dispose() {
+      clearInterval(poll);
+      clearTimeout(timer);
+      folder?.close();
+    },
+  };
 }
 
 /**

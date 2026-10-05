@@ -308,7 +308,7 @@ describe("Tasks and Drifts", () => {
     expect(driftView).not.toContain("locked");
   });
 
-  test("task next names the lowest runnable Task, recomputed each time, within a design when asked, and moves nothing", () => {
+  test("task next names the oldest runnable Task, recomputed each time, within a design when asked, and moves nothing", () => {
     const prop = newProposal(p, "Design");
     const blockedFirst = newTask(p, { title: "Return flow", refs: ["order"], technical: false, proposal: prop.id }).id;
     const outside = newTask(p, { title: "Outside flow", refs: ["payment"], technical: false }).id;
@@ -374,7 +374,7 @@ describe("Tasks and Drifts", () => {
     const board = cli("board").out;
     expect(board).toContain(`## In progress\n- Proposal ${prop.id} "Returns" (1/3 done)\n  - ${a} Return request [done]\n  - ${b} Refund on return [doing]\n  - ${c} Return label [todo]`);
     expect(board.match(new RegExp(`Proposal ${prop.id} "Returns"`, "g"))).toHaveLength(1);
-    expect(board).toMatch(/## To do\n- \d+ Alone\n- \d+ Only one\n/);
+    expect(board).toMatch(/## To do\n- [a-z0-9]+ Alone\n- [a-z0-9]+ Only one\n/);
 
     const list = cli("task", "list", "--column", "todo").out;
     expect(list).toContain(`- ${c} Return label (Proposal ${prop.id})`);
@@ -422,9 +422,10 @@ describe("Tasks and Drifts", () => {
     const fixed = resolveDrift(p, old.id, "fix-code", [], { note: "Careful." });
     expect(getDrift(p, old.id).data).toMatchObject({ option: null, note: "Careful." });
     expect(getTask(p, fixed.data.task as string).body).toBe("# Fix code to match the Model: Old\n\n## What happens\n\nCode does it.\n\n## What should happen\n\nModel says so.\n\n## Note\n\nCareful.\n");
-    expect(getDrift(p, bare("Plain").id).data.note).toBeNull();
-    resolveDrift(p, "0002", "fix-code");
-    expect(getDrift(p, "0002").data).toMatchObject({ resolution: "fix-code", option: null, note: null });
+    const plainDrift = bare("Plain");
+    expect(getDrift(p, plainDrift.id).data.note).toBeNull();
+    resolveDrift(p, plainDrift.id, "fix-code");
+    expect(getDrift(p, plainDrift.id).data).toMatchObject({ resolution: "fix-code", option: null, note: null });
 
     const prop = newProposal(p, "Model forgot this");
     editOrder(prop.id, (t) => t.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
@@ -476,7 +477,7 @@ describe("Tasks and Drifts", () => {
     expect(getDrift(p, viaCore.id).data.origin).toBe(task.id);
 
     const viaCli = run(["--root", dir, "drift", "new", "Cli", "--ref", "order", "--task", task.id, "--happens", "Code does it.", "--should", "Model says so.", ...CLI_OPTIONS], process.cwd());
-    const cliId = /Created Drift (\d+)/.exec(viaCli.out)?.[1] ?? "";
+    const cliId = /Created Drift ([a-z0-9]+)/.exec(viaCli.out)?.[1] ?? "";
     expect(getDrift(p, cliId).data.origin).toBe(task.id);
 
     expect(() => run(["--root", dir, "drift", "new", "Missing", "--ref", "order", "--task", "42", "--happens", "Code does it.", "--should", "Model says so.", ...CLI_OPTIONS], process.cwd())).toThrow(/No Task/);
@@ -523,8 +524,8 @@ describe("Tasks and Drifts", () => {
   test("a new Drift needs two to five distinct fix options, each with title and text, in the order given, from core and command line", async () => {
     const file = (options: { title: string; text: string }[]) => newDrift(p, { title: "x", refs: ["order"], happens: "Code does it.", should: "Model says so.", options });
     const five = ["A", "B", "C", "D", "E"].map((t) => ({ title: t, text: `Way ${t}.` }));
-    expect(driftOptions(file(five))).toEqual(five);
-    const kept = getDrift(p, "0001");
+    const kept = file(five);
+    expect(driftOptions(kept)).toEqual(five);
     expect(driftOptions(kept).map((o) => o.title)).toEqual(["A", "B", "C", "D", "E"]);
     expect(driftSides(kept)).toMatchObject({ should: "Model says so.", where: null });
 
@@ -542,11 +543,11 @@ describe("Tasks and Drifts", () => {
     expect(() => run([...args, "--option", "A", "--option-text", "Way A.", "--option", "B"], process.cwd())).toThrow(/Fix option 2 \("B"\) needs its text/);
     expect(() => run([...args, "--option", "A", "--option-text", "Way A.", "--option-text", "Way B."], process.cwd())).toThrow(/Fix option 2 needs its title/);
     expect(() => run(args, process.cwd())).toThrow(/from 2 to 5 fix options.*found 0/);
-    const created = /Created Drift (\d+)/.exec(run([...args, ...CLI_OPTIONS], process.cwd()).out)?.[1] ?? "";
+    const created = /Created Drift ([a-z0-9]+)/.exec(run([...args, ...CLI_OPTIONS], process.cwd()).out)?.[1] ?? "";
     expect(driftOptions(getDrift(p, created))).toEqual(FIX_OPTIONS);
 
     const three = run([...args, ...five.slice(0, 3).flatMap((o) => ["--option", o.title, "--option-text", o.text])], process.cwd()).out;
-    expect(driftOptions(getDrift(p, /Created Drift (\d+)/.exec(three)?.[1] ?? ""))).toEqual(five.slice(0, 3));
+    expect(driftOptions(getDrift(p, /Created Drift ([a-z0-9]+)/.exec(three)?.[1] ?? ""))).toEqual(five.slice(0, 3));
   });
 
   test("drift show lists the two sides as two blocks, says why an attached Proposal cannot be approved, and shows an old Drift as one block", async () => {
@@ -649,13 +650,14 @@ describe("CLI", () => {
 
   test("a Proposal written through the command line is validated before submit and leaves the Model untouched; paths outside the Model are refused", () => {
     const before = readFileSync(modelFile("checkout/order.md"), "utf8");
-    cli("proposal", "new", "Lost parcels", "--body", "Couriers lose parcels.");
-    const file = cli("proposal", "edit", "1", "checkout/order.md").out.split("\n")[0] as string;
+    const created = cli("proposal", "new", "Lost parcels", "--body", "Couriers lose parcels.").out;
+    const id = /Created Draft Proposal ([a-z0-9]+)/.exec(created)?.[1] ?? "";
+    const file = cli("proposal", "edit", id, "checkout/order.md").out.split("\n")[0] as string;
     writeFileSync(file, before.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)").replace("→ Paid", "→ Nowhere"));
-    expect(() => cli("proposal", "submit", "1")).toThrow(/Nowhere/);
+    expect(() => cli("proposal", "submit", id)).toThrow(/Nowhere/);
     expect(readFileSync(modelFile("checkout/order.md"), "utf8")).toBe(before);
-    expect(getProposal(p, "1").data.status).toBe("draft");
-    expect(() => cli("proposal", "edit", "1", "../../escape.md")).toThrow();
+    expect(getProposal(p, id).data.status).toBe("draft");
+    expect(() => cli("proposal", "edit", id, "../../escape.md")).toThrow();
     expect(existsSync(join(dir, "escape.md"))).toBe(false);
   });
 
@@ -678,20 +680,20 @@ describe("CLI", () => {
     const lost = newProposal(p, "Lost");
     editOrder(lost.id, (t) => t.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
     handOver(p, lost.id);
-    newDrift(p, { options: FIX_OPTIONS, title: "d", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
-    expect(() => run(["--root", dir, "proposal", "approve", "1"], dir, agent)).toThrow(/developer's decision/);
-    expect(() => run(["--root", dir, "proposal", "reject", "1", "--feedback", "no"], dir, agent)).toThrow(/developer's decision/);
-    expect(() => run(["--root", dir, "drift", "resolve", "1", "--dismiss"], dir, agent)).toThrow(/developer's decision/);
-    expect(getProposal(p, "1").data.status).toBe("open");
-    expect(getDrift(p, "1").data.status).toBe("open");
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "d", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
+    expect(() => run(["--root", dir, "proposal", "approve", lost.id], dir, agent)).toThrow(/developer's decision/);
+    expect(() => run(["--root", dir, "proposal", "reject", lost.id, "--feedback", "no"], dir, agent)).toThrow(/developer's decision/);
+    expect(() => run(["--root", dir, "drift", "resolve", drift.id, "--dismiss"], dir, agent)).toThrow(/developer's decision/);
+    expect(getProposal(p, lost.id).data.status).toBe("open");
+    expect(getDrift(p, drift.id).data.status).toBe("open");
     expect(run(["--root", dir, "proposal", "list"], dir, agent).exit).toBe(0);
-    expect(run(["--root", dir, "proposal", "approve", "1"], dir, {}).exit).toBe(0);
+    expect(run(["--root", dir, "proposal", "approve", lost.id], dir, {}).exit).toBe(0);
   });
 
   test("drift resolve demands exactly one resolution", () => {
-    newDrift(p, { options: FIX_OPTIONS, title: "d", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
-    expect(() => cli("drift", "resolve", "1")).toThrow(/exactly one/);
-    expect(() => cli("drift", "resolve", "1", "--dismiss", "--fix-code")).toThrow(/exactly one/);
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "d", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
+    expect(() => cli("drift", "resolve", drift.id)).toThrow(/exactly one/);
+    expect(() => cli("drift", "resolve", drift.id, "--dismiss", "--fix-code")).toThrow(/exactly one/);
   });
 
   test("init refuses to overwrite and creates a valid empty Model", () => {

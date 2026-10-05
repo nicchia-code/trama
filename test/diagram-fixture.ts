@@ -16,8 +16,8 @@ export function shopSnapshot(): Snapshot {
 }
 
 /**
- * `examples/shop` with: Proposal 0001 (a Returned State, a changed Transition, the RETURN Event and a new `return` Machine),
- * Proposal 0002 (a Written off State in payment), Drift 0001 on `order/Shipped` and Drift 0002 on `payment` attached to 0002.
+ * `examples/shop` with: the oldest Proposal (a Returned State, a changed Transition, the RETURN Event and a new `return` Machine),
+ * a second Proposal (a Written off State in payment), a Drift on `order/Shipped` and a Drift on `payment` attached to that second Proposal.
  */
 export function shopWithProposals(): Snapshot {
   const dir = mkdtempSync(join(tmpdir(), "trama-diagram-"));
@@ -52,7 +52,7 @@ export function shopWithProposals(): Snapshot {
   }
 }
 
-/** `examples/shop` with Proposal 0001: no Cart, no Refunding State, and a new `billing` Feature with an `invoice` Machine. */
+/** `examples/shop` with one Proposal: no Cart, no Refunding State, and a new `billing` Feature with an `invoice` Machine. */
 export function shopWithRemovals(): Snapshot {
   const dir = mkdtempSync(join(tmpdir(), "trama-diagram-"));
   try {
@@ -82,8 +82,10 @@ export function snapshotOf(files: FileMap): Snapshot {
     diagnostics: model.diagnostics,
     areas: [],
     proposals: [],
+    inWorktree: [],
     drifts: [],
     tasks: [],
     announcements: [],
+    multiBranch: false,
   };
 }

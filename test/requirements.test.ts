@@ -153,12 +153,63 @@ describe("Tasks and generated skills", () => {
     expect(show(badge.data.task)).toMatchObject({ technical: false, refs: ["order/Paid", "requirements/ui#order/Paid"], drift: badge.id });
   });
 
-  test("task show quotes the Requirements attached to the referenced elements and points at the General ones", () => {
+  test("task show quotes the Requirements attached to the referenced elements and writes each General section in full", () => {
     const task = newTask(p, { title: "Prepare", refs: ["order/Preparing"], technical: false });
     const out = run(["task", "show", task.id], dir, {});
     expect(out.out).toContain("`requirements/ui#order/Preparing`\n  > Show a progress bar.");
     expect(out.out).toContain("`requirements/ui#order/Paid`\n  > Show a green badge.");
-    expect(out.out).toContain("General Requirements apply too: Interface (skill `trama-req-ui`)");
+    expect(out.out).toContain("`requirements/ui#General`\n  > Material 3 everywhere.");
+    expect(out.out).not.toContain("trama-req-");
+  });
+
+  test("task show inlines a Machine, a State's inherited Transitions, an Event's reactions and a whole Area, with no command or skill pointers", () => {
+    writeFileSync(
+      reqFile("tech"),
+      '---\ndescription: "Use when choosing libraries."\n---\n# Technology\n\nPick a library.\n\n## General\n',
+    );
+    const machine = newTask(p, { title: "The order", refs: ["order"], technical: false });
+    const state = newTask(p, { title: "Preparing", refs: ["order/Preparing"], technical: false });
+    const event = newTask(p, { title: "Cancel", refs: ["user.CANCEL"], technical: false });
+    const area = newTask(p, { title: "Screens", refs: ["requirements/ui"], technical: true });
+    const show = (id: string) => run(["task", "show", id], dir, {}).out;
+
+    const order = show(machine.id);
+    const machineView = run(["machine", "order"], dir, {}).out;
+    const machineFacts = machineView.split("## Requirements")[0] ?? "";
+    for (const line of machineFacts.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("-")) expect(order).toContain(trimmed);
+    }
+    expect(order).toContain("An order placed by a customer, from composition to delivery.");
+    expect(order).not.toMatch(/trama (machine|state|event|paths|requirements|validate)/);
+    expect(order).not.toContain("trama-req-");
+    expect(order).not.toContain("Technology");
+
+    const preparing = show(state.id);
+    const stateView = run(["state", "order/Preparing"], dir, {}).out;
+    const outgoing = stateView.split("## Incoming Transitions")[0] ?? "";
+    for (const line of outgoing.split("\n")) {
+      if (line.trimStart().startsWith("- `")) expect(preparing).toContain(line.trim());
+    }
+    expect(preparing).toContain("_(inherited from Paid)_");
+    expect(preparing).not.toContain("trama state");
+
+    const cancel = show(event.id);
+    const eventView = run(["event", "user.CANCEL"], dir, {}).out;
+    const eventFacts = eventView.split("## Requirements")[0] ?? "";
+    for (const line of eventFacts.split("\n")) {
+      if (line.trimStart().startsWith("- ")) expect(cancel).toContain(line.trim());
+    }
+    expect(cancel).toContain("emitted by Actor `user`");
+    expect(cancel).toContain("The user asks to cancel an order.");
+    expect(cancel).not.toContain("trama event");
+
+    const screens = show(area.id);
+    for (const text of ["Material 3 everywhere.", "Checkout screens use the brand colour.", "Show a green badge.", "Show a progress bar."])
+      expect(screens).toContain(text);
+    expect(screens).toContain("## checkout");
+    expect(screens).not.toContain("Load the trama-req-");
+    expect(screens).not.toContain("trama-req-");
   });
 
   test("skills follow the Areas: written for those with content, removed when an Area is emptied or deleted", () => {

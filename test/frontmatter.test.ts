@@ -39,7 +39,7 @@ describe("malformed Task files give domain errors naming the file", () => {
     ["agent is not a boolean", "agent: yes please\nrefs: [order]", /"agent" must be true or false/],
     ["non-technical without refs", "column: todo", /must reference at least one Model element in "refs"/],
     ["technical with refs", "technical: true\nrefs: [order]", /Technical Task cannot reference the Model/],
-    ["drift is not numeric", "refs: [order]\ndrift: abc", /"drift" must be a numeric ID/],
+    ["drift is not an id", "refs: [order]\ndrift: abc", /"drift" must be a card ID/],
     ["front matter is a list", "- a\n- b", /front matter must be a mapping, not a list/],
     ["front matter is a scalar", "just text", /front matter must be a mapping, not a string/],
     ["invalid YAML", "refs: [order", /invalid YAML front matter/],
@@ -101,7 +101,7 @@ describe("malformed Proposal files", () => {
 
   test("missing optional fields fall back to an open Proposal that touches nothing", () => {
     proposal("status: open");
-    expect(getProposal(p, "1").data).toEqual({ status: "open", kind: "change", requires: [], base: {}, delete: [], request: null });
+    expect(getProposal(p, "1").data).toEqual({ status: "open", kind: "change", requires: [], base: {}, delete: [], request: null, created: null });
   });
 });
 

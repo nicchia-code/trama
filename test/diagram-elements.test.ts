@@ -110,7 +110,8 @@ test("levels the Scene no longer has fall back to the closest one that exists", 
   expect(validLevel(scene, { kind: "machine", machine: "gone" })).toEqual({ kind: "system" });
   expect(validLevel(scene, { kind: "state", machine: "order", state: "Draft" })).toEqual({ kind: "machine", machine: "order" });
   expect(validLevel(scene, { kind: "state", machine: "order", state: "paid" })).toEqual({ kind: "state", machine: "order", state: "Paid" });
-  const withProposal = buildScene(shopWithProposals(), "0001");
+  const proposed = shopWithProposals();
+  const withProposal = buildScene(proposed, proposed.proposals[0]?.id ?? "");
   expect(validLevel(withProposal, { kind: "machine", machine: "return" })).toEqual({ kind: "machine", machine: "return" });
   expect(validLevel(scene, { kind: "machine", machine: "return" })).toEqual({ kind: "system" });
 });

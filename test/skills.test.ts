@@ -73,3 +73,18 @@ test("skills update deletes the retired trama-fix folder from every skill folder
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("trama-implement reads each Task once from task show and checks the run once at the end", () => {
+  const skill = SKILLS["trama-implement/SKILL.md"] as string;
+  expect(skill).toContain("Read the Task once, with `trama task show <id>`.");
+  expect(skill).toContain("That text is the Model and the Requirements for this Task.");
+  expect(skill).toContain("do not open a `trama-req-*` skill");
+  expect(skill).toContain("run one command for that Transition, `trama state` or `trama event`, and do not resume the tour");
+  expect(skill).toContain("After the code, do not read the Model again.");
+  expect(skill).toContain("Do not run the project's full suite, the linter or the build after the Task.");
+  expect(skill).toContain("A Task asked by name is its own run");
+  expect(skill).toContain("this step runs once, after `trama task next` says no Task is runnable");
+  expect(skill).toContain("If you cannot tell which Task broke the check, say so in the report and stop");
+  expect(skill).not.toContain("load the `trama-req-");
+  expect(skill).not.toContain("Understand the surroundings");
+});

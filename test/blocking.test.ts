@@ -56,7 +56,7 @@ describe("which Tasks an open Drift blocks", () => {
     expect(blockedFor("order/Paid/user.CANCEL")).toEqual([section, wholeMachine].sort());
     expect(blockedFor("order/Shipped")).toEqual([wholeMachine, element].sort());
     expect(blockedFor("order")).toEqual([section, wholeMachine, element].sort());
-    expect(blockedFor("requirements/ui#order/Paid")).toEqual([section, wholeMachine]); // the Machine contains the State, not the sibling
+    expect(blockedFor("requirements/ui#order/Paid")).toEqual([section, wholeMachine].sort()); // the Machine contains the State, not the sibling
     expect(blockedFor("requirements/ui#General")).toEqual([general]);
     expect(blockedFor("cart")).toEqual([]);
     expect(blockedFor("order/Paid")).not.toContain(general);

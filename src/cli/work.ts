@@ -1,11 +1,14 @@
 import { approvalBlock, changes, getProposal, health, listProposals, type Proposal, validateProposal } from "../core/proposals";
 import { requiredReasons } from "../core/required";
-import { hasContent, loadProject, parseRequirementRef, type ProjectModel, requirementsFor, resolveProjectRef } from "../core/requirements";
-import type { Project } from "../core/store";
+import { hasContent, loadProject, parseRequirementRef, type Area, type ProjectModel, requirementsFor, resolveProjectRef } from "../core/requirements";
+import { byCreation, type Project } from "../core/store";
 import { formatDiagnostic } from "../core/model";
 import { placeTasks } from "../core/design";
 import type { Blocker } from "../core/blocking";
 import { blockedTasks, COLUMNS, type Drift, driftOptions, driftSides, listDrifts, listTasks, nextTask, type Task } from "../core/work";
+import { inWorktreeProposals, openProposalsAwaitingDecision, roundWorktrees } from "../core/worktree-round";
+import { readMergeDrift } from "../core/worktree-merge";
+import { machineReceiverLines, outgoingLines, reactionLines, stateTreeLines } from "./explore";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 
 /** One-line summary of a Proposal for lists and the board. */
@@ -94,7 +97,7 @@ const taskSummary = (t: Task, blocked: Map<string, Blocker[]>): TaskSummary => (
 const driftSummary = (d: Drift) => ({ id: d.id, title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin });
 
 /** The current text of a Model element or Requirement, for inlining into a Task or Drift. */
-export function describeRef(project: ProjectModel, ref: string): string {
+export function describeRef(project: ProjectModel, ref: string, full = false): string {
   let el;
   try {
     el = resolveProjectRef(project, ref);
@@ -107,31 +110,55 @@ export function describeRef(project: ProjectModel, ref: string): string {
     case "actor":
       return `${el.actor.name}${dash(el.actor.description)}\nEvents: ${el.actor.events.map((e) => e.name).join(", ") || "_none_"}`;
     case "machine":
-      return `${el.machine.name}${dash(el.machine.description)}\nUse \`trama machine ${el.machine.id}\` for the full State tree.`;
+      if (!full) return `${el.machine.name}${dash(el.machine.description)}\nUse \`trama machine ${el.machine.id}\` for the full State tree.`;
+      return [
+        `${el.machine.name} (machine \`${el.machine.id}\`, feature \`${el.machine.feature}\`)`,
+        el.machine.description,
+        "States:",
+        bullets(stateTreeLines(el.machine.states)),
+        "Events:",
+        bullets(machineReceiverLines(project.model, el.machine)),
+      ]
+        .filter((part) => part !== "")
+        .join("\n");
     case "state":
       return [
         `${el.state.name}${marker(el.state)}${dash(el.state.description)}`,
-        ...el.state.transitions.map((t) => `- \`${eventKey(t)}\` → ${t.target}${prose(t)}`),
+        ...(full ? outgoingLines(el.machine, el.state) : el.state.transitions.map((t) => `- \`${eventKey(t)}\` → ${t.target}${prose(t)}`)),
       ].join("\n");
     case "transition":
       return el.transitions.map((t) => `- ${el.state.name}: \`${eventKey(t)}\` → ${t.target}${prose(t)}`).join("\n");
     case "event":
-      return `${ref}${dash(el.event.description)}`;
+      if (!full) return `${ref}${dash(el.event.description)}`;
+      return [
+        `\`${ref}\` (emitted by ${project.model.machines.has(el.owner.id) ? "Machine" : "Actor"} \`${el.owner.id}\`)${dash(el.event.description)}`,
+        "Transitions that react to it:",
+        bullets(reactionLines(project.model, el.owner.id, el.event.name)),
+      ].join("\n");
     case "requirement":
       if (el.section) return `${el.area.title}, ${el.section.ref ?? "General"}:\n${el.section.text || "_empty_"}`;
-      return `${el.area.title}: ${el.area.sections.filter((s) => s.text !== "").map((s) => s.ref ?? "General").join(", ") || "_empty_"}. Load the trama-req-${el.area.id} skill for the full text.`;
+      if (!full) return `${el.area.title}: ${el.area.sections.filter((s) => s.text !== "").map((s) => s.ref ?? "General").join(", ") || "_empty_"}. Load the trama-req-${el.area.id} skill for the full text.`;
+      return areaText(el.area);
   }
 }
 
-function refsBlock(project: ProjectModel, refs: string[]): string {
-  return bullets(refs.map((r) => `- \`${r}\`\n${describeRef(project, r).split("\n").map((l) => `  > ${l}`).join("\n")}`), "_No references._");
+/** Title, introduction and every section of an Area, so a Task can be carried out without opening the Area's skill. */
+function areaText(area: Area): string {
+  const sections = area.sections.map((s) => `## ${s.ref ?? "General"}\n${s.text || "_empty_"}`);
+  return [area.title, area.description, area.intro, ...sections].filter((part) => part !== "").join("\n\n");
 }
+
+function refsBlock(project: ProjectModel, refs: string[], full = false): string {
+  return bullets(refs.map((r) => `- \`${r}\`\n${describeRef(project, r, full).split("\n").map((l) => `  > ${l}`).join("\n")}`), "_No references._");
+}
+
+const quoteBlock = (key: string, text: string) => `- \`${key}\`\n${text.split("\n").map((l) => `  > ${l}`).join("\n")}`;
 
 /**
  * Requirements attached to the referenced Model elements or to what contains them, except those referenced
  * directly, plus a pointer to the Areas' General Requirements, which apply to everything.
  */
-export function requirementsBlock(project: ProjectModel, refs: string[]): string {
+export function requirementsBlock(project: ProjectModel, refs: string[], general: "pointer" | "text" = "pointer"): string {
   const explicit = new Set(refs.filter((r) => parseRequirementRef(r) !== null));
   const seen = new Set<string>();
   const lines: string[] = [];
@@ -141,12 +168,20 @@ export function requirementsBlock(project: ProjectModel, refs: string[]): string
       const key = `requirements/${r.area.id}#${r.section.ref}`;
       if (seen.has(key) || explicit.has(key) || explicit.has(`requirements/${r.area.id}`)) continue;
       seen.add(key);
-      lines.push(`- \`${key}\`\n${r.section.text.split("\n").map((l) => `  > ${l}`).join("\n")}`);
+      lines.push(quoteBlock(key, r.section.text));
     }
   }
-  const general = project.areas.filter((a) => a.sections.some((s) => s.ref === null && s.text !== "") || a.intro !== "");
-  if (general.length > 0)
-    lines.push(`- General Requirements apply too: ${general.map((a) => `${a.title} (skill \`trama-req-${a.id}\`)`).join(", ")}.`);
+  if (general === "text") {
+    for (const area of project.areas) {
+      const section = area.sections.find((s) => s.ref === null && s.text !== "");
+      const key = `requirements/${area.id}#General`;
+      if (!section || explicit.has(key)) continue;
+      lines.push(quoteBlock(key, section.text));
+    }
+  } else {
+    const areas = project.areas.filter((a) => a.sections.some((s) => s.ref === null && s.text !== "") || a.intro !== "");
+    if (areas.length > 0) lines.push(`- General Requirements apply too: ${areas.map((a) => `${a.title} (skill \`trama-req-${a.id}\`)`).join(", ")}.`);
+  }
   return bullets(lines, "_No Requirements apply._");
 }
 
@@ -163,8 +198,8 @@ export function taskShowView(p: Project, task: Task): Result {
     ...blockedBy.map((b) => (b.kind === "drift" ? `Blocked by Drift ${b.drift}: ${b.title}` : `Waiting for Task ${b.task}: ${b.title} (fixes the code for Drift ${b.drift})`)),
     "",
     "## References",
-    task.data.refs.length === 0 ? "_Technical Task: no references._" : refsBlock(project, task.data.refs),
-    ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, task.data.refs)] : []),
+    task.data.refs.length === 0 ? "_Technical Task: no references._" : refsBlock(project, task.data.refs, true),
+    ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, task.data.refs, "text")] : []),
   ].join("\n");
   return { md, json: { ...taskSummary(task, blocked), body: task.body } };
 }
@@ -255,13 +290,28 @@ export function driftListView(p: Project, all: boolean): Result {
  */
 export function boardView(p: Project): Result {
   const allProposals = listProposals(p);
-  const proposals = allProposals.filter((x) => x.data.status === "open").map((x) => proposalSummary(p, x));
+  const proposals = openProposalsAwaitingDecision(p, allProposals).map((x) => proposalSummary(p, x));
+  const inWorktree = inWorktreeProposals(p);
   const drafts = allProposals.filter((x) => x.data.status === "draft").map((x) => proposalSummary(p, x));
   const titles = new Map(allProposals.map((x) => [x.id, x.title]));
-  const drifts = listDrifts(p).filter((d) => d.data.status === "open");
+  const folders = roundWorktrees(p);
+  const driftCards = [
+    ...listDrifts(p).filter((d) => d.data.status === "open").map((drift) => ({ drift, worktree: false })),
+    ...folders.flatMap(({ project: home }) => listDrifts(home).filter((d) => d.data.status === "open").map((drift) => ({ drift, worktree: true }))),
+  ];
+  const drifts = byCreation(driftCards, (item) => ({ id: item.drift.id, created: item.drift.data.created })).map((item) => ({ ...driftSummary(item.drift), worktree: item.worktree }));
   const blocked = blockedTasks(p);
-  const placed = placeTasks(listTasks(p).map((t) => taskSummary(t, blocked)));
-  const line = (t: TaskSummary) => `${t.id} ${t.title}${t.technical ? " (technical)" : ""}${t.agent ? WORKING : ""}${blockedMarks(t.blockedBy)}`;
+  const taskCards = [
+    ...listTasks(p).map((task) => ({ task, blocked, worktree: false })),
+    ...folders.flatMap(({ project: home }) => {
+      const why = blockedTasks(home);
+      return listTasks(home).map((task) => ({ task, blocked: why, worktree: true }));
+    }),
+  ];
+  const placed = placeTasks(
+    byCreation(taskCards, (item) => ({ id: item.task.id, created: item.task.data.created })).map((item) => ({ ...taskSummary(item.task, item.blocked), worktree: item.worktree })),
+  );
+  const line = (t: TaskSummary & { worktree?: boolean }) => `${t.id} ${t.title}${t.technical ? " (technical)" : ""}${t.worktree ? " (worktree)" : ""}${t.agent ? WORKING : ""}${blockedMarks(t.blockedBy)}`;
   const entries = (column: string) =>
     placed
       .filter((x) => x.column === column)
@@ -278,10 +328,12 @@ export function boardView(p: Project): Result {
     "# Board",
     "",
     ...(drafts.length === 0 ? [] : ["## In writing", bullets(drafts.map((i) => `- Proposal ${i.id} (draft): ${i.title}`)), ""]),
+    ...(inWorktree.length === 0 ? [] : ["## In worktree", bullets(inWorktree.map((i) => `- Proposal ${i.id}: ${i.title}`)), ""]),
     "## To decide",
     bullets([
       ...proposals.map((i) => `- Proposal ${i.id}${i.stale ? " (stale)" : ""}: ${i.title}`),
-      ...drifts.map((d) => `- Drift ${d.id}: ${d.title}${d.data.proposal ? ` (Proposal ${d.data.proposal})` : ""}`),
+      ...drifts.map((d) => `- Drift ${d.id}${d.worktree ? " (worktree)" : ""}: ${d.title}${d.proposal ? ` (Proposal ${d.proposal})` : ""}`),
+      ...(readMergeDrift(p.root) ? ["- Merge Drift: Merge"] : []),
     ]),
     "",
     "## To do",
@@ -297,7 +349,8 @@ export function boardView(p: Project): Result {
     md,
     json: {
       inWriting: drafts,
-      toDecide: { proposals, drifts: drifts.map(driftSummary) },
+      inWorktree,
+      toDecide: { proposals, drifts },
       todo: entries("todo").map((e) => e.json),
       doing: entries("doing").map((e) => e.json),
       done: entries("done").map((e) => e.json),

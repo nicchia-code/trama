@@ -13,7 +13,7 @@ let project: Project;
 let server: QuestionServer | undefined;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-question-tools-"));
-  runtimeDir = mkdtempSync(join(tmpdir(), "trama-question-runtime-"));
+  runtimeDir = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-qr-") : "/tmp/trama-qr-");
   cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
   project = projectAt(dir);
 });

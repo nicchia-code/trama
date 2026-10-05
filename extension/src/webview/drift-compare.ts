@@ -95,6 +95,10 @@ export function driftComparison(d: DriftView, selection: FixSelection = fixSelec
   if (d.proposal === null) keepHappens = { how: "dismiss", consequence: "Closes the Drift; nothing changes", aria, blocked: false, carries: {} };
   else if (d.proposalBlock !== null) keepHappens = { how: "accept-proposal", consequence: d.proposalBlock.reason, aria, blocked: true, carries: {} };
   else keepHappens = { how: "accept-proposal", consequence: `Approves Proposal ${d.proposal} and changes the Model to match`, aria, blocked: false, carries: {} };
+  if (d.merge === true) {
+    keepShould.consequence = "A Task is created to reconcile the conflicts";
+    keepHappens = { how: "dismiss", consequence: "Every Proposal in the round returns to To decide and the worktrees are deleted", aria, blocked: false, carries: {} };
+  }
   return {
     happens: d.sides?.happens ?? d.body,
     should: d.sides?.should ?? LEGACY_SHOULD,

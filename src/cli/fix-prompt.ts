@@ -34,7 +34,7 @@ export async function completeFixChoice(argv: string[], cwd: string, io: PromptI
   let options: DriftOption[];
   let heading: string;
   try {
-    const drift = getDrift(makeContext(cwd, root).project(), positionals[0] as string);
+    const drift = getDrift(makeContext(cwd, root).project(), positionals[0] as string, true);
     if (drift.data.status !== "open") return argv;
     options = driftOptions(drift);
     heading = `Drift ${drift.id}: ${drift.title}`;

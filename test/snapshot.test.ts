@@ -82,8 +82,8 @@ test("the snapshot carries the Model, open Proposals as ghost overlays, Drifts a
   const order = editInProposal(p, prop.id, "checkout/order.md");
   writeFileSync(order, readFileSync(order, "utf8").replace("### Shipped (final)", "### Shipped\n- `user.CANCEL` → Returned\n\n### Returned (final)"));
   writeFileSync(editInProposal(p, prop.id, "actors/user.md"), readFileSync(join(dir, ".trama/model/actors/user.md"), "utf8") + "\n### RETURN\nAsks to return.\n");
-  newDrift(p, { options: FIX_OPTIONS, title: "Code refunds late", refs: ["order/Shipped"], happens: "see refund.ts", should: "The Model says another." });
-  newTask(p, { title: "Build cart", refs: ["cart"], technical: false });
+  const drift = newDrift(p, { options: FIX_OPTIONS, title: "Code refunds late", refs: ["order/Shipped"], happens: "see refund.ts", should: "The Model says another." });
+  const task = newTask(p, { title: "Build cart", refs: ["cart"], technical: false });
   handOver(p, prop.id);
   const done = newProposal(p, "Closed");
   rmSync(join(done.dir, "model"), { recursive: true, force: true });
@@ -97,9 +97,9 @@ test("the snapshot carries the Model, open Proposals as ghost overlays, Drifts a
   const returned = flat(view?.machines[0]?.states ?? []).find((s) => s.name === "Returned");
   expect(returned?.change).toBe("added");
   expect(view?.actors).toEqual([{ id: "user", change: "modified", events: expect.arrayContaining([{ name: "RETURN", change: "added" }]) }]);
-  expect(snap.drifts).toMatchObject([{ id: "0001", title: "Code refunds late", refs: ["order/Shipped"], proposal: null }]);
+  expect(snap.drifts).toMatchObject([{ id: drift.id, title: "Code refunds late", refs: ["order/Shipped"], proposal: null }]);
   expect(snap.drifts[0]?.body).toContain("see refund.ts");
-  expect(snap.tasks[0]).toMatchObject({ title: "Build cart", column: "todo", refs: ["cart"], file: "tasks/0001-build-cart.md" });
+  expect(snap.tasks[0]).toMatchObject({ title: "Build cart", column: "todo", refs: ["cart"], file: `tasks/${task.name}` });
   expect(JSON.parse(JSON.stringify(snap))).toEqual(snap);
 });
 

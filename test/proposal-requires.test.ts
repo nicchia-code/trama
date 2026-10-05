@@ -20,11 +20,11 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 const BANK = "# Bank\n\nThe bank.\n\n## Events\n\n### TRANSFER_RECEIVED\nMoney arrived.\n";
 const INVOICE = "# Invoice\n\nA bill.\n\n## States\n\n### Open (initial)\n- `bank.TRANSFER_RECEIVED` → Paid\n\n### Paid (final)\n";
 
-/** 0001 adds the bank Actor; 0002 adds a billing Feature reacting to it, on top of 0001. */
+/** The first Proposal adds the bank Actor; the second adds a billing Feature reacting to it, on top of the first. */
 function chain() {
   const actors = newProposal(p, "Bank");
   writeFileSync(editInProposal(p, actors.id, "actors/bank.md"), BANK);
-  const billing = newProposal(p, "Billing", "", { requires: ["1"] });
+  const billing = newProposal(p, "Billing", "", { requires: [actors.id] });
   writeFileSync(editInProposal(p, billing.id, "billing/feature.md"), "# Billing\n\nInvoices.\n");
   writeFileSync(editInProposal(p, billing.id, "billing/invoice.md"), INVOICE);
   handOver(p, actors.id, billing.id);
@@ -44,7 +44,7 @@ test("a Proposal is validated on top of the one it requires and shows only its o
 
 test("it can be approved only after what it requires, and approving that does not make it stale", () => {
   const { actors, billing } = chain();
-  expect(() => approveProposal(p, billing)).toThrow(/Proposal 0001 "Bank" is not approved yet/);
+  expect(() => approveProposal(p, billing)).toThrow(new RegExp(`Proposal ${actors} "Bank" is not approved yet`));
   approveProposal(p, actors);
   expect(health(p, getProposal(p, billing))).toEqual({ stale: [], unbased: [], requires: [] });
   approveProposal(p, billing);
@@ -52,17 +52,17 @@ test("it can be approved only after what it requires, and approving that does no
 });
 
 test("editing a file the required Proposal adds starts from that Proposal's version", () => {
-  chain();
-  const more = newProposal(p, "Bank refunds", "", { requires: ["1"] });
+  const { actors } = chain();
+  const more = newProposal(p, "Bank refunds", "", { requires: [actors] });
   expect(readFileSync(editInProposal(p, more.id, "actors/bank.md"), "utf8")).toBe(BANK);
-  approveProposal(p, "1");
+  approveProposal(p, actors);
   expect(health(p, getProposal(p, more.id)).stale).toEqual([]);
 });
 
 test("a rejected requirement blocks the Proposal, and a new Proposal cannot require it", () => {
   const { actors, billing } = chain();
   rejectProposal(p, actors, "No bank");
-  expect(health(p, getProposal(p, billing)).requires).toEqual([{ id: "0001", title: "Bank", status: "rejected" }]);
+  expect(health(p, getProposal(p, billing)).requires).toEqual([{ id: actors, title: "Bank", status: "rejected" }]);
   expect(() => approveProposal(p, billing)).toThrow(/was rejected/);
   expect(() => newProposal(p, "Later", "", { requires: [actors] })).toThrow(/was rejected/);
 });
@@ -80,7 +80,7 @@ test("a cycle further down the chain also blocks the Proposals that require it",
   const b = newProposal(p, "B", "", { requires: [a.id] });
   const c = newProposal(p, "C", "", { requires: [b.id] });
   const file = join(getProposal(p, b.id).dir, "proposal.md");
-  writeFileSync(file, readFileSync(file, "utf8").replace(`  - "${a.id}"\n`, `  - "${c.id}"\n`));
+  writeFileSync(file, readFileSync(file, "utf8").replaceAll(a.id, c.id));
   const top = newProposal(p, "Top", "", { requires: [b.id] });
   handOver(p, top.id);
   expect(health(p, getProposal(p, top.id)).requires.map((r) => [r.id, r.status])).toContainEqual([b.id, "cycle"]);
@@ -88,12 +88,12 @@ test("a cycle further down the chain also blocks the Proposals that require it",
 });
 
 test("the Diagram draws a dependent Proposal over the Model with its requirements applied", () => {
-  const { billing } = chain();
+  const { actors, billing } = chain();
   const view = buildSnapshot(p).proposals.find((x) => x.id === billing);
   expect(view?.base?.actors.map((a) => a.id)).toContain("bank");
   expect(view?.actors).toEqual([]);
   expect(view?.machines.map((m) => [m.id, m.change])).toEqual([["invoice", "added"]]);
-  expect(buildSnapshot(p).proposals.find((x) => x.id === "0001")?.base).toBeNull();
+  expect(buildSnapshot(p).proposals.find((x) => x.id === actors)?.base).toBeNull();
 });
 
 test("a Proposal file that is no valid Machine leaves the snapshot readable and reports its errors", () => {

@@ -118,7 +118,7 @@ export function buildScene(snapshot: Snapshot, proposalId: string | null): Scene
     machine: machines,
     files: new Map(model.machines.map((m) => [m.id, m.file])),
     proposal,
-    drifts: snapshot.drifts,
+    drifts: snapshot.drifts.filter((d) => d.worktree === null && d.merge !== true),
   };
 }
 

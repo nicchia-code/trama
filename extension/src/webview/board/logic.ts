@@ -61,6 +61,16 @@ export interface ChangeSummary {
   more: number;
 }
 
+/** A Proposal that has a worktree: title and, before the round starts merging, Remove from round. No Approve and no Reject. */
+export interface WorktreeCard {
+  kind: "worktree";
+  key: string;
+  id: string;
+  heading: string;
+  title: string;
+  removable: boolean;
+}
+
 export interface ProposalCard {
   kind: "proposal";
   key: string;
@@ -83,6 +93,8 @@ export interface DriftCard {
   title: string;
   refs: string[];
   proposal: string | null;
+  /** Proposal whose worktree this Drift lives in, or null when it lives in the open folder. */
+  worktree: string | null;
   /** The Drift as the snapshot carries it: the card shows its two sides and its choices (see `driftComparison`). */
   drift: DriftView;
 }
@@ -108,6 +120,8 @@ export interface TaskCard {
   /** Path relative to `.trama/`. */
   file: string;
   column: Column;
+  /** Proposal whose worktree this Task lives in, or null when it lives in the open folder. */
+  worktree: string | null;
 }
 
 /** The Tasks of one design (Proposal) shown as a single card; it stands in the column its Tasks add up to. */
@@ -177,6 +191,18 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
   return badges;
 }
 
+/** The In worktree group. These Proposals are not cards of To decide. */
+export function worktreeCards(snapshot: Snapshot): WorktreeCard[] {
+  return snapshot.inWorktree.map((item) => ({
+    kind: "worktree",
+    key: `worktree:${item.id}`,
+    id: item.id,
+    heading: `Proposal ${item.id}`,
+    title: item.title,
+    removable: item.removable,
+  }));
+}
+
 export function proposalCard(p: ProposalView): ProposalCard {
   return {
     kind: "proposal",
@@ -192,13 +218,23 @@ export function proposalCard(p: ProposalView): ProposalCard {
 }
 
 export function driftCard(d: DriftView): DriftCard {
-  return { kind: "drift", key: `drift:${d.id}`, id: d.id, heading: `Drift ${d.id}`, title: d.title, refs: d.refs, proposal: d.proposal, drift: d };
+  return {
+    kind: "drift",
+    key: d.worktree ? `worktree:${d.worktree}:drift:${d.id}` : `drift:${d.id}`,
+    id: d.id,
+    heading: d.merge === true ? "Merge Drift" : `Drift ${d.id}`,
+    title: d.title,
+    refs: d.refs,
+    proposal: d.proposal,
+    worktree: d.worktree,
+    drift: d,
+  };
 }
 
 export function taskCard(t: TaskView): TaskCard {
   return {
     kind: "task",
-    key: `task:${t.id}`,
+    key: t.worktree ? `worktree:${t.worktree}:task:${t.id}` : `task:${t.id}`,
     id: t.id,
     title: t.title,
     technical: t.technical,
@@ -211,6 +247,7 @@ export function taskCard(t: TaskView): TaskCard {
     body: t.body,
     file: t.file,
     column: t.column,
+    worktree: t.worktree,
   };
 }
 

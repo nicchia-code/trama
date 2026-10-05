@@ -18,24 +18,26 @@ Se il developer ha indicato un argomento ntfy nelle impostazioni dell'editor, la
 
 Lo stesso vale per la chat di Cursor: ogni fine di turno dell'agente di una conversazione di Trama fa nascere un avviso, e un nuovo prompt inviato a quella conversazione annulla gli avvisi sulla fine ancora in attesa (vedi l'Actor cursor-chat).
 
+Un terminale aperto per un worktree non è questo terminale: non lo si riusa, la sua fine non muove questa Machine e non rilascia i Task della cartella aperta. La fine del comando che Trama vi ha scritto fa nascere lo stesso avviso di fine comando.
+
 ## States
 
 ### No agent terminal (initial)
 Trama has no terminal of its own to reuse: none was started yet, or the last one was closed.
 - `developer.ASK_AGENT` → Agent running: only with the terminal launcher and only if an instruction is actually sent. Asks once for the agent command if none is configured and remembers the answer for all projects; cancelling that prompt, or a design request left empty, sends nothing. Opens a new terminal named "Trama agent" in the project folder, marked so that the command line refuses the developer-only decisions to the agent, and types the command with the instruction into it. A design request also announces a Proposal, so that the Board shows its ghost at once.
-- `proposal.APPROVED` → Agent running: only for an ordinary change (never an import), only if automatic scanning is on, an agent can be started without asking the developer anything (the chat launcher, or an agent command is configured) and the approval affects at least one Feature that still exists. One agent run scans all those Features and is told which Proposal the Tasks it files come from. With the chat launcher the instruction goes to the chat and nothing changes here.
+- `proposal.APPROVED` → Agent running: only for an ordinary change (never an import), only if the approval is not the landing of a worktree round, only if automatic scanning is on, an agent can be started without asking the developer anything (the chat launcher, or an agent command is configured) and the approval affects at least one Feature that still exists. One agent run scans all those Features and is told which Proposal the Tasks it files come from. With the chat launcher the instruction goes to the chat and nothing changes here.
 
 ### Agent running
 The agent command typed into the terminal has not ended, or the terminal cannot tell whether it did.
 - `developer.ASK_AGENT` → Agent running: a new terminal is opened, because a running agent must not receive the instruction as a message; the old terminal is left alone and no longer tracked. A design request announces a Proposal, as from the first State.
-- `proposal.APPROVED` → Agent running: same as an automatic scan from the first State; a new terminal is opened.
+- `proposal.APPROVED` → Agent running: same as an automatic scan from the first State; a new terminal is opened. An approval that lands from a worktree round does not start it.
 - `terminal.COMMAND_ENDED` → Agent idle: se il developer ha indicato un argomento ntfy, nasce anche un avviso sulla fine del comando (vedi il Notice); la fine di un altro comando non conta.
 - `terminal.CLOSED` → No agent terminal
 
 ### Agent idle
 The terminal is open and its command has ended, so it is free for the next instruction.
 - `developer.ASK_AGENT` → Agent running: the terminal is reused only if its process is still alive and it reports command start and end; otherwise a new one is opened. A design request announces a Proposal, as from the first State.
-- `proposal.APPROVED` → Agent running: same as an automatic scan from the first State, reusing the terminal under the same condition.
+- `proposal.APPROVED` → Agent running: same as an automatic scan from the first State, reusing the terminal under the same condition. An approval that lands from a worktree round does not start it.
 - `terminal.CLOSED` → No agent terminal
 
 ## Events

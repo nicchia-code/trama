@@ -71,6 +71,31 @@ function renderStates(states: State[], depth: number): string[] {
   ]);
 }
 
+/** The State tree of a Machine, the same lines `trama machine` prints under States. */
+export function stateTreeLines(states: State[]): string[] {
+  return renderStates(states, 0);
+}
+
+/** One line per Event of a Machine, with the States that receive it. */
+export function machineReceiverLines(model: Model, machine: Machine): string[] {
+  return machine.events.map((e) => {
+    const received = receivers(model, machine.id, e.name);
+    const who = received.map((r) => `${r.machine.id}/${r.state.name} → ${r.transition.target}`).join("; ") || "_nobody_";
+    return `- \`${machine.id}.${e.name}\`${dash(firstLine(e.description))}\n  - Received by: ${who}`;
+  });
+}
+
+/** Outgoing Transitions of a State, including those inherited from the States that contain it. */
+export function outgoingLines(machine: Machine, state: State): string[] {
+  const own = lineage(machine, state).flatMap((source) => source.transitions.map((t) => ({ from: source.name, t })));
+  return own.map((o) => `- \`${eventKey(o.t)}\` → ${o.t.target}${prose(o.t)}${o.from === state.name ? "" : ` _(inherited from ${o.from})_`}`);
+}
+
+/** The Transitions that react to an Event, the same lines `trama event` prints. */
+export function reactionLines(model: Model, ownerId: string, eventName: string): string[] {
+  return receivers(model, ownerId, eventName).map((r) => `- ${r.machine.id}/${r.state.name} → ${r.transition.target}${prose(r.transition)}`);
+}
+
 export function machineView(model: Model, id: string): Result {
   const machine = machineOf(model, id);
   const events = machine.events.map((e) => ({
@@ -84,15 +109,10 @@ export function machineView(model: Model, id: string): Result {
     machine.description,
     "",
     "## States",
-    bullets(renderStates(machine.states, 0)),
+    bullets(stateTreeLines(machine.states)),
     "",
     "## Events",
-    bullets(
-      events.map(
-        (e) =>
-          `- \`${machine.id}.${e.name}\`${dash(firstLine(e.description))}\n  - Received by: ${e.receivers.map((r) => `${r.machine}/${r.state} → ${r.target}`).join("; ") || "_nobody_"}`,
-      ),
-    ),
+    bullets(machineReceiverLines(model, machine)),
     modelNote(model),
   ].join("\n");
   return { md, json: { id, feature: machine.feature, name: machine.name, description: machine.description, states: machine.states, events } };
@@ -116,7 +136,6 @@ export function stateView(model: Model, ref: string): Result {
       }
       if (chain.includes(state)) incoming.push({ from: other.name, t, viaInitial: target !== state });
     }
-  const fmtOut = (o: (typeof own)[number]) => `- \`${eventKey(o.t)}\` → ${o.t.target}${prose(o.t)}${o.from === state.name ? "" : ` _(inherited from ${o.from})_`}`;
   const md = [
     `# ${machine.id}/${state.name}${marker(state)}`,
     "",
@@ -126,7 +145,7 @@ export function stateView(model: Model, ref: string): Result {
     `Sub-States: ${state.children.map((c) => c.name).join(", ") || "_none_"}`,
     "",
     "## Outgoing Transitions",
-    bullets(own.map(fmtOut)),
+    bullets(outgoingLines(machine, state)),
     "",
     "## Incoming Transitions",
     bullets(incoming.map((i) => `- ${machine.id}/${i.from}: \`${eventKey(i.t)}\`${i.viaInitial ? ` → ${i.t.target} _(enters this initial sub-State)_` : ""}${prose(i.t)}`)),
@@ -159,7 +178,7 @@ export function eventView(model: Model, ref: string): Result {
     el.event.description,
     "",
     "## Transitions that react to it",
-    bullets(rec.map((r) => `- ${r.machine.id}/${r.state.name} → ${r.transition.target}${prose(r.transition)}`)),
+    bullets(reactionLines(model, el.owner.id, el.event.name)),
     modelNote(model),
   ].join("\n");
   return {

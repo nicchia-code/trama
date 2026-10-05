@@ -39,13 +39,37 @@ export function stringList(raw: Raw, key: string, where: string): string[] {
   return v as string[];
 }
 
-/** A numbered ID such as "0003". YAML reads an unquoted 0003 as the number 3, so numbers are accepted. */
+/** Eight lowercase letters and digits: the identity of a Proposal, Task or Drift that is not numbered. */
+const RANDOM_ID = /^[a-z0-9]{8}$/;
+
+/**
+ * The identity as it is stored. An eight-character identity stays as written, even when it is all digits.
+ * A shorter number is padded to four digits, so `12` and `0012` are the same numbered card.
+ */
+export function canonicalCardId(raw: string): string {
+  if (RANDOM_ID.test(raw)) return raw;
+  if (/^\d+$/.test(raw)) return String(Number(raw)).padStart(4, "0");
+  return raw;
+}
+
+/** A card identity: a number such as "0003", or eight lowercase letters and digits. YAML reads an unquoted 0003 as the number 3. */
 export function idField(raw: Raw, key: string, where: string): string | null {
   const v = raw[key];
   if (v === undefined || v === null) return null;
   if (typeof v === "number" && Number.isInteger(v) && v >= 0) return String(v).padStart(4, "0");
-  if (typeof v === "string" && /^\d+$/.test(v)) return v.padStart(4, "0");
-  throw new TramaError(`${where}: "${key}" must be a numeric ID such as "0003", found ${JSON.stringify(v)}`);
+  if (typeof v === "string" && (RANDOM_ID.test(v) || /^\d+$/.test(v))) return canonicalCardId(v);
+  throw new TramaError(`${where}: "${key}" must be a card ID (a number such as "0003", or eight lowercase letters and digits), found ${JSON.stringify(v)}`);
+}
+
+const CREATED_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** When the card was created, as a UTC ISO 8601 date and time. Absent on numbered cards written before the field existed. */
+export function createdField(raw: Raw, where: string): string | null {
+  const v = raw["created"];
+  if (v === undefined || v === null) return null;
+  if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString();
+  if (typeof v === "string" && CREATED_AT.test(v) && !Number.isNaN(Date.parse(v))) return v;
+  throw new TramaError(`${where}: "created" must be a UTC date and time in ISO 8601, found ${JSON.stringify(v)}`);
 }
 
 export function stringMap(raw: Raw, key: string, where: string): Record<string, string> {

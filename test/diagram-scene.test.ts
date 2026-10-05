@@ -31,8 +31,9 @@ test("toMerged keeps the State tree, Transitions and Events of a Machine", () =>
 });
 
 test("a Proposal overlays its Machines, Actor Events and marks what it touches", () => {
-  const scene = buildScene(proposed, "0001");
-  expect(scene.proposal?.id).toBe("0001");
+  const returnsId = proposed.proposals[0]?.id ?? "";
+  const scene = buildScene(proposed, returnsId);
+  expect(scene.proposal?.id).toBe(returnsId);
 
   const ret = scene.machine.get("return") as MergedMachine;
   expect(ret.change).toBe("added");
@@ -59,7 +60,8 @@ test("an unknown Proposal id gives today's Model", () => {
 });
 
 test("a Feature only a Proposal knows is an added ghost; removed Machines and States stay drawn as removed", () => {
-  const scene = buildScene(shopWithRemovals(), "0001");
+  const removals = shopWithRemovals();
+  const scene = buildScene(removals, removals.proposals[0]?.id ?? "");
   const billing = scene.feature.get("billing");
   expect(billing?.change).toBe("added");
   expect(billing?.machines).toEqual(["invoice"]);

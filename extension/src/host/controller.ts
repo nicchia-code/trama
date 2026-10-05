@@ -2,20 +2,26 @@ import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { approvalBlock, approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
+import { lostWorktreeMessage, reconcileLostWorktrees, roundWorktrees, withdrawFromRound } from "../../../src/core/worktree-round";
+import { abandonRound, reconcileMerge } from "../../../src/core/worktree-merge";
+import { approvalBySwitch, noticeForSwitch, readMultiBranch, turnMultiBranch } from "../../../src/core/multi-branch";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { runBlocker } from "../../../src/core/design";
 import { blockedTasks, getDrift, getTask, listTasks, resolveDrift, staleAttachedProposal } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn } from "./announcements";
-import { agentReady, configuredSkillsDir, launchAgent, settings } from "./agent";
+import { acceptOrdinaryProposal } from "./acceptance";
+import { agentReady, configuredLanguage, configuredSkillsDir, configuredWorktreeAgent, launchAgent, launchReconcileAgent, launchWorktreeAgent, resumeWorktreeTasks, settings } from "./agent";
+import { applyWorktreeDecision } from "./worktree-decision";
+import { approvalRoute, projectMultiBranch } from "./multi-branch";
 import { driftBlockedMessage, REWORK_PROPOSAL } from "./drift-blocked";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { resolveMarkdownFile } from "./paths";
 import { findProject, initializeProject, updateSkills } from "./project";
-import { buildPrompt, buildScanPrompt } from "./prompts";
+import { buildPrompt, buildScanPrompt, withLanguage } from "./prompts";
 import { type ApprovalOptions, applyApprovedProposal } from "./approval";
 import type { QuestionSession } from "./question-session";
 
@@ -42,6 +48,8 @@ export class Controller implements vscode.Disposable {
   private watcher: vscode.FileSystemWatcher | undefined;
   private timer: NodeJS.Timeout | undefined;
   private disposed = false;
+  /** File text last warned about as unreadable. Forgotten when the panel closes, so reopening warns again. */
+  private switchWarned: string | null = null;
 
   constructor(private readonly extensionUri: vscode.Uri, private readonly questions?: QuestionSession) {}
 
@@ -155,12 +163,14 @@ export class Controller implements vscode.Disposable {
       for (const subscription of subscriptions) subscription.dispose();
       clearTimeout(this.timer);
       this.panel = this.watcher = this.project = undefined;
+      this.switchWarned = null;
       // The round stays open and the agent keeps waiting; the developer is offered a way back to it.
       if (!this.disposed && this.questions?.current()) this.offerReopen();
     });
     this.panel = panel;
     this.watcher = watcher;
     this.project = project;
+    this.noteSwitch();
   }
 
   /** The message cannot be withdrawn, so Reopen checks whether the round still exists: without one it only opens the panel. */
@@ -184,10 +194,33 @@ export class Controller implements vscode.Disposable {
     this.timer = setTimeout(() => this.refresh(), DEBOUNCE_MS);
   }
 
+  /** A worktree disappeared while the panel may be closed. The Board, if it is open, shows the Proposal back to decide. */
+  noteWorktreesLost(): void {
+    if (this.panel && this.project) this.refresh();
+  }
+
+  /** A waiting round was applied. The Board, if it is open, shows the Proposals as part of the Model. */
+  noteRoundMerged(): void {
+    if (this.panel && this.project) this.refresh();
+  }
+
+  /**
+   * An unreadable switch is off. The warning is shown once per content while the panel stays open,
+   * again when the content changes and is still unreadable, and again after the panel is reopened.
+   */
+  private noteSwitch(): void {
+    if (!this.project) return;
+    const notice = noticeForSwitch(readMultiBranch(this.project), this.switchWarned);
+    this.switchWarned = notice.warned;
+    if (notice.warning !== null) void vscode.window.showWarningMessage(notice.warning);
+  }
+
   /** Posts a fresh snapshot; if the files cannot be read, posts the error and the view keeps its last snapshot. */
   private refresh(): void {
     if (!this.project) return;
+    this.noteSwitch();
     try {
+      for (const lost of reconcileLostWorktrees(this.project)) void vscode.window.showWarningMessage(lostWorktreeMessage(lost));
       this.post({ type: "snapshot", snapshot: buildSnapshot(this.project), asking: questionRoundOpen() });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
@@ -229,14 +262,27 @@ export class Controller implements vscode.Disposable {
         await this.openFile(req ? resolveMarkdownFile(requirementsDir(project), message.path.slice(REQUIREMENTS_PREFIX.length)) : resolveMarkdownFile(modelDir(project), message.path));
         return;
       }
-      case "openFile":
-        await this.openFile(resolveMarkdownFile(project.dir, message.path));
+      case "openFile": {
+        const home = message.worktree === undefined ? project : roundWorktrees(project).find((folder) => folder.proposal === message.worktree)?.project;
+        if (!home) throw new TramaError(`Proposal ${message.worktree} is not in a worktree.`);
+        await this.openFile(resolveMarkdownFile(home.dir, message.path));
         return;
+      }
       case "openLink":
         await vscode.env.openExternal(vscode.Uri.parse(message.url, true));
         return;
+      case "setMultiBranch": {
+        const warning = turnMultiBranch(project, message.on, configuredWorktreeAgent());
+        if (warning !== null) void vscode.window.showWarningMessage(warning);
+        else this.refresh();
+        return;
+      }
       case "approveProposal":
-        await this.approving(project, message.id, () => approveProposal(project, message.id, [configuredSkillsDir()]));
+        await this.approving(project, message.id, () => approveProposal(project, message.id, [configuredSkillsDir()]), false);
+        return;
+      case "withdrawFromRound":
+        withdrawFromRound(project, message.id);
+        this.refresh();
         return;
       case "rejectProposal": {
         const feedback = await vscode.window.showInputBox({
@@ -249,10 +295,31 @@ export class Controller implements vscode.Disposable {
         this.refresh();
         return;
       }
+      case "abandonRound":
+        abandonRound(project);
+        this.refresh();
+        return;
       case "resolveDrift": {
+        if (message.id === "merge") {
+          if (message.how === "fix-code") {
+            const started = reconcileMerge(project, message.option ?? 1);
+            this.refresh();
+            await launchReconcileAgent(project.root, started.worktree, withLanguage(buildPrompt({ kind: "implement", task: started.task }), configuredLanguage()));
+          } else {
+            abandonRound(project);
+            this.refresh();
+          }
+          return;
+        }
+        if (message.worktree !== undefined) {
+          const worktree = applyWorktreeDecision(project, message.worktree, message.id, message.how, [configuredSkillsDir()], { option: message.option, note: message.note });
+          this.refresh();
+          await resumeWorktreeTasks(project.root, worktree, message.worktree);
+          return;
+        }
         const resolve = () => resolveDrift(project, message.id, message.how, [configuredSkillsDir()], { option: message.option, note: message.note });
         const attached = getDrift(project, message.id).data.proposal;
-        if (message.how === "accept-proposal" && attached !== null) await this.approving(project, attached, resolve);
+        if (message.how === "accept-proposal" && attached !== null) await this.approving(project, attached, resolve, true);
         else {
           resolve();
           this.refresh();
@@ -260,8 +327,10 @@ export class Controller implements vscode.Disposable {
         return;
       }
       case "driftBlocked": {
-        const proposal = getDrift(project, message.id).data.proposal;
-        const block = proposal === null ? null : approvalBlock(project, proposal);
+        const home = message.worktree === undefined ? project : roundWorktrees(project).find((folder) => folder.proposal === message.worktree)?.project;
+        if (!home) throw new TramaError(`Proposal ${message.worktree} is not in a worktree.`);
+        const proposal = getDrift(home, message.id).data.proposal;
+        const block = proposal === null ? null : approvalBlock(home, proposal);
         if (block === null) {
           // The Proposal can be approved now: the developer was looking at an old picture.
           this.refresh();
@@ -301,12 +370,77 @@ export class Controller implements vscode.Disposable {
     };
   }
 
-  /** Every path that approves a Proposal goes through here; the view is refreshed before any agent is launched. */
-  private async approving(project: Project, proposalId: string, apply: () => void): Promise<void> {
-    await applyApprovedProposal(this.approvalOptions(project), proposalId, () => {
-      apply();
-      this.refresh();
-    });
+  /**
+   * `trama proposal approve` with the switch on. The command waits for this; the worktree agent starts the same way as the panel.
+   */
+  async approveFromCommand(project: Project, proposalId: string, skillsDirs: string[]): Promise<{ ok: boolean; message: string }> {
+    const decision = approvalBySwitch(readMultiBranch(project));
+    if (decision.route === "folder") {
+      try {
+        const approved = approveProposal(project, proposalId, skillsDirs);
+        this.refresh();
+        const line = `Approved Proposal ${approved.id}`;
+        return { ok: true, message: decision.notice ? `${decision.notice}\n${line}` : line };
+      } catch (err) {
+        const message = describeError(err);
+        void vscode.window.showWarningMessage(message);
+        return { ok: false, message };
+      }
+    }
+    const warnings: string[] = [];
+    try {
+      const started = await acceptOrdinaryProposal(
+        {
+          project,
+          autoScan: settings().get<boolean>("autoScan", true),
+          worktreeAgent: configuredWorktreeAgent(),
+          language: configuredLanguage(),
+          warn: (message) => {
+            warnings.push(message);
+            void vscode.window.showWarningMessage(message);
+          },
+          startAgent: async (worktree, prompt) => {
+            this.refresh();
+            await launchWorktreeAgent(project.root, worktree, prompt, proposalId);
+          },
+        },
+        proposalId,
+      );
+      if (!started) return { ok: false, message: warnings.at(-1) ?? "The Proposal stayed open." };
+      return { ok: true, message: `Proposal ${proposalId} is in a worktree.` };
+    } catch (err) {
+      const message = describeError(err);
+      void vscode.window.showErrorMessage(`Trama: ${message}`);
+      return { ok: false, message };
+    }
+  }
+
+  /**
+   * Every path that approves a Proposal goes through here; the view is refreshed before any agent is launched.
+   * With multi-branch on, an ordinary Proposal goes to a worktree. A Drift's Proposal stays in the open folder.
+   */
+  private async approving(project: Project, proposalId: string, apply: () => void, viaDrift: boolean): Promise<void> {
+    if (approvalRoute(projectMultiBranch(project), viaDrift) === "folder") {
+      await applyApprovedProposal(this.approvalOptions(project), proposalId, () => {
+        apply();
+        this.refresh();
+      });
+      return;
+    }
+    await acceptOrdinaryProposal(
+      {
+        project,
+        autoScan: settings().get<boolean>("autoScan", true),
+        worktreeAgent: configuredWorktreeAgent(),
+        language: configuredLanguage(),
+        warn: (message) => void vscode.window.showWarningMessage(message),
+        startAgent: async (worktree, prompt) => {
+          this.refresh();
+          await launchWorktreeAgent(project.root, worktree, prompt, proposalId);
+        },
+      },
+      proposalId,
+    );
   }
 
   private async launchAction(project: Project, action: AgentAction): Promise<void> {

@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -115,6 +115,12 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Language the agent writes in, for example `Italian` or `Deutsch`. When set, every instruction Trama sends to the agent asks it to write everything it generates in that language, except code, which always stays in English. Empty (the default) asks nothing about language. It only reaches agents that Trama starts, changes nothing already written, and the Trama interface stays in English."
+        },
+        "trama.worktreeAgent": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Command of the worktree terminals, only in your user settings. `{prompt}` is replaced by the shell-quoted prompt; if it is missing, the prompt is appended. Empty prevents turning the multi-branch switch on, and blocks accepting a Proposal while the switch is on."
         },
         "trama.ntfy": {
           "type": "string",

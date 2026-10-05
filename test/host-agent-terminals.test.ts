@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { announce, listAnnouncements, withdrawAll } from "../src/core/announcements";
 import type { CursorHook } from "../src/core/cursor-chat";
 import { newProposal } from "../src/core/proposals";
+import { handOver } from "./handover";
 import { projectAt } from "../src/core/store";
 import { getTask, moveTask, newTask } from "../src/core/work";
 
@@ -34,6 +35,12 @@ const terminals: FakeTerminal[] = [];
 const typed: string[] = [];
 /** The environment each fake terminal was created with, in the order created. */
 const environments: Record<string, string>[] = [];
+/** Every terminal Trama created, in order, including the folder and the name. */
+const created: { name?: string; cwd?: string; env: Record<string, string> }[] = [];
+/** What `inspect` reports for a setting key. */
+const inspected: Record<string, { globalValue?: unknown; workspaceValue?: unknown; workspaceFolderValue?: unknown }> = {};
+/** Values written with `update`. */
+const updates: { key: string; value: unknown }[] = [];
 /** Settings the test changes; anything else reads as the editor's default. */
 const settingValues: Record<string, unknown> = {};
 /** The editor's name: "Cursor" makes the extension behave as in Cursor. */
@@ -56,8 +63,9 @@ mock.module("vscode", () => ({
     onDidStartTerminalShellExecution: subscribe(listeners.start),
     onDidEndTerminalShellExecution: subscribe(listeners.end),
     onDidCloseTerminal: subscribe(listeners.close),
-    createTerminal: (options: { env: Record<string, string> }) => {
+    createTerminal: (options: { name?: string; cwd?: string; env: Record<string, string> }) => {
       environments.push(options.env);
+      created.push(options);
       const terminal: FakeTerminal = {
         exitStatus: undefined,
         shellIntegration: {},
@@ -72,6 +80,7 @@ mock.module("vscode", () => ({
       return terminal;
     },
     showErrorMessage: () => undefined,
+    showWarningMessage: () => undefined,
     showInformationMessage: () => {
       const offer = Promise.withResolvers<string | undefined>();
       answerOffer.push(offer.resolve);
@@ -90,7 +99,11 @@ mock.module("vscode", () => ({
     get workspaceFolders() {
       return [{ uri: { scheme: "file", fsPath: workspaceRoot } }];
     },
-    getConfiguration: () => ({ get: (key: string, fallback: unknown) => (key === "agentCommand" ? "agent {prompt}" : (settingValues[key] ?? fallback)), update: async () => {} }),
+    getConfiguration: () => ({
+      get: (key: string, fallback: unknown) => (key === "agentCommand" ? "agent {prompt}" : (settingValues[key] ?? fallback)),
+      inspect: (key: string) => inspected[key],
+      update: async (key: string, value: unknown) => void updates.push({ key, value }),
+    }),
     createFileSystemWatcher: () => ({ onDidCreate() {}, onDidChange() {}, onDidDelete() {}, dispose() {} }),
   },
   Uri: { joinPath: (base: unknown, ...parts: string[]) => ({ base, parts, toString: () => parts.join("/") }), parse: (value: string) => ({ toString: () => value }) },
@@ -546,6 +559,190 @@ describe("the notice on the end of the agent's command", () => {
       born.mockRestore();
       cancelAll.mockRestore();
       terminalCancel.mockRestore();
+    }
+  });
+});
+
+describe("worktree agent terminal", () => {
+  test("it is born in the worktree, named Trama agent, with TRAMA_AGENT, and it does not take the open folder's terminal", async () => {
+    const { launchAgent, launchWorktreeAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    settingValues.worktreeAgent = "echo {prompt}";
+    try {
+      expect(await launchAgent(dir, "open-folder-marker")).toBe("terminal");
+      const open = [...terminals].reverse().find((t) => t.line.includes("open-folder-marker")) as FakeTerminal;
+      listeners.start.forEach((fn) => fn(shell(open)));
+      listeners.end.forEach((fn) => fn(shell(open)));
+
+      const before = terminals.length;
+      await launchWorktreeAgent(dir, "/tmp/repo.trama-worktrees/0001", "scan checkout", "0001");
+      expect(terminals.length).toBe(before + 1);
+      const work = terminals.at(-1) as FakeTerminal;
+      expect(created.at(-1)?.name).toBe("Trama agent");
+      expect(created.at(-1)?.cwd).toBe("/tmp/repo.trama-worktrees/0001");
+      expect(created.at(-1)?.env.TRAMA_AGENT).toBe("1");
+      expect(work.line).toBe("echo 'scan checkout'");
+
+      await launchAgent(dir, "open-again-marker");
+      expect(open.line).toContain("open-again-marker");
+      expect(work.line).toBe("echo 'scan checkout'");
+    } finally {
+      delete settingValues.worktreeAgent;
+      watching.dispose();
+    }
+  });
+
+  test("a missing worktree agent key is written empty, and a command already set is kept", async () => {
+    const { ensureWorktreeAgentSetting } = await import("../extension/src/host/agent");
+    delete inspected.worktreeAgent;
+    updates.length = 0;
+    await ensureWorktreeAgentSetting();
+    expect(updates).toEqual([{ key: "worktreeAgent", value: "" }]);
+
+    inspected.worktreeAgent = { globalValue: "agent {prompt}" };
+    updates.length = 0;
+    await ensureWorktreeAgentSetting();
+    expect(updates).toEqual([]);
+
+    inspected.worktreeAgent = { globalValue: "" };
+    updates.length = 0;
+    await ensureWorktreeAgentSetting();
+    expect(updates).toEqual([]);
+    delete inspected.worktreeAgent;
+  });
+
+  test("the end of the worktree command releases only that worktree's Tasks and notices the open project", async () => {
+    const { launchAgent, launchWorktreeAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { endNotices } = await import("../extension/src/host/notice-host");
+    const born = spyOn(endNotices, "born").mockImplementation(() => {});
+    const work = mkdtempSync(join(tmpdir(), "trama-wt-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), work, { recursive: true });
+    listeners.end.length = 0;
+    const watching = watchAgentTerminal();
+    settingValues.worktreeAgent = "echo {prompt}";
+    const openProject = projectAt(dir);
+    const workProject = projectAt(work);
+    try {
+      const openTask = newTask(openProject, { title: "Open", refs: ["order/Paid"], technical: false });
+      moveTask(openProject, openTask.id, "doing", "agent");
+      const workTask = newTask(workProject, { title: "There", refs: ["order/Paid"], technical: false });
+      moveTask(workProject, workTask.id, "doing", "agent");
+
+      await launchAgent(dir, "busy-in-the-open-folder");
+      await launchWorktreeAgent(dir, work, "scan", "0001");
+      const workTerminal = terminals.at(-1) as FakeTerminal;
+      listeners.end.forEach((fn) => fn(shell(workTerminal)));
+
+      expect(getTask(openProject, openTask.id).data).toMatchObject({ column: "doing", agent: true });
+      expect(getTask(workProject, workTask.id).data).toMatchObject({ column: "todo", agent: false });
+      expect(born).toHaveBeenCalledTimes(1);
+      expect(born.mock.calls[0]?.[0]).toBe(basename(dir));
+      expect(workTerminal.line).toBe("echo 'scan'");
+      // The open folder's terminal is still busy: ending the worktree does not free it.
+      const count = terminals.length;
+      await launchAgent(dir, "still-not-reused");
+      expect(terminals.length).toBe(count + 1);
+
+      const takenAgain = newTask(workProject, { title: "Stays", refs: ["order/Paid"], technical: false });
+      moveTask(workProject, takenAgain.id, "doing", "agent");
+      const openTerminal = [...terminals].reverse().find((t) => t.line.includes("busy-in-the-open-folder")) as FakeTerminal;
+      listeners.end.forEach((fn) => fn(shell(openTerminal)));
+      expect(getTask(workProject, takenAgain.id).data).toMatchObject({ column: "doing", agent: true });
+      expect(getTask(openProject, openTask.id).data).toMatchObject({ column: "todo", agent: false });
+    } finally {
+      born.mockRestore();
+      delete settingValues.worktreeAgent;
+      watching.dispose();
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  test("a scan that created Tasks types the implement instruction into the same terminal, and that command's end does not type another", async () => {
+    const { launchWorktreeAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { endNotices } = await import("../extension/src/host/notice-host");
+    const born = spyOn(endNotices, "born").mockImplementation(() => {});
+    const work = mkdtempSync(join(tmpdir(), "trama-wt-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), work, { recursive: true });
+    listeners.end.length = 0;
+    const watching = watchAgentTerminal();
+    settingValues.worktreeAgent = "echo {prompt}";
+    settingValues.language = "Italian";
+    const workProject = projectAt(work);
+    try {
+      const proposal = newProposal(workProject, "In the worktree");
+      handOver(workProject, proposal.id);
+      await launchWorktreeAgent(dir, work, "scan the proposal", proposal.id);
+      const terminal = terminals.at(-1) as FakeTerminal;
+      newTask(workProject, { title: "Born", refs: ["order/Paid"], technical: false, proposal: proposal.id });
+
+      listeners.end.forEach((fn) => fn(shell(terminal)));
+      const implement = `Use the trama-implement skill on every Task of Proposal ${proposal.id} that is in the "todo" column. Take each one from \`trama task next --proposal ${proposal.id}\`, one after the other, until it says there is none. Write everything you generate in Italian, except code, which always stays in English.`;
+      expect(terminal.line).toBe(`echo '${implement}'`);
+      expect(born).not.toHaveBeenCalled();
+
+      listeners.end.forEach((fn) => fn({ ...shell(terminal), exitCode: 0 } as ShellEvent & { exitCode: number }));
+      expect(terminal.line).toBe(`echo '${implement}'`);
+      expect(born).toHaveBeenCalledTimes(1);
+      expect(born.mock.calls[0]?.[1]).toEqual({ kind: "finished" });
+    } finally {
+      born.mockRestore();
+      delete settingValues.worktreeAgent;
+      delete settingValues.language;
+      watching.dispose();
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  test("a scan that created only Tasks already Done does not type another command", async () => {
+    const { launchWorktreeAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { endNotices } = await import("../extension/src/host/notice-host");
+    const born = spyOn(endNotices, "born").mockImplementation(() => {});
+    const work = mkdtempSync(join(tmpdir(), "trama-wt-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), work, { recursive: true });
+    listeners.end.length = 0;
+    watchAgentTerminal();
+    settingValues.worktreeAgent = "echo {prompt}";
+    const workProject = projectAt(work);
+    try {
+      const proposal = newProposal(workProject, "Done already");
+      handOver(workProject, proposal.id);
+      await launchWorktreeAgent(dir, work, "scan", proposal.id);
+      const terminal = terminals.at(-1) as FakeTerminal;
+      const task = newTask(workProject, { title: "Finished", refs: ["order/Paid"], technical: false, proposal: proposal.id });
+      moveTask(workProject, task.id, "done", "developer");
+      listeners.end.forEach((fn) => fn(shell(terminal)));
+      expect(terminal.line).toBe("echo 'scan'");
+      expect(born).toHaveBeenCalledTimes(1);
+    } finally {
+      born.mockRestore();
+      delete settingValues.worktreeAgent;
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  test("after a worktree Drift is decided, the Tasks still in To do are typed into that worktree, and a busy terminal is not reused", async () => {
+    const { launchWorktreeAgent, resumeWorktreeTasks, watchAgentTerminal } = await import("../extension/src/host/agent");
+    listeners.end.length = 0;
+    const watching = watchAgentTerminal();
+    settingValues.worktreeAgent = "echo {prompt}";
+    const work = "/tmp/repo.trama-worktrees/0004";
+    try {
+      await launchWorktreeAgent(dir, work, "scan", "0004");
+      const first = terminals.at(-1) as FakeTerminal;
+      const count = terminals.length;
+      await resumeWorktreeTasks(dir, work, "0004");
+      expect(terminals.length).toBe(count + 1);
+      expect(first.line).toBe("echo 'scan'");
+
+      listeners.end.forEach((fn) => fn(shell(terminals.at(-1) as FakeTerminal)));
+      const before = terminals.length;
+      await resumeWorktreeTasks(dir, work, "0004");
+      expect(terminals.length).toBe(before);
+      const again = 'Use the trama-implement skill on every Task in the "todo" column. Take each one from `trama task next`, one after the other, until it says there is none.';
+      expect((terminals.at(-1) as FakeTerminal).line).toBe(`echo '${again}'`);
+    } finally {
+      delete settingValues.worktreeAgent;
+      watching.dispose();
     }
   });
 });

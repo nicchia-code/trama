@@ -22,6 +22,21 @@ The developer keeps the side of an open Drift that says what happens, when a Pro
 ### DISMISS_DRIFT
 The developer keeps the side of an open Drift that says what happens, when no Proposal is attached: the code is right and nothing changes.
 
+### WITHDRAW_FROM_ROUND
+Il developer toglie una Proposal da un giro di worktree ancora in corso, prima che cominci l'unione. Il worktree di quella Proposal si elimina e lei torna da decidere. Non è un rifiuto.
+
+### RECONCILE_MERGE
+Il developer tiene, sul Merge Drift, il lato che sistema i conflitti del giro, scegliendo una delle opzioni. Nasce un Task nel worktree di merge.
+
+### ABANDON_ROUND
+Il developer abbandona un giro di worktree il cui Merge Drift è aperto, oppure la cui unione aspetta la cartella. Ogni Proposal del giro torna da decidere e i worktree si eliminano. Il branch non cambia.
+
+### TURN_MULTI_BRANCH_ON
+Il developer accende l'interruttore multi-branch da una scheda del pannello.
+
+### TURN_MULTI_BRANCH_OFF
+Il developer spegne l'interruttore multi-branch da una scheda del pannello.
+
 ### MOVE_TASK_TO_TODO
 The developer moves a Task to the To do column, with the command line. The Board offers no way to do it.
 
@@ -47,6 +62,9 @@ The developer asks to set up Trama in a workspace folder.
 
 ### UPDATE_SKILLS
 The developer asks to refresh the agent skills of the project with the ones shipped with this version of Trama.
+
+### REWRITE_IDENTITIES
+Il developer riscrive, dalla riga di comando, l'identità di ogni Proposal, Task e Drift ancora numerati. Non è un'approvazione, non sposta nessuna scheda e il pannello non offre un modo per farlo.
 
 ### OPEN_PANEL
 The developer opens the Trama panel, or brings it to the front.
