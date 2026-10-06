@@ -31,7 +31,7 @@ export type ToHost =
   /** Tracked path: relative to `.trama/model/`, or `requirements/<area>.md`. */
   | { type: "openModelFile"; path: string }
   /** Path relative to `.trama/` (for example `tasks/0003-x.md`). */
-  /** `worktree` is the Proposal whose worktree holds the file; absent for a file of the open folder. */
+  /** `worktree` is the Proposal whose worktree holds the file, or `merge` for the merge worktree; absent for a file of the open folder. */
   | { type: "openFile"; path: string; worktree?: string }
   /** The developer turned the multi-branch switch. `on` is the state they asked for. */
   | { type: "setMultiBranch"; on: boolean }

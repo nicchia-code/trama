@@ -37,6 +37,37 @@ test("raw HTML and images are not interpreted", () => {
   expect(parseInline('<img src=x onerror="alert(1)"> ![alt](https://example.com/a.png)')).toEqual([text('<img src=x onerror="alert(1)"> ![alt](https://example.com/a.png)')]);
 });
 
+test("quoted link titles keep parentheses and escaped quotes inside the link", () => {
+  for (const title of ['"Capitolo ) finale"', "'Capitolo ( finale'", '"Capitolo \\" ) finale"']) {
+    expect(parseInline(`[Manuale](https://example.com ${title}) after`)).toEqual([
+      { t: "link", href: "https://example.com/", c: [text("Manuale")] },
+      text(" after"),
+    ]);
+  }
+  expect(parseInline('[Manuale](https://example.com "unclosed )')).toEqual([text('[Manuale](https://example.com "unclosed )')]);
+  expect(parseInline("[quote](https://example.com/it's)")).toEqual([
+    { t: "link", href: "https://example.com/it's", c: [text("quote")] },
+  ]);
+});
+
+test("literal HTML attributes and comments never become inline Markdown", () => {
+  for (const html of [
+    '<span title="**testo**">valore</span>',
+    "<span title='> *text* [link](https://example.com) `code`'>value</span>",
+    '<!-- **text** > [link](https://example.com) -->',
+    '<span title="**unclosed**',
+  ]) expect(parseInline(html)).toEqual([text(html)]);
+  expect(parseInline('**before <span title="**">value</span> after**')).toEqual([
+    { t: "strong", c: [text('before <span title="**">value</span> after')] },
+  ]);
+  expect(parseInline('<span>**value**</span>')).toEqual([
+    text("<span>"), { t: "strong", c: [text("value")] }, text("</span>"),
+  ]);
+  expect(parseInline('1 < 2 and **bold**')).toEqual([
+    text("1 < 2 and "), { t: "strong", c: [text("bold")] },
+  ]);
+});
+
 test("a line ending in two spaces or a backslash is a hard break; any other newline is a space", () => {
   expect(parseMarkdown("one\ntwo  \nthree\\\nfour")).toEqual([para(text("one two"), { t: "br" }, text("three"), { t: "br" }, text("four"))]);
 });

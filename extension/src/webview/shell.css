@@ -66,6 +66,8 @@ button.trama-switch[aria-checked="true"] .trama-switch-thumb { left: 14px; }
 .md .md-heading { margin: .8em 0 .3em; font-size: 1em; font-weight: 700; }
 .md .md-h3, .md .md-h4 { font-weight: 600; }
 .md .md-h5, .md .md-h6 { font-weight: 600; font-style: italic; }
+/* A Drift's texts sit under 11px headings (the two sides, the fix options, where in the code): their own headings never exceed them. */
+.drift-compare-text .md-heading, .drift-compare-where-text .md-heading, .drift-option-text .md-heading { font-size: 11px; }
 .md code, .md-inline code { font-family: var(--vscode-editor-font-family, monospace); font-size: .95em; padding: 0 .25em; border-radius: 3px; background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, .2)); }
 .md pre { margin: 0 0 .6em; padding: 6px 8px; overflow-x: auto; border-radius: 3px; background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, .2)); max-width: 100%; }
 .md pre code { padding: 0; background: none; font-size: .95em; white-space: pre; overflow-wrap: normal; }

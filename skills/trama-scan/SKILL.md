@@ -29,6 +29,13 @@ Every live Proposal, Task and Drift has a temporary **short number** (`P3`, `T3`
 - Name cards to the developer by short number and title, for example "Task T3 – title" or "Drift D2 – title", also in the final report. A closed card has no number: use its permanent identity.
 - In every command you run and every file you write (`--proposal`, `--task`, card bodies, references) use **only the permanent identity**, taken from `--json` (field `id`; the number is the field `number`) or from the file name. **Never write a short number in a file**: it changes from one working copy to another.
 
+## Language
+
+When the instruction asks you to write in a language, only the prose you produce for Trama goes in that language: the bodies, descriptions and introductions of Proposals, Model files, Requirements, Tasks and Drifts, the text of questions and their options, and your replies in the conversation. Without a language in the instruction, nothing here changes.
+
+- **Always in English**, whatever the language: code and its comments, commit messages and the project's own documentation; the names and titles of Model elements, Requirements, Proposals, Tasks and Drifts; IDs, Event names, the section titles Trama requires (for example "General", "What happens", "What should happen", "Where in the code") and the `(initial)` and `(final)` markers.
+- **A language changes nothing already written.** When you edit a file written in another language, keep its existing text and write only the new or rewritten text in the chosen language; never translate the whole file.
+
 ## Steps
 
 1. **Scope.** Use the Feature you were given, or `trama system` for the list. For each Machine: `trama feature <id>`, `trama machine <id>`, `trama state <machine/State>`, `trama event <owner.EVENT>`, `trama paths …` as needed; these views end with the Requirements attached. Read the Areas with `trama requirements` and `trama requirements <area>`, and keep their `## General` sections in mind for everything. Also run `trama analyze <machine>`: warnings are Model problems to tell the developer about, not code problems.

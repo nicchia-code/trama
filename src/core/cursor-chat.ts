@@ -85,7 +85,6 @@ export function parseCursorHook(input: unknown): CursorHook | null {
  */
 export class CursorConversations {
   private readonly trama = new Set<string>();
-
   translate(h: CursorHook): CursorChatEvent | null {
     if (h.hook === "beforeSubmitPrompt" && h.tramaPrompt) this.trama.add(h.conversation);
     if (!this.trama.has(h.conversation)) return null;

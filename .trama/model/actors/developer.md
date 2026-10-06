@@ -91,7 +91,10 @@ The developer shows one Feature in the Diagram, by opening it, with the breadcru
 The developer shows one Machine in the Diagram, by opening it, with the breadcrumb or by following a link to one of its States or Transitions.
 
 ### OPEN_STATE_LEVEL
-The developer zooms into a State that has sub-States, in the Diagram.
+The developer zooms into a State that has sub-States, in the Diagram, aprendolo oppure risalendo con il breadcrumb a uno Stato che contiene quello mostrato.
+
+### CHOOSE_DRAWN_PROPOSAL
+Il developer cambia la Proposal che il Diagramma disegna sopra il Modello: ne sceglie un'altra, o None, nel selettore del Diagramma, seleziona un Drift che porta con sé una Proposal diversa da quella disegnata, oppure segue un link a una Proposal disegnata sopra il Modello. Il livello del Diagramma resta quello che il developer guardava, finché esiste ancora.
 
 ### CHOOSE_ANSWER
 Il developer conferma la domanda corrente con le scelte selezionate, con la risposta scritta o con entrambe.

@@ -96,3 +96,15 @@ test("the four skills name cards by short number and title but write only the pe
     expect(skill).toContain("**Never write a short number in a file**");
   }
 });
+
+test("the four skills say which texts follow the chosen language and which stay in English, without naming a language", () => {
+  for (const name of ["trama-design", "trama-scan", "trama-implement", "trama-import"]) {
+    const skill = SKILLS[`${name}/SKILL.md`] as string;
+    const section = skill.slice(skill.indexOf("## Language"), skill.indexOf("## Steps"));
+    expect(section).toContain("only the prose you produce for Trama goes in that language");
+    expect(section).toContain("the names and titles of Model elements, Requirements, Proposals, Tasks and Drifts");
+    expect(section).toContain("the `(initial)` and `(final)` markers");
+    expect(section).toContain("never translate the whole file");
+    expect(section).not.toMatch(/Italian|French|German|Spanish/);
+  }
+});

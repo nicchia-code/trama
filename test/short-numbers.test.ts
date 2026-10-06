@@ -221,6 +221,17 @@ describe("the file", () => {
     expect(readFileSync(assigned(), "utf8")).toBe(`task ${a.id} 1\ntask ${b.id} 2\ndrift ${open.id} 1\n`);
   });
 
+  test("a file that cannot be read nor saved still numbers the cards, and no command fails", () => {
+    const a = task("A");
+    const b = task("B");
+    mkdirSync(assigned(), { recursive: true });
+
+    const numbers = syncShortNumbers(p);
+    expect([numbers.of("task", a.id), numbers.of("task", b.id)]).toEqual([1, 2]);
+    expect(run(["--root", dir, "task", "show", "T2"], dir, {}).out).toContain("# B");
+    expect(readdirSync(shortNumbersDir(p)).sort()).toEqual([".gitignore", "assigned"]);
+  });
+
   test("the same number may repeat across kinds", () => {
     const a = task("A");
     const open = drift("D");
@@ -341,6 +352,26 @@ describe("cards in the worktrees of a round", () => {
     expect([numbers.of("task", mine.id), numbers.of("task", theirs.id), numbers.of("drift", found.id)]).toEqual([1, 2, 1]);
     expect(syncShortNumbers(p).of("task", theirs.id)).toBe(2);
     expect(existsSync(join(home, ".trama/short-numbers"))).toBe(false);
+  });
+
+  test("a card of the open folder closed during the round frees its number, though the worktree still holds it open", () => {
+    const git = (...args: string[]) => {
+      const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, encoding: "utf8" });
+      if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+    };
+    const old = drift("Old");
+    const mine = task("Mine");
+    git("init", "-q");
+    git("add", "-A");
+    git("commit", "-q", "-m", "x");
+    git("worktree", "add", "-q", "-b", "trama/abcd1234", worktreePath(dir, "abcd1234"));
+    expect([numberOf("drift", old.id), numberOf("task", mine.id)]).toEqual([1, 1]);
+
+    resolveDrift(p, old.id, "dismiss");
+    moveTask(p, mine.id, "done", "developer");
+
+    expect([numberOf("drift", old.id), numberOf("task", mine.id)]).toEqual([null, null]);
+    expect(numberOf("drift", drift("New").id)).toBe(1);
   });
 });
 

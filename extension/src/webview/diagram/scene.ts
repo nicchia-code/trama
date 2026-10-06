@@ -2,6 +2,7 @@ import type { Change, MergedMachine, MergedState } from "../../../../src/core/me
 import { type CardNumbers, noNumbers } from "../../../../src/core/card-names";
 import type { DriftView, ProposalView, Snapshot } from "../../../../src/core/snapshot";
 import type { Machine, State } from "../../../../src/core/types";
+import { viewableProposals } from "../requirements/logic";
 
 export interface SceneEvent {
   name: string;
@@ -38,6 +39,8 @@ export interface Scene {
   /** Model file (relative to `.trama/model/`) of every Machine that exists today. */
   files: Map<string, string>;
   proposal: ProposalView | null;
+  /** The drawn Proposal belongs to a worktree's Drift and is decided only from that Drift. */
+  proposalFromDrift: boolean;
   /** The short numbers of the live cards, to write cards the way the Board does. */
   numbers: CardNumbers;
   drifts: DriftView[];
@@ -68,8 +71,8 @@ export function toMerged(m: Machine): MergedMachine {
 }
 
 export function buildScene(snapshot: Snapshot, proposalId: string | null): Scene {
-  const proposal = snapshot.proposals.find((p) => p.id === proposalId) ?? null;
-  // A Proposal that requires open ones is drawn over the Model with those applied, as if already approved.
+  const proposal = viewableProposals(snapshot).find((p) => p.id === proposalId) ?? null;
+  // A Proposal that requires open ones, or that lives in a worktree, is drawn over the Model it would change.
   const model = proposal?.base ?? snapshot;
 
   const machines = new Map<string, MergedMachine>(model.machines.map((m) => [m.id, toMerged(m)]));
@@ -121,6 +124,7 @@ export function buildScene(snapshot: Snapshot, proposalId: string | null): Scene
     machine: machines,
     files: new Map(model.machines.map((m) => [m.id, m.file])),
     proposal,
+    proposalFromDrift: proposal !== null && snapshot.worktreeProposals.includes(proposal),
     drifts: snapshot.drifts.filter((d) => d.worktree === null && d.merge !== true),
     numbers: snapshot.numbers ?? noNumbers,
   };

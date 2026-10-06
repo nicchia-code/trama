@@ -1,4 +1,4 @@
-import { acceptIntoWorktree } from "../../../src/core/worktree-round";
+import { acceptIntoWorktree, withdrawFromRound } from "../../../src/core/worktree-round";
 import type { Project } from "../../../src/core/store";
 import { buildApprovalScanPrompt, withLanguage } from "./prompts";
 
@@ -28,6 +28,11 @@ export async function acceptOrdinaryProposal(options: OrdinaryAcceptance, propos
     return false;
   }
   const prompt = withLanguage(buildApprovalScanPrompt(proposalId, false), options.language);
-  await options.startAgent(result.acceptance.worktree, prompt);
+  try {
+    await options.startAgent(result.acceptance.worktree, prompt);
+  } catch (err) {
+    withdrawFromRound(options.project, proposalId);
+    throw err;
+  }
   return true;
 }

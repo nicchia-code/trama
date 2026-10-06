@@ -1,13 +1,15 @@
-import { afterAll, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
-import { basename, join } from "node:path";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, mock, spyOn, test, vi } from "bun:test";
+import { basename, join, relative, isAbsolute } from "node:path";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
 import { announce, listAnnouncements, withdrawAll } from "../src/core/announcements";
 import type { CursorHook } from "../src/core/cursor-chat";
 import { newProposal } from "../src/core/proposals";
 import { handOver } from "./handover";
 import { projectAt } from "../src/core/store";
 import { getTask, moveTask, newTask } from "../src/core/work";
+import { syncRequirementSkills } from "../src/core/requirement-skills";
 
 // A minimal editor: just the terminal events and the calls launchAgent makes.
 type Listener<T> = (event: T) => void;
@@ -60,8 +62,20 @@ let commandHandler: (id: string, ...args: unknown[]) => unknown = () => undefine
 const editorCalls: string[] = [];
 const clipboard: string[] = [];
 
+/** Wait for the external marker watcher to finish the observable state change. */
+async function waitUntil(done: () => boolean): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!done()) {
+    if (Date.now() >= deadline) throw new Error("External terminal state did not settle.");
+    await delay(5);
+  }
+}
 /** The open workspace folder the panel looks for a Trama project in. */
 let workspaceRoot = "";
+let workspaceRoots: string[] | undefined;
+type FileUri = { scheme: string; fsPath: string };
+const requirementEvents = { create: [] as Listener<FileUri>[], change: [] as Listener<FileUri>[], delete: [] as Listener<FileUri>[] };
+const errorMessages: string[] = [];
 /** The answers to the offer to initialize a project, in the order the offers were shown. */
 const answerOffer: Array<(choice: string | undefined) => void> = [];
 let panelsCreated = 0;
@@ -91,7 +105,7 @@ mock.module("vscode", () => ({
       terminals.push(terminal);
       return terminal;
     },
-    showErrorMessage: () => undefined,
+    showErrorMessage: (message: string) => void errorMessages.push(message),
     showWarningMessage: () => undefined,
     showInformationMessage: () => {
       const offer = Promise.withResolvers<string | undefined>();
@@ -113,14 +127,23 @@ mock.module("vscode", () => ({
   },
   workspace: {
     get workspaceFolders() {
-      return [{ uri: { scheme: "file", fsPath: workspaceRoot } }];
+      return (workspaceRoots ?? [workspaceRoot]).map((fsPath) => ({ uri: { scheme: "file", fsPath } }));
+    },
+    getWorkspaceFolder: (uri: FileUri) => {
+      const root = (workspaceRoots ?? [workspaceRoot]).find((root) => {
+        const path = relative(root, uri.fsPath);
+        return path !== ".." && !path.startsWith("../") && !isAbsolute(path);
+      });
+      return root === undefined ? undefined : { uri: { scheme: "file", fsPath: root } };
     },
     getConfiguration: () => ({
       get: (key: string, fallback: unknown) => (key === "agentCommand" ? "agent {prompt}" : (settingValues[key] ?? fallback)),
       inspect: (key: string) => inspected[key],
       update: async (key: string, value: unknown) => void updates.push({ key, value }),
     }),
-    createFileSystemWatcher: () => ({ onDidCreate() {}, onDidChange() {}, onDidDelete() {}, dispose() {} }),
+    createFileSystemWatcher: (pattern: string) => pattern === "**/.trama/requirements/**"
+      ? { onDidCreate: subscribe(requirementEvents.create), onDidChange: subscribe(requirementEvents.change), onDidDelete: subscribe(requirementEvents.delete), dispose() { for (const list of Object.values(requirementEvents)) list.length = 0; } }
+      : { onDidCreate() {}, onDidChange() {}, onDidDelete() {}, dispose() {} },
   },
   Uri: { joinPath: (base: unknown, ...parts: string[]) => ({ base, parts, toString: () => parts.join("/") }), parse: (value: string) => ({ toString: () => value }) },
   RelativePattern: class {},
@@ -142,7 +165,7 @@ mock.module("vscode", () => ({
   ConfigurationTarget: { Global: 1 },
   extensions: { getExtension: () => undefined },
 }));
-mock.module("../extension/src/host/questions", () => ({ questionEndpoint: async () => "endpoint" }));
+mock.module("../extension/src/host/questions", () => ({ questionEndpoint: async () => "endpoint", EditorQuestions: class {} }));
 
 let dir: string;
 beforeAll(() => {
@@ -315,6 +338,56 @@ describe("the agent terminal as an editor tab", () => {
       await launchAgent(dir, instruction, "Scan"); // the plain terminal stays in the terminal area and is shown as before
       expect(created.at(-1)?.location).toBeUndefined();
       expect(terminals.at(-1)?.shown).toEqual([false]);
+    } finally {
+      delete settingValues["agentLauncher"];
+      tabGroups.columns = [1];
+    }
+  });
+
+  test("a free terminal is reused only in the selected location, including auto outside Cursor", async () => {
+    // Load after mock.module installs the editor API.
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    watchAgentTerminal();
+    terminals.forEach((terminal) => listeners.close.forEach((fn) => fn(terminal)));
+    const instruction = "Use the trama-scan skill on the whole System.";
+    settingValues["agentLauncher"] = "terminal";
+    tabGroups.columns = [1, 2];
+    try {
+      await launchAgent(dir, instruction, "Scan");
+      const area = terminals.at(-1) as FakeTerminal;
+      listeners.end.forEach((fn) => fn(shell(area)));
+      settingValues["agentLauncher"] = "terminal-tab";
+      await launchAgent(dir, instruction, "Scan");
+      const tab = terminals.at(-1) as FakeTerminal;
+      expect(tab).not.toBe(area);
+      expect(created.at(-1)?.location).toEqual({ viewColumn: -2, preserveFocus: true });
+      expect(area.shown).toEqual([false]);
+      expect(tab.shown).toEqual([true]);
+      listeners.tabs.forEach((fn) => fn({ opened: [{ input: new TabInputTerminal(), label: "Scan", group: { viewColumn: 2 } }] }));
+      listeners.end.forEach((fn) => fn(shell(tab)));
+      const tabId = environments.at(-1)?.["TRAMA_TERMINAL"];
+      await launchAgent(dir, instruction, "Scan");
+      expect(terminals.at(-1)).toBe(tab);
+      expect(environments.at(-1)?.["TRAMA_TERMINAL"]).toBe(tabId);
+      expect(tab.shown).toEqual([true, true]);
+
+      listeners.end.forEach((fn) => fn(shell(tab)));
+      settingValues["agentLauncher"] = "auto";
+      await launchAgent(dir, instruction, "Scan");
+      const nextArea = terminals.at(-1) as FakeTerminal;
+      expect(nextArea).not.toBe(tab);
+      expect(created.at(-1)?.location).toBeUndefined();
+      expect(nextArea.shown).toEqual([false]);
+      listeners.end.forEach((fn) => fn(shell(nextArea)));
+      settingValues["agentLauncher"] = "terminal";
+      await launchAgent(dir, instruction, "Scan");
+      expect(terminals.at(-1)).toBe(nextArea);
+      expect(nextArea.shown).toEqual([false, false]);
+
+      listeners.end.forEach((fn) => fn(shell(nextArea)));
+      settingValues["agentLauncher"] = "terminal-tab";
+      await launchAgent(dir, instruction, "Scan");
+      expect(created.at(-1)?.location).toEqual({ viewColumn: 2, preserveFocus: true });
     } finally {
       delete settingValues["agentLauncher"];
       tabGroups.columns = [1];
@@ -539,6 +612,51 @@ describe("withdrawing the ghosts", () => {
   });
 });
 
+describe("synchronizing Writing titles", () => {
+  test("updates only the H1, preserves inactivity, skips unreadable or non-Draft proposals and never restores a withdrawn ghost", async () => {
+    // The editor mock must replace vscode before this host module loads.
+    const { watchAnnouncements } = await import("../extension/src/host/announcements");
+    const root = mkdtempSync(join(tmpdir(), "trama-writing-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    const p = projectAt(root);
+    vi.useFakeTimers();
+    const watching = watchAnnouncements(() => root);
+    try {
+      const a = announce(p, { kind: "proposal", title: "Planned", source: "request", terminal: "ab12cd" });
+      const draft = newProposal(p, "Initial", "", { announcement: a.id });
+      const file = join(p.dir, "announcements", `${a.id}.md`);
+      const proposalFile = join(draft.dir, "proposal.md");
+      const original = readFileSync(file, "utf8");
+      const proposal = readFileSync(proposalFile, "utf8");
+      writeFileSync(proposalFile, proposal.replace("# Initial", "# Updated title è"));
+      vi.advanceTimersByTime(30_000);
+      expect(readFileSync(file, "utf8")).toBe(original.replace("# Initial", "# Updated title è"));
+      expect(listAnnouncements(p)[0]?.touched).toBe(a.touched);
+
+      const old = new Date(Date.now() - 60_000);
+      utimesSync(file, old, old);
+      vi.advanceTimersByTime(30_000);
+      expect(statSync(file).mtimeMs).toBe(old.getTime());
+
+      writeFileSync(proposalFile, "unreadable");
+      vi.advanceTimersByTime(30_000);
+      expect(readFileSync(file, "utf8")).toContain("# Updated title è");
+      writeFileSync(proposalFile, proposal.replace("status: draft", "status: open").replace("# Initial", "# Handed over"));
+      vi.advanceTimersByTime(30_000);
+      expect(readFileSync(file, "utf8")).toContain("# Updated title è");
+
+      withdrawAll(p);
+      writeFileSync(proposalFile, proposal.replace("# Initial", "# After withdrawal"));
+      vi.advanceTimersByTime(30_000);
+      expect(existsSync(file)).toBe(false);
+    } finally {
+      watching.dispose();
+      vi.useRealTimers();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("the ghosts of Cursor's chat agent", () => {
   test("an interrupted turn of a Trama conversation withdraws them with the notice, closing it withdraws them silently, a normal end keeps them", async () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
@@ -578,91 +696,59 @@ describe("the ghosts of Cursor's chat agent", () => {
   });
 });
 
-describe("the notice on the end of the agent's command", () => {
-  test("only the end of the command Trama typed makes one, with the terminal's status; any instruction really written takes back the waiting ones", async () => {
-    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
-    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { endNotices } = await import("../extension/src/host/notice-host");
-    const born = spyOn(endNotices, "born").mockImplementation(() => {});
-    const cancelAll = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
+describe("parallel integrated and external terminals", () => {
+  test("every terminal ending releases its own Tasks and announcements after a new instruction", async () => {
+    // The host modules must load after the editor mock establishes their boundary.
+    const { launchAgent, watchAgentTerminal, watchExternalRuns, startExternalRun } = await import("../extension/src/host/agent");
+    const { markerName } = await import("../extension/src/host/external-terminal");
+    const markers = mkdtempSync(join(tmpdir(), "trama-parallel-"));
+    const external = watchExternalRuns(markers);
+    const p = projectAt(dir);
     listeners.end.length = 0;
     watchAgentTerminal();
+    withdrawAll(p);
     try {
-      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
-      expect(cancelAll).toHaveBeenCalledTimes(1);
-      const terminal = terminals.at(-1) as FakeTerminal;
+      await launchAgent(dir, "Use the trama-design skill. Old", "Design", "Old");
+      const old = terminals.at(-1) as FakeTerminal;
+      const oldId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      listeners.start.forEach((fn) => fn(shell(old)));
+      await launchAgent(dir, "Use the trama-design skill. New", "Design", "New"); // the old one is busy: a new terminal
+      const current = terminals.at(-1) as FakeTerminal;
+      expect(current).not.toBe(old);
+      const task = newTask(p, { title: "Old", refs: ["order/Paid"], technical: false }).id;
+      moveTask(p, task, "doing", "agent", { terminal: oldId });
+      // A later external instruction leaves the earlier integrated terminal followed.
+      listeners.end.forEach((fn) => fn({ ...shell(current), exitCode: 9 } as ShellEvent));
+      startExternalRun(dir, "ext111", "true", "first").sent();
+      // Sending to an integrated terminal must not stop either external run from reporting its end.
+      startExternalRun(dir, "ext222", "true", "second").sent();
+      await launchAgent(dir, "Use the trama-scan skill.", "Scan");
+      const latest = terminals.at(-1) as FakeTerminal;
+      const externalTasks = ["ext111", "ext222"].map((terminal) => {
+        const task = newTask(p, { title: terminal, refs: ["order/Paid"], technical: false });
+        moveTask(p, task.id, "doing", "agent", { terminal });
+        announce(p, { kind: "task", title: terminal, terminal });
+        return task.id;
+      });
 
-      listeners.end.forEach((fn) => fn(shell(terminal, "ls")));
-      listeners.end.forEach((fn) => fn(shell(terminal, "")));
-      expect(born).not.toHaveBeenCalled();
+      listeners.end.forEach((fn) => fn({ ...shell(old), exitCode: 3 } as ShellEvent));
+      expect([getTask(p, task).data.column, getTask(p, task).data.agent]).toEqual(["todo", false]);
+      expect(listAnnouncements(p).map((a) => a.terminal)).toEqual(["ext111", "ext222"]);
 
-      listeners.end.forEach((fn) => fn({ ...shell(terminal), exitCode: 3 } as ShellEvent));
-      expect(born).toHaveBeenCalledTimes(1);
-      expect(born.mock.calls[0]?.[0]).toBe(basename(dir));
-      expect(born.mock.calls[0]?.[1]).toEqual({ kind: "failed", exitCode: 3 });
-
-      listeners.end.forEach((fn) => fn(shell(terminal)));
-      expect(born.mock.calls[1]?.[1]).toEqual({ kind: "unreported" });
-
-      // The terminal is free again, so the next instruction reuses it and takes back what waits.
-      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
-      expect(cancelAll).toHaveBeenCalledTimes(2);
-
-      // The chat gets no terminal: nothing is written, so nothing is taken back.
-      settingValues["agentLauncher"] = "chat";
-      try {
-        await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
-      } finally {
-        delete settingValues["agentLauncher"];
-      }
-      expect(cancelAll).toHaveBeenCalledTimes(2);
+      listeners.end.forEach((fn) => fn({ ...shell(latest), exitCode: 0 } as ShellEvent));
+      writeFileSync(join(markers, markerName("ext111", 1)), "7\n");
+      writeFileSync(join(markers, markerName("ext222", 1)), "0\n");
+      await waitUntil(() => externalTasks.every((id) => getTask(p, id).data.column === "todo") && readdirSync(markers).length === 0);
+      expect(externalTasks.map((id) => [getTask(p, id).data.column, getTask(p, id).data.agent])).toEqual([["todo", false], ["todo", false]]);
+      expect(listAnnouncements(p)).toEqual([]);
     } finally {
-      born.mockRestore();
-      cancelAll.mockRestore();
+      external.dispose();
+      rmSync(markers, { recursive: true, force: true });
+      withdrawAll(p);
     }
-  });
-
-  test("closing the terminal makes no notice", async () => {
-    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { endNotices } = await import("../extension/src/host/notice-host");
-    const born = spyOn(endNotices, "born").mockImplementation(() => {});
-    watchAgentTerminal();
-    try {
-      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
-      listeners.close.forEach((fn) => fn(terminals.at(-1) as FakeTerminal));
-      expect(born).not.toHaveBeenCalled();
-    } finally {
-      born.mockRestore();
-    }
-  });
-
-  test("in Cursor's chat every end of a Trama conversation's turn makes one, closing makes none, a new prompt takes back the waiting ones", async () => {
-    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
-    const { chatEndNotices, endNotices, watchCursorChatNotices } = await import("../extension/src/host/notice-host");
-    const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const born = spyOn(chatEndNotices, "born").mockImplementation(() => {});
-    const cancelAll = spyOn(chatEndNotices, "cancelAll").mockImplementation(() => {});
-    const terminalCancel = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
-    const watching = watchCursorChatNotices();
-    const hook = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ root: dir, conversation: "n1", ...h });
-    try {
-      hook({ hook: "stop", status: "completed", conversation: "other" });
-      hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
-      hook({ hook: "beforeSubmitPrompt", tramaPrompt: true, conversation: "n2" });
-      expect(cancelAll).toHaveBeenCalledTimes(2);
-      hook({ hook: "stop", status: "completed" });
-      hook({ hook: "stop", status: "aborted", conversation: "n2" });
-      hook({ hook: "sessionEnd", reason: "user_close" });
-      expect(born.mock.calls.map((c) => [c[0], c[1]])).toEqual([[basename(dir), { kind: "chat-stopped" }], [basename(dir), { kind: "chat-interrupted" }]]);
-      expect(terminalCancel).not.toHaveBeenCalled();
-    } finally {
-      watching.dispose();
-      born.mockRestore();
-      cancelAll.mockRestore();
-      terminalCancel.mockRestore();
-    }
-  });
+  }, 15_000);
 });
+
 
 describe("worktree agent terminal", () => {
   test("it is born in the worktree, named Trama agent, with TRAMA_AGENT, and it does not take the open folder's terminal", async () => {
@@ -712,10 +798,8 @@ describe("worktree agent terminal", () => {
     delete inspected.worktreeAgent;
   });
 
-  test("the end of the worktree command releases only that worktree's Tasks and notices the open project", async () => {
+  test("the end of the worktree command releases only that worktree's Tasks", async () => {
     const { launchAgent, launchWorktreeAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { endNotices } = await import("../extension/src/host/notice-host");
-    const born = spyOn(endNotices, "born").mockImplementation(() => {});
     const work = mkdtempSync(join(tmpdir(), "trama-wt-"));
     cpSync(join(import.meta.dir, "../examples/shop"), work, { recursive: true });
     listeners.end.length = 0;
@@ -736,8 +820,6 @@ describe("worktree agent terminal", () => {
 
       expect(getTask(openProject, openTask.id).data).toMatchObject({ column: "doing", agent: true });
       expect(getTask(workProject, workTask.id).data).toMatchObject({ column: "todo", agent: false });
-      expect(born).toHaveBeenCalledTimes(1);
-      expect(born.mock.calls[0]?.[0]).toBe(basename(dir));
       expect(workTerminal.line).toBe("echo 'scan'");
       // The open folder's terminal is still busy: ending the worktree does not free it.
       const count = terminals.length;
@@ -751,7 +833,6 @@ describe("worktree agent terminal", () => {
       expect(getTask(workProject, takenAgain.id).data).toMatchObject({ column: "doing", agent: true });
       expect(getTask(openProject, openTask.id).data).toMatchObject({ column: "todo", agent: false });
     } finally {
-      born.mockRestore();
       delete settingValues.worktreeAgent;
       watching.dispose();
       rmSync(work, { recursive: true, force: true });
@@ -759,9 +840,8 @@ describe("worktree agent terminal", () => {
   });
 
   test("a scan that created Tasks types the implement instruction into the same terminal, and that command's end does not type another", async () => {
-    const { launchWorktreeAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { endNotices } = await import("../extension/src/host/notice-host");
-    const born = spyOn(endNotices, "born").mockImplementation(() => {});
+    // The host must load after the editor mock installs the terminal boundary.
+    const { launchWorktreeAgent, resumeWorktreeTasks, watchAgentTerminal } = await import("../extension/src/host/agent");
     const work = mkdtempSync(join(tmpdir(), "trama-wt-"));
     cpSync(join(import.meta.dir, "../examples/shop"), work, { recursive: true });
     listeners.end.length = 0;
@@ -779,14 +859,14 @@ describe("worktree agent terminal", () => {
       listeners.end.forEach((fn) => fn(shell(terminal)));
       const implement = `Use the trama-implement skill on every Task of Proposal ${proposal.id} that is in the "todo" column, taking them from \`trama task next --batch --proposal ${proposal.id}\`, one group at a time, until it says there is none. Do not scan the whole System at the end: Trama checks the code after the merge. Write everything you generate in Italian, except code, which always stays in English.`;
       expect(terminal.line).toBe(`echo '${implement}'`);
-      expect(born).not.toHaveBeenCalled();
 
       listeners.end.forEach((fn) => fn({ ...shell(terminal), exitCode: 0 } as ShellEvent & { exitCode: number }));
       expect(terminal.line).toBe(`echo '${implement}'`);
-      expect(born).toHaveBeenCalledTimes(1);
-      expect(born.mock.calls[0]?.[1]).toEqual({ kind: "finished" });
+      const count = terminals.length;
+      await resumeWorktreeTasks(dir, work, proposal.id);
+      expect(terminals.length).toBe(count);
+      expect(terminals.at(-1)).toBe(terminal);
     } finally {
-      born.mockRestore();
       delete settingValues.worktreeAgent;
       delete settingValues.language;
       watching.dispose();
@@ -796,8 +876,6 @@ describe("worktree agent terminal", () => {
 
   test("a scan that created only Tasks already Done does not type another command", async () => {
     const { launchWorktreeAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { endNotices } = await import("../extension/src/host/notice-host");
-    const born = spyOn(endNotices, "born").mockImplementation(() => {});
     const work = mkdtempSync(join(tmpdir(), "trama-wt-"));
     cpSync(join(import.meta.dir, "../examples/shop"), work, { recursive: true });
     listeners.end.length = 0;
@@ -813,9 +891,8 @@ describe("worktree agent terminal", () => {
       moveTask(workProject, task.id, "done", "developer");
       listeners.end.forEach((fn) => fn(shell(terminal)));
       expect(terminal.line).toBe("echo 'scan'");
-      expect(born).toHaveBeenCalledTimes(1);
+      expect(getTask(workProject, task.id).data.column).toBe("done");
     } finally {
-      born.mockRestore();
       delete settingValues.worktreeAgent;
       rmSync(work, { recursive: true, force: true });
     }
@@ -846,17 +923,67 @@ describe("worktree agent terminal", () => {
       watching.dispose();
     }
   });
+
+  test("a rework asked for a worktree Drift goes to that worktree's free terminal and its ghost waits in the worktree for that terminal", async () => {
+    const { launchWorktreeAgent, sendWorktreeInstruction, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const work = mkdtempSync(join(tmpdir(), "trama-wt-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), work, { recursive: true });
+    listeners.end.length = 0;
+    const watching = watchAgentTerminal();
+    settingValues.worktreeAgent = "echo {prompt}";
+    try {
+      await launchWorktreeAgent(dir, work, "scan", "0004");
+      const terminal = terminals.at(-1) as FakeTerminal;
+      listeners.end.forEach((fn) => fn(shell(terminal)));
+      const count = terminals.length;
+      await sendWorktreeInstruction(dir, work, "0004", "rework", "Rework of Proposal abcd1234");
+      expect(terminals.length).toBe(count);
+      expect(terminal.line).toBe("echo 'rework'");
+      const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      expect(listAnnouncements(projectAt(work)).map((a) => [a.title, a.terminal])).toEqual([["Rework of Proposal abcd1234", id]]);
+      expect(listAnnouncements(projectAt(dir)).some((a) => a.title === "Rework of Proposal abcd1234")).toBe(false);
+    } finally {
+      delete settingValues.worktreeAgent;
+      watching.dispose();
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("the end of an external window's command", () => {
-  test("the marker of the run in progress releases the taken Tasks, withdraws that window's ghosts and makes the notice; a marker of a run no longer followed does nothing", async () => {
+  test("a previous window ending during a failed opening releases its work", async () => {
+    // Load the host only after this test module installs its VS Code mock.
     const { startExternalRun, watchExternalRuns } = await import("../extension/src/host/agent");
-    const { endNotices } = await import("../extension/src/host/notice-host");
     const p = projectAt(dir);
     const markers = mkdtempSync(join(tmpdir(), "trama-markers-"));
-    let noticed = Promise.withResolvers<void>();
-    const born = spyOn(endNotices, "born").mockImplementation(() => noticed.resolve());
-    const cancelAll = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
+    const watching = watchExternalRuns(markers);
+    try {
+      withdrawAll(p);
+      startExternalRun(dir, "prior1", "true", "Use the trama-scan skill on the whole System.").sent();
+      const task = newTask(p, { title: "Previous run", refs: ["order/Paid"], technical: false });
+      moveTask(p, task.id, "doing", "agent", { terminal: "prior1" });
+      announce(p, { kind: "task", title: "Previous work", terminal: "prior1" });
+      announce(p, { kind: "task", title: "Unrelated work", terminal: "other1" });
+      const failed = startExternalRun(dir, "failed1", "true", "Use the trama-design skill.");
+      writeFileSync(join(markers, "prior1-1.end.tmp"), "0\n");
+      renameSync(join(markers, "prior1-1.end.tmp"), join(markers, "prior1-1.end"));
+      await waitUntil(() => getTask(p, task.id).data.column === "todo" && readdirSync(markers).length === 0);
+      failed.abandon();
+      expect(getTask(p, task.id).data.column).toBe("todo");
+      expect(getTask(p, task.id).data.agent).toBe(false);
+      expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Unrelated work"]);
+      expect(readdirSync(markers)).toEqual([]);
+    } finally {
+      watching.dispose();
+      rmSync(markers, { recursive: true, force: true });
+      withdrawAll(p);
+    }
+  });
+
+  test("each window's marker releases only its taken Tasks and ghosts", async () => {
+    const { startExternalRun, watchExternalRuns } = await import("../extension/src/host/agent");
+    const p = projectAt(dir);
+    const markers = mkdtempSync(join(tmpdir(), "trama-markers-"));
     const watching = watchExternalRuns(markers);
     const leave = (name: string, status: string) => {
       writeFileSync(join(markers, `${name}.tmp`), status);
@@ -867,7 +994,6 @@ describe("the end of an external window's command", () => {
       const first = startExternalRun(dir, "win111", "agent {prompt}", "Use the trama-scan skill on the whole System.");
       expect(first.line).toContain(join(markers, "win111-1.end"));
       first.sent();
-      expect(cancelAll).toHaveBeenCalledTimes(1);
 
       const task = newTask(p, { title: "External", refs: ["order/Paid"], technical: false });
       moveTask(p, task.id, "doing", "agent");
@@ -875,31 +1001,59 @@ describe("the end of an external window's command", () => {
       announce(p, { kind: "task", title: "Another window", terminal: "other1" });
 
       leave("win111-1.end", "3\n");
-      await noticed.promise;
-      expect(born).toHaveBeenCalledTimes(1);
-      expect(born.mock.calls[0]?.[0]).toBe(basename(dir));
-      expect(born.mock.calls[0]?.[1]).toEqual({ kind: "failed", exitCode: 3 });
+      await waitUntil(() => getTask(p, task.id).data.column === "todo" && readdirSync(markers).length === 0);
       expect(getTask(p, task.id).data.column).toBe("todo");
       expect(getTask(p, task.id).data.agent).toBe(false);
       expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Another window"]);
 
-      // A new window while the run goes on: the old window's marker no longer counts, so its ghost stays.
+      // A new window while the run goes on: both markers release their own work.
       startExternalRun(dir, "win222", "agent {prompt}", "Use the trama-scan skill on the whole System.").sent();
       startExternalRun(dir, "win333", "agent {prompt}", "Use the trama-scan skill on the whole System.").sent();
-      expect(cancelAll).toHaveBeenCalledTimes(3);
+      const replacedTask = newTask(p, { title: "Replaced", refs: ["order/Paid"], technical: false });
+      moveTask(p, replacedTask.id, "doing", "agent", { terminal: "win222" });
       announce(p, { kind: "task", title: "Window two", terminal: "win222" });
       announce(p, { kind: "task", title: "Window three", terminal: "win333" });
-      noticed = Promise.withResolvers<void>();
       leave("win222-1.end", "0\n");
       leave("win333-1.end", "0\n");
-      await noticed.promise;
+      await waitUntil(() => readdirSync(markers).length === 0 && !listAnnouncements(p).some((a) => a.terminal === "win222" || a.terminal === "win333"));
       expect(readdirSync(markers)).toEqual([]);
-      expect(born).toHaveBeenCalledTimes(2);
-      expect(listAnnouncements(p).map((a) => a.title).sort()).toEqual(["Another window", "Window two"]);
+      expect(getTask(p, replacedTask.id).data.column).toBe("todo");
+      expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Another window"]);
     } finally {
       watching.dispose();
-      born.mockRestore();
-      cancelAll.mockRestore();
+      rmSync(markers, { recursive: true, force: true });
+      withdrawAll(p);
+    }
+  });
+
+  test("switching launcher preserves the old terminal's command ending and releases its Tasks", async () => {
+    const { launchAgent, startExternalRun, watchAgentTerminal, watchExternalRuns } = await import("../extension/src/host/agent");
+    const p = projectAt(dir);
+    const markers = mkdtempSync(join(tmpdir(), "trama-markers-"));
+    listeners.end.length = 0;
+    watchAgentTerminal();
+    const watching = watchExternalRuns(markers);
+    try {
+      // An external window runs, then an instruction goes to the integrated terminal.
+      startExternalRun(dir, "win444", "agent {prompt}", "Use the trama-scan skill on the whole System.").sent();
+      const external = newTask(p, { title: "External", refs: ["order/Paid"], technical: false });
+      moveTask(p, external.id, "doing", "agent", { terminal: "win444" });
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
+      const integrated = terminals.at(-1) as FakeTerminal;
+      const integratedId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      writeFileSync(join(markers, "win444-1.end.tmp"), "0\n");
+      renameSync(join(markers, "win444-1.end.tmp"), join(markers, "win444-1.end"));
+      await waitUntil(() => getTask(p, external.id).data.column === "todo" && readdirSync(markers).length === 0);
+      expect(getTask(p, external.id).data.column).toBe("todo");
+
+      // Then a new external window while the integrated one runs: its end still releases its Tasks.
+      const local = newTask(p, { title: "Integrated", refs: ["order/Paid"], technical: false });
+      moveTask(p, local.id, "doing", "agent", { terminal: integratedId });
+      startExternalRun(dir, "win555", "agent {prompt}", "Use the trama-scan skill on the whole System.").sent();
+      listeners.end.forEach((fn) => fn(shell(integrated)));
+      expect(getTask(p, local.id).data.column).toBe("todo");
+    } finally {
+      watching.dispose();
       rmSync(markers, { recursive: true, force: true });
       withdrawAll(p);
     }
@@ -907,11 +1061,8 @@ describe("the end of an external window's command", () => {
 
   test("a design request sent to an external window announces a Proposal that belongs to that window and the end of its command withdraws it; a plain request announces nothing", async () => {
     const { startExternalRun, watchExternalRuns } = await import("../extension/src/host/agent");
-    const { endNotices } = await import("../extension/src/host/notice-host");
     const p = projectAt(dir);
     const markers = mkdtempSync(join(tmpdir(), "trama-markers-"));
-    const noticed = Promise.withResolvers<void>();
-    const born = spyOn(endNotices, "born").mockImplementation(() => noticed.resolve());
     const watching = watchExternalRuns(markers);
     try {
       withdrawAll(p);
@@ -925,11 +1076,10 @@ describe("the end of an external window's command", () => {
 
       writeFileSync(join(markers, "desgn1-1.end.tmp"), "0\n");
       renameSync(join(markers, "desgn1-1.end.tmp"), join(markers, "desgn1-1.end"));
-      await noticed.promise;
+      await waitUntil(() => listAnnouncements(p).length === 0 && readdirSync(markers).length === 0);
       expect(listAnnouncements(p)).toEqual([]);
     } finally {
       watching.dispose();
-      born.mockRestore();
       rmSync(markers, { recursive: true, force: true });
       withdrawAll(p);
     }
@@ -939,7 +1089,6 @@ describe("the end of an external window's command", () => {
 describe("reusing a free external window", () => {
   test("only a finished run of the same project, in the detected terminal, with no terminal command set, is written into; a failure forgets the window and says why", async () => {
     const { rememberExternalWindow, reuseExternalWindow, startExternalRun, warnExternalReuseFailed, watchExternalRuns } = await import("../extension/src/host/agent");
-    const { endNotices } = await import("../extension/src/host/notice-host");
     const vscode = await import("vscode");
     const bin = mkdtempSync(join(tmpdir(), "trama-fake-kitten-"));
     const markers = mkdtempSync(join(tmpdir(), "trama-markers-"));
@@ -949,16 +1098,12 @@ describe("reusing a free external window", () => {
     const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("CALL ").length - 1 : 0);
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
-    let noticed = Promise.withResolvers<void>();
-    const born = spyOn(endNotices, "born").mockImplementation(() => noticed.resolve());
-    const cancelAll = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
     const warning = spyOn(vscode.window, "showWarningMessage");
     const watching = watchExternalRuns(markers);
     const finish = async (name: string) => {
-      noticed = Promise.withResolvers<void>();
       writeFileSync(join(markers, `${name}.tmp`), "0\n");
       renameSync(join(markers, `${name}.tmp`), join(markers, name));
-      await noticed.promise;
+      await waitUntil(() => !existsSync(join(markers, name)));
     };
     const window = { terminal: "kitty", address: "unix:/tmp/trama-test-kitty", windowId: 1 } as const;
     const reuse = (detected: "kitty" | "wezterm" | undefined, root = dir, name = "Scan") => reuseExternalWindow(root, name, "agent {prompt}", "Use the trama-scan skill on the whole System.", detected);
@@ -988,7 +1133,6 @@ describe("reusing a free external window", () => {
       expect(warning).not.toHaveBeenCalled();
 
       // Free window: the same line as a new window, with the same identity and a new run number, goes through the scripting.
-      const before = cancelAll.mock.calls.length;
       expect(await reuse("kitty")).toEqual({ kind: "reused" });
       expect(calls()).toBe(1);
       const written = readFileSync(log, "utf8");
@@ -996,13 +1140,11 @@ describe("reusing a free external window", () => {
       expect(written).toContain("sh -c 'export TRAMA_AGENT=1 TRAMA_TERMINAL=");
       expect(written).toContain("kw1111");
       expect(written).toContain(join(markers, "kw1111-2.end"));
-      expect(cancelAll.mock.calls.length).toBe(before + 1);
 
       // The new run is the one that counts, and until it ends the window is busy.
       expect(await reuse("kitty")).toEqual({ kind: "new-window" });
       expect(calls()).toBe(1);
       await finish("kw1111-2.end");
-      expect(born).toHaveBeenCalledTimes(2);
 
       // The scripting fails: the reason is the scripting's, the window is forgotten, nothing is warned until the caller says so.
       writeFileSync(fail, "");
@@ -1016,8 +1158,6 @@ describe("reusing a free external window", () => {
     } finally {
       process.env.PATH = path;
       watching.dispose();
-      born.mockRestore();
-      cancelAll.mockRestore();
       warning.mockRestore();
       rmSync(bin, { recursive: true, force: true });
       rmSync(markers, { recursive: true, force: true });
@@ -1028,7 +1168,6 @@ describe("reusing a free external window", () => {
 describe("launching into an external window", () => {
   test("a design request opens a window through the developer's command, announces a Proposal that belongs to it, and the end of its command withdraws it; the editor opens no terminal", async () => {
     const { launchAgent, watchExternalRuns } = await import("../extension/src/host/agent");
-    const { endNotices } = await import("../extension/src/host/notice-host");
     const { onAnnouncementsWithdrawn } = await import("../extension/src/host/announcements");
     const p = projectAt(dir);
     const bin = mkdtempSync(join(tmpdir(), "trama-fake-terminal-"));
@@ -1036,9 +1175,6 @@ describe("launching into an external window", () => {
     // A terminal like alacritty: after -e a program and its arguments, which it runs.
     const terminal = join(bin, "faketerm");
     writeFileSync(terminal, `#!/bin/sh\n[ "$1" = -e ] || exit 9\nshift\nexec "$@"\n`, { mode: 0o755 });
-    const noticed = Promise.withResolvers<unknown[]>();
-    const born = spyOn(endNotices, "born").mockImplementation((...args: unknown[]) => noticed.resolve(args));
-    const cancelAll = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
     const watching = watchExternalRuns(markers);
     const told: string[] = [];
     const subscription = onAnnouncementsWithdrawn((views) => told.push(...views.map((v) => `${v.kind}:${v.title}`)));
@@ -1050,13 +1186,10 @@ describe("launching into an external window", () => {
     try {
       withdrawAll(p);
       expect(await launchAgent(dir, "Use the trama-design skill. Cancel orders", "Design", "Cancel orders")).toBe("terminal");
-      expect(cancelAll).toHaveBeenCalledTimes(1);
       expect(created).toHaveLength(openedBefore);
       // `agent` does not exist here, so the command fails at once (127) and its marker may come before the window is known
       // to be open: the ghost is announced first all the same, and withdrawn by that end.
-      const [project, outcome] = await noticed.promise;
-      expect(project).toBe(basename(dir));
-      expect(outcome).toEqual({ kind: "failed", exitCode: 127 });
+      await waitUntil(() => told.includes("proposal:Cancel orders") && readdirSync(markers).length === 0);
       expect(told).toEqual(["proposal:Cancel orders"]);
       expect(listAnnouncements(p)).toEqual([]);
       expect(readdirSync(markers)).toEqual([]);
@@ -1067,21 +1200,17 @@ describe("launching into an external window", () => {
       if (shell === undefined) delete process.env["SHELL"];
       else process.env["SHELL"] = shell;
       watching.dispose();
-      born.mockRestore();
-      cancelAll.mockRestore();
       rmSync(bin, { recursive: true, force: true });
       rmSync(markers, { recursive: true, force: true });
       withdrawAll(p);
     }
   });
 
-  test("when no window can be opened nothing starts: the instruction is on the clipboard with the reason, no notice is taken back, nothing is announced and no terminal opens", async () => {
+  test("when no window can be opened nothing starts: the instruction is on the clipboard with the reason, nothing is announced and no terminal opens", async () => {
     const { launched, launchAgent, watchExternalRuns } = await import("../extension/src/host/agent");
-    const { endNotices } = await import("../extension/src/host/notice-host");
     const vscode = await import("vscode");
     const p = projectAt(dir);
     const markers = mkdtempSync(join(tmpdir(), "trama-markers-"));
-    const cancelAll = spyOn(endNotices, "cancelAll").mockImplementation(() => {});
     const error = spyOn(vscode.window, "showErrorMessage");
     const watching = watchExternalRuns(markers);
     const platform = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
@@ -1121,7 +1250,19 @@ describe("launching into an external window", () => {
       settingValues["externalTerminalCommand"] = "/nonexistent/terminal {command}";
       expect(await attempt()).toBe(told("the terminal could not be started"));
 
-      expect(cancelAll).not.toHaveBeenCalled();
+      // The end markers could not be watched at start: the reason is the error that stopped the watching.
+      watching.dispose();
+      const blocker = join(markers, "file");
+      writeFileSync(blocker, "");
+      let failure = "";
+      try {
+        watchExternalRuns(join(blocker, "external-terminals"));
+      } catch (err) {
+        failure = (err as Error).message;
+      }
+      expect(failure).toContain("ENOTDIR");
+      expect(await attempt()).toBe(told(failure));
+
       expect(created).toHaveLength(openedBefore);
     } finally {
       delete settingValues["agentLauncher"];
@@ -1131,7 +1272,6 @@ describe("launching into an external window", () => {
       process.env["PATH"] = path;
       if (terminalVariable !== undefined) process.env["TERMINAL"] = terminalVariable;
       watching.dispose();
-      cancelAll.mockRestore();
       error.mockRestore();
       rmSync(markers, { recursive: true, force: true });
       withdrawAll(p);
@@ -1165,6 +1305,86 @@ describe("opening the panel", () => {
       expect(reveals - revealsBefore).toBe(1);
     } finally {
       rmSync(empty, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Requirement skills in a multi-root workspace", () => {
+  test("changes, creation and deletion regenerate only the owning project, with separate pauses and no panel", async () => {
+    // The host must load after the editor API mock is installed.
+    const { watchRequirements } = await import("../extension/src/host/main");
+    const roots = [mkdtempSync(join(tmpdir(), "trama-skills-first-")), mkdtempSync(join(tmpdir(), "trama-skills-second-"))];
+    const fragment = (root: string) => join(root, ".trama/requirements/ui/main.md");
+    const skill = (root: string) => join(root, ".agents/skills/trama-req-ui-main/SKILL.md");
+    const emit = (kind: keyof typeof requirementEvents, path: string) => requirementEvents[kind].forEach((fn) => fn({ scheme: "file", fsPath: path }));
+    vi.useFakeTimers();
+    let watching: { dispose(): void } | undefined;
+    const panelsBefore = panelsCreated;
+    try {
+      for (const root of roots) {
+        cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+        mkdirSync(join(root, ".agents/skills/trama-design"), { recursive: true });
+        writeFileSync(join(root, ".agents/skills/trama-design/SKILL.md"), "Installed skill marker.");
+        syncRequirementSkills(projectAt(root));
+      }
+      const first = roots[0]!;
+      const second = roots[1]!;
+      workspaceRoots = roots;
+      watching = watchRequirements();
+      const originalFirst = readFileSync(skill(first), "utf8");
+      writeFileSync(fragment(second), `${readFileSync(fragment(second), "utf8")}\nSecond-project change.\n`);
+      emit("change", fragment(second));
+      vi.advanceTimersByTime(300);
+      expect(readFileSync(skill(second), "utf8")).toContain("Second-project change.");
+      expect(readFileSync(skill(first), "utf8")).toBe(originalFirst);
+
+      writeFileSync(fragment(first), `${readFileSync(fragment(first), "utf8")}\nFirst-project change.\n`);
+      emit("change", fragment(first));
+      vi.advanceTimersByTime(150);
+      writeFileSync(fragment(second), `${readFileSync(fragment(second), "utf8")}\nSecond-project latest.\n`);
+      emit("change", fragment(second));
+      vi.advanceTimersByTime(150);
+      expect(readFileSync(skill(first), "utf8")).toContain("First-project change.");
+      expect(readFileSync(skill(second), "utf8")).not.toContain("Second-project latest.");
+      vi.advanceTimersByTime(150);
+      expect(readFileSync(skill(first), "utf8")).toContain("First-project change.");
+      expect(readFileSync(skill(second), "utf8")).toContain("Second-project latest.");
+
+      const extra = join(second, ".trama/requirements/ui/extra.md");
+      const extraSkill = join(second, ".agents/skills/trama-req-ui-extra/SKILL.md");
+      writeFileSync(extra, "---\ndescription: Extra requirements\n---\n# Extra\n\n## General\n\nCreated requirement.\n");
+      emit("create", extra);
+      vi.advanceTimersByTime(300);
+      expect(readFileSync(extraSkill, "utf8")).toContain("Created requirement.");
+      rmSync(extra);
+      emit("delete", extra);
+      vi.advanceTimersByTime(300);
+      expect(existsSync(extraSkill)).toBe(false);
+      expect(readFileSync(skill(first), "utf8")).not.toContain("Second-project");
+      expect(panelsCreated).toBe(panelsBefore);
+
+      const skillFolder = join(second, ".agents/skills/trama-req-ui-main");
+      const savedSkill = join(second, "saved-skill");
+      const errorsBefore = errorMessages.length;
+      renameSync(skillFolder, savedSkill);
+      writeFileSync(skillFolder, "A file prevents writing the skill directory.");
+      emit("change", fragment(second));
+      vi.advanceTimersByTime(300);
+      rmSync(skillFolder);
+      renameSync(savedSkill, skillFolder);
+      expect(errorMessages.slice(errorsBefore).join("\n")).toContain("could not regenerate the Requirement skills");
+      expect(readFileSync(skill(second), "utf8")).toContain("Second-project latest.");
+
+      writeFileSync(fragment(second), `${readFileSync(fragment(second), "utf8")}\nCancelled on disposal.\n`);
+      emit("change", fragment(second));
+      watching.dispose();
+      vi.advanceTimersByTime(300);
+      expect(readFileSync(skill(second), "utf8")).not.toContain("Cancelled on disposal.");
+    } finally {
+      watching?.dispose();
+      vi.useRealTimers();
+      workspaceRoots = undefined;
+      for (const root of roots) rmSync(root, { recursive: true, force: true });
     }
   });
 });

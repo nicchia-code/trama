@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,7 +16,7 @@ import {
   withdrawAll,
 } from "../src/core/announcements";
 import { run } from "../src/cli/main";
-import { discardProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
+import { boundDraftsChangedAt, discardProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
 
@@ -80,7 +80,7 @@ describe("a Draft and its announcement", () => {
     const early = announce(p, { kind: "proposal", title: "Request one", source: "request" }, t(1));
     const late = announce(p, { kind: "proposal", title: "Request two", source: "request" }, t(2));
     const prop = newProposal(p, "Draft");
-    expect(getAnnouncement(p, early.id)?.proposal).toBe(prop.id);
+    expect(getAnnouncement(p, early.id)).toMatchObject({ proposal: prop.id, title: "Draft" });
     expect(getAnnouncement(p, late.id)?.proposal).toBeNull();
     expect(listAnnouncements(p)).toHaveLength(3);
   });
@@ -92,13 +92,30 @@ describe("a Draft and its announcement", () => {
     expect(getAnnouncement(p, only?.id as string)?.proposal).toBe(prop.id);
   });
 
-  test("an ID of another kind or one already bound is not used, and the Draft still gets a ghost", () => {
-    const task = announce(p, { kind: "task", title: "A task" });
-    const prop = newProposal(p, "First", "", { announcement: task.id });
-    expect(getAnnouncement(p, task.id)?.proposal).toBeNull();
-    const second = newProposal(p, "Second", "", { announcement: listAnnouncements(p).find((a) => a.proposal === prop.id)?.id });
-    expect(listAnnouncements(p).filter((a) => a.kind === "proposal").map((a) => a.proposal).sort()).toEqual([prop.id, second.id].sort());
-  });
+  for (const waiting of [false, true]) {
+    test.each(["unknown", "delivered", "withdrawn", "wrong kind", "already bound"])(
+      `a %s announcement creates no ghost${waiting ? " and leaves the waiting request Preparing" : ""}`,
+      (invalid) => {
+        let id = "zzzzzz";
+        if (invalid !== "unknown") {
+          const a = announce(p, { kind: invalid === "wrong kind" ? "task" : "proposal", title: "Named announcement" });
+          id = a.id;
+          if (invalid === "delivered") submitProposal(p, newProposal(p, "Delivered", "", { announcement: id }).id);
+          if (invalid === "withdrawn") withdrawAll(p, [id]);
+          if (invalid === "already bound") newProposal(p, "Existing Draft", "", { announcement: id });
+        }
+        if (waiting) announce(p, { kind: "proposal", title: "Waiting request", source: "request" });
+        const before = buildSnapshot(p).announcements;
+        const result = run(["--json", "proposal", "new", "Without ghost", "--announcement", id], dir, {});
+        expect(result.exit).toBe(0);
+        const created = JSON.parse(result.out);
+        expect(created.note).toBeString();
+        expect(getProposal(p, created.id).data.status).toBe("draft");
+        expect(listAnnouncements(p).some((a) => a.proposal === created.id)).toBe(false);
+        expect(buildSnapshot(p).announcements).toEqual(before);
+      },
+    );
+  }
 
   test("handing the Draft over delivers its card, and the ghost is gone", () => {
     const prop = newProposal(p, "Empty change");
@@ -188,6 +205,38 @@ describe("the quiet period", () => {
     withdrawAll(p);
     expect(isQuiet(listAnnouncements(p), t(500).getTime())).toBe(false);
   });
+
+  test("writing, creating or deleting a file of an announced Draft counts as activity; an unannounced Draft does not", () => {
+    const prop = newProposal(p, "Long writing");
+    const file = editInProposal(p, prop.id, "checkout/order.md");
+    const other = newProposal(p, "Not announced");
+    withdrawAll(p, listAnnouncements(p).filter((a) => a.proposal === other.id).map((a) => a.id));
+    const old = t(0);
+    const allIn = (d: string) => [d, ...readdirSync(d, { recursive: true, encoding: "utf8" }).map((r) => join(d, r))];
+    for (const path of [...allIn(prop.dir), ...allIn(other.dir)]) utimesSync(path, old, old);
+    const now = Date.now();
+    expect(boundDraftsChangedAt(p, listAnnouncements(p))).toBe(old.getTime());
+
+    writeFileSync(join(other.dir, "proposal.md"), "changed");
+    expect(boundDraftsChangedAt(p, listAnnouncements(p))).toBe(old.getTime());
+
+    writeFileSync(file, "# Order\n\nRewritten.\n");
+    const changedAt = boundDraftsChangedAt(p, listAnnouncements(p));
+    expect(changedAt).toBeGreaterThanOrEqual(now - 1000);
+    // Announcements last touched long ago: only the Draft's file keeps the agent from being taken to have stopped.
+    const stale = listAnnouncements(p).map((a) => ({ ...a, touched: old.toISOString() }));
+    expect(isQuiet(stale, changedAt + 14 * 60_000)).toBe(true);
+    expect(isQuiet(stale, changedAt + 14 * 60_000, changedAt)).toBe(false);
+    expect(isQuiet(stale, changedAt + 15 * 60_000, changedAt)).toBe(true);
+
+    for (const path of allIn(prop.dir)) utimesSync(path, old, old);
+    rmSync(file);
+    expect(boundDraftsChangedAt(p, listAnnouncements(p))).toBeGreaterThanOrEqual(now - 1000);
+
+    for (const path of allIn(prop.dir)) utimesSync(path, old, old);
+    writeFileSync(join(prop.dir, "notes.md"), "new file");
+    expect(boundDraftsChangedAt(p, listAnnouncements(p))).toBeGreaterThanOrEqual(now - 1000);
+  });
 });
 
 describe("the terminal an announcement belongs to", () => {
@@ -236,7 +285,7 @@ describe("the terminal an announcement belongs to", () => {
   test("a Draft that takes a design request's announcement leaves it in the terminal the request was typed into", () => {
     announce(p, { kind: "proposal", title: "Request", source: "request", terminal: "ab12cd" });
     run(["proposal", "new", "Draft"], dir, { TRAMA_TERMINAL: "zz99yy" });
-    expect(listAnnouncements(p).map((a) => [a.title, a.proposal !== null, a.terminal])).toEqual([["Request", true, "ab12cd"]]);
+    expect(listAnnouncements(p).map((a) => [a.title, a.proposal !== null, a.terminal])).toEqual([["Draft", true, "ab12cd"]]);
   });
 });
 

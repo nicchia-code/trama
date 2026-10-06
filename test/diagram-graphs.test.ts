@@ -134,6 +134,21 @@ test("State level: the sub-Machine of one State, with the far ends of leaving Tr
   expect(child.sections.find((s) => s.heading === "Inherited from Paid")?.items).toHaveLength(2);
 });
 
+test("State level: a State drawn outside the shown one offers no Drill in, even with sub-States", () => {
+  const files: FileMap = new Map([
+    ["system.md", "# S\n"],
+    ["actors/u.md", "# U\n\n## Events\n\n### GO\nx\n"],
+    ["a/feature.md", "# A\n"],
+    ["a/m.md", "# M\n\n## States\n\n### A (initial)\n\n#### A1 (initial)\n- `u.GO` → B\n\n### B\n\n#### B1 (initial)\n"],
+  ]);
+  const s = buildScene(snapshotOf(files), null);
+  const g = buildGraph(s, { kind: "state", machine: "m", state: "A" }, new Map());
+  expect(nodeOf(g, "x:B")?.external).toBe(true);
+  expect(detailOfSelection(s, g, "x:B").drill).toBeNull();
+  const machine = buildGraph(s, { kind: "machine", machine: "m" }, new Map());
+  expect(detailOfSelection(s, machine, "s:B").drill).toEqual({ kind: "state", machine: "m", state: "B" });
+});
+
 test("a Proposal tags Machines, States, Transitions and aggregated edges", () => {
   const snap = shopWithProposals();
   const p = buildScene(snap, snap.proposals[0]?.id ?? "");

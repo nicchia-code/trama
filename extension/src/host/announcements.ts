@@ -1,9 +1,15 @@
 import * as vscode from "vscode";
-import { type Announcement, isQuiet, listAnnouncements, withdrawAll } from "../../../src/core/announcements";
+import { closeSync, ftruncateSync, openSync, readFileSync, writeSync } from "node:fs";
+import { join } from "node:path";
+import { announcementsDir, isQuiet, listAnnouncements, withdrawAll } from "../../../src/core/announcements";
+import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
-import { listProposals } from "../../../src/core/proposals";
-import { type AnnouncementView, announcementView } from "../../../src/core/snapshot";
-import { projectAt, type Project } from "../../../src/core/store";
+import { boundDraftsChangedAt, getProposal, listProposals } from "../../../src/core/proposals";
+import { announcementView } from "../../../src/core/snapshot";
+import type { AnnouncementView } from "../../../src/core/snapshot";
+import { projectAt } from "../../../src/core/store";
+import type { Project } from "../../../src/core/store";
+import { roundWorktrees } from "../../../src/core/worktree-round";
 import type { CursorChatEvent } from "../../../src/core/cursor-chat";
 import { onCursorChatEvent } from "./cursor";
 import { questionRoundClosedAt, questionRoundOpen } from "./question-activity";
@@ -59,22 +65,71 @@ function onCursorChat(event: CursorChatEvent): void {
   else if (event.event === "CONVERSATION_CLOSED") withdrawWaiting(event.root, fromChat, false);
 }
 
+/** The open folder and the worktrees of its round: an agent in any of them announces in its own copy. */
+function copies(root: string): Project[] {
+  const p = projectAt(root);
+  return [p, ...roundWorktrees(p).map((folder) => folder.project)];
+}
+
+function synchronizeTitles(p: Project, waiting: Announcement[]): void {
+  for (const a of waiting) {
+    if (a.kind !== "proposal" || a.proposal === null) continue;
+    let title: string;
+    try {
+      const draft = getProposal(p, a.proposal);
+      if (draft.data.status !== "draft") continue;
+      title = draft.title;
+    } catch {
+      // An unreadable Draft leaves its announcement unchanged.
+      continue;
+    }
+    if (title === a.title) continue;
+    let fd: number;
+    try {
+      // Opening an existing file cannot recreate a delivered or withdrawn announcement.
+      fd = openSync(join(announcementsDir(p), `${a.id}.md`), "r+");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw new TramaError(`Could not synchronize announcement ${a.id}: ${(err as Error).message}`);
+    }
+    try {
+      const text = readFileSync(fd, "utf8");
+      const updated = text.replace(/^#\s+(.+)$/m, () => `# ${title}`);
+      if (text === updated) continue;
+      const bytes = Buffer.from(updated);
+      let offset = 0;
+      while (offset < bytes.length) offset += writeSync(fd, bytes, offset, bytes.length - offset, offset);
+      ftruncateSync(fd, bytes.length);
+    } finally {
+      closeSync(fd);
+    }
+  }
+}
+
 /**
- * Starting up, announcements left on disk belong to an agent run that can no longer be told: they are withdrawn with
- * no notice. Then every half minute the quiet period is checked; it does not run while a question round is open and
+ * Starting up, announcements left on disk, in the open folder or in a worktree of its round, belong to an agent run
+ * that can no longer be told: they are withdrawn with no notice. Then every half minute the quiet period of each copy
+ * is checked; changing a file of an announced Draft restarts it, and it does not run while a question round is open and
  * starts again when it closes.
  */
 export function watchAnnouncements(root: () => string | undefined): vscode.Disposable {
   const startup = root();
-  if (startup !== undefined) guarded(() => void withdrawAll(projectAt(startup)));
+  if (startup !== undefined) guarded(() => copies(startup).forEach((p) => withdrawAll(p)));
   const timer = setInterval(() => {
     const current = root();
-    if (current === undefined || questionRoundOpen()) return;
-    let quiet = false;
+    if (current === undefined) return;
+    let quiet: string[] = [];
     guarded(() => {
-      quiet = isQuiet(listAnnouncements(projectAt(current)), Date.now(), questionRoundClosedAt());
+      quiet = copies(current)
+        .filter((p) => {
+          const waiting = listAnnouncements(p);
+          synchronizeTitles(p, waiting);
+          if (questionRoundOpen()) return false;
+          return isQuiet(waiting, Date.now(), Math.max(questionRoundClosedAt(), boundDraftsChangedAt(p, waiting)));
+        })
+        .map((p) => p.root);
     });
-    if (quiet) withdrawWaiting(current);
+    for (const copy of quiet) withdrawWaiting(copy);
   }, CHECK_EVERY_MS);
   const chat = onCursorChatEvent(onCursorChat);
   return new vscode.Disposable(() => (clearInterval(timer), chat.dispose()));

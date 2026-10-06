@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detectTerminal, type DetectedTerminal, findProgram, openWindow, reusableKind, startDetached, terminalCommand, type WindowRequest } from "../extension/src/host/external-open";
@@ -176,6 +176,20 @@ describe("opening a window that runs the agent line", () => {
     await expect(openWindow({ custom: "", terminal: undefined }, requestFor("true"))).rejects.toThrow("no terminal was found; set trama.externalTerminalCommand");
     await expect(openWindow({ custom: "/nonexistent/terminal {command}", terminal: undefined }, requestFor("true"))).rejects.toThrow("the terminal could not be started");
     await expect(openWindow({ custom: "", terminal: { program: join(dir, "missing"), kind: "xterm" } }, requestFor("true"))).rejects.toThrow("ENOENT");
+  });
+
+  test("a request deleted while WezTerm prepares its window never reaches the fallback window", async () => {
+    const file = join(dir, "request.md");
+    const calls = join(dir, "calls");
+    writeFileSync(file, "# Request\n");
+    const wezterm = program(bin, "wezterm-cancel", `printf '%s\\n' "$1" >> "${calls}"\nrm -f "${file}"\nexit 1`);
+    await expect(openWindow(
+      { custom: "", terminal: { program: wezterm, kind: "wezterm" } },
+      requestFor("echo instruction"),
+      () => existsSync(file),
+    )).rejects.toThrow("the instruction was cancelled");
+    expect(readFileSync(calls, "utf8")).toBe("cli\n");
+    expect(existsSync(file)).toBe(false);
   });
 
   test("kitty is remembered by its socket and its first window", async () => {

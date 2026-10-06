@@ -83,6 +83,7 @@ export function snapshotOf(files: FileMap): Snapshot {
     areas: [],
     proposals: [],
     inWorktree: [],
+    worktreeProposals: [],
     drifts: [],
     tasks: [],
     announcements: [],

@@ -6,7 +6,6 @@ import { takeApprovedNotices, takeApproveRequest, writeApproveResult } from "../
 import { lostWorktreeMessage, reconcileLostWorktrees, worktreesHome } from "../../../src/core/worktree-round";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { watchAnnouncements } from "./announcements";
-import { notices, watchCursorChatNotices } from "./notice-host";
 import { agentName, watchAgentTerminal, watchExternalRuns, configuredSkillsDir, ensureWorktreeAgentSetting, settleWaitingRound } from "./agent";
 import { Controller, describeError } from "./controller";
 import { DesignRequests } from "./design-requests";
@@ -33,11 +32,14 @@ function guarded<A extends unknown[]>(action: (...args: A) => Promise<void>): (.
 
 export function activate(context: vscode.ExtensionContext): void {
   const session = new QuestionSession(() => trama.revealForQuestions(), agentName);
-  const trama = new Controller(context.extensionUri, session);
+  // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
+  const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
+  const trama = new Controller(context.extensionUri, session, tramaFiles);
   controller = trama;
   const questions = new EditorQuestions(findProject, session.present);
-  const requests = new DesignRequests(context.workspaceState);
+  const requests = new DesignRequests(context.workspaceState, tramaFiles);
   context.subscriptions.push(
+    tramaFiles,
     vscode.commands.registerCommand("trama.open", guarded(() => trama.open())),
     vscode.commands.registerCommand(
       "trama.init",
@@ -53,8 +55,6 @@ export function activate(context: vscode.ExtensionContext): void {
     watchAnnouncements(() => findProject()?.root),
     questions,
     requests,
-    notices,
-    watchCursorChatNotices(),
     watchRequirements(),
     watchLostWorktrees(() => trama.noteWorktreesLost()),
     watchReadyRound(() => trama.noteRoundSettled()),
@@ -103,25 +103,30 @@ function watchApproveRequests(): vscode.Disposable {
  * The developer edits Requirement files directly, so the generated `trama-req-*` skills are regenerated on every
  * change under `.trama/requirements/`, inside the Area folders too, also when the Trama panel is closed.
  */
-function watchRequirements(): vscode.Disposable {
+export function watchRequirements(): vscode.Disposable {
   const watcher = vscode.workspace.createFileSystemWatcher("**/.trama/requirements/**");
-  let timer: NodeJS.Timeout | undefined;
-  const sync = () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      const project = findProject();
-      if (!project) return;
+  const timers = new Map<string, NodeJS.Timeout>();
+  const sync = (uri: vscode.Uri) => {
+    const project = findProject(uri);
+    if (!project) return;
+    clearTimeout(timers.get(project.root));
+    timers.set(project.root, setTimeout(() => {
+      timers.delete(project.root);
       try {
         syncRequirementSkills(project, [configuredSkillsDir()]);
       } catch (err) {
         void vscode.window.showErrorMessage(`Trama: could not regenerate the Requirement skills: ${describeError(err)}`);
       }
-    }, SKILL_SYNC_DEBOUNCE_MS);
+    }, SKILL_SYNC_DEBOUNCE_MS));
   };
   watcher.onDidCreate(sync);
   watcher.onDidChange(sync);
   watcher.onDidDelete(sync);
-  return { dispose: () => (clearTimeout(timer), watcher.dispose()) };
+  return { dispose: () => {
+    for (const timer of timers.values()) clearTimeout(timer);
+    timers.clear();
+    watcher.dispose();
+  } };
 }
 
 /**

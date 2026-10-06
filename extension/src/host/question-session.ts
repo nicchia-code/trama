@@ -52,7 +52,6 @@ export class QuestionSession {
       };
       context.signal.addEventListener("abort", close, { once: true });
       this.active = round;
-      context.onQuestion?.(round.state.current);
       void Promise.resolve(this.reveal()).finally(() => this.changed());
     });
 
@@ -92,9 +91,7 @@ export class QuestionSession {
       round.resolve(step.result);
       return;
     }
-    const previous = round.state;
     round.state = step.state;
-    if (step.state.view === "question" && (previous.view !== "question" || previous.current !== step.state.current)) round.context.onQuestion?.(step.state.current);
     // Typing is not echoed back: the panel already shows what was typed.
     if (action.type !== "setText") this.changed();
   }

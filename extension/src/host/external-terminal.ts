@@ -80,14 +80,15 @@ interface Followed<T> {
 }
 
 /**
- * The runs of the external windows and their markers. Only the marker of the run in progress of a followed terminal
- * counts as the command ending; any other marker is deleted and counts for nothing. The end never comes from waiting
- * for the terminal's process.
+ * The runs of the external windows and their markers. The marker of each terminal's current run counts as the
+ * command ending (`onEnded`), even after another terminal starts work. Any other marker is deleted and counts
+ * for nothing. The end never comes from waiting for the terminal's process.
  */
 export class ExternalRuns<T> {
   private readonly runs = new Map<string, Followed<T>>();
+  /** Attempts collect their own markers without replacing the successfully sent instruction. */
+  private readonly attempts = new Map<string, Followed<T>>();
   private readonly last = new Map<string, number>();
-  private latest: string | undefined;
   private watcher: FSWatcher | undefined;
 
   /**
@@ -116,49 +117,39 @@ export class ExternalRuns<T> {
   }
 
   /**
-   * Run `run` of `terminal` (from `nextRun`) begins and is the one that counts. A run still in progress in another
-   * terminal is no longer followed: its marker, if it comes, is deleted and counts for nothing.
-   *
-   * The run is followed from before its window opens, because a command that fails at once leaves its marker before the
-   * window is known to be open. Until `commit` its end is held back, so that what must happen when the instruction is
-   * sent (ghosts announced, waiting notices taken back) comes before what must happen when the command ends. `commit`
-   * is for a window that opened: it delivers the end that was held, if any. `abandon` is for one that failed to open: the
-   * run is dropped with any end it held, its number is free again and the run it had displaced is followed again.
+   * Prepare run `run` of `terminal` (from `nextRun`) before opening its window. Its end is held until `commit`,
+   * so instruction-sent effects happen first. The current run stays followed throughout the attempt.
+   * Only `commit`, after the instruction was sent, replaces it; `abandon` drops the attempt and its held end.
    */
   start(terminal: string, run: number, context: T): { commit: () => void; abandon: () => void } {
-    const before = {
-      latest: this.latest,
-      last: this.last.get(terminal),
-      own: this.runs.get(terminal),
-      displaced: this.latest !== undefined && this.latest !== terminal ? this.runs.get(this.latest) : undefined,
-    };
-    if (before.displaced !== undefined && this.latest !== undefined) this.runs.delete(this.latest);
+    const last = this.last.get(terminal);
     const entry: Followed<T> = { run, context, pending: true };
     this.last.set(terminal, run);
-    this.runs.set(terminal, entry);
-    this.latest = terminal;
+    this.attempts.set(terminal, entry);
     return {
       commit: () => {
+        if (this.attempts.get(terminal) !== entry) return;
+        this.attempts.delete(terminal);
         entry.pending = false;
-        if (entry.held === undefined || this.runs.get(terminal) !== entry) return;
-        this.runs.delete(terminal);
-        this.onEnded(entry.held);
+        this.runs.set(terminal, entry);
+        if (entry.held !== undefined) {
+          this.runs.delete(terminal);
+          this.onEnded(entry.held);
+        }
       },
       abandon: () => {
-        if (this.runs.get(terminal) !== entry) return; // another run replaced it
-        if (before.own === undefined) this.runs.delete(terminal);
-        else this.runs.set(terminal, before.own);
-        if (before.last === undefined) this.last.delete(terminal);
-        else this.last.set(terminal, before.last);
-        if (before.displaced !== undefined && before.latest !== undefined) this.runs.set(before.latest, before.displaced);
-        this.latest = before.latest;
+        if (this.attempts.get(terminal) !== entry) return;
+        this.attempts.delete(terminal);
+        if (last === undefined) this.last.delete(terminal);
+        else this.last.set(terminal, last);
       },
     };
   }
 
+
   /** Whether `terminal` has had a run and none is in progress: its last marker arrived, so its window is free. */
   idle(terminal: string): boolean {
-    return this.last.has(terminal) && !this.runs.has(terminal);
+    return this.last.has(terminal) && !this.runs.has(terminal) && !this.attempts.has(terminal);
   }
 
   /** Reads every marker in the folder. */
@@ -188,14 +179,16 @@ export class ExternalRuns<T> {
       return; // gone already (taken by an earlier event) or not readable yet
     }
     this.discard(name);
-    const current = this.runs.get(marker.terminal);
+    const pending = this.attempts.get(marker.terminal)?.run === marker.run;
+    const runs = pending ? this.attempts : this.runs;
+    const current = runs.get(marker.terminal);
     if (current === undefined || current.run !== marker.run) return;
     const end = { terminal: marker.terminal, run: marker.run, exitCode: markerStatus(content), context: current.context };
     if (current.pending) {
       current.held = end;
       return;
     }
-    this.runs.delete(marker.terminal);
+    runs.delete(marker.terminal);
     this.onEnded(end);
   }
 

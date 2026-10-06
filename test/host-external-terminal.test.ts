@@ -57,14 +57,17 @@ describe("the marker of an external run", () => {
     for (const name of ["abc123-12.end.tmp", "abc123.end", "abc123-x.end", "ABC-1.end", "abc123-1.endx"]) expect(parseMarkerName(name)).toBeUndefined();
   });
 
-  /** The ends reported to the editor, and a promise that resolves at the next one. */
+  /** The ends reported to the editor and a promise that resolves at the next end. */
   function follow() {
     const ends: ExternalEnd<string>[] = [];
     let wake: () => void = () => undefined;
-    const runs = new ExternalRuns<string>(dir, (end) => {
-      ends.push(end);
-      wake();
-    });
+    const runs = new ExternalRuns<string>(
+      dir,
+      (end) => {
+        ends.push(end);
+        wake();
+      },
+    );
     const next = () => new Promise<void>((resolve) => (wake = resolve));
     return { runs, ends, next };
   }
@@ -114,25 +117,72 @@ describe("the marker of an external run", () => {
     }
   });
 
-  test("a new run in another window ends the following of the old one: its marker is deleted and does not count", () => {
+  test("each parallel window reports its own command ending once and stays busy until its marker arrives", () => {
     const { runs, ends } = follow();
     try {
       runs.start("old111", runs.nextRun("old111"), "p").commit();
       runs.start("new222", runs.nextRun("new222"), "p").commit();
+      expect(runs.idle("old111")).toBe(false);
+      expect(runs.idle("new222")).toBe(false);
       leave("old111", 1, "0\n");
       runs.scan();
-      expect(ends).toEqual([]);
+      expect(ends).toEqual([{ terminal: "old111", run: 1, exitCode: 0, context: "p" }]);
+      expect(runs.idle("old111")).toBe(true);
+      expect(runs.idle("new222")).toBe(false);
       expect(readdirSync(dir)).toEqual([]);
 
-      leave("new222", 1, "0\n");
+      leave("old111", 1, "0\n");
+      leave("new222", 1, "3\n");
       runs.scan();
-      expect(ends.map((end) => end.terminal)).toEqual(["new222"]);
+      expect(ends).toEqual([
+        { terminal: "old111", run: 1, exitCode: 0, context: "p" },
+        { terminal: "new222", run: 1, exitCode: 3, context: "p" },
+      ]);
+      expect(runs.idle("new222")).toBe(true);
     } finally {
       runs.dispose();
     }
   });
 
-  test("a window that failed to open is abandoned: its run is dropped, its number is free and the run it had displaced is followed again", () => {
+
+  test("a held end reports only after commit, without suppressing another window's ending", () => {
+    const { runs, ends } = follow();
+    try {
+      const old = runs.start("old111", 1, "p");
+      leave("old111", 1, "1\n");
+      runs.scan();
+      runs.start("new222", 1, "p").commit();
+      old.commit();
+      expect(ends).toEqual([{ terminal: "old111", run: 1, exitCode: 1, context: "p" }]);
+      leave("new222", 1, "0\n");
+      runs.scan();
+      expect(ends).toEqual([
+        { terminal: "old111", run: 1, exitCode: 1, context: "p" },
+        { terminal: "new222", run: 1, exitCode: 0, context: "p" },
+      ]);
+    } finally {
+      runs.dispose();
+    }
+  });
+
+  test("the previous run ends normally during a failed opening and is not counted again on abandonment", () => {
+    const { runs, ends } = follow();
+    try {
+      runs.start("old111", 1, "old").commit();
+      const failed = runs.start("new222", 1, "new");
+      leave("old111", 1, "0\n");
+      runs.scan();
+      failed.abandon();
+      leave("old111", 1, "0\n");
+      runs.scan();
+      expect(ends).toEqual([{ terminal: "old111", run: 1, exitCode: 0, context: "old" }]);
+      expect(runs.idle("old111")).toBe(true);
+    } finally {
+      runs.dispose();
+    }
+  });
+
+  test("abandoning a failed opening drops its attempt, frees its number and leaves the previous run followed", () => {
     const { runs, ends } = follow();
     try {
       runs.start("old111", runs.nextRun("old111"), "old").commit();

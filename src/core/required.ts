@@ -11,7 +11,8 @@ export interface RequiredProposal {
   status: "draft" | "open" | "rejected" | "discarded" | "missing" | "cycle";
 }
 
-const REQUIRED_STATUS: Record<RequiredProposal["status"], string> = {
+/** Why a required Proposal blocks, after its name. */
+export const REQUIRED_STATUS: Record<RequiredProposal["status"], string> = {
   draft: "is still being written",
   open: "is not approved yet",
   rejected: "was rejected",

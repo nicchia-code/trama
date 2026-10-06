@@ -1,9 +1,10 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import { isAbsolute, relative, sep } from "node:path";
 import * as vscode from "vscode";
-import { createRequest, isEmptyRequest, requestFile, requestIdAt, requestTitle } from "../../../src/core/design-requests";
+import { createRequest, isEmptyRequest, requestFile, requestIdAt, requestsDir, requestTitle } from "../../../src/core/design-requests";
 import type { Project } from "../../../src/core/store";
 import { launchAgent, launched } from "./agent";
-import { findProject } from "./project";
+import { findProject, NO_PROJECT_WARNING } from "./project";
 import { buildPrompt } from "./prompts";
 
 /** Set on the active editor when it shows a request never sent, so the editor title shows Send to agent. */
@@ -27,22 +28,30 @@ export class DesignRequests implements vscode.Disposable {
   private readonly saves = new Map<string, ReturnType<typeof setTimeout>>();
   /** Requests whose instruction is being sent right now, so a second gesture does not send them again. */
   private readonly sending = new Set<string>();
+  /**
+   * Requests whose file was deleted in this session, consumed or abandoned: final, even if the editor saves a tab kept
+   * open with unsaved changes back to disk. Trama no longer saves, offers or sends them.
+   */
+  private readonly finished = new Set<string>();
   private readonly subscriptions: vscode.Disposable[];
 
   constructor(
     private readonly state: vscode.Memento,
+    /** The extension's watcher of `.trama/`, on for the extension's whole life, whether or not the panel is open. */
+    tramaFiles: vscode.FileSystemWatcher,
     private readonly project: () => Project | undefined = findProject,
     private readonly launch: typeof launchAgent = launchAgent,
   ) {
     this.subscriptions = [
       vscode.window.onDidChangeActiveTextEditor(() => this.updateContext()),
       vscode.workspace.onDidChangeTextDocument((event) => {
-        if (event.contentChanges.length > 0 && this.requestId(event.document) !== undefined) this.scheduleSave(event.document);
+        const id = this.requestId(event.document);
+        if (event.contentChanges.length > 0 && id !== undefined && !this.finished.has(id)) this.scheduleSave(event.document);
       }),
       vscode.window.tabGroups.onDidChangeTabs((event) => {
         for (const tab of event.closed) void this.closed(tab);
       }),
-      this.watchDeletions(),
+      tramaFiles.onDidDelete((uri) => this.deleted(uri)),
     ];
     this.forgetMissing();
     this.updateContext();
@@ -51,8 +60,12 @@ export class DesignRequests implements vscode.Disposable {
   /** Design…: the empty file of a new request, in a tab that is not a preview. */
   async write(): Promise<void> {
     const project = this.project();
-    if (!project) return;
-    const { file } = createRequest(project);
+    if (!project) {
+      void vscode.window.showWarningMessage(NO_PROJECT_WARNING);
+      return;
+    }
+    const { id, file } = createRequest(project);
+    this.finished.delete(id); // A new request may reuse the ID of one deleted earlier in the session.
     await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
     this.updateContext();
   }
@@ -66,7 +79,7 @@ export class DesignRequests implements vscode.Disposable {
     const document = this.documentAt(uri);
     const project = this.project();
     const id = this.requestId(document);
-    if (!document || !project || id === undefined || this.isSent(id) || this.sending.has(id)) return;
+    if (!document || !project || id === undefined || this.isDone(id) || this.sending.has(id)) return;
     if (isEmptyRequest(document.getText())) {
       void vscode.window.showWarningMessage(EMPTY_WARNING);
       return;
@@ -87,12 +100,12 @@ export class DesignRequests implements vscode.Disposable {
     const uri = tab.input.uri;
     const project = this.project();
     const id = uri.scheme === "file" && project ? requestIdAt(project, uri.fsPath) : undefined;
-    if (!project || id === undefined || this.isSent(id) || this.sending.has(id) || this.tabsOf(uri).length > 0) return;
+    if (!project || id === undefined || this.isDone(id) || this.sending.has(id) || this.tabsOf(uri).length > 0) return;
     let text: string;
     try {
       text = readFileSync(uri.fsPath, "utf8");
     } catch {
-      return; // Already deleted: the deletion watcher deals with it.
+      return; // Already deleted: `deleted` deals with it.
     }
     if (isEmptyRequest(text)) rmSync(uri.fsPath, { force: true });
     else await this.once(id, () => this.deliver(project, id, text));
@@ -117,8 +130,11 @@ export class DesignRequests implements vscode.Disposable {
 
   /** Sends the instruction naming request `id`; true, with the request marked as sent, once it has really left. */
   private async deliver(project: Project, id: string, text: string): Promise<boolean> {
-    const launch = await this.launch(project.root, buildPrompt({ kind: "written-design", request: id }), "Design", requestTitle(text));
-    if (!launched(launch)) return false;
+    const file = requestFile(project, id);
+    const canSend = () => file !== undefined && existsSync(file);
+    if (!canSend()) return false;
+    const launch = await this.launch(project.root, buildPrompt({ kind: "written-design", request: id }), "Design", requestTitle(text), false, canSend);
+    if (!launched(launch) || !canSend()) return false;
     await this.state.update(SENT_KEY, [...this.sentIds(), id]);
     return true;
   }
@@ -129,6 +145,11 @@ export class DesignRequests implements vscode.Disposable {
 
   private isSent(id: string): boolean {
     return this.sentIds().includes(id);
+  }
+
+  /** Sent, or deleted in this session: either way never sent (again). */
+  private isDone(id: string): boolean {
+    return this.finished.has(id) || this.isSent(id);
   }
 
   /** Drops from the sent list every request whose file no longer exists. */
@@ -158,20 +179,30 @@ export class DesignRequests implements vscode.Disposable {
 
   /**
    * A request file is gone, deleted by the hand-over of its Proposal or from outside: the request is consumed. Its tab
-   * closes unless it has unsaved changes, which are left to the editor.
+   * closes unless it has unsaved changes, which are left to the editor. Told by the watcher of `.trama/requests/`,
+   * whether or not the panel is open. The editor often reports only a deleted folder (`.trama/requests/` or `.trama/`
+   * itself), so a deleted folder holding the requests counts as the deletion of every request in it.
    */
-  private watchDeletions(): vscode.Disposable {
-    const watcher = vscode.workspace.createFileSystemWatcher("**/.trama/requests/*.md", true, true, false);
-    watcher.onDidDelete((uri) => {
-      const project = this.project();
-      if (!project || requestIdAt(project, uri.fsPath) === undefined) return;
-      clearTimeout(this.saves.get(uri.toString()));
-      this.saves.delete(uri.toString());
-      this.forgetMissing();
-      const tabs = this.tabsOf(uri).filter((tab) => !tab.isDirty);
-      if (tabs.length > 0) void vscode.window.tabGroups.close(tabs);
-    });
-    return watcher;
+  private deleted(uri: vscode.Uri): void {
+    const project = this.project();
+    if (!project) return;
+    const gone = (fsPath: string) => within(uri.fsPath, fsPath) && requestIdAt(project, fsPath) !== undefined;
+    if (!gone(uri.fsPath) && !within(uri.fsPath, requestsDir(project))) return;
+    const allTabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs);
+    const open = [...vscode.workspace.textDocuments.map((document) => document.uri), ...allTabs.flatMap((tab) => (tab.input instanceof vscode.TabInputText ? [tab.input.uri] : []))];
+    for (const { scheme, fsPath } of open) {
+      const id = scheme === "file" && within(uri.fsPath, fsPath) ? requestIdAt(project, fsPath) : undefined;
+      if (id !== undefined) this.finished.add(id);
+    }
+    for (const document of vscode.workspace.textDocuments) {
+      if (document.uri.scheme !== "file" || !gone(document.uri.fsPath)) continue;
+      clearTimeout(this.saves.get(document.uri.toString()));
+      this.saves.delete(document.uri.toString());
+    }
+    this.forgetMissing();
+    const tabs = allTabs.filter((tab) => tab.input instanceof vscode.TabInputText && tab.input.uri.scheme === "file" && gone(tab.input.uri.fsPath) && !tab.isDirty);
+    if (tabs.length > 0) void vscode.window.tabGroups.close(tabs);
+    this.updateContext();
   }
 
   private tabsOf(uri: vscode.Uri): vscode.Tab[] {
@@ -194,6 +225,12 @@ export class DesignRequests implements vscode.Disposable {
 
   private updateContext(): void {
     const id = this.requestId(vscode.window.activeTextEditor?.document);
-    void vscode.commands.executeCommand("setContext", CONTEXT_KEY, id !== undefined && !this.isSent(id));
+    void vscode.commands.executeCommand("setContext", CONTEXT_KEY, id !== undefined && !this.isDone(id));
   }
+}
+
+/** True when `path` is `parent` or inside it. */
+function within(parent: string, path: string): boolean {
+  const rel = relative(parent, path);
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }

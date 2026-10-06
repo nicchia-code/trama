@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildApprovalScanPrompt, buildPrompt, buildScanPrompt, buildWorktreeTasksPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
+import { buildApprovalScanPrompt, buildPrompt, buildReconcilePrompt, buildScanPrompt, buildWorktreeTasksPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "design", prompt: "  Add refunds to checkout \n" })).toBe("Use the trama-design skill. Add refunds to checkout");
@@ -28,6 +28,12 @@ test("several Features are listed in backticks, comma separated", () => {
 test("in a worktree the Tasks run in groups and leave the whole-System check to the merge", () => {
   expect(buildWorktreeTasksPrompt("ab12cd34")).toBe(
     'Use the trama-implement skill on every Task of Proposal ab12cd34 that is in the "todo" column, taking them from `trama task next --batch --proposal ab12cd34`, one group at a time, until it says there is none. Do not scan the whole System at the end: Trama checks the code after the merge.',
+  );
+});
+
+test("the reconciliation Task in the merge worktree leaves the whole-System check to the merge", () => {
+  expect(buildReconcilePrompt("ab12cd34")).toBe(
+    "Use the trama-implement skill on Task ab12cd34. Do not scan the whole System at the end: Trama checks the code after the merge.",
   );
 });
 

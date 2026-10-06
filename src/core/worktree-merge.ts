@@ -1,13 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { TramaError } from "./errors";
 import { getProposal, recordMergedProposal } from "./proposals";
 import { syncRequirementSkills } from "./requirement-skills";
 import { proposalScope } from "./scope";
 import { loadModel, type Project, projectAt, readDocument, writeDocument, writeFileEnsuringDir } from "./store";
-import { type Drift, driftOptions, listTasks, newTask } from "./work";
-import { mergedProposalIds, roundOrigin, roundWorktrees, worktreePath, worktreeProposalIds, worktreesHome } from "./worktree-round";
+import { type Drift, driftOptions, getTask, listTasks, newTask, type Task } from "./work";
+import { mergedProposalIds, rememberedScopes, roundOrigin, roundWorktrees, worktreePath, worktreeProposalIds, worktreesHome } from "./worktree-round";
 
 const KEEP = "Keep unfinished worktree changes";
 const LEAVE_DRIFT = "Leave the Merge Drift out of the merged result";
@@ -110,7 +110,7 @@ export function mergeRound(p: Project, skillsDirs: string[] = []): MergeRoundRes
 function preparedMerge(root: string, originCommit: string): "none" | "conflict" | "ready" | "reconciling" {
   const mergePath = worktreePath(root, "merge");
   if (!existsSync(mergePath)) return "none";
-  if (reconciliationOpen(mergePath)) return "reconciling";
+  if (mergeTaskRels(mergePath).length > 0) return "reconciling";
   if (conflictOpen(mergePath)) return "conflict";
   const head = git(mergePath, ["rev-parse", "HEAD"]);
   if (!head.ok) throw new TramaError(failure(head));
@@ -120,9 +120,8 @@ function preparedMerge(root: string, originCommit: string): "none" | "conflict" 
 
 /**
  * Applies a merge that is already waiting in the merge worktree, once the open folder is the branch the round
- * started from and has no uncommitted changes. A Merge Drift or its Task that was committed is removed first.
- * Does nothing while a reconciliation Task is still open, while the merge has conflicts, or while the merge
- * worktree is only the untouched start.
+ * started from and has no uncommitted changes. Only a round really waiting counts: no merge stopped on its markers,
+ * no Merge Drift and no reconciliation Task, Done or not. A reconciliation goes on only when the agent's command ends.
  */
 export function applyWaitingMerge(p: Project, skillsDirs: string[] = []): MergeRoundResult {
   const origin = roundOrigin(p.root);
@@ -130,7 +129,7 @@ export function applyWaitingMerge(p: Project, skillsDirs: string[] = []): MergeR
   if (!origin || !existsSync(mergePath)) return { kind: "pending" };
   const head = git(mergePath, ["rev-parse", "HEAD"]);
   if (!head.ok || head.stdout === origin.commit) return { kind: "pending" };
-  if (reconciliationOpen(mergePath) || conflictOpen(mergePath)) return { kind: "pending" };
+  if (mergeInProgress(mergePath) || existsSync(join(mergePath, ".trama", "merge-drift.md")) || mergeTaskRels(mergePath).length > 0) return { kind: "pending" };
   if (mergedProposalIds(p).length === 0) return { kind: "pending" };
   return landReadyMerge(p, skillsDirs, origin.branch, true);
 }
@@ -149,8 +148,10 @@ function landReadyMerge(p: Project, skillsDirs: string[], branch: string, again:
   const ids = mergedProposalIds(p);
   // Scoped against the folder before the merge lands, the rule of an acceptance: afterwards the Requirements no longer differ.
   const scoped = ids.flatMap((id) => proposalScope(p, id));
-  // The scan scope each Proposal got when it entered its worktree, written only there.
-  const scopes = new Map(ids.map((id) => [id, existsSync(join(worktreePath(p.root, id), proposalFileRel(p, id))) ? getProposal(projectAt(worktreePath(p.root, id)), id).data.scanScope : null]));
+  // The scan scope each Proposal got when it entered its worktree, kept beside the worktrees; a round started before
+  // that was kept has it only in the worktree's own copy.
+  const remembered = rememberedScopes(p.root);
+  const scopes = new Map(ids.map((id) => [id, remembered[id] ?? (existsSync(join(worktreePath(p.root, id), proposalFileRel(p, id))) ? getProposal(projectAt(worktreePath(p.root, id)), id).data.scanScope : null)]));
   // The branch may have moved on while the round waited: catch the merge worktree up there, so the open folder only fast-forwards.
   const mergePath = worktreePath(p.root, "merge");
   const caughtUp = git(mergePath, ["merge", "--no-edit", branch]);
@@ -201,10 +202,24 @@ function mergeTaskRels(mergePath: string): string[] {
   return rels;
 }
 
-/** The Merge Drift file of the round, when the merge worktree holds one. */
+/** The round's reconciliation Tasks, read from the merge worktree; none outside Reconciling. */
+export function reconciliationTasks(root: string): Task[] {
+  const mergePath = worktreePath(root, "merge");
+  const home = projectAt(mergePath);
+  return mergeTaskRels(mergePath).flatMap((rel) => {
+    try {
+      return [getTask(home, basename(rel))];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** The Merge Drift of the round, to decide only in Conflict: while a reconciliation Task exists the round is Reconciling. */
 export function readMergeDrift(root: string): { title: string; body: string } | null {
-  const path = join(worktreePath(root, "merge"), ".trama", "merge-drift.md");
-  if (!existsSync(path)) return null;
+  const mergePath = worktreePath(root, "merge");
+  const path = join(mergePath, ".trama", "merge-drift.md");
+  if (!existsSync(path) || mergeTaskRels(mergePath).length > 0) return null;
   const body = readFileSync(path, "utf8");
   const title = /^#\s+(.+)$/m.exec(body)?.[1]?.trim() || "Merge";
   return { title, body };
@@ -224,13 +239,13 @@ export function mergeDriftDocument(root: string): Drift | null {
  */
 export function reconcileMerge(p: Project, option: number): { task: string; worktree: string } {
   const mergePath = worktreePath(p.root, "merge");
+  // Only from Conflict: while a reconciliation Task exists, in any column, the round is Reconciling.
+  if (mergeTaskRels(mergePath).length > 0) throw new TramaError("The round is already being reconciled.");
   const drift = mergeDriftDocument(p.root);
   if (!drift) throw new TramaError("There is no Merge Drift to reconcile.");
-  if (reconciliationOpen(mergePath)) throw new TramaError("The round is already being reconciled.");
   const options = driftOptions(drift);
   const chosen = options[option - 1];
   if (!chosen) throw new TramaError(`The Merge Drift has no fix option ${option}.`);
-  clearReconciliationTasks(mergePath);
   const task = newTask(projectAt(mergePath), {
     title: "Reconcile the worktree round",
     refs: [],
@@ -322,12 +337,9 @@ function commitReconciliation(mergePath: string): void {
   if (!committed.ok) throw new TramaError(failure(committed));
 }
 
-/** Markers in the Model, the Requirements, or any file the merge or the agent changed and has not committed. */
+/** Markers anywhere in the merge result, including files the agent already committed or has not staged yet. */
 function conflictMarkers(mergePath: string): boolean {
-  const changed = git(mergePath, ["diff", "--name-only", "HEAD"]);
-  if (!changed.ok) throw new TramaError(failure(changed));
-  const paths = [".trama/model", ".trama/requirements", ...changed.stdout.split("\n").filter((path) => path !== "")];
-  const found = git(mergePath, ["grep", "-l", "-e", "^<<<<<<<", "--", ...paths]);
+  const found = git(mergePath, ["grep", "--untracked", "--exclude-standard", "-l", "-e", "^<<<<<<<"]);
   return found.ok && found.stdout !== "";
 }
 
@@ -335,11 +347,11 @@ function clearReconciliationTasks(mergePath: string): void {
   for (const rel of mergeTaskRels(mergePath)) rmSync(join(mergePath, rel), { force: true });
 }
 
+/** Removes the Merge Drift and its Tasks before the merge lands or waits; committed ones leave the merged result too. */
 function dropMergeArtifacts(mergePath: string): void {
-  const rels = [...mergeTaskRels(mergePath)];
-  const drift = join(".trama", "merge-drift.md");
-  if (git(mergePath, ["ls-files", "--error-unmatch", "--", drift]).ok) rels.push(drift);
+  const rels = [...mergeTaskRels(mergePath), join(".trama", "merge-drift.md")];
   const tracked = rels.filter((rel) => git(mergePath, ["ls-files", "--error-unmatch", "--", rel]).ok);
+  for (const rel of rels) rmSync(join(mergePath, rel), { force: true });
   if (tracked.length === 0) return;
   const removed = git(mergePath, ["rm", "-f", "--", ...tracked]);
   if (!removed.ok) throw new TramaError(failure(removed));

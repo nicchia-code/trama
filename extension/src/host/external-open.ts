@@ -172,7 +172,8 @@ export interface WindowOrigin {
  * detected terminal. Returns how to reach the window again when its terminal allows it (kitty, WezTerm and Terminal.app),
  * undefined otherwise. Rejects with the reason it could not be opened.
  */
-export async function openWindow(origin: WindowOrigin, request: WindowRequest): Promise<ExternalWindow | undefined> {
+export async function openWindow(origin: WindowOrigin, request: WindowRequest, canSend: () => boolean = () => true): Promise<ExternalWindow | undefined> {
+  if (!canSend()) throw new Error("the instruction was cancelled");
   if (origin.custom !== "") {
     await startDetached("sh", ["-c", customTerminalCommand(origin.custom, request.script)], request.cwd);
     return undefined;
@@ -196,6 +197,7 @@ export async function openWindow(origin: WindowOrigin, request: WindowRequest): 
       // No WezTerm is running to ask: start one, which cannot be reached again.
     }
   }
+  if (!canSend()) throw new Error("the instruction was cancelled");
   const { program, args } = terminalCommand(terminal, request);
   await startDetached(program, args, request.cwd);
   return terminal.kind === "kitty" ? { terminal: "kitty", address: `unix:${request.kittySocket}`, windowId: 1 } : undefined;

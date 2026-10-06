@@ -1,7 +1,7 @@
 ---
-description: "Usa quando lavori sui round di domande o sugli avvisi ntfy."
+description: "Usa quando lavori sui round di domande."
 ---
-# Tecnologia di domande e avvisi
+# Tecnologia dei round di domande
 
 ## question-round
 - Expose `trama ask`, reading the round as JSON from standard input and waiting until it can print the result as JSON to standard output. When no editor is connected for the project it prints explicit editor unavailability instead of an answer. Keep diagnostics off standard output so agents can consume the result. This command displays no terminal question interface.
@@ -15,14 +15,7 @@ description: "Usa quando lavori sui round di domande o sugli avvisi ntfy."
 - Propagate the interruption of `trama ask` (SIGINT or SIGTERM) and its disconnection to the round's lifecycle. Close controls only for the affected round and release its queue position. Client-side timeouts that are not signalled to Trama cannot be detected; observable cancellation or disconnection is required to remove those rounds.
 - Distinguish initial editor connection failure from loss of an established editor connection after sending a validated round. Connection failure before submission returns initial editor unavailability. Closure or failure of the editor connection after submission and before a complete result returns the shared `editor-interrupted` error without answers; do not wait for a response timeout or translate it into the fallback result.
 - For `editor-interrupted`, `trama ask` prints the error with its code and message as JSON on stdout and exits with failure, keeping diagnostics on stderr. This ends the waiting operation, not external agent processes. The agent skills enforce stopping the workflow awaiting those decisions.
-- Dalla shell dell'agente di Cursor (`CURSOR_AGENT=1`) `trama ask` dice all'editor che la richiesta viene dall'agente di Cursor, così nasce l'avviso sulla domanda. Il sandbox di Cursor nasconde i socket sotto `XDG_RUNTIME_DIR` (indizio nel suo programma `cursorsandbox`; non provato): se `trama ask` risponde che l'editor non è raggiungibile mentre il comando gira nel sandbox (`CURSOR_SANDBOX` impostato), le skill dicono all'agente di ripeterlo una volta fuori dal sandbox, chiedendo il permesso a Cursor, e solo dopo di usare le sue domande.
+- Il sandbox di Cursor può nascondere i socket sotto `XDG_RUNTIME_DIR` (indizio nel suo programma `cursorsandbox`; non provato): se `trama ask` risponde che l'editor non è raggiungibile mentre il comando gira nel sandbox (`CURSOR_SANDBOX` impostato), le skill dicono all'agente di ripeterlo una volta fuori dal sandbox, chiedendo il permesso a Cursor, e solo dopo di usare le sue domande.
 - `docs/cli.md` e le skill `trama-design` e `trama-import` descrivono i campi facoltativi `context` e `details` della richiesta di `trama ask`.
 - Cursor sposta in background un comando che dura più di 30 secondi (documentato nel suo strumento di attesa). Le skill dicono all'agente di aspettare la fine di `trama ask` fino al risultato, senza considerarlo fallito né ripeterlo.
 
-## notice
-- L'impostazione `trama.ntfy` è una stringa, vuota per default (vuota o di soli spazi vuol dire non impostata, come `trama.language`), dichiarata con scope `application`: vale solo nelle impostazioni utente e viene ignorata nelle impostazioni del workspace, così l'argomento non finisce in un `.vscode/settings.json` versionato con il progetto. Non è salvata in `.trama/` né altrove nel progetto.
-- L'impostazione è letta ogni volta: quando sta per nascere un avviso, quando scadono i dieci secondi e quando scade l'attesa del secondo tentativo. Il valore, tolti gli spazi ai bordi, è valido se è un nome di argomento che rispetta `^[A-Za-z0-9_-]{1,64}$`, inviato a `https://ntfy.sh/<argomento>`, oppure un URL assoluto `http://` o `https://` di un argomento (per un server proprio) usato così com'è e senza credenziali dentro. Qualunque altro valore è non valido. Trama non controlla che l'argomento esista.
-- L'invio è fatto dall'host dell'estensione, che già osserva i terminali, i round di domande e l'invio delle istruzioni, con la `fetch` globale di Node: nessuna nuova libreria runtime. La riga di comando non partecipa.
-- Ogni tentativo è una sola richiesta `POST` all'URL dell'argomento, con il testo UTF-8 come corpo e le intestazioni `Title` (solo ASCII), `Priority` (da 1 a 5) e `Tags`. È un successo solo una risposta HTTP 2xx; ogni altro stato, errore di rete o mancata risposta entro 10 secondi è un fallimento. Non usare credenziali, token né azioni di ntfy.
-- Il ritardo di dieci secondi e l'attesa del secondo tentativo sono fissi, non impostazioni. I timer vivono nell'host dell'estensione e sono fermati quando l'avviso viene annullato o l'estensione è disattivata.
-- La composizione del testo è una funzione pura dai fatti (tipo di avviso, nome del progetto, domanda, esito, conteggi) a titolo, messaggio, priorità e tag, verificabile senza editor né rete.

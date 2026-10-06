@@ -27,6 +27,12 @@ function proposalEditing(path: string, transform: (text: string) => string): str
 }
 
 describe("proposalScope", () => {
+  test("unchanged registered Model files do not affect any Feature", () => {
+    const prop = newProposal(p, "Unchanged");
+    for (const path of ["checkout/order.md", "checkout/feature.md", "actors/user.md"]) editInProposal(p, prop.id, path);
+    expect(proposalScope(p, prop.id)).toEqual([]);
+  });
+
   test("a Machine change affects its Feature", () => {
     expect(proposalScope(p, proposalEditing("checkout/order.md", (t) => `${t}\n`))).toEqual(["checkout"]);
   });

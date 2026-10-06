@@ -162,12 +162,23 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
   if (card.refs.length > 0) node.append(chips(card.refs, env));
   const proposalId = card.proposal;
   if (proposalId !== null) {
-    const link = el("button", "board-link", `Proposal ${card.proposalName ?? proposalId} attached`);
+    const named = `Proposal ${card.proposalName ?? proposalId}`;
+    const touches = card.proposalTouches;
+    const onlyRequirements = touches !== null && touches.requirements && !touches.model;
+    const link = el("button", "board-link", `${named} attached`);
     link.type = "button";
     link.dataset["action"] = "proposal-link";
-    link.title = `Show Proposal ${card.proposalName ?? proposalId} on the diagram`;
-    link.addEventListener("click", () => env.context.navigate("diagram", { proposal: proposalId }));
+    link.title = onlyRequirements ? `Show the Requirements ${named} changes` : `Show ${named} on the diagram`;
+    link.addEventListener("click", () => env.context.navigate(onlyRequirements ? "requirements" : "diagram", { proposal: proposalId }));
     node.append(link);
+    if (touches?.model && touches.requirements) {
+      const more = el("button", "board-link", "Its Requirements");
+      more.type = "button";
+      more.dataset["action"] = "proposal-requirements-link";
+      more.title = `Show the Requirements ${named} changes`;
+      more.addEventListener("click", () => env.context.navigate("requirements", { proposal: proposalId }));
+      node.append(more);
+    }
   }
   const whereKey = `${card.key}:where`;
   node.append(

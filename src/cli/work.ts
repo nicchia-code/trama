@@ -9,7 +9,7 @@ import { placeTasks } from "../core/design";
 import type { Blocker } from "../core/blocking";
 import { blockedTasks, COLUMNS, type Drift, driftOptions, driftSides, listDrifts, listTasks, nextTask, roundWork, type Task } from "../core/work";
 import { inWorktreeProposals, openProposalsAwaitingDecision } from "../core/worktree-round";
-import { readMergeDrift } from "../core/worktree-merge";
+import { readMergeDrift, reconciliationTasks } from "../core/worktree-merge";
 import { machineReceiverLines, outgoingLines, reactionLines, stateTreeLines } from "./explore";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 
@@ -341,6 +341,7 @@ export function boardView(p: Project): Result {
       const why = blockedTasks(home);
       return born.map((task) => ({ task, blocked: why, worktree: true }));
     }),
+    ...reconciliationTasks(p.root).map((task) => ({ task, blocked: new Map<string, Blocker[]>(), worktree: true })),
   ];
   const placed = placeTasks(
     byCreation(taskCards, (item) => ({ id: item.task.id, created: item.task.data.created })).map((item) => ({ ...taskSummary(item.task, item.blocked, numbers), worktree: item.worktree })),

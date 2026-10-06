@@ -37,6 +37,15 @@ const shown: Array<{ path: string; preview: boolean | undefined }> = [];
 const contexts: Array<[string, unknown]> = [];
 const warnings: string[] = [];
 let active: FakeDocument | undefined;
+let command: ((id: string) => Promise<void>) | undefined;
+let launcher = "chat";
+let input: (() => Promise<string | undefined>) | undefined;
+/** The extension's watcher of `.trama/`; the panel is closed, so it alone reports the deletion. */
+const tramaFiles = { onDidDelete: subscribe(listeners.deleted) };
+function deleteFile(document: FakeDocument) {
+  rmSync(document.uri.fsPath);
+  for (const fn of listeners.deleted) fn(document.uri);
+}
 
 function openDocument(fsPath: string): FakeDocument {
   const existing = documents.find((d) => d.uri.fsPath === fsPath);
@@ -121,6 +130,7 @@ mock.module("vscode", () => ({
       focus(document);
     },
     showWarningMessage: (message: string) => void warnings.push(message),
+    showInputBox: async () => input?.(),
     tabGroups: {
       get all() {
         return [{ tabs }];
@@ -137,16 +147,23 @@ mock.module("vscode", () => ({
     get textDocuments() {
       return documents;
     },
-    createFileSystemWatcher: () => ({ onDidCreate() {}, onDidChange() {}, onDidDelete: subscribe(listeners.deleted), dispose() {} }),
-    getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }),
+    getConfiguration: () => ({
+      get: (key: string, fallback: unknown) => key === "agentLauncher" ? launcher : fallback,
+      update: async () => {},
+    }),
   },
   Uri: { file: fileUri },
   TabInputText,
-  commands: { executeCommand: async (id: string, ...args: unknown[]) => void (id === "setContext" && contexts.push([args[0] as string, args[1]])) },
+  ConfigurationTarget: { Global: 1 },
+  commands: { executeCommand: async (id: string, ...args: unknown[]) => {
+    if (id === "setContext") contexts.push([args[0] as string, args[1]]);
+    else await command?.(id);
+  } },
   env: { appName: "Visual Studio Code" },
 }));
 
 const { DesignRequests, SAVE_DELAY_MS, SENT_KEY } = await import("../extension/src/host/design-requests");
+const { NO_PROJECT_WARNING } = await import("../extension/src/host/project");
 type Launch = Awaited<ReturnType<typeof import("../extension/src/host/agent").launchAgent>>;
 
 /** The extension's workspace state. */
@@ -177,7 +194,7 @@ beforeAll(() => {
   cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
   p = projectAt(dir);
   state = new FakeMemento();
-  requests = new DesignRequests(state as never, () => p, launch);
+  requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
 });
 afterAll(() => {
   requests.dispose();
@@ -193,6 +210,9 @@ afterEach(() => {
   launches.length = 0;
   state.values.clear();
   outcome = "terminal";
+  command = undefined;
+  launcher = "chat";
+  input = undefined;
   focus(undefined);
 });
 
@@ -218,6 +238,15 @@ describe("Design… creates the request file", () => {
     expect(readFileSync(file, "utf8")).toBe("");
     expect(shown).toEqual([{ path: file, preview: false }]);
     expect(lastContext()).toBe(true);
+  });
+
+  test("senza progetto Trama non crea nulla e rimanda all'inizializzazione", async () => {
+    const without = new DesignRequests(state as never, tramaFiles as never, () => undefined, launch);
+    await without.write();
+    without.dispose();
+    expect(existsSync(requestsDir(p))).toBe(false);
+    expect(shown).toEqual([]);
+    expect(warnings).toEqual([NO_PROJECT_WARNING]);
   });
 });
 
@@ -310,14 +339,36 @@ describe("Send to agent", () => {
     expect(launches).toHaveLength(2);
   });
 
-  test("the chat's fallbacks count as sent", async () => {
-    for (const result of ["sent", "confirm", "clipboard"] as const) {
-      outcome = result;
-      const document = await writeRequest("# Returns\n");
-      await requests.send();
-      expect(state.get<string[]>(SENT_KEY, [])).toContain(idOf(document));
-    }
+  test("la chat che invia automaticamente segna la richiesta e chiude la scheda", async () => {
+    outcome = "sent";
+    const document = await writeRequest("# Resi\n");
+    await requests.send();
+    expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
+    expect(tabs).toEqual([]);
+    expect(lastContext()).toBe(false);
   });
+
+  for (const result of ["confirm", "clipboard"] as const) {
+    test(`la consegna ${result} conserva la scheda e permette di riprovare anche dopo un riavvio`, async () => {
+      outcome = result;
+      const document = await writeRequest("# Resi\n");
+      await requests.send();
+      expect(state.get<string[]>(SENT_KEY, [])).toEqual([]);
+      expect(tabs.map((tab) => tab.input.uri.fsPath)).toEqual([document.uri.fsPath]);
+      expect(lastContext()).toBe(true);
+      expect(readFileSync(document.uri.fsPath, "utf8")).toBe(document.text);
+
+      requests.dispose();
+      requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
+      expect(lastContext()).toBe(true);
+      outcome = "sent";
+      await requests.send();
+      expect(launches).toHaveLength(2);
+      expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
+      expect(tabs).toEqual([]);
+      expect(lastContext()).toBe(false);
+    });
+  }
 
   test("a request is sent at most once", async () => {
     const document = await writeRequest("# Returns\n");
@@ -346,11 +397,11 @@ describe("the list of sent requests", () => {
     const gone = await writeRequest("# Gone\n");
     await requests.send();
     rmSync(gone.uri.fsPath);
-    const restarted = new DesignRequests(state as never, () => p, launch);
+    const restarted = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
     restarted.dispose();
     expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(kept)]);
     focus(openDocument(kept.uri.fsPath));
-    const again = new DesignRequests(state as never, () => p, launch);
+    const again = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
     again.dispose();
     expect(lastContext()).toBe(false);
   });
@@ -396,6 +447,29 @@ describe("closing the tab of a request", () => {
     expect(existsSync(document.uri.fsPath)).toBe(true);
   });
 
+  for (const result of ["confirm", "clipboard"] as const) {
+    test(`chiudere volontariamente con consegna ${result} lascia il file mai inviato e recuperabile`, async () => {
+      outcome = result;
+      const document = await writeRequest("# Resi\n");
+      await document.save();
+      closeTabs(tabsShowing(document));
+      await settle();
+      expect(tabs).toEqual([]);
+      expect(state.get<string[]>(SENT_KEY, [])).toEqual([]);
+      expect(readFileSync(document.uri.fsPath, "utf8")).toBe(document.text);
+
+      const reopened = openDocument(document.uri.fsPath);
+      tabs.push(tabOf(reopened));
+      focus(reopened);
+      expect(lastContext()).toBe(true);
+      outcome = "sent";
+      await requests.send();
+      expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
+      expect(launches).toHaveLength(2);
+      expect(tabs).toEqual([]);
+    });
+  }
+
   test("an empty text on disk deletes the file without a word and sends nothing", async () => {
     const document = await writeRequest("typed but never saved");
     closeTabs(tabsShowing(document));
@@ -431,10 +505,7 @@ describe("closing the tab of a request", () => {
     const clean = await writeRequest("# Clean\n");
     await clean.save();
     const dirty = await writeRequest("# Dirty\n");
-    for (const document of [clean, dirty]) {
-      rmSync(document.uri.fsPath);
-      for (const fn of listeners.deleted) fn(document.uri);
-    }
+    for (const document of [clean, dirty]) deleteFile(document);
     await settle();
     expect(tabsShowing(clean)).toHaveLength(0);
     expect(tabsShowing(dirty)).toHaveLength(1);
@@ -444,14 +515,114 @@ describe("closing the tab of a request", () => {
     expect(existsSync(dirty.uri.fsPath)).toBe(false);
   });
 
+  for (const dirty of [false, true]) {
+    test(`deletion while the real chat launcher is preparing cancels delivery and keeps only dirty tabs (${dirty})`, async () => {
+      requests.dispose();
+      requests = new DesignRequests(state as never, tramaFiles as never, () => p);
+      let resume!: () => void;
+      let ready!: () => void;
+      const preparing = new Promise<void>((resolve) => { ready = resolve; });
+      const waiting = new Promise<void>((resolve) => { resume = resolve; });
+      const deliveries: string[] = [];
+      command = async (id) => {
+        if (id === "workbench.action.chat.newChat") {
+          ready();
+          await waiting;
+        } else deliveries.push(id);
+      };
+      try {
+        const document = await writeRequest("# Cancel before delivery\n");
+        const sending = requests.send();
+        await preparing;
+        if (dirty) type(document, "unsaved");
+        deleteFile(document);
+        resume();
+        await sending;
+        expect(deliveries).toEqual([]);
+        expect(state.get(SENT_KEY, [])).toEqual([]);
+        expect(existsSync(document.uri.fsPath)).toBe(false);
+        expect(tabsShowing(document)).toHaveLength(dirty ? 1 : 0);
+      } finally {
+        requests.dispose();
+        requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
+      }
+    });
+  }
+
+  test("deletion while asking for the terminal agent command prevents terminal creation and delivery", async () => {
+    requests.dispose();
+    requests = new DesignRequests(state as never, tramaFiles as never, () => p);
+    launcher = "terminal";
+    let resume!: (value: string) => void;
+    let ready!: () => void;
+    const preparing = new Promise<void>((resolve) => { ready = resolve; });
+    input = () => {
+      ready();
+      return new Promise<string>((resolve) => { resume = resolve; });
+    };
+    try {
+      const document = await writeRequest("# Cancel terminal launch\n");
+      const sending = requests.send();
+      await preparing;
+      deleteFile(document);
+      resume("echo {prompt}");
+      await sending;
+      expect(state.get(SENT_KEY, [])).toEqual([]);
+      expect(existsSync(document.uri.fsPath)).toBe(false);
+      expect(tabsShowing(document)).toEqual([]);
+    } finally {
+      requests.dispose();
+      requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
+    }
+  });
+
+  test("the hand-over consuming a sent request closes its clean tab and drops it from the sent list", async () => {
+    const document = await writeRequest("# Handed over\n");
+    await requests.send();
+    tabs.push(tabOf(openDocument(document.uri.fsPath)));
+    deleteFile(document);
+    await settle();
+    expect(tabsShowing(document)).toHaveLength(0);
+    expect(state.get(SENT_KEY, [])).toEqual([]);
+    expect(launches).toHaveLength(1);
+  });
+
+  for (const folder of ["requests", ".trama"]) {
+    test(`deleting the folder ${folder} consumes every request in it, as if each file had been deleted`, async () => {
+      const sent = await writeRequest("# Sent\n");
+      await requests.send();
+      tabs.push(tabOf(openDocument(sent.uri.fsPath)));
+      const clean = await writeRequest("# Clean\n");
+      await clean.save();
+      const dirty = await writeRequest("# Dirty\n");
+      const gone = folder === "requests" ? requestsDir(p) : p.dir;
+      const kept = folder === ".trama" ? join(dir, "kept") : undefined;
+      if (kept) cpSync(p.dir, kept, { recursive: true });
+      rmSync(gone, { recursive: true });
+      // The editor reports only the folder.
+      for (const fn of listeners.deleted) fn(fileUri(gone));
+      await settle();
+      expect(tabsShowing(sent)).toHaveLength(0);
+      expect(tabsShowing(clean)).toHaveLength(0);
+      expect(tabsShowing(dirty)).toHaveLength(1);
+      expect(state.get(SENT_KEY, [])).toEqual([]);
+      expect(launches).toHaveLength(1);
+      await sleep(SAVE_DELAY_MS + 100);
+      expect(dirty.saves).toBe(0);
+      if (kept) {
+        cpSync(kept, p.dir, { recursive: true });
+        rmSync(kept, { recursive: true });
+      }
+    });
+  }
+
   test("a deleted request kept open with unsaved changes is neither saved back nor sent again", async () => {
     const document = await writeRequest("# Consumed\n");
     await requests.send();
     // The developer reopens the sent request and edits it while its Proposal is handed over.
     tabs.push(tabOf(openDocument(document.uri.fsPath)));
     type(document, "more");
-    rmSync(document.uri.fsPath);
-    for (const fn of listeners.deleted) fn(document.uri);
+    deleteFile(document);
     type(document, " and more");
     await sleep(SAVE_DELAY_MS + 100);
     expect(existsSync(document.uri.fsPath)).toBe(false);
@@ -459,4 +630,26 @@ describe("closing the tab of a request", () => {
     await settle();
     expect(launches).toHaveLength(1);
   });
+
+  for (const sentBefore of [false, true]) {
+    test(`a deleted request saved back by the editor stays finished: no Send to agent, no sending (sent before: ${sentBefore})`, async () => {
+      const document = await writeRequest("# Finished\n");
+      if (sentBefore) {
+        await requests.send();
+        tabs.push(tabOf(openDocument(document.uri.fsPath)));
+      }
+      type(document, " unsaved");
+      deleteFile(document);
+      // The developer saves the tab kept open, which writes the file again.
+      await document.save();
+      focus(undefined);
+      focus(document);
+      expect(lastContext()).toBe(false);
+      await requests.send();
+      closeTabs(tabsShowing(document));
+      await settle();
+      expect(launches).toHaveLength(sentBefore ? 1 : 0);
+      expect(state.get(SENT_KEY, [])).toEqual([]);
+    });
+  }
 });

@@ -37,7 +37,8 @@ Il Merge Drift del giro è aperto. Va risolto: o si riconcilia, o si abbandona i
 
 ### Reconciling
 L'agente sistema i conflitti nel worktree di merge.
-- `terminal.COMMAND_ENDED` → Merging: solo se il Task di riconciliazione è in Done. Trama committa ciò che è rimasto, lasciando fuori il Merge Drift e quel Task, e riprova l'unione.
+- `terminal.COMMAND_ENDED` → Merging: solo se il Task di riconciliazione è in Done e nel worktree di merge non restano marcatori di conflitto. Trama committa ciò che è rimasto, lasciando fuori il Merge Drift e quel Task, e riprova l'unione.
+- `terminal.COMMAND_ENDED` → Conflict: il Task di riconciliazione è in Done, ma nel worktree di merge restano marcatori di conflitto. Non si committa nulla e l'unione non si riprova. Il Task di riconciliazione sparisce, il Merge Drift torna da decidere e il developer è avvisato che il giro ha ancora conflitti.
 - `terminal.COMMAND_ENDED` → Reconciling: il Task non è in Done. Il giro resta fermo e il developer è avvisato; l'unione non si riprova. Si può abbandonare il giro.
 - `developer.ABANDON_ROUND` → No round: come dal Conflict.
 - `workspace.WORKTREE_LOST` → Reconciling: come dal Conflict. L'agente continua, e l'unione che si riprova non include quella Proposal.

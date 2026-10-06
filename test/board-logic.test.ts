@@ -23,7 +23,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
 });
 const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, worktree: null, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, finished: null, blockedBy: [], file: "tasks/0012-refunds.md", worktree: null, ...over });
-const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], inWorktree: [], drifts: [], tasks: [], announcements: [], multiBranch: false, numbers: { proposal: {}, task: {}, drift: {} }, ...over });
+const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], inWorktree: [], worktreeProposals: [], drifts: [], tasks: [], announcements: [], multiBranch: false, numbers: { proposal: {}, task: {}, drift: {} }, ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
 
 test("a Proposal in a worktree is its own group and is not a card to decide; Remove from round is only before the merge", () => {
@@ -346,6 +346,30 @@ describe("the Done column", () => {
   test("Last 7 days starts at midnight six local days ago", () => {
     const edge = buildBoard(snapshot({ tasks: [done("0001", at(30 - 30, 0)), done("0002", at(29 - 30, 23, 59))] }))[3]?.cards ?? [];
     expect(doneGroups(edge, "week", now, "en-US").map((g) => g.heading)).toEqual(["September 30, 2026 · 1"]);
+  });
+
+  test("i periodi limitati includono il primo istante ed escludono la mezzanotte successiva, anche al cambio dell'ora", () => {
+    for (const date of [now, new Date(2026, 2, 29, 15), new Date(2026, 9, 25, 15)]) {
+      for (const [period, days] of [["today", 1], ["week", 7], ["month", 30]] as const) {
+        const from = new Date(date.getFullYear(), date.getMonth(), date.getDate() - days + 1).getTime();
+        const until = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
+        const edge = buildBoard(snapshot({ tasks: [
+          done("start001", new Date(from).toISOString()),
+          done("before01", new Date(from - 1).toISOString()),
+          done("last0001", new Date(until - 1).toISOString()),
+          done("nextday1", new Date(until).toISOString()),
+          done("future01", new Date(until).toISOString(), "design01"),
+          done("future02", new Date(until + 86_400_000).toISOString(), "design01"),
+          done("nodate01", null),
+        ] }))[3]?.cards ?? [];
+        const groups = doneGroups(edge, period, date, "en-US");
+        expect(groups.flatMap((g) => g.cards.map((c) => c.key))).toEqual(["task:last0001", "task:start001"]);
+        expect(groups.reduce((count, g) => count + g.cards.length, 0)).toBe(2);
+        expect(doneGroups(edge, "all", date, "en-US").flatMap((g) => g.cards.map((c) => c.key))).toEqual([
+          "design:design01", "task:nextday1", "task:last0001", "task:start001", "task:before01", "task:nodate01",
+        ]);
+      }
+    }
   });
 
   test("a period with no cards leaves no group and the column says so", () => {

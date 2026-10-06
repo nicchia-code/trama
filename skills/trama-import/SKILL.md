@@ -31,6 +31,13 @@ Every live Proposal has a temporary **short number** (`P3`) besides its **perman
 - Name Proposals to the developer by short number and title, for example "Proposal P3 – Import: title", also in the final report. A closed Proposal has no number: use its permanent identity.
 - In every command you run and every file you write (`--requires`, the Proposal bodies, the doubts) use **only the permanent identity**, taken from `--json` (field `id`; the number is the field `number`) or from the file or folder name. **Never write a short number in a file**: it changes from one working copy to another.
 
+## Language
+
+When the instruction asks you to write in a language, only the prose you produce for Trama goes in that language: the bodies, descriptions and introductions of Proposals, Model files, Requirements, Tasks and Drifts, the text of questions and their options, and your replies in the conversation. Without a language in the instruction, nothing here changes.
+
+- **Always in English**, whatever the language: code and its comments, commit messages and the project's own documentation; the names and titles of Model elements, Requirements, Proposals, Tasks and Drifts; IDs, Event names, the section titles Trama requires (for example "General", "What happens", "What should happen", "Where in the code") and the `(initial)` and `(final)` markers.
+- **A language changes nothing already written.** When you edit a file written in another language, keep its existing text and write only the new or rewritten text in the chosen language; never translate the whole file.
+
 ## Steps
 
 1. **Read what is modelled.** `trama system`, `trama requirements`, and `trama feature <id>` for each existing Feature. Note what is already covered.

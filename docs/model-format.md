@@ -332,6 +332,7 @@ touched: 2026-01-01T12:03:10.000Z
 - The file holds only the developer's Markdown, exactly as written: no front matter, and it may have no title. Its title, used only for the ghost of the terminal launcher, is the first level-one `#` heading outside code blocks, or else the first non-empty line.
 - Which requests were sent is not in the file nor under `.trama/`: the extension keeps the sent IDs in its workspace state, which survives restarts, and drops an ID whose file is gone. A file whose ID is not in that list is still being written. A request is sent at most once; closing a request never sent with an empty text deletes it.
 - The successful hand-over of the first Proposal bound to it (`request` in `proposal.md`) deletes it; a file deleted by hand is simply gone. Either way the extension closes its tab when it has no unsaved changes.
+- Cancellare la richiesta prima della consegna, anche mentre il launcher prepara la chat o attende il comando dell'agente, annulla l'invio: non parte nessuna istruzione e l'ID non entra nello stato delle richieste inviate.
 - The folder holds a `.gitignore` that ignores everything in it, written with the first request, so requests are never versioned.
 
 ## Requirements

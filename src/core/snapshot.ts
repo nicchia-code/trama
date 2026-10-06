@@ -2,9 +2,9 @@ import type { CardNumbers } from "./card-names";
 import { type Announcement, type AnnouncementKind, listAnnouncements } from "./announcements";
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
-import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type ProposalKind } from "./proposals";
+import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type Proposal, type ProposalKind } from "./proposals";
 import { inWorktreeProposals, type InWorktreeProposal, mergeWorktreeOpen, openProposalsAwaitingDecision } from "./worktree-round";
-import { mergeDriftDocument } from "./worktree-merge";
+import { mergeDriftDocument, reconciliationTasks } from "./worktree-merge";
 import { appliesUnder, type RequiredProposal } from "./required";
 import { type Area, areaIdOf, buildProject, type Fragment, parseRequirementRef, type ProjectModel } from "./requirements";
 import { multiBranchOn, readMultiBranch } from "./multi-branch";
@@ -140,7 +140,7 @@ export interface TaskView {
   blockedBy: Blocker[];
   /** Path relative to `.trama/`, for opening the file. */
   file: string;
-  /** Proposal whose worktree this Task lives in, or null when it lives in the open folder. */
+  /** Proposal whose worktree this Task lives in, `merge` for the round's reconciliation Task, or null when it lives in the open folder. */
   worktree: string | null;
 }
 
@@ -160,6 +160,11 @@ export interface Snapshot extends ModelView {
   proposals: ProposalView[];
   /** Proposals that have a worktree. They are a group of their own, not awaiting a decision. */
   inWorktree: InWorktreeProposal[];
+  /**
+   * Proposals attached to an open Drift of a round's worktree, read in that worktree and drawn over its Model. They
+   * can be shown but not decided: they are accepted only from their Drift.
+   */
+  worktreeProposals: ProposalView[];
   drifts: DriftView[];
   tasks: TaskView[];
   /** The announcements that still exist, in the order they were announced. */
@@ -232,6 +237,60 @@ const modelView = (project: ProjectModel): ModelView => ({
   areas: project.areas.map((a) => areaView(a, a, a)),
 });
 
+/**
+ * A Proposal as the Diagram and the Requirements tab draw it, read in `p` whose Model is `project`. `overHome` draws
+ * it over that Model even when it requires nothing, for a Proposal whose Model is not the open folder's.
+ */
+function proposalView(p: Project, project: ProjectModel, proposal: Proposal, overHome: boolean): ProposalView {
+  const afterProject = buildProject(applied(p, proposal));
+  const after = afterProject.model;
+  const h = health(p, proposal);
+  const pending = h.requires.some((r) => appliesUnder(r.status));
+  const baseProject = pending ? buildProject(baseFiles(p, proposal)) : project;
+  const before = baseProject.model;
+  const touched = changes(p, proposal);
+  const machineIds = new Set<string>();
+  const actorIds = new Set<string>();
+  const areaIds = new Set<string>();
+  for (const c of touched) {
+    const areaId = areaIdOf(c.path);
+    if (areaId !== null) {
+      areaIds.add(areaId);
+      continue;
+    }
+    const parts = c.path.split("/");
+    const id = (parts.at(-1) as string).replace(/\.md$/, "");
+    if (parts.length === 2 && parts[0] === "actors") actorIds.add(id);
+    else if (parts.length === 2 && id !== "feature") machineIds.add(id);
+  }
+  const areaOf = (pm: ProjectModel, id: string) => pm.areas.find((a) => a.id === id);
+  return {
+    id: proposal.id,
+    title: proposal.title,
+    body: stripTitle(proposal.body),
+    kind: proposal.data.kind,
+    requires: h.requires,
+    base: pending || overHome ? modelView(baseProject) : null,
+    stale: h.stale,
+    unbased: h.unbased,
+    errors: afterProject.diagnostics,
+    changes: touched,
+    // A file the Model rejects (bad name, ID taken by a Feature or Actor) is a Machine on neither side; its errors are listed instead.
+    machines: [...machineIds].sort().flatMap((id) => {
+      const was = before.machines.get(id);
+      const is = after.machines.get(id);
+      return was || is ? [mergeMachine(was, is)] : [];
+    }),
+    actors: [...actorIds].sort().map((id) => actorChange(id, before.actors.get(id), after.actors.get(id))),
+    areas: [...areaIds].sort().flatMap((id) => {
+      const was = areaOf(baseProject, id);
+      const is = areaOf(afterProject, id);
+      const shown = is ?? was;
+      return shown ? [areaView(shown, was, is)] : [];
+    }),
+  };
+}
+
 /** Everything the extension shows, as plain JSON. Malformed Task or Drift files throw, naming the file. */
 export function buildSnapshot(p: Project): Snapshot {
   const numbers = syncShortNumbers(p).all();
@@ -242,57 +301,21 @@ export function buildSnapshot(p: Project): Snapshot {
   const blocked = computeBlocked(project, tasks, drifts);
 
   const allProposals = listProposals(p);
-  const proposals = openProposalsAwaitingDecision(p, allProposals).map((proposal): ProposalView => {
-      const afterProject = buildProject(applied(p, proposal));
-      const after = afterProject.model;
-      const h = health(p, proposal);
-      const pending = h.requires.some((r) => appliesUnder(r.status));
-      const baseProject = pending ? buildProject(baseFiles(p, proposal)) : project;
-      const before = baseProject.model;
-      const touched = changes(p, proposal);
-      const machineIds = new Set<string>();
-      const actorIds = new Set<string>();
-      const areaIds = new Set<string>();
-      for (const c of touched) {
-        const areaId = areaIdOf(c.path);
-        if (areaId !== null) {
-          areaIds.add(areaId);
-          continue;
-        }
-        const parts = c.path.split("/");
-        const id = (parts.at(-1) as string).replace(/\.md$/, "");
-        if (parts.length === 2 && parts[0] === "actors") actorIds.add(id);
-        else if (parts.length === 2 && id !== "feature") machineIds.add(id);
-      }
-      const areaOf = (pm: ProjectModel, id: string) => pm.areas.find((a) => a.id === id);
-      return {
-        id: proposal.id,
-        title: proposal.title,
-        body: stripTitle(proposal.body),
-        kind: proposal.data.kind,
-        requires: h.requires,
-        base: pending ? modelView(baseProject) : null,
-        stale: h.stale,
-        unbased: h.unbased,
-        errors: afterProject.diagnostics,
-        changes: touched,
-        // A file the Model rejects (bad name, ID taken by a Feature or Actor) is a Machine on neither side; its errors are listed instead.
-        machines: [...machineIds].sort().flatMap((id) => {
-          const was = before.machines.get(id);
-          const is = after.machines.get(id);
-          return was || is ? [mergeMachine(was, is)] : [];
-        }),
-        actors: [...actorIds].sort().map((id) => actorChange(id, before.actors.get(id), after.actors.get(id))),
-        areas: [...areaIds].sort().flatMap((id) => {
-          const was = areaOf(baseProject, id);
-          const is = areaOf(afterProject, id);
-          const shown = is ?? was;
-          return shown ? [areaView(shown, was, is)] : [];
-        }),
-      };
-    });
+  const proposals = openProposalsAwaitingDecision(p, allProposals).map((proposal) => proposalView(p, project, proposal, false));
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
   const folders = roundWork(p);
+  // A Drift born in a worktree may carry a Proposal that exists only there: it is drawn over that worktree's Model.
+  const shown = new Set(proposals.map((x) => x.id));
+  const worktreeProposals = folders.flatMap(({ project: home, drifts: born }) => {
+    const attached = new Set(born.filter((d) => d.data.status === "open" && d.data.proposal !== null).map((d) => d.data.proposal as string));
+    const found = listProposals(home).filter((x) => attached.has(x.id) && x.data.status === "open" && !shown.has(x.id));
+    if (found.length === 0) return [];
+    const homeProject = buildProject(readTrackedFiles(home));
+    return found.map((x) => {
+      shown.add(x.id);
+      return proposalView(home, homeProject, x, true);
+    });
+  });
   const merging = mergeWorktreeOpen(p.root);
   const viewDrift = (home: Project, d: Drift, worktree: string | null): DriftView => ({
     id: d.id,
@@ -334,6 +357,8 @@ export function buildSnapshot(p: Project): Snapshot {
     const why = computeBlocked(buildProject(readTrackedFiles(home)), listTasks(home), listDrifts(home));
     return born.map((task) => ({ task, why, worktree: proposal }));
   });
+  // The reconciliation Task is technical and linked to nothing, so nothing blocks it.
+  for (const task of reconciliationTasks(p.root)) awayTasks.push({ task, why: new Map(), worktree: "merge" });
   const orderedTasks = byCreation(
     [...tasks.map((task) => ({ task, why: blocked, worktree: null as string | null })), ...awayTasks],
     (item) => ({ id: item.task.id, created: item.task.data.created }),
@@ -343,12 +368,17 @@ export function buildSnapshot(p: Project): Snapshot {
     diagnostics: project.diagnostics,
     proposals,
     inWorktree: inWorktreeProposals(p),
+    worktreeProposals,
     drifts: [
       ...byCreation([...openDrifts, ...awayDrifts], (item) => ({ id: item.drift.id, created: item.drift.data.created })).map((item) => viewDrift(item.home, item.drift, item.worktree)),
       ...mergeDriftViews(p),
     ],
     tasks: orderedTasks.map((item) => viewTask(item.task, item.why, item.worktree)),
-    announcements: listAnnouncements(p).map((a) => announcementView(a, a.proposal === null ? undefined : proposalById.get(a.proposal)?.title)),
+    // The agents in the round's worktrees announce in their own copy; their ghosts belong on this Board too.
+    announcements: [{ home: p, titles: proposalById }, ...folders.map(({ project: home }) => ({ home, titles: new Map(listProposals(home).map((x) => [x.id, x])) }))]
+      .flatMap(({ home, titles }) => listAnnouncements(home).map((a) => ({ a, title: a.proposal === null ? undefined : titles.get(a.proposal)?.title })))
+      .sort((x, y) => x.a.created.localeCompare(y.a.created) || x.a.id.localeCompare(y.a.id))
+      .map(({ a, title }) => announcementView(a, title)),
     multiBranch: multiBranchOn(readMultiBranch(p)),
     numbers,
   };

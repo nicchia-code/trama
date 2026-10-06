@@ -200,19 +200,21 @@ export function announcementNote(p: Project, id: string | undefined, kind: Annou
 }
 
 /**
- * A Draft was started: it is bound to the announcement the agent named; failing that to the oldest announcement of a
- * design request still Preparing; failing that it makes an announcement of its own, already Writing.
+ * A Draft is bound to the usable announcement the agent named, or left without a ghost when that ID is unusable.
+ * Only without a named ID does it take the oldest Preparing design request or make its own Writing announcement.
  */
-export function bindDraft(p: Project, proposal: { id: string; title: string }, announcementId?: string, origin: AgentOrigin = {}, now = new Date()): Announcement {
+export function bindDraft(p: Project, proposal: { id: string; title: string }, announcementId?: string, origin: AgentOrigin = {}, now = new Date()): Announcement | null {
   markActivity(p, now);
   const all = listAnnouncements(p);
-  const named = announcementId ? all.find((a) => a.id === announcementId && a.kind === "proposal" && a.proposal === null) : undefined;
-  const target = named ?? all.find((a) => a.kind === "proposal" && a.source === "request" && a.proposal === null);
+  const target = announcementId !== undefined
+    ? all.find((a) => a.id === announcementId && a.kind === "proposal" && a.proposal === null)
+    : all.find((a) => a.kind === "proposal" && a.source === "request" && a.proposal === null);
   if (target) {
-    const bound = { ...target, proposal: proposal.id, touched: now.toISOString() };
+    const bound = { ...target, title: proposal.title, proposal: proposal.id, touched: now.toISOString() };
     write(p, bound);
     return bound;
   }
+  if (announcementId !== undefined) return null;
   return announce(p, { kind: "proposal", title: proposal.title, proposal: proposal.id, ...origin }, now);
 }
 
@@ -248,8 +250,9 @@ export function markDraftActivity(p: Project, proposalId: string) {
 
 /**
  * Whether the agent has done nothing about its announced cards for the quiet period. The count starts at the latest
- * activity, or at `resumedAt` if later: a question round was open until then and does not count. No announcement
- * waiting means nothing to withdraw.
+ * activity recorded in the announcements, or at `resumedAt` if later: activity the announcements do not record (a
+ * file of an announced Draft changed) or the close of a question round, which does not count. No announcement waiting
+ * means nothing to withdraw.
  */
 export function isQuiet(announcements: readonly Announcement[], now: number, resumedAt = 0): boolean {
   if (announcements.length === 0) return false;

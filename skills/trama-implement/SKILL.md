@@ -29,6 +29,13 @@ Every live Proposal, Task and Drift has a temporary **short number** (`P3`, `T3`
 - Name cards to the developer by short number and title, for example "Task T3 – title" or "Drift D2 – title", also in the final report. A closed card (for example a Task in Done) has no number: use its permanent identity.
 - In every command you run and every file you write (`trama task move`, `--task`, `--proposal`, the body of a Proposal) use **only the permanent identity**, taken from `--json` (field `id`; the number is the field `number`) or from the file name. **Never write a short number in a file**: it changes from one working copy to another.
 
+## Language
+
+When the instruction asks you to write in a language, only the prose you produce for Trama goes in that language: the bodies, descriptions and introductions of Proposals, Model files, Requirements, Tasks and Drifts, the text of questions and their options, and your replies in the conversation. Without a language in the instruction, nothing here changes.
+
+- **Always in English**, whatever the language: code and its comments, commit messages and the project's own documentation; the names and titles of Model elements, Requirements, Proposals, Tasks and Drifts; IDs, Event names, the section titles Trama requires (for example "General", "What happens", "What should happen", "Where in the code") and the `(initial)` and `(final)` markers.
+- **A language changes nothing already written.** When you edit a file written in another language, keep its existing text and write only the new or rewritten text in the chosen language; never translate the whole file.
+
 ## Steps
 
 1. **Pick the Task.** Asked for one named Task, use the ID you were given, and do steps 2 to 5 for it. Asked for several Tasks, take them in groups from `trama task next --batch`, with `--proposal <id>` when asked for the Tasks of a design. It prints one Task per line, short number and title (with `--json`, the list `batch`, each with `id` and `number`): one to four runnable Tasks that do not concern the same thing, the first being the next runnable Task. It skips the blocked Tasks, moves nothing, and recomputes the answer each time, so a Task that waited for the Task fixing its Drift comes back, after it, once that Task is Done. When its first line says no Task is runnable, the run is over: go to the final check (step 6).

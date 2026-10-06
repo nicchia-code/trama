@@ -4,7 +4,7 @@ import type { NavigateOptions } from "../../protocol";
 import { renderMarkdown } from "../markdown";
 import type { MountView } from "../types";
 import { createMultiBranchSwitch } from "../multi-branch-switch";
-import { areasWith, parseTarget, sectionMatches, visibleSections } from "./logic";
+import { areasWith, parseTarget, sectionMatches, viewableProposals, visibleSections } from "./logic";
 import css from "./requirements.css" with { type: "text" };
 
 const CHANGE_LABEL: Record<SectionView["change"], string> = { added: "added", removed: "removed", changed: "changed", same: "" };
@@ -66,7 +66,8 @@ export const mountRequirements: MountView = (root, context) => {
   function renderToolbar() {
     if (!snapshot) return;
     select.replaceChildren(new Option("None", ""));
-    for (const p of snapshot.proposals.filter((x) => x.areas.length > 0)) select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} ${p.title}`, p.id));
+    for (const p of viewableProposals(snapshot).filter((x) => x.areas.length > 0))
+      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} ${p.title}${snapshot.worktreeProposals.includes(p) ? " (worktree)" : ""}`, p.id));
     select.value = proposalId ?? "";
     select.disabled = select.options.length === 1;
     filterBox.replaceChildren();
@@ -120,7 +121,7 @@ export const mountRequirements: MountView = (root, context) => {
     if (AREA_LABEL[area.change]) head.append(el("span", `rq-badge ${area.change}`, AREA_LABEL[area.change]));
     head.append(el("span", "rq-spacer"), button("Open file", "trama-btn", `Open .trama/${area.file}`, () => context.post({ type: "openFile", path: area.file })));
     card.append(head);
-    if (area.description) card.append(el("p", "rq-when", area.description));
+    if (area.description) card.append(markdown(area.description, context.openLink, "rq-text rq-when"));
     if (area.fragments.length === 0) card.append(el("p", "rq-muted", "No fragments."));
     if (area.intro) card.append(markdown(area.intro, context.openLink, "rq-text"));
     for (const f of fragments) card.append(fragmentNode(area, f.fragment, f.sections));
@@ -129,10 +130,11 @@ export const mountRequirements: MountView = (root, context) => {
 
   function render() {
     if (!snapshot) return;
-    if (proposalId && !snapshot.proposals.some((p) => p.id === proposalId)) proposalId = null;
+    const proposal = viewableProposals(snapshot).find((p) => p.id === proposalId);
+    if (!proposal) proposalId = null;
     renderToolbar();
     multiBranch.setOn(snapshot.multiBranch);
-    const areas = areasWith(snapshot, snapshot.proposals.find((p) => p.id === proposalId));
+    const areas = areasWith(snapshot, proposal);
     const cards = areas.map(areaNode).filter((n): n is HTMLElement => n !== null);
     if (areas.length === 0) list.replaceChildren(el("p", "rq-muted", "No Requirement Areas in .trama/requirements/. Run “trama skills update” to create the starting ones."));
     else if (cards.length === 0) list.replaceChildren(el("p", "rq-muted", `No Requirements for ${target}.`));

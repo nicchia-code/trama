@@ -33,7 +33,7 @@ import type { Model } from "../core/types";
 import type { Warning } from "../core/graph";
 import { rewriteNumberedCards } from "../core/rewrite-ids";
 import { type Drift, getDrift, getTask, moveTask, newDrift, newTask, replaceDriftProposal, resolveDrift, takeBackTask } from "../core/work";
-import { withdrawFromRound } from "../core/worktree-round";
+import { withdrawFromRound, worktreeEarlyRefusal } from "../core/worktree-round";
 import { approvalBySwitch, readMultiBranch } from "../core/multi-branch";
 import { approveWaitMs, EDITOR_UNAVAILABLE, waitApproveResult, writeApprovedNotice, writeApproveRequest } from "../core/approve-request";
 import { approvedScope } from "../core/scope";
@@ -71,7 +71,7 @@ export interface Context {
   byAgent: boolean;
   /** The agent terminal (`TRAMA_TERMINAL`) or the chat (`CURSOR_AGENT`) the command runs in, when either is known. */
   origin: AgentOrigin;
-  project(): Project;
+  project(assignNumbers?: boolean): Project;
 }
 
 export interface Command {
@@ -121,11 +121,11 @@ export function makeContext(cwd: string, rootOption?: string, byAgent = false, o
     rootOption,
     byAgent,
     origin,
-    project() {
+    project(assignNumbers = true) {
       const project = rootOption === undefined ? findProject(cwd) : projectAt(resolve(cwd, rootOption));
       if (rootOption !== undefined && !existsSync(project.dir)) throw new TramaError(`No ${TRAMA_DIR}/ in ${project.root}. Run "trama init".`);
       // A command is a reading of the working copy: cards it has not seen yet take their short number before it acts.
-      if (!numbered) {
+      if (assignNumbers && !numbered) {
         numbered = true;
         syncShortNumbers(project);
       }
@@ -194,8 +194,10 @@ export const COMMANDS: Command[] = [
     summary: "Give every numbered Proposal, Task and Drift its own identity, keeping number order. Refused while a worktree round is open, when two cards of one kind share a number, or when a new identity would collide. Does nothing when none are numbered",
     developerOnly: true,
     run(ctx) {
-      const rewritten = rewriteNumberedCards(ctx.project());
+      const project = ctx.project(false);
+      const rewritten = rewriteNumberedCards(project);
       if (rewritten.length === 0) return text("No numbered Proposal, Task or Drift to rewrite.");
+      syncShortNumbers(project);
       const lines = rewritten.map((card) => `- ${card.kind} ${card.from} → ${card.to}`);
       return text(`Rewrote ${rewritten.length} numbered ${rewritten.length === 1 ? "card" : "cards"}.\n${lines.join("\n")}`, { rewritten });
     },
@@ -303,6 +305,8 @@ export const COMMANDS: Command[] = [
         const line = `Approved Proposal ${numbersOf(ctx).name("proposal", approved)}`;
         return text(decision.notice ? `${decision.notice}\n${line}` : line, { id: approved, number: numbersOf(ctx).label("proposal", approved), status: "approved", ...(decision.notice ? { notice: decision.notice } : {}) });
       }
+      const early = worktreeEarlyRefusal(project, id);
+      if (early) throw new TramaError(early);
       const request = writeApproveRequest(project, id, skillsDirs);
       const result = waitApproveResult(project, request.nonce, approveWaitMs());
       if (!result) throw new TramaError(EDITOR_UNAVAILABLE);

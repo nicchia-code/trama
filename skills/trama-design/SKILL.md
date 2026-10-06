@@ -29,6 +29,13 @@ Every live Proposal, Task and Drift has a temporary **short number** (`P3`, `T3`
 - Name cards to the developer by short number and title, for example "Proposal P3 – title". A closed card has no number: use its permanent identity.
 - In every command you run and every file you write (the Proposal body, `--requires`, `--request`, reasons, references) use **only the permanent identity**, taken from `--json` (field `id`; the number is the field `number`) or from the file or folder name. **Never write a short number in a file**: it changes from one working copy to another.
 
+## Language
+
+When the instruction asks you to write in a language, only the prose you produce for Trama goes in that language: the bodies, descriptions and introductions of Proposals, Model files, Requirements, Tasks and Drifts, the text of questions and their options, and your replies in the conversation. Without a language in the instruction, nothing here changes.
+
+- **Always in English**, whatever the language: code and its comments, commit messages and the project's own documentation; the names and titles of Model elements, Requirements, Proposals, Tasks and Drifts; IDs, Event names, the section titles Trama requires (for example "General", "What happens", "What should happen", "Where in the code") and the `(initial)` and `(final)` markers.
+- **A language changes nothing already written.** When you edit a file written in another language, keep its existing text and write only the new or rewritten text in the chosen language; never translate the whole file.
+
 ## Steps
 
 1. **Explore before asking.** When the instruction names a written design request, read it first (see "Written design requests" below). Then `trama system`, then `trama search <word>` for what already exists (it searches the Requirements too), then `trama feature <id>`, `trama machine <id>`, `trama state <machine/State>`, `trama event <owner.EVENT>`, and `trama requirements` for the Areas. Reuse existing Machines, Actors and Events instead of duplicating them. Add `--json` if you need structured data. Facts are your job: never ask the developer anything the Model, the Requirements or the code can tell you.

@@ -136,12 +136,6 @@
           "default": "",
           "scope": "application",
           "markdownDescription": "Command of the worktree terminals, only in your user settings. `{prompt}` is replaced by the shell-quoted prompt; if it is missing, the prompt is appended. Empty prevents turning the multi-branch switch on, and blocks accepting a Proposal while the switch is on."
-        },
-        "trama.ntfy": {
-          "type": "string",
-          "default": "",
-          "scope": "application",
-          "markdownDescription": "Name (for example `my-trama-alerts`) or full URL of an [ntfy](https://ntfy.sh) topic. When set, Trama sends a notification when an agent question goes unanswered for 10 seconds and when the agent command ends (in Cursor's chat, when the agent ends its turn) without another instruction starting within 10 seconds. It only covers agents that Trama starts in a terminal and Trama's conversations in Cursor's chat, not the chat of other editors or an agent you start yourself. Empty (the default) sends nothing. It only applies in your user settings. On the public service `https://ntfy.sh` anyone who knows the topic can read the notifications, which contain questions and Board counts, so use a long, hard-to-guess topic or your own server."
         }
       }
     }

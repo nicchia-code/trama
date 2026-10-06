@@ -6,7 +6,7 @@ import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } fr
 import type { Column } from "../../protocol";
 import { designColumn, placeTasks } from "../../../../src/core/design";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
-import { proposalTouches } from "../requirements/logic";
+import { proposalTouches, viewableProposals } from "../requirements/logic";
 import { type CardName, cardNameOf, type CardNumbers, namerOf, noNumbers } from "../../../../src/core/card-names";
 
 export type ColumnId = "decide" | Column;
@@ -115,6 +115,8 @@ export interface DriftCard {
   proposal: string | null;
   /** How the attached Proposal is written. */
   proposalName: string | null;
+  /** Which views can show the attached Proposal; null when there is none or the panel cannot show it. */
+  proposalTouches: { model: boolean; requirements: boolean } | null;
   /** Proposal whose worktree this Drift lives in, or null when it lives in the open folder. */
   worktree: string | null;
   /** The Drift as the snapshot carries it: the card shows its two sides and its choices (see `driftComparison`). */
@@ -146,7 +148,7 @@ export interface TaskCard {
   /** Path relative to `.trama/`. */
   file: string;
   column: Column;
-  /** Proposal whose worktree this Task lives in, or null when it lives in the open folder. */
+  /** Proposal whose worktree this Task lives in, `merge` for the round's reconciliation Task, or null when it lives in the open folder. */
   worktree: string | null;
   /** When the Task arrived in Done (UTC ISO 8601); null outside Done or when it was not kept. */
   finished: string | null;
@@ -253,7 +255,7 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers):
   };
 }
 
-export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers): DriftCard {
+export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers, attached?: ProposalView): DriftCard {
   const name = d.merge === true ? null : cardNameOf(numbers, "drift", d.id);
   return {
     kind: "drift",
@@ -265,6 +267,7 @@ export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers): Drift
     refs: d.refs,
     proposal: d.proposal,
     proposalName: d.proposal === null ? null : namerOf(numbers)("proposal", d.proposal),
+    proposalTouches: attached ? proposalTouches(attached) : null,
     worktree: d.worktree,
     drift: d,
   };
@@ -313,7 +316,10 @@ export function designCard(proposal: string, title: string | null, tasks: TaskCa
 export function buildBoard(snapshot: Snapshot): BoardColumn[] {
   const numbers = snapshot.numbers ?? noNumbers;
   const cards: Record<ColumnId, Card[]> = {
-    decide: [...snapshot.proposals.map((p) => proposalCard(p, numbers)), ...snapshot.drifts.map((d) => driftCard(d, numbers))],
+    decide: [
+      ...snapshot.proposals.map((p) => proposalCard(p, numbers)),
+      ...snapshot.drifts.map((d) => driftCard(d, numbers, viewableProposals(snapshot).find((p) => p.id === d.proposal))),
+    ],
     todo: [],
     doing: [],
     done: [],
@@ -373,12 +379,13 @@ const dayStart = (d: Date, back = 0) => new Date(d.getFullYear(), d.getMonth(), 
 export function doneGroups(cards: Card[], period: DonePeriod, now: Date = new Date(), locale?: string): DoneGroup[] {
   const days = PERIOD_DAYS[period];
   const from = days === null ? -Infinity : dayStart(now, days - 1);
+  const until = days === null ? Infinity : dayStart(now, -1);
   const dated: { card: Card; index: number; time: number }[] = [];
   const undated: Card[] = [];
   cards.forEach((card, index) => {
     const time = finishedAt(card);
     if (time === null) undated.unshift(card);
-    else if (time >= from) dated.push({ card, index, time });
+    else if (time >= from && time < until) dated.push({ card, index, time });
   });
   dated.sort((a, b) => b.time - a.time || b.index - a.index);
   const today = dayStart(now);

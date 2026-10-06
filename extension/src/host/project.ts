@@ -10,9 +10,13 @@ import { bundledTrama, cursorHooksFile, isCursor } from "./cursor";
 
 const fileFolders = () => (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file");
 
-/** The first workspace folder that contains `.trama/`. */
-export function findProject(): Project | undefined {
-  const folder = fileFolders().find((f) => existsSync(join(f.uri.fsPath, TRAMA_DIR)));
+/** What every action other than initializing says in a workspace without `.trama/`. */
+export const NO_PROJECT_WARNING = 'Trama: no .trama/ in this workspace. Run "Trama: Initialize Project" first.';
+
+/** The project containing a file, or the first Trama workspace folder when no file is given. */
+export function findProject(uri?: vscode.Uri): Project | undefined {
+  const folders = uri ? [vscode.workspace.getWorkspaceFolder(uri)].filter((f): f is vscode.WorkspaceFolder => f !== undefined && f.uri.scheme === "file") : fileFolders();
+  const folder = folders.find((f) => existsSync(join(f.uri.fsPath, TRAMA_DIR)));
   return folder && projectAt(folder.uri.fsPath);
 }
 
@@ -75,7 +79,7 @@ export async function initializeProject(): Promise<Project | undefined> {
 export function updateSkills(project: Project): void {
   const skillsDir = configuredSkillsDir();
   const { out } = run(["--root", project.root, "skills", "update", "--skills-dir", skillsDir], project.root);
-  const shown = ["Deleted ", "Converted ", "Left ", "Requirement skills: ", "Switched "];
+  const shown = ["Deleted ", "Created ", "Converted ", "Left ", "Requirement skills: ", "Switched "];
   const report = out.split("\n").filter((line, i) => i === 0 || shown.some((start) => line.startsWith(start)));
   void vscode.window.showInformationMessage(`Trama: ${report.join(" ")}`);
   installCursorHooks();

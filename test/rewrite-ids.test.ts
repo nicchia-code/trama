@@ -102,6 +102,13 @@ test("does nothing when no card is numbered, and refuses before writing when num
   writeCard("tasks", "abcd1111-free.md", "column: todo\ntechnical: true\nrefs: []\ncreated: 2020-01-01T00:00:00.000Z", "# Free\n");
   expect(cli("ids", "rewrite").out).toBe("No numbered Proposal, Task or Drift to rewrite.");
   expect(readFileSync(join(p.dir, "tasks", "abcd1111-free.md"), "utf8")).toContain("created: 2020-01-01T00:00:00.000Z");
+  expect(existsSync(join(p.dir, "short-numbers"))).toBe(false);
+  const assigned = join(p.dir, "short-numbers", "assigned");
+  const registry = "task abcd1111 17\n";
+  mkdirSync(join(assigned, ".."));
+  writeFileSync(assigned, registry);
+  expect(cli("ids", "rewrite").out).toBe("No numbered Proposal, Task or Drift to rewrite.");
+  expect(readFileSync(assigned, "utf8")).toBe(registry);
 
   writeCard("tasks", "0012-one.md", "column: todo\ntechnical: true\nrefs: []", "# One\n");
   writeCard("tasks", "00012-two.md", "column: todo\ntechnical: true\nrefs: []", "# Two\n");
@@ -109,6 +116,8 @@ test("does nothing when no card is numbered, and refuses before writing when num
   expect(existsSync(join(p.dir, "tasks", "0012-one.md"))).toBe(true);
   expect(existsSync(join(p.dir, "tasks", "00012-two.md"))).toBe(true);
   expect(readFileSync(join(p.dir, "tasks", "0012-one.md"), "utf8")).not.toContain("created:");
+  expect(readFileSync(assigned, "utf8")).toBe(registry);
+  expect(existsSync(join(p.dir, "short-numbers", ".gitignore"))).toBe(false);
 
   rmSync(join(p.dir, "tasks", "00012-two.md"));
   const taken = rewrittenId("task", "0012");
@@ -116,6 +125,8 @@ test("does nothing when no card is numbered, and refuses before writing when num
   expect(() => cli("ids", "rewrite")).toThrow(new RegExp(`Task 0012 would be ${taken}`));
   expect(existsSync(join(p.dir, "tasks", "0012-one.md"))).toBe(true);
   expect(readFileSync(join(p.dir, "tasks", `${taken}-taken.md`), "utf8")).toBe("---\ncolumn: todo\ntechnical: true\nrefs: []\ncreated: 2020-01-01T00:00:00.000Z\n---\n# Taken\n");
+  expect(readFileSync(assigned, "utf8")).toBe(registry);
+  expect(existsSync(join(p.dir, "short-numbers", ".gitignore"))).toBe(false);
 });
 
 test("an agent cannot run it, and an open worktree round is left untouched", () => {
@@ -142,6 +153,7 @@ test("an agent cannot run it, and an open worktree round is left untouched", () 
   expect(() => cli("ids", "rewrite")).toThrow(/worktree round is open/);
   expect(existsSync(join(p.dir, "tasks", "0007-wait.md"))).toBe(true);
   expect(readFileSync(join(p.dir, "tasks", "0007-wait.md"), "utf8")).not.toContain("created:");
+  expect(existsSync(join(p.dir, "short-numbers"))).toBe(false);
   git(["worktree", "remove", "--force", join(home, "abcd1234")]);
   git(["branch", "-D", "trama/abcd1234"]);
   expect(cli("ids", "rewrite").exit).toBe(0);

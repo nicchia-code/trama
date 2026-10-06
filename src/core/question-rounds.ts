@@ -3,8 +3,6 @@ import { parseQuestionRequest, questionAborted, QuestionInterruptedError, unavai
 export type CompletedQuestionRound = Extract<QuestionResult, { status: "answered" }>;
 export interface PresentationContext extends QuestionContext {
   signal: AbortSignal;
-  /** Told by the presenter each time a question is in front of the developer, with its position (from 0) in the round. */
-  onQuestion?: (index: number) => void;
 }
 export type QuestionPresenter = (request: QuestionRequest, context: PresentationContext) => Promise<CompletedQuestionRound>;
 

@@ -99,6 +99,7 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
   let pendingText: string | null = null;
   const openDetails = new Set<number>();
   let wasConfirming = false;
+  let wasMinimized = false;
 
   const flushText = () => {
     clearTimeout(textTimer);
@@ -114,7 +115,9 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
   }
 
   // Esc does nothing while the overlay is open; focus stays inside it; digits choose options outside the text area.
-  overlay.addEventListener("keydown", (e) => {
+  // Listening on the document catches keys also when a click on the backdrop left the focus on the page.
+  document.addEventListener("keydown", (e) => {
+    if (overlay.hidden) return;
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
@@ -131,7 +134,12 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
     if (n === null) return;
     e.preventDefault();
     act({ type: "toggleOption", option: n });
-  });
+  }, true);
+
+  /** While the overlay is open the tabs under it take neither focus nor clicks; minimized, they work again. */
+  function setTabsInert(inert: boolean) {
+    for (const child of app.children) if (child !== overlay && child !== bar && child instanceof HTMLElement) child.inert = inert;
+  }
 
   function trapFocus(e: KeyboardEvent) {
     // While Skip all is being confirmed, only the confirmation and the header (Minimize, Close) take focus.
@@ -155,11 +163,13 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
       const status = questionStatus(state, i);
       const current = state.view === "question" && state.current === i;
       const entry = button("", `qo-index-item${current ? " is-current" : ""}`, () => act({ type: "openQuestion", index: i }), { title: q.question });
+      entry.id = `qo-index-${i}`;
       if (current) entry.setAttribute("aria-current", "step");
       entry.append(el("span", "qo-index-number", String(i + 1)), el("span", "qo-index-text", q.question), statusTag(status));
       return entry;
     });
     const summary = button("Summary", `qo-index-item qo-index-summary${state.view === "summary" ? " is-current" : ""}`, () => act({ type: "openSummary" }));
+    summary.id = "qo-index-summary";
     if (state.view === "summary") summary.setAttribute("aria-current", "step");
     index.replaceChildren(...items, summary);
 
@@ -169,11 +179,13 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
         const current = state.view === "question" && state.current === i;
         const name = `Question ${i + 1}: ${status}`;
         const dot = button(String(i + 1), `qo-dot qo-dot-${status.toLowerCase()}${current ? " is-current" : ""}`, () => act({ type: "openQuestion", index: i }), { title: `${name}. ${q.question}`, aria: name });
+        dot.id = `qo-dot-${i}`;
         if (current) dot.setAttribute("aria-current", "step");
         return dot;
       }),
       (() => {
         const dot = button("Σ", `qo-dot qo-dot-summary${state.view === "summary" ? " is-current" : ""}`, () => act({ type: "openSummary" }), { title: "Summary", aria: "Summary" });
+        dot.id = "qo-dot-summary";
         if (state.view === "summary") dot.setAttribute("aria-current", "step");
         return dot;
       })(),
@@ -238,6 +250,7 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
           toggle.textContent = nowOpen ? "Hide details" : "Show details";
           toggle.setAttribute("aria-expanded", String(nowOpen));
         });
+        toggle.id = `qo-details-toggle-${n}`;
         toggle.setAttribute("aria-expanded", String(open));
         toggle.setAttribute("aria-controls", details.id);
         toggle.addEventListener("click", (e) => e.stopPropagation());
@@ -259,15 +272,7 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
       textarea.rows = 2;
       textarea.placeholder = "Write a free answer or a note for the agent";
       textarea.value = draft.text;
-      const area = textarea;
-      area.addEventListener("input", () => {
-        pendingText = area.value;
-        clearTimeout(textTimer);
-        textTimer = setTimeout(flushText, TEXT_DELAY_MS);
-        grow(area);
-        updatePrimary();
-      });
-      area.addEventListener("blur", flushText);
+      textarea.addEventListener("blur", flushText);
     }
     const field = el("div", "qo-field");
     const fieldLabel = el("label", "qo-field-label", "Your answer (optional)");
@@ -276,14 +281,32 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
     view.append(field);
 
     const footer = el("div", "qo-footer");
-    if (state.current > 0) footer.append(button("Back", "trama-btn", () => act({ type: "back" })));
-    footer.append(el("span", "qo-spacer"), button("Skip all", "trama-btn", () => act({ type: "closeQuestions" })), button("Skip", "trama-btn", () => act({ type: "skip" })));
+    if (state.current > 0) {
+      const back = button("Back", "trama-btn", () => act({ type: "back" }));
+      back.id = "qo-back";
+      footer.append(back);
+    }
+    const skipAll = button("Skip all", "trama-btn", () => act({ type: "closeQuestions" }));
+    skipAll.id = "qo-skip-all";
+    const skip = button("Skip", "trama-btn", () => act({ type: "skip" }));
+    skip.id = "qo-skip";
+    footer.append(el("span", "qo-spacer"), skipAll, skip);
     const primary = button(primaryLabel(state), "trama-btn primary qo-primary", () => act({ type: "next" }));
+    primary.id = "qo-next";
     footer.append(primary);
     const updatePrimary = () => {
       const can = draft.selected.length > 0 || (textarea?.value.trim() ?? "") !== "";
       primary.disabled = !can;
       primary.title = can ? "" : "Choose an option or write an answer first";
+    };
+    const area = textarea;
+    // The reused text area must update this render's button and choices, not the first render's.
+    area.oninput = () => {
+      pendingText = area.value;
+      clearTimeout(textTimer);
+      textTimer = setTimeout(flushText, TEXT_DELAY_MS);
+      grow(area);
+      updatePrimary();
     };
     updatePrimary();
     view.append(footer);
@@ -364,10 +387,12 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
       round = next;
       if (!next) {
         overlay.hidden = true;
+        setTabsInert(false);
         bar.hidden = true;
         textarea = null;
         shownKey = "";
         wasConfirming = false;
+        wasMinimized = false;
         confirm.replaceChildren();
         return;
       }
@@ -375,17 +400,25 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
       bar.hidden = !state.minimized;
       barLabel.textContent = barText(state);
       overlay.hidden = state.minimized;
-      if (state.minimized) return;
+      setTabsInert(!state.minimized);
+      if (state.minimized) {
+        // The bar takes the place of the overlay; reopening it brings the focus back inside the dialog.
+        wasMinimized = true;
+        confirm.replaceChildren();
+        return;
+      }
+      const reopened = wasMinimized;
+      wasMinimized = false;
 
       agent.textContent = next.agent ?? "";
       agent.hidden = next.agent === null;
       step.textContent = stepTitle(state);
+      // Redrawing replaces the index and the controls: the one that had focus gets it back, unless something new is in front.
+      const focusedId = document.activeElement instanceof HTMLElement && dialog.contains(document.activeElement) ? document.activeElement.id : "";
       renderIndex(state);
       const key = `${next.id}:${state.view}:${state.view === "question" ? state.current : ""}`;
       const fresh = key !== shownKey;
       if (fresh) openDetails.clear();
-      // Redrawing replaces the controls: the one that had focus gets it back, unless something new is in front.
-      const focusedId = document.activeElement instanceof HTMLElement && content.contains(document.activeElement) ? document.activeElement.id : "";
       content.replaceChildren(state.view === "question" ? renderQuestion(state, fresh) : renderSummary(state));
       if (textarea) grow(textarea);
       shownKey = key;
@@ -393,8 +426,13 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
       const closedConfirm = wasConfirming && state.confirming === null;
       wasConfirming = state.confirming !== null;
       if (state.confirming !== null) return;
-      if (fresh || closedConfirm) content.querySelector<HTMLElement>(".qo-question")?.focus();
-      else if (focusedId !== "") document.getElementById(focusedId)?.focus();
+      const questionText = content.querySelector<HTMLElement>(".qo-question");
+      if (fresh || closedConfirm || reopened) questionText?.focus();
+      else {
+        if (focusedId !== "") document.getElementById(focusedId)?.focus();
+        // A control that no longer exists leaves the focus on the page: it goes back to the current question's text.
+        if (!dialog.contains(document.activeElement)) questionText?.focus();
+      }
     },
   };
 }

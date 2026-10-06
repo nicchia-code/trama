@@ -1,5 +1,5 @@
-import { type CardNumbers, cardLabel, cardNameOf, namerOf } from "../../../../src/core/card-names";
-import { appliesUnder, requiredReasons } from "../../../../src/core/required";
+import { type CardName, type CardNumbers, cardNameOf, namerOf } from "../../../../src/core/card-names";
+import { appliesUnder, REQUIRED_STATUS } from "../../../../src/core/required";
 import type { ProposalView } from "../../../../src/core/snapshot";
 import { approveBlocker } from "../board/logic";
 import { renderDriftCompare } from "../drift-compare";
@@ -51,6 +51,13 @@ function list(className: string, lines: string[]): HTMLElement {
   return ul;
 }
 
+/** `label` then the card's number or identity tag, so it is named the way the Board names it. */
+function named(label: string, name: CardName): HTMLElement {
+  const span = el("span", "", label === "" ? "" : `${label} `);
+  span.append(idTag(name, "dg-id"));
+  return span;
+}
+
 export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
   const body = (source: string): HTMLElement => {
     const node = renderMarkdown(source, actions.openLink);
@@ -61,13 +68,18 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
   const renderItem = (item: DetailItem): HTMLElement => {
     const li = el("li", `dg-item change-${item.change}`);
     const head = item.ref ? el("button", "dg-link", item.text) : el("span", "dg-item-text", item.text);
+    if (item.card && !item.card.inNote) head.replaceChildren(named(item.card.label, item.card.name));
     if (head instanceof HTMLButtonElement) {
       head.type = "button";
       head.addEventListener("click", () => actions.jump(item.ref as string));
     }
     li.append(head);
     if (item.change !== "same") li.append(el("span", "dg-tag", item.change));
-    if (item.note) {
+    if (item.card?.inNote) {
+      const note = el("div", "dg-note");
+      note.append(named(item.card.label, item.card.name));
+      li.append(note);
+    } else if (item.note) {
       const note = el("div", "dg-note");
       note.append(item.block ? renderMarkdown(item.note, actions.openLink) : renderInline(item.note, actions.openLink));
       li.append(note);
@@ -75,16 +87,29 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     return li;
   };
 
-  const renderProposal = (p: ProposalView, numbers: CardNumbers): HTMLElement => {
+  const renderProposal = (p: ProposalView, numbers: CardNumbers, fromDrift: boolean): HTMLElement => {
     const box = el("section", "dg-proposal");
     const kind = el("div", "dg-kind", "Proposal ");
     kind.append(idTag(cardNameOf(numbers, "proposal", p.id), "dg-id"));
     box.append(kind, el("h3", "", p.title));
     if (p.body) box.append(body(p.body));
     const open = p.requires.filter((r) => appliesUnder(r.status));
-    if (open.length > 0) box.append(el("div", "dg-note", `Drawn on top of ${open.map((r) => `Proposal ${cardLabel(numbers, "proposal", r.id)}`).join(", ")}, not yet approved: what they add is shown as if approved.`));
+    if (open.length > 0) {
+      const note = el("div", "dg-note", "Drawn on top of ");
+      open.forEach((r, i) => note.append(...(i > 0 ? [", "] : []), named("Proposal", cardNameOf(numbers, "proposal", r.id))));
+      note.append(", not yet approved: what they add is shown as if approved.");
+      box.append(note);
+    }
     const unusable = p.requires.filter((r) => !appliesUnder(r.status));
-    if (unusable.length > 0) box.append(el("div", "dg-problem-head", "Requires Proposals that cannot be approved"), list("dg-problems", requiredReasons(unusable, (id) => cardLabel(numbers, "proposal", id))));
+    if (unusable.length > 0) {
+      const ul = el("ul", "dg-problems");
+      for (const r of unusable) {
+        const li = el("li");
+        li.append(named("Proposal", cardNameOf(numbers, "proposal", r.id)), `${r.title ? ` "${r.title}"` : ""} ${REQUIRED_STATUS[r.status]}`);
+        ul.append(li);
+      }
+      box.append(el("div", "dg-problem-head", "Requires Proposals that cannot be approved"), ul);
+    }
     if (p.stale.length > 0) box.append(el("div", "dg-problem-head", "Stale: the Model changed since the Proposal was written"), list("dg-problems", p.stale));
     if (p.unbased.length > 0) box.append(el("div", "dg-problem-head", "Touches files it has no base for"), list("dg-problems", p.unbased));
     if (p.errors.length > 0) {
@@ -100,6 +125,10 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
         ul.append(li);
       }
       box.append(ul);
+    }
+    if (fromDrift) {
+      box.append(el("div", "dg-note", "This Proposal belongs to a Drift in a worktree: decide it from that Drift on the Board."));
+      return box;
     }
     const blocker = approveBlocker(p, numbers);
     const row = el("div", "dg-actions");
@@ -143,7 +172,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
         for (const i of s.items) ul.append(renderItem(i));
         root.append(el("div", "dg-heading", s.heading), ul);
       }
-      if (detail.proposal) root.append(renderProposal(detail.proposal, detail.numbers));
+      if (detail.proposal) root.append(renderProposal(detail.proposal, detail.numbers, detail.fromDrift));
     },
   };
 }

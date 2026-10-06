@@ -78,4 +78,4 @@ The editor was lost while the round was queued or being answered. The round is r
 Emesso quando un round entra in Asking, prima che compaia la sua prima domanda. Fa aprire il pannello Trama in primo piano, o lo porta in primo piano se è già aperto (vedi il Panel).
 
 ### ROUND_CLOSED
-Emitted when a round leaves Asking for Answered or Abandoned. Allows the oldest round still queued in the same window to open, if any. Closing a queued round does not emit this event or interrupt the active round. Annulla anche l'avviso al developer su quel round, se ancora in attesa (vedi il Notice).
+Emesso quando un round lascia Asking per Answered o Abandoned. Permette al round più vecchio ancora in coda nella stessa finestra di aprirsi, se presente. Chiudere un round in coda non emette questo evento e non interrompe il round attivo.

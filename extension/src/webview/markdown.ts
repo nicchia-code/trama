@@ -30,6 +30,25 @@ const PUNCTUATION = /[!-/:-@[-`{-~]/;
 const isSpace = (ch: string | undefined): boolean => ch === undefined || /\s/.test(ch);
 const isWord = (ch: string | undefined): boolean => ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
 
+/** End of a literal HTML fragment, keeping quoted attributes opaque to Markdown. */
+function htmlEnd(s: string, at: number): number {
+  if (s[at] !== "<") return -1;
+  if (s.startsWith("<!--", at)) {
+    const close = s.indexOf("-->", at + 4);
+    return close === -1 ? s.length : close + 3;
+  }
+  if (!/^<(?:\/?[A-Za-z][\w-]*(?=[\s/>])|![A-Z]|\?)/.test(s.slice(at))) return -1;
+  let quote: string | undefined;
+  for (let i = at + 1; i < s.length; i++) {
+    const ch = s[i];
+    if (quote !== undefined) {
+      if (ch === quote) quote = undefined;
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === ">") return i + 1;
+  }
+  return s.length;
+}
+
 /** Index of the `]` that closes the `[` at `open`, skipping code spans and escapes; -1 when there is none. */
 function closingBracket(s: string, open: number): number {
   let depth = 0;
@@ -50,9 +69,13 @@ function closingBracket(s: string, open: number): number {
 function linkTarget(s: string, at: number): { url: string; end: number } | null {
   if (s[at] !== "(") return null;
   let depth = 0;
+  let quote: string | undefined;
   for (let i = at; i < s.length; i++) {
     const ch = s[i];
     if (ch === "\\") i++;
+    else if (quote !== undefined) {
+      if (ch === quote) quote = undefined;
+    } else if (depth === 1 && (ch === '"' || ch === "'") && isSpace(s[i - 1])) quote = ch;
     else if (ch === "(") depth++;
     else if (ch === ")" && --depth === 0) {
       const inner = s.slice(at + 1, i).trim();
@@ -74,6 +97,11 @@ function closingDelimiter(s: string, from: number, ch: string, n: number): numbe
       const run = /^`+/.exec(s.slice(i))?.[0] ?? "`";
       const end = s.indexOf(run, i + run.length);
       if (end !== -1) i = end + run.length - 1;
+      continue;
+    }
+    const html = htmlEnd(s, i);
+    if (html !== -1) {
+      i = html - 1;
       continue;
     }
     if (s[i] !== ch) continue;
@@ -142,6 +170,13 @@ export function parseInline(s: string): Inline[] {
       flush();
       out.push({ t: "code", text: code });
       i = close + run.length;
+      continue;
+    }
+
+    const html = htmlEnd(s, i);
+    if (html !== -1) {
+      text += s.slice(i, html);
+      i = html;
       continue;
     }
 

@@ -9,15 +9,16 @@ import { approvalRoute, worktreeAgentMissing } from "../extension/src/host/multi
 import { EDITOR_UNAVAILABLE } from "../src/core/approve-request";
 import { approvalBySwitch, multiBranchDir, multiBranchStatePath, readMultiBranch, turnMultiBranch, UNREADABLE_SWITCH, writeMultiBranch } from "../src/core/multi-branch";
 import { run } from "../src/cli/main";
-import { boardCounts } from "../extension/src/host/board-counts";
 import { boardView } from "../src/cli/work";
 import { applyWorktreeDecision } from "../extension/src/host/worktree-decision";
 import { getTask, listTasks, newDrift, nextTask, newTask, resolveDrift } from "../src/core/work";
 import { approvalBlock, approveProposal, deleteInProposal, editInProposal, getProposal, newProposal, rejectProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
+import { announce, withdrawAll } from "../src/core/announcements";
 import { type Project, projectAt } from "../src/core/store";
-import { abandonRound, applyWaitingMerge, finishReconciliation, mergeRound, reconcileMerge } from "../src/core/worktree-merge";
+import { abandonRound, applyWaitingMerge, finishReconciliation, mergeRound, readMergeDrift, reconcileMerge } from "../src/core/worktree-merge";
 import { driftComparison } from "../extension/src/webview/drift-compare";
+import { buildBoard } from "../extension/src/webview/board/logic";
 import { acceptIntoWorktree, lostWorktreeMessage, reconcileLostWorktrees, roundOrigin, withdrawFromRound, worktreePath, worktreeProposalIds, worktreesHome } from "../src/core/worktree-round";
 import { handOver } from "./handover";
 
@@ -203,6 +204,26 @@ describe("trama proposal approve reads the switch", () => {
     expect(worktreeProposalIds(p)).toEqual([]);
   });
 
+  test("on, a Draft or an import is refused with its own reason before asking the editor", () => {
+    writeMultiBranch(p, "on");
+    const draft = newProposal(p, "Draft");
+    const imported = newProposal(p, "Imported", "", { kind: "import" });
+    const file = editInProposal(p, imported.id, "checkout/order.md");
+    writeFileSync(file, readFileSync(file, "utf8").replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
+    handOver(p, imported.id);
+    const previous = process.env.TRAMA_APPROVE_WAIT_MS;
+    process.env.TRAMA_APPROVE_WAIT_MS = "80";
+    try {
+      expect(() => approve(draft.id)).toThrow(`Proposal ${cardName(p, "proposal", draft.id)} is still being written.`);
+      expect(() => approve(imported.id)).toThrow("Import proposals cannot be accepted while multi-branch is on.");
+    } finally {
+      if (previous === undefined) delete process.env.TRAMA_APPROVE_WAIT_MS;
+      else process.env.TRAMA_APPROVE_WAIT_MS = previous;
+    }
+    expect(getProposal(p, draft.id).data.status).toBe("draft");
+    expect(getProposal(p, imported.id).data.status).toBe("open");
+  });
+
   test("on, the command prints what the editor answers and does not copy into this folder", () => {
     initRepo();
     const id = changeOrder();
@@ -247,6 +268,48 @@ const EDITOR_SCRIPT = [
 ].join("\n");
 
 describe("accepting an ordinary Proposal into a worktree", () => {
+  test("a brand-new Feature enters a real worktree without changing the open Model", () => {
+    initRepo();
+    const proposal = newProposal(p, "Billing");
+    const feature = "# Billing\n\nInvoices.\n";
+    const machine = "# Invoice\n\n## States\n\n### Open (initial)\n";
+    writeFileSync(editInProposal(p, proposal.id, "billing/feature.md"), feature);
+    writeFileSync(editInProposal(p, proposal.id, "billing/invoice.md"), machine);
+    handOver(p, proposal.id);
+    commit("new Feature proposal");
+
+    const result = acceptIntoWorktree(p, proposal.id, ready);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.acceptance.features).toEqual(["billing"]);
+    expect(runGit(result.acceptance.worktree, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe(`trama/${proposal.id}`);
+    expect(readFileSync(join(result.acceptance.worktree, ".trama/model/billing/feature.md"), "utf8")).toBe(feature);
+    expect(readFileSync(join(result.acceptance.worktree, ".trama/model/billing/invoice.md"), "utf8")).toBe(machine);
+    expect(existsSync(join(dir, ".trama/model/billing"))).toBe(false);
+    expect(getProposal(p, proposal.id).data.status).toBe("open");
+    expect(runGit(dir, ["status", "--porcelain"])).toBe("");
+  });
+
+  test("a removed Feature alone cannot start a worktree", () => {
+    mkdirSync(join(dir, ".trama/model/billing"), { recursive: true });
+    writeFileSync(join(dir, ".trama/model/billing/feature.md"), "# Billing\n\nInvoices.\n");
+    writeFileSync(join(dir, ".trama/model/billing/invoice.md"), "# Invoice\n\n## States\n\n### Open (initial)\n");
+    initRepo();
+    const proposal = newProposal(p, "Remove billing");
+    deleteInProposal(p, proposal.id, "billing/feature.md");
+    deleteInProposal(p, proposal.id, "billing/invoice.md");
+    handOver(p, proposal.id);
+    commit("removed Feature proposal");
+
+    expect(acceptIntoWorktree(p, proposal.id, ready)).toEqual({
+      ok: false,
+      message: "This Proposal affects no Feature, so multi-branch cannot start a worktree.",
+    });
+    expect(worktreeProposalIds(p)).toEqual([]);
+    expect(existsSync(worktreePath(dir, proposal.id))).toBe(false);
+    expect(getProposal(p, proposal.id).data.status).toBe("open");
+    expect(existsSync(join(dir, ".trama/model/billing/feature.md"))).toBe(true);
+  });
+
   test("the worktree is born from the open branch's commit, outside the work tree, and the open folder stays as it is", () => {
     initRepo();
     const id = changeOrder();
@@ -268,13 +331,24 @@ describe("accepting an ordinary Proposal into a worktree", () => {
     expect(runGit(dir, ["status", "--porcelain"])).toBe("");
     expect(buildSnapshot(p).proposals.map((item) => item.id)).not.toContain(id);
     expect(buildSnapshot(p).inWorktree).toEqual([{ id, title: "Change", removable: true }]);
-    expect(boardCounts(p).toDecide).toBe(0);
     const board = boardView(p).md;
     const beforeDecide = board.split("## To decide")[0] ?? "";
     const decide = board.split("## To decide")[1]?.split("## To do")[0] ?? "";
     expect(beforeDecide).toContain("## In worktree");
     expect(beforeDecide).toContain(`Proposal ${cardName(p, "proposal", id)}: Change`);
     expect(decide).not.toContain("Change");
+  }, 20_000);
+
+  test("a Drift's Proposal in a worktree cannot be accepted, and the Drift says why", () => {
+    initRepo();
+    const id = changeOrder();
+    const drift = newDrift(p, { title: "Keep Lost", refs: ["order"], proposal: id, happens: "The code has Lost.", should: "The Model does not.", options: FIX_OPTIONS });
+    commit("proposal and drift");
+    expect(acceptIntoWorktree(p, id, ready).ok).toBe(true);
+    const reason = `Proposal ${cardName(p, "proposal", id)} is in a worktree.`;
+    expect(buildSnapshot(p).drifts.find((d) => d.id === drift.id)?.proposalBlock).toEqual({ kind: "worktree", reason });
+    expect(() => resolveDrift(p, drift.id, "accept-proposal")).toThrow(reason);
+    expect(getProposal(p, id).data.status).toBe("open");
   }, 20_000);
 
   test("a later Proposal of the same round is born from the same commit, and one still in a worktree does not count as accepted", () => {
@@ -337,6 +411,39 @@ describe("accepting an ordinary Proposal into a worktree", () => {
       },
     ]);
   });
+
+  for (const existingRound of [false, true]) {
+    test(`a failed agent start restores the open Proposal${existingRound ? " without changing the existing round" : " and removes the new round"}`, async () => {
+      initRepo();
+      const id = changeOrder();
+      const other = existingRound ? changePayment("Already running") : undefined;
+      commit("proposals");
+      if (other) expect(acceptIntoWorktree(p, other, ready).ok).toBe(true);
+      const roundFile = join(worktreesHome(dir), "round.json");
+      const previousRound = existingRound ? readFileSync(roundFile, "utf8") : undefined;
+      const originalProposal = readFileSync(join(getProposal(p, id).dir, "proposal.md"), "utf8");
+      const failure = new Error("The launching editor window's question channel is not available.");
+      const options = {
+        project: p,
+        ...ready,
+        language: "",
+        warn: () => {},
+        startAgent: async () => { throw failure; },
+      };
+      await expect(acceptOrdinaryProposal(options, id)).rejects.toBe(failure);
+      expect(getProposal(p, id).data.status).toBe("open");
+      expect(readFileSync(join(getProposal(p, id).dir, "proposal.md"), "utf8")).toBe(originalProposal);
+      expect(buildSnapshot(p).proposals.map((proposal) => proposal.id)).toContain(id);
+      expect(worktreeProposalIds(p)).toEqual(other ? [other] : []);
+      expect(existsSync(worktreePath(dir, id))).toBe(false);
+      expect(runGit(dir, ["branch", "--list", `trama/${id}`])).toBe("");
+      if (previousRound) expect(readFileSync(roundFile, "utf8")).toBe(previousRound);
+      else expect(roundOrigin(dir)).toBeNull();
+      const started = await acceptOrdinaryProposal({ ...options, startAgent: async () => {} }, id);
+      expect(started).toBe(true);
+      expect(worktreeProposalIds(p).sort()).toEqual([id, ...(other ? [other] : [])].sort());
+    }, 20_000);
+  }
 
   test("an import, a scan that is off, no Feature, or no worktree command leaves the Proposal open", () => {
     initRepo();
@@ -555,6 +662,15 @@ describe("deciding a Drift that lives in a worktree", () => {
     handOver(work, attached.id);
     const drift = newDrift(work, { title: "Keep the payment", refs: ["payment"], proposal: attached.id, happens: "The code keeps it.", should: "The Model does not.", options: FIX_OPTIONS });
 
+    // The attached Proposal exists only in the worktree: it is shown over that worktree's Model, never offered to decide.
+    const snap = buildSnapshot(p);
+    expect(snap.proposals.map((item) => item.id)).not.toContain(attached.id);
+    const shown = snap.worktreeProposals.find((item) => item.id === attached.id);
+    expect(shown?.machines.map((m) => m.id)).toEqual(["payment"]);
+    expect(JSON.stringify(shown?.base?.machines.find((m) => m.id === "order"))).toContain('"Lost"');
+    expect(JSON.stringify(snap.machines.find((m) => m.id === "order"))).not.toContain('"Lost"');
+    expect(buildBoard(snap)[0]?.cards.map((c) => c.kind)).toEqual(["drift"]);
+
     expect(applyWorktreeDecision(p, id, drift.id, "accept-proposal")).toBe(accepted.acceptance.worktree);
     expect(readFileSync(join(accepted.acceptance.worktree, ".trama/model/checkout/payment.md"), "utf8")).toContain("### Kept (final)");
     expect(readFileSync(join(dir, ".trama/model/checkout/payment.md"), "utf8")).toBe(before);
@@ -584,6 +700,26 @@ describe("deciding a Drift that lives in a worktree", () => {
     expect(buildSnapshot(p).drifts.find((d) => d.id === drift.id)?.merging).toBe(true);
     expect(() => applyWorktreeDecision(p, id, drift.id, "fix-code", [], { option: 1 })).toThrow("started merging");
     expect(listTasks(work).some((item) => item.title.startsWith("Fix code to match the Model"))).toBe(false);
+  }, 20_000);
+});
+
+describe("announcements of an agent in a worktree", () => {
+  test("the open folder's Board shows their ghosts, in the order they were announced, with the Draft's title", () => {
+    initRepo();
+    const id = changeOrder();
+    commit("proposal");
+    expect(acceptIntoWorktree(p, id, ready).ok).toBe(true);
+    const work = projectAt(worktreePath(dir, id));
+    withdrawAll(p);
+    const at = (minutes: number) => new Date(Date.now() + minutes * 60_000);
+    announce(p, { kind: "task", title: "Here" }, at(1));
+    announce(work, { kind: "drift", title: "There" }, at(2));
+    const draft = newProposal(work, "Drafted there", "", { announcement: announce(work, { kind: "proposal", title: "Planned" }, at(3)).id });
+    expect(buildSnapshot(p).announcements.map((a) => [a.kind, a.title, a.phase])).toEqual([
+      ["task", "Here", "preparing"],
+      ["drift", "There", "preparing"],
+      ["proposal", draft.title, "writing"],
+    ]);
   }, 20_000);
 });
 
@@ -770,7 +906,6 @@ describe("merging a round when every Task is Done", () => {
     const snapshot = buildSnapshot(p);
     expect(snapshot.tasks.map((t) => [t.title, t.worktree])).toEqual([["Old work", null], ["Born there", id]]);
     expect(snapshot.drifts.map((d) => [d.title, d.worktree])).toEqual([["Old drift", null]]);
-    expect(boardCounts(p)).toMatchObject({ toDecide: 1, todo: 2 });
 
     expect(getTask(work, old.id).data.column).toBe("todo");
     expect(mergeRound(p)).toEqual({ kind: "pending" });
@@ -804,10 +939,12 @@ describe("merging a round when every Task is Done", () => {
     writeFileSync(join(dir, "dirty.txt"), "x\n");
     expect(mergeRound(p)).toEqual({ kind: "waiting", branch: "main" });
     rmSync(worktreePath(dir, id), { recursive: true, force: true });
+    expect(reconcileLostWorktrees(p)).toEqual([]);
     rmSync(join(dir, "dirty.txt"));
     expect(applyWaitingMerge(p)).toEqual({ kind: "merged", features: ["checkout"] });
     expect(readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8")).toContain("### Lost (final)");
     expect(getProposal(p, id).data.status).toBe("approved");
+    expect(getProposal(p, id).data.scanScope).toEqual([{ ref: "order/Lost", reason: "changed" }]);
     expect(runGit(dir, ["branch", "--list", `trama/${id}`])).toBe("");
     expect(reconcileLostWorktrees(p)).toEqual([]);
   }, 20_000);
@@ -895,24 +1032,52 @@ describe("merging a round when every Task is Done", () => {
     expect(getProposal(p, id).data.status).toBe("approved");
   }, 20_000);
 
-  test("a committed Merge Drift and its Task are left out when the waiting merge lands", () => {
-    initRepo();
-    const id = changeOrder();
-    commit("proposal");
-    expect(acceptIntoWorktree(p, id, ready).ok).toBe(true);
-    writeFileSync(join(dir, "dirty.txt"), "x\n");
-    expect(mergeRound(p)).toEqual({ kind: "waiting", branch: "main" });
+  test("a reconciliation the agent committed itself waits for its command to end, then merges every branch without the Merge Drift or its Task", () => {
+    const { first, second } = conflicted();
     const merge = worktreePath(dir, "merge");
-    mkdirSync(join(merge, ".trama", "tasks"), { recursive: true });
-    writeFileSync(join(merge, ".trama", "merge-drift.md"), "# Merge\n");
-    writeFileSync(join(merge, ".trama", "tasks", "0001-reconcile.md"), "---\ncolumn: done\ntechnical: true\nrefs: []\ndrift: null\nproposal: null\nagent: false\nmerge: true\n---\n# Reconcile\n");
+    const started = reconcileMerge(p, 1);
+    const conflictedFile = readFileSync(join(merge, ".trama/model/checkout/order.md"), "utf8");
+    writeFileSync(join(merge, ".trama/model/checkout/order.md"), conflictedFile.split("\n").filter((line) => !/^(<<<<<<<|=======|>>>>>>>)/.test(line)).join("\n"));
+    const task = getTask(projectAt(merge), started.task);
+    writeFileSync(task.path, readFileSync(task.path, "utf8").replace("column: todo", "column: done"));
     runGit(merge, ["add", "-A"]);
-    runGit(merge, ["commit", "-m", "agent kept them"]);
+    runGit(merge, ["commit", "--no-edit"]);
+
+    // The periodic check must not close the round while the agent's command is still running.
+    expect(applyWaitingMerge(p)).toEqual({ kind: "pending" });
+    expect(mergeRound(p)).toEqual({ kind: "pending" });
+    expect(readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8")).not.toContain("### Lost (final)");
+    expect(roundOrigin(dir)).not.toBeNull();
+
+    writeFileSync(join(dir, "dirty.txt"), "x\n");
+    expect(finishReconciliation(p)).toEqual({ kind: "waiting", branch: "main" });
+    expect(existsSync(join(merge, ".trama", "merge-drift.md"))).toBe(false);
+    expect(existsSync(task.path)).toBe(false);
+    expect(readMergeDrift(dir)).toBeNull();
     rmSync(join(dir, "dirty.txt"));
     expect(applyWaitingMerge(p)).toEqual({ kind: "merged", features: ["checkout"] });
+    const landed = readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8");
+    expect(landed).toContain("### Lost (final)");
+    expect(landed).toContain("### Found (final)");
     expect(existsSync(join(dir, ".trama", "merge-drift.md"))).toBe(false);
-    expect(existsSync(join(dir, ".trama", "tasks", "0001-reconcile.md"))).toBe(false);
-    expect(readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8")).toContain("### Lost (final)");
+    expect(existsSync(join(dir, ".trama", "tasks", task.name))).toBe(false);
+    expect(getProposal(p, first).data.status).toBe("approved");
+    expect(getProposal(p, second).data.status).toBe("approved");
+  }, 20_000);
+
+  test("a reconciliation that leaves its files uncommitted still lands once the folder is clean", () => {
+    conflicted();
+    const merge = worktreePath(dir, "merge");
+    const started = reconcileMerge(p, 1);
+    const conflictedFile = readFileSync(join(merge, ".trama/model/checkout/order.md"), "utf8");
+    writeFileSync(join(merge, ".trama/model/checkout/order.md"), conflictedFile.split("\n").filter((line) => !/^(<<<<<<<|=======|>>>>>>>)/.test(line)).join("\n"));
+    const task = getTask(projectAt(merge), started.task);
+    writeFileSync(task.path, readFileSync(task.path, "utf8").replace("column: todo", "column: done"));
+    writeFileSync(join(dir, "dirty.txt"), "x\n");
+    expect(finishReconciliation(p)).toEqual({ kind: "waiting", branch: "main" });
+    expect(readMergeDrift(dir)).toBeNull();
+    rmSync(join(dir, "dirty.txt"));
+    expect(applyWaitingMerge(p)).toEqual({ kind: "merged", features: ["checkout"] });
   }, 20_000);
 
   test("an open reconciliation Task keeps the waiting merge from landing", () => {
@@ -962,7 +1127,20 @@ describe("merging a round when every Task is Done", () => {
     expect(task.body).toContain("resolve every conflict here");
     expect(mergeRound(p)).toEqual({ kind: "pending" });
     expect(() => reconcileMerge(p, 2)).toThrow("The round is already being reconciled.");
+    // Reconciling: the Merge Drift is not to decide, so the Board leaves it out of To decide.
+    expect(buildSnapshot(p).drifts.some((item) => item.merge === true)).toBe(false);
+    expect(boardView(p).md).not.toContain("Merge Drift");
     expect(finishReconciliation(p)).toEqual({ kind: "stayed" });
+
+    // The open Board shows the reconciliation Task as a worktree card, numbered, following its column; the open folder's runs do not see it.
+    const shownTask = () => buildSnapshot(p).tasks.find((item) => item.id === started.task);
+    expect(shownTask()).toMatchObject({ worktree: "merge", column: "todo", technical: true });
+    expect(buildSnapshot(p).numbers?.task[started.task]).toMatch(/^T\d+$/);
+    expect(boardView(p).md).toContain("Reconcile the worktree round (technical) (worktree)");
+    expect(nextTask(p).next?.id).not.toBe(started.task);
+    writeFileSync(task.path, readFileSync(task.path, "utf8").replace("column: todo", "column: doing"));
+    expect(shownTask()?.column).toBe("doing");
+    writeFileSync(task.path, readFileSync(task.path, "utf8").replace("column: doing", "column: todo"));
     expect(readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8")).not.toContain("### Lost (final)");
 
     const conflictedFile = readFileSync(join(started.worktree, ".trama/model/checkout/order.md"), "utf8");
@@ -970,6 +1148,8 @@ describe("merging a round when every Task is Done", () => {
     const resolved = conflictedFile.split("\n").filter((line) => !/^(<<<<<<<|=======|>>>>>>>)/.test(line)).join("\n");
     writeFileSync(join(started.worktree, ".trama/model/checkout/order.md"), resolved);
     writeFileSync(task.path, readFileSync(task.path, "utf8").replace("column: todo", "column: done"));
+    expect(() => reconcileMerge(p, 2)).toThrow("The round is already being reconciled.");
+    expect(getTask(projectAt(started.worktree), started.task).data.column).toBe("done");
     expect(finishReconciliation(p)).toEqual({ kind: "merged", features: ["checkout"] });
     const landed = readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8");
     expect(landed).toContain("### Lost (final)");
@@ -979,6 +1159,7 @@ describe("merging a round when every Task is Done", () => {
     expect(existsSync(join(dir, ".trama/tasks", task.name))).toBe(false);
     expect(getProposal(p, first).data.status).toBe("approved");
     expect(existsSync(worktreePath(dir, "merge"))).toBe(false);
+    expect(buildSnapshot(p).tasks.some((item) => item.id === started.task)).toBe(false);
   }, 20_000);
 
   test("conflict markers stay out of the open folder and the round remains in conflict", () => {
@@ -991,6 +1172,41 @@ describe("merging a round when every Task is Done", () => {
     expect(readFileSync(join(started.worktree, ".trama/model/checkout/order.md"), "utf8")).toContain("<<<<<<<");
     expect(existsSync(join(worktreePath(dir, "merge"), ".trama/merge-drift.md"))).toBe(true);
     expect(existsSync(task.path)).toBe(false);
+    // Back in Conflict, the Merge Drift is to decide again.
+    expect(buildSnapshot(p).drifts.some((item) => item.merge === true)).toBe(true);
+    expect(buildSnapshot(p).tasks.some((item) => item.id === started.task)).toBe(false);
+  }, 20_000);
+
+  test.each(["committed", "staged", "untracked"] as const)("i marcatori sorgente %s riportano la riconciliazione in Conflict senza commit né unione", (state) => {
+    conflicted();
+    const started = reconcileMerge(p, 1);
+    const merge = started.worktree;
+    const model = join(merge, ".trama/model/checkout/order.md");
+    writeFileSync(model, readFileSync(model, "utf8").split("\n").filter((line) => !/^(<<<<<<<|=======|>>>>>>>)/.test(line)).join("\n"));
+    const task = getTask(projectAt(merge), started.task);
+    writeFileSync(task.path, readFileSync(task.path, "utf8").replace("column: todo", "column: done"));
+    // Finish the Git merge first, so only a source file contains markers, not the Model.
+    runGit(merge, ["add", "-A"]);
+    runGit(merge, ["commit", "--no-edit"]);
+    const source = join(merge, "source.ts");
+    const markers = "<<<<<<< HEAD\nexport const value = 1;\n=======\nexport const value = 2;\n>>>>>>> other\n";
+    writeFileSync(source, markers);
+    if (state !== "untracked") runGit(merge, ["add", "source.ts"]);
+    if (state === "committed") runGit(merge, ["commit", "-m", "agent reconciliation"]);
+    const mergeHead = runGit(merge, ["rev-parse", "HEAD"]);
+    const openHead = runGit(dir, ["rev-parse", "HEAD"]);
+
+    expect(finishReconciliation(p)).toEqual({ kind: "conflict" });
+    expect(runGit(merge, ["rev-parse", "HEAD"])).toBe(mergeHead);
+    expect(runGit(dir, ["rev-parse", "HEAD"])).toBe(openHead);
+    expect(runGit(dir, ["status", "--porcelain"])).toBe("");
+    expect(existsSync(join(dir, "source.ts"))).toBe(false);
+    expect(readFileSync(source, "utf8")).toBe(markers);
+    expect(existsSync(task.path)).toBe(false);
+    expect(buildSnapshot(p).drifts.some((item) => item.merge === true)).toBe(true);
+    expect(buildSnapshot(p).tasks.some((item) => item.id === started.task)).toBe(false);
+    expect(applyWaitingMerge(p)).toEqual({ kind: "pending" });
+    expect(mergeRound(p)).toEqual({ kind: "conflict", again: true });
   }, 20_000);
 
   test("a worktree lost while reconciling its own conflict leaves its work out of the retried merge; the agent goes on", () => {

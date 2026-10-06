@@ -3,11 +3,11 @@ import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { approvalBlock, approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
 import { approvedScope } from "../../../src/core/scope";
-import { lostWorktreeMessage, reconcileLostWorktrees, roundWorktrees, withdrawFromRound, worktreePath } from "../../../src/core/worktree-round";
+import { lostWorktreeMessage, mergeWorktreeOpen, reconcileLostWorktrees, roundWorktrees, withdrawFromRound, worktreePath } from "../../../src/core/worktree-round";
 import { abandonRound, reconcileMerge } from "../../../src/core/worktree-merge";
 import { approvalBySwitch, noticeForSwitch, readMultiBranch, turnMultiBranch } from "../../../src/core/multi-branch";
 import { buildSnapshot } from "../../../src/core/snapshot";
-import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
+import { loadModel, modelDir, type Project, projectAt, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { namerOf } from "../../../src/core/card-names";
 import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
@@ -15,7 +15,7 @@ import { blockedTasks, getDrift, getTask, listTasks, resolveDrift, staleAttached
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn } from "./announcements";
 import { acceptOrdinaryProposal } from "./acceptance";
-import { agentReady, configuredLanguage, configuredSkillsDir, configuredWorktreeAgent, launchAgent, launchReconcileAgent, launchWorktreeAgent, resumeWorktreeTasks, settings } from "./agent";
+import { agentReady, configuredLanguage, configuredSkillsDir, configuredWorktreeAgent, launchAgent, launchReconcileAgent, launchWorktreeAgent, resumeWorktreeTasks, sendWorktreeInstruction, settings } from "./agent";
 import { applyWorktreeDecision } from "./worktree-decision";
 import { approvalRoute, projectMultiBranch } from "./multi-branch";
 import { driftBlockedMessage, REWORK_PROPOSAL } from "./drift-blocked";
@@ -23,8 +23,8 @@ import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { resolveMarkdownFile } from "./paths";
-import { findProject, initializeProject, updateSkills } from "./project";
-import { buildApprovalScanPrompt, buildPrompt, type ResolvedAction, terminalName, withLanguage } from "./prompts";
+import { findProject, initializeProject, NO_PROJECT_WARNING, updateSkills } from "./project";
+import { buildApprovalScanPrompt, buildPrompt, buildReconcilePrompt, type ResolvedAction, terminalName, withLanguage } from "./prompts";
 import { type ApprovalOptions, applyApprovedProposal } from "./approval";
 import type { QuestionSession } from "./question-session";
 import { syncFolderWatchers } from "./folder-watchers";
@@ -49,7 +49,6 @@ const notBlank = (message: string) => (value: string) => (value.trim() === "" ? 
 export class Controller implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
   private project: Project | undefined;
-  private watcher: vscode.FileSystemWatcher | undefined;
   /** One watcher per worktree of the round, keyed by folder: their Tasks, Drifts and Proposals are on the Board too. */
   private readonly worktreeWatchers = new Map<string, vscode.Disposable>();
   private timer: NodeJS.Timeout | undefined;
@@ -57,7 +56,12 @@ export class Controller implements vscode.Disposable {
   /** File text last warned about as unreadable. Forgotten when the panel closes, so reopening warns again. */
   private switchWarned: string | null = null;
 
-  constructor(private readonly extensionUri: vscode.Uri, private readonly questions?: QuestionSession) {}
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly questions?: QuestionSession,
+    /** The extension's watcher of `.trama/`, which outlives the panel: the panel follows it only while open. */
+    private readonly tramaFiles?: vscode.FileSystemWatcher,
+  ) {}
 
   /**
    * A question round entered Asking: the panel opens in front, on the Diagram, or comes to the front keeping its tab.
@@ -96,9 +100,9 @@ export class Controller implements vscode.Disposable {
     return true;
   }
 
+  /** Initializes the workspace and stops there: only opening the panel or a question round opens it. */
   async init(): Promise<void> {
-    const project = await initializeProject();
-    if (project) await this.open();
+    await initializeProject();
   }
 
   /** Command entry point: launches an agent without needing the panel. */
@@ -128,14 +132,13 @@ export class Controller implements vscode.Disposable {
 
   private requireProject(): Project | undefined {
     const project = this.project ?? findProject();
-    if (!project) void vscode.window.showWarningMessage('Trama: no .trama/ in this workspace. Run "Trama: Initialize Project" first.');
+    if (!project) void vscode.window.showWarningMessage(NO_PROJECT_WARNING);
     return project;
   }
 
   dispose(): void {
     this.disposed = true;
     this.panel?.dispose();
-    this.watcher?.dispose();
     syncFolderWatchers(this.worktreeWatchers, [], () => ({ dispose() {} }));
     clearTimeout(this.timer);
   }
@@ -154,27 +157,24 @@ export class Controller implements vscode.Disposable {
     });
     panel.webview.onDidReceiveMessage((raw: unknown) => void this.handle(raw));
 
-    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(project.root, ".trama/**"));
-    this.watchChanges(watcher);
     const subscriptions = [
+      ...(this.tramaFiles ? this.watchChanges(this.tramaFiles) : []),
       onAnnouncementsWithdrawn((announcements) => this.post({ type: "withdrawn", announcements })),
       onQuestionRoundChange(() => this.refresh()),
       ...(this.questions ? [this.questions.onChange((round) => this.post({ type: "questions", round }))] : []),
     ];
 
     panel.onDidDispose(() => {
-      watcher.dispose();
       syncFolderWatchers(this.worktreeWatchers, [], () => ({ dispose() {} }));
       for (const subscription of subscriptions) subscription.dispose();
       clearTimeout(this.timer);
-      this.panel = this.watcher = this.project = undefined;
+      this.panel = this.project = undefined;
       this.switchWarned = null;
       // The round stays open and the agent keeps waiting; the developer is offered a way back to it.
       this.questions?.panelClosed();
       if (!this.disposed && this.questions?.current()) this.offerReopen();
     });
     this.panel = panel;
-    this.watcher = watcher;
     this.project = project;
     this.noteSwitch();
   }
@@ -200,18 +200,17 @@ export class Controller implements vscode.Disposable {
     this.timer = setTimeout(() => this.refresh(), DEBOUNCE_MS);
   }
 
-  private watchChanges(watcher: vscode.FileSystemWatcher): void {
+  private watchChanges(watcher: vscode.FileSystemWatcher): vscode.Disposable[] {
     const onChange = () => this.scheduleRefresh();
-    watcher.onDidCreate(onChange);
-    watcher.onDidChange(onChange);
-    watcher.onDidDelete(onChange);
+    return [watcher.onDidCreate(onChange), watcher.onDidChange(onChange), watcher.onDidDelete(onChange)];
   }
 
-  /** Follows the cards inside the worktrees now in the round; called on every refresh, since the round changes then. */
+  /** Follows the cards inside the worktrees now in the round, and the merge worktree's reconciliation Task; called on every refresh, since the round changes then. */
   private watchWorktrees(project: Project): void {
     const folders = roundWorktrees(project).map((folder) => worktreePath(project.root, folder.proposal));
+    if (mergeWorktreeOpen(project.root)) folders.push(worktreePath(project.root, "merge"));
     syncFolderWatchers(this.worktreeWatchers, folders, (folder) => {
-      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(folder), ".trama/{tasks,drifts,proposals}/**"));
+      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(folder), ".trama/{tasks,drifts,proposals,announcements}/**"));
       this.watchChanges(watcher);
       return watcher;
     });
@@ -287,7 +286,12 @@ export class Controller implements vscode.Disposable {
         return;
       }
       case "openFile": {
-        const home = message.worktree === undefined ? project : roundWorktrees(project).find((folder) => folder.proposal === message.worktree)?.project;
+        const home =
+          message.worktree === undefined
+            ? project
+            : message.worktree === "merge"
+              ? projectAt(worktreePath(project.root, "merge"))
+              : roundWorktrees(project).find((folder) => folder.proposal === message.worktree)?.project;
         if (!home) throw new TramaError(`Proposal ${cardName(project, "proposal", message.worktree as string)} is not in a worktree.`);
         await this.openFile(resolveMarkdownFile(home.dir, message.path));
         return;
@@ -328,7 +332,7 @@ export class Controller implements vscode.Disposable {
           if (message.how === "fix-code") {
             const started = reconcileMerge(project, message.option ?? 1);
             this.refresh();
-            await launchReconcileAgent(project.root, started.worktree, withLanguage(buildPrompt({ kind: "implement", task: started.task }), configuredLanguage()));
+            await launchReconcileAgent(project.root, started.worktree, withLanguage(buildReconcilePrompt(started.task), configuredLanguage()));
           } else {
             abandonRound(project);
             this.refresh();
@@ -362,7 +366,13 @@ export class Controller implements vscode.Disposable {
         }
         const stale = block.kind === "stale";
         const choice = await vscode.window.showWarningMessage(driftBlockedMessage(block), ...(stale ? [REWORK_PROPOSAL] : []));
-        if (choice === REWORK_PROPOSAL) await this.launchAction(project, { kind: "rework-drift", drift: message.id });
+        if (choice !== REWORK_PROPOSAL) return;
+        if (message.worktree === undefined) await this.launchAction(project, { kind: "rework-drift", drift: message.id });
+        else {
+          // The Drift and its Proposal live in the worktree: its agent writes the new Proposal there.
+          const old = staleAttachedProposal(home, getDrift(home, message.id));
+          await sendWorktreeInstruction(project.root, home.root, message.worktree, buildPrompt({ kind: "rework-drift", drift: message.id, proposal: old.id }), `Rework of Proposal ${old.id}`);
+        }
         return;
       }
     }
@@ -443,7 +453,7 @@ export class Controller implements vscode.Disposable {
           },
         },
         proposalId,
-      );
+      ).finally(() => this.refresh());
       if (!started) return { ok: false, message: warnings.at(-1) ?? "The Proposal stayed open." };
       return { ok: true, message: `Proposal ${cardName(project, "proposal", proposalId)} is in a worktree.` };
     } catch (err) {
@@ -478,7 +488,7 @@ export class Controller implements vscode.Disposable {
         },
       },
       proposalId,
-    );
+    ).finally(() => this.refresh());
   }
 
   private async launchAction(project: Project, action: AgentAction): Promise<void> {

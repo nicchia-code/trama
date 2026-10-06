@@ -1,0 +1,23 @@
+---
+description: "Usa quando mostri i round di domande."
+---
+# Interfaccia dei round di domande
+
+## question-round
+- Il round si mostra in un overlay modale dentro il pannello Trama, sopra qualunque scheda, con uno sfondo semitrasparente che oscura la scheda sotto. Niente Quick Pick, input box nativi, widget di domande della chat dell'editor o prompt nel terminale. L'overlay si apre subito, senza una notifica da cliccare prima, e perdere il focus non lo chiude. Il tasto Esc non fa nulla.
+- L'overlay ha un'intestazione con `Questions from the agent`, il nome dell'agente quando è noto, e `Question <n> of <total>` (oppure `Summary` sul riepilogo); a destra due pulsanti a icona: `Minimize` (riduce a barra) e `Close` (chiede la conferma di Skip all). Entrambi hanno tooltip e nome accessibile.
+- A sinistra un indice elenca le domande in ordine: numero, testo della domanda su una riga accorciato con i puntini (il tooltip mostra il testo intero) e lo stato con icona e testo, mai solo colore: `Answered`, `Skipped` o `Missing`. La domanda corrente è evidenziata. L'ultima voce è `Summary`. Sotto i 600 px di larghezza del pannello l'indice diventa una riga di pallini numerati sopra la domanda, con gli stessi stati come tooltip e nome accessibile.
+- Il testo della domanda si mostra per intero, con a capo automatico: mai troncato, mai in un placeholder. Il contesto, se c'è, sta sotto la domanda, sempre visibile, in un colore attenuato.
+- Le opzioni stanno nell'ordine dato dall'agente, ognuna come una riga cliccabile per intero con un pulsante radio (scelta singola) o una casella (scelta multipla), il numero da 1 a 9 come suggerimento di tasto, l'etichetta in grassetto e sotto la descrizione per intera, con a capo. L'opzione raccomandata ha un badge `Recommended` accanto all'etichetta. Il badge e il numero sono solo presentazione e non cambiano le etichette consegnate all'agente.
+- Un'opzione con dettagli ha un pulsante `Show details` che apre i dettagli sotto la descrizione e diventa `Hide details`; a ogni visita della domanda i dettagli sono chiusi.
+- Alla prima visita l'opzione raccomandata è selezionata (spuntata nella scelta multipla); una visita successiva mostra quello che il developer aveva lasciato. Nella scelta singola, cliccare l'opzione già selezionata la deseleziona, così si può rispondere solo con il testo.
+- I tasti da 1 a 9 selezionano l'opzione corrispondente (nella scelta multipla la spuntano o la tolgono), ma non mentre il focus è nell'area di testo. Non ci sono altre scorciatoie oltre a Tab, Invio e Spazio sui controlli.
+- Sotto le opzioni, sempre visibile, un'area di testo multilinea con etichetta `Your answer (optional)` e segnaposto `Write a free answer or a note for the agent`. Cresce con il testo fino a dieci righe, poi scorre.
+- Il piede della domanda ha, da sinistra: `Back` (dalla seconda domanda in poi), `Skip all`, `Skip`, e il pulsante principale `Next`, che diventa `Review` sull'ultima domanda e su una domanda aperta dal riepilogo. `Next` e `Review` sono disabilitati finché non c'è almeno una scelta o un testo non vuoto, con un tooltip che lo dice.
+- La conferma di Skip all è un dialogo dentro l'overlay: `Skip all unanswered questions?`, con la riga `The agent will use its recommendation for each of them.` e i pulsanti `Skip all` e `Go back`; il focus parte su `Go back`.
+- Il riepilogo elenca ogni domanda con il numero, il testo intero e sotto la risposta confermata: le etichette scelte, il testo scritto come testo semplice con gli a capo, oppure `Skipped`, oppure `Missing` nel colore di avviso con un'icona. Ogni voce ha un pulsante `Edit` che apre la domanda. Il pulsante principale `Send to agent` è disabilitato finché manca qualcosa, e sopra di esso una riga dice `Answer or skip <n> more question(s) to send.`. Il riepilogo ha anche `Skip all`.
+- La barra dell'overlay ridotto sta in cima al pannello, sopra le schede, nel colore d'accento: `The agent is waiting for your answers (question <n> of <total>)`, con il pulsante `Open questions`. Cliccare la barra o il pulsante riapre l'overlay.
+- Chiudere il pannello con un round aperto mostra un messaggio informativo dell'editor `Trama has questions from the agent waiting.` con il pulsante `Reopen`.
+- L'overlay è un dialogo per le tecnologie assistive (con titolo accessibile), tiene il focus al suo interno finché è aperto, e a ogni domanda nuova porta il focus sul testo della domanda. Colori e caratteri seguono il tema dell'editor; le transizioni si disattivano quando il sistema chiede movimento ridotto.
+- Le etichette dell'interfaccia sono in inglese. Testo delle domande, contesti, etichette, descrizioni e dettagli restano nella lingua dell'agente.
+

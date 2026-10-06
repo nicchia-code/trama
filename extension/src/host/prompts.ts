@@ -54,6 +54,11 @@ export function buildWorktreeTasksPrompt(proposal: string): string {
   return `Use the trama-implement skill on every Task of Proposal ${proposal} that is in the "todo" column, taking them from \`trama task next --batch --proposal ${proposal}\`, one group at a time, until it says there is none. Do not scan the whole System at the end: Trama checks the code after the merge.`;
 }
 
+/** In the merge worktree, the reconciliation Task alone, leaving the whole-System check to the merge like the other worktree runs. */
+export function buildReconcilePrompt(task: string): string {
+  return `${buildPrompt({ kind: "implement", task })} Do not scan the whole System at the end: Trama checks the code after the merge.`;
+}
+
 /**
  * The name of the agent terminal that receives `action`'s instruction: the short number of the Task or Proposal to
  * implement, as `short` gives it in this working copy, or a fixed English word. A free terminal is reused only for the same name.

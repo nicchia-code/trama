@@ -22,11 +22,7 @@ When the developer has chosen a language in the editor settings, every instructi
 
 A design request, which includes asking the agent to rework the stale Proposal of a Drift, announces a Proposal (see the Announcement) as soon as it is sent, because the agent will create one. This holds only with the terminal launchers, integrated or external: with the chat launcher nothing here changes, and the Board shows a ghost from the moment the agent starts the Proposal's Draft.
 
-Se il developer ha indicato un argomento ntfy nelle impostazioni dell'editor, la fine del comando che Trama ha scritto nel terminale fa nascere un avviso (vedi il Notice) per far sapere al developer lontano dal computer che l'agente si è fermato. Ogni istruzione che Trama scrive davvero in un terminale per l'agente annulla gli avvisi sulla fine del comando ancora in attesa.
-
-Lo stesso vale per la chat di Cursor: ogni fine di turno dell'agente di una conversazione di Trama fa nascere un avviso, e un nuovo prompt inviato a quella conversazione annulla gli avvisi sulla fine ancora in attesa (vedi l'Actor cursor-chat).
-
-Un terminale aperto per un worktree non è questo terminale: non lo si riusa, la sua fine non muove questa Machine e non rilascia i Task della cartella aperta. La fine del comando che Trama vi ha scritto fa nascere lo stesso avviso di fine comando.
+Un terminale aperto per un worktree non è questo terminale: non lo si riusa, la sua fine non muove questa Machine e non rilascia i Task della cartella aperta.
 
 ## States
 
@@ -41,7 +37,7 @@ The agent command typed into the terminal has not ended, or the terminal cannot 
 - `developer.ASK_AGENT` → Agent running: a new terminal (with the external launcher, a new window) is opened, because a running agent must not receive the instruction as a message; the old terminal is left alone and no longer tracked. A design request announces a Proposal, as from the first State.
 - `proposal.APPROVED` → Agent running: same as an automatic scan from the first State; a new terminal is opened. An approval that lands from a worktree round does not start it.
 - `worktree-round.MERGED` → Agent running: come dal primo State; si apre un terminale nuovo.
-- `terminal.COMMAND_ENDED` → Agent idle: se il developer ha indicato un argomento ntfy, nasce anche un avviso sulla fine del comando (vedi il Notice); la fine di un altro comando non conta.
+- `terminal.COMMAND_ENDED` → Agent idle: solo per la fine del comando che Trama ha scritto nel terminale; la fine di un altro comando non conta.
 - `terminal.CLOSED` → No agent terminal: only for the editor's terminal; a window of the external launcher never reports it.
 
 ### Agent idle
@@ -50,8 +46,3 @@ The terminal is open and its command has ended, so it is free for the next instr
 - `proposal.APPROVED` → Agent running: same as an automatic scan from the first State, reusing the terminal under the same condition. An approval that lands from a worktree round does not start it.
 - `worktree-round.MERGED` → Agent running: come dal primo State, riusando il terminale alle stesse condizioni di `developer.ASK_AGENT`.
 - `terminal.CLOSED` → No agent terminal: only for the editor's terminal; a window of the external launcher never reports it.
-
-## Events
-
-### INSTRUCTION_SENT
-Emessa ogni volta che Trama scrive davvero un'istruzione in un terminale per l'agente, integrato o esterno, che nasca da un bottone, da una scansione automatica o dal rifacimento di una Proposal obsoleta. Non è emessa con il launcher della chat, né se l'istruzione non viene inviata (richiesta vuota, comando dell'agente non scelto, richiesta rifiutata, finestra esterna che non si apre). Annulla gli avvisi sulla fine del comando ancora in attesa.

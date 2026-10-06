@@ -21,8 +21,7 @@ function session() {
 
 test("a round entering Asking reveals the panel, and the developer's actions deliver only confirmed answers", async () => {
   const { s, seen, reveals } = session();
-  const questions: number[] = [];
-  const answered = s.present(request(), { signal: new AbortController().signal, fromCursorChat: true, onQuestion: (i) => questions.push(i) });
+  const answered = s.present(request(), { signal: new AbortController().signal, fromCursorChat: true });
   expect(reveals()).toBe(1);
   const round = s.current();
   expect(round?.agent).toBe("Cursor");
@@ -38,7 +37,6 @@ test("a round entering Asking reveals the panel, and the developer's actions del
   expect(await answered).toEqual({ status: "answered", answers: { q1: { status: "answered", selected: ["A"], text: "because" }, q2: { status: "skipped" } } });
   expect(s.current()).toBeNull();
   expect(seen.at(-1)).toBeNull();
-  expect(questions).toEqual([0, 1]);
 });
 
 test("an incomplete send from the panel is refused and the round stays open", () => {

@@ -56,9 +56,11 @@ function affectedByRequirements(before: ProjectModel, after: ProjectModel, paths
 export function proposalScope(p: Project, proposalId: string): string[] {
   const proposal = getProposal(p, proposalId);
   const paths = [...Object.keys(proposal.data.base), ...proposal.data.delete];
-  const before = buildProject(readTrackedFiles(p));
-  const after = buildProject(applied(p, proposal));
-  const modelPaths = paths.filter((path) => !path.startsWith(REQUIREMENTS_PREFIX));
+  const beforeFiles = readTrackedFiles(p);
+  const afterFiles = applied(p, proposal);
+  const before = buildProject(beforeFiles);
+  const after = buildProject(afterFiles);
+  const modelPaths = paths.filter((path) => !path.startsWith(REQUIREMENTS_PREFIX) && beforeFiles.get(path) !== afterFiles.get(path));
   return [...new Set([...affectedFeatures(before.model, after.model, modelPaths), ...affectedByRequirements(before, after, paths)])].sort();
 }
 

@@ -1,13 +1,10 @@
 import * as vscode from "vscode";
-import { basename } from "node:path";
 import { createQuestionServer, questionProjectId, type QuestionServer } from "../../../src/core/question-channel";
 import { QuestionRoundQueue } from "../../../src/core/question-rounds";
 import { unavailableQuestions } from "../../../src/core/questions";
 import type { QuestionPresenter } from "../../../src/core/question-rounds";
 import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
-import { noticeOnQuestion } from "./question-notice";
-import { notices } from "./notice-host";
 import { receiveCursorHook } from "./cursor";
 
 interface WindowRoundService {
@@ -76,14 +73,15 @@ export class EditorQuestions implements vscode.Disposable {
     const current = this.service;
     if (current && current.identity === identity) return current;
     this.closeService();
-    const queue = new QuestionRoundQueue(noticeOnQuestion(trackRound(this.present), notices, basename(project.root)));
+    const queue = new QuestionRoundQueue(trackRound(this.present));
     const service: WindowRoundService = {
       identity, queue,
       server: createQuestionServer({
         project,
         focusedAt: vscode.window.state.focused ? Date.now() : 0,
-        handler: async (callerProject, request, context) => {
-          if (this.closed || this.service !== service || questionProjectId(callerProject) !== identity) return unavailableQuestions();
+        // The channel admits only this project and the worktrees of its round.
+        handler: async (_callerProject, request, context) => {
+          if (this.closed || this.service !== service) return unavailableQuestions();
           return queue.ask(request, context);
         },
         onCursorHook: receiveCursorHook,

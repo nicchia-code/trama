@@ -9,6 +9,7 @@ import { CURSOR_AGENT_ENV } from "./announcements";
 import type { CursorHook } from "./cursor-chat";
 import { parseQuestionRequest, questionAborted, questionFailure, QuestionInterruptedError, unavailableQuestions, type QuestionContext, type QuestionHandler, type QuestionRequest, type QuestionResult } from "./questions";
 import { type Project, projectAt } from "./store";
+import { roundFolders } from "./worktree-round";
 
 export const QUESTION_ENDPOINT_ENV = "TRAMA_QUESTION_ENDPOINT";
 
@@ -155,9 +156,9 @@ function connectEditor(endpoint: string, projectId: string, signal: AbortSignal 
     const lost = () => finish(null);
     const stopLines = lines(socket, (line) => {
       try {
-        const value = JSON.parse(line) as { type?: unknown };
+        const value = JSON.parse(line) as { type?: unknown; caller?: unknown };
         const record = recordValue(value);
-        finish(value.type === "ready" && record?.projectId === projectId && record.endpoint === endpoint ? { socket, record } : null);
+        finish(value.type === "ready" && record?.endpoint === endpoint && (record.projectId === projectId || value.caller === projectId) ? { socket, record } : null);
       } catch { finish(null); }
     });
     socket.on("error", lost);
@@ -367,6 +368,7 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
     connections.add(connection);
     const controller = new AbortController();
     let phase: "hello" | "ready" | "waiting" | "done" = "hello";
+    let from: { id: unknown; project: Project } | undefined;
     connection.closed(() => {
       connections.delete(connection);
       if (phase !== "done") controller.abort();
@@ -383,10 +385,16 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         const value: unknown = JSON.parse(line);
         if (!value || typeof value !== "object" || Array.isArray(value)) throw new UsageError("Question channel message must be an object");
         const message = value as Record<string, unknown>;
-        if (message.projectId !== record.projectId) { finish(unavailableQuestions()); return; }
+        // The window's own project or a worktree of its round, read again at each connection: worktrees join and leave the round.
+        if (phase === "hello") {
+          const project = message.projectId === record.projectId ? options.project
+            : roundFolders(options.project.root).map(projectAt).find((worktree) => questionProjectId(worktree) === message.projectId);
+          if (project) from = { id: message.projectId, project };
+        }
+        if (!from || message.projectId !== from.id) { finish(unavailableQuestions()); return; }
         if (phase === "hello" && message.type === "hello") {
           phase = "ready";
-          connection.send({ type: "ready", ...record });
+          connection.send({ type: "ready", ...record, caller: from.id });
           return;
         }
         if (phase === "ready" && message.type === "cursor-hook") {
@@ -401,9 +409,10 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         const fromTramaTerminal = message.fromTramaTerminal === true;
         const fromCursorChat = message.fromCursorChat === true;
         phase = "waiting";
+        const { project } = from;
         void Promise.resolve().then(() => {
           if (controller.signal.aborted || closed) throw questionAborted();
-          return options.handler(options.project, request, { signal: controller.signal, fromTramaTerminal, fromCursorChat });
+          return options.handler(project, request, { signal: controller.signal, fromTramaTerminal, fromCursorChat });
         }).then((result) => finish(result.status === "unavailable" ? questionFailure(new QuestionInterruptedError()) : result), (error) => finish(questionFailure(error)));
       } catch (error) { finish(questionFailure(error)); }
     });

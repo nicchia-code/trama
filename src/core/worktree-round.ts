@@ -2,10 +2,11 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { TramaError } from "./errors";
-import { approvalBlock, getProposal, writeProposalFiles } from "./proposals";
+import { approvalBlock, getProposal, type Proposal, writeProposalFiles } from "./proposals";
+import type { ScanScopeEntry } from "./scan-scope";
 import { proposalScope } from "./scope";
 import { cardName } from "./short-numbers";
-import { compareByCreation, loadModel, type Project, projectAt, writeFileEnsuringDir } from "./store";
+import { compareByCreation, type Project, projectAt, writeFileEnsuringDir } from "./store";
 
 /**
  * A round is not a file in the repository. Trama reads it from git worktrees whose branch is
@@ -113,21 +114,38 @@ function rememberOrigin(root: string, origin: RoundOrigin): void {
   writeFileEnsuringDir(originFile(root), `${JSON.stringify(origin, null, 2)}\n`);
 }
 
-/** Proposal ids the sibling folder remembers, or null when the round file does not list them yet. */
-function rememberedProposals(root: string): string[] | null {
+function readRoundFile(root: string): { proposals?: unknown; scopes?: unknown } | null {
   const file = originFile(root);
   if (!existsSync(file)) return null;
   try {
-    const raw = JSON.parse(readFileSync(file, "utf8")) as { proposals?: unknown };
-    if (!Array.isArray(raw.proposals) || raw.proposals.some((id) => typeof id !== "string")) return null;
-    return raw.proposals;
+    return JSON.parse(readFileSync(file, "utf8")) as { proposals?: unknown; scopes?: unknown };
   } catch {
     return null;
   }
 }
 
-function writeRound(root: string, origin: RoundOrigin, proposals: string[]): void {
-  writeFileEnsuringDir(originFile(root), `${JSON.stringify({ ...origin, proposals: [...new Set(proposals)].sort() }, null, 2)}\n`);
+/** Proposal ids the sibling folder remembers, or null when the round file does not list them yet. */
+function rememberedProposals(root: string): string[] | null {
+  const raw = readRoundFile(root);
+  if (!raw || !Array.isArray(raw.proposals) || raw.proposals.some((id) => typeof id !== "string")) return null;
+  return raw.proposals;
+}
+
+/**
+ * The scan scope each Proposal got when it entered its worktree, kept beside the worktrees so that a worktree folder
+ * that vanished after its branch was merged does not take it away.
+ */
+export function rememberedScopes(root: string): Record<string, ScanScopeEntry[]> {
+  const scopes = readRoundFile(root)?.scopes;
+  return scopes !== null && typeof scopes === "object" && !Array.isArray(scopes) ? (scopes as Record<string, ScanScopeEntry[]>) : {};
+}
+
+/** Writes the round; the scan scopes of the Proposals still listed are kept, with `scope` added for its Proposal. */
+function writeRound(root: string, origin: RoundOrigin, proposals: string[], scope?: { id: string; entries: ScanScopeEntry[] }): void {
+  const listed = [...new Set(proposals)].sort();
+  const scopes = Object.fromEntries(Object.entries(rememberedScopes(root)).filter(([id]) => listed.includes(id)));
+  if (scope && listed.includes(scope.id)) scopes[scope.id] = scope.entries;
+  writeFileEnsuringDir(originFile(root), `${JSON.stringify({ ...origin, proposals: listed, scopes }, null, 2)}\n`);
 }
 
 /** The worktrees of the Proposals still in the round, in id order, each as its own project. */
@@ -186,6 +204,11 @@ export function mergedProposalIds(p: Project): string[] {
 /** The merge worktree exists: the round is merging, in conflict, reconciling or waiting. */
 export function mergeWorktreeOpen(root: string): boolean {
   return listed(root).some((entry) => entry.branch === MERGE_BRANCH);
+}
+
+/** The folders of the round's worktrees, Proposal and merge alike, as git lists them right now. */
+export function roundFolders(root: string): string[] {
+  return listed(root).filter((entry) => entry.branch === MERGE_BRANCH || PROPOSAL_BRANCH.test(entry.branch ?? "")).map((entry) => entry.path);
 }
 
 /** Open Proposals that still await a decision. One in a worktree has left that column. */
@@ -310,18 +333,26 @@ function gitFailure(result: { stderr: string; stdout: string }): string {
 }
 
 /**
+ * Refusals known without the editor's settings or git: a Proposal that is not open (a Draft is still being written),
+ * already in a worktree, or an import. Null when only the editor can decide.
+ */
+export function worktreeEarlyRefusal(p: Project, id: string, block = approvalBlock(p, id)): string | null {
+  if (block && !OPEN_BLOCK.has(block.kind)) return block.reason;
+  if (getProposal(p, id).data.kind === "import") return "Import proposals cannot be accepted while multi-branch is on.";
+  return null;
+}
+
+/**
  * Accepts an ordinary Proposal into a worktree. The open folder is not modified.
  * The caller has already decided that multi-branch is on and that this is not a Drift's Proposal.
  */
 export function acceptIntoWorktree(p: Project, id: string, options: { autoScan: boolean; worktreeAgent: string }): AcceptResult {
   const block = approvalBlock(p, id);
-  if (block && !OPEN_BLOCK.has(block.kind)) return refuse(block.reason);
-  if (proposalIsInWorktree(p, id)) return refuse(`Proposal ${cardName(p, "proposal", id)} is in a worktree.`);
+  const early = worktreeEarlyRefusal(p, id, block);
+  if (early) return refuse(early);
   const proposal = getProposal(p, id);
-  if (proposal.data.kind === "import") return refuse("Import proposals cannot be accepted while multi-branch is on.");
   if (!options.autoScan) return refuse("Turn automatic scan on, or turn multi-branch off, before accepting this Proposal.");
-  const existing = loadModel(p).features;
-  const features = proposalScope(p, proposal.id).filter((feature) => existing.has(feature));
+  const features = proposalScope(p, proposal.id);
   if (features.length === 0) return refuse("This Proposal affects no Feature, so multi-branch cannot start a worktree.");
   if (options.worktreeAgent.trim() === "") return refuse("Set trama.worktreeAgent in your user settings before accepting a Proposal with multi-branch on.");
   if (block) return refuse(block.reason);
@@ -351,8 +382,9 @@ export function acceptIntoWorktree(p: Project, id: string, options: { autoScan: 
   }
   const createdOrigin = stored === null;
   if (createdOrigin) rememberOrigin(p.root, { branch, commit });
+  let written: Proposal;
   try {
-    writeProposalFiles(p, proposal.id, join(path, ".trama"));
+    written = writeProposalFiles(p, proposal.id, join(path, ".trama"));
   } catch (err) {
     git(p.root, ["worktree", "remove", "--force", path]);
     git(p.root, ["branch", "-D", branchName]);
@@ -360,6 +392,7 @@ export function acceptIntoWorktree(p: Project, id: string, options: { autoScan: 
     throw err;
   }
   const origin = roundOrigin(p.root);
-  if (origin) writeRound(p.root, origin, worktreeProposalIds(p));
+  const scope = written.data.scanScope;
+  if (origin) writeRound(p.root, origin, worktreeProposalIds(p), scope === null ? undefined : { id: proposal.id, entries: scope });
   return { ok: true, acceptance: { worktree: path, features, branch, commit } };
 }

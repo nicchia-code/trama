@@ -1,10 +1,10 @@
 import type { CardKind, CardNumbers } from "./card-names";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { TramaError } from "./errors";
 import { createdField, idField, type Raw } from "./schema";
 import { compareByCreation, listCards, type CardLayout, type Project, readDocument } from "./store";
-import { roundWorktrees, worktreesHome } from "./worktree-round";
+import { roundWorktrees, worktreePath, worktreesHome } from "./worktree-round";
 
 export type { CardKind };
 
@@ -50,9 +50,9 @@ const KIND_SPEC: Record<CardKind, { folder: string; layout: CardLayout; field: s
 
 /**
  * The live cards of a kind in one `.trama/` folder, and its Done Tasks that belong to a design. A card that cannot be
- * read has no number: reading it is another command's error to report.
+ * read has no number: reading it is another command's error to report. `only` keeps the cards whose front matter it accepts.
  */
-function cardsIn(dir: string, kind: CardKind): ReadCard[] {
+function cardsIn(dir: string, kind: CardKind, only?: (raw: Raw) => boolean): ReadCard[] {
   const spec = KIND_SPEC[kind];
   const folder = join(dir, spec.folder);
   const cards: ReadCard[] = [];
@@ -60,6 +60,7 @@ function cardsIn(dir: string, kind: CardKind): ReadCard[] {
     const file = spec.layout === "folder" ? join(folder, entry.name, "proposal.md") : join(folder, entry.name);
     try {
       const raw = readDocument(file).data;
+      if (only && !only(raw)) continue;
       const state = raw[spec.field] ?? spec.fallback;
       const design = kind === "task" ? designField(raw, file) : null;
       const live = typeof state === "string" && spec.live.includes(state);
@@ -73,16 +74,24 @@ function cardsIn(dir: string, kind: CardKind): ReadCard[] {
 }
 
 /**
- * The cards of a kind that hold or may take a number, oldest first. The Tasks and Drifts that live in the worktrees of
- * an open round are read by this working copy too, so the Board it shows numbers them in its own sequence, whatever the
- * worktree's own file says. A Done Task is among them only while a Task of its design is in To do or In progress, and
- * then only to keep the number it has.
+ * The cards of a kind that hold or may take a number, oldest first. The Tasks and Drifts born in the worktrees of an
+ * open round, and the round's reconciliation Task in the merge worktree, are read by this working copy too, so the
+ * Board it shows numbers them in its own sequence, whatever the worktree's own file says. A worktree's copy of a card
+ * of this working copy is not counted: the card counts as it is here, so resolving or closing it frees its number even
+ * during the round. A Done Task is among them only while a Task of its design is in To do or In progress, and then
+ * only to keep the number it has.
  */
 function liveCards(p: Project, kind: CardKind): LiveCard[] {
-  const folders = [p.dir];
-  if (kind !== "proposal" && existsSync(worktreesHome(p.root))) folders.push(...roundWorktrees(p).map((folder) => folder.project.dir));
   const byId = new Map<string, ReadCard>();
-  for (const dir of folders) for (const card of cardsIn(dir, kind)) if (!byId.has(card.id)) byId.set(card.id, card);
+  for (const card of cardsIn(p.dir, kind)) byId.set(card.id, card);
+  if (kind !== "proposal" && existsSync(worktreesHome(p.root))) {
+    const spec = KIND_SPEC[kind];
+    const own = new Set(listCards(join(p.dir, spec.folder), spec.layout).map((entry) => entry.id));
+    for (const { project } of roundWorktrees(p))
+      for (const card of cardsIn(project.dir, kind)) if (!own.has(card.id) && !byId.has(card.id)) byId.set(card.id, card);
+    if (kind === "task")
+      for (const card of cardsIn(join(worktreePath(p.root, "merge"), ".trama"), kind, (raw) => raw["merge"] === true)) if (!own.has(card.id) && !byId.has(card.id)) byId.set(card.id, card);
+  }
   const underWay = new Set([...byId.values()].filter((c) => !c.done && c.design !== null).map((c) => c.design));
   return [...byId.values()]
     .filter((c) => !c.done || underWay.has(c.design))
@@ -112,14 +121,6 @@ function parseAssigned(text: string): Numbers | null {
     own.set(id, n);
   }
   return numbers;
-}
-
-function readAssigned(p: Project): Numbers | null {
-  try {
-    return parseAssigned(readFileSync(assignedFile(p), "utf8"));
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -160,8 +161,16 @@ function render(numbers: Numbers): string {
 function writeAtomically(path: string, text: string) {
   const temporary = `${path}.${process.pid}.tmp`;
   writeFileSync(temporary, text);
-  renameSync(temporary, path);
+  try {
+    renameSync(temporary, path);
+  } catch (err) {
+    rmSync(temporary, { force: true });
+    throw err;
+  }
 }
+
+/** The folders whose `assigned` could not be saved, so a command warns once however many times it reads the numbers. */
+const unsaved = new Set<string>();
 
 /** The short numbers of one working copy, as `syncShortNumbers` left them. */
 export class ShortNumbers {
@@ -200,20 +209,34 @@ export class ShortNumbers {
  * Reads the live Proposals, Tasks and Drifts of this working copy and brings `.trama/short-numbers/assigned` up to date:
  * a card that has no number takes the lowest free one of its kind (several in one reading, in creation order), a card
  * that is no longer live or no longer exists loses its line, and a missing, unreadable, incomprehensible or repeating
- * file is rebuilt from zero in creation order. Never fails because of the file's content.
+ * file is rebuilt from zero in creation order. Never fails because of the file: when it cannot be saved either, the
+ * command warns once and goes on with the numbers it rebuilt.
  */
 export function syncShortNumbers(p: Project): ShortNumbers {
   const live = Object.fromEntries(CARD_KINDS.map((kind) => [kind, liveCards(p, kind)])) as Record<CardKind, LiveCard[]>;
-  const previous = readAssigned(p);
+  let current: string | null;
+  try {
+    current = readFileSync(assignedFile(p), "utf8");
+  } catch {
+    current = null; // missing, or unreadable: a folder in its place, no permission
+  }
+  const previous = current === null ? null : parseAssigned(current);
   const numbers = emptyNumbers();
   for (const kind of CARD_KINDS) numbers[kind] = assign(live[kind], previous?.[kind]);
 
   const text = render(numbers);
-  const current = existsSync(assignedFile(p)) ? readFileSync(assignedFile(p), "utf8") : null;
-  if (text !== current && (text !== "" || current !== null)) {
-    mkdirSync(shortNumbersDir(p), { recursive: true });
-    if (!existsSync(ignoreFile(p))) writeAtomically(ignoreFile(p), "*\n");
-    writeAtomically(assignedFile(p), text);
+  if (text !== current && (text !== "" || existsSync(assignedFile(p)))) {
+    try {
+      mkdirSync(shortNumbersDir(p), { recursive: true });
+      if (!existsSync(ignoreFile(p))) writeAtomically(ignoreFile(p), "*\n");
+      writeAtomically(assignedFile(p), text);
+    } catch (err) {
+      // The numbers stay valid for this reading and are rebuilt by the next one; the command goes on.
+      if (!unsaved.has(p.dir)) {
+        unsaved.add(p.dir);
+        console.warn(`warning: the short numbers could not be saved in ${assignedFile(p)} (${(err as Error).message}); they are rebuilt at every reading until it can be written.`);
+      }
+    }
   }
   return new ShortNumbers(numbers);
 }

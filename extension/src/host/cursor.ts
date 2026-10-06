@@ -64,7 +64,8 @@ export const deeplinkAccepts = (prompt: string): boolean => prompt.trim() !== ""
  * and Enter; 3) the clipboard, with a notice. With `selfSendingOnly` (an automatic scan) only the first step is tried,
  * so no chat is left waiting for the developer.
  */
-export async function openCursorChat(root: string, prompt: string, selfSendingOnly = false): Promise<ChatDelivery> {
+export async function openCursorChat(root: string, prompt: string, selfSendingOnly = false, canSend: () => boolean = () => true): Promise<ChatDelivery> {
+  if (!canSend()) return "not-sent";
   try {
     // Its result does not count: Cursor always returns nothing, so only an error moves to the deeplink.
     await vscode.commands.executeCommand("composer.createNew", { partialState: { text: prompt, richText: prompt, unifiedMode: "agent" }, openInNewTab: true, autoSubmit: true });
@@ -72,7 +73,7 @@ export async function openCursorChat(root: string, prompt: string, selfSendingOn
   } catch {
     // Missing in this version of Cursor, or failed: the deeplink is next.
   }
-  if (selfSendingOnly) return "not-sent";
+  if (selfSendingOnly || !canSend()) return "not-sent";
   if (deeplinkAccepts(prompt)) {
     const query = `text=${encodeURIComponent(prompt)}&workspace=${encodeURIComponent(basename(root))}&mode=agent`;
     try {
@@ -81,5 +82,6 @@ export async function openCursorChat(root: string, prompt: string, selfSendingOn
       // The clipboard is next.
     }
   }
+  if (!canSend()) return "not-sent";
   return toClipboard(prompt);
 }

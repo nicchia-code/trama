@@ -1,6 +1,6 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { type AgentOrigin, bindDraft, markActivity, markDraftActivity, removeBoundTo } from "./announcements";
+import { type AgentOrigin, type Announcement, bindDraft, markActivity, markDraftActivity, removeBoundTo } from "./announcements";
 import { consumeRequest, requestExists } from "./design-requests";
 import { diffFile, type FileChange } from "./diff";
 import { TramaError } from "./errors";
@@ -131,6 +131,28 @@ export function listProposals(p: Project): Proposal[] {
   return listCards(proposalsDir(p), "folder")
     .map((e) => load(p, e))
     .sort((a, b) => compareByCreation({ id: a.id, created: a.data.created }, { id: b.id, created: b.data.created }));
+}
+
+/**
+ * When the agent last created, changed or deleted a file inside a Draft bound to one of `announcements`, in epoch
+ * milliseconds; 0 when there is none. Read from the Draft files' times: synchronizing an announcement's title is not
+ * activity, and a deletion shows as the change of the folder that held the file.
+ */
+export function boundDraftsChangedAt(p: Project, announcements: readonly Announcement[]): number {
+  const bound = new Set(announcements.map((a) => a.proposal));
+  let latest = 0;
+  for (const entry of listCards(proposalsDir(p), "folder")) {
+    if (!bound.has(entry.id)) continue;
+    const dir = join(proposalsDir(p), entry.name);
+    for (const rel of ["", ...readdirSync(dir, { recursive: true, encoding: "utf8" })]) {
+      try {
+        latest = Math.max(latest, statSync(join(dir, rel)).mtimeMs);
+      } catch {
+        // Deleted between listing and reading: its folder's time already counts.
+      }
+    }
+  }
+  return latest;
 }
 
 /**
@@ -380,7 +402,7 @@ export function changes(p: Project, proposal: Proposal): FileChange[] {
   return paths.map((path) => diffFile(path, before.get(path), after.get(path)));
 }
 
-export type ApprovalBlockKind = "missing" | "draft" | "rejected" | "discarded" | "approved" | "waiting" | "stale" | "unregistered" | "invalid";
+export type ApprovalBlockKind = "missing" | "draft" | "rejected" | "discarded" | "approved" | "worktree" | "waiting" | "stale" | "unregistered" | "invalid";
 
 export interface ApprovalBlock {
   kind: ApprovalBlockKind;
@@ -409,6 +431,7 @@ export function approvalBlock(p: Project, id: string): ApprovalBlock | null {
     case "open":
       break;
   }
+  if (proposalIsInWorktree(p, proposal.id)) return { kind: "worktree", reason: `${name} is in a worktree.` };
   const h = health(p, proposal);
   if (h.requires.length > 0) return { kind: "waiting", reason: `${name} waits for other Proposals: ${h.requires.map((r) => cardName(p, "proposal", r.id)).join(", ")}.` };
   if (h.stale.length > 0) return { kind: "stale", reason: `${name} is stale: the Model changed since it was written.` };
