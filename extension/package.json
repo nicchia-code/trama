@@ -116,6 +116,11 @@
           "default": true,
           "markdownDescription": "After you approve a Proposal, launch the agent to Scan the Features it touched. With a terminal launcher (integrated or external) it only applies when `#trama.agentCommand#` is set."
         },
+        "trama.autoImplement": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "After an automatic scan that files no Drift, the same agent goes on to implement the Tasks it filed."
+        },
         "trama.skillsDir": {
           "type": "string",
           "default": ".agents/skills",

@@ -63,14 +63,17 @@ export function idField(raw: Raw, key: string, where: string): string | null {
 
 const CREATED_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
-/** When the card was created, as a UTC ISO 8601 date and time. Absent on numbered cards written before the field existed. */
-export function createdField(raw: Raw, where: string): string | null {
-  const v = raw["created"];
+/** A UTC ISO 8601 date and time under `key`, or null when absent. */
+export function instantField(raw: Raw, key: string, where: string): string | null {
+  const v = raw[key];
   if (v === undefined || v === null) return null;
   if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString();
   if (typeof v === "string" && CREATED_AT.test(v) && !Number.isNaN(Date.parse(v))) return v;
-  throw new TramaError(`${where}: "created" must be a UTC date and time in ISO 8601, found ${JSON.stringify(v)}`);
+  throw new TramaError(`${where}: "${key}" must be a UTC date and time in ISO 8601, found ${JSON.stringify(v)}`);
 }
+
+/** When the card was created, as a UTC ISO 8601 date and time. Absent on numbered cards written before the field existed. */
+export const createdField = (raw: Raw, where: string): string | null => instantField(raw, "created", where);
 
 export function stringMap(raw: Raw, key: string, where: string): Record<string, string> {
   const v = raw[key];

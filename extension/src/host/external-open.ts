@@ -92,7 +92,7 @@ export function terminalCommand(terminal: DetectedTerminal, request: WindowReque
     case "kitty":
       return { program, args: ["--title", title, "--directory", cwd, "-o", "allow_remote_control=socket-only", "--listen-on", `unix:${kittySocket}`, ...run] };
     case "wezterm":
-      return { program, args: ["start", "--cwd", cwd, "--", ...run] };
+      return { program, args: ["start", "--cwd", cwd, "--", "sh", "-c", weztermTitled(program, title, script)] };
     case "alacritty":
       return { program, args: ["--title", title, "--working-directory", cwd, "-e", ...run] };
     case "foot":
@@ -105,6 +105,17 @@ export function terminalCommand(terminal: DetectedTerminal, request: WindowReque
     case "other":
       return { program, args: ["-e", ...run] };
   }
+}
+
+/**
+ * `script` preceded by naming its WezTerm tab and window `title`: WezTerm takes no title when it opens a window, so the
+ * window names itself once through `wezterm cli`, which finds it from `WEZTERM_PANE`. A WezTerm without these commands
+ * leaves it unnamed and runs the script all the same.
+ */
+function weztermTitled(program: string, title: string, script: string): string {
+  const cli = `${quote("posix", program)} cli`;
+  const name = quote("posix", title);
+  return `${cli} set-tab-title ${name} 2>/dev/null; ${cli} set-window-title ${name} 2>/dev/null; ${script}`;
 }
 
 /** How long a terminal that has started may take to fail before it counts as running. */
@@ -178,7 +189,7 @@ export async function openWindow(origin: WindowOrigin, request: WindowRequest): 
   if (terminal.kind === "wezterm") {
     // Asking the running WezTerm for a window prints the id of its pane, which is how the window is reached again.
     try {
-      const id = await runScripting({ program: terminal.program, args: ["cli", "spawn", "--new-window", "--cwd", request.cwd, "--", "sh", "-c", request.script] });
+      const id = await runScripting({ program: terminal.program, args: ["cli", "spawn", "--new-window", "--cwd", request.cwd, "--", "sh", "-c", weztermTitled(terminal.program, request.title, request.script)] });
       const paneId = Number.parseInt(id.trim(), 10);
       if (!Number.isNaN(paneId)) return { terminal: "wezterm", paneId };
     } catch {

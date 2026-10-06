@@ -5,7 +5,7 @@ description: Use when asked to scan, sync or compare a Feature (or the whole Sys
 
 # Trama: scan
 
-A **Scan** compares the Model (source of truth for behaviour) and its **Requirements** (how it must be built) with the existing code, for one **Feature** or, on request, the whole System. You produce **Tasks** (work to do) and **Drifts** (differences the developer must decide on). You change neither code, nor Model, nor Requirements.
+A **Scan** compares the Model (source of truth for behaviour) and its **Requirements** (how it must be built) with the existing code, for one **Feature**, for what one Proposal changed, or, on request, the whole System. You produce **Tasks** (work to do) and **Drifts** (differences the developer must decide on). You change neither code, nor Model, nor Requirements.
 
 ## Hand-over
 
@@ -32,9 +32,15 @@ Every live Proposal, Task and Drift has a temporary **short number** (`P3`, `T3`
 ## Steps
 
 1. **Scope.** Use the Feature you were given, or `trama system` for the list. For each Machine: `trama feature <id>`, `trama machine <id>`, `trama state <machine/State>`, `trama event <owner.EVENT>`, `trama paths …` as needed; these views end with the Requirements attached. Read the Areas with `trama requirements` and `trama requirements <area>`, and keep their `## General` sections in mind for everything. Also run `trama analyze <machine>`: warnings are Model problems to tell the developer about, not code problems.
-2. **Avoid duplicates.** `trama task list` and `trama drift list` first. Do not file what is already there.
-3. **Find the implementation.** Search the code yourself for where each Machine lives: handlers, reducers, components, routes, jobs, database transitions. The Model carries no code hints; do not expect any. If there are no source files at all, see "No code at all" under Judgement.
-4. **Compare each Machine** State by State and Transition by Transition, then each Requirement that applies, and decide:
+   **What a Proposal changed.** When the instruction limits the scan to what a Proposal changed, run `trama proposal show <id>` and read its `## Scan scope`: one reference per line, each with why it is there. Compare with the code **only those references**, not the whole Features, and read a Machine (`trama state`, `trama event`, `trama machine`) only as far as you need to understand them. `changed` is an element or Requirement section added or changed, with what it contains; `leads into a change` is a Transition that enters or reacts to it, to check it still fits; `removed, its container` is the nearest element still there of something removed: look for the code that implemented what was removed, and file a Task to take it out. `trama analyze` only for the Machines in the scope. If the Proposal has no `## Scan scope` (approved before it existed), scan the Features it touched, as before.
+2. **Avoid duplicates.** Read `trama task list` and `trama drift list` once, first. Do not file what is already there.
+3. **Split the work by Machine.** The comparison of steps 4 to 7 is done Machine by Machine (in a targeted scan, the Machines its references name).
+   - **With sub-agents**: give each Machine to its own sub-agent, at most four at once, in whatever way your agent starts sub-agents. Give each one the Machine, the open Tasks and Drifts from step 2 that concern it, and what to compare (the scope references of that Machine, or the whole Machine), with the instruction to do steps 4 to 7 of this skill for that Machine only: find the code, compare, announce and file its own Tasks and Drifts with the same `--proposal` rule, and come back with the list of the cards it filed. A sub-agent does not read the lists again, does not take another Machine and writes no report. Wait for all of them.
+   - **Without sub-agents**: do the same Machines yourself, one after the other.
+
+   The General Requirements, and the sections that name no Machine (a Feature, an Actor, an Event of an Actor, an Area), stay with you: compare them yourself, in the same way. You write the one report.
+4. **Find the implementation.** Search the code yourself for where each Machine lives: handlers, reducers, components, routes, jobs, database transitions. The Model carries no code hints; do not expect any. If there are no source files at all, see "No code at all" under Judgement.
+5. **Compare each Machine** State by State and Transition by Transition (in a targeted scan, only the references of its scope), then each Requirement that applies, and decide:
 
 | You find | You file |
 |---|---|
@@ -45,23 +51,23 @@ Every live Proposal, Task and Drift has a temporary **short number** (`P3`, `T3`
 | Code that handles a case the Model forgot, and it looks **important** (real user-visible or data-affecting behaviour, not a detail) | a **Drift with an attached Proposal** |
 | Anything below Diagram level that no Requirement mentions | nothing |
 
-5. **File Tasks.** One Task per coherent unit of work (typically a State with its Transitions), as specific as possible in `--ref`:
+6. **File Tasks.** One Task per coherent unit of work (typically a State with its Transitions), as specific as possible in `--ref`:
    `trama task new "<what to implement>" --ref order/Refunding --ref order/Paid/user.CANCEL --ref requirements/ui#order/Paid --body "<in domain words: what must be true when done>"`.
    Reference the Requirement sections the Task must satisfy next to the Model elements. A Task that only applies Requirements without changing behaviour (for example adopting the required theme everywhere) is technical: `--technical --ref requirements/ui#General`.
    The body says *what*, in domain words, not which files to touch.
-   **The design link.** When the prompt says the scan follows the approval of a Proposal, add `--proposal <id>` to every Task you file, so the Board shows the Tasks of one design together. File Tasks with no `--proposal` when the prompt names no Proposal (a scan the developer started by hand).
-6. **File each Drift exactly once, in one of two ways.** `trama drift new` always creates a new card, so decide which way applies before running it.
+   **The design link.** When the instruction names a Proposal (the scan follows its approval, and says to link every Task to it), add `--proposal <id>` to every Task you file, so the Board shows the Tasks of one design together. File Tasks with no `--proposal` when the instruction names no Proposal (a scan the developer started by hand).
+7. **File each Drift exactly once, in one of two ways.** `trama drift new` always creates a new card, so decide which way applies before running it.
    - **Ordinary Drift** (the default): `trama drift new "<title>" --ref <nearest Model element or Requirement> --happens "<what the code does, in terms of behaviour>" --should "<what the Model or Requirement says>" --option "<title of the way you recommend>" --option-text "<what it changes and costs>" --option "<title of another way>" --option-text "<…>" [up to five] [--where "<where in the code you saw it>"]`. The two texts and the options are required; `--where` is optional and the only place for code locations. Write them as described in "Writing a Drift". Do not pass `--task`: a Drift filed by a Scan has no origin Task. Do not choose the resolution.
    - **Drift with a Proposal**, only when the code handles an important case the Model forgot: first create the Proposal by following the `trama-design` skill without its interview (`trama proposal new`, `edit`, `validate --proposal`, `proposal show`, `proposal submit`; list your choices in the Proposal body). If `validate` warns that a Requirement fragment the Proposal writes into is larger than 12 KB, split it in the same Proposal before submitting, as `trama-design` describes under "Good Requirement habits". Correct and retry a refused submission before continuing; only after it succeeds run `trama drift new … --proposal <id>` once, with the same texts and options. Never run `drift new` a second time for the same difference.
 
    Do not open a Proposal for small differences: the default is that the code gets fixed.
-7. **Report.** List the Tasks and Drifts you created with their IDs, Machines you could not find any code for, and Model warnings from `analyze`. Say which Drifts need a decision. Then stop.
+8. **Report.** List the Tasks and Drifts you and your sub-agents created with their IDs, Machines you could not find any code for, and Model warnings from `analyze`. Say which Drifts need a decision. Then stop, unless the instruction goes on with more work after the scan.
 
 ## Judgement
 
 - Unsure whether code is a Drift or only an implementation detail? Ask: would drawing it change the Diagram? If not, skip it.
 - If you cannot tell whether the code implements a Transition, say so in the report instead of guessing a Task or a Drift.
-- **No code at all is an answer, not a blocker.** If, after step 3, the project has no source files (only `.trama/`, agent skill folders and editor or tool settings), it is a greenfield: the whole Model is still to be built. Do not stop and ask where the code lives. Treat every State and Transition as missing and go to step 5: skip what an open or in-progress Task already covers, then file one Task per coherent unit (usually one per Machine, or per group of States if the Machine is large), each with a `--ref` for every State and Transition it covers and for the Requirement sections attached to them. If the `tech` Area or other General Requirements ask for setup (framework, project structure), file that first as a technical Task referencing them. Say in the report that the project had no code. A Drift needs code to differ from, so file none, and list existing Drifts whose code paths do not exist so the developer can dismiss them.
+- **No code at all is an answer, not a blocker.** If, after step 4, the project has no source files (only `.trama/`, agent skill folders and editor or tool settings), it is a greenfield: the whole Model is still to be built. Do not stop and ask where the code lives. Treat every State and Transition as missing and go to step 6: skip what an open or in-progress Task already covers, then file one Task per coherent unit (usually one per Machine, or per group of States if the Machine is large), each with a `--ref` for every State and Transition it covers and for the Requirement sections attached to them. If the `tech` Area or other General Requirements ask for setup (framework, project structure), file that first as a technical Task referencing them. Say in the report that the project had no code. A Drift needs code to differ from, so file none, and list existing Drifts whose code paths do not exist so the developer can dismiss them.
 - Only ask a question when you truly cannot tell whether code exists, for example because the sources may live in another repository.
 
 ## Writing a Drift

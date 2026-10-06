@@ -33,16 +33,19 @@ Trama sta unendo i worktree in una cartella a parte. Il branch aperto non è anc
 Il Merge Drift del giro è aperto. Va risolto: o si riconcilia, o si abbandona il giro. Finché è aperto il branch non cambia.
 - `developer.RECONCILE_MERGE` → Reconciling: il developer tiene il lato che sistema i conflitti, scegliendo una delle opzioni. Nasce un Task nel worktree di merge e Trama ci avvia l'agente col comando dei worktree.
 - `developer.ABANDON_ROUND` → No round: il developer abbandona il giro. Ogni Proposal torna aperta, i worktree si eliminano, il Merge Drift non c'è più e il branch non cambia.
+- `workspace.WORKTREE_LOST` → Conflict: sparisce il worktree di una Proposal il cui lavoro non è ancora nell'unione. Quella Proposal torna aperta e il developer è avvisato; l'unione non la include e il giro resta in conflitto. Un worktree il cui lavoro è già nell'unione può sparire senza conseguenze.
 
 ### Reconciling
 L'agente sistema i conflitti nel worktree di merge.
 - `terminal.COMMAND_ENDED` → Merging: solo se il Task di riconciliazione è in Done. Trama committa ciò che è rimasto, lasciando fuori il Merge Drift e quel Task, e riprova l'unione.
 - `terminal.COMMAND_ENDED` → Reconciling: il Task non è in Done. Il giro resta fermo e il developer è avvisato; l'unione non si riprova. Si può abbandonare il giro.
 - `developer.ABANDON_ROUND` → No round: come dal Conflict.
+- `workspace.WORKTREE_LOST` → Reconciling: come dal Conflict. L'agente continua, e l'unione che si riprova non include quella Proposal.
 
 ### Waiting
 L'unione è pronta e aspetta che la cartella aperta sia di nuovo il branch di partenza, senza modifiche non committate.
-- `workspace.TREE_READY` → No round: la cartella è pronta. Trama la aggiorna, elimina i worktree, fa sapere che il giro è unito e fa partire il controllo, come da Merging.
+- `workspace.TREE_READY` → No round: la cartella è pronta e il branch di partenza, se nel frattempo è andato avanti, si combina con l'unione senza conflitti. Trama la aggiorna, elimina i worktree, fa sapere che il giro è unito e fa partire il controllo, come da Merging.
+- `workspace.TREE_READY` → Conflict: la cartella è pronta, ma il branch di partenza nel frattempo è andato avanti e le sue modifiche non si combinano con l'unione. Nel branch non entra nulla e la cartella aperta non riceve marcatori: restano nel worktree di merge. Nasce un Merge Drift per l'intero giro. I worktree restano.
 - `developer.ABANDON_ROUND` → No round: il developer rinuncia al risultato. I worktree si eliminano, le Proposal tornano aperte e il branch non cambia.
 
 ## Events

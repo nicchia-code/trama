@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildPrompt, buildScanPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
+import { buildApprovalScanPrompt, buildPrompt, buildScanPrompt, buildWorktreeTasksPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "design", prompt: "  Add refunds to checkout \n" })).toBe("Use the trama-design skill. Add refunds to checkout");
@@ -10,10 +10,10 @@ test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "scan", feature: "checkout" })).toBe("Use the trama-scan skill on the Feature `checkout`.");
   expect(buildPrompt({ kind: "implement", task: "0012" })).toBe("Use the trama-implement skill on Task 0012.");
   expect(buildPrompt({ kind: "implement-all" })).toBe(
-    'Use the trama-implement skill on every Task in the "todo" column. Take each one from `trama task next`, one after the other, until it says there is none.',
+    'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch`, one group at a time, until it says there is none.',
   );
   expect(buildPrompt({ kind: "implement-design", proposal: "0007" })).toBe(
-    'Use the trama-implement skill on every Task of Proposal 0007 that is in the "todo" column. Take each one from `trama task next --proposal 0007`, one after the other, until it says there is none.',
+    'Use the trama-implement skill on every Task of Proposal 0007 that is in the "todo" column. Take them from `trama task next --batch --proposal 0007`, one group at a time, until it says there is none.',
   );
   expect(buildPrompt({ kind: "rework-drift", drift: "0003", proposal: "0002" })).toBe(
     "Use the trama-design skill, without asking questions. Proposal 0002, attached to Drift 0003, is stale: write a new Proposal that makes the same change on the current Model and Requirements, hand it over, and attach it to the Drift in place of the stale one.",
@@ -25,11 +25,18 @@ test("several Features are listed in backticks, comma separated", () => {
   expect(buildScanPrompt([])).toBe("Use the trama-scan skill on the whole System.");
 });
 
-test("a scan after an approval names the approved Proposal, and a scan by hand names none", () => {
-  expect(buildScanPrompt(["checkout"], "0007")).toBe(
-    "Use the trama-scan skill on the Feature `checkout`. The scan follows the approval of Proposal 0007: link every Task you file to it with --proposal 0007.",
+test("in a worktree the Tasks run in groups and leave the whole-System check to the merge", () => {
+  expect(buildWorktreeTasksPrompt("ab12cd34")).toBe(
+    'Use the trama-implement skill on every Task of Proposal ab12cd34 that is in the "todo" column, taking them from `trama task next --batch --proposal ab12cd34`, one group at a time, until it says there is none. Do not scan the whole System at the end: Trama checks the code after the merge.',
   );
-  expect(buildPrompt({ kind: "scan", feature: "checkout" })).not.toContain("Proposal");
+});
+
+test("the automatic scan after an approval reads the Proposal's scan scope, and goes on to implement only with autoImplement on", () => {
+  const scan = "Use the trama-scan skill on what Proposal ab12cd34 changed: its scan scope is in `trama proposal show ab12cd34`. Link every Task you file to it with --proposal ab12cd34.";
+  expect(buildApprovalScanPrompt("ab12cd34", false)).toBe(scan);
+  expect(buildApprovalScanPrompt("ab12cd34", true)).toBe(
+    `${scan} If the scan files no Drift, go on with the trama-implement skill on every Task of Proposal ab12cd34 that is in the "todo" column, taking them from \`trama task next --batch --proposal ab12cd34\`, one group at a time, until it says there is none.`,
+  );
 });
 
 test("the agent terminal is named after the work: the card's short number, or a fixed word", () => {
@@ -45,7 +52,7 @@ test("the agent terminal is named after the work: the card's short number, or a 
 });
 
 test("a chosen language ends the instruction on the same line, trimmed; blank asks nothing", () => {
-  const scan = buildScanPrompt(["checkout"], "0007");
+  const scan = buildApprovalScanPrompt("ab12cd34", true);
   expect(withLanguage("Use the trama-scan skill on the whole System.", "  Italian ")).toBe(
     "Use the trama-scan skill on the whole System. Write everything you generate in Italian, except code, which always stays in English.",
   );

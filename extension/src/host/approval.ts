@@ -1,7 +1,5 @@
-import { getProposal } from "../../../src/core/proposals";
-import { proposalScope } from "../../../src/core/scope";
+import { approvedScope } from "../../../src/core/scope";
 import type { Project } from "../../../src/core/store";
-import { loadModel } from "../../../src/core/store";
 
 export interface ApprovalOptions {
   project: Project;
@@ -9,8 +7,8 @@ export interface ApprovalOptions {
   autoScan: boolean;
   /** Whether `trama.agentCommand` is set: without it nothing can be launched. */
   agentConfigured: boolean;
-  /** Starts ONE agent run that scans these Features, after the approval of `proposal` (its ID, as stored). */
-  launchScan(features: string[], proposal: string): Promise<void>;
+  /** Starts ONE agent run that scans what `proposal` (its ID, as stored) changed, after its approval. */
+  launchScan(proposal: string): Promise<void>;
 }
 
 /**
@@ -20,13 +18,7 @@ export interface ApprovalOptions {
  * attached Proposal); if it throws, nothing is launched.
  */
 export async function applyApprovedProposal(options: ApprovalOptions, proposalId: string, apply: () => void): Promise<void> {
-  const { project } = options;
-  const approved = getProposal(project, proposalId);
-  const isImport = approved.data.kind === "import";
-  const scope = proposalScope(project, proposalId);
-  apply();
-  if (isImport || !options.autoScan || !options.agentConfigured) return;
-  const existing = loadModel(project).features;
-  const features = scope.filter((f) => existing.has(f));
-  if (features.length > 0) await options.launchScan(features, approved.id);
+  const { id, features } = approvedScope(options.project, proposalId, apply);
+  if (features.length === 0 || !options.autoScan || !options.agentConfigured) return;
+  await options.launchScan(id);
 }

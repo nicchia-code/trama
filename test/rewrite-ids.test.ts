@@ -33,8 +33,8 @@ function writeCard(folder: string, name: string, front: string, body: string): v
 
 test("rewrites numbered cards to a stable identity, keeps the slug, the body and the state, and follows references", () => {
   writeCard("proposals", "0001-returns", "status: draft\nbase: {}\ndelete: []\nrequires:\n  - \"12\"", "# Returns\n\nCustomers send it back.\n");
-  writeCard("proposals", "0012-billing", "status: open\nbase: {}\ndelete: []", "# Billing\n\nInvoices.\n");
-  writeCard("proposals", "zzzz9999-kept", "status: draft\nbase: {}\ndelete: []\ncreated: 2020-01-01T00:00:00.000Z\nrequires:\n  - \"0001\"\n  - \"9999\"", "# Kept\n\nAlready its own.\n");
+  writeCard("proposals", "0012-billing", "status: approved\nbase: {}\ndelete: []\nscanScope:\n  - { ref: order, reason: changed }", "# Billing\n\nInvoices.\n");
+  writeCard("proposals", "zzzz9999-kept", "status: draft\nbase: {}\ndelete: []\ncreated: 2020-01-01T00:00:00.000Z\nrequires:\n  - \"0001\"\n  - \"9999\"\nscanScope:\n  - { ref: order/Paid, reason: \"leads into a change\" }", "# Kept\n\nAlready its own.\n");
   writeCard("tasks", "0003-label.md", "column: todo\ntechnical: false\nrefs: [order]\nproposal: \"1\"\ndrift: \"0004\"", "# Label\n\nPrint it.\n");
   writeCard("tasks", "12345678-digits.md", "column: todo\ntechnical: true\nrefs: []\ncreated: 2020-06-01T00:00:00.000Z", "# Digits\n\nLeave this identity.\n");
   writeCard("drifts", "0004-late.md", "status: open\nrefs: [order]\nproposal: \"0012\"\ntask: \"0003\"\norigin: \"3\"", "# Late\n\n## What happens\n\nCode.\n\n## What should happen\n\nModel.\n");
@@ -61,12 +61,14 @@ test("rewrites numbered cards to a stable identity, keeps the slug, the body and
   expect(returns.data).toMatchObject({ status: "draft", created: rewrittenInstant("0001"), requires: [billingId] });
   expect(returns.body).toBe("# Returns\n\nCustomers send it back.\n");
   const billing = getProposal(p, billingId);
-  expect(billing.data.status).toBe("open");
+  expect(billing.data.status).toBe("approved");
+  expect(billing.data.scanScope).toEqual([{ ref: "order", reason: "changed" }]);
   expect(billing.data.created).toBe(rewrittenInstant("0012"));
   expect(billing.body).toBe("# Billing\n\nInvoices.\n");
   const kept = getProposal(p, "zzzz9999");
   expect(kept.data.requires).toEqual([proposalId, "9999"]);
   expect(kept.data.created).toBe("2020-01-01T00:00:00.000Z");
+  expect(kept.data.scanScope).toEqual([{ ref: "order/Paid", reason: "leads into a change" }]);
   expect(kept.body).toBe("# Kept\n\nAlready its own.\n");
 
   const task = getTask(p, taskId);

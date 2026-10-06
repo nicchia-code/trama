@@ -1,10 +1,10 @@
 import { join } from "node:path";
-import { deliverCard } from "./announcements";
-import { type Blocker, computeBlocked, refusalFor } from "./blocking";
+import { type AgentOrigin, deliverCard } from "./announcements";
+import { type Blocker, computeBlocked, concernSameThing, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
 import { approveProposal, getProposal, health, type Proposal, rejectProposal } from "./proposals";
 import { loadProject, parseRequirementRef, resolveProjectRef } from "./requirements";
-import { boolField, createdField, enumField, enumOrNull, idField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
+import { boolField, createdField, enumField, enumOrNull, idField, instantField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
 import { cardName, identityOfShortNumber, syncShortNumbers } from "./short-numbers";
 import { roundWorktrees } from "./worktree-round";
 import {
@@ -40,8 +40,15 @@ interface TaskData {
   proposal: string | null;
   /** True while the agent has taken the Task (it is working on it); absent in Tasks written before the mark existed, which are free. */
   agent: boolean;
+  /**
+   * Who took it, kept in the `agent` field instead of `true`: the agent terminal's ID, or `cursor` for Cursor's chat.
+   * Null when free, and when taken before the holder was recorded or by an agent of unknown origin: any end releases it.
+   */
+  holder: string | null;
   /** When the Task was created, UTC ISO 8601. Absent on numbered Tasks written before the field existed. */
   created: string | null;
+  /** When the Task arrived in Done from another column, UTC ISO 8601; absent outside Done and on Tasks that reached Done before the field existed. */
+  finished: string | null;
 }
 
 export type DriftResolution = "fix-code" | "proposal" | "dismissed";
@@ -78,12 +85,23 @@ function parseTask(raw: Raw, where: string): TaskData {
     refs: stringList(raw, "refs", where),
     drift: idField(raw, "drift", where),
     proposal: idField(raw, "proposal", where),
-    agent: boolField(raw, "agent", false, where),
+    ...agentField(raw, where),
     created: createdField(raw, where),
+    finished: instantField(raw, "finished", where),
   };
   checkTaskRefs(data.technical, data.refs, `${where}: `);
   return data;
 }
+
+/** The `agent` field: false, true, or the holder that took the Task (a terminal ID or `cursor`). */
+function agentField(raw: Raw, where: string): { agent: boolean; holder: string | null } {
+  const v = raw["agent"];
+  if (typeof v === "string" && v.trim() !== "") return { agent: true, holder: v.trim() };
+  return { agent: boolField(raw, "agent", false, where), holder: null };
+}
+
+/** The holder recorded for a Task taken from `origin`: the terminal wins over the chat, as in `originFromEnv`. */
+const holderOf = (origin: AgentOrigin): string | null => origin.terminal ?? origin.chat ?? null;
 
 function parseDrift(raw: Raw, where: string): DriftData {
   return {
@@ -106,10 +124,15 @@ function load<D>(dir: string, entry: { id: string; name: string }, parse: (raw: 
   return { id: entry.id, name: entry.name, path, data: parse(doc.data, path), title, body: doc.body };
 }
 
-/** Writes a card. A numbered card has no `created`; the key stays absent so a later edit does not invent an instant. */
+/** Writes a card. A numbered card has no `created`, and a Task outside Done no `finished`; the key stays absent so a later edit does not invent an instant. */
 function saveItem(path: string, data: object, body: string) {
   const copy: Record<string, unknown> = { ...data };
   if (copy["created"] == null) delete copy["created"];
+  if (copy["finished"] === null) delete copy["finished"];
+  if ("holder" in copy) {
+    if (copy["agent"] === true && typeof copy["holder"] === "string") copy["agent"] = copy["holder"];
+    delete copy["holder"];
+  }
   writeDocument(path, copy, body);
 }
 
@@ -159,7 +182,7 @@ export function newTask(
   // unless it fixes a Drift: then it belongs to the design of the Task the Drift came from.
   const linked = input.proposal ? getProposal(p, input.proposal).id : null;
   const proposal = input.technical && drift === null ? null : linked;
-  const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift, proposal, agent: false, created: createdNow() };
+  const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift, proposal, agent: false, holder: null, created: createdNow(), finished: null };
   const task = create(tasksDir(p), input.title, data, input.body ?? "", "Task");
   deliverCard(p, input.announcement, "task");
   return task;
@@ -176,7 +199,7 @@ export type Mover = "agent" | "developer";
  * To do or Done clears the mark. The developer never takes a Task and cannot move one the agent has taken.
  * The agent cannot start a blocked Task, from any column, nor keep one In progress; nothing changes then.
  */
-export function moveTask(p: Project, id: string, column: string, by: Mover): Task {
+export function moveTask(p: Project, id: string, column: string, by: Mover, origin: AgentOrigin = {}): Task {
   if (!COLUMNS.includes(column as Column))
     throw new TramaError(`Unknown column "${column}" (expected ${COLUMNS.join(", ")})`);
   const task = getTask(p, id);
@@ -188,15 +211,30 @@ export function moveTask(p: Project, id: string, column: string, by: Mover): Tas
     const blockers = blockedTasks(p).get(task.id);
     if (blockers) throw new TramaError(refusalFor(task, blockers, syncShortNumbers(p)));
   }
+  // Arriving in Done from another column records the instant; Done to Done keeps it; leaving Done forgets it.
+  if (column !== "done") task.data.finished = null;
+  else if (task.data.column !== "done") task.data.finished = createdNow();
   task.data.column = column as Column;
-  if (by === "agent") task.data.agent = column === "doing";
+  if (by === "agent") {
+    // Moving a taken Task to In progress again keeps the mark and who holds it.
+    task.data.holder = column !== "doing" ? null : task.data.agent ? task.data.holder : holderOf(origin);
+    task.data.agent = column === "doing";
+  }
   saveItem(task.path, task.data, task.body);
   return task;
 }
 
-/** What a run can take: the next runnable Task, and the Tasks in To do that wait, each with what blocks it. */
+/** Most Tasks a parallel run implements together. */
+const BATCH_MAX = 4;
+
+/** What a run can take: the next runnable Task, the group of a parallel run, and the Tasks in To do that wait, each with what blocks it. */
 export interface RunQueue {
   next: Task | null;
+  /**
+   * The group of a parallel run, starting with `next`: each later runnable Task, oldest first, that concerns
+   * the same thing as none already chosen, up to `BATCH_MAX`. Empty when no Task is runnable.
+   */
+  batch: Task[];
   /** Every Task in To do within the scope that is blocked, in order. */
   waiting: { task: Task; blockers: Blocker[] }[];
 }
@@ -207,10 +245,18 @@ export interface RunQueue {
  */
 export function nextTask(p: Project, proposal?: string): RunQueue {
   const scope = proposal === undefined ? null : getProposal(p, proposal).id;
-  const blocked = blockedTasks(p);
-  const todo = listTasks(p).filter((t) => t.data.column === "todo" && (scope === null || t.data.proposal === scope));
+  const project = loadProject(p);
+  const tasks = listTasks(p);
+  const blocked = computeBlocked(project, tasks, listDrifts(p));
+  const todo = tasks.filter((t) => t.data.column === "todo" && (scope === null || t.data.proposal === scope));
+  const batch: Task[] = [];
+  for (const task of todo) {
+    if (batch.length === BATCH_MAX) break;
+    if (!blocked.has(task.id) && !batch.some((chosen) => concernSameThing(project, chosen.data.refs, task.data.refs))) batch.push(task);
+  }
   return {
-    next: todo.find((t) => !blocked.has(t.id)) ?? null,
+    next: batch[0] ?? null,
+    batch,
     waiting: todo.flatMap((task) => (blocked.has(task.id) ? [{ task, blockers: blocked.get(task.id) as Blocker[] }] : [])),
   };
 }
@@ -220,15 +266,21 @@ export function takeBackTask(p: Project, id: string): Task {
   const task = getTask(p, id);
   if (!task.data.agent) throw new TramaError(`The agent has not taken Task ${cardName(p, "task", task.id)}`);
   task.data.agent = false;
+  task.data.holder = null;
   saveItem(task.path, task.data, task.body);
   return task;
 }
 
-/** The agent's command ended, so no agent can still be working: every Task it took is released and goes back to To do. */
-export function releaseTasks(p: Project): Task[] {
-  const released = listTasks(p).filter((t) => t.data.agent);
+/**
+ * The agent's command ended in `origin` (an agent terminal or Cursor's chat), so that agent is no longer working: the
+ * Tasks it took are released and go back to To do. Tasks taken without a recorded holder count as any origin's.
+ */
+export function releaseTasks(p: Project, origin: AgentOrigin): Task[] {
+  const holder = holderOf(origin);
+  const released = listTasks(p).filter((t) => t.data.agent && (t.data.holder === null || t.data.holder === holder));
   for (const task of released) {
     task.data.agent = false;
+    task.data.holder = null;
     task.data.column = "todo";
     saveItem(task.path, task.data, task.body);
   }
@@ -365,10 +417,14 @@ export function newDrift(
   return drift;
 }
 
-/** What the developer adds when fixing the code of a Drift: the number of the chosen fix option (from 1) and a free note. */
+/**
+ * What the developer adds when fixing the code of a Drift: the number of the chosen fix option (from 1) and a free note.
+ * `proposal` is the design the fix Task belongs to whatever the Drift came from: the Proposal of the worktree holding it.
+ */
 export interface FixChoice {
   option?: number;
   note?: string;
+  proposal?: string;
 }
 
 /** The body of the Task that fixes the code: both sides, then the chosen option and the note, then where in the code. A Drift written before the sections existed keeps its free text. */
@@ -408,14 +464,16 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
     const option = chosenOption(p, drift, choice.option);
     // A Drift that only contradicts Requirements changes no behaviour, so its Task is technical.
     const touchesModel = drift.data.refs.some((r) => parseRequirementRef(r) === null);
-    // The fix belongs to the design of the Task the Drift came from, if any, even when it is technical.
+    // The fix belongs to the given design (a worktree's Proposal) or else to the design of the Task the Drift came
+    // from, if any, even when it is technical.
     const origin = drift.data.origin ? getTask(p, drift.data.origin) : null;
+    const design = choice.proposal ?? origin?.data.proposal;
     const task = newTask(p, {
       title: `Fix code to match the ${touchesModel ? "Model" : "Requirements"}: ${drift.title}`,
       refs: drift.data.refs,
       technical: !touchesModel,
       drift: drift.id,
-      ...(origin?.data.proposal ? { proposal: origin.data.proposal } : {}),
+      ...(design ? { proposal: design } : {}),
       body: fixTaskBody(drift, option, note),
     });
     drift.data.task = task.id;
@@ -426,6 +484,7 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
     if (origin && origin.data.column !== "done") {
       origin.data.column = "todo";
       origin.data.agent = false;
+      origin.data.holder = null;
       saveItem(origin.path, origin.data, origin.body);
     }
   } else if (how === "accept-proposal") {

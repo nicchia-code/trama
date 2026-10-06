@@ -143,6 +143,7 @@ export class DesignRequests implements vscode.Disposable {
     if (kept.length !== sent.length) void this.state.update(SENT_KEY, kept);
   }
 
+  /** Saves `document` shortly after its last change, but never brings back a request file already deleted. */
   private scheduleSave(document: vscode.TextDocument): void {
     const key = document.uri.toString();
     clearTimeout(this.saves.get(key));
@@ -150,7 +151,7 @@ export class DesignRequests implements vscode.Disposable {
       key,
       setTimeout(() => {
         this.saves.delete(key);
-        if (!document.isClosed && document.isDirty) void document.save();
+        if (!document.isClosed && document.isDirty && existsSync(document.uri.fsPath)) void document.save();
       }, SAVE_DELAY_MS),
     );
   }

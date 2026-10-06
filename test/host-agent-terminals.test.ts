@@ -152,7 +152,7 @@ beforeAll(() => {
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("taken Tasks and the agent terminals", () => {
-  test("a command ending in an earlier terminal still sends the Tasks taken while a later one runs back to To do", async () => {
+  test("a command ending in one terminal sends back to To do only the Tasks that terminal took, and those taken before the holder was kept", async () => {
     // Dynamic: the module must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const p = projectAt(dir);
@@ -160,24 +160,25 @@ describe("taken Tasks and the agent terminals", () => {
 
     expect(await launchAgent(dir, "first", "Scan")).toBe("terminal");
     const first = terminals[0] as FakeTerminal;
+    const firstId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
     listeners.start.forEach((fn) => fn(shell(first)));
     await launchAgent(dir, "second", "Scan"); // the first is busy, so this one starts another terminal
     const second = terminals[1] as FakeTerminal;
+    const secondId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
     expect(second).not.toBe(first);
     listeners.start.forEach((fn) => fn(shell(second)));
 
-    const a = newTask(p, { title: "A", refs: ["order/Paid"], technical: false });
-    const b = newTask(p, { title: "B", refs: ["order/Paid"], technical: false });
-    moveTask(p, a.id, "doing", "agent");
-    moveTask(p, b.id, "doing", "agent");
-    expect(getTask(p, a.id).data.agent).toBe(true);
+    const take = (title: string, terminal?: string) => moveTask(p, newTask(p, { title, refs: ["order/Paid"], technical: false }).id, "doing", "agent", terminal ? { terminal } : {}).id;
+    const a = take("A", firstId);
+    const b = take("B", secondId);
+    const old = take("Old"); // taken with no holder recorded, as before the mark kept one
+    expect(readFileSync(getTask(p, a).path, "utf8")).toContain(`agent: ${firstId}`);
+    const state = (id: string) => [getTask(p, id).data.column, getTask(p, id).data.agent];
 
     listeners.end.forEach((fn) => fn(shell(first)));
-    for (const id of [a.id, b.id]) {
-      const task = getTask(p, id);
-      expect(task.data.agent).toBe(false);
-      expect(task.data.column).toBe("todo");
-    }
+    expect([a, b, old].map(state)).toEqual([["todo", false], ["doing", true], ["todo", false]]);
+    listeners.end.forEach((fn) => fn(shell(second)));
+    expect(state(b)).toEqual(["todo", false]);
   });
 
   test("the end of a turn of a Trama conversation in Cursor's chat, however it ends, sends every taken Task back to To do", async () => {
@@ -776,7 +777,7 @@ describe("worktree agent terminal", () => {
       newTask(workProject, { title: "Born", refs: ["order/Paid"], technical: false, proposal: proposal.id });
 
       listeners.end.forEach((fn) => fn(shell(terminal)));
-      const implement = `Use the trama-implement skill on every Task of Proposal ${proposal.id} that is in the "todo" column. Take each one from \`trama task next --proposal ${proposal.id}\`, one after the other, until it says there is none. Write everything you generate in Italian, except code, which always stays in English.`;
+      const implement = `Use the trama-implement skill on every Task of Proposal ${proposal.id} that is in the "todo" column, taking them from \`trama task next --batch --proposal ${proposal.id}\`, one group at a time, until it says there is none. Do not scan the whole System at the end: Trama checks the code after the merge. Write everything you generate in Italian, except code, which always stays in English.`;
       expect(terminal.line).toBe(`echo '${implement}'`);
       expect(born).not.toHaveBeenCalled();
 
@@ -838,7 +839,7 @@ describe("worktree agent terminal", () => {
       const before = terminals.length;
       await resumeWorktreeTasks(dir, work, "0004");
       expect(terminals.length).toBe(before);
-      const again = 'Use the trama-implement skill on every Task of Proposal 0004 that is in the "todo" column. Take each one from `trama task next --proposal 0004`, one after the other, until it says there is none.';
+      const again = 'Use the trama-implement skill on every Task of Proposal 0004 that is in the "todo" column, taking them from `trama task next --batch --proposal 0004`, one group at a time, until it says there is none. Do not scan the whole System at the end: Trama checks the code after the merge.';
       expect((terminals.at(-1) as FakeTerminal).line).toBe(`echo '${again}'`);
     } finally {
       delete settingValues.worktreeAgent;

@@ -376,7 +376,7 @@ Needs the agent of E12 for row 6 (`trama.agentCommand` as `bash -c "sleep 600" {
 | 4 | `j task move <id of the first row> done` | Badge `1/3 done`, the row's dot is `Done`; the card stays in In progress (a mix of To do and Done) | ☐ |
 | 5 | Edit any file under `$D/tasks/` from outside (see F1) | The card stays open and in place after the refresh | ☐ |
 | 6 | Try to drag the card onto another column | It cannot be dragged; nothing moves | ☐ |
-| 7 | **Run this design** | The launch prints ``Use the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column. Take each one from `trama task next --proposal 0001`, one after the other, until it says there is none.`` | ☐ |
+| 7 | **Run this design** | The launch prints ``Use the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column. Take them from `trama task next --batch --proposal 0001`, one group at a time, until it says there is none.`` | ☐ |
 | 8 | `j task move <id> done` for the other two Tasks | The card moves to Done, badge `3/3 done`, **Run this design** is disabled with the tooltip `No Task of this design is in To do` | ☐ |
 | 9 | Close the panel and open it again | The card is closed again | ☐ |
 | 10 | `trama --root $D board` and `trama --root $D task list` | `board` lists `Proposal 0001 "Returns after shipping" (3/3 done)` once, in Done, with the three Tasks under it and their columns; `task list` lists the three Tasks flat, each with `(Proposal 0001)` | ☐ |
@@ -453,7 +453,7 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 |---|---|---|---|
 | 1 | Board: **Approve** on Proposal 0001 | The card leaves To decide (count 3). No error banner | ☐ |
 | 2 | Look at the bottom panel | A terminal named **Scan** opens in the project folder | ☐ |
-| 3 | Read the terminal | Exactly **one** command was sent and one line printed: ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
+| 3 | Read the terminal | Exactly **one** command was sent and one line printed: ``Use the trama-scan skill on what Proposal 0001 changed: its scan scope is in `trama proposal show 0001`. Link every Task you file to it with --proposal 0001. If the scan files no Drift, go on with the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column, taking them from `trama task next --batch --proposal 0001`, one group at a time, until it says there is none.`` | ☐ |
 | 4 | Verification shell: `j validate` | `The Model and its Requirements are valid.` | ☐ |
 | 5 | `grep -c Returned $D/model/checkout/order.md` | `2` | ☐ |
 | 6 | `ls $D/model/checkout` | `cart.md feature.md order.md payment.md return.md` | ☐ |
@@ -461,6 +461,8 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 | 8 | `grep status $D/proposals/0001-*/proposal.md` | `status: approved` | ☐ |
 | 9 | Diagram, System level, selector `None` | User now has `4 events`; Checkout has `4 machines`; no ghosts for 0001 | ☐ |
 | 10 | Selector | `0001` is no longer listed | ☐ |
+| 11 | `j proposal show 1` | After `## Changes`, a `## Scan scope` section, one reference per line with `(changed)`, `(removed, its container)` or `(leads into a change)`, among them `` `return` (changed) ``; `j --json proposal show 1` has `scanScope` as a list of `{ ref, reason }` | ☐ |
+| 12 | ↻. Add `"trama.autoImplement": false` to the settings, approve Proposal 0001 | The line of G1.3 ends after `--proposal 0001.`: nothing about trama-implement | ☐ |
 
 ### G2. Approve from the Diagram panel
 | # | Action | Expected | ✓ |
@@ -570,7 +572,7 @@ Each launch sends one command to a terminal named after its work (cwd = the demo
 | H8 | Click **Quick request…** and press Esc | Nothing is printed | ☐ |
 | H9 | Diagram toolbar **Quick request…**, then the Requirements toolbar **Quick request…** | Same input box and result as H5–H7 | ☐ |
 | H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
-| H11 | Board: **Run all To do** | ``Use the trama-implement skill on every Task in the "todo" column. Take each one from `trama task next`, one after the other, until it says there is none.`` | ☐ |
+| H11 | Board: **Run all To do** | ``Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch`, one group at a time, until it says there is none.`` | ☐ |
 | H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task take-back 5` and `j task take-back 7`, then look at **Run all To do** and at the **Run this design** button of `Proposal 0003` | **Run all To do** is **disabled** with the tooltip and accessible description `All the Tasks in To do are blocked: Task 0001 is blocked by Drift 0006`; **Run this design** is disabled with `All the Tasks of this design in To do are blocked: Task 0006 is blocked by Drift 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run all To do** | ☐ |
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
@@ -855,6 +857,20 @@ Start each block with ↻. `$D` and `j` are the ones of S4.
 | U18 | Read the buttons of a Proposal in To decide | Their text uses the number: `Approves Proposal P1 and changes the Model to match` (tooltip), not the identity | ☐ |
 | U19 | Run **Trama: Update Agent Skills**, then `grep -l 'Never write a short number in a file' /tmp/trama-demo/shop/.agents/skills/trama-*/SKILL.md` | Four files: `trama-design`, `trama-scan`, `trama-implement`, `trama-import` | ☐ |
 | U20 | Start a run of `trama-implement` on a Task (✓ with a real agent 🪙) and read its report | The agent names Tasks and Drifts as `Task T3 – title`, and every command it ran and every file it wrote uses the permanent identity: `ls $D/drifts` and the Task and Drift files hold no short number | ☐ |
+
+## V. Faster agent runs
+
+Start each block with ↻. `$D` and `j` are the ones of S4.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| V1 | `j task next --batch` | One Task per line, `<number> <title>`, at most four, the first being the one `j task next` names; no two of them concern the same thing (for example never `order` together with `order/Paid`). Nothing moves | ☐ |
+| V2 | `j --json task next --batch` | `batch`: the same Tasks, each with `id`, `number` and `title` | ☐ |
+| V3 | Move every Task in To do to Done with `j task move <id> done`, then `j task next --batch` and `j task next` | The two outputs are identical: `No Task is runnable.` and the Tasks left | ☐ |
+| V4 | `j proposal show 1` before approving it | No `## Scan scope` section: it is written only on approval or acceptance into a worktree | ☐ |
+| V5 | Turn **Multi-branch** on, set `trama.worktreeAgent` to `echo {prompt}` in the user settings, accept Proposal 0001 | The worktree's terminal receives the targeted scan line of G1.3 **without** the trama-implement part. `trama proposal show 1` run inside the worktree has `## Scan scope`; in the open folder it has none until the merge | ☐ |
+| V6 | In that worktree, `trama task new "Born" --ref order --proposal <id of 0001>`, then let the command end | The same terminal receives ``Use the trama-implement skill on every Task of Proposal <id> that is in the "todo" column, taking them from `trama task next --batch --proposal <id>`, one group at a time, until it says there is none. Do not scan the whole System at the end: Trama checks the code after the merge.`` Turn Multi-branch off afterwards | ☐ |
+| V7 | 🪙 With a real agent that has sub-agents, **Run all To do** with at least three Tasks on different Machines | The agent hands each Task of a group to a sub-agent, waits for all, asks `trama task next --batch` again, runs tests, lint and build once at the end, then scans the whole System and reports the Tasks and Drifts that scan filed | ☐ |
 
 ---
 

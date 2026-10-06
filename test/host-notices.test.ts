@@ -155,13 +155,25 @@ test("a first failure is retried once after ten seconds with the same text, and 
   expect(t.warnings).toEqual([]);
 });
 
-test("the retry reads the setting again: a removed or invalid topic stops it", async () => {
+test("the retry reads the setting again: a removed topic stops it silently, an invalid one stops it with one warning", async () => {
   const removed = harness({ answers: [500] });
   removed.service.start(() => question);
   await removed.advance(10_000);
   removed.setTopic("");
   await removed.advance(60_000);
   expect(removed.calls).toHaveLength(1);
+  expect(removed.warnings).toEqual([]);
+
+  const invalid = harness({ answers: [500, 500] });
+  invalid.service.start(() => question);
+  await invalid.advance(10_000);
+  invalid.setTopic("bad topic");
+  await invalid.advance(60_000);
+  expect(invalid.calls).toHaveLength(1);
+  expect(invalid.warnings).toEqual(["Trama could not send the ntfy notification: the setting is not a topic name or an http(s) URL. Check the trama.ntfy setting and your connection."]);
+  invalid.service.start(() => question);
+  await invalid.advance(60_000);
+  expect(invalid.warnings).toHaveLength(1);
 
   const changed = harness({ answers: [500, 200] });
   changed.service.start(() => question);

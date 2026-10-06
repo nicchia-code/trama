@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { approvalBlock, approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
+import { approvedScope } from "../../../src/core/scope";
 import { lostWorktreeMessage, reconcileLostWorktrees, roundWorktrees, withdrawFromRound, worktreePath } from "../../../src/core/worktree-round";
 import { abandonRound, reconcileMerge } from "../../../src/core/worktree-merge";
 import { approvalBySwitch, noticeForSwitch, readMultiBranch, turnMultiBranch } from "../../../src/core/multi-branch";
@@ -23,7 +24,7 @@ import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { resolveMarkdownFile } from "./paths";
 import { findProject, initializeProject, updateSkills } from "./project";
-import { buildPrompt, buildScanPrompt, type ResolvedAction, terminalName, withLanguage } from "./prompts";
+import { buildApprovalScanPrompt, buildPrompt, type ResolvedAction, terminalName, withLanguage } from "./prompts";
 import { type ApprovalOptions, applyApprovedProposal } from "./approval";
 import type { QuestionSession } from "./question-session";
 import { syncFolderWatchers } from "./folder-watchers";
@@ -221,8 +222,8 @@ export class Controller implements vscode.Disposable {
     if (this.panel && this.project) this.refresh();
   }
 
-  /** A waiting round was applied. The Board, if it is open, shows the Proposals as part of the Model. */
-  noteRoundMerged(): void {
+  /** A waiting round was applied or went into conflict. The Board, if it is open, shows the Proposals as part of the Model, or the Merge Drift. */
+  noteRoundSettled(): void {
     if (this.panel && this.project) this.refresh();
   }
 
@@ -377,8 +378,9 @@ export class Controller implements vscode.Disposable {
       project,
       autoScan: settings().get<boolean>("autoScan", true),
       agentConfigured: agentReady(),
-      launchScan: async (features, proposal) => {
-        const instruction = buildScanPrompt(features, proposal);
+      launchScan: async (proposal) => {
+        // Read when the instruction is built, like the language.
+        const instruction = buildApprovalScanPrompt(proposal, settings().get<boolean>("autoImplement", true));
         if ((await launchAgent(project.root, instruction, "Scan", undefined, true)) !== "not-sent") return;
         // Cursor could not send it by itself: no chat is left waiting; the developer starts the scan when they want.
         void vscode.window.showInformationMessage(`Trama: Proposal ${cardName(project, "proposal", proposal)} was approved. Scan the Features it affects?`, "Scan now").then(async (choice) => {
@@ -394,15 +396,28 @@ export class Controller implements vscode.Disposable {
   }
 
   /**
+   * An approval made outside the panel (`trama proposal approve`, `trama drift resolve --accept-proposal`) already
+   * applied an ordinary Proposal that affects a Feature that still exists: start the same automatic scan as the panel.
+   */
+  async scanApproved(project: Project, proposalId: string): Promise<void> {
+    const options = this.approvalOptions(project);
+    this.refresh();
+    if (!options.autoScan || !options.agentConfigured) return;
+    await options.launchScan(proposalId);
+  }
+
+  /**
    * `trama proposal approve` with the switch on. The command waits for this; the worktree agent starts the same way as the panel.
    */
   async approveFromCommand(project: Project, proposalId: string, skillsDirs: string[]): Promise<{ ok: boolean; message: string }> {
     const decision = approvalBySwitch(readMultiBranch(project));
     if (decision.route === "folder") {
       try {
-        const approved = approveProposal(project, proposalId, skillsDirs);
-        this.refresh();
-        const line = `Approved Proposal ${cardName(project, "proposal", approved.id)}`;
+        const { id: approved, features } = approvedScope(project, proposalId, () => approveProposal(project, proposalId, skillsDirs));
+        // The command is not held up by the scan: its answer goes back first.
+        if (features.length > 0) void this.scanApproved(project, approved).catch((err: unknown) => void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`));
+        else this.refresh();
+        const line = `Approved Proposal ${cardName(project, "proposal", approved)}`;
         return { ok: true, message: decision.notice ? `${decision.notice}\n${line}` : line };
       } catch (err) {
         const message = describeError(err);

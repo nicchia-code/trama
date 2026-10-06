@@ -1,7 +1,7 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, formatCounts, interleave, proposalBadges, summarizeChanges, summarizeFile, withdrawnNotice, worktreeCards } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, doneGroups, formatCounts, interleave, proposalBadges, summarizeChanges, summarizeFile, withdrawnNotice, worktreeCards } from "../extension/src/webview/board/logic";
 import { runBlocker } from "../src/core/design";
 import { namerOf } from "../src/core/card-names";
 
@@ -22,7 +22,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   ...over,
 });
 const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, worktree: null, ...over });
-const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, blockedBy: [], file: "tasks/0012-refunds.md", worktree: null, ...over });
+const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, finished: null, blockedBy: [], file: "tasks/0012-refunds.md", worktree: null, ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], inWorktree: [], drifts: [], tasks: [], announcements: [], multiBranch: false, numbers: { proposal: {}, task: {}, drift: {} }, ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
 
@@ -197,6 +197,20 @@ test("a blocked Task, alone or inside a design, gets one badge per blocker that 
   expect(away[1]?.key).toBe("worktree:p1:task:0009");
 });
 
+test("a badge that leads to a Task shown as a row of a design card leads to that design card, opened on the row", () => {
+  const fix: TaskView["blockedBy"] = [{ kind: "fix", task: "0009", title: "Fix refunds", drift: "0004" }];
+  // The fix Task sits in the design of the blocked Task: the badge leads to the design card, on its row.
+  const inDesign = buildBoard(snapshot({ tasks: [{ ...design("0001", "todo"), blockedBy: fix }, design("0009", "doing")] }))[2]?.cards[0];
+  expect(inDesign?.kind === "design" && inDesign.tasks[0]?.blocks.map((b) => b.target)).toEqual([{ kind: "card", key: "design:0007", row: "task:0009" }]);
+  // A blocked Task on its own card, waiting for a fix Task inside a design card, leads there too.
+  const alone = buildBoard(snapshot({ tasks: [task({ id: "0002", blockedBy: fix }), design("0009", "todo"), design("0010", "todo")] }))[1]?.cards ?? [];
+  expect(alone.map((c) => c.key)).toEqual(["task:0002", "design:0007"]);
+  expect(alone[0]?.kind === "task" && alone[0].blocks.map((b) => b.target)).toEqual([{ kind: "card", key: "design:0007", row: "task:0009" }]);
+  // In a worktree too.
+  const away = buildBoard(snapshot({ tasks: [{ ...design("0001", "todo"), worktree: "p1", blockedBy: fix }, { ...design("0009", "todo"), worktree: "p1" }] }))[1]?.cards[0];
+  expect(away?.kind === "design" && away.tasks[0]?.blocks.map((b) => b.target)).toEqual([{ kind: "card", key: "design:0007", row: "worktree:p1:task:0009" }]);
+});
+
 const announcement = (over: Partial<AnnouncementView> = {}): AnnouncementView => ({ id: "abc123", kind: "proposal", title: "Refunds", phase: "preparing", ...over });
 
 test("announced ghosts stand in the column their card will land in, after the real cards of their kind, Proposals before Drifts", () => {
@@ -287,4 +301,55 @@ test("the run blockers name the Tasks and the Drift by number", () => {
   const blocked = { id: "0012", column: "todo" as const, agent: false, blockedBy: [{ kind: "drift" as const, drift: "0003" }] };
   expect(runBlocker([blocked], "all", name)).toBe("All the Tasks in To do are blocked: Task T3 is blocked by Drift D2");
   expect(runBlocker([{ ...blocked, agent: true }], "all", name)).toBe("An agent is working on Task T3");
+});
+
+describe("the Done column", () => {
+  // Local times, so the days are the developer's whatever the machine's zone.
+  const now = new Date(2026, 9, 6, 15, 0);
+  const at = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute).toISOString();
+  const done = (id: string, finished: string | null, proposal: string | null = null) => task({ id, column: "done", finished, proposal, proposalTitle: proposal && "Returns" });
+  // Creation order: the design card stands where its first Task (0003) stands.
+  const column = buildBoard(
+    snapshot({
+      tasks: [
+        done("0001", at(6, 10)),
+        done("0002", at(5, 20)),
+        done("0003", at(3, 9), "0007"),
+        done("0004", at(6, 10)),
+        done("0005", at(6, 12), "0007"),
+        done("0006", null),
+        done("0008", at(4, 8)),
+        done("0009", at(26 - 30, 8)),
+      ],
+    }),
+  )[3];
+  const cards = column?.cards ?? [];
+  const shown = (period: Parameters<typeof doneGroups>[1]) => doneGroups(cards, period, now, "en-US").map((g) => [g.heading, g.cards.map((c) => c.key)]);
+
+  test("puts the latest finished first, by local day; a design counts from its last Task; ties go to the newer card", () => {
+    expect(shown("week")).toEqual([
+      ["Today · 3", ["design:0007", "task:0004", "task:0001"]],
+      ["Yesterday · 1", ["task:0002"]],
+      ["October 4, 2026 · 1", ["task:0008"]],
+    ]);
+    const design = cards.find((c) => c.kind === "design");
+    expect(design?.kind === "design" && design.tasks.map((t) => t.id)).toEqual(["0003", "0005"]);
+  });
+
+  test("the period lets through today, the last 7 or 30 local days, or all with the undated cards last", () => {
+    expect(shown("today")).toEqual([["Today · 3", ["design:0007", "task:0004", "task:0001"]]]);
+    expect(shown("month").map(([heading]) => heading)).toEqual(["Today · 3", "Yesterday · 1", "October 4, 2026 · 1", "September 26, 2026 · 1"]);
+    expect(shown("all").at(-1)).toEqual(["No date · 1", ["task:0006"]]);
+    expect(shown("all").flatMap(([, keys]) => keys)).toHaveLength(cards.length);
+  });
+
+  test("Last 7 days starts at midnight six local days ago", () => {
+    const edge = buildBoard(snapshot({ tasks: [done("0001", at(30 - 30, 0)), done("0002", at(29 - 30, 23, 59))] }))[3]?.cards ?? [];
+    expect(doneGroups(edge, "week", now, "en-US").map((g) => g.heading)).toEqual(["September 30, 2026 · 1"]);
+  });
+
+  test("a period with no cards leaves no group and the column says so", () => {
+    expect(doneGroups(cards.filter((c) => c.key === "task:0009"), "week", now)).toEqual([]);
+    expect(column?.hint).toBe("Nothing done in this period");
+  });
 });

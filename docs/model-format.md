@@ -183,6 +183,11 @@ base:
 delete:
   - checkout/legacy.md
 request: 2026-10-04T19-05-12 # optional: the written design request it was born from; kept after the request is consumed
+scanScope: # written by Trama when an ordinary Proposal is approved or enters a worktree; never changed afterwards
+  - ref: order/Paid
+    reason: changed # or "removed, its container", or "leads into a change"
+  - ref: order/Awaiting payment/payment.SUCCEEDED
+    reason: leads into a change
 ---
 # Refunds
 
@@ -198,10 +203,11 @@ Written by the developer on rejection, only when they gave some.
 - **Editing after submission**: register the file before each change. Registering, rewriting or marking a file for deletion returns an open Proposal to Draft, even if the content ends up unchanged; submit again when finished.
 - **Requires**: a Proposal that lists `requires` is written, diffed and validated on top of the draft and open Proposals it requires, directly or through them, applied in order. Its `base` hashes refer to that state, so approving a required Proposal does not make it stale. It cannot be approved while any required Proposal is a draft, open, rejected, discarded or missing, or while two Proposals require each other; a rejected or discarded requirement leaves it blocked. `trama proposal new` refuses to require a rejected or discarded Proposal.
 - A Proposal is **stale** when any file's current hash (on top of the Proposals it requires) differs from its `base` entry. Staleness is computed, never stored. A stale Proposal cannot be approved; the agent writes a new one.
-- **Approving** checks that every required Proposal is approved and that the Proposal is not stale, validates the Model and its Requirements with the Proposal applied, copies the new files into `model/` and `requirements/`, removes the `delete` entries, sets `status: approved` and regenerates the `trama-req-*` skills. The extension scans the affected Features afterwards, except for `kind: import` Proposals, whose Model already matches the code (ADR 0008).
+- **Approving** checks that every required Proposal is approved and that the Proposal is not stale, validates the Model and its Requirements with the Proposal applied, copies the new files into `model/` and `requirements/`, removes the `delete` entries, sets `status: approved` and regenerates the `trama-req-*` skills. The extension then scans what the Proposal changed, its scan scope, except for `kind: import` Proposals, whose Model already matches the code (ADR 0008).
 - **Rejecting** sets `status: rejected` and appends `## Feedback` when the developer gave feedback; it is optional, and an empty or blank one adds nothing. The agent answers with a new Proposal.
 - **Discarding** a draft the agent never finished sets `status: discarded`; no feedback is written. Only drafts can be discarded.
 - **Bound to a written design request**: `request` names the request the agent opened the Proposal for (`trama proposal new --request <id>`); only the first Proposal of a design is bound. Handing it over deletes the request file. Proposals written before the field existed have none.
+- **Scan scope**: `scanScope` lists what a targeted scan compares with the code, worked out from the Model and Requirements before and after the Proposal when an ordinary Proposal is approved or enters a worktree: every State, Transition and Event added or changed, with what it contains; the changed description of a Machine, Feature or Actor, alone; every Requirement section added or changed, compared by Area and reference whatever fragment holds it; a new Machine whole; an element removed as its nearest container that still exists; and the Transitions of any Machine that enter those elements or react to a changed Event. The System description and fragment titles and descriptions add nothing. A Proposal in a worktree carries it in its worktree's copy until the merge brings it here. Imports, Proposals not approved yet and those approved before the field existed have none.
 - Approved, rejected and discarded Proposals stay on disk as history.
 
 ## Element references
@@ -231,6 +237,7 @@ refs:
 drift: "0003"           # optional: the Drift this Task resolves
 proposal: "0007"        # optional: the Proposal (the design) this Task comes from
 agent: false            # true while the agent has taken the Task (default false)
+finished: "2026-10-06T09:12:00.000Z"  # only in Done: when the Task arrived there (UTC)
 ---
 # Refund cancelled orders once preparation has started
 
@@ -241,6 +248,7 @@ What to do, in prose.
 - The board's **To decide** column is not a Task column: it shows open Proposals (never drafts) and open Drifts.
 - `proposal` is set when the agent files the Task after that Proposal was approved (the Scan is told which Proposal). It must name an existing Proposal, in any status. Tasks written before the field existed, Tasks of a Scan started by hand, Technical Tasks and Tasks that fix a Drift carry none.
 - `agent` is `true` while the agent has taken the Task: it takes it by moving it to `doing` with `trama task move` in the terminal Trama started (`TRAMA_AGENT` set) or in Cursor's chat (`CURSOR_AGENT=1`). While it is taken the developer cannot move it, and the Board has no way to move a Task; `trama task take-back` clears the mark and leaves the Task in `doing`. When the agent terminal's command ends, or a turn of a Trama conversation in Cursor's chat ends or that conversation is closed, every Task of the project that carries the mark goes back to `todo` with the mark cleared, so it can be run again. Tasks written before the field existed are free.
+- `finished` is the UTC instant (ISO 8601) the Task arrived in Done from another column. A move from Done to Done keeps it; a move out of Done removes it, and arriving in Done again writes a new one. Tasks that reached Done before the field existed have none.
 - The Tasks linked to one Proposal form a **design**. The Board shows a design of two or more Tasks as one card, closed at first, standing in the column its Tasks add up to: To do while all are in To do, Done when all are done, In progress in every other case. A design of one Task, and Tasks with no `proposal`, are plain cards.
 
 ## Drift

@@ -1,7 +1,7 @@
 .qo { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .qo-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .45); }
 .qo-dialog { position: relative; display: flex; flex-direction: column; width: min(960px, 100%); max-height: 100%; background: var(--vscode-editorWidget-background, var(--vscode-editor-background, #252526)); color: var(--vscode-editorWidget-foreground, var(--vscode-foreground, #ccc)); border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, #454545)); border-radius: 4px; box-shadow: 0 4px 24px var(--vscode-widget-shadow, rgba(0, 0, 0, .5)); }
-.qo-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--vscode-panel-border, #444); }
+.qo-head { position: relative; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--vscode-panel-border, #444); }
 .qo-titles { flex: 1; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
 .qo-title { margin: 0; font-size: 1em; font-weight: 600; }
 .qo-agent { opacity: .8; }

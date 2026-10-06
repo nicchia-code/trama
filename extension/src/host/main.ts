@@ -2,7 +2,7 @@ import { cardName } from "../../../src/core/short-numbers";
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import * as vscode from "vscode";
-import { takeApproveRequest, writeApproveResult } from "../../../src/core/approve-request";
+import { takeApprovedNotices, takeApproveRequest, writeApproveResult } from "../../../src/core/approve-request";
 import { lostWorktreeMessage, reconcileLostWorktrees, worktreesHome } from "../../../src/core/worktree-round";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { watchAnnouncements } from "./announcements";
@@ -57,7 +57,7 @@ export function activate(context: vscode.ExtensionContext): void {
     watchCursorChatNotices(),
     watchRequirements(),
     watchLostWorktrees(() => trama.noteWorktreesLost()),
-    watchReadyRound(() => trama.noteRoundMerged()),
+    watchReadyRound(() => trama.noteRoundSettled()),
     watchApproveRequests(),
   );
   exposeBundledCli(context);
@@ -71,17 +71,24 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 }
 
-/** `trama proposal approve` writes a request here when the switch is on. The editor runs the panel's acceptance. */
+/**
+ * `trama proposal approve` writes a request here when the switch is on: the editor runs the panel's acceptance.
+ * An approval the command line made in the open folder leaves a notice instead: the editor starts the automatic scan.
+ */
 function watchApproveRequests(): vscode.Disposable {
+  // Notices older than this editor were left while no editor was open: they start nothing.
+  const since = Date.now();
   let busy = false;
   const timer = setInterval(() => {
     if (busy || !controller) return;
     const project = findProject();
     if (!project) return;
+    const answer = controller;
+    for (const id of takeApprovedNotices(project, since))
+      void answer.scanApproved(project, id).catch((err: unknown) => void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`));
     const request = takeApproveRequest(project);
     if (!request) return;
     busy = true;
-    const answer = controller;
     void answer.approveFromCommand(project, request.id, request.skillsDirs).then(
       (result) => writeApproveResult(project, { nonce: request.nonce, ok: result.ok, message: result.message }),
       (err: unknown) => writeApproveResult(project, { nonce: request.nonce, ok: false, message: describeError(err) }),
@@ -163,16 +170,16 @@ function watchLostWorktrees(onLost: () => void): vscode.Disposable {
 
 /**
  * A merge can be ready before this folder is back on the branch it started from, with a clean tree. When that
- * happens, the waiting merge is applied even if the panel is closed.
+ * happens, the waiting merge is applied, or goes into conflict, even if the panel is closed.
  */
-function watchReadyRound(onMerged: () => void): vscode.Disposable {
+function watchReadyRound(onSettled: () => void): vscode.Disposable {
   let timer: NodeJS.Timeout | undefined;
   let gitDir = "";
   let folder: FSWatcher | undefined;
   const run = () => {
     const project = findProject();
     if (!project) return;
-    if (settleWaitingRound(project.root)) onMerged();
+    if (settleWaitingRound(project.root)) onSettled();
     const next = join(project.root, ".git");
     if (next === gitDir) return;
     folder?.close();

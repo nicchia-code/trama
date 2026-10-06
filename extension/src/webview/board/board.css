@@ -64,6 +64,16 @@
 
 .board-column-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
 .board-hint { margin: 12px 0; text-align: center; color: var(--board-muted); font-style: italic; }
+.board-done-period {
+  margin: 8px 8px 0;
+  padding: 2px 4px;
+  font: inherit;
+  color: var(--vscode-dropdown-foreground, inherit);
+  background: var(--vscode-dropdown-background, transparent);
+  border: 1px solid var(--vscode-dropdown-border, var(--board-border));
+  border-radius: 2px;
+}
+.board-done-day { margin: 4px 0 0; font-size: 11px; font-weight: 600; color: var(--board-muted); }
 
 .board-card {
   display: flex;

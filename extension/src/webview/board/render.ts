@@ -14,8 +14,8 @@ export interface CardEnv {
   /** Whether a design card was left open; kept for the session, so a refresh does not close it. */
   isExpanded(key: string): boolean;
   setExpanded(key: string, expanded: boolean): void;
-  /** Scrolls to a card, by its key, and focuses it. */
-  showCard(key: string): void;
+  /** Scrolls to a card, by its key, and focuses it; with `row`, opens the design card and focuses that Task's row. */
+  showCard(key: string, row?: string): void;
   /** The short numbers of the snapshot being drawn. */
   numbers(): CardNumbers;
 }
@@ -71,7 +71,7 @@ function blockBadgeLink(b: BlockBadge, env: CardEnv): HTMLElement {
   node.dataset["action"] = target.kind === "diagram" ? `blocked:diagram:${target.drift}` : `blocked:${target.key}`;
   node.title = b.tooltip;
   node.setAttribute("aria-label", b.tooltip);
-  node.addEventListener("click", () => (target.kind === "diagram" ? env.context.navigate("diagram", { drift: target.drift }) : env.showCard(target.key)));
+  node.addEventListener("click", () => (target.kind === "diagram" ? env.context.navigate("diagram", { drift: target.drift }) : env.showCard(target.key, target.row)));
   return node;
 }
 
@@ -275,6 +275,8 @@ function design(card: DesignCard, env: CardEnv): HTMLElement {
   list.id = `board-design-${card.id}`;
   for (const t of card.tasks) {
     const item = el("li", "board-design-task");
+    item.dataset["row"] = t.key;
+    item.tabIndex = -1;
     item.append(statusDot(t), idTag(t.name, "board-card-kind board-card-id"), el("span", "board-design-title", t.title), ...(t.worktree ? [badge(WORKTREE_BADGE)] : []));
     item.append(...t.blocks.map((b) => blockBadgeLink(b, env)));
     list.append(item);

@@ -58,6 +58,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
       "_No files touched._",
     ),
     "",
+    ...(proposal.data.scanScope === null ? [] : ["## Scan scope", bullets(proposal.data.scanScope.map((e) => `- \`${e.ref}\` (${e.reason})`), "_Nothing to scan._"), ""]),
     "## Validation of the Model and Requirements with the Proposal applied",
     !live ? "Not checked for a finished Proposal." : errors.length === 0 ? "Valid." : errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n"),
   ].join("\n");
@@ -75,6 +76,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
       unbased: h.unbased,
       changes: fileChanges,
       errors,
+      ...(proposal.data.scanScope === null ? {} : { scanScope: proposal.data.scanScope }),
     },
   };
 }
@@ -238,14 +240,20 @@ export function taskListView(p: Project, column?: string): Result {
   return { md: `# Tasks\n\n${md}`, json: { tasks: tasks.map((t) => taskSummary(t, blocked, numbers)) } };
 }
 
-/** The next runnable Task, or the statement that there is none with the Tasks in To do that wait. Moves nothing. */
-export function taskNextView(p: Project, proposal?: string): Result {
-  const { next, waiting } = nextTask(p, proposal);
+/**
+ * The next runnable Task, or with `batch` the group of a parallel run, one Task per line; or the statement that
+ * there is none with the Tasks in To do that wait, the same either way. Moves nothing.
+ */
+export function taskNextView(p: Project, proposal?: string, batch = false): Result {
+  const queue = nextTask(p, proposal);
+  const { next, waiting } = queue;
   const blocked = new Map(waiting.map((w) => [w.task.id, w.blockers]));
   const numbers = syncShortNumbers(p);
   const scope = proposal === undefined ? "" : ` in Proposal ${numbers.name("proposal", getProposal(p, proposal).id)}`;
   const waitingJson = waiting.map((w) => taskSummary(w.task, blocked, numbers));
-  if (next) return { md: `Next Task${scope}: ${numbers.name("task", next.id)} ${next.title}`, json: { next: { id: next.id, number: numbers.label("task", next.id), title: next.title }, waiting: waitingJson } };
+  const brief = (t: Task) => ({ id: t.id, number: numbers.label("task", t.id), title: t.title });
+  if (next && batch) return { md: queue.batch.map((t) => `${numbers.name("task", t.id)} ${t.title}`).join("\n"), json: { batch: queue.batch.map(brief), waiting: waitingJson } };
+  if (next) return { md: `Next Task${scope}: ${numbers.name("task", next.id)} ${next.title}`, json: { next: brief(next), waiting: waitingJson } };
   const md = [`No Task is runnable${scope}.`, ...(waiting.length > 0 ? ["", "Still in To do:", ...waiting.map((w) => taskLine(w.task, blocked, numbers))] : [])].join("\n");
   return { md, json: { next: null, waiting: waitingJson } };
 }

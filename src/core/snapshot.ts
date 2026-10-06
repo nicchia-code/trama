@@ -3,7 +3,7 @@ import { type Announcement, type AnnouncementKind, listAnnouncements } from "./a
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
 import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type ProposalKind } from "./proposals";
-import { inWorktreeProposals, type InWorktreeProposal, openProposalsAwaitingDecision } from "./worktree-round";
+import { inWorktreeProposals, type InWorktreeProposal, mergeWorktreeOpen, openProposalsAwaitingDecision } from "./worktree-round";
 import { mergeDriftDocument } from "./worktree-merge";
 import { appliesUnder, type RequiredProposal } from "./required";
 import { type Area, areaIdOf, buildProject, type Fragment, parseRequirementRef, type ProjectModel } from "./requirements";
@@ -116,6 +116,8 @@ export interface DriftView {
   worktree: string | null;
   /** The round's Merge Drift: it lives in the merge worktree and is drawn with the round's own choices. */
   merge?: boolean;
+  /** A worktree's Drift once the round has started merging: it can no longer be decided and goes with the round. */
+  merging?: boolean;
 }
 
 export interface TaskView {
@@ -132,6 +134,8 @@ export interface TaskView {
   proposalTitle: string | null;
   /** True while the agent has taken the Task: the developer cannot move it. */
   agent: boolean;
+  /** When the Task arrived in Done, UTC ISO 8601; null outside Done and on Tasks that reached Done before the instant was kept. */
+  finished: string | null;
   /** Why the Task is blocked, if it is: the open Drifts, or the Task that fixes the code of its Drift. Empty when it is free. */
   blockedBy: Blocker[];
   /** Path relative to `.trama/`, for opening the file. */
@@ -289,6 +293,7 @@ export function buildSnapshot(p: Project): Snapshot {
     });
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
   const folders = roundWork(p);
+  const merging = mergeWorktreeOpen(p.root);
   const viewDrift = (home: Project, d: Drift, worktree: string | null): DriftView => ({
     id: d.id,
     title: d.title,
@@ -302,6 +307,7 @@ export function buildSnapshot(p: Project): Snapshot {
     proposal: d.data.proposal,
     proposalBlock: d.data.proposal === null ? null : approvalBlock(home, d.data.proposal),
     worktree,
+    ...(worktree !== null && merging ? { merging: true } : {}),
   });
   const viewTask = (t: Task, why: Map<string, Blocker[]>, worktree: string | null): TaskView => ({
     id: t.id,
@@ -314,6 +320,7 @@ export function buildSnapshot(p: Project): Snapshot {
     proposal: t.data.proposal,
     proposalTitle: (t.data.proposal !== null && proposalById.get(t.data.proposal)?.title) || null,
     agent: t.data.agent,
+    finished: t.data.finished,
     blockedBy: why.get(t.id) ?? [],
     file: `tasks/${t.name}`,
     worktree,

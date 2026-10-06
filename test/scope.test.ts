@@ -3,7 +3,10 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildModel } from "../src/core/model";
-import { editInProposal, newProposal } from "../src/core/proposals";
+import { approveProposal, editInProposal, getProposal, newProposal } from "../src/core/proposals";
+import { run } from "../src/cli/main";
+import { handOver } from "./handover";
+import type { ScanScopeEntry } from "../src/core/scan-scope";
 import { affectedFeatures, proposalScope } from "../src/core/scope";
 import { type Project, projectAt, readModelFiles } from "../src/core/store";
 
@@ -95,5 +98,65 @@ describe("affectedFeatures", () => {
     for (const path of files.keys()) if (path.startsWith("checkout/")) gone.delete(path);
     expect(affectedFeatures(before, buildModel(gone), ["checkout/order.md", "checkout/cart.md"])).toEqual([]);
     expect(affectedFeatures(before, before, ["checkout/payment.md", "checkout/order.md", "actors/user.md"])).toEqual(["checkout"]);
+  });
+});
+
+describe("scan scope written at approval", () => {
+  test("lists changed States, Transitions, Events and sections, removed elements as their container, and the Transitions leading into them", () => {
+    const prop = newProposal(p, "Change");
+    const order = editInProposal(p, prop.id, "checkout/order.md");
+    writeFileSync(
+      order,
+      readFileSync(order, "utf8")
+        .replace("only if the cart is not empty.", "only if the cart is not empty and the address is set.")
+        .replace("### Paid\n", "### Paid\nMoney received.\n")
+        .replace("- `user.CANCEL` → Refunding: once preparation has started.\n", "")
+        .replace("### Refunding\n- `payment.REFUNDED` → Cancelled\n\n", "")
+        .replace("Emitted when a paid order is cancelled", "Emitted when a paid order is cancelled by the customer"),
+    );
+    const ui = editInProposal(p, prop.id, "requirements/ui/main.md");
+    writeFileSync(ui, readFileSync(ui, "utf8").replace('A green "Paid" badge', 'A blue "Paid" badge'));
+    handOver(p, prop.id);
+    expect(getProposal(p, prop.id).data.scanScope).toBeNull();
+    approveProposal(p, prop.id);
+    const expected: ScanScopeEntry[] = [
+      { ref: "order/Draft/cart.CONFIRM", reason: "changed" },
+      { ref: "order/Paid", reason: "changed" },
+      { ref: "order", reason: "removed, its container" },
+      { ref: "order.REFUND_REQUESTED", reason: "changed" },
+      { ref: "order/Awaiting payment/payment.SUCCEEDED", reason: "leads into a change" },
+      { ref: "payment/Paid/order.REFUND_REQUESTED", reason: "leads into a change" },
+      { ref: "requirements/ui#order/Paid", reason: "changed" },
+    ];
+    expect(getProposal(p, prop.id).data.scanScope).toEqual(expected);
+
+    const shown = run(["--root", dir, "proposal", "show", prop.id], dir, {});
+    expect(shown.out).toContain("## Scan scope\n- `order/Draft/cart.CONFIRM` (changed)\n- `order/Paid` (changed)\n- `order` (removed, its container)");
+    expect(JSON.parse(run(["--root", dir, "proposal", "show", prop.id, "--json"], dir, {}).out).scanScope).toEqual(expected);
+  });
+
+  test("a new Machine enters whole, and a changed State brings its Transitions and those entering it", () => {
+    const prop = newProposal(p, "Gift");
+    writeFileSync(editInProposal(p, prop.id, "checkout/gift.md"), "# Gift\n\n## States\n\n### Wrapped (initial)\n- `user.CANCEL` → Unwrapped\n\n### Unwrapped (final)\n\n## Events\n\n### OPENED\nThe gift is opened.\n");
+    const order = editInProposal(p, prop.id, "checkout/order.md");
+    writeFileSync(order, readFileSync(order, "utf8").replace("### Shipped (final)", "### Shipped\n- `gift.OPENED` → Cancelled"));
+    handOver(p, prop.id);
+    approveProposal(p, prop.id);
+    expect(getProposal(p, prop.id).data.scanScope).toEqual([
+      { ref: "gift", reason: "changed" },
+      { ref: "order/Shipped", reason: "changed" },
+      { ref: "order/Ready to ship/courier.PICKED_UP", reason: "leads into a change" },
+    ]);
+  });
+
+  test("an import, a Proposal not approved yet, and one approved before the field have no scan scope and no section", () => {
+    const imported = newProposal(p, "Imported", "", { kind: "import" });
+    const file = editInProposal(p, imported.id, "checkout/order.md");
+    writeFileSync(file, readFileSync(file, "utf8").replace("### Paid\n", "### Paid\nMoney received.\n"));
+    handOver(p, imported.id);
+    approveProposal(p, imported.id);
+    expect(getProposal(p, imported.id).data.scanScope).toBeNull();
+    expect(run(["--root", dir, "proposal", "show", imported.id], dir, {}).out).not.toContain("## Scan scope");
+    expect(JSON.parse(run(["--root", dir, "proposal", "show", imported.id, "--json"], dir, {}).out)).not.toHaveProperty("scanScope");
   });
 });

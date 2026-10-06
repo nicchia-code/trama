@@ -4,7 +4,7 @@ import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
 import { createMultiBranchSwitch } from "../multi-branch-switch";
 import type { MountView } from "../types";
 import css from "./board.css" with { type: "text" };
-import { announcedGhosts, buildBoard, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, interleave, withdrawnNotice, worktreeCards } from "./logic";
+import { announcedGhosts, buildBoard, type Card, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, DONE_PERIODS, type DonePeriod, doneGroups, interleave, withdrawnNotice, worktreeCards } from "./logic";
 import { type CardEnv, renderAnnounced, renderCard, renderWorktreeCard } from "./render";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -72,6 +72,8 @@ export const mountBoard: MountView = (root, context) => {
   let nextNotice = 0;
   /** Design cards the developer left open. Kept while the panel lives, so a refresh does not close them. */
   const expanded = new Set<string>();
+  /** The period of the Done column. Kept while the panel lives, so a refresh does not reset it. */
+  let period: DonePeriod = "week";
 
   const env: CardEnv = {
     context,
@@ -81,10 +83,13 @@ export const mountBoard: MountView = (root, context) => {
       if (open) expanded.add(key);
       else expanded.delete(key);
     },
-    showCard: (key) => {
+    showCard: (key, row) => {
       const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === key);
-      card?.scrollIntoView({ block: "nearest" });
-      card?.focus();
+      const toggle = row === undefined ? null : card?.querySelector<HTMLButtonElement>('[data-action="toggle"][aria-expanded="false"]');
+      toggle?.click();
+      const target = (row === undefined ? null : [...(card?.querySelectorAll<HTMLElement>("[data-row]") ?? [])].find((n) => n.dataset["row"] === row)) ?? card;
+      target?.scrollIntoView({ block: "nearest" });
+      target?.focus();
     },
   };
 
@@ -100,13 +105,31 @@ export const mountBoard: MountView = (root, context) => {
     heading.id = headingId;
     section.setAttribute("aria-labelledby", headingId);
     const body = el("div", "board-column-body");
-    section.append(heading, body);
+    section.append(heading);
+    if (id === "done") {
+      const select = el("select", "board-done-period");
+      select.setAttribute("aria-label", "Done period");
+      for (const p of DONE_PERIODS) {
+        const option = el("option", "", p.label);
+        option.value = p.id;
+        select.append(option);
+      }
+      select.value = period;
+      select.addEventListener("change", () => {
+        period = select.value as DonePeriod;
+        render();
+      });
+      section.append(select);
+    }
+    section.append(body);
     columnsEl.append(section);
     parts[id] = { section, count, body, hint: el("p", "board-hint") };
   }
 
   const cache = new Map<string, { signature: string; node: HTMLElement }>();
   const announced = new Map<string, { signature: string; node: HTMLElement }>();
+  /** The day headings of the Done column, reused across refreshes. */
+  let dayHeads = new Map<string, HTMLElement>();
 
   function render() {
     if (snapshot === null) return;
@@ -132,11 +155,11 @@ export const mountBoard: MountView = (root, context) => {
     const columns = buildBoard(snapshot);
     const placedGhosts = announcedGhosts(columns, snapshot.announcements, asking, snapshot.numbers ?? noNumbers);
     const liveAnnounced = new Set<string>();
+    const nextHeads = new Map<string, HTMLElement>();
     for (const column of columns) {
       const part = parts[column.id];
-      part.count.textContent = String(column.cards.length);
       part.hint.textContent = column.hint;
-      const nodes = column.cards.map((card) => {
+      const cardNode = (card: Card) => {
         live.add(card.key);
         const signature = JSON.stringify(card);
         let entry = cache.get(card.key);
@@ -145,22 +168,37 @@ export const mountBoard: MountView = (root, context) => {
           cache.set(card.key, entry);
         }
         return entry.node;
-      });
-      const withAnnounced = interleave(
-        nodes,
-        placedGhosts[column.id].map((g) => {
-          liveAnnounced.add(g.card.key);
-          const signature = JSON.stringify(g.card);
-          let entry = announced.get(g.card.key);
-          if (entry?.signature !== signature) {
-            entry = { signature, node: renderAnnounced(g.card) };
-            announced.set(g.card.key, entry);
-          }
-          return { item: entry.node, index: g.index };
-        }),
-      );
-      reconcile(part.body, withAnnounced.length > 0 ? withAnnounced : [part.hint]);
+      };
+      let shown: HTMLElement[];
+      if (column.id === "done") {
+        // Done has no ghosts: its cards come grouped by day, filtered by the period, and the count is what is shown.
+        const groups = doneGroups(column.cards, period);
+        part.count.textContent = String(groups.reduce((n, g) => n + g.cards.length, 0));
+        shown = groups.flatMap((g) => {
+          const head = dayHeads.get(g.key) ?? el("h3", "board-done-day");
+          head.textContent = g.heading;
+          nextHeads.set(g.key, head);
+          return [head, ...g.cards.map(cardNode)];
+        });
+      } else {
+        part.count.textContent = String(column.cards.length);
+        shown = interleave(
+          column.cards.map(cardNode),
+          placedGhosts[column.id].map((g) => {
+            liveAnnounced.add(g.card.key);
+            const signature = JSON.stringify(g.card);
+            let entry = announced.get(g.card.key);
+            if (entry?.signature !== signature) {
+              entry = { signature, node: renderAnnounced(g.card) };
+              announced.set(g.card.key, entry);
+            }
+            return { item: entry.node, index: g.index };
+          }),
+        );
+      }
+      reconcile(part.body, shown.length > 0 ? shown : [part.hint]);
     }
+    dayHeads = nextHeads;
     // Run all To do covers the Tasks inside design cards too, which may stand in another column.
     const blocker = runBlocker(snapshot.tasks.filter((t) => !t.worktree), "all", namerOf(snapshot.numbers ?? noNumbers));
     runAll.disabled = blocker !== null;

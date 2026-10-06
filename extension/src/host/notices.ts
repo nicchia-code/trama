@@ -89,12 +89,8 @@ export class NoticeService {
   }
 
   private async send(facts: () => NoticeFacts | undefined): Promise<void> {
-    const endpoint = ntfyEndpoint(this.env.topic());
-    if (endpoint === undefined) {
-      // An empty setting is silent; an invalid one is told once, as a failed send is.
-      if (this.env.topic() !== "") this.tell(INVALID_SETTING);
-      return;
-    }
+    const endpoint = this.endpoint();
+    if (endpoint === undefined) return;
     let current: NoticeFacts | undefined;
     try {
       current = facts();
@@ -115,11 +111,18 @@ export class NoticeService {
   }
 
   private async retry(text: NoticeText): Promise<void> {
-    const endpoint = ntfyEndpoint(this.env.topic());
+    const endpoint = this.endpoint();
     if (endpoint === undefined) return;
     const second = await this.attempt(endpoint, text);
     if (second.ok) this.delivered();
     else this.tell(second.reason);
+  }
+
+  /** The URL the setting points to right now. An empty setting is silent; an invalid one is told once, as a failed send is. */
+  private endpoint(): string | undefined {
+    const endpoint = ntfyEndpoint(this.env.topic());
+    if (endpoint === undefined && this.env.topic() !== "") this.tell(INVALID_SETTING);
+    return endpoint;
   }
 
   private delivered(): void {

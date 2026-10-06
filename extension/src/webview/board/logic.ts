@@ -24,7 +24,7 @@ export const EMPTY_HINTS: Record<ColumnId, string> = {
   decide: "Nothing to decide",
   todo: "Nothing to do",
   doing: "Nothing in progress",
-  done: "Nothing done yet",
+  done: "Nothing done in this period",
 };
 
 /** The key of a Drift or Task card on the Board; a card of a worktree is keyed by its Proposal too. */
@@ -33,13 +33,14 @@ const cardKey = (kind: "drift" | "task", id: string, worktree: string | null) =>
 /**
  * The badge of one blocker: "blocked D2" goes to the Drift on the Diagram, "waiting T4" to the card of the fix Task.
  * The Diagram does not draw the Drifts of a worktree, so "blocked" for a Task of a worktree goes to the Drift's card.
- * Each card is written by its number while live.
+ * A Task that is a row of a design card has no card of its own: the badge goes to the design card, opened on that
+ * row (`row`, see `buildBoard`). Each card is written by its number while live.
  */
 export interface BlockBadge {
   label: string;
   /** Tooltip and accessible name: why the Task is blocked, and where the badge leads. */
   tooltip: string;
-  target: { kind: "diagram"; drift: string } | { kind: "card"; key: string };
+  target: { kind: "diagram"; drift: string } | { kind: "card"; key: string; row?: string };
 }
 
 /** `worktree` is the Proposal whose worktree holds the blocked Task; its blockers live in the same worktree. */
@@ -147,6 +148,8 @@ export interface TaskCard {
   column: Column;
   /** Proposal whose worktree this Task lives in, or null when it lives in the open folder. */
   worktree: string | null;
+  /** When the Task arrived in Done (UTC ISO 8601); null outside Done or when it was not kept. */
+  finished: string | null;
 }
 
 /** The Tasks of one design (Proposal) shown as a single card; it stands in the column its Tasks add up to. */
@@ -287,6 +290,7 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers): TaskCar
     file: t.file,
     column: t.column,
     worktree: t.worktree,
+    finished: t.finished,
   };
 }
 
@@ -319,7 +323,79 @@ export function buildBoard(snapshot: Snapshot): BoardColumn[] {
     if (!placed.design) cards[placed.column].push(taskCard(placed.task, numbers));
     else cards[placed.column].push(designCard(placed.proposal, placed.tasks[0]?.proposalTitle ?? null, placed.tasks.map((t) => taskCard(t, numbers)), numbers));
   }
+  // A badge that leads to a Task shown as a row of a design card leads to that design card, opened on the row.
+  const all = Object.values(cards).flat();
+  const rows = new Map(all.flatMap((c) => (c.kind === "design" ? c.tasks.map((t) => [t.key, c.key] as const) : [])));
+  for (const t of all.flatMap((c) => (c.kind === "task" ? [c] : c.kind === "design" ? c.tasks : []))) {
+    t.blocks = t.blocks.map((b): BlockBadge => {
+      if (b.target.kind !== "card") return b;
+      const design = rows.get(b.target.key);
+      return design === undefined ? b : { ...b, target: { kind: "card", key: design, row: b.target.key } };
+    });
+  }
   return COLUMN_ORDER.map((id) => ({ id, title: COLUMN_TITLES[id], hint: EMPTY_HINTS[id], cards: cards[id] }));
+}
+
+export type DonePeriod = "today" | "week" | "month" | "all";
+
+/** The choices of the Done column's period menu; `week` is the initial one. */
+export const DONE_PERIODS: readonly { id: DonePeriod; label: string }[] = [
+  { id: "today", label: "Today" },
+  { id: "week", label: "Last 7 days" },
+  { id: "month", label: "Last 30 days" },
+  { id: "all", label: "All" },
+];
+
+const PERIOD_DAYS: Record<DonePeriod, number | null> = { today: 1, week: 7, month: 30, all: null };
+
+/** One day of the Done column: its heading (`Today · 3`) and its cards. */
+export interface DoneGroup {
+  key: string;
+  heading: string;
+  cards: Card[];
+}
+
+/** When a Done card was finished, in ms: a Task's `finished`, the latest among a design's Tasks; null when none is known. */
+export function finishedAt(card: Card): number | null {
+  const stamps = card.kind === "task" ? [card.finished] : card.kind === "design" ? card.tasks.map((t) => t.finished) : [];
+  const times = stamps.map((s) => (s === null ? NaN : Date.parse(s))).filter((t) => !Number.isNaN(t));
+  return times.length === 0 ? null : Math.max(...times);
+}
+
+/** Start of the local day `back` days before `d`. */
+const dayStart = (d: Date, back = 0) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - back).getTime();
+
+/**
+ * The Done column for a period: the cards the period lets through, the latest finished first (ties: reverse creation
+ * order; `cards` come in creation order), grouped by local day. Cards with no date form a last `No date` group, only
+ * with `all`. No group is empty.
+ */
+export function doneGroups(cards: Card[], period: DonePeriod, now: Date = new Date(), locale?: string): DoneGroup[] {
+  const days = PERIOD_DAYS[period];
+  const from = days === null ? -Infinity : dayStart(now, days - 1);
+  const dated: { card: Card; index: number; time: number }[] = [];
+  const undated: Card[] = [];
+  cards.forEach((card, index) => {
+    const time = finishedAt(card);
+    if (time === null) undated.unshift(card);
+    else if (time >= from) dated.push({ card, index, time });
+  });
+  dated.sort((a, b) => b.time - a.time || b.index - a.index);
+  const today = dayStart(now);
+  const yesterday = dayStart(now, 1);
+  const groups: { key: string; label: string; cards: Card[] }[] = [];
+  for (const { card, time } of dated) {
+    const day = dayStart(new Date(time));
+    const key = `day:${day}`;
+    const last = groups[groups.length - 1];
+    if (last?.key === key) last.cards.push(card);
+    else {
+      const label = day === today ? "Today" : day === yesterday ? "Yesterday" : new Date(day).toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric" });
+      groups.push({ key, label, cards: [card] });
+    }
+  }
+  if (period === "all" && undated.length > 0) groups.push({ key: "none", label: "No date", cards: undated });
+  return groups.map((g) => ({ key: g.key, heading: `${g.label} · ${g.cards.length}`, cards: g.cards }));
 }
 
 /** A card the agent is about to create, as the Board draws its ghost. */

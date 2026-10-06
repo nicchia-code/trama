@@ -36,5 +36,7 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 
 ## task
 
-- Una corsa che realizza dei task legge Modello e Requisiti di ciascun task una volta, da `trama task show`, e esegue test, lint e build del progetto una volta, alla fine della corsa.
-- Mentre scrive, l'agente non rilancia la suite intera al posto dei test di quel task.
+- Una corsa che realizza dei task legge Modello e Requisiti di ciascun task una volta, da `trama task show`, e esegue test, lint e build del progetto una volta, alla fine della corsa, dopo l'ultimo gruppo; mai un sotto-agente.
+- Mentre scrive, l'agente o il sotto-agente non rilancia la suite intera al posto dei test di quel task.
+- Prestazioni: quando l'agente ha dei sotto-agenti, una corsa realizza insieme fino a quattro Task che non riguardano la stessa cosa, la scansione confronta fino a quattro Machine insieme e il design esplora con fino a quattro sotto-agenti. Il limite di quattro tiene sotto controllo il carico della macchina, i limiti del fornitore dell'agente e i conflitti fra file.
+- Prestazioni: la scansione dopo l'approvazione legge solo l'ambito di scansione della Proposal, non le Feature intere.

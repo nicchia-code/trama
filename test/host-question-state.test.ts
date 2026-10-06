@@ -162,4 +162,14 @@ describe("minimizing", () => {
     expect(restored.drafts[1]?.text).toBe("typed");
     expect(restored.confirmed[0]).toEqual({ status: "answered", selected: [1], text: "" });
   });
+
+  test("while Skip all is being confirmed, it closes the confirmation without skipping and comes back where it was asked", () => {
+    const s = run(round(), { type: "next" }, { type: "setText", text: "typed" });
+    const fromQuestion = run(s, { type: "closeQuestions" }, { type: "minimize" });
+    expect(fromQuestion.minimized).toBe(true);
+    expect(fromQuestion.confirming).toBeNull();
+    expect(run(fromQuestion, { type: "restore" })).toEqual(s);
+    const summary = run(s, { type: "openSummary" });
+    expect(run(summary, { type: "closeQuestions" }, { type: "minimize" }, { type: "restore" })).toEqual(summary);
+  });
 });

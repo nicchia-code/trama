@@ -32,10 +32,11 @@ import {
 import type { Model } from "../core/types";
 import type { Warning } from "../core/graph";
 import { rewriteNumberedCards } from "../core/rewrite-ids";
-import { getDrift, getTask, moveTask, newDrift, newTask, replaceDriftProposal, resolveDrift, takeBackTask } from "../core/work";
+import { type Drift, getDrift, getTask, moveTask, newDrift, newTask, replaceDriftProposal, resolveDrift, takeBackTask } from "../core/work";
 import { withdrawFromRound } from "../core/worktree-round";
 import { approvalBySwitch, readMultiBranch } from "../core/multi-branch";
-import { approveWaitMs, EDITOR_UNAVAILABLE, waitApproveResult, writeApproveRequest } from "../core/approve-request";
+import { approveWaitMs, EDITOR_UNAVAILABLE, waitApproveResult, writeApprovedNotice, writeApproveRequest } from "../core/approve-request";
+import { approvedScope } from "../core/scope";
 import {
   analyzeView,
   eventView,
@@ -297,9 +298,10 @@ export const COMMANDS: Command[] = [
       const skillsDirs = list(o["skills-dir"]);
       const decision = approvalBySwitch(readMultiBranch(project));
       if (decision.route === "folder") {
-        const p = approveProposal(project, id, skillsDirs);
-        const line = `Approved Proposal ${numbersOf(ctx).name("proposal", p.id)}`;
-        return text(decision.notice ? `${decision.notice}\n${line}` : line, { id: p.id, number: numbersOf(ctx).label("proposal", p.id), status: p.data.status, ...(decision.notice ? { notice: decision.notice } : {}) });
+        const { id: approved, features } = approvedScope(project, id, () => approveProposal(project, id, skillsDirs));
+        if (features.length > 0) writeApprovedNotice(project, approved);
+        const line = `Approved Proposal ${numbersOf(ctx).name("proposal", approved)}`;
+        return text(decision.notice ? `${decision.notice}\n${line}` : line, { id: approved, number: numbersOf(ctx).label("proposal", approved), status: "approved", ...(decision.notice ? { notice: decision.notice } : {}) });
       }
       const request = writeApproveRequest(project, id, skillsDirs);
       const result = waitApproveResult(project, request.nonce, approveWaitMs());
@@ -328,10 +330,10 @@ export const COMMANDS: Command[] = [
       return text(`Created Task ${n.name("task", t.id)} at ${t.path}${note ? `\n${note}` : ""}`, { id: t.id, number: n.label("task", t.id), path: t.path, ...(note ? { note } : {}) });
     } },
   { name: "task list", args: "", summary: "Tasks grouped by column", options: { column: { type: "string" } }, run: (ctx, _a, o) => taskListView(ctx.project(), str(o["column"])) },
-  { name: "task next", args: "", summary: "The next runnable Task (in To do, not blocked, oldest in creation order), moving nothing; --proposal <id> considers only the Tasks of that design. When none is runnable it says so and lists the Tasks in To do with what blocks them", options: { proposal: { type: "string" } }, run: (ctx, _a, o) => taskNextView(ctx.project(), optionalArg(ctx, str(o["proposal"]), proposalArg)) },
+  { name: "task next", args: "", summary: "The next runnable Task (in To do, not blocked, oldest in creation order), moving nothing; --proposal <id> considers only the Tasks of that design; --batch prints instead the group of a parallel run, up to four runnable Tasks that concern different things, one per line, the first being the next one. When none is runnable it says so and lists the Tasks in To do with what blocks them", options: { proposal: { type: "string" }, batch: { type: "boolean" } }, run: (ctx, _a, o) => taskNextView(ctx.project(), optionalArg(ctx, str(o["proposal"]), proposalArg), o["batch"] === true) },
   { name: "task show", args: "<id>", summary: "A Task with the current Model text of its references", run: (ctx, a) => taskShowView(ctx.project(), getTask(ctx.project(), a[0] as string, true)) },
   { name: "task move", args: "<id> <column>", summary: "Move a Task to todo, doing or done", run(ctx, a) {
-      const t = moveTask(ctx.project(), taskArg(ctx, a[0] as string), a[1] as string, ctx.byAgent ? "agent" : "developer");
+      const t = moveTask(ctx.project(), taskArg(ctx, a[0] as string), a[1] as string, ctx.byAgent ? "agent" : "developer", ctx.origin);
       const n = numbersOf(ctx);
       return text(`Task ${n.name("task", t.id)} is now ${t.data.column}`, { id: t.id, number: n.label("task", t.id), column: t.data.column });
     } },
@@ -353,10 +355,20 @@ export const COMMANDS: Command[] = [
   { name: "drift resolve", args: "<id>", summary: "Resolve with --fix-code, --accept-proposal or --dismiss. --fix-code takes --option <n> (the number of the chosen fix option, from 1) and the optional --note <text>; the other two take neither. --skills-dir adds the configured skills folder for the approval of --accept-proposal", developerOnly: true, options: { "fix-code": { type: "boolean" }, "accept-proposal": { type: "boolean" }, dismiss: { type: "boolean" }, option: { type: "string" }, note: { type: "string" }, "skills-dir": ref }, run(ctx, a, o) {
       const chosen = (["fix-code", "accept-proposal", "dismiss"] as const).filter((k) => o[k] === true);
       if (chosen.length !== 1) throw new UsageError("Choose exactly one of --fix-code, --accept-proposal, --dismiss");
-      const d = resolveDrift(ctx.project(), driftArg(ctx, a[0] as string), chosen[0] as (typeof chosen)[number], list(o["skills-dir"]), {
+      const project = ctx.project();
+      const driftId = driftArg(ctx, a[0] as string);
+      const how = chosen[0] as (typeof chosen)[number];
+      const resolve = () => resolveDrift(project, driftId, how, list(o["skills-dir"]), {
         ...(o["option"] !== undefined ? { option: Number(str(o["option"])) } : {}),
         ...(o["note"] !== undefined ? { note: str(o["note"]) ?? "" } : {}),
       });
+      const attached = how === "accept-proposal" ? getDrift(project, driftId).data.proposal : null;
+      let d!: Drift;
+      if (attached === null) d = resolve();
+      else {
+        const scanned = approvedScope(project, attached, () => (d = resolve()));
+        if (scanned.features.length > 0) writeApprovedNotice(project, scanned.id);
+      }
       const n = numbersOf(ctx);
       return text(`Drift ${n.name("drift", d.id)} resolved (${d.data.resolution})${d.data.task ? `; Task ${n.name("task", d.data.task)} created` : ""}`, { id: d.id, number: n.label("drift", d.id), resolution: d.data.resolution, task: d.data.task, option: d.data.option, note: d.data.note });
     } },

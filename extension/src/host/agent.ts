@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { basename, dirname, join } from "node:path";
-import { announce, newTerminalId, TERMINAL_ENV } from "../../../src/core/announcements";
+import { type AgentOrigin, announce, newTerminalId, TERMINAL_ENV } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { listTasks, releaseTasks } from "../../../src/core/work";
@@ -15,7 +15,7 @@ import { type ExternalWindow, type ReusableTerminal, runScripting, scriptingComm
 import { detectTerminal, openWindow, reusableKind, type WindowOrigin } from "./external-open";
 import { agentCommandLine, shellFamily } from "./quote";
 import { questionEndpoint } from "./questions";
-import { buildPrompt, buildScanPrompt, withLanguage } from "./prompts";
+import { buildPrompt, buildScanPrompt, buildWorktreeTasksPrompt, withLanguage } from "./prompts";
 import { shouldRunProposalTasks } from "./worktree-follow";
 import { boardCounts } from "./board-counts";
 import { commandOutcome } from "./end-notices";
@@ -138,9 +138,9 @@ interface WorktreeRun {
 
 const agentTerminals = new Map<vscode.Terminal, { id: string; root: string; line: string; worktree?: WorktreeRun }>();
 
-function releaseTakenTasks(root: string): void {
+function releaseTakenTasks(root: string, origin: AgentOrigin): void {
   try {
-    releaseTasks(projectAt(root));
+    releaseTasks(projectAt(root), origin);
   } catch (err) {
     if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: could not release the Tasks the agent had taken: ${err.message}`);
     else throw err;
@@ -174,7 +174,7 @@ function continueAfterScan(terminal: vscode.Terminal, info: { root: string; line
   if (!shouldRunProposalTasks({ kind: run.kind, before: [...run.tasksBefore], after: now.map((task) => task.id), columns: roundColumns(run, info.root) })) return false;
   const template = configuredWorktreeAgent();
   if (template === "") return false;
-  const prompt = withLanguage(buildPrompt({ kind: "implement-design", proposal: run.proposal }), configuredLanguage());
+  const prompt = withLanguage(buildWorktreeTasksPrompt(run.proposal), configuredLanguage());
   info.line = agentCommandLine(template, prompt, shellFamily(vscode.env.shell));
   run.kind = "implement";
   run.tasksBefore = new Set(now.map((task) => task.id));
@@ -194,11 +194,14 @@ function reportRoundMerge(root: string, outcome: MergeRoundResult): void {
   }
 }
 
-/** Applies a merge that has been waiting, once this folder is the start branch with a clean tree. */
+/**
+ * Applies a merge that has been waiting, once this folder is the start branch with a clean tree. True when the round
+ * changed: merged, or in conflict because the branch moved on the same lines, so the Board shows the Merge Drift.
+ */
 export function settleWaitingRound(root: string): boolean {
   try {
     const outcome = applyWaitingMerge(projectAt(root), [configuredSkillsDir()]);
-    if (outcome.kind !== "merged") return false;
+    if (outcome.kind !== "merged" && outcome.kind !== "conflict") return false;
     reportRoundMerge(root, outcome);
     return true;
   } catch (err) {
@@ -224,7 +227,7 @@ export function watchAgentTerminal(): vscode.Disposable {
       if (info.worktree) {
         // Only the command Trama typed into this worktree releases its Tasks. The open folder's terminal is left alone.
         if (!isTypedCommand(e.terminal, e.execution.commandLine.value)) return;
-        releaseTakenTasks(info.root);
+        releaseTakenTasks(info.root, { terminal: info.id });
         withdrawWaiting(info.root, (a) => a.terminal === info.id);
         if (info.worktree.kind !== "reconcile" && continueAfterScan(e.terminal, info)) return;
         const round = info.worktree;
@@ -241,17 +244,16 @@ export function watchAgentTerminal(): vscode.Disposable {
         endNotices.born(basename(round.projectRoot), commandOutcome(e.exitCode), () => boardCounts(projectAt(round.projectRoot)));
         return;
       }
-      // A command ended in the open folder's terminal, so a Task marked as taken there is released.
-      releaseTakenTasks(info.root);
       // Only the end of the command Trama typed counts as the agent finishing; any other command, or an end that comes
-      // without a command line, changes nothing here.
+      // without a command line, changes nothing here, not even the Tasks this terminal had taken.
       if (!isTypedCommand(e.terminal, e.execution.commandLine.value)) return;
       if (e.terminal === lastTerminal) commandRunning = false;
+      releaseTakenTasks(info.root, { terminal: info.id });
       withdrawWaiting(info.root, (a) => a.terminal === info.id);
       endNotices.born(basename(info.root), commandOutcome(e.exitCode), () => boardCounts(projectAt(info.root)));
     }),
     onCursorChatEvent((e) => {
-      if (e.event !== "PROMPT_SUBMITTED") releaseTakenTasks(e.root);
+      if (e.event !== "PROMPT_SUBMITTED") releaseTakenTasks(e.root, { chat: "cursor" });
     }),
     vscode.window.onDidCloseTerminal((t) => {
       const info = agentTerminals.get(t);
@@ -299,7 +301,7 @@ let externalDir = "";
  */
 export function watchExternalRuns(markerDir: string): vscode.Disposable {
   const runs = new ExternalRuns<{ root: string }>(markerDir, ({ terminal, exitCode, context }) => {
-    releaseTakenTasks(context.root);
+    releaseTakenTasks(context.root, { terminal });
     withdrawWaiting(context.root, (a) => a.terminal === terminal);
     endNotices.born(basename(context.root), commandOutcome(exitCode), () => boardCounts(projectAt(context.root)));
   });
@@ -579,7 +581,7 @@ export async function resumeWorktreeTasks(projectRoot: string, worktree: string,
   if (template === "") throw new TramaError("Set trama.worktreeAgent in your user settings before accepting a Proposal with multi-branch on.");
   const endpoint = await questionEndpoint(projectRoot);
   if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
-  const prompt = withLanguage(buildPrompt({ kind: "implement-design", proposal }), configuredLanguage());
+  const prompt = withLanguage(buildWorktreeTasksPrompt(proposal), configuredLanguage());
   const line = agentCommandLine(template, prompt, shellFamily(vscode.env.shell));
   const idle = [...agentTerminals.entries()].find(([terminal, info]) => info.worktree?.proposal === proposal && info.root === worktree && info.worktree.busy === false && terminal.exitStatus === undefined);
   const run: WorktreeRun = { projectRoot, proposal, kind: "implement", busy: true, tasksBefore: new Set(proposalTaskIds(worktree, proposal).map((task) => task.id)) };

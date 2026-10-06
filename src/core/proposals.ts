@@ -28,6 +28,7 @@ import {
 import type { Diagnostic, FileMap } from "./types";
 import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
 import { cardName, identityOfShortNumber } from "./short-numbers";
+import { SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
 import { proposalIsInWorktree } from "./worktree-round";
 
 /**
@@ -51,6 +52,8 @@ interface ProposalData {
   request: string | null;
   /** When the Proposal was created, UTC ISO 8601. Absent on numbered Proposals written before the field existed. */
   created: string | null;
+  /** What a targeted scan compares, written once when an ordinary Proposal is approved or enters a worktree. */
+  scanScope: ScanScopeEntry[] | null;
 }
 
 export interface Proposal {
@@ -76,6 +79,7 @@ function parseData(raw: Raw, where: string): ProposalData {
     delete: stringList(raw, "delete", where),
     request: textOrNull(raw, "request", where),
     created: createdField(raw, where),
+    scanScope: scanScopeField(raw, where),
   };
   for (const id of data.requires)
     if (!/^[a-z0-9]{8}$/.test(id) && !/^\d+$/.test(id)) throw new TramaError(`${where}: "requires" lists Proposal IDs, not "${id}"`);
@@ -89,6 +93,14 @@ function parseData(raw: Raw, where: string): ProposalData {
   return data;
 }
 
+function scanScopeField(raw: Raw, where: string): ScanScopeEntry[] | null {
+  const v = raw["scanScope"];
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v) || v.some((e) => typeof e?.ref !== "string" || !SCAN_REASONS.includes(e.reason)))
+    throw new TramaError(`${where}: "scanScope" must be a list of { ref, reason } with reason one of ${SCAN_REASONS.join(", ")}`);
+  return v.map((e) => ({ ref: e.ref, reason: e.reason }));
+}
+
 function load(p: Project, entry: { id: string; name: string }): Proposal {
   const dir = join(proposalsDir(p), entry.name);
   const file = join(dir, "proposal.md");
@@ -97,8 +109,9 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
   return { id: entry.id, name: entry.name, dir, body: doc.body, title, data: parseData(doc.data, file) };
 }
 
-function save(proposal: Proposal) {
-  const { kind, requires, request, created, ...rest } = proposal.data;
+/** Writes `proposal.md` from the Proposal's data, leaving defaults out of the file. */
+export function save(proposal: Proposal) {
+  const { kind, requires, request, created, scanScope, ...rest } = proposal.data;
   // Defaults stay out of the file, so Proposals without dependencies look as they always did.
   // Numbered Proposals have no `created`; writing it would pretend they remember an instant they do not.
   const data = {
@@ -109,6 +122,7 @@ function save(proposal: Proposal) {
     delete: rest.delete,
     ...(request === null ? {} : { request }),
     ...(created === null ? {} : { created }),
+    ...(scanScope === null ? {} : { scanScope }),
   };
   writeDocument(join(proposal.dir, "proposal.md"), data, proposal.body);
 }
@@ -156,6 +170,7 @@ export function newProposal(
       // A request that does not exist binds nothing; the Proposal is created all the same.
       request: options.request !== undefined && requestExists(p, options.request) ? options.request : null,
       created: createdNow(),
+      scanScope: null,
     },
     body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
   };
@@ -402,21 +417,30 @@ export function approvalBlock(p: Project, id: string): ApprovalBlock | null {
   return null;
 }
 
-/** Copies the Proposal's files into a `.trama` folder. Does not change its status and does not regenerate skills. */
-export function writeProposalFiles(p: Project, id: string, tramaDir: string): void {
+/**
+ * Copies the Proposal's files into a `.trama` folder. An ordinary Proposal also gets its scan scope, computed
+ * against the open folder before anything is copied, written into its own copy in that folder.
+ * Does not change its status and does not regenerate skills.
+ */
+export function writeProposalFiles(p: Project, id: string, tramaDir: string): Proposal {
   const proposal = getProposal(p, id);
+  if (proposal.data.kind === "change") proposal.data.scanScope = scanScope(buildProject(readTrackedFiles(p)), buildProject(applied(p, proposal)));
   for (const path of proposal.data.delete) rmSync(trackedLocation(tramaDir, path));
   for (const [path, content] of newFiles(proposal)) writeFileEnsuringDir(trackedLocation(tramaDir, path), content);
+  if (proposal.data.scanScope !== null) save({ ...proposal, dir: join(tramaDir, "proposals", proposal.name) });
+  return proposal;
 }
 
 /**
  * The round has already put this Proposal's files into the open folder by merging.
- * The Proposal becomes approved. The files are not copied again and staleness is not checked.
+ * The Proposal becomes approved, with the scan scope it got when it entered its worktree.
+ * The files are not copied again and staleness is not checked.
  */
-export function recordMergedProposal(p: Project, id: string): void {
+export function recordMergedProposal(p: Project, id: string, scope: ScanScopeEntry[] | null): void {
   const proposal = getProposal(p, id);
   if (proposal.data.status !== "open") return;
   proposal.data.status = "approved";
+  proposal.data.scanScope = scope;
   save(proposal);
 }
 
@@ -436,11 +460,11 @@ export function approveProposal(p: Project, id: string, skillsDirs: string[] = [
   if (errors.length > 0)
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} would leave the Model invalid:\n${errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n")}`);
 
-  writeProposalFiles(p, id, p.dir);
-  proposal.data.status = "approved";
-  save(proposal);
+  const written = writeProposalFiles(p, id, p.dir);
+  written.data.status = "approved";
+  save(written);
   syncRequirementSkills(p, skillsDirs);
-  return proposal;
+  return written;
 }
 
 /** Rejects an open Proposal. The feedback is optional: with text it is appended under `## Feedback`; empty or blank adds nothing. */

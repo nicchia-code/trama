@@ -134,15 +134,17 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
   });
 
   function trapFocus(e: KeyboardEvent) {
-    const scope = confirm.hidden ? dialog : confirm;
-    const focusable = [...scope.querySelectorAll<HTMLElement>("button, textarea, input, a[href]")].filter((n) => !n.hasAttribute("disabled") && n.offsetParent !== null && n.closest("[inert]") === null);
+    // While Skip all is being confirmed, only the confirmation and the header (Minimize, Close) take focus.
+    const scopes = confirm.hidden ? [dialog] : [head, confirm];
+    const focusable = scopes.flatMap((s) => [...s.querySelectorAll<HTMLElement>("button, textarea, input, a[href]")]).filter((n) => !n.hasAttribute("disabled") && n.offsetParent !== null && n.closest("[inert]") === null);
+    const inside = scopes.some((s) => s.contains(document.activeElement));
     if (focusable.length === 0) return;
     const first = focusable[0] as HTMLElement;
     const last = focusable[focusable.length - 1] as HTMLElement;
-    if (e.shiftKey && (document.activeElement === first || !scope.contains(document.activeElement))) {
+    if (e.shiftKey && (document.activeElement === first || !inside)) {
       e.preventDefault();
       last.focus();
-    } else if (!e.shiftKey && (document.activeElement === last || !scope.contains(document.activeElement))) {
+    } else if (!e.shiftKey && (document.activeElement === last || !inside)) {
       e.preventDefault();
       first.focus();
     }
@@ -332,14 +334,12 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
   function renderConfirm(state: QuestionRoundState) {
     confirm.hidden = state.confirming === null;
     body.inert = state.confirming !== null;
-    head.inert = state.confirming !== null;
     if (state.confirming === null) {
       confirm.replaceChildren();
       return;
     }
     if (confirm.childElementCount > 0) return;
     confirm.setAttribute("role", "alertdialog");
-    confirm.setAttribute("aria-modal", "true");
     confirm.setAttribute("aria-labelledby", "qo-confirm-title");
     confirm.setAttribute("aria-describedby", "qo-confirm-text");
     const box = el("div", "qo-confirm-box");

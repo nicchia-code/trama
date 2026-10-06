@@ -87,7 +87,10 @@ describe("how each terminal is told to run a command in a folder", () => {
     expect(command("alacritty").args).toEqual(["--title", "Trama agent", "--working-directory", "/work/shop", "-e", ...run]);
     expect(command("foot").args).toEqual(["--title=Trama agent", "--working-directory=/work/shop", ...run]);
     expect(command("xterm").args).toEqual(["-T", "Trama agent", "-e", ...run]);
-    expect(command("wezterm").args).toEqual(["start", "--cwd", "/work/shop", "--", ...run]);
+    expect(command("wezterm").args).toEqual([
+      "start", "--cwd", "/work/shop", "--", "sh", "-c",
+      `'/usr/bin/wezterm' cli set-tab-title 'Trama agent' 2>/dev/null; '/usr/bin/wezterm' cli set-window-title 'Trama agent' 2>/dev/null; ${request.script}`,
+    ]);
     expect(command("xdg-terminal-exec").args).toEqual(run);
   });
 
@@ -175,20 +178,45 @@ describe("opening a window that runs the agent line", () => {
     await expect(openWindow({ custom: "", terminal: { program: join(dir, "missing"), kind: "xterm" } }, requestFor("true"))).rejects.toThrow("ENOENT");
   });
 
-  test("kitty is remembered by its socket and its first window; WezTerm by the pane its running instance printed, or not at all when none runs", async () => {
+  test("kitty is remembered by its socket and its first window", async () => {
     const kitty = program(bin, "kitty-fake", "exit 0");
     expect(await openWindow({ custom: "", terminal: { program: kitty, kind: "kitty" } }, requestFor("true"))).toEqual({ terminal: "kitty", address: `unix:${join(dir, "k.sock")}`, windowId: 1 });
+  });
 
-    const log = join(dir, "wezterm-args");
-    const running = program(bin, "wezterm-running", `printf '%s\\n' "$@" > ${log}\necho 42`);
-    expect(await openWindow({ custom: "", terminal: { program: running, kind: "wezterm" } }, requestFor("echo script"))).toEqual({ terminal: "wezterm", paneId: 42 });
-    expect(readFileSync(log, "utf8").split("\n")).toEqual(["cli", "spawn", "--new-window", "--cwd", dir, "--", "sh", "-c", "echo script", ""]);
+  test("WezTerm names the new tab and window once with the request's title, whether its running instance opens it or a new one is started, and the script runs", async () => {
+    const titles = join(dir, "titles");
+    const ran = join(dir, "ran");
+    const request = { ...requestFor(`echo ok >> ${ran}`), title: "All tasks" };
+    // Title commands are logged; `spawn` and `start` run what follows `--`, as WezTerm does in the new pane.
+    const fake = (name: string, spawn: string) =>
+      program(bin, name, [
+        `if [ "$1 $2" = "cli spawn" ]; then ${spawn}; fi`,
+        `if [ "$1" = cli ]; then printf '%s|' "$@" >> ${titles}; echo >> ${titles}; exit 0; fi`,
+        `while [ "$1" != -- ]; do shift; done; shift; exec "$@"`,
+      ].join("\n"));
 
-    // No instance to ask: `cli` fails, so `start` opens one, which cannot be reached again.
-    const started = join(dir, "wezterm-start");
-    const idle = program(bin, "wezterm-idle", `if [ "$1" = cli ]; then echo "no running instance" >&2; exit 1; fi\nprintf '%s\\n' "$@" > ${started}`);
-    expect(await openWindow({ custom: "", terminal: { program: idle, kind: "wezterm" } }, requestFor("echo script"))).toBeUndefined();
-    expect(readFileSync(started, "utf8").split("\n")).toEqual(["start", "--cwd", dir, "--", "sh", "-c", "echo script", ""]);
+    // A running instance prints the id of the pane it opened, which is how the window is reached again.
+    const running = fake("wezterm-running", `while [ "$1" != -- ]; do shift; done; shift; "$@" > /dev/null; echo 42; exit 0`);
+    expect(await openWindow({ custom: "", terminal: { program: running, kind: "wezterm" } }, request)).toEqual({ terminal: "wezterm", paneId: 42 });
+    expect(readFileSync(titles, "utf8")).toBe("cli|set-tab-title|All tasks|\ncli|set-window-title|All tasks|\n");
+    expect(readFileSync(ran, "utf8")).toBe("ok\n");
+
+    // No instance to ask: `cli spawn` fails, so `start` opens one, which cannot be reached again but is named all the same.
+    rmSync(titles);
+    const idle = fake("wezterm-idle", `echo "no running instance" >&2; exit 1`);
+    expect(await openWindow({ custom: "", terminal: { program: idle, kind: "wezterm" } }, request)).toBeUndefined();
+    expect(readFileSync(titles, "utf8")).toBe("cli|set-tab-title|All tasks|\ncli|set-window-title|All tasks|\n");
+    expect(readFileSync(ran, "utf8")).toBe("ok\nok\n");
+  });
+
+  test("a WezTerm that cannot name its windows still runs the script", async () => {
+    const ran = join(dir, "ran");
+    const old = program(bin, "wezterm-old", [
+      `if [ "$1" = cli ]; then echo "unrecognized subcommand" >&2; exit 2; fi`,
+      `while [ "$1" != -- ]; do shift; done; shift; exec "$@"`,
+    ].join("\n"));
+    expect(await openWindow({ custom: "", terminal: { program: old, kind: "wezterm" } }, requestFor(`echo ok > ${ran}`))).toBeUndefined();
+    expect(readFileSync(ran, "utf8")).toBe("ok\n");
   });
 
   test("Terminal.app is told to type the folder change and the script through sh, titles the window with the request's title, and its window id is remembered", async () => {

@@ -30,11 +30,11 @@ Waiting for the developer, who may now see it, approve it or reject it. It may b
 - `agent.EDIT_PROPOSAL` → Draft: the agent changes a file of a Proposal it had handed over. It is withdrawn from the developer until the agent hands it over again.
 
 ### In worktree
-The Proposal has been accepted into a worktree round. It is not among what awaits a decision, and it cannot be approved or rejected again: an attempt is refused, saying it is in a worktree. Removing it from the round is not a rejection.
+The Proposal has been accepted into a worktree round. It is not among what awaits a decision, and it cannot be approved or rejected again: an attempt is refused, saying it is in a worktree. Removing it from the round is not a rejection. Quando il suo branch è già nell'unione del giro, la Proposal resta in questo State anche se la cartella del suo worktree sparisce: il suo lavoro è già nell'unione.
 - `developer.WITHDRAW_FROM_ROUND` → Open: only this Proposal, and only while the round has not started merging. Its worktree is deleted.
-- `workspace.WORKTREE_LOST` → Open: only if the worktree that disappeared is this Proposal's. The developer is told.
+- `workspace.WORKTREE_LOST` → Open: only if the worktree that disappeared is this Proposal's and its branch is not already in the round's merge. The developer is told.
 - `developer.ABANDON_ROUND` → Open: the whole round is given up. This Proposal returns to awaiting a decision.
-- `worktree-round.MERGED` → Approved: the round has applied the merge to the open folder, so the files are already there. Regenerates the Requirement skills. Does not start the per-Proposal scan; the round starts one scan of the union.
+- `worktree-round.MERGED` → Approved: the round has applied the merge to the open folder, so the files are already there. Vale per ogni Proposal il cui branch è nel risultato unito, anche se la cartella del suo worktree è sparita. Regenerates the Requirement skills. Does not start the per-Proposal scan; the round starts one scan of the union.
 
 ### Approved (final)
 Part of the Model now.

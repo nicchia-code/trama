@@ -184,6 +184,26 @@ describe("Tasks and Drifts", () => {
     expect(moveTask(p, id, "done", "developer").data.column).toBe("done");
   });
 
+  test("a Task remembers when it arrived in Done, keeps it Done to Done and forgets it when it leaves", () => {
+    const id = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
+    expect(getTask(p, id).data.finished).toBeNull();
+    const before = Date.now();
+    const first = moveTask(p, id, "done", "developer").data.finished as string;
+    expect(Date.parse(first)).toBeGreaterThanOrEqual(before - 1000);
+    expect(getTask(p, id).data.finished).toBe(first);
+    expect(moveTask(p, id, "done", "agent").data.finished).toBe(first);
+
+    moveTask(p, id, "doing", "agent");
+    expect(getTask(p, id).data.finished).toBeNull();
+    expect(readFileSync(getTask(p, id).path, "utf8")).not.toContain("finished");
+    expect(moveTask(p, id, "done", "agent").data.finished).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+    // A Task that reached Done before the instant was kept reads as Done with no instant.
+    const old = getTask(p, id);
+    writeFileSync(old.path, readFileSync(old.path, "utf8").replace(/^finished:.*\n/m, ""));
+    expect(getTask(p, id).data).toMatchObject({ column: "done", finished: null });
+  });
+
   test("the agent cannot start a blocked Task, from any column; the developer and the agent's other moves are free", async () => {
     const id = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
     const drift = newDrift(p, { options: FIX_OPTIONS, title: "Refunds differ", refs: ["order"], origin: id, happens: "The code does it one way.", should: "The Model says another." });
@@ -246,18 +266,26 @@ describe("Tasks and Drifts", () => {
     expect(moveTask(p, id, "done", "developer").data.column).toBe("done");
   });
 
-  test("releasing sends every taken Task back to To do and leaves the others where they are", () => {
-    const [a, b, c] = [1, 2, 3].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string];
+  test("releasing sends back to To do the Tasks taken by the origin that ended, and those taken with no holder kept", () => {
+    const [a, b, c, d, e] = [1, 2, 3, 4, 5].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string, string, string];
     moveTask(p, a, "doing", "agent");
     moveTask(p, b, "doing", "developer");
-    expect(releaseTasks(p).map((t) => t.id)).toEqual([a]);
-    expect([a, b, c].map((id) => getTask(p, id).data)).toMatchObject([
+    moveTask(p, d, "doing", "agent", { terminal: "aaa111" });
+    moveTask(p, d, "doing", "agent", { terminal: "bbb222" }); // taken again: the holder stays
+    moveTask(p, e, "doing", "agent", { chat: "cursor" });
+    expect(releaseTasks(p, { terminal: "bbb222" }).map((t) => t.id)).toEqual([a]);
+    expect([a, b, c, d, e].map((id) => getTask(p, id).data)).toMatchObject([
       { column: "todo", agent: false },
       { column: "doing", agent: false },
       { column: "todo", agent: false },
+      { column: "doing", agent: true, holder: "aaa111" },
+      { column: "doing", agent: true, holder: "cursor" },
     ]);
+    expect(releaseTasks(p, { chat: "cursor" }).map((t) => t.id)).toEqual([e]);
+    expect(releaseTasks(p, { terminal: "aaa111" }).map((t) => t.id)).toEqual([d]);
+    expect(readFileSync(getTask(p, d).path, "utf8")).toContain("agent: false");
     expect(moveTask(p, a, "done", "developer").data.column).toBe("done");
-    expect(releaseTasks(p)).toEqual([]);
+    expect(releaseTasks(p, {})).toEqual([]);
   });
 
   test("a taken Task is marked (agent working) in the board, the task list and task show", async () => {
@@ -340,6 +368,30 @@ describe("Tasks and Drifts", () => {
     expect(cli("task", "next", "--proposal", prop.id).out).toBe(`Next Task in Proposal ${named("proposal", prop.id)}: ${named("task", fix)} ${getTask(p, fix).title}`);
     moveTask(p, fix, "done", "developer");
     expect(cli("task", "next", "--proposal", prop.id).out).toBe(`Next Task in Proposal ${named("proposal", prop.id)}: ${named("task", blockedFirst)} Return flow`);
+  });
+
+  test("task next --batch groups up to four runnable Tasks that concern different things, starting with the next one", () => {
+    const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
+    const add = (title: string, refs: string[], proposal?: string) => newTask(p, { title, refs, technical: false, ...(proposal ? { proposal } : {}) }).id;
+    const prop = newProposal(p, "Design");
+    const blocked = add("Blocked", ["warehouse.PACKAGE_READY"]);
+    const paid = add("Paid", ["order/Paid"], prop.id);
+    const order = add("Whole order", ["order"], prop.id);
+    const payment = add("Payment", ["payment"], prop.id);
+    const cart = add("Cart", ["cart/Empty"]);
+    const draft = add("Draft", ["order/Draft", "requirements/ui#General"]);
+    add("Fifth", ["user.CANCEL"]);
+    newDrift(p, { options: FIX_OPTIONS, title: "Stop", refs: ["warehouse.PACKAGE_READY"], origin: blocked, happens: "One way.", should: "Another." });
+
+    // `order` contains `order/Paid`, so it waits for a later group; `order/Draft` is a sibling of `order/Paid` and joins.
+    const group = [paid, payment, cart, draft];
+    expect(cli("task", "next", "--batch").out).toBe(group.map((id) => `${named("task", id)} ${getTask(p, id).title}`).join("\n"));
+    expect(JSON.parse(cli("--json", "task", "next", "--batch").out).batch.map((t: { id: string; number: string }) => [t.id, t.number])).toEqual(group.map((id) => [id, named("task", id)]));
+    expect(cli("task", "next", "--batch", "--proposal", prop.id).out).toBe(`${named("task", paid)} Paid\n${named("task", payment)} Payment`);
+    expect(listTasks(p).every((t) => t.data.column === "todo" && !t.data.agent)).toBe(true);
+
+    for (const id of [paid, order, payment]) moveTask(p, id, "done", "developer");
+    expect(cli("task", "next", "--batch", "--proposal", prop.id).out).toBe(cli("task", "next", "--proposal", prop.id).out);
   });
 
   test("the command line takes the Task only inside the terminal Trama started or Cursor's chat", async () => {

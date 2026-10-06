@@ -1,6 +1,6 @@
 import { acceptIntoWorktree } from "../../../src/core/worktree-round";
 import type { Project } from "../../../src/core/store";
-import { buildScanPrompt, withLanguage } from "./prompts";
+import { buildApprovalScanPrompt, withLanguage } from "./prompts";
 
 export interface OrdinaryAcceptance {
   project: Project;
@@ -14,7 +14,8 @@ export interface OrdinaryAcceptance {
 }
 
 /**
- * Accepts one ordinary Proposal into a worktree and starts its agent on the scan of the Features it affects.
+ * Accepts one ordinary Proposal into a worktree and starts its agent on the scan of what that Proposal changed,
+ * never chained to the implementation: the Tasks follow in the same terminal once the scan has filed some.
  * A refusal leaves the Proposal open and tells the developer why. Returns whether the agent was started.
  */
 export async function acceptOrdinaryProposal(options: OrdinaryAcceptance, proposalId: string): Promise<boolean> {
@@ -26,7 +27,7 @@ export async function acceptOrdinaryProposal(options: OrdinaryAcceptance, propos
     options.warn(result.message);
     return false;
   }
-  const prompt = withLanguage(buildScanPrompt(result.acceptance.features, proposalId), options.language);
+  const prompt = withLanguage(buildApprovalScanPrompt(proposalId, false), options.language);
   await options.startAgent(result.acceptance.worktree, prompt);
   return true;
 }

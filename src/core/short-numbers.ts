@@ -2,7 +2,7 @@ import type { CardKind, CardNumbers } from "./card-names";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { TramaError } from "./errors";
-import { createdField } from "./schema";
+import { createdField, idField, type Raw } from "./schema";
 import { compareByCreation, listCards, type CardLayout, type Project, readDocument } from "./store";
 import { roundWorktrees, worktreesHome } from "./worktree-round";
 
@@ -21,6 +21,24 @@ const ignoreFile = (p: Project) => join(shortNumbersDir(p), ".gitignore");
 interface LiveCard {
   id: string;
   created: string | null;
+  /** A Done Task of a design still under way: it keeps the number it has but never takes one. */
+  keepOnly?: boolean;
+}
+
+/** A card read from its file: a live one, or a Done Task of a design that may keep its number. */
+interface ReadCard extends LiveCard {
+  /** The design (Proposal) of a Task, or null. */
+  design: string | null;
+  done: boolean;
+}
+
+/** The Proposal a Task's file links it to, or null when there is none or it cannot be read. */
+function designField(raw: Raw, file: string): string | null {
+  try {
+    return idField(raw, "proposal", file);
+  } catch {
+    return null;
+  }
 }
 
 /** Where a kind's cards are and which status or column leaves a card live: a Proposal not yet approved, rejected or discarded, a Drift not yet resolved, a Task in To do or In progress. */
@@ -31,19 +49,22 @@ const KIND_SPEC: Record<CardKind, { folder: string; layout: CardLayout; field: s
 };
 
 /**
- * The live cards of a kind in one `.trama/` folder. A card that cannot be read has no number: reading it is another
- * command's error to report.
+ * The live cards of a kind in one `.trama/` folder, and its Done Tasks that belong to a design. A card that cannot be
+ * read has no number: reading it is another command's error to report.
  */
-function liveCardsIn(dir: string, kind: CardKind): LiveCard[] {
+function cardsIn(dir: string, kind: CardKind): ReadCard[] {
   const spec = KIND_SPEC[kind];
   const folder = join(dir, spec.folder);
-  const cards: LiveCard[] = [];
+  const cards: ReadCard[] = [];
   for (const entry of listCards(folder, spec.layout)) {
     const file = spec.layout === "folder" ? join(folder, entry.name, "proposal.md") : join(folder, entry.name);
     try {
       const raw = readDocument(file).data;
       const state = raw[spec.field] ?? spec.fallback;
-      if (typeof state === "string" && spec.live.includes(state)) cards.push({ id: entry.id, created: createdField(raw, file) });
+      const design = kind === "task" ? designField(raw, file) : null;
+      const live = typeof state === "string" && spec.live.includes(state);
+      if (live || (kind === "task" && state === "done" && design !== null))
+        cards.push({ id: entry.id, created: createdField(raw, file), design, done: !live });
     } catch {
       // not a readable card: it gets no number
     }
@@ -52,15 +73,21 @@ function liveCardsIn(dir: string, kind: CardKind): LiveCard[] {
 }
 
 /**
- * The live cards of a kind, oldest first. The Tasks and Drifts that live in the worktrees of an open round are read by
- * this working copy too, so the Board it shows numbers them in its own sequence, whatever the worktree's own file says.
+ * The cards of a kind that hold or may take a number, oldest first. The Tasks and Drifts that live in the worktrees of
+ * an open round are read by this working copy too, so the Board it shows numbers them in its own sequence, whatever the
+ * worktree's own file says. A Done Task is among them only while a Task of its design is in To do or In progress, and
+ * then only to keep the number it has.
  */
 function liveCards(p: Project, kind: CardKind): LiveCard[] {
   const folders = [p.dir];
   if (kind !== "proposal" && existsSync(worktreesHome(p.root))) folders.push(...roundWorktrees(p).map((folder) => folder.project.dir));
-  const byId = new Map<string, LiveCard>();
-  for (const dir of folders) for (const card of liveCardsIn(dir, kind)) if (!byId.has(card.id)) byId.set(card.id, card);
-  return [...byId.values()].sort(compareByCreation);
+  const byId = new Map<string, ReadCard>();
+  for (const dir of folders) for (const card of cardsIn(dir, kind)) if (!byId.has(card.id)) byId.set(card.id, card);
+  const underWay = new Set([...byId.values()].filter((c) => !c.done && c.design !== null).map((c) => c.design));
+  return [...byId.values()]
+    .filter((c) => !c.done || underWay.has(c.design))
+    .map((c): LiveCard => (c.done ? { id: c.id, created: c.created, keepOnly: true } : { id: c.id, created: c.created }))
+    .sort(compareByCreation);
 }
 
 type Numbers = Record<CardKind, Map<string, number>>;
@@ -111,6 +138,7 @@ function assign(live: LiveCard[], previous: Map<string, number> | undefined): Ma
   for (const card of live) {
     let n = kept.get(card.id);
     if (n === undefined) {
+      if (card.keepOnly) continue;
       while (used.has(next)) next++;
       n = next;
       used.add(n);

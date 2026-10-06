@@ -443,4 +443,20 @@ describe("closing the tab of a request", () => {
     expect(dirty.saves).toBe(0);
     expect(existsSync(dirty.uri.fsPath)).toBe(false);
   });
+
+  test("a deleted request kept open with unsaved changes is neither saved back nor sent again", async () => {
+    const document = await writeRequest("# Consumed\n");
+    await requests.send();
+    // The developer reopens the sent request and edits it while its Proposal is handed over.
+    tabs.push(tabOf(openDocument(document.uri.fsPath)));
+    type(document, "more");
+    rmSync(document.uri.fsPath);
+    for (const fn of listeners.deleted) fn(document.uri);
+    type(document, " and more");
+    await sleep(SAVE_DELAY_MS + 100);
+    expect(existsSync(document.uri.fsPath)).toBe(false);
+    closeTabs(tabsShowing(document));
+    await settle();
+    expect(launches).toHaveLength(1);
+  });
 });

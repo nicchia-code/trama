@@ -155,12 +155,36 @@ export function worktreeRoundOpen(p: Project): boolean {
   return worktreeProposalIds(p).length > 0 || mergeWorktreeOpen(p.root);
 }
 
-/** Proposal ids whose worktree folder is still there. A folder that disappeared has left the round. */
+/**
+ * Proposal ids still in the round: their worktree folder is there or, once the round has started merging, their
+ * branch is already in the merge. Any other folder that disappeared has left the round.
+ */
 export function worktreeProposalIds(p: Project): string[] {
-  return proposalEntries(p.root).filter((entry) => existsSync(entry.path)).map((entry) => entry.id);
+  const present = proposalEntries(p.root).filter((entry) => existsSync(entry.path)).map((entry) => entry.id);
+  if (!mergeWorktreeOpen(p.root)) return present;
+  return [...new Set([...present, ...mergedProposalIds(p)])];
 }
 
-function mergeWorktreeOpen(root: string): boolean {
+/**
+ * Proposals of the round whose branch is already in the merge worktree's result, read from the round the sibling
+ * folder remembers and from git, not from the folders still there: a worktree deleted after its branch was merged
+ * still counts. A worktree that vanished before the merge left its branch at the start commit, so its work is not in the result.
+ */
+export function mergedProposalIds(p: Project): string[] {
+  const start = roundOrigin(p.root)?.commit;
+  const ids = new Set([...(rememberedProposals(p.root) ?? []), ...proposalEntries(p.root).map((entry) => entry.id)]);
+  return [...ids]
+    .filter((id) => {
+      const ref = `refs/heads/trama/${id}`;
+      const tip = git(p.root, ["rev-parse", "--verify", "-q", ref]);
+      if (!tip.ok || (tip.stdout === start && !existsSync(worktreePath(p.root, id)))) return false;
+      return git(p.root, ["merge-base", "--is-ancestor", ref, "refs/heads/trama/merge"]).ok;
+    })
+    .sort();
+}
+
+/** The merge worktree exists: the round is merging, in conflict, reconciling or waiting. */
+export function mergeWorktreeOpen(root: string): boolean {
   return listed(root).some((entry) => entry.branch === MERGE_BRANCH);
 }
 
@@ -218,7 +242,7 @@ export function withdrawFromRound(p: Project, id: string): { remaining: number }
   return { remaining: remainingIds.length };
 }
 
-/** A Proposal whose worktree disappeared before the round merged. */
+/** A Proposal whose worktree disappeared before its branch was in the round's merge. */
 export interface LostWorktree {
   id: string;
   title: string;
@@ -228,26 +252,27 @@ export interface LostWorktree {
 
 /**
  * A Proposal worktree that is gone — the folder was deleted, including by Cursor's own cleanup —
- * leaves the round. The Proposal is open again, so it awaits a decision. The others stay.
+ * leaves the round, unless the round is merging and its branch is already in the merge: that work lands with the rest.
+ * The Proposal that left is open again, so it awaits a decision. The others stay.
  * When none remain, the round is gone. Calling it again reports nothing.
  */
 export function reconcileLostWorktrees(p: Project): LostWorktree[] {
-  if (!ownRepo(p.root) || mergeWorktreeOpen(p.root)) return [];
+  if (!ownRepo(p.root)) return [];
+  const merging = mergeWorktreeOpen(p.root);
   const entries = proposalEntries(p.root);
-  const present = new Set(entries.filter((entry) => existsSync(entry.path)).map((entry) => entry.id));
+  const kept = new Set(worktreeProposalIds(p));
   const remembered = rememberedProposals(p.root);
-  const lostIds = [
-    ...new Set([
-      ...entries.filter((entry) => !existsSync(entry.path)).map((entry) => entry.id),
-      ...(remembered ?? []).filter((id) => !present.has(id)),
-    ]),
-  ].sort();
+  const lostIds = [...new Set([...entries.map((entry) => entry.id), ...(remembered ?? [])])].filter((id) => !kept.has(id)).sort();
   const origin = roundOrigin(p.root);
   if (lostIds.length === 0) {
-    if (origin && remembered === null && present.size > 0) writeRound(p.root, origin, [...present]);
+    if (origin && remembered === null && kept.size > 0) writeRound(p.root, origin, [...kept]);
     return [];
   }
+  const mergePath = worktreePath(p.root, "merge");
+  const pending = merging ? git(mergePath, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]) : null;
   for (const id of lostIds) {
+    // The conflict the round stopped on is this Proposal's own branch: drop that unfinished merge, so its work stays out.
+    if (pending?.ok && git(p.root, ["rev-parse", "--verify", "-q", `refs/heads/trama/${id}`]).stdout === pending.stdout) git(mergePath, ["merge", "--abort"]);
     const entry = entries.find((item) => item.id === id);
     if (entry) git(p.root, ["worktree", "remove", "--force", entry.path]);
     git(p.root, ["worktree", "prune"]);
@@ -255,7 +280,8 @@ export function reconcileLostWorktrees(p: Project): LostWorktree[] {
   }
   const remaining = worktreeProposalIds(p);
   const still = roundOrigin(p.root);
-  if (remaining.length === 0 || !still) rmSync(originFile(p.root), { force: true });
+  // The merge worktree still needs the start of the round, even with no Proposal left in it.
+  if ((remaining.length === 0 && !merging) || !still) rmSync(originFile(p.root), { force: true });
   else writeRound(p.root, still, remaining);
   return lostIds.map((id) => {
     let title = "";

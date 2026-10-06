@@ -1,7 +1,7 @@
 import { existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { TramaError } from "./errors";
-import { listProposals, type Proposal } from "./proposals";
+import { listProposals, save as writeProposal } from "./proposals";
 import { canonicalCardId } from "./schema";
 import { type CardEntry, type CardLayout, listCards, type Project, readDocument, sha256, writeDocument } from "./store";
 import { type Drift, listDrifts, listTasks, type Task } from "./work";
@@ -122,19 +122,6 @@ function refuseCollisions(p: Project, cards: NumberedCard[]): Map<string, string
 function mapped(kind: CardKind, value: string | null, ids: Map<string, string>): string | null {
   if (value === null) return null;
   return ids.get(`${kind}:${canonicalCardId(value)}`) ?? value;
-}
-
-function writeProposal(proposal: Proposal): void {
-  const { kind, requires, request, created, ...rest } = proposal.data;
-  writeDocument(join(proposal.dir, "proposal.md"), {
-    status: rest.status,
-    ...(kind === "change" ? {} : { kind }),
-    ...(requires.length === 0 ? {} : { requires }),
-    base: rest.base,
-    delete: rest.delete,
-    ...(request === null ? {} : { request }),
-    ...(created === null ? {} : { created }),
-  }, proposal.body);
 }
 
 function writeTask(task: Task): void {

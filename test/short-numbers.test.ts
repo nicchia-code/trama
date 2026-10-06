@@ -128,6 +128,36 @@ describe("release", () => {
     expect(numberOf("task", c.id)).toBe(1);
   });
 
+  test("the Done Tasks of a design keep their numbers until the whole design is Done, and never take one back", () => {
+    const design = newProposal(p, "Design").id;
+    const linked = (title: string) => newTask(p, { title, refs: ["order"], technical: false, proposal: design });
+    const a = linked("A");
+    const b = linked("B");
+    const loose = task("Loose");
+    syncShortNumbers(p);
+
+    moveTask(p, a.id, "done", "developer");
+    moveTask(p, loose.id, "done", "developer");
+    const halfway = syncShortNumbers(p);
+    expect([halfway.of("task", a.id), halfway.of("task", b.id), halfway.of("task", loose.id)]).toEqual([1, 2, null]);
+    expect(run(["--root", dir, "task", "show", "T1"], dir, {}).out).toContain("# A");
+
+    moveTask(p, b.id, "done", "developer");
+    const finished = syncShortNumbers(p);
+    expect([finished.of("task", a.id), finished.of("task", b.id)]).toEqual([null, null]);
+
+    // The design reopens: only the Task back in To do takes a number; the Done one stays without.
+    moveTask(p, b.id, "todo", "developer");
+    const reopened = syncShortNumbers(p);
+    expect([reopened.of("task", a.id), reopened.of("task", b.id)]).toEqual([null, 1]);
+
+    // A design of a single Task behaves as before: Done frees its number.
+    const single = newTask(p, { title: "Single", refs: ["order"], technical: false, proposal: newProposal(p, "One").id });
+    syncShortNumbers(p);
+    moveTask(p, single.id, "done", "developer");
+    expect(numberOf("task", single.id)).toBeNull();
+  });
+
   test("a line for a card that no longer exists is removed", () => {
     const a = task("A");
     syncShortNumbers(p);
@@ -240,7 +270,7 @@ describe("as a command argument", () => {
     expect(filed.exit).toBe(0);
     const text = readdirSync(join(p.dir, "drifts")).map((f) => readFileSync(join(p.dir, "drifts", f), "utf8")).join("");
     expect(text).toContain(`origin: ${b.id}`);
-    expect(text).not.toMatch(/origin: T/i);
+    expect(text).not.toMatch(/origin: T\d+\n/i);
   });
 
   test("the developer's commands take a number too", () => {

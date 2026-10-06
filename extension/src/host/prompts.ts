@@ -23,24 +23,35 @@ export function buildPrompt(action: ResolvedAction): string {
     case "implement":
       return `Use the trama-implement skill on Task ${action.task}.`;
     case "implement-all":
-      return 'Use the trama-implement skill on every Task in the "todo" column. Take each one from `trama task next`, one after the other, until it says there is none.';
+      return 'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch`, one group at a time, until it says there is none.';
     case "implement-design":
-      return `Use the trama-implement skill on every Task of Proposal ${action.proposal} that is in the "todo" column. Take each one from \`trama task next --proposal ${action.proposal}\`, one after the other, until it says there is none.`;
+      return `Use the trama-implement skill on every Task of Proposal ${action.proposal} that is in the "todo" column. Take them from \`trama task next --batch --proposal ${action.proposal}\`, one group at a time, until it says there is none.`;
     case "import":
       return "Use the trama-import skill on this repository.";
   }
 }
 
+/** The scan prompt for one Feature, or the whole System when there is none, as the developer starts it by hand; the scan after a round's merge lists several. It names no Proposal. */
+export function buildScanPrompt(features: string[]): string {
+  return features.length === 0
+    ? "Use the trama-scan skill on the whole System."
+    : `Use the trama-scan skill on the ${features.length === 1 ? "Feature" : "Features"} ${features.map((f) => `\`${f}\``).join(", ")}.`;
+}
+
 /**
- * The scan prompt for several Features at once (after an approval); none means the whole System. After an approval,
- * `proposal` names the approved Proposal, so the agent links every Task it files to it; a scan started by hand names none.
+ * The automatic scan after an approval: only what the Proposal changed, read from its scan scope. With
+ * `trama.autoImplement` on, the same run goes on to implement that design's Tasks when the scan files no Drift.
  */
-export function buildScanPrompt(features: string[], proposal?: string): string {
-  const scope =
-    features.length === 0
-      ? "Use the trama-scan skill on the whole System."
-      : `Use the trama-scan skill on the ${features.length === 1 ? "Feature" : "Features"} ${features.map((f) => `\`${f}\``).join(", ")}.`;
-  return proposal === undefined ? scope : `${scope} The scan follows the approval of Proposal ${proposal}: link every Task you file to it with --proposal ${proposal}.`;
+export function buildApprovalScanPrompt(proposal: string, autoImplement: boolean): string {
+  const scan = `Use the trama-scan skill on what Proposal ${proposal} changed: its scan scope is in \`trama proposal show ${proposal}\`. Link every Task you file to it with --proposal ${proposal}.`;
+  return autoImplement
+    ? `${scan} If the scan files no Drift, go on with the trama-implement skill on every Task of Proposal ${proposal} that is in the "todo" column, taking them from \`trama task next --batch --proposal ${proposal}\`, one group at a time, until it says there is none.`
+    : scan;
+}
+
+/** In a Proposal's worktree, after its scan filed Tasks: run them in groups, and leave the whole-System check to the merge. */
+export function buildWorktreeTasksPrompt(proposal: string): string {
+  return `Use the trama-implement skill on every Task of Proposal ${proposal} that is in the "todo" column, taking them from \`trama task next --batch --proposal ${proposal}\`, one group at a time, until it says there is none. Do not scan the whole System at the end: Trama checks the code after the merge.`;
 }
 
 /**
