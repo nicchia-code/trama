@@ -7,14 +7,14 @@ import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
 import { formatDiagnostic } from "../core/model";
 import { placeTasks } from "../core/design";
 import type { Blocker } from "../core/blocking";
-import { blockedTasks, COLUMNS, type Drift, driftOptions, driftSides, listDrifts, listTasks, nextTask, type Task } from "../core/work";
+import { attachedDrift, blockedTasks, COLUMNS, type Drift, driftOptions, driftSides, listDrifts, listTasks, nextTask, type Task } from "../core/work";
 import { machineReceiverLines, outgoingLines, reactionLines, stateTreeLines } from "./explore";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 
 /** One-line summary of a Proposal for lists and the board. `number` is its short number (`P3`) while it is live, otherwise null. */
 export function proposalSummary(p: Project, proposal: Proposal, numbers: ShortNumbers) {
   const h = proposal.data.status === "draft" || proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
-  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, stale: h.stale.length > 0, requires: h.requires.map((r) => r.id) };
+  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, stale: h.stale.length > 0, requires: h.requires.map((r) => r.id), attachedTo: attachedDrift(p, proposal.id)?.id ?? null };
 }
 
 export function proposalListView(p: Project, all: boolean): Result {
@@ -25,7 +25,7 @@ export function proposalListView(p: Project, all: boolean): Result {
   const flags = (i: (typeof items)[number]) =>
     [i.status, i.kind === "import" ? "import" : "", i.stale ? "stale" : "", i.requires.length > 0 ? `requires ${i.requires.map((r) => numbers.name("proposal", r)).join(", ")}` : ""].filter(Boolean).join(", ");
   const md = bullets(
-    items.map((i) => `- ${numbers.name("proposal", i.id)} [${flags(i)}] ${i.title}${i.status === "draft" ? " (draft)" : ""}`),
+    items.map((i) => `- ${numbers.name("proposal", i.id)} [${flags(i)}] ${i.title}${i.status === "draft" ? " (draft)" : ""}${i.attachedTo ? ` (attached to ${numbers.name("drift", i.attachedTo)})` : ""}`),
     "_No Proposals._",
   );
   return { md: `# Proposals\n\n${md}`, json: { proposals: items } };
@@ -34,6 +34,7 @@ export function proposalListView(p: Project, all: boolean): Result {
 export function proposalShowView(p: Project, proposal: Proposal): Result {
   const numbers = syncShortNumbers(p);
   const live = proposal.data.status === "draft" || proposal.data.status === "open";
+  const attached = attachedDrift(p, proposal.id);
   const h = live ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
   const fileChanges = changes(p, proposal);
   const errors = live ? validateProposal(p, proposal) : [];
@@ -41,6 +42,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
     proposal.body.trim(),
     "",
     `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}${proposal.data.kind === "import" ? " · import" : ""}`,
+    attached ? `Attached to Drift ${numbers.name("drift", attached.id)} ${attached.title}` : "",
     proposal.data.status === "draft" ? "Still being written; submit when finished. The developer cannot approve or reject it yet." : "",
     proposal.data.requires.length > 0 ? `Requires: ${proposal.data.requires.map((r) => numbers.name("proposal", r)).join(", ")}. Changes and validation below are on top of them.` : "",
     h.requires.length > 0 ? `\nCannot be approved yet:\n${requiredReasons(h.requires, (id) => numbers.name("proposal", id)).map((r) => `- ${r}`).join("\n")}` : "",
@@ -322,8 +324,9 @@ export function driftListView(p: Project, all: boolean): Result {
 export function boardView(p: Project): Result {
   const numbers = syncShortNumbers(p);
   const allProposals = listProposals(p);
-  const proposals = allProposals.filter((x) => x.data.status === "open").map((x) => proposalSummary(p, x, numbers));
-  const drafts = allProposals.filter((x) => x.data.status === "draft").map((x) => proposalSummary(p, x, numbers));
+  const summaries = allProposals.map((x) => proposalSummary(p, x, numbers)).filter((x) => !x.attachedTo);
+  const proposals = summaries.filter((x) => x.status === "open");
+  const drafts = summaries.filter((x) => x.status === "draft");
   const titles = new Map(allProposals.map((x) => [x.id, x.title]));
   const drifts = listDrifts(p).filter((d) => d.data.status === "open").map((d) => driftSummary(d, numbers));
   const blocked = blockedTasks(p);
@@ -348,7 +351,11 @@ export function boardView(p: Project): Result {
     "## To decide",
     bullets([
       ...proposals.map((i) => `- Proposal ${i.number ?? i.id}${i.stale ? " (stale)" : ""}: ${i.title}`),
-      ...drifts.map((d) => `- Drift ${d.number ?? d.id}: ${d.title}${d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : ""}`),
+      ...drifts.map((d) => {
+        const att = d.proposal ? allProposals.find((x) => x.id === d.proposal) : undefined;
+        const nested = att ? `\n  - Proposal ${numbers.label("proposal", att.id) ?? att.id}${att.data.status === "draft" ? " (draft)" : ""}: ${att.title}` : "";
+        return `- Drift ${d.number ?? d.id}: ${d.title}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
+      }),
     ]),
     "",
     "## To do",

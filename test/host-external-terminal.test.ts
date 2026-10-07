@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { customTerminalCommand, ExternalRuns, type ExternalEnd, externalScript, markerName, parseMarkerName } from "../extension/src/host/external-terminal";
+import { customTerminalCommand, ExternalRuns, type ExternalEnd, externalScript, markerName, parseMarkerName, windowMarkerDir } from "../extension/src/host/external-terminal";
 import { runScripting, scriptingCommand } from "../extension/src/host/external-reuse";
 import { agentCommandLine } from "../extension/src/host/quote";
 
@@ -254,6 +254,34 @@ describe("the marker of an external run", () => {
     } finally {
       second.dispose();
     }
+  });
+});
+
+describe("the marker folder of an editor window", () => {
+  test("another window's markers and sockets are never read or deleted; folders untouched for a week are swept", () => {
+    const root = join(dir, "external-terminals");
+    const a = windowMarkerDir(root, "aaaa");
+    writeFileSync(join(a, "t1.sock"), "");
+    const b = windowMarkerDir(root, "bbbb");
+    expect(readdirSync(a)).toEqual(["t1.sock"]);
+    const ends: ExternalEnd<string>[] = [];
+    const runs = new ExternalRuns<string>(b, (end) => ends.push(end));
+    try {
+      writeFileSync(join(a, markerName("abc123", 1)), "0\n");
+      runs.start("abc123", 1, "p").commit();
+      runs.scan();
+      expect(ends).toEqual([]);
+      expect(readdirSync(a).sort()).toEqual([markerName("abc123", 1), "t1.sock"]);
+    } finally {
+      runs.dispose();
+    }
+    const old = new Date(Date.now() - 8 * 24 * 3600 * 1000);
+    mkdirSync(join(root, "cccc"));
+    utimesSync(join(root, "cccc"), old, old);
+    writeFileSync(join(root, "legacy.sock"), "");
+    utimesSync(join(root, "legacy.sock"), old, old);
+    windowMarkerDir(root, "dddd");
+    expect(readdirSync(root).sort()).toEqual(["aaaa", "bbbb", "dddd"]);
   });
 });
 

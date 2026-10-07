@@ -17,7 +17,7 @@ export function buildPrompt(action: ResolvedAction): string {
     case "written-design":
       return `Use the trama-design skill on the design request in \`.trama/requests/${action.request}.md\`. Bind the first Proposal you open to it with \`--request ${action.request}\`.`;
     case "rework-drift":
-      return `Use the trama-design skill, without asking questions. Proposal ${action.proposal}, attached to Drift ${action.drift}, is stale: write a new Proposal that makes the same change on the current Model and Requirements, hand it over, and attach it to the Drift in place of the stale one.`;
+      return `Use the trama-design skill, without asking questions. Proposal ${action.proposal}, attached to Drift ${action.drift}, is stale: write a new Proposal that makes the same change on the current Model and Requirements, attach it to the Drift in place of the stale one as soon as you create it, then hand it over.`;
     case "scan":
       return buildScanPrompt(action.feature === undefined ? [] : [action.feature]);
     case "implement":

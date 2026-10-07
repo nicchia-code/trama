@@ -1,18 +1,19 @@
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
-import { approvalBlock, approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
+import { type ApprovalBlock, approvalBlock, approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
 import { approvedScope } from "../../../src/core/scope";
 import { noticeForScanHold, readScanHold, turnScanHoldOff, turnScanHoldOn } from "../../../src/core/scan-hold";
+import { listAnnouncements } from "../../../src/core/announcements";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { namerOf } from "../../../src/core/card-names";
 import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
-import { blockedTasks, getDrift, getTask, listTasks, resolveDrift, staleAttachedProposal } from "../../../src/core/work";
+import { blockedTasks, getDrift, getTask, listTasks, requireNotAttached, resolveDrift, staleAttachedProposal } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn } from "./announcements";
-import { agentReady, configuredSkillsDir, launchAgent, settings } from "./agent";
+import { agentReady, configuredSkillsDir, type DesignAnnouncement, launchAgent, settings } from "./agent";
 import { driftBlockedMessage, REWORK_PROPOSAL } from "./drift-blocked";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { webviewHtml } from "./html";
@@ -262,9 +263,11 @@ export class Controller implements vscode.Disposable {
         await this.turnScanHold(project, message.on);
         return;
       case "approveProposal":
+        requireNotAttached(project, message.id);
         await this.approving(project, message.id, () => approveProposal(project, message.id, [configuredSkillsDir()]));
         return;
       case "rejectProposal": {
+        requireNotAttached(project, message.id);
         const feedback = await vscode.window.showInputBox({
           title: `Reject Proposal ${cardName(project, "proposal", message.id)}`,
           prompt: "Feedback for the agent (optional): what should the next Proposal do differently? Press Enter to reject without feedback, Esc to cancel.",
@@ -287,7 +290,9 @@ export class Controller implements vscode.Disposable {
       }
       case "driftBlocked": {
         const proposal = getDrift(project, message.id).data.proposal;
-        const block = proposal === null ? null : approvalBlock(project, proposal);
+        const reworking = listAnnouncements(project).some((a) => a.drift === message.id);
+        // While the agent reworks the stale Proposal the button waits like for a Proposal still being written, and the stale warning's Rework button would start a second rework.
+        const block: ApprovalBlock | null = proposal === null ? null : reworking ? { kind: "draft", reason: `Proposal ${cardName(project, "proposal", proposal)} is being reworked by the agent.` } : approvalBlock(project, proposal);
         if (block === null) {
           // The Proposal can be approved now: the developer was looking at an old picture.
           this.refresh();
@@ -371,7 +376,7 @@ export class Controller implements vscode.Disposable {
   }
 
   private async launchAction(project: Project, action: AgentAction): Promise<void> {
-    const send = (resolved: ResolvedAction, announceProposal?: string) =>
+    const send = (resolved: ResolvedAction, announceProposal?: DesignAnnouncement) =>
       launchAgent(project.root, buildPrompt(resolved), terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal);
     switch (action.kind) {
       case "design": {
@@ -416,7 +421,7 @@ export class Controller implements vscode.Disposable {
         const drift = getDrift(project, action.drift);
         const stale = staleAttachedProposal(project, drift);
         // The title is written into the announcement's file, so it names the Proposal by its identity; the Board shows its number.
-        await send({ kind: "rework-drift", drift: drift.id, proposal: stale.id }, `Rework of Proposal ${stale.id}`);
+        await send({ kind: "rework-drift", drift: drift.id, proposal: stale.id }, { title: `Rework of Proposal ${stale.id}`, drift: drift.id });
         return;
       }
     }

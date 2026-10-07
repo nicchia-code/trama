@@ -2,6 +2,7 @@ import { cardLabel, noNumbers } from "../../../../src/core/card-names";
 import { createScanHoldSwitch } from "../scan-hold-switch";
 import type { Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
+import { attachedSuffix } from "../board/logic";
 import type { MountView, View } from "../types";
 import { createCanvas } from "./canvas";
 import { type Detail, detailOfSelection, requirementItems, tooltipOf } from "./details";
@@ -85,6 +86,8 @@ export const mountDiagram: MountView = (root, context) => {
     resolveDrift: (id, how, carries) => context.post({ type: "resolveDrift", id, how, ...carries }),
     driftBlocked: (id) => context.post({ type: "driftBlocked", id }),
     openLink: context.openLink,
+    viewProposal: (view, proposal) => context.navigate(view, { proposal }),
+    decideOnDrift: (id) => navigateDrift(id),
   });
 
   const canvas = createCanvas(stage, $("div.dg-canvas"), {
@@ -130,7 +133,7 @@ export const mountDiagram: MountView = (root, context) => {
     select.replaceChildren(new Option("None", ""));
     for (const p of snapshot.proposals) {
       const marks = [p.stale.length > 0 ? "stale" : "", p.unbased.length > 0 ? "unbased" : "", p.errors.length > 0 ? "invalid" : ""].filter(Boolean);
-      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} · ${p.title}${marks.length > 0 ? ` ⚠ ${marks.join(", ")}` : ""}`, p.id));
+      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} · ${p.title}${marks.length > 0 ? ` ⚠ ${marks.join(", ")}` : ""}${attachedSuffix(snapshot, p.id)}`, p.id));
     }
     select.value = proposalId ?? "";
 

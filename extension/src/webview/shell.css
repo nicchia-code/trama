@@ -46,6 +46,30 @@ button.trama-switch[aria-checked="true"] .trama-switch-thumb { left: 14px; }
 .drift-compare-where-head { cursor: pointer; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .drift-compare-where-text { margin-top: 6px; }
 .drift-compare-col > button { align-self: flex-start; }
+.drift-attached-frame { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border: 1px solid var(--vscode-focusBorder, #007fd4); border-radius: 3px; }
+.drift-attached { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.drift-attached-head { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.drift-attached-title { overflow-wrap: anywhere; }
+.drift-attached-id { font-family: var(--vscode-editor-font-family, monospace); }
+.drift-attached-state { margin: 0; font-style: italic; opacity: .8; }
+.drift-attached-files { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.drift-attached-file { display: flex; gap: 8px; justify-content: space-between; }
+.drift-attached-path { overflow-wrap: anywhere; }
+.drift-attached-counts, .drift-attached-more { white-space: nowrap; opacity: .7; font-variant-numeric: tabular-nums; }
+.drift-attached-ghost { opacity: .7; border: 1px dashed currentColor; border-radius: 3px; padding: 4px 6px; user-select: none; }
+.drift-attached-skeleton { display: flex; flex-direction: column; gap: 6px; }
+.drift-attached-line {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, color-mix(in srgb, currentColor 10%, transparent) 25%, color-mix(in srgb, currentColor 28%, transparent) 50%, color-mix(in srgb, currentColor 10%, transparent) 75%);
+  background-size: 200% 100%;
+  animation: drift-shimmer 1.4s linear infinite;
+}
+.drift-attached-line.is-short { width: 60%; }
+@keyframes drift-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .drift-attached-line { animation: none; } }
+.drift-attached-views { display: flex; flex-wrap: wrap; gap: 6px; }
 .drift-compare-consequence { margin: 0; font-size: 12px; opacity: .8; }
 .drift-fix { display: flex; flex-direction: column; gap: 6px; }
 .drift-fix-head { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }

@@ -131,6 +131,8 @@ mock.module("vscode", () => ({
     },
     showWarningMessage: (message: string) => void warnings.push(message),
     showInputBox: async () => input?.(),
+    // No agent chosen: the developer picks "Other command…", the last item, and is asked for the command.
+    showQuickPick: async (items: unknown[]) => items.at(-1),
     tabGroups: {
       get all() {
         return [{ tabs }];
@@ -178,9 +180,9 @@ class FakeMemento {
 }
 
 /** Every instruction sent, with its terminal's name and the title announced; `outcome` is how the next ones leave. */
-const launches: Array<{ root: string; instruction: string; name: string; title: string | undefined }> = [];
+const launches: Array<{ root: string; instruction: string; name: string; title: string | { title: string; drift: string } | undefined }> = [];
 let outcome: Launch = "terminal";
-const launch = async (root: string, instruction: string, name: string, title?: string): Promise<Launch> => {
+const launch = async (root: string, instruction: string, name: string, title?: string | { title: string; drift: string }): Promise<Launch> => {
   launches.push({ root, instruction, name, title });
   return outcome;
 };

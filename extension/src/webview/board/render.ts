@@ -143,26 +143,6 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}`);
   node.append(head("Drift", card.name), el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
-  const proposalId = card.proposal;
-  if (proposalId !== null) {
-    const named = `Proposal ${card.proposalName ?? proposalId}`;
-    const touches = card.proposalTouches;
-    const onlyRequirements = touches !== null && touches.requirements && !touches.model;
-    const link = el("button", "board-link", `${named} attached`);
-    link.type = "button";
-    link.dataset["action"] = "proposal-link";
-    link.title = onlyRequirements ? `Show the Requirements ${named} changes` : `Show ${named} on the diagram`;
-    link.addEventListener("click", () => env.context.navigate(onlyRequirements ? "requirements" : "diagram", { proposal: proposalId }));
-    node.append(link);
-    if (touches?.model && touches.requirements) {
-      const more = el("button", "board-link", "Its Requirements");
-      more.type = "button";
-      more.dataset["action"] = "proposal-requirements-link";
-      more.title = `Show the Requirements ${named} changes`;
-      more.addEventListener("click", () => env.context.navigate("requirements", { proposal: proposalId }));
-      node.append(more);
-    }
-  }
   const whereKey = `${card.key}:where`;
   node.append(
     renderDriftCompare(card.drift, {
@@ -170,7 +150,8 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
       blocked: () => env.context.post({ type: "driftBlocked", id: card.id }),
       openLink: env.context.openLink,
       where: { open: env.isExpanded(whereKey), toggled: (open) => env.setExpanded(whereKey, open) },
-      name: namerOf(env.numbers()),
+      numbers: env.numbers(),
+      viewProposal: (view) => env.context.navigate(view, { proposal: card.proposal ?? "" }),
     }),
   );
   const firstRef = card.refs[0];

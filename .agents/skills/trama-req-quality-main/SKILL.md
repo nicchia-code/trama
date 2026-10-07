@@ -15,6 +15,13 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 - Riservatezza: l'hook non conserva né registra il testo del prompt; lo legge solo per riconoscere se comincia con una skill di Trama, e all'editor manda l'evento, l'identificatore della conversazione e la cartella del progetto, mai il prompt. Le voci di Trama in `~/.cursor/hooks.json` contengono solo un percorso locale.
 - Compatibilità: i comandi interni di Cursor che Trama usa (`composer.createNew`, il deeplink con `workspace`) non sono documentati. Ogni nuova versione di Cursor che il developer usa è provata dallo smoke test dell'accettazione (una richiesta di design e un `trama ask`) prima di dichiararla supportata; un comando che sparisce passa al ripiego, e il developer lo vede come un prompt negli appunti, mai come un errore.
 
+## agent-launching
+
+- Sicurezza: la chiave di Jev sta solo nell'archivio segreto dell'editor. Non entra mai nelle impostazioni, nell'ambiente dei terminali, nei file del progetto o di `.trama/`, nell'istruzione, nell'output di `trama classify` o nei log; il comando `trama` non la riceve mai.
+- Sicurezza: `trama.terminalAgent`, i ruoli dei modelli e `trama.system1` si leggono solo dalle impostazioni utente, e i nomi dei modelli entrano nella riga di comando solo citati per la shell, così il file di un repository clonato non può cambiare il programma o le opzioni che Trama esegue.
+- Riservatezza: senza `trama.system1` impostata nulla lascia la macchina per lo smistamento. Con Jev acceso, a TypeSafe va solo lo stato che l'agente passa a `trama classify`, mai altri file del progetto.
+- Affidabilità: una chiamata a Jev dura al più 10 secondi e non blocca mai l'editor; un classificatore che non risponde manda la Machine all'analisi, così una differenza non va mai persa per un errore di rete.
+
 ## agent-terminal
 
 - Affidabilità: aprire o riusare una finestra esterna non blocca l'editor. Il processo del terminale parte staccato, ogni errore è catturato e mostrato come descritto in `ui`, e la fine del comando arriva solo dal marcatore, mai dall'attesa del processo del terminale.

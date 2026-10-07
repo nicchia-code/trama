@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, unlinkSync, watch, type FSWatcher } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, utimesSync, watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import { TERMINAL_ENV } from "../../../src/core/announcements";
 import { QUESTION_ENDPOINT_ENV } from "../../../src/core/question-channel";
@@ -6,6 +6,29 @@ import { quote } from "./quote";
 
 /** The folder of `globalStorageUri` where the scripts of the external windows leave their end markers. */
 export const MARKER_FOLDER = "external-terminals";
+
+const HEARTBEAT_MS = 60 * 60 * 1000;
+const ORPHAN_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The marker folder of the editor window `id` inside `root` (`external-terminals/` of the global storage): each window has
+ * its own, so no window reads, deletes or clears what another window's runs leave there (end markers, kitty sockets).
+ * Creates it, and deletes what in `root` no window has touched for a week: folders of closed sessions, and the loose files
+ * earlier versions left.
+ */
+export function windowMarkerDir(root: string, id: string, now = Date.now()): string {
+  mkdirSync(root, { recursive: true });
+  for (const name of readdirSync(root)) {
+    try {
+      if (name !== id && now - statSync(join(root, name)).mtimeMs > ORPHAN_MS) rmSync(join(root, name), { recursive: true, force: true });
+    } catch {
+      // already gone
+    }
+  }
+  const dir = join(root, id);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 /** The name of the marker of run `run` of terminal `terminal`. */
 export const markerName = (terminal: string, run: number): string => `${terminal}-${run}.end`;
@@ -90,6 +113,7 @@ export class ExternalRuns<T> {
   private readonly attempts = new Map<string, Followed<T>>();
   private readonly last = new Map<string, number>();
   private watcher: FSWatcher | undefined;
+  private readonly beat: NodeJS.Timeout;
 
   /**
    * `dir` is the marker folder. Markers left in it by an earlier session are deleted without effect, and it is
@@ -101,6 +125,16 @@ export class ExternalRuns<T> {
   ) {
     mkdirSync(dir, { recursive: true });
     for (const name of readdirSync(dir)) this.discard(name);
+    // The folder's modification time says the window is alive, so another window's sweep (`windowMarkerDir`) keeps it.
+    this.beat = setInterval(() => {
+      try {
+        const now = new Date();
+        utimesSync(dir, now, now);
+      } catch {
+        // folder gone: nothing to keep alive
+      }
+    }, HEARTBEAT_MS);
+    this.beat.unref();
     this.watcher = watch(dir, () => this.scan());
     // A watcher that fails (the folder removed, no handles left) must not take the editor down: markers are then read on the next event.
     this.watcher.on("error", () => undefined);
@@ -166,6 +200,7 @@ export class ExternalRuns<T> {
   dispose(): void {
     this.watcher?.close();
     this.watcher = undefined;
+    clearInterval(this.beat);
   }
 
   private take(name: string): void {

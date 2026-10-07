@@ -42,7 +42,7 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | S1 | Run `cd /home/luca/Developer/Trama && TRAMA_DEMO_DIR=/tmp/trama-demo/shop bun run scripts/harness.ts` | Prints `wrote extension/dist/harness.html`. No error | ☐ |
-| S2 | Run `printf '{\n  "trama.agentCommand": "echo {prompt}"\n}\n' > /tmp/trama-demo/shop/.vscode/settings.json` | File contains `"trama.agentCommand": "echo {prompt}"`. From now on the "agent" only prints its prompt | ☐ |
+| S2 | Make sure your **user** settings have no `trama.terminalAgent` (or have `custom`) and no model roles (`trama.analysis`, `trama.scan`, `trama.execution`). Run `printf '{\n  "trama.agentCommand": "echo {prompt}"\n}\n' > /tmp/trama-demo/shop/.vscode/settings.json` | File contains `"trama.agentCommand": "echo {prompt}"`. From now on the "agent" only prints its prompt: with no agent chosen, an existing command counts as `custom` | ☐ |
 | S3 | Run `code --extensionDevelopmentPath=/home/luca/Developer/Trama/extension --new-window /tmp/trama-demo/shop` (skip if the window is already open) | A VS Code window titled `shop`. If a Welcome dialog appears, close it | ☐ |
 | S4 | In the verification shell paste: `j() { /home/luca/Developer/Trama/dist/trama --root /tmp/trama-demo/shop "$@"; }` and `D=/tmp/trama-demo/shop/.trama` | No output. `j board` prints the board (see S5) | ☐ |
 | S5 | Run `j board` | `To decide`: Proposal `P1`, Proposal `P2`, Drift `D1`, Drift `D2` (Proposal `P2`). `To do`: `T1`, `T2`. `In progress`: `T3`. `Done`: `0004` (its identity, because it has no number) | ☐ |
@@ -71,7 +71,7 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 ### A1. First open
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Initialize Project**, **Trama: Quick Design Request…**, **Trama: Design…**, **Trama: Scan System**. **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
+| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Initialize Project**, **Trama: Quick Design Request…**, **Trama: Design…**, **Trama: Scan System**, **Trama: Set System 1 API Key**, **Trama: Clear System 1 API Key**. **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
 | 2 | Run **Trama: Open** | One new editor tab titled `Trama`, in the editor area | ☐ |
 | 3 | Look at the tab header inside the panel | Two tabs: **Diagram** (selected, underlined) and **Board** with a grey badge `4` | ☐ |
 | 4 | Look under the tabs | No red banner | ☐ |
@@ -543,7 +543,7 @@ Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." -
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | ↻. Append a blank line to `$D/model/checkout/payment.md` (makes Proposal 0002 stale), then click the left **Keep this** on Drift 0002 | A warning `Proposal 0002 is stale: the Model changed since it was written.` with a **Rework Proposal** button | ☐ |
-| 2 | Click **Rework Proposal** | The terminal prints one line: `Use the trama-design skill, without asking questions. Proposal 0002, attached to Drift 0002, is stale: write a new Proposal that makes the same change on the current Model and Requirements, hand it over, and attach it to the Drift in place of the stale one.` | ☐ |
+| 2 | Click **Rework Proposal** | The terminal prints one line: `Use the trama-design skill, without asking questions. Proposal 0002, attached to Drift 0002, is stale: write a new Proposal that makes the same change on the current Model and Requirements, attach it to the Drift in place of the stale one as soon as you create it, then hand it over.` | ☐ |
 | 3 | `j drift replace-proposal 2 --proposal <new id>` after a new Proposal exists | Drift 0002 shows the new Proposal; Proposal 0002 is rejected with `Replaced by Proposal <new id>` under `## Feedback` | ☐ |
 | 4 | On a Drift whose Proposal is still a Draft, click the left **Keep this** | A warning `… is still being written. Wait until the agent hands it over.` | ☐ |
 
@@ -582,7 +582,7 @@ Each launch sends one command to a terminal named after its work (cwd = the demo
 | H15 | Palette: **Trama: Quick Design Request…** | Same input box as H5 | ☐ |
 | H16 | After H1 to H15, open the terminal dropdown | Each run of launches with the same name reused one terminal; a launch with another name opened a new terminal and left the previous one open: `Scan` (H1–H4), `Design` (H5–H9), the short number of Task 0001 (H10), `All tasks` (H11), then a new `Scan` (H13–H14) and a new `Design` (H15). No terminal is named `Trama agent`. If an earlier command is still running (for example an agent), the next launch opens a new terminal even with the same name | ☐ |
 | H17 | Set `printf '{"trama.agentCommand": "echo"}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (no `{prompt}`), click **Scan System** | The prompt is appended: `Use the trama-scan skill on the whole System.` | ☐ |
-| H18 | Set `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, click **Scan System** | An input box `Trama: agent command`, placeholder `claude {prompt}    or    codex {prompt}`. With empty text: `Enter the command that starts your agent`. **Press Esc**: nothing is launched. (Typing a command would save it in your *user* settings.) | ☐ |
+| H18 | Set `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (no agent chosen in the user settings either), click **Scan System** | A list titled `Choose the agent Trama starts in the terminal`: `omp` (`omp`), `Claude Code` (`claude`), `Codex` (`codex`), `Copilot CLI` (`copilot -i`), `Cursor CLI` (`agent`), `Other command…`. **Press Esc**: nothing is launched and nothing is saved. Choose **Other command…**: an input box `Trama: agent command`, placeholder `claude {prompt}    or    codex {prompt}`; with empty text `Enter the command that starts your agent`; **Esc** again launches nothing. (Choosing an agent or typing a command saves it in your *user* settings: remove `trama.terminalAgent` and `trama.agentCommand` from them afterwards.) | ☐ |
 | H19 | Restore S2. Set `printf '{"trama.agentCommand": "echo {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, approve Proposal 0001 | The Proposal is approved (G1.1, G1.4–G1.8 hold) but **no** command is sent to the terminal | ☐ |
 | H20 | Restore S2 (settings back to `echo {prompt}`) | | ☐ |
 | H21 | Set `printf '{"trama.agentCommand": "echo {prompt}", "trama.autoScan": false, "trama.language": " Italian "}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, click **Scan System** | One line, ending `Use the trama-scan skill on the whole System. Write everything you generate in Italian, except code, which always stays in English.` (the typed text is trimmed). The same ending appears after **Run all To do**, **Run** on a Task, **Quick request…** (after the request), **Send to agent** on a written design request and **Rework** of a stale Proposal | ☐ |
@@ -876,6 +876,30 @@ Modalità echo (S2), con `trama.autoScan` acceso (il valore predefinito). Inizia
 | W13 | ↻, poi `mkdir -p $D/scan-hold && echo maybe > $D/scan-hold/state` | Lo switch è spento sulle tre schede e compare una volta l'avviso `Trama could not read the Hold scan switch, so it is off.` | ☐ |
 | W14 | ↻, `mkdir -p $D/scan-hold && chmod 555 $D/scan-hold`, poi clic su **Hold scan** | Lo switch resta spento e compare l'avviso `Trama could not save the Hold scan switch.`. Poi `chmod 755 $D/scan-hold` | ☐ |
 | W15 | 🔍 In Cursor, con `trama.autoScan` acceso, accendere, approvare P1 e spegnere | L'istruzione va alla chat come ogni pulsante; se Cursor non riesce a crearla da sé ripiega sul deeplink e sugli appunti, mai sull'avviso **Scan now** | ☐ |
+
+## X. Terminal agents, model roles and System 1
+
+Written from the Requirements; the rows have not been run in the editor yet, so note what you see even when it matches. These settings only count in your **user** settings: set them there (Preferences: Open User Settings (JSON)) and remove them at the end. Start with S2's echo mode, then ↻. Check every command line in the terminal list (the integrated terminal named after the work).
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| X1 | Put `"trama.terminalAgent": "codex"` in the workspace settings `/tmp/trama-demo/shop/.vscode/settings.json` (not the user ones), reload, click **Scan System** | The setting is ignored (application scope; the Settings editor says so): the echo command still runs | ☐ |
+| X2 | User settings: `"trama.agentCommand": "echo {model} {prompt}"`, `"trama.terminalAgent": "custom"`, `"trama.scan": "my model"`. Click **Scan System** | The terminal `Scan` prints `my model Use the trama-scan skill on the whole System.` (the model quoted as one word) | ☐ |
+| X3 | Remove `trama.scan`, click **Scan System** | The line has no model: `{model}` became nothing | ☐ |
+| X4 | Set `"trama.execution": "fast"`, click **Run all To do** | The prompt ends with `Your agent cannot give sub-agents their own model: triage and analyse on your own model, and say so in the report.` before any language sentence. **Quick request…** with `x` has no such sentence | ☐ |
+| X5 | 🪙 With omp installed: `"trama.terminalAgent": "omp"`, `"trama.analysis": "opus"`, `"trama.execution": "haiku"`; click **Scan System**, then **Quick request…** with `x` | Scan: `omp --smol 'haiku' --slow 'opus' '<prompt>'` with the prompt ending `Triage each Machine with the trama-triage sub-agent and analyse every Machine in conflict with the trama-analysis sub-agent.` Design: `omp --model 'opus' '<prompt>'` with no sub-agent sentence | ☐ |
+| X6 | 🪙 With Claude Code: `"trama.terminalAgent": "claude"`, the same roles, **Scan System** | `claude --agents '{"trama-triage":{…,"model":"haiku"},"trama-analysis":{…,"model":"opus"}}' '<prompt>'` and the same sub-agent sentence | ☐ |
+| X7 | `"trama.terminalAgent": "copilot"` and `"trama.scan": "gpt-x"`, **Scan System** | `copilot --model 'gpt-x' -i '<prompt>'` | ☐ |
+| X8 | `j skills update` (or **Trama: Update Agent Skills**), then `cat /tmp/trama-demo/shop/.omp/agents/trama-triage.md` | Front matter `name: trama-triage`, a `description`, `model: "@smol"`, then a short English prompt naming `trama-scan`; `trama-analysis.md` the same with `model: "@slow"`. No concrete model in either | ☐ |
+| X9 | With a role set, `"trama.agentLauncher": "chat"`, click **Scan System** twice, then open another project and launch to the chat | Once only, ever: `Trama: model roles (trama.analysis, trama.scan, trama.execution) apply only to terminal agents. The chat uses the model chosen in the chat.` The chat prompt has no model and no sub-agent sentence | ☐ |
+| X10 | **Trama: Set System 1 API Key**, press Esc; again, press Enter with an empty box; again, type `test-key` | A hidden input titled `Jev API key`. Esc and the empty value save nothing and show nothing; `test-key` shows `Trama: the Jev API key is saved.`. `grep -r test-key ~/.config/Code/User/settings.json /tmp/trama-demo/shop` finds nothing | ☐ |
+| X11 | In the terminal Trama opened (`Scan`), run `echo state \| trama classify --machine order` with `trama.system1` empty | `unavailable`, exit 0 | ☐ |
+| X12 | User settings `"trama.system1": "jev"`, the same command | With the fake key: `conflict` and, on stderr, `Jev answered HTTP 401.` (or another one-line reason), exit 0, within 10 seconds, and the editor keeps responding | ☐ |
+| X13 | `echo state \| trama classify --machine nope`; `printf '' \| trama classify --machine order`; the same command with the Trama window closed | `error: Unknown Machine "nope"`, exit 1; the empty-input error, exit 2; `unavailable`, exit 0 | ☐ |
+| X14 | **Trama: Clear System 1 API Key**, then X12's command | `Trama: the Jev API key is cleared.`; then `unavailable` | ☐ |
+| X15 | 🪙 With a real agent and Jev on, run **Scan System** | The report has one line on the triage: Machines skipped and analysed, who decided, and how many classifier errors counted as a conflict | ☐ |
+
+Remove every setting of this section from your user settings at the end.
 
 ---
 

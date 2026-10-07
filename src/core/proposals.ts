@@ -495,7 +495,7 @@ export function submitProposal(p: Project, id: string): Proposal & { requestCons
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} cannot be handed over yet:\n${problems.map((x) => `- ${x}`).join("\n")}${warningsText(warnings)}`);
   proposal.data.status = "open";
   save(proposal);
-  removeBoundTo(p, proposal.id);
+  removeBoundTo(p, proposal.id, true);
   markActivity(p);
   const requestConsumed = proposal.data.request !== null && consumeRequest(p, proposal.data.request);
   return { ...proposal, requestConsumed, warnings };

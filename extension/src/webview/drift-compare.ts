@@ -1,6 +1,9 @@
-import { identityNamer, type Namer } from "../../../src/core/card-names";
+import { type CardNumbers, cardNameOf, identityNamer, type Namer, namerOf, noNumbers } from "../../../src/core/card-names";
 import type { DriftView } from "../../../src/core/snapshot";
+import { summarizeChanges } from "./board/logic";
+import { idTag } from "./id-tag";
 import { renderMarkdown } from "./markdown";
+import { proposalTouches } from "./requirements/logic";
 
 export type DriftHow = "fix-code" | "accept-proposal" | "dismiss";
 
@@ -71,6 +74,8 @@ export interface DriftComparison {
   optionsName: string;
   /** Accessible name of the note field. */
   noteName: string;
+  /** Accessible name of the box of the attached Proposal. */
+  attachedName: string;
   /** The text of the note field. */
   note: string;
   keepHappens: DriftChoice;
@@ -84,9 +89,10 @@ export function driftComparison(d: DriftView, selection: FixSelection = fixSelec
   const options = d.options.map((o, i) => ({ number: i + 1, title: o.title, text: o.text, recommended: i === 0, selected: i + 1 === selection.option }));
   const selected = options.find((o) => o.selected);
   const note = selection.note.trim() === "" ? undefined : selection.note;
+  const setAside = d.proposal === null ? "" : `; Proposal ${name("proposal", d.proposal)} is ${d.proposalBlock?.kind === "draft" ? "discarded" : "rejected"}`;
   const keepShould: DriftChoice = {
     how: "fix-code",
-    consequence: `A Task is created for the agent to fix the code${selected ? " with the chosen option" : ""}`,
+    consequence: `A Task is created for the agent to fix the code${selected ? " with the chosen option" : ""}${setAside}`,
     aria: `Keep what should happen for ${d.title}${selected ? ` with option ${selected.title}` : ""}`,
     blocked: false,
     carries: { ...(selected ? { option: selected.number } : {}), ...(note !== undefined ? { note } : {}) },
@@ -94,8 +100,9 @@ export function driftComparison(d: DriftView, selection: FixSelection = fixSelec
   const aria = `Keep what happens for ${d.title}`;
   let keepHappens: DriftChoice;
   if (d.proposal === null) keepHappens = { how: "dismiss", consequence: "Closes the Drift; nothing changes", aria, blocked: false, carries: {} };
+  else if (d.rework !== null) keepHappens = { how: "accept-proposal", consequence: `Proposal ${name("proposal", d.proposal)} is being reworked by the agent.`, aria, blocked: true, carries: {} };
   else if (d.proposalBlock !== null) keepHappens = { how: "accept-proposal", consequence: d.proposalBlock.reason, aria, blocked: true, carries: {} };
-  else keepHappens = { how: "accept-proposal", consequence: `Approves Proposal ${name("proposal", d.proposal)} and changes the Model to match`, aria, blocked: false, carries: {} };
+  else keepHappens = { how: "accept-proposal", consequence: `Accepts Proposal ${name("proposal", d.proposal)}: the Model changes to match`, aria, blocked: false, carries: {} };
   return {
     happens: d.sides?.happens ?? d.body,
     should: d.sides?.should ?? LEGACY_SHOULD,
@@ -104,6 +111,7 @@ export function driftComparison(d: DriftView, selection: FixSelection = fixSelec
     options,
     optionsName: `Fix options for ${d.title}`,
     noteName: `Note for ${d.title}`,
+    attachedName: `Proposal attached to ${d.title}`,
     note: selection.note,
     keepHappens,
     keepShould,
@@ -119,8 +127,10 @@ export interface DriftHandlers {
   openLink(url: string): void;
   /** The "Where in the code" block: whether it starts open, and told when the developer opens or closes it. Closed, and forgotten, when absent. */
   where?: { open: boolean; toggled(open: boolean): void };
-  /** How a card is written in the lines under "Keep this": by its short number while live. Identities when absent. */
-  name?: Namer;
+  /** The short numbers of the live cards, to write cards by number while live. Identities when absent. */
+  numbers?: CardNumbers;
+  /** The "View diagram" or "View requirements" button of the attached Proposal box was clicked. */
+  viewProposal(view: "diagram" | "requirements"): void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ""): HTMLElementTagNameMap[K] {
@@ -155,7 +165,7 @@ let groups = 0;
 
 /** The "Fix options" radio group (when the Drift has options) and the note field: what the developer selects and types is remembered for the session. */
 function fixControls(d: DriftView, handlers: DriftHandlers, sync: () => void): HTMLElement {
-  const c = driftComparison(d, fixSelection(d), handlers.name);
+  const c = driftComparison(d, fixSelection(d), handlers.numbers ? namerOf(handlers.numbers) : identityNamer);
   const box = el("div", "drift-fix");
   if (c.options.length > 0) {
     const group = el("div", "drift-options");
@@ -201,7 +211,58 @@ function fixControls(d: DriftView, handlers: DriftHandlers, sync: () => void): H
   return box;
 }
 
-function column(heading: string, source: string | null, text: string, keep: () => DriftChoice, handlers: DriftHandlers, primary: boolean, controls?: (sync: () => void) => HTMLElement): HTMLElement {
+/** The box of the Proposal attached to the Drift: number and title, what it changes (or that it is being written), and the buttons that show it. No Approve, no Reject. */
+function attachedBox(d: DriftView, c: DriftComparison, handlers: DriftHandlers): HTMLElement {
+  const box = el("div", "drift-attached");
+  box.setAttribute("role", "group");
+  box.setAttribute("aria-label", c.attachedName);
+  const id = d.proposal ?? "";
+  box.append(el("h5", "drift-attached-head", "Attached Proposal"));
+  if (d.rework !== null) {
+    // The ghost of the rework stands in place of the stale Proposal: a skeleton that cannot be used.
+    box.classList.add("drift-attached-ghost");
+    // The box stays a group named for the Drift; the skeleton's own text says it is being reworked.
+    const lines = el("div", "drift-attached-skeleton");
+    lines.append(el("span", "drift-attached-line"), el("span", "drift-attached-line is-short"));
+    box.append(...(d.rework.title === null ? [] : [el("div", "drift-attached-title", d.rework.title)]), lines, el("p", "drift-attached-state", "Being reworked"));
+    return box;
+  }
+  const title = el("div", "drift-attached-title");
+  title.append(idTag(cardNameOf(handlers.numbers ?? noNumbers, "proposal", id), "drift-attached-id"), " ", d.proposalTitle ?? "");
+  box.append(title);
+  if (d.proposalBlock?.kind === "draft") {
+    box.append(el("p", "drift-attached-state", "Being written by the agent"));
+    return box;
+  }
+  if (d.proposalChanges === null) return box;
+  const summary = summarizeChanges(d.proposalChanges);
+  if (summary.files.length > 0) {
+    const list = el("ul", "drift-attached-files");
+    for (const file of summary.files) {
+      const item = el("li", "drift-attached-file");
+      item.append(el("span", "drift-attached-path", file.path), el("span", "drift-attached-counts", file.text));
+      list.append(item);
+    }
+    if (summary.more > 0) list.append(el("li", "drift-attached-file drift-attached-more", `and ${summary.more} more ${summary.more === 1 ? "file" : "files"}`));
+    box.append(list);
+  }
+  const touches = proposalTouches({ changes: d.proposalChanges });
+  const row = el("div", "drift-attached-views");
+  const view = (label: string, which: "diagram" | "requirements") => {
+    const b = el("button", "trama-btn", label);
+    b.type = "button";
+    b.dataset["action"] = `view-${which}`;
+    b.setAttribute("aria-label", `${label} of Proposal ${namerOf(handlers.numbers ?? noNumbers)("proposal", id)}`);
+    b.addEventListener("click", () => handlers.viewProposal(which));
+    row.append(b);
+  };
+  if (touches.model) view("View diagram", "diagram");
+  if (touches.requirements) view("View requirements", "requirements");
+  if (row.childElementCount > 0) box.append(row);
+  return box;
+}
+
+function column(heading: string, source: string | null, text: string, keep: () => DriftChoice, handlers: DriftHandlers, primary: boolean, controls?: (sync: () => void) => HTMLElement, attached?: HTMLElement): HTMLElement {
   const col = el("section", "drift-compare-col");
   const head = el("h4", "drift-compare-head", heading);
   if (source !== null) head.append(" ", el("span", "drift-compare-source", source));
@@ -210,18 +271,23 @@ function column(heading: string, source: string | null, text: string, keep: () =
   col.append(head, body);
   const { button, consequence, sync } = keepButton(keep, handlers, primary);
   if (controls) col.append(controls(sync));
-  col.append(button, consequence);
+  if (attached) {
+    const frame = el("div", "drift-attached-frame");
+    frame.append(attached, button, consequence);
+    col.append(frame);
+  } else col.append(button, consequence);
   return col;
 }
 
 /** The two sides of a Drift side by side (stacked when narrow), each with its own "Keep this", and under them the collapsible "Where in the code" when the Drift has it. */
 export function renderDriftCompare(d: DriftView, handlers: DriftHandlers): HTMLElement {
-  const c = driftComparison(d, fixSelection(d), handlers.name);
+  const name = handlers.numbers ? namerOf(handlers.numbers) : identityNamer;
+  const c = driftComparison(d, fixSelection(d), name);
   const block = el("div", "drift-compare-block");
   const grid = el("div", "drift-compare");
   grid.append(
-    column("What happens", null, c.happens, () => driftComparison(d, fixSelection(d), handlers.name).keepHappens, handlers, false),
-    column("What should happen", c.shouldSource, c.should, () => driftComparison(d, fixSelection(d), handlers.name).keepShould, handlers, true, (sync) => fixControls(d, handlers, sync)),
+    column("What happens", null, c.happens, () => driftComparison(d, fixSelection(d), name).keepHappens, handlers, false, undefined, d.proposal === null ? undefined : attachedBox(d, c, handlers)),
+    column("What should happen", c.shouldSource, c.should, () => driftComparison(d, fixSelection(d), name).keepShould, handlers, true, (sync) => fixControls(d, handlers, sync)),
   );
   block.append(grid);
   if (c.where !== null) {

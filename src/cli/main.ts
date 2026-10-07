@@ -1,7 +1,8 @@
 import { parseArgs } from "node:util";
 import { CURSOR_AGENT_ENV, originFromEnv } from "../core/announcements";
 import { TramaError, UsageError } from "../core/errors";
-import { askEditor, sendCursorHook } from "../core/question-channel";
+import { askEditor, type Classification, classifyWithEditor, sendCursorHook } from "../core/question-channel";
+import { loadModel, type Project } from "../core/store";
 import { hookAnswer, parseCursorHook } from "../core/cursor-chat";
 import { parseQuestionRequest, questionAborted, questionFailure, type QuestionHandler } from "../core/questions";
 import { arity, COMMANDS, type Command, makeContext, type Values } from "./commands";
@@ -23,6 +24,7 @@ function help(): string {
     "Options: --json prints JSON instead of Markdown; --root <dir> uses <dir>/.trama.",
     "trama ask [--root <dir>] reads a question round as JSON from stdin and waits for the editor; stdout is JSON.",
     "trama cursor-hook is run by Cursor's hooks: it reads the hook's JSON from stdin and tells the editor; it always exits with 0.",
+    "trama classify --machine <id> [--root <dir>] reads the state of a Machine from stdin and prints conflict, no-conflict or unavailable, as the editor's System 1 classifier answers.",
     "Exit codes: 0 ok, 1 failure (validation errors, unknown element, stale Proposal), 2 usage.",
   ].join("\n");
 }
@@ -109,6 +111,40 @@ export async function runAsk(argv: string[], cwd: string, input: string, options
     return { out: JSON.stringify(result), exit: 0 };
   } catch (error) {
     return { out: JSON.stringify(questionFailure(error)), exit: error instanceof UsageError || error instanceof SyntaxError ? 2 : 1 };
+  }
+}
+
+/** The `classify` command, which also waits for the editor; null for any other command. */
+export function classifyCommand(argv: string[]): { tail: string[]; root?: string } | null {
+  const { rest, root } = splitGlobals(argv);
+  return rest[0] === "classify" ? { tail: rest.slice(1), root } : null;
+}
+
+/**
+ * `trama classify --machine <id>`: hands the Machine and the state read from stdin to the editor and prints its one-word
+ * answer, exiting with 0 whatever it is; `err` is the line on why an error counted as a conflict. Exits otherwise only for a
+ * wrong use: an unknown Machine (1) or a missing Machine or empty input (2).
+ */
+export async function runClassify(argv: string[], cwd: string, input: string, options: { env?: Record<string, string | undefined>; classify?: (project: Project, machine: string, state: string) => Promise<Classification> } = {}): Promise<{ out: string; err?: string; exit: number }> {
+  try {
+    const selected = classifyCommand(argv);
+    let machine: string | undefined;
+    try {
+      const { values } = parseArgs({ args: selected?.tail ?? [], options: { machine: { type: "string" } }, strict: true });
+      machine = values.machine;
+    } catch (err) {
+      throw new UsageError(`trama classify: ${(err as Error).message}`);
+    }
+    if (selected === null || machine === undefined) throw new UsageError("Usage: trama classify --machine <id>");
+    const project = makeContext(cwd, selected.root).project();
+    if (!loadModel(project).machines.has(machine)) throw new TramaError(`Unknown Machine "${machine}"`);
+    if (input.trim() === "") throw new UsageError("trama classify reads the Machine's state from standard input, which is empty.");
+    const classify = options.classify ?? ((project, machine, state) => classifyWithEditor(project, machine, state, { env: options.env }));
+    const { answer, reason } = await classify(project, machine, input);
+    return { out: answer, ...(reason === undefined ? {} : { err: reason }), exit: 0 };
+  } catch (err) {
+    if (!(err instanceof UsageError || err instanceof TramaError)) throw err;
+    return { out: "", err: `error: ${err.message}`, exit: err instanceof UsageError ? 2 : 1 };
   }
 }
 

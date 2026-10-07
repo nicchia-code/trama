@@ -1,18 +1,20 @@
 import { cardName } from "../../../src/core/short-numbers";
+import { randomBytes } from "node:crypto";
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import * as vscode from "vscode";
 import { takeApprovedNotices } from "../../../src/core/approve-request";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { watchAnnouncements } from "./announcements";
-import { agentName, watchAgentTerminal, watchExternalRuns, configuredSkillsDir } from "./agent";
+import { agentName, useGlobalState, watchAgentTerminal, watchExternalRuns, configuredSkillsDir } from "./agent";
 import { Controller, describeError } from "./controller";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./cursor";
-import { MARKER_FOLDER } from "./external-terminal";
+import { MARKER_FOLDER, windowMarkerDir } from "./external-terminal";
 import { findProject } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
+import { classifyMachine, clearSystem1ApiKey, setSystem1ApiKey } from "./system1";
 
 const SKILL_SYNC_DEBOUNCE_MS = 300;
 
@@ -30,12 +32,13 @@ function guarded<A extends unknown[]>(action: (...args: A) => Promise<void>): (.
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  useGlobalState(context.globalState);
   const session = new QuestionSession(() => trama.revealForQuestions(), agentName);
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
   const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
   const trama = new Controller(context.extensionUri, session, tramaFiles);
   controller = trama;
-  const questions = new EditorQuestions(findProject, session.present);
+  const questions = new EditorQuestions(findProject, session.present, (_machine, state) => classifyMachine(context.secrets, state));
   const requests = new DesignRequests(context.workspaceState, tramaFiles);
   context.subscriptions.push(
     tramaFiles,
@@ -50,6 +53,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("trama.scan", guarded(() => trama.pickAndScan())),
     vscode.commands.registerCommand("trama.import", guarded(() => trama.launch({ kind: "import" }))),
     vscode.commands.registerCommand("trama.updateSkills", guarded(async () => trama.updateSkills())),
+    vscode.commands.registerCommand("trama.setSystem1ApiKey", guarded(() => setSystem1ApiKey(context.secrets))),
+    vscode.commands.registerCommand("trama.clearSystem1ApiKey", guarded(() => clearSystem1ApiKey(context.secrets))),
     watchAgentTerminal(),
     watchAnnouncements(() => findProject()?.root),
     questions,
@@ -59,7 +64,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   exposeBundledCli(context);
   try {
-    context.subscriptions.push(watchExternalRuns(join(context.globalStorageUri.fsPath, MARKER_FOLDER)));
+    context.subscriptions.push(watchExternalRuns(windowMarkerDir(join(context.globalStorageUri.fsPath, MARKER_FOLDER), randomBytes(4).toString("hex"))));
   } catch (err) {
     void vscode.window.showErrorMessage(`Trama: could not watch the external terminal's end markers: ${describeError(err)}`);
   }

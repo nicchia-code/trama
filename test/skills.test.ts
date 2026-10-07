@@ -22,6 +22,22 @@ test("init refuses to overwrite customised skill files and creates nothing", () 
   }
 });
 
+test("init and skills update install omp's two sub-agents on roles, never on a concrete model", () => {
+  const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
+  try {
+    run(["--root", root, "init"], root);
+    const triage = join(root, ".omp/agents/trama-triage.md");
+    const analysis = join(root, ".omp/agents/trama-analysis.md");
+    expect(readFileSync(triage, "utf8")).toMatch(/^---\nname: trama-triage\ndescription: ".+"\nmodel: "@smol"\n---\n\n.*trama-scan/);
+    expect(readFileSync(analysis, "utf8")).toMatch(/^---\nname: trama-analysis\ndescription: ".+"\nmodel: "@slow"\n---\n\n.*trama-scan/);
+    rmSync(join(root, ".omp"), { recursive: true });
+    run(["--root", root, "skills", "update"], root);
+    expect(existsSync(triage) && existsSync(analysis)).toBe(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("init --force replaces customised skills, and identical existing files are not a conflict", () => {
   const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
   try {

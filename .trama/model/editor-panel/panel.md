@@ -24,8 +24,12 @@ Mentre un round di domande dell'agente è aperto, compare in un overlay sopra qu
 #### Diagram (initial)
 The Model drawn one level at a time, with a selector to draw an open Proposal over it (never one the agent is still writing) and the open Drifts drawn where they point. Selecting something shows its details and its Requirements; from there the developer can approve or reject a Proposal, resolve a Drift or open the file. Buttons ask the agent to design a change or to scan the whole System or the Feature being looked at.
 
+Una Proposal allegata a un Drift aperto resta nel selettore, segnata con il suo Drift, così il developer può guardarla per intero sopra il Modello; i suoi dettagli non permettono di approvarla o rifiutarla, ma portano al Drift su cui decidere.
+
 #### Board
 Four columns: To decide (open Proposals, then open Drifts), To do, In progress and Done (the Tasks). Proposals the agent is still writing are not among the open ones: the Board does not show them as cards and they do not count as awaiting a decision. Cards link to the Diagram. The Board tab shows how many Proposals and Drifts await a decision. Buttons ask the agent to implement every Task in To do, to scan the System or to design a change.
+
+Una Proposal allegata a un Drift aperto non è una scheda di To decide e non conta fra ciò che aspetta una decisione: la scheda del Drift la mostra, nella colonna di ciò che succede, sopra il pulsante che la accetta, con ciò che cambia e i link per guardarla nel Diagramma e nei Requisiti. Il ghost di un rifacimento sta lì, al posto della Proposal, e non in To decide.
 
 La colonna Done mostra prima ciò che è finito più di recente, raggruppato per giorno, e un filtro sceglie il periodo da mostrare: oggi, gli ultimi 7 giorni, gli ultimi 30 giorni o tutto. All'apertura del pannello il periodo è gli ultimi 7 giorni; quello scelto resta mentre la Board si aggiorna e si dimentica alla chiusura del pannello. Una scheda di design finita conta dal momento in cui è finito il suo ultimo Task. I Task finiti prima che Trama ricordasse quando, si vedono solo scegliendo tutto, in fondo, come senza data.
 

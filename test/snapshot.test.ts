@@ -123,8 +123,11 @@ test("an open Drift carries its two sides and why its attached Proposal cannot b
 
   expect(drifts()[0]).toMatchObject({ sides: { happens: "Code writes it off.", should: "Nothing writes it off." }, requirementsOnly: false, proposalBlock: { kind: "draft" } });
   expect(drifts()[1]).toMatchObject({ requirementsOnly: true, proposal: null, proposalBlock: null });
+  expect(drifts()[0]).toMatchObject({ proposalTitle: "Lost orders", proposalChanges: null });
   handOver(p, prop.id);
   expect(drifts()[0]?.proposalBlock).toBeNull();
+  expect(drifts()[0]?.proposalChanges?.map((c) => c.path)).toEqual(["checkout/payment.md"]);
+  expect(drifts()[1]).toMatchObject({ proposalTitle: null, proposalChanges: null });
   writeFileSync(join(dir, ".trama/model/checkout/payment.md"), `${readFileSync(join(dir, ".trama/model/checkout/payment.md"), "utf8")}\n`);
   expect(drifts()[0]?.proposalBlock).toMatchObject({ kind: "stale", reason: `Proposal ${cardName(p, "proposal", prop.id)} is stale: the Model changed since it was written.` });
 });

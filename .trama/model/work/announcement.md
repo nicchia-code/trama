@@ -4,6 +4,8 @@ A card the agent is about to create, announced so that the Board can show a ghos
 
 An announcement is created Preparing, as soon as the agent knows it will create the card, by the agent announcing it with the kind and the title of the card. Trama itself creates one when the developer asks the agent for a design (also to rework the stale Proposal of a Drift) from a terminal launcher, integrated or external; the title is then the developer's request. A Proposal the agent starts that no announcement is waiting for, as happens with the chat launcher, creates its own announcement already Writing. An announcement lasts only as long as the agent's work: once the real card has arrived, or the work is over without it, it is gone.
 
+Una Proposal destinata a un Drift non ha mai un ghost a sé in To decide, perché il developer la vedrà solo dentro il Drift. Un Drift che porterà una Proposal ha un solo annuncio, quello del Drift: la Draft che l'agente comincia per esso si lega a quell'annuncio, che resta un Drift e mostra che la sua Proposal è in scrittura; il Drift arriva poi con la Draft allegata, che l'agente consegna subito dopo. L'annuncio che Trama fa per il rifacimento della Proposal obsoleta di un Drift ricorda quel Drift: il suo ghost si disegna dentro il Drift, al posto della Proposal allegata, finché la nuova non è consegnata.
+
 An announcement belongs to the agent terminal in which its agent runs, when there is one: the terminal Trama typed a design request into, or the terminal of the agent that announced it. What happens in another agent terminal, or to a command other than the one Trama typed, never touches it. An announcement made from the chat of an editor other than Cursor, or by an agent Trama did not start, belongs to no terminal and is withdrawn only by the clock or by the editor starting up.
 
 Un annuncio fatto dall'agente della chat di Cursor non appartiene a nessun terminale ma al progetto: lo ritira anche l'interruzione o la chiusura di una conversazione di Trama dello stesso progetto (vedi l'Actor cursor-chat). Un turno concluso normalmente non lo ritira, perché in una chat l'agente può essersi fermato solo per aspettare una risposta a testo del developer e poi riprendere: in quel caso il timer dei quindici minuti resta la rete di sicurezza.
@@ -14,7 +16,7 @@ Un annuncio può anche essere un controllo: non una scheda che arriverà, ma il 
 
 ### Announced (initial)
 The card has not arrived yet, or the check is not finished. The Board shows its ghost. Whatever the agent or the clock does with it applies in every sub-State.
-- `agent.SUBMIT_PROPOSAL` → Delivered: the agent hands over the Proposal the announcement is bound to, so its card arrives in To decide.
+- `agent.SUBMIT_PROPOSAL` → Delivered: the agent hands over the Proposal the announcement is bound to, so its card arrives in To decide. Vale solo per un annuncio di Proposal: per un rifacimento la Proposal arriva dentro il suo Drift. La consegna della Draft legata all'annuncio di un Drift non lo consegna: lo consegna il Drift.
 - `agent.FILE_TASK` → Delivered: the agent files the Task it announced.
 - `agent.FILE_DRIFT` → Delivered: the agent files the Drift it announced.
 - `developer.DISCARD_PROPOSAL` → Withdrawn: only if the Proposal bound to the announcement is the one discarded; the developer gave up the draft on purpose, so no notice is shown.
@@ -23,13 +25,14 @@ The card has not arrived yet, or the check is not finished. The Board shows its 
 - `cursor-chat.AGENT_INTERRUPTED` → Withdrawn: solo per un annuncio fatto dall'agente della chat di Cursor dello stesso progetto; il turno dell'agente è stato interrotto o è andato in errore, quindi nessun agente lavora più a quella consegna. Il ghost sparisce subito e il developer è avvisato che l'agente si è fermato senza consegnare quanto aveva annunciato, come alla fine del comando.
 - `cursor-chat.CONVERSATION_CLOSED` → Withdrawn: come sopra, per la chiusura di una conversazione di Trama dello stesso progetto; il developer ha chiuso la chat di sua scelta, quindi nessun avviso.
 - `time.QUIET_PERIOD_ELAPSED` → Withdrawn: nothing happened for fifteen minutes, so the agent is taken to have stopped; the developer is told, as when the command ends.
+- `drift.CODE_FIX_CHOSEN` → Withdrawn: solo per l'annuncio del rifacimento della Proposal di quel Drift; il developer ha deciso di correggere il codice, quindi il rifacimento non serve più e non c'è avviso.
 
 #### Preparing (initial)
 The agent is working on it and nothing is written yet; it may be waiting for the developer's answers. Un controllo non passa mai da qui: nasce già in Verifying o in Scanning, secondo la fase che l'agente dichiara annunciandolo.
-- `agent.START_PROPOSAL` → Writing: only for an announced Proposal; the new Draft is bound to the announcement and the ghost takes its title. The Draft is taken by the oldest announcement of the developer's request still Preparing, or by the one the agent names.
+- `agent.START_PROPOSAL` → Writing: only for an announced Proposal; the new Draft is bound to the announcement and the ghost takes its title. The Draft is taken by the oldest announcement of the developer's request still Preparing, or by the one the agent names. Vale anche per un Drift annunciato, quando l'agente lo nomina: la Draft si lega all'annuncio del Drift, che tiene il titolo del Drift.
 
 #### Writing
-The Draft of the Proposal exists and the agent is writing it.
+The Draft of the Proposal exists and the agent is writing it. Per un Drift, la Draft è la Proposal che il Drift porterà allegata.
 
 #### Checking
 Solo per un controllo: l'agente sta ancora lavorando dopo che le schede della sua corsa hanno lasciato In progress, o sta scansionando. Il ghost sta in In progress e mostra la fase.

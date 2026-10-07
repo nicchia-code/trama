@@ -1,6 +1,6 @@
-import { type CardName, type CardNumbers, cardNameOf, namerOf } from "../../../../src/core/card-names";
+import { type CardName, type CardNumbers, cardNameOf } from "../../../../src/core/card-names";
 import { appliesUnder, REQUIRED_STATUS } from "../../../../src/core/required";
-import type { ProposalView } from "../../../../src/core/snapshot";
+import type { DriftView, ProposalView } from "../../../../src/core/snapshot";
 import { approveBlocker } from "../board/logic";
 import { renderDriftCompare } from "../drift-compare";
 import { idTag } from "../id-tag";
@@ -21,6 +21,10 @@ export interface PanelActions {
   driftBlocked(drift: string): void;
   /** An http or https link of a rendered text was followed. */
   openLink(url: string): void;
+  /** Show a Proposal drawn in the Diagram or in the Requirements tab. */
+  viewProposal(view: "diagram" | "requirements", proposal: string): void;
+  /** The "Decide on Drift" link of an attached Proposal: select that Drift in the Diagram. */
+  decideOnDrift(drift: string): void;
 }
 
 export interface Panel {
@@ -87,7 +91,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     return li;
   };
 
-  const renderProposal = (p: ProposalView, numbers: CardNumbers): HTMLElement => {
+  const renderProposal = (p: ProposalView, numbers: CardNumbers, drift: DriftView | null): HTMLElement => {
     const box = el("section", "dg-proposal");
     const kind = el("div", "dg-kind", "Proposal ");
     kind.append(idTag(cardNameOf(numbers, "proposal", p.id), "dg-id"));
@@ -126,6 +130,16 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       }
       box.append(ul);
     }
+    if (drift) {
+      const row = el("div", "dg-actions");
+      const link = el("button", "dg-link", "Decide on Drift ");
+      link.type = "button";
+      link.append(idTag(cardNameOf(numbers, "drift", drift.id), "dg-id"));
+      link.addEventListener("click", () => actions.decideOnDrift(drift.id));
+      row.append(link);
+      box.append(row);
+      return box;
+    }
     const blocker = approveBlocker(p, numbers);
     const row = el("div", "dg-actions");
     row.append(
@@ -149,7 +163,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       root.append(head);
       if (detail.drift) {
         const d = detail.drift;
-        root.append(renderDriftCompare(d, { keep: (how, carries) => actions.resolveDrift(d.id, how, carries), blocked: () => actions.driftBlocked(d.id), openLink: actions.openLink, name: namerOf(detail.numbers) }));
+        root.append(renderDriftCompare(d, { keep: (how, carries) => actions.resolveDrift(d.id, how, carries), blocked: () => actions.driftBlocked(d.id), openLink: actions.openLink, numbers: detail.numbers, viewProposal: (view) => actions.viewProposal(view, d.proposal ?? "") }));
       }
 
       if (detail.description) root.append(body(detail.description));
@@ -168,7 +182,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
         for (const i of s.items) ul.append(renderItem(i));
         root.append(el("div", "dg-heading", s.heading), ul);
       }
-      if (detail.proposal) root.append(renderProposal(detail.proposal, detail.numbers));
+      if (detail.proposal) root.append(renderProposal(detail.proposal, detail.numbers, detail.proposalDrift));
     },
   };
 }

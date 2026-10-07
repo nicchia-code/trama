@@ -10,13 +10,17 @@ import { withdrawWaiting } from "./announcements";
 import { ExternalRuns, externalScript, typedCommand } from "./external-terminal";
 import { type ExternalWindow, type ReusableTerminal, runScripting, scriptingCommand } from "./external-reuse";
 import { detectTerminal, openWindow, reusableKind, type WindowOrigin } from "./external-open";
-import { agentCommandLine, shellFamily } from "./quote";
+import { agentCommandLine, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint } from "./questions";
 import { buildScanPrompt, withLanguage } from "./prompts";
+import { agentTemplate, canScan, effectiveAgent, KNOWN_AGENTS, knownCommand, type Models, type Role, roleOf, subAgentSentence, type TerminalAgent } from "./terminal-agent";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
 
 export const configuredAgentCommand = (): string => settings().get<string>("agentCommand", "").trim();
+
+/** The agent Trama starts in a terminal (`trama.terminalAgent`, or `custom` with `trama.agentCommand`); undefined when none is chosen yet. Application scope: only the user's settings count. */
+export const configuredTerminalAgent = (): TerminalAgent | undefined => effectiveAgent(settings().get<string>("terminalAgent", ""), configuredAgentCommand());
 
 /** The command that opens the external terminal instead of the detected one (`trama.externalTerminalCommand`). Application scope: only the user's settings count. */
 export const configuredExternalTerminalCommand = (): string => settings().get<string>("externalTerminalCommand", "").trim();
@@ -34,7 +38,9 @@ export const configuredLanguage = (): string => settings().get<string>("language
 export function agentName(context: { fromTramaTerminal?: boolean; fromCursorChat?: boolean }): string | null {
   if (context.fromCursorChat === true) return "Cursor";
   if (context.fromTramaTerminal !== true) return null;
-  const program = configuredAgentCommand().split(/\s+/)[0] ?? "";
+  const agent = configuredTerminalAgent();
+  const command = agent === undefined ? "" : (knownCommand(agent) ?? configuredAgentCommand());
+  const program = command.split(/\s+/)[0] ?? "";
   return program === "" ? null : basename(program);
 }
 
@@ -52,7 +58,11 @@ export function agentLauncher(): AgentLauncher {
 }
 
 /** Whether a launch can happen without asking the developer anything first (used to decide on automatic scans). */
-export const agentReady = (): boolean => agentLauncher() === "chat" || configuredAgentCommand() !== "";
+export const agentReady = (): boolean => {
+  if (agentLauncher() === "chat") return true;
+  const agent = configuredTerminalAgent();
+  return agent !== undefined && (agent !== "custom" || configuredAgentCommand() !== "");
+};
 
 /**
  * Starts a new agent-mode conversation in the editor's chat with `prompt`. Cursor has its own chain of steps. Elsewhere
@@ -161,9 +171,13 @@ function isTypedCommand(terminal: vscode.Terminal, commandLine: string | undefin
   return typed !== undefined && commandLine !== undefined && commandLine.trim() === typed.trim();
 }
 
-function announceDesignRequest(root: string, title: string, terminal: string): void {
+/** What a design request announces: its title, or, to rework the stale Proposal of a Drift, the title and that Drift. */
+export type DesignAnnouncement = string | { title: string; drift: string };
+
+function announceDesignRequest(root: string, request: DesignAnnouncement, terminal: string): void {
   try {
-    announce(projectAt(root), { kind: "proposal", title, source: "request", terminal });
+    const { title, drift } = typeof request === "string" ? { title: request, drift: undefined } : request;
+    announce(projectAt(root), { kind: "proposal", title, source: "request", terminal, ...(drift ? { drift } : {}) });
   } catch (err) {
     if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: could not announce the Proposal: ${err.message}`);
     else throw err;
@@ -213,7 +227,7 @@ export interface ExternalRunStart {
    * A design request (`announceProposal` is its title) announces a Proposal that belongs to this window, and only then
    * is delivered the end of the command, if it already came.
    */
-  sent: (announceProposal?: string) => void;
+  sent: (announceProposal?: DesignAnnouncement) => void;
   /** The window could not be opened: nothing was sent; drop the attempt without changing the followed run. */
   abandon: () => void;
 }
@@ -277,7 +291,7 @@ export async function reuseExternalWindow(
   template: string,
   prompt: string,
   detected: ReusableTerminal | undefined,
-  announceProposal?: string,
+  announceProposal?: DesignAnnouncement,
   canSend: () => boolean = () => true,
 ): Promise<ExternalReuse> {
   const previous = lastExternal;
@@ -328,15 +342,48 @@ async function externalWindowFailed(prompt: string, reason: string): Promise<und
   return undefined;
 }
 
+/** What a terminal agent receives: the template of its command line, with `{prompt}`, and the prompt. */
+interface TerminalRun {
+  template: (family: ShellFamily) => string;
+  prompt: string;
+}
+
 /**
- * Sends `prompt` to the agent command in a window of the system terminal outside the editor, titled `name`: the free
+ * The instruction as a terminal agent receives it: for an instruction that can scan, followed by the sentence about
+ * sub-agents for `agent` (none while no agent is chosen), then by the language sentence.
+ */
+function terminalPrompt(agent: TerminalAgent | undefined, instruction: string, role: Role, models: Models): string {
+  const sentence = agent === undefined || !canScan(role) ? undefined : subAgentSentence(agent, models);
+  return withLanguage(sentence === undefined ? instruction : `${instruction} ${sentence}`, configuredLanguage());
+}
+
+/** The model roles, trimmed (`trama.analysis`, `trama.scan`, `trama.execution`). Application scope: only the user's settings count. */
+const configuredModels = (): Models => ({
+  analysis: settings().get<string>("analysis", "").trim(),
+  scan: settings().get<string>("scan", "").trim(),
+  execution: settings().get<string>("execution", "").trim(),
+});
+
+/** The prompt of the run called `name` and its command line template for a shell family, after choosing the agent when none is; undefined when the developer cancels. */
+async function terminalRun(instruction: string, name: string): Promise<TerminalRun | undefined> {
+  const chosen = await terminalAgent();
+  if (chosen === undefined) return undefined;
+  const role = roleOf(name);
+  const models = configuredModels();
+  return { template: (family) => agentTemplate(chosen.agent, chosen.command, role, models, family), prompt: terminalPrompt(chosen.agent, instruction, role, models) };
+}
+
+/**
+ * Sends `instruction` to the agent in a window of the system terminal outside the editor, titled `name`: the free
  * window of the last run when it can be reused, a new one otherwise. Nothing is sent, announced or followed when no window opens.
  */
-async function launchExternal(root: string, prompt: string, name: string, announceProposal: string | undefined, canSend: () => boolean): Promise<Launch | undefined> {
+async function launchExternal(root: string, instruction: string, name: string, announceProposal: DesignAnnouncement | undefined, canSend: () => boolean): Promise<Launch | undefined> {
   const origin = externalOrigin();
-  if (typeof origin === "string") return externalWindowFailed(prompt, origin);
-  const template = await agentCommandTemplate();
-  if (template === undefined || !canSend()) return undefined;
+  if (typeof origin === "string") return externalWindowFailed(terminalPrompt(configuredTerminalAgent(), instruction, roleOf(name), configuredModels()), origin);
+  const run = await terminalRun(instruction, name);
+  if (run === undefined || !canSend()) return undefined;
+  const template = run.template("posix");
+  const { prompt } = run;
   const reuse = await reuseExternalWindow(root, name, template, prompt, reusableKind(origin.terminal), announceProposal, canSend);
   if (reuse.kind === "cancelled" || !canSend()) return undefined;
   if (reuse.kind === "reused") return "terminal";
@@ -357,8 +404,33 @@ async function launchExternal(root: string, prompt: string, name: string, announ
   return "terminal";
 }
 
-/** The agent command, asked for once when none is configured and remembered for all projects; undefined when the developer cancels. */
-async function agentCommandTemplate(): Promise<string | undefined> {
+/**
+ * The agent to start and its command: the effective agent, after asking once which agent to use when none is chosen
+ * (remembered for all projects); for `custom`, `trama.agentCommand`, asked for when empty. Undefined when the developer cancels.
+ */
+async function terminalAgent(): Promise<{ agent: TerminalAgent; command: string } | undefined> {
+  const agent = configuredTerminalAgent();
+  if (agent === undefined) return chooseTerminalAgent();
+  const command = knownCommand(agent) ?? (await customAgentCommand());
+  return command === undefined ? undefined : { agent, command };
+}
+
+/** Asks which agent Trama starts in the terminal and saves it in the user's settings; undefined when the developer cancels. */
+async function chooseTerminalAgent(): Promise<{ agent: TerminalAgent; command: string } | undefined> {
+  const items: (vscode.QuickPickItem & { agent: TerminalAgent })[] = [
+    ...KNOWN_AGENTS.map((known) => ({ label: known.label, description: known.command, agent: known.id })),
+    { label: "Other command…", agent: "custom" },
+  ];
+  const picked = await vscode.window.showQuickPick(items, { title: "Choose the agent Trama starts in the terminal", ignoreFocusOut: true });
+  if (picked === undefined) return undefined;
+  const command = knownCommand(picked.agent) ?? (await customAgentCommand());
+  if (command === undefined) return undefined;
+  await settings().update("terminalAgent", picked.agent, vscode.ConfigurationTarget.Global);
+  return { agent: picked.agent, command };
+}
+
+/** `trama.agentCommand`, asked for once when empty and remembered for all projects; undefined when the developer cancels. */
+async function customAgentCommand(): Promise<string | undefined> {
   const configured = configuredAgentCommand();
   if (configured !== "") return configured;
   const entered = await vscode.window.showInputBox({
@@ -378,22 +450,27 @@ async function agentCommandTemplate(): Promise<string | undefined> {
  * Sends `prompt` to the developer's agent: the editor's chat when the launcher is the chat, a window of the system terminal
  * when it is the external terminal, otherwise the agent command in an integrated terminal called `name` (see
  * `terminalName`): the last one is reused only while it is free and has the same name, otherwise a new one is opened and
- * the old one is left alone; an editor tab with `terminal-tab`. The command is asked for first if none is set.
+ * the old one is left alone; an editor tab with `terminal-tab`. The agent is chosen first if none is (see `terminalAgent`).
+ * A terminal agent runs on the model of the instruction's role (see `roleOf`) and, for an instruction that can scan, is told
+ * how to use its sub-agents; the chat receives only the instruction with its language sentence.
  * `announceProposal` is the title of the Proposal a design request will make: with a terminal launcher it is announced
  * once the instruction is sent, so the Board shows its ghost at once. The chat has no end to follow, so it announces nothing.
  * `selfSendingOnly` (the automatic scan) lets Cursor's chat use only a new chat that sends by itself.
  * Returns how the chat received the instruction, "terminal" once it is typed into a terminal or an external window, or
- * undefined when nothing was sent: the developer cancelled the prompt for the agent command, or the external window
+ * undefined when nothing was sent: the developer cancelled the choice of the agent or its command, or the external window
  * could not be opened (the developer was told and the instruction is on the clipboard).
  */
-export async function launchAgent(root: string, instruction: string, name: string, announceProposal?: string, selfSendingOnly = false, canSend: () => boolean = () => true): Promise<Launch | undefined> {
+export async function launchAgent(root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement, selfSendingOnly = false, canSend: () => boolean = () => true): Promise<Launch | undefined> {
   if (!canSend()) return undefined;
-  const prompt = withLanguage(instruction, configuredLanguage());
-  if (agentLauncher() === "chat") return openChat(root, prompt, selfSendingOnly, canSend);
+  if (agentLauncher() === "chat") {
+    const delivery = await openChat(root, withLanguage(instruction, configuredLanguage()), selfSendingOnly, canSend);
+    if (delivery !== "not-sent") noticeChatModelRoles();
+    return delivery;
+  }
   // Never the integrated terminal in place of the external one: the Model forbids that fallback.
-  if (agentLauncher() === "external-terminal") return launchExternal(root, prompt, name, announceProposal, canSend);
-  const template = await agentCommandTemplate();
-  if (template === undefined || !canSend()) return undefined;
+  if (agentLauncher() === "external-terminal") return launchExternal(root, instruction, name, announceProposal, canSend);
+  const run = await terminalRun(instruction, name);
+  if (run === undefined || !canSend()) return undefined;
 
   const previous = lastTerminal;
   const endpoint = await questionEndpoint(root);
@@ -419,7 +496,8 @@ export async function launchAgent(root: string, instruction: string, name: strin
         env: { TRAMA_AGENT: "1", [QUESTION_ENDPOINT_ENV]: endpoint, [TERMINAL_ENV]: terminalId },
         ...(asTab ? { location: { viewColumn: tabColumn(), preserveFocus: true } } : {}),
       });
-  const line = agentCommandLine(template, prompt, shellFamily(vscode.env.shell));
+  const family = shellFamily(vscode.env.shell);
+  const line = agentCommandLine(run.template(family), run.prompt, family);
   agentTerminals.set(terminal, { id: terminalId, root, line });
   if (asTab && !reusable) lastTab = { terminal, name, column: undefined };
   // The agent's tab comes to the front of its group without the focus, which stays where the developer was typing.
@@ -435,4 +513,18 @@ export async function launchAgent(root: string, instruction: string, name: strin
   commandRunning = true;
   if (announceProposal !== undefined) announceDesignRequest(root, announceProposal, terminalId);
   return "terminal";
+}
+
+/** The editor's state for all projects (`ExtensionContext.globalState`), given at activation. */
+let globalState: vscode.Memento | undefined;
+export const useGlobalState = (state: vscode.Memento): void => void (globalState = state);
+
+const CHAT_ROLES_NOTICE_SHOWN = "trama.chatModelRolesNoticeShown";
+
+/** The first instruction sent to the chat while a model role is set tells the developer, once for all projects, that the chat ignores the roles. */
+function noticeChatModelRoles(): void {
+  if (globalState === undefined || globalState.get<boolean>(CHAT_ROLES_NOTICE_SHOWN) === true) return;
+  if (Object.values(configuredModels()).every((model) => model === "")) return;
+  void globalState.update(CHAT_ROLES_NOTICE_SHOWN, true);
+  void vscode.window.showInformationMessage("Trama: model roles (trama.analysis, trama.scan, trama.execution) apply only to terminal agents. The chat uses the model chosen in the chat.");
 }

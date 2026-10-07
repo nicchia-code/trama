@@ -220,7 +220,7 @@ test("Drifts draw a red ghost joined to the element their first resolvable refer
 });
 
 test("a Drift on a State hidden in a collapsed State outlines the State that hides it", () => {
-  const snap = { ...shopSnapshot(), drifts: [{ id: "0007", title: "Preparing", body: "", refs: ["order/Preparing"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null }] };
+  const snap = { ...shopSnapshot(), drifts: [{ id: "0007", title: "Preparing", body: "", refs: ["order/Preparing"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null }] };
   const s = buildScene(snap, null);
   const collapsed = buildGraph(s, { kind: "machine", machine: "order" }, new Map());
   expect(nodeOf(collapsed, "s:Paid")).toMatchObject({ drifts: ["0007"], sub: "2 sub-states · ⚠ 1 drift inside" });
@@ -231,7 +231,7 @@ test("a Drift on a State hidden in a collapsed State outlines the State that hid
 });
 
 test("unresolved Drift references are skipped for the ghost and listed in the panel", () => {
-  const snap = { ...shopSnapshot(), drifts: [{ id: "0008", title: "Gone", body: "", refs: ["order/Gone", "order/Paid"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null }, { id: "0009", title: "All gone", body: "", refs: ["nope"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null }] };
+  const snap = { ...shopSnapshot(), drifts: [{ id: "0008", title: "Gone", body: "", refs: ["order/Gone", "order/Paid"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null }, { id: "0009", title: "All gone", body: "", refs: ["nope"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null }] };
   const s = buildScene(snap, null);
   const order = withDrifts(machineGraph(s, "order", null, new Set()), s);
   expect(order.edges.find((e) => e.kind === "drift")).toMatchObject({ source: "d:0008", target: "s:Paid" });
@@ -257,6 +257,20 @@ test("the panel carries the Proposal for ghosts and the Drift for Drift ghosts",
   const driftPanel = detailOfSelection(s, order, `d:${shipped}`);
   expect(driftPanel.drift?.id).toBe(shipped);
   expect(driftPanel.proposal).toBeNull();
+});
+
+test("the level details of a drawn attached Proposal carry its Drift, and a free Proposal none", () => {
+  const snap = shopWithProposals();
+  const attached = snap.drifts.find((d) => d.proposal !== null);
+  const free = snap.proposals.find((p) => p.id !== attached?.proposal);
+  expect(attached && free).toBeTruthy();
+  const level = (id: string) => {
+    const s = buildScene(snap, id);
+    return detailOfSelection(s, buildGraph(s, { kind: "system" }, new Map()), null);
+  };
+  expect(level(attached?.proposal ?? "").proposalDrift?.id).toBe(attached?.id);
+  expect(level(free?.id ?? "").proposalDrift).toBeNull();
+  expect(level(free?.id ?? "").proposal?.id).toBe(free?.id);
 });
 
 test("the Requirement sections of the Transitions an edge draws are listed in order of the Transitions, as Markdown blocks", () => {

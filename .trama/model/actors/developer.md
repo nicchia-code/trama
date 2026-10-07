@@ -5,16 +5,16 @@ The person who owns the project. Decides what enters the Model, resolves differe
 ## Events
 
 ### APPROVE_PROPOSAL
-The developer approves an open Proposal, from the Board or from the Diagram's detail panel.
+The developer approves an open Proposal, from the Board or from the Diagram's detail panel. Una Proposal allegata a un Drift aperto non si approva così: si accetta tenendo ciò che succede sul Drift.
 
 ### REJECT_PROPOSAL
-The developer rejects an open Proposal and may give feedback for the agent. Cancelling the feedback prompt rejects nothing; confirming it empty rejects without feedback.
+The developer rejects an open Proposal and may give feedback for the agent. Cancelling the feedback prompt rejects nothing; confirming it empty rejects without feedback. Una Proposal allegata a un Drift aperto non si rifiuta così: si mette da parte tenendo ciò che dovrebbe succedere sul Drift.
 
 ### DISCARD_PROPOSAL
 The developer discards a Proposal the agent is still writing, with the command line. It is for drafts the agent never finished; a Proposal already handed over is rejected instead.
 
 ### FIX_DRIFT_CODE
-The developer keeps the side of an open Drift that says what should happen: the Model or the Requirement is right and the code must change.
+The developer keeps the side of an open Drift that says what should happen: the Model or the Requirement is right and the code must change. La Proposal allegata, se c'è, è messa da parte con il Drift.
 
 ### ACCEPT_DRIFT_PROPOSAL
 The developer keeps the side of an open Drift that says what happens, when a Proposal is attached: the code is right and the Proposal is accepted.

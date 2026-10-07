@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { createQuestionServer, questionProjectId, type QuestionServer } from "../../../src/core/question-channel";
+import { type Classification, createQuestionServer, questionProjectId, type QuestionServer } from "../../../src/core/question-channel";
 import { QuestionRoundQueue } from "../../../src/core/question-rounds";
 import { unavailableQuestions } from "../../../src/core/questions";
 import type { QuestionPresenter } from "../../../src/core/question-rounds";
@@ -26,8 +26,8 @@ export class EditorQuestions implements vscode.Disposable {
   private closed = false;
   private readonly subscriptions: vscode.Disposable[];
 
-  /** `present` shows a round to the developer: the overlay of the Trama panel. */
-  constructor(private readonly project: () => Project | undefined, private readonly present: QuestionPresenter) {
+  /** `present` shows a round to the developer: the overlay of the Trama panel; `classify` answers `trama classify`. */
+  constructor(private readonly project: () => Project | undefined, private readonly present: QuestionPresenter, private readonly classify: (machine: string, state: string) => Promise<Classification>) {
     windowQuestions = this;
     // Directory deletion/rename does not emit separate events for its children.
     const watcher = vscode.workspace.createFileSystemWatcher("**/.trama");
@@ -85,6 +85,7 @@ export class EditorQuestions implements vscode.Disposable {
           return queue.ask(request, context);
         },
         onCursorHook: receiveCursorHook,
+        onClassify: this.classify,
         onClose: () => {
           queue.dispose();
           if (this.service === service) this.service = undefined;

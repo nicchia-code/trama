@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, doneGroups, formatCounts, interleave, proposalBadges, summarizeChanges, summarizeFile, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, attachedDriftOf, attachedSuffix, blockBadge, buildBoard, doneGroups, formatCounts, interleave, proposalBadges, proposalsToDecide, summarizeChanges, summarizeFile, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { runBlocker } from "../src/core/design";
 import { namerOf } from "../src/core/card-names";
 
@@ -21,7 +21,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   areas: [],
   ...over,
 });
-const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, ...over });
+const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, finished: null, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], announcements: [], scanHold: { on: false, held: 0 }, numbers: { proposal: {}, task: {}, drift: {} }, ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
@@ -218,6 +218,15 @@ test("interleaving puts each ghost before the real card at its index, keeping th
   expect(interleave([], [{ item: "only", index: 0 }])).toEqual(["only"]);
 });
 
+test("the ghost of a Drift says Writing the Proposal once its Draft exists, and a rework ghost is not placed in a column", () => {
+  const card = announcedCard(announcement({ kind: "drift", title: "Refunds differ", phase: "writing" }), false);
+  expect(card.phase).toBe("Writing the Proposal");
+  expect(card.label).toContain("writing the proposal");
+  expect(announcedCard(announcement({ kind: "drift", phase: "preparing" }), false).phase).toBe("Preparing");
+  const placed = announcedGhosts(buildBoard(snapshot()), [announcement({ id: "r00001", kind: "proposal", drift: "0003" }), announcement({ id: "r00002", kind: "proposal" })], false);
+  expect(placed.decide.map((g) => g.card.key)).toEqual(["announced:r00002"]);
+});
+
 test("a ghost says Preparing, Writing, or that the agent waits for the answers while a question round is open, and its name tells kind, title and phase", () => {
   expect(announcedCard(announcement(), false).phase).toBe("Preparing");
   expect(announcedCard(announcement({ phase: "writing" }), false).phase).toBe("Writing");
@@ -254,6 +263,20 @@ test("ghosts are not cards: the columns and what awaits a decision ignore them",
   expect(buildBoard(snap).map((c) => c.cards.length)).toEqual([0, 0, 0, 0]);
 });
 
+test("a Proposal attached to an open Drift is not a To decide card and not counted; one of a resolved Drift stays", () => {
+  const snap = snapshot({ proposals: [proposal({ id: "0007" }), proposal({ id: "0009" })], drifts: [drift({ id: "0003", proposal: "0007" })] });
+  expect(buildBoard(snap)[0]?.cards.map((c) => c.key)).toEqual(["proposal:0009", "drift:0003"]);
+  expect(proposalsToDecide(snap).map((p) => p.id)).toEqual(["0009"]);
+  expect(proposalsToDecide(snapshot({ proposals: [proposal({ id: "0007" })] })).map((p) => p.id)).toEqual(["0007"]);
+});
+
+test("a selector lists a Proposal held by an open Drift with its Drift, and others as they are", () => {
+  const snap = snapshot({ numbers: { proposal: {}, task: {}, drift: { "0003": "D2" } }, proposals: [proposal({ id: "0007" })], drifts: [drift({ id: "0003", proposal: "0007" })] });
+  expect(attachedSuffix(snap, "0007")).toBe(" · D2");
+  expect(attachedSuffix(snap, "0009")).toBe("");
+  expect(attachedDriftOf(snapshot({ drifts: [drift({ id: "0004", proposal: "0007" })] }), "0007")?.id).toBe("0004");
+});
+
 const NUMBERS = { proposal: { "0007": "P1" }, task: { "0012": "T3", "0013": "T4" }, drift: { "0003": "D2" } };
 
 test("a live card is written by its short number, a closed one by its identity, never both", () => {
@@ -261,7 +284,7 @@ test("a live card is written by its short number, a closed one by its identity, 
     snapshot({
       numbers: NUMBERS,
       proposals: [proposal({ id: "0007" })],
-      drifts: [drift({ id: "0003", proposal: "0007" })],
+      drifts: [drift({ id: "0003" })],
       tasks: [task({ id: "0012" }), task({ id: "0099", column: "done" })],
     }),
   );
@@ -270,7 +293,6 @@ test("a live card is written by its short number, a closed one by its identity, 
     { heading: "Proposal P1", name: { text: "P1", isNumber: true } },
     { heading: "Drift D2", name: { text: "D2", isNumber: true } },
   ]);
-  expect(decide?.cards[1]).toMatchObject({ proposalName: "P1" });
   expect(todo?.cards[0]).toMatchObject({ kind: "task", id: "0012", name: { text: "T3", isNumber: true } });
   expect(done?.cards[0]).toMatchObject({ kind: "task", id: "0099", name: { text: "0099", isNumber: false } });
 });

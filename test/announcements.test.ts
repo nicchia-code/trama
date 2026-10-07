@@ -19,6 +19,7 @@ import {
 import { run } from "../src/cli/main";
 import { boundDraftsChangedAt, discardProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
+import { newDrift, resolveDrift } from "../src/core/work";
 import { type Project, projectAt } from "../src/core/store";
 
 let dir: string;
@@ -39,7 +40,6 @@ describe("announcing", () => {
     const b = announce(p, { kind: "task", title: "Second" }, t(1));
     const a = announce(p, { kind: "task", title: "Third" }, t(0));
     expect(listAnnouncements(p).map((x) => x.title)).toEqual(["First", "Second", "Third"]);
-    expect(first.created < b.created && b.created < a.created).toBe(true);
     expect(a.id).toMatch(/^[a-z0-9]{6}$/);
     expect(getAnnouncement(p, b.id)?.kind).toBe("task");
   });
@@ -189,6 +189,28 @@ describe("ending announcements", () => {
     bindDraft(p, { id: "0099", title: "Whatever" });
     expect(buildSnapshot(p).announcements[0]?.phase).toBe("writing");
   });
+
+  test("a Draft named with a Drift announcement binds to it: it stays a Drift, keeps its title, and only the Drift delivers it", () => {
+    const a = announce(p, { kind: "drift", title: "Drift title" });
+    expect(announcementNote(p, a.id, "proposal")).toBeNull();
+    const prop = newProposal(p, "Draft title", "", { announcement: a.id });
+    const all = listAnnouncements(p);
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({ id: a.id, kind: "drift", title: "Drift title", proposal: prop.id });
+    expect(buildSnapshot(p).announcements[0]).toMatchObject({ kind: "drift", title: "Drift title", phase: "writing" });
+    expect(announcementNote(p, a.id, "drift")).toBeNull();
+    submitProposal(p, prop.id);
+    expect(listAnnouncements(p)).toHaveLength(1);
+    deliverCard(p, a.id, "drift");
+    expect(listAnnouncements(p)).toHaveLength(0);
+  });
+
+  test("discarding a Draft bound to a Drift announcement withdraws it", () => {
+    const a = announce(p, { kind: "drift", title: "Drift title" });
+    const prop = newProposal(p, "Draft title", "", { announcement: a.id });
+    discardProposal(p, prop.id);
+    expect(listAnnouncements(p)).toHaveLength(0);
+  });
 });
 
 describe("the quiet period", () => {
@@ -247,7 +269,7 @@ describe("the terminal an announcement belongs to", () => {
     expect(listAnnouncements(p).map((a) => [a.title, a.terminal])).toEqual([["Mine", "ab12cd"], ["Nobody's", null]]);
 
     // Written before the field existed: no `terminal` line at all.
-    writeFileSync(join(announcementsDir(p), "old001.md"), "---\nkind: task\nsource: agent\nproposal: null\ncreated: 2026-01-01T10:00:00.000Z\ntouched: 2026-01-01T10:00:00.000Z\n---\n# Old\n");
+    writeFileSync(join(announcementsDir(p), "old001.md"), "---\nkind: task\nsource: agent\nproposal: null\ntouched: 2026-01-01T10:00:00.000Z\n---\n# Old\n");
     expect(getAnnouncement(p, "old001")?.terminal).toBeNull();
     expect(getAnnouncement(p, mine.id)?.terminal).toBe("ab12cd");
   });
@@ -304,7 +326,7 @@ describe("an announcement made by Cursor's chat agent", () => {
     expect(listAnnouncements(p).map((a) => [a.title, a.chat])).toEqual([["Own ghost", "cursor"]]);
 
     // Written before the field existed: no `chat` line at all.
-    writeFileSync(join(announcementsDir(p), "old001.md"), "---\nkind: task\nsource: agent\nproposal: null\ncreated: 2026-01-01T10:00:00.000Z\ntouched: 2026-01-01T10:00:00.000Z\n---\n# Old\n");
+    writeFileSync(join(announcementsDir(p), "old001.md"), "---\nkind: task\nsource: agent\nproposal: null\ntouched: 2026-01-01T10:00:00.000Z\n---\n# Old\n");
     expect(getAnnouncement(p, "old001")?.chat).toBeNull();
   });
 });
@@ -349,5 +371,43 @@ describe("a check", () => {
     expect(getAnnouncement(p, task.id)?.touched).toBe(t(10).toISOString());
     changeCheckPhase(p, check.id, "scanning", t(20));
     expect(listAnnouncements(p).map((a) => a.touched)).toEqual([t(20).toISOString(), t(20).toISOString()]);
+  });
+});
+
+describe("the rework announcement of a Drift", () => {
+  test("remembers its Drift, shows it in the Snapshot, and is withdrawn silently when the code is kept; other announcements stay", () => {
+    const opts = [{ title: "Change the code", text: "Make the code do it." }, { title: "Other", text: "Another way." }];
+    const mk = (title: string) => newDrift(p, { title, refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts });
+    const [one, two] = [mk("One"), mk("Two")];
+    const a = announce(p, { kind: "proposal", title: "Rework of Proposal x", source: "request", drift: one.id });
+    const b = announce(p, { kind: "proposal", title: "Rework of Proposal y", source: "request", drift: two.id });
+    const plain = announce(p, { kind: "proposal", title: "Plain" });
+    expect(getAnnouncement(p, a.id)?.drift).toBe(one.id);
+    expect(getAnnouncement(p, plain.id)?.drift).toBeNull();
+    expect(readFileSync(join(announcementsDir(p), `${plain.id}.md`), "utf8")).not.toContain("drift:");
+    const views = buildSnapshot(p).announcements;
+    expect(views.find((v) => v.id === a.id)?.drift).toBe(one.id);
+    expect("drift" in (views.find((v) => v.id === plain.id) as object)).toBe(false);
+    const rework = (id: string) => buildSnapshot(p).drifts.find((d) => d.id === id)?.rework;
+    expect(rework(one.id)).toEqual({ title: null });
+    const draft = newProposal(p, "Reworked refunds");
+    bindDraft(p, draft, a.id);
+    expect(rework(one.id)).toEqual({ title: "Reworked refunds" });
+    expect(rework(two.id)).toEqual({ title: null });
+
+    resolveDrift(p, one.id, "fix-code", [], { option: 1 });
+    expect(listAnnouncements(p).map((x) => x.id).sort()).toEqual([b.id, plain.id].sort());
+  });
+
+  test("a Proposal ghost whose Draft is attached to an open Drift is drawn inside that Drift, and stays in To decide before", () => {
+    const opts = [{ title: "Change the code", text: "Make the code do it." }, { title: "Other", text: "Another way." }];
+    const a = announce(p, { kind: "proposal", title: "Design" });
+    const draft = newProposal(p, "Archived with a Drift");
+    bindDraft(p, draft, a.id);
+    expect(buildSnapshot(p).announcements.find((v) => v.id === a.id)?.drift).toBeUndefined();
+    const d = newDrift(p, { title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts, proposal: draft.id });
+    const snap = buildSnapshot(p);
+    expect(snap.announcements.find((v) => v.id === a.id)?.drift).toBe(d.id);
+    expect(snap.drifts.find((x) => x.id === d.id)?.rework).toEqual({ title: "Archived with a Drift" });
   });
 });

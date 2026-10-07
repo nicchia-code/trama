@@ -4,7 +4,7 @@ description: "Usa sempre quando lavori sull'interfaccia: regole generali, pannel
 # Interfaccia generale e pannello
 
 ## General
-- Dove il pannello o la riga di comando nominano una Proposal, un Task o un Drift con il suo ID (schede della Board e righe dentro una scheda di design, badge `blocked` e `waiting`, dettagli nel Diagramma, `trama board`, i comandi `list`, `show` e `next`, i messaggi dei comandi e i testi dei pulsanti, per esempio «Approves Proposal P3 and changes the Model to match»), mostrano il numero breve (`P3`, `T3`, `D3`) se la scheda ne ha uno e, solo se non ne ha (scheda chiusa, o Task Done senza numero, vedi `rules`), la sua identità permanente di otto caratteri. Mai tutti e due insieme. Il titolo resta accanto, come prima.
+- Dove il pannello o la riga di comando nominano una Proposal, un Task o un Drift con il suo ID (schede della Board e righe dentro una scheda di design, badge `blocked` e `waiting`, dettagli nel Diagramma, `trama board`, i comandi `list`, `show` e `next`, i messaggi dei comandi e i testi dei pulsanti, per esempio «Accepts Proposal P3: the Model changes to match»), mostrano il numero breve (`P3`, `T3`, `D3`) se la scheda ne ha uno e, solo se non ne ha (scheda chiusa, o Task Done senza numero, vedi `rules`), la sua identità permanente di otto caratteri. Mai tutti e due insieme. Il titolo resta accanto, come prima.
 - Nel pannello il numero breve e l'identità permanente stanno nello stesso punto, con lo stesso carattere a spaziatura fissa; li distinguono il tooltip e il nome accessibile, «Short number (temporary)» o «Permanent ID», così il modo in cui sono scritti non è l'unico segnale.
 
 ## panel

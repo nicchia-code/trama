@@ -1,6 +1,6 @@
 ---
 name: trama-req-ui-agents
-description: Usa quando mostri richieste di design, terminale dell'agente e Hold scan.
+description: Usa quando mostri richieste di design, terminale dell'agente, scelta dell'agente e dei modelli e Hold scan.
 ---
 # Requirements: Interfaccia, Interfaccia del lavoro dell'agente
 
@@ -25,6 +25,14 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 - La descrizione di `trama.externalTerminalCommand`, in inglese, dice: comando che apre il terminale esterno con `external-terminal` al posto di quello rilevato; `{command}` è sostituito dalla riga di comando dell'agente, aggiunta in fondo se manca; per esempio `alacritty -e {command}`; vuota (il default) rileva il terminale di sistema; con un valore non vuoto si apre sempre una finestra nuova; vale solo nelle impostazioni utente.
 - Se la finestra esterna non si può aprire: messaggio di errore `Trama could not open an external terminal: <reason>. The instruction was copied to the clipboard.` con `<reason>` uno tra `external terminals are not supported on this platform`, `external terminals are not available in a remote workspace`, `no terminal was found; set trama.externalTerminalCommand`, `the terminal could not be started` e il messaggio dell'errore del sistema. Senza pulsanti.
 - Se il riuso di una finestra esterna fallisce: messaggio di avviso (warning) `Trama could not reuse the external terminal window: <reason>. A new window was opened.` con `<reason>` il messaggio dell'errore dello scripting del terminale, senza pulsanti.
+- Tutti questi testi sono in inglese e non seguono `trama.language`.
+
+## agent-launching
+
+- La scelta dell'agente alla prima corsa è un elenco con titolo `Choose the agent Trama starts in the terminal` e le voci, in quest'ordine, `omp`, `Claude Code`, `Codex`, `Copilot CLI`, `Cursor CLI` e `Other command…`; ogni agente noto ha come descrizione il comando che Trama avvia (`omp`, `claude`, `codex`, `copilot -i`, `agent`). Esc annulla.
+- Le descrizioni delle impostazioni, in inglese: `trama.terminalAgent` elenca i cinque agenti e `custom` (usa `trama.agentCommand`); `trama.analysis`, `trama.scan` e `trama.execution` dicono quali lavori usano quel modello, che il nome va scritto come lo accetta l'agente, che vuoto lascia il modello predefinito dell'agente e che in chat non vale; `trama.system1` dice che `jev` manda all'API di TypeSafe, per ogni Machine scansionata, il Modello, i Requisiti e gli estratti di codice scelti dall'agente, e che la chiave si salva con `Trama: Set System 1 API Key`.
+- Nella palette i comandi sono `Trama: Set System 1 API Key` e `Trama: Clear System 1 API Key`. Il primo apre una casella con il testo nascosto (`password: true`), titolo `Jev API key`, e salva solo un valore non vuoto; Esc non cambia nulla. Dopo il salvataggio compare `Trama: the Jev API key is saved.`; dopo la cancellazione `Trama: the Jev API key is cleared.`.
+- L'avviso dei ruoli in chat è un messaggio informativo senza pulsanti: `Trama: model roles (trama.analysis, trama.scan, trama.execution) apply only to terminal agents. The chat uses the model chosen in the chat.`
 - Tutti questi testi sono in inglese e non seguono `trama.language`.
 
 ## scan-hold

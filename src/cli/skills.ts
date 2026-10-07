@@ -7,6 +7,7 @@ import importSkill from "../../skills/trama-import/SKILL.md" with { type: "text"
 import scan from "../../skills/trama-scan/SKILL.md" with { type: "text" };
 import { SKILL_DIRS } from "../core/requirement-skills";
 import { writeFileEnsuringDir } from "../core/store";
+import { SUB_AGENTS } from "../core/sub-agents";
 
 /** Skill files, embedded in the binary: path relative to the skills directory -> content. */
 export const SKILLS: Record<string, string> = {
@@ -49,6 +50,19 @@ export function installSkills(dir: string): string[] {
   return Object.entries(SKILLS).map(([rel, content]) => {
     const path = join(dir, rel);
     writeFileEnsuringDir(path, content);
+    return path;
+  });
+}
+
+/** The omp role each sub-agent runs on: Trama passes `--smol` and `--slow` with the developer's models, so no file holds a concrete model. */
+const OMP_ROLES = [["trama-triage", "@smol"], ["trama-analysis", "@slow"]] as const;
+
+/** Writes omp's definitions of the scan's sub-agents into the project's `.omp/agents/`, replacing any previous copy; returns the written paths. */
+export function installOmpAgents(root: string): string[] {
+  return OMP_ROLES.map(([name, model]) => {
+    const path = join(root, ".omp", "agents", `${name}.md`);
+    const { description, prompt } = SUB_AGENTS[name];
+    writeFileEnsuringDir(path, `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\nmodel: "${model}"\n---\n\n${prompt}\n`);
     return path;
   });
 }

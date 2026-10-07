@@ -15,6 +15,9 @@ const drift = (over: Partial<DriftView> = {}): DriftView => ({
   refs: ["order/Shipped"],
   proposal: null,
   proposalBlock: null,
+  proposalTitle: null,
+  proposalChanges: null,
+  rework: null,
   ...over,
 });
 
@@ -28,7 +31,13 @@ test("keeping what should happen fixes the code; keeping what happens without a 
 
 test("keeping what happens with an approvable Proposal approves it", () => {
   const c = driftComparison(drift({ proposal: "0002" }));
-  expect(c.keepHappens).toMatchObject({ how: "accept-proposal", blocked: false, consequence: "Approves Proposal 0002 and changes the Model to match" });
+  expect(c.keepHappens).toMatchObject({ how: "accept-proposal", blocked: false, consequence: "Accepts Proposal 0002: the Model changes to match" });
+});
+
+test("keeping what should happen says the attached Proposal is rejected, or discarded while still being written", () => {
+  const line = (block: DriftView["proposalBlock"]) => driftComparison(drift({ proposal: "0002", proposalBlock: block })).keepShould.consequence;
+  expect(line(null)).toBe("A Task is created for the agent to fix the code; Proposal 0002 is rejected");
+  expect(line({ kind: "draft", reason: "x" })).toBe("A Task is created for the agent to fix the code; Proposal 0002 is discarded");
 });
 
 test("keeping what happens is blocked, saying why, whenever the attached Proposal cannot be approved; the other side stays free", () => {
@@ -80,6 +89,7 @@ test("with options, the first is recommended and selected at first; the right Ke
   });
   expect(c.optionsName).toBe("Fix options for Code refunds late");
   expect(c.noteName).toBe("Note for Code refunds late");
+  expect(c.attachedName).toBe("Proposal attached to Code refunds late");
   expect(c.keepHappens.carries).toEqual({});
 
   const bare = driftComparison(drift({ id: "0011" }));
@@ -108,4 +118,10 @@ test("what was selected survives a refresh of the same Drift; exactly one option
   const fewer = driftComparison(drift({ id: "0013", options: options.slice(0, 1) }));
   expect(fewer.options.filter((o) => o.selected).map((o) => o.number)).toEqual([1]);
   expect(fixSelection(drift({ id: "0014", options }))).toEqual({ option: 1, note: "" });
+});
+
+test("while the agent reworks the Proposal, the left Keep this is blocked as for a Proposal still being written", () => {
+  const c = driftComparison(drift({ proposal: "0002", proposalBlock: { kind: "stale", reason: "stale" }, rework: { title: null } }));
+  expect(c.keepHappens).toMatchObject({ how: "accept-proposal", blocked: true });
+  expect(c.keepHappens.consequence).toContain("being reworked");
 });

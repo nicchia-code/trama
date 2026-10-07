@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { TramaError } from "./errors";
 import { enumField, idField, type Raw } from "./schema";
@@ -30,8 +30,6 @@ export interface Announcement {
   source: AnnouncementSource;
   /** The Draft bound to it once there is one: the announcement is then Writing, before that Preparing. */
   proposal: string | null;
-  /** When it was announced, as an ISO date and time; the Board keeps ghosts in this order. */
-  created: string;
   /** When the agent last did something about an announced card, as an ISO date and time. */
   touched: string;
   /** The agent terminal it belongs to (see `TERMINAL_ENV`), or null: made from a chat or by an agent Trama did not start, or written before this field existed. */
@@ -40,6 +38,8 @@ export interface Announcement {
   chat: Chat | null;
   /** The phase of a check; null for every other kind. */
   phase: CheckPhase | null;
+  /** The Drift whose stale Proposal this announcement reworks; null for every other announcement and in those written before this field existed. */
+  drift: string | null;
   /** The title as announced; the ghost of a bound Draft shows the Draft's own title instead. */
   title: string;
 }
@@ -108,11 +108,11 @@ function parse(raw: Raw, body: string, id: string, where: string): Announcement 
     kind: enumField(raw, "kind", ANNOUNCEMENT_KINDS, "proposal", where),
     source: enumField(raw, "source", SOURCES, "agent", where),
     proposal: idField(raw, "proposal", where),
-    created: stamp("created"),
     touched: stamp("touched"),
     terminal: terminalField(raw, where),
     chat: raw["chat"] === undefined || raw["chat"] === null ? null : enumField(raw, "chat", CHATS, "cursor", where),
     phase: raw["phase"] === undefined || raw["phase"] === null ? null : enumField(raw, "phase", CHECK_PHASES, "verifying", where),
+    drift: idField(raw, "drift", where),
     title: /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? id,
   };
 }
@@ -129,9 +129,9 @@ function write(p: Project, a: Announcement) {
   // The folder ignores itself and everything in it, so announcements are never versioned.
   const ignore = join(dir, ".gitignore");
   if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
-  const { id, title, chat, phase, ...data } = a;
-  // `chat` and `phase` are written only when set, so the other announcements look as before.
-  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}) }, `# ${title}\n`);
+  const { id, title, chat, phase, drift, ...data } = a;
+  // `chat`, `phase` and `drift` are written only when set, so the other announcements look as before.
+  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}), ...(drift ? { drift } : {}) }, `# ${title}\n`);
 }
 
 function remove(p: Project, id: string) {
@@ -145,45 +145,50 @@ function remove(p: Project, id: string) {
 export function listAnnouncements(p: Project): Announcement[] {
   const dir = announcementsDir(p);
   if (!existsSync(dir)) return [];
-  const out: Announcement[] = [];
+  const out: { a: Announcement; born: bigint }[] = [];
   for (const name of readdirSync(dir)) {
     if (!FILE_PATTERN.test(name)) continue;
     const id = name.slice(0, -3);
     try {
       const doc = readDocument(join(dir, name));
-      out.push(parse(doc.data, doc.body, id, join(dir, name)));
+      const st = statSync(join(dir, name), { bigint: true });
+      // ponytail: announcement order is the file's birth; where the filesystem keeps none (0), the last change stands in.
+      out.push({ a: parse(doc.data, doc.body, id, join(dir, name)), born: st.birthtimeNs > 0n ? st.birthtimeNs : st.mtimeNs });
     } catch {
       // Half written or edited by hand: not an announcement.
     }
   }
-  return out.sort((a, b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
+  return out.sort((x, y) => (x.born < y.born ? -1 : x.born > y.born ? 1 : x.a.id.localeCompare(y.a.id))).map((x) => x.a);
 }
 
 export const getAnnouncement = (p: Project, id: string): Announcement | null => listAnnouncements(p).find((a) => a.id === id) ?? null;
 
+/** The announcements that rework the stale Proposal of Drift `driftId` cease to exist, with no notice: the developer kept what should happen. */
+export function removeReworkOf(p: Project, driftId: string) {
+  for (const a of listAnnouncements(p)) if (a.drift === driftId) remove(p, a.id);
+}
+
 /** Announces a card as soon as it is known it will be created. Refreshes the quiet period of every announcement. */
 export function announce(
   p: Project,
-  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase } & AgentOrigin,
+  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase; drift?: string } & AgentOrigin,
   now = new Date(),
 ): Announcement {
   const title = input.title.trim().replace(/\s+/g, " ");
   if (!title) throw new TramaError("An announcement needs a title");
   if ((input.kind === "check") !== (input.phase !== undefined)) throw new TramaError(input.kind === "check" ? "A check needs a phase" : "Only a check has a phase");
   markActivity(p, now);
-  // Strictly after the latest one, so announcements announced within one millisecond still keep their order.
-  const latest = Math.max(0, ...listAnnouncements(p).map((a) => Date.parse(a.created)));
-  const stamp = new Date(Math.max(now.getTime(), latest + 1)).toISOString();
+  const stamp = now.toISOString();
   const announcement: Announcement = {
     id: newId(announcementsDir(p)),
     kind: input.kind,
     source: input.source ?? "agent",
     proposal: input.proposal ?? null,
-    created: stamp,
     touched: stamp,
     terminal: input.terminal ?? null,
     chat: input.terminal ? null : (input.chat ?? null),
     phase: input.phase ?? null,
+    drift: input.drift ?? null,
     title,
   };
   write(p, announcement);
@@ -204,8 +209,9 @@ export function announcementNote(p: Project, id: string | undefined, kind: Annou
   if (!id) return null;
   const a = getAnnouncement(p, id);
   if (!a) return `No announcement "${id}" was found (unknown, or already delivered or withdrawn); the ${kind} was created without a ghost.`;
-  if (a.kind !== kind) return `Announcement "${id}" is for a ${a.kind}, not a ${kind}; the ${kind} was created without using it.`;
-  if (a.proposal !== null) return `Announcement "${id}" is already bound to Proposal ${cardName(p, "proposal", a.proposal)}; the ${kind} was created without using it.`;
+  // A Drift announcement is also usable by the Draft its Drift will carry; a Drift filed with it delivers it, Draft or not.
+  if (a.kind !== kind && !(kind === "proposal" && a.kind === "drift")) return `Announcement "${id}" is for a ${a.kind}, not a ${kind}; the ${kind} was created without using it.`;
+  if (a.proposal !== null && kind !== "drift") return `Announcement "${id}" is already bound to Proposal ${cardName(p, "proposal", a.proposal)}; the ${kind} was created without using it.`;
   return null;
 }
 
@@ -217,10 +223,11 @@ export function bindDraft(p: Project, proposal: { id: string; title: string }, a
   markActivity(p, now);
   const all = listAnnouncements(p);
   const target = announcementId !== undefined
-    ? all.find((a) => a.id === announcementId && a.kind === "proposal" && a.proposal === null)
+    ? all.find((a) => a.id === announcementId && (a.kind === "proposal" || a.kind === "drift") && a.proposal === null)
     : all.find((a) => a.kind === "proposal" && a.source === "request" && a.proposal === null);
   if (target) {
-    const bound = { ...target, title: proposal.title, proposal: proposal.id, touched: now.toISOString() };
+    // A Drift announcement keeps the Drift's title; the Draft's title is the Proposal's own.
+    const bound = { ...target, title: target.kind === "drift" ? target.title : proposal.title, proposal: proposal.id, touched: now.toISOString() };
     write(p, bound);
     return bound;
   }
@@ -230,10 +237,11 @@ export function bindDraft(p: Project, proposal: { id: string; title: string }, a
 
 /**
  * The announcements bound to a Draft cease to exist: its card arrives when it is handed over, or the developer
- * discarded it (no notice to give then).
+ * discarded it (no notice to give then). The announcement of a Drift is not delivered by the hand-over of its Draft:
+ * the Drift delivers it.
  */
-export function removeBoundTo(p: Project, proposalId: string) {
-  for (const a of listAnnouncements(p)) if (a.proposal === proposalId) remove(p, a.id);
+export function removeBoundTo(p: Project, proposalId: string, handedOver = false) {
+  for (const a of listAnnouncements(p)) if (a.proposal === proposalId && !(handedOver && a.kind === "drift")) remove(p, a.id);
 }
 
 /**

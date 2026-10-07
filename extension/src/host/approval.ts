@@ -6,7 +6,7 @@ export interface ApprovalOptions {
   project: Project;
   /** `trama.autoScan` */
   autoScan: boolean;
-  /** Whether `trama.agentCommand` is set: without it nothing can be launched. */
+  /** Whether an agent can be started without asking anything (the chat, or a chosen terminal agent or command): otherwise nothing is launched. */
   agentConfigured: boolean;
   /** Starts ONE agent run that scans what `proposal` (its ID, as stored) changed, after its approval. */
   launchScan(proposal: string): Promise<void>;

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TramaError, UsageError } from "../core/errors";
 import { type AgentOrigin, ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote, CHECK_PHASES, type CheckPhase, changeCheckPhase, finishCheck } from "../core/announcements";
-import { installSkills, missingSkills, removeRetiredSkills, skillConflicts } from "./skills";
+import { installOmpAgents, installSkills, missingSkills, removeRetiredSkills, skillConflicts } from "./skills";
 import {
   approveProposal,
   deleteInProposal,
@@ -32,7 +32,7 @@ import {
 import type { Model } from "../core/types";
 import type { Warning } from "../core/graph";
 import { rewriteNumberedCards } from "../core/rewrite-ids";
-import { type Drift, getDrift, getTask, moveTask, newDrift, newTask, replaceDriftProposal, resolveDrift, takeBackTask } from "../core/work";
+import { type Drift, getDrift, getTask, moveTask, newDrift, newTask, replaceDriftProposal, requireNotAttached, resolveDrift, takeBackTask } from "../core/work";
 import { writeApprovedNotice } from "../core/approve-request";
 import { approvedScope } from "../core/scope";
 import {
@@ -154,8 +154,9 @@ export const COMMANDS: Command[] = [
       writeFileEnsuringDir(join(project.dir, "model", "system.md"), `# ${name}\n\nDescribe what this System is and who it is for.\n`);
       const areas = createDefaultAreas(project);
       const skills = installSkills(skillsDir);
+      const agents = installOmpAgents(root);
       syncRequirementSkills(project, [skillsDir]);
-      return text(`Created ${project.dir} with ${areas.length} Requirement Areas\nInstalled ${skills.length} skill files in ${skillsDir}`, { path: project.dir, skillsDir, skills, areas });
+      return text(`Created ${project.dir} with ${areas.length} Requirement Areas\nInstalled ${skills.length} skill files in ${skillsDir}\nInstalled omp's sub-agent definitions: ${agents.join(", ")}`, { path: project.dir, skillsDir, skills, agents, areas });
     },
   },
   {
@@ -168,6 +169,7 @@ export const COMMANDS: Command[] = [
       const skillsDir = resolve(project.root, str(o["skills-dir"]) ?? ".agents/skills");
       const changed = skillConflicts(skillsDir).concat(missingSkills(skillsDir));
       installSkills(skillsDir);
+      const agents = installOmpAgents(project.root);
       const removed = removeRetiredSkills(project.root, [skillsDir]);
       const areas = existsSync(requirementsDir(project)) ? [] : createDefaultAreas(project);
       const conversion = convertSingleFileAreas(project);
@@ -175,6 +177,7 @@ export const COMMANDS: Command[] = [
       const lines = [
         changed.length === 0 ? `Skills in ${skillsDir} are already up to date.` : `Updated ${changed.length} skill file(s) in ${skillsDir}:\n${changed.map((c) => `- ${c}`).join("\n")}`,
         removed.length > 0 ? `Deleted the retired trama-fix skill: ${removed.join(", ")}` : "",
+        `Installed omp's sub-agent definitions: ${agents.join(", ")}`,
         areas.length > 0 ? `Created ${areas.length} Requirement Areas in ${requirementsDir(project)}: ${areas.join(", ")}` : "",
         conversion.converted.length > 0
           ? `Converted ${conversion.converted.length} single-file Requirement Area(s) to Area folders (area.md, and main.md with the sections): ${conversion.converted.join(", ")}`
@@ -182,7 +185,7 @@ export const COMMANDS: Command[] = [
         conversion.skipped.length > 0 ? `Left ${conversion.skipped.length} single-file Requirement Area(s) as they were: ${conversion.skipped.map((s) => `${s.id} (${s.reason})`).join(", ")}` : "",
         describeRequirementSkillSync(generated),
       ];
-      return text(lines.filter(Boolean).join("\n"), { skillsDir, changed, removed, areas, conversion, generated });
+      return text(lines.filter(Boolean).join("\n"), { skillsDir, changed, removed, agents, areas, conversion, generated });
     },
   },
 
@@ -311,12 +314,15 @@ export const COMMANDS: Command[] = [
   { name: "proposal approve", args: "<id>", summary: "Accept an open Proposal and apply it in this folder (--skills-dir adds the configured skills folder)", developerOnly: true, options: { "skills-dir": ref }, run(ctx, a, o) {
       const project = ctx.project();
       const id = proposalArg(ctx, a[0] as string);
+      requireNotAttached(project, id);
       const { id: approved, features } = approvedScope(project, id, () => approveProposal(project, id, list(o["skills-dir"])));
       if (features.length > 0) writeApprovedNotice(project, approved);
       return text(`Approved Proposal ${numbersOf(ctx).name("proposal", approved)}`, { id: approved, number: numbersOf(ctx).label("proposal", approved), status: "approved" });
     } },
   { name: "proposal reject", args: "<id>", summary: "Reject a Proposal, optionally with feedback for the agent", developerOnly: true, options: { feedback: { type: "string" } }, run(ctx, a, o) {
-      const p = rejectProposal(ctx.project(), proposalArg(ctx, a[0] as string), str(o["feedback"]));
+      const id = proposalArg(ctx, a[0] as string);
+      requireNotAttached(ctx.project(), id);
+      const p = rejectProposal(ctx.project(), id, str(o["feedback"]));
       const n = numbersOf(ctx);
       return text(`Rejected Proposal ${n.name("proposal", p.id)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status });
     } },
@@ -361,7 +367,10 @@ export const COMMANDS: Command[] = [
         ...(o["option"] !== undefined ? { option: Number(str(o["option"])) } : {}),
         ...(o["note"] !== undefined ? { note: str(o["note"]) ?? "" } : {}),
       });
-      const attached = how === "accept-proposal" ? getDrift(project, driftId).data.proposal : null;
+      const before = getDrift(project, driftId).data.proposal;
+      const attached = how === "accept-proposal" ? before : null;
+      const status = how === "fix-code" && before !== null ? getProposal(project, before).data.status : null;
+      const setAside = status === "open" ? "rejected" : status === "draft" ? "discarded" : null;
       let d!: Drift;
       if (attached === null) d = resolve();
       else {
@@ -369,7 +378,7 @@ export const COMMANDS: Command[] = [
         if (scanned.features.length > 0) writeApprovedNotice(project, scanned.id);
       }
       const n = numbersOf(ctx);
-      return text(`Drift ${n.name("drift", d.id)} resolved (${d.data.resolution})${d.data.task ? `; Task ${n.name("task", d.data.task)} created` : ""}`, { id: d.id, number: n.label("drift", d.id), resolution: d.data.resolution, task: d.data.task, option: d.data.option, note: d.data.note });
+      return text(`Drift ${n.name("drift", d.id)} resolved (${d.data.resolution})${d.data.task ? `; Task ${n.name("task", d.data.task)} created` : ""}${setAside ? `; attached Proposal ${n.name("proposal", before as string)} ${setAside}` : ""}`, { id: d.id, number: n.label("drift", d.id), resolution: d.data.resolution, task: d.data.task, option: d.data.option, note: d.data.note, ...(setAside ? { proposal: before, proposalSetAside: setAside } : {}) });
     } },
   { name: "drift replace-proposal", args: "<id>", summary: "Attach a newer Proposal (--proposal <id>) to an open Drift in place of its stale one, which is rejected", options: { proposal: { type: "string" } }, run(ctx, a, o) {
       const id = driftArg(ctx, a[0] as string);

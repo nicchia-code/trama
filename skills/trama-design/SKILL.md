@@ -90,7 +90,7 @@ If the developer rejected it, the reason, when they gave one, is under `## Feedb
 
 ### Reworking the stale Proposal of a Drift
 
-When the prompt says that Proposal `<p>`, attached to Drift `<d>`, is stale, do not interview the developer. Write a new Proposal that makes the same change on the current Model and Requirements (read `trama proposal show <p>` for what it did; list your choices in the new Proposal body), validate it and submit it as usual. Only after the submission succeeds run `trama drift replace-proposal <d> --proposal <new id>`: it attaches the new Proposal to the Drift and rejects the stale one as replaced. Run it once. If it is refused, report why and stop.
+When the prompt says that Proposal `<p>`, attached to Drift `<d>`, is stale, do not interview the developer. Write a new Proposal that makes the same change on the current Model and Requirements (read `trama proposal show <p>` for what it did; list your choices in the new Proposal body). Right after `trama proposal new`, with the Draft just created, run `trama drift replace-proposal <d> --proposal <new id>`: it attaches the Draft to the Drift and rejects the stale one as replaced, so the new Proposal never shows up alone. Run it once. If it is refused, report why and stop. Then write the files, validate and review the Proposal, and only at the end submit it as usual.
 
 ## Good Model habits
 

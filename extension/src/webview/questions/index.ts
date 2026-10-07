@@ -108,6 +108,11 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
     pendingText = null;
     post({ type: "questionAction", round: round.id, action: { type: "setText", text } });
   };
+  // Closing the panel can destroy the page before the typing delay ends: send what is typed as soon as the page is hidden or leaves.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushText();
+  });
+  window.addEventListener("pagehide", flushText);
   function act(action: QuestionAction) {
     if (!round) return;
     flushText();

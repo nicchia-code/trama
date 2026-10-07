@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -61,6 +61,16 @@
         "command": "trama.updateSkills",
         "title": "Update Agent Skills",
         "category": "Trama"
+      },
+      {
+        "command": "trama.setSystem1ApiKey",
+        "title": "Set System 1 API Key",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.clearSystem1ApiKey",
+        "title": "Clear System 1 API Key",
+        "category": "Trama"
       }
     ],
     "menus": {
@@ -84,7 +94,63 @@
         "trama.agentCommand": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Command that starts your coding agent in a terminal. `{prompt}` is replaced by the shell-quoted prompt; if it is missing, the prompt is appended. Examples: `claude {prompt}`, `codex {prompt}`. Trama never calls a model itself."
+          "markdownDescription": "Command that starts your coding agent in a terminal when `#trama.terminalAgent#` is `custom` (or is empty while this is set). `{prompt}` is replaced by the shell-quoted prompt; if it is missing, the prompt is appended. Examples: `claude {prompt}`, `codex {prompt}`. Trama never calls a model itself."
+        },
+        "trama.terminalAgent": {
+          "type": "string",
+          "enum": [
+            "",
+            "omp",
+            "claude",
+            "codex",
+            "copilot",
+            "cursor",
+            "custom"
+          ],
+          "enumDescriptions": [
+            "Not chosen: `custom` when `#trama.agentCommand#` is set, otherwise Trama asks the first time a terminal launcher starts an agent.",
+            "omp, started as `omp`.",
+            "Claude Code, started as `claude`.",
+            "Codex, started as `codex`.",
+            "Copilot CLI, started as `copilot -i`.",
+            "Cursor CLI, started as `agent`.",
+            "Your own command, `#trama.agentCommand#`."
+          ],
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "The agent Trama starts in a terminal, for every project: `omp`, `claude` (Claude Code), `codex` (Codex), `copilot` (Copilot CLI), `cursor` (Cursor CLI) or `custom` (uses `#trama.agentCommand#`). Empty (the default) counts as `custom` when `#trama.agentCommand#` is set; otherwise Trama asks the first time a terminal launcher starts an agent. It only applies in your user settings."
+        },
+        "trama.analysis": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Model for design work: quick and written design requests, the rework of a stale Proposal and import; inside scans and runs, also the analysis of Machines in conflict. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
+        },
+        "trama.scan": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Model for scans: of the System, of Features, after an approval and when Hold scan is turned off. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
+        },
+        "trama.execution": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Model for implementing Tasks: implement, implement all and implement a design, including the final scan of the run; inside scans and runs, also the triage of each Machine. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
+        },
+        "trama.system1": {
+          "type": "string",
+          "enum": [
+            "",
+            "jev"
+          ],
+          "enumDescriptions": [
+            "No classifier: the agent triages each Machine on its own and nothing leaves your machine.",
+            "Jev: sends to TypeSafe's API, for every scanned Machine, the Model, the Requirements and the code excerpts chosen by the agent."
+          ],
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Classifier that triages each scanned Machine. `jev` sends to TypeSafe's API, for every scanned Machine, the Model, the Requirements and the code excerpts chosen by the agent; save its key with **Trama: Set System 1 API Key**. Empty (the default) sends nothing. It only applies in your user settings."
         },
         "trama.agentLauncher": {
           "type": "string",
@@ -97,9 +163,9 @@
           ],
           "enumDescriptions": [
             "The chat in Cursor, the integrated terminal in every other editor. In Cursor `#trama.agentCommand#` is not needed. Never the external terminal.",
-            "Run `#trama.agentCommand#` in the editor's integrated terminal (omp, claude, codex, copilot CLI, Cursor's `agent`…).",
-            "Run `#trama.agentCommand#` in the editor's integrated terminal, opened as an editor tab beside the active one.",
-            "Run `#trama.agentCommand#` in a window of your system's default terminal, outside the editor (Linux and macOS only, and only for a project opened locally).",
+            "Start the agent of `#trama.terminalAgent#` (or `#trama.agentCommand#` when it is `custom`) in the editor's integrated terminal.",
+            "Start the agent of `#trama.terminalAgent#` (or `#trama.agentCommand#` when it is `custom`) in the editor's integrated terminal, opened as an editor tab beside the active one.",
+            "Start the agent of `#trama.terminalAgent#` (or `#trama.agentCommand#` when it is `custom`) in a window of your system's default terminal, outside the editor (Linux and macOS only, and only for a project opened locally).",
             "Send the prompt to the agent chat built into the editor. In Cursor a new chat sends it by itself; if Cursor does not allow that, the chat waits for your confirmation and Enter, or the prompt is copied to the clipboard. In VS Code it goes to Copilot's chat, or to the clipboard if the chat is not available."
           ],
           "default": "auto",
@@ -114,7 +180,7 @@
         "trama.autoScan": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "After you approve a Proposal, launch the agent to Scan the Features it touched. With a terminal launcher (integrated or external) it only applies when `#trama.agentCommand#` is set."
+          "markdownDescription": "After you approve a Proposal, launch the agent to Scan the Features it touched. With a terminal launcher (integrated or external) it only applies when `#trama.terminalAgent#` is chosen or `#trama.agentCommand#` is set."
         },
         "trama.skillsDir": {
           "type": "string",

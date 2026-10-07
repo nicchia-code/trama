@@ -1,8 +1,8 @@
 import { join } from "node:path";
-import { type AgentOrigin, deliverCard } from "./announcements";
+import { type AgentOrigin, deliverCard, removeReworkOf } from "./announcements";
 import { type Blocker, computeBlocked, concernSameThing, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
-import { approveProposal, getProposal, health, type Proposal, rejectProposal } from "./proposals";
+import { approveProposal, discardProposal, getProposal, health, type Proposal, rejectProposal } from "./proposals";
 import { loadProject, parseRequirementRef, resolveProjectRef } from "./requirements";
 import { boolField, createdField, enumField, enumOrNull, idField, instantField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
 import { cardName, identityOfShortNumber, syncShortNumbers } from "./short-numbers";
@@ -294,6 +294,17 @@ export function listDrifts(p: Project): Drift[] {
     .sort((a, b) => compareByCreation({ id: a.id, created: a.data.created }, { id: b.id, created: b.data.created }));
 }
 
+/** The open Drift that holds Proposal `proposalId`, or null: a resolved Drift no longer holds it. The one decision of "attached to an open Drift". */
+export function attachedDrift(p: Project, proposalId: string): Drift | null {
+  return listDrifts(p).find((d) => d.data.status === "open" && d.data.proposal === proposalId) ?? null;
+}
+
+/** Refuses a direct approval or rejection of a Proposal attached to an open Drift; the developer decides it through the Drift. */
+export function requireNotAttached(p: Project, proposalId: string): void {
+  const drift = attachedDrift(p, proposalId);
+  if (drift) throw new TramaError(`Proposal ${cardName(p, "proposal", proposalId)} is attached to Drift ${cardName(p, "drift", drift.id)}: decide on the Drift with trama drift resolve`);
+}
+
 /** The Drift `id` names. `asArgument` applies the command rules: digits cite only a numbered Drift, and a short number (`D3`) cites the live Drift that has it. */
 export function getDrift(p: Project, id: string, asArgument = false): Drift {
   const cited = asArgument ? identityOfShortNumber(p, "drift", id) : null;
@@ -376,6 +387,15 @@ function checkOptions(options: DriftOption[]): DriftOption[] {
   return checked;
 }
 
+/** A Proposal can be attached to a Drift only if it is a Draft or open, and no other open Drift names it (a resolved Drift holds nothing). Refuses otherwise, saying why. */
+function requireAttachable(p: Project, proposal: Proposal, driftId?: string) {
+  const name = cardName(p, "proposal", proposal.id);
+  const { status } = proposal.data;
+  if (status !== "draft" && status !== "open") throw new TramaError(`Proposal ${name} was ${status}: only a Draft or open Proposal can be attached to a Drift`);
+  const holder = listDrifts(p).find((d) => d.id !== driftId && d.data.status === "open" && d.data.proposal === proposal.id);
+  if (holder) throw new TramaError(`Proposal ${name} is already attached to Drift ${cardName(p, "drift", holder.id)}`);
+}
+
 export function newDrift(
   p: Project,
   input: { title: string; refs: string[]; proposal?: string; origin?: string; happens: string; should: string; options: DriftOption[]; where?: string; announcement?: string },
@@ -389,7 +409,9 @@ export function newDrift(
   const options = checkOptions(input.options);
   if (where === "") throw new TramaError(`The "${WHERE_HEADING}" text is optional, but when given it needs text: the files where the difference was seen`);
   checkRefs(p, input.refs);
-  const proposal = input.proposal ? getProposal(p, input.proposal).id : null;
+  const attached = input.proposal ? getProposal(p, input.proposal) : null;
+  if (attached) requireAttachable(p, attached);
+  const proposal = attached?.id ?? null;
   const origin = input.origin ? getTask(p, input.origin).id : null;
   const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, option: null, note: null, created: createdNow() };
   const sections = [
@@ -457,6 +479,7 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
       ...(design ? { proposal: design } : {}),
       body: fixTaskBody(drift, option, note),
     });
+    removeReworkOf(p, drift.id);
     drift.data.task = task.id;
     drift.data.resolution = "fix-code";
     drift.data.option = option ? (choice.option as number) : null;
@@ -468,6 +491,10 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
       origin.data.holder = null;
       saveItem(origin.path, origin.data, origin.body);
     }
+    // The attached Proposal is set aside with the Drift: an open one is rejected, a Draft discarded, a decided one stays.
+    const attached = drift.data.proposal ? getProposal(p, drift.data.proposal) : null;
+    if (attached?.data.status === "open") rejectProposal(p, attached.id, `Drift ${drift.id} resolved by fixing the code`);
+    else if (attached?.data.status === "draft") discardProposal(p, attached.id);
   } else if (how === "accept-proposal") {
     if (!drift.data.proposal) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has no attached Proposal`);
     approveProposal(p, drift.data.proposal, skillsDirs);
@@ -477,6 +504,8 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
       throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has an attached Proposal (${cardName(p, "proposal", drift.data.proposal)}): accept that Proposal to keep the code, or fix the code`);
     drift.data.resolution = "dismissed";
   }
+  // A resolved Drift no longer holds its Proposal.
+  drift.data.proposal = null;
   drift.data.status = "resolved";
   saveItem(drift.path, drift.data, drift.body);
   return drift;
@@ -501,8 +530,7 @@ export function replaceDriftProposal(p: Project, id: string, proposalId: string)
   const old = staleAttachedProposal(p, drift);
   const replacement = getProposal(p, proposalId);
   if (replacement.id === old.id) throw new TramaError(`Proposal ${cardName(p, "proposal", old.id)} is the one already attached; name a newer one`);
-  if (replacement.data.status === "rejected" || replacement.data.status === "discarded")
-    throw new TramaError(`Proposal ${cardName(p, "proposal", replacement.id)} was ${replacement.data.status}: it cannot replace the attached one`);
+  requireAttachable(p, replacement, drift.id);
   rejectProposal(p, old.id, `Replaced by Proposal ${replacement.id}`);
   drift.data.proposal = replacement.id;
   saveItem(drift.path, drift.data, drift.body);

@@ -2,7 +2,7 @@
 import { TramaError, UsageError } from "../core/errors";
 import { questionAborted, questionFailure } from "../core/questions";
 import { completeFixChoice } from "./fix-prompt";
-import { agentVariable, asyncCommand, run, runAsk, runCursorHook } from "./main";
+import { agentVariable, asyncCommand, classifyCommand, run, runAsk, runClassify, runCursorHook } from "./main";
 
 try {
   const argv = process.argv.slice(2);
@@ -16,6 +16,14 @@ try {
     } catch { /* Cursor is answered all the same. */ }
     await new Promise<void>((resolve) => process.stdout.write(`${out}\n`, () => resolve()));
     process.exit(0);
+  }
+  if (classifyCommand(argv) !== null) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const { out, err, exit } = await runClassify(argv, process.cwd(), Buffer.concat(chunks).toString("utf8"));
+    if (err !== undefined) console.error(err);
+    if (out !== "") await new Promise<void>((resolve) => process.stdout.write(`${out}\n`, () => resolve()));
+    process.exit(exit);
   }
   const selected = asyncCommand(argv);
   if (selected?.command === "ask") {

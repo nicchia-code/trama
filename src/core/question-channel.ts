@@ -12,6 +12,13 @@ import { type Project, projectAt } from "./store";
 
 export const QUESTION_ENDPOINT_ENV = "TRAMA_QUESTION_ENDPOINT";
 
+/** What the System 1 classifier says about one Machine; `reason` is one line on why an error counted as a conflict. */
+export interface Classification {
+  answer: "conflict" | "no-conflict" | "unavailable";
+  reason?: string;
+}
+const UNAVAILABLE: Classification = { answer: "unavailable" };
+
 export interface QuestionServer {
   endpoint: string;
   focus(focusedAt?: number): Promise<void>;
@@ -33,6 +40,8 @@ interface ServerOptions {
   focusedAt?: number;
   /** A hook of Cursor's chat, forwarded by `trama cursor-hook`. */
   onCursorHook?: (hook: CursorHook) => void;
+  /** Asks the editor's System 1 classifier whether `machine`'s code, described in `state`, is in conflict. */
+  onClassify?: (machine: string, state: string) => Promise<Classification>;
   onClose?: () => void;
 }
 
@@ -301,6 +310,43 @@ export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: nu
   }
 }
 
+/**
+ * Hands a Machine and the state the agent prepared to the editor of the project, found as for `trama ask`, and returns
+ * its classification: `unavailable` when no editor answers within `timeoutMs`. The key never leaves the editor.
+ */
+export async function classifyWithEditor(project: Project, machine: string, state: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<Classification> {
+  const projectId = questionProjectId(project);
+  const sockets = new Set<Socket>();
+  try {
+    const endpoint = (options.env ?? process.env)[QUESTION_ENDPOINT_ENV];
+    const editor = endpoint !== undefined ? await connectEditor(endpoint, projectId, undefined, sockets) : await liveEditor(projectId, undefined, sockets, options.runtimeDir);
+    if (!editor) return UNAVAILABLE;
+    const { promise, resolve } = Promise.withResolvers<Classification>();
+    // The editor's own call to Jev stops after 10 seconds: this only guards against an editor that never answers.
+    const timer = setTimeout(() => resolve(UNAVAILABLE), options.timeoutMs ?? 15_000);
+    const stop = lines(editor.socket, (line) => {
+      try {
+        const value: unknown = JSON.parse(line);
+        const answer = value && typeof value === "object" && "answer" in value ? value.answer : undefined;
+        const reason = value && typeof value === "object" && "reason" in value && typeof value.reason === "string" ? value.reason : undefined;
+        resolve(answer === "conflict" || answer === "no-conflict" ? { answer, ...(reason === undefined ? {} : { reason }) } : UNAVAILABLE);
+      } catch { resolve(UNAVAILABLE); }
+    });
+    editor.socket.once("close", () => resolve(UNAVAILABLE));
+    editor.socket.write(`${JSON.stringify({ type: "classify", projectId, machine, state })}\n`);
+    try {
+      return await promise;
+    } finally {
+      clearTimeout(timer);
+      stop();
+    }
+  } catch {
+    return UNAVAILABLE;
+  } finally {
+    for (const socket of sockets) socket.destroy();
+  }
+}
+
 interface ChannelConnection {
   send(value: object, finish?: boolean): void;
   close(): void;
@@ -397,6 +443,16 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
           if (!hook || typeof hook !== "object" || typeof hook.conversation !== "string" || typeof hook.root !== "string") throw new UsageError("A Cursor hook needs a conversation and a project folder");
           options.onCursorHook?.(hook);
           finish({ type: "taken" });
+          return;
+        }
+        if (phase === "ready" && message.type === "classify") {
+          if (typeof message.machine !== "string" || typeof message.state !== "string") throw new UsageError("A classification needs a Machine and its state");
+          phase = "waiting";
+          const classify = options.onClassify ?? (async () => UNAVAILABLE);
+          void classify(message.machine, message.state).then(
+            (result) => finish(result),
+            (error: unknown) => finish({ answer: "conflict", reason: error instanceof Error ? error.message : String(error) }),
+          );
           return;
         }
         if (phase !== "ready" || message.type !== "ask") throw new UsageError("Identify the editor before submitting a question round");

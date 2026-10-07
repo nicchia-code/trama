@@ -61,6 +61,9 @@ let commandHandler: (id: string, ...args: unknown[]) => unknown = () => undefine
 /** Every command run and every link opened externally, in order. */
 const editorCalls: string[] = [];
 const clipboard: string[] = [];
+/** What the developer picks in a list or types in an input box; undefined is Esc. */
+let pick: (items: { label: string; description?: string }[], options: { title?: string }) => unknown = () => undefined;
+let typeIn: () => string | undefined = () => undefined;
 
 /** Wait for the external marker watcher to finish the observable state change. */
 async function waitUntil(done: () => boolean): Promise<void> {
@@ -106,6 +109,8 @@ mock.module("vscode", () => ({
       return terminal;
     },
     showErrorMessage: (message: string) => void errorMessages.push(message),
+    showQuickPick: async (items: { label: string; description?: string }[], options: { title?: string }) => pick(items, options),
+    showInputBox: async () => typeIn(),
     showWarningMessage: () => undefined,
     showInformationMessage: () => {
       const offer = Promise.withResolvers<string | undefined>();
@@ -137,7 +142,7 @@ mock.module("vscode", () => ({
       return root === undefined ? undefined : { uri: { scheme: "file", fsPath: root } };
     },
     getConfiguration: () => ({
-      get: (key: string, fallback: unknown) => (key === "agentCommand" ? "agent {prompt}" : (settingValues[key] ?? fallback)),
+      get: (key: string, fallback: unknown) => (key in settingValues ? settingValues[key] : key === "agentCommand" ? "agent {prompt}" : fallback),
       inspect: (key: string) => inspected[key],
       update: async (key: string, value: unknown) => void updates.push({ key, value }),
     }),
@@ -415,6 +420,113 @@ describe("the language the agent writes in", () => {
       expect(typed.at(-1)).not.toContain("Write everything");
     } finally {
       delete settingValues["language"];
+    }
+  });
+});
+
+describe("choosing the terminal agent", () => {
+  test("with no agent and no command the developer chooses once; Esc sends nothing; an existing command is custom and asks nothing", async () => {
+    // Dynamic, as above: the module must load after mock.module replaced "vscode".
+    const { agentReady, configuredTerminalAgent, launchAgent } = await import("../extension/src/host/agent");
+    const instruction = "Use the trama-scan skill on the whole System.";
+    const shown: string[] = [];
+    settingValues["agentCommand"] = "";
+    settingValues["terminalAgent"] = "";
+    updates.length = 0;
+    try {
+      expect(configuredTerminalAgent()).toBeUndefined();
+      expect(agentReady()).toBe(false); // no automatic scan without an agent
+
+      const typedBefore = typed.length;
+      pick = (items, options) => void shown.push(options.title ?? "", ...items.map((i) => `${i.label}|${i.description ?? ""}`));
+      expect(await launchAgent(dir, instruction, "Scan")).toBeUndefined();
+      expect(typed.length).toBe(typedBefore);
+      expect(updates).toEqual([]);
+      expect(shown).toEqual(["Choose the agent Trama starts in the terminal", "omp|omp", "Claude Code|claude", "Codex|codex", "Copilot CLI|copilot -i", "Cursor CLI|agent", "Other command…|"]);
+
+      // Other command… then Esc on the command: nothing sent, nothing saved.
+      pick = (items) => items.at(-1);
+      typeIn = () => undefined;
+      expect(await launchAgent(dir, instruction, "Scan")).toBeUndefined();
+      expect(updates).toEqual([]);
+
+      typeIn = () => " my-agent {prompt} ";
+      expect(await launchAgent(dir, instruction, "Scan")).toBe("terminal");
+      expect(updates).toEqual([{ key: "agentCommand", value: "my-agent {prompt}" }, { key: "terminalAgent", value: "custom" }]);
+      expect(typed.at(-1)).toStartWith("my-agent '");
+
+      updates.length = 0;
+      pick = (items) => items.find((i) => i.label === "Copilot CLI");
+      listeners.end.forEach((fn) => fn(shell(terminals.at(-1) as FakeTerminal)));
+      expect(await launchAgent(dir, instruction, "Scan")).toBe("terminal");
+      expect(updates).toEqual([{ key: "terminalAgent", value: "copilot" }]);
+      expect(typed.at(-1)).toStartWith("copilot -i '");
+
+      // Chosen: no question, ready for the automatic scan.
+      settingValues["terminalAgent"] = "claude";
+      pick = () => {
+        throw new Error("asked again");
+      };
+      expect(agentReady()).toBe(true);
+      listeners.end.forEach((fn) => fn(shell(terminals.at(-1) as FakeTerminal)));
+      await launchAgent(dir, "Use the trama-design skill. X", "Design");
+      expect(typed.at(-1)).toBe("claude 'Use the trama-design skill. X'");
+
+      // A scan on its role's model, with the sub-agents sentence before the language sentence; the chat gets neither.
+      settingValues["scan"] = " sonnet ";
+      settingValues["language"] = "Italian";
+      listeners.end.forEach((fn) => fn(shell(terminals.at(-1) as FakeTerminal)));
+      await launchAgent(dir, instruction, "Scan");
+      expect(typed.at(-1)).toStartWith("claude --model 'sonnet' --agents '{");
+      expect(typed.at(-1)).toEndWith(`'${instruction} Triage each Machine with the trama-triage sub-agent and analyse every Machine in conflict with the trama-analysis sub-agent. Write everything you generate in Italian, except code, which always stays in English.'`);
+      settingValues["agentLauncher"] = "chat";
+      clipboard.length = 0;
+      commandHandler = () => {
+        throw new Error("no chat"); // the prompt goes to the clipboard, where the test reads it
+      };
+      await launchAgent(dir, instruction, "Scan");
+      commandHandler = () => undefined;
+      expect(clipboard.at(-1)).toBe(`${instruction} Write everything you generate in Italian, except code, which always stays in English.`);
+      delete settingValues["agentLauncher"];
+
+      // An existing command and no agent chosen: custom, no choice.
+      settingValues["terminalAgent"] = "";
+      settingValues["agentCommand"] = "codex {prompt}";
+      expect(configuredTerminalAgent()).toBe("custom");
+      expect(agentReady()).toBe(true);
+
+      // custom chosen but no command yet: the command is asked, so no automatic scan.
+      settingValues["terminalAgent"] = "custom";
+      settingValues["agentCommand"] = "";
+      expect(agentReady()).toBe(false);
+    } finally {
+      for (const key of ["agentCommand", "terminalAgent", "agentLauncher", "scan", "language"]) delete settingValues[key];
+      pick = () => undefined;
+      typeIn = () => undefined;
+      updates.length = 0;
+    }
+  });
+
+  test("the chat tells once, for all projects, that model roles apply only to terminal agents, and only when a role is set", async () => {
+    // Dynamic, as above: the module must load after mock.module replaced "vscode".
+    const { launchAgent, useGlobalState } = await import("../extension/src/host/agent");
+    const vscode = await import("vscode");
+    const state = new Map<string, unknown>();
+    useGlobalState({ get: (key: string) => state.get(key), update: async (key: string, value: unknown) => void state.set(key, value), keys: () => [...state.keys()] } as never);
+    const info = spyOn(vscode.window, "showInformationMessage").mockImplementation(() => Promise.resolve(undefined) as never);
+    settingValues["agentLauncher"] = "chat";
+    try {
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
+      expect(info).not.toHaveBeenCalled(); // no role set
+      settingValues["execution"] = "haiku";
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
+      await launchAgent(dir, "Use the trama-design skill. X", "Design");
+      expect(info.mock.calls.map((call) => call[0])).toEqual(["Trama: model roles (trama.analysis, trama.scan, trama.execution) apply only to terminal agents. The chat uses the model chosen in the chat."]);
+      expect(state.get("trama.chatModelRolesNoticeShown")).toBe(true);
+    } finally {
+      info.mockRestore();
+      delete settingValues["agentLauncher"];
+      delete settingValues["execution"];
     }
   });
 });

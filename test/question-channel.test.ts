@@ -6,7 +6,7 @@ import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { askEditor, createQuestionServer, QUESTION_ENDPOINT_ENV, questionProjectId, type QuestionServer } from "../src/core/question-channel";
+import { askEditor, classifyWithEditor, createQuestionServer, QUESTION_ENDPOINT_ENV, questionProjectId, type QuestionServer } from "../src/core/question-channel";
 import { QuestionRoundQueue, type CompletedQuestionRound } from "../src/core/question-rounds";
 import { QuestionInterruptedError, type QuestionHandler, type QuestionRequest } from "../src/core/questions";
 import { projectAt } from "../src/core/store";
@@ -61,6 +61,23 @@ async function server(handler: QuestionHandler, options: { projectRoot?: string;
 function ask(request: QuestionRequest, endpoint?: string, signal?: AbortSignal) {
   return askEditor(projectAt(projectRoot), request, { signal }, { runtimeDir, env: endpoint === undefined ? {} : { [QUESTION_ENDPOINT_ENV]: endpoint } });
 }
+
+test("classify reaches the project's editor with the Machine and the state, and is unavailable without an editor or one that answers", async () => {
+  const p = projectAt(projectRoot);
+  expect(await classifyWithEditor(p, "order", "state", { runtimeDir, env: {} })).toEqual({ answer: "unavailable" });
+  const seen: string[][] = [];
+  const editor = await createQuestionServer({ project: p, runtimeDir, handler: async () => answer("choice"), onClassify: async (machine, state) => (seen.push([machine, state]), { answer: "conflict", reason: "Jev answered HTTP 500." }) });
+  servers.push(editor);
+  expect(await classifyWithEditor(p, "order", "é state\nline", { runtimeDir, env: {} })).toEqual({ answer: "conflict", reason: "Jev answered HTTP 500." });
+  expect(seen).toEqual([["order", "é state\nline"]]);
+  await editor.dispose();
+
+  const silent = await createQuestionServer({ project: p, runtimeDir, handler: async () => answer("choice"), onClassify: () => new Promise(() => {}) });
+  servers.push(silent);
+  expect(await classifyWithEditor(p, "order", "state", { runtimeDir, env: {}, timeoutMs: 100 })).toEqual({ answer: "unavailable" });
+  const plain = await server(async () => answer("choice"), { focusedAt: Date.now() + 1000 }); // no classifier
+  expect(await classifyWithEditor(p, "order", "state", { runtimeDir, env: { [QUESTION_ENDPOINT_ENV]: plain.endpoint } })).toEqual({ answer: "unavailable" });
+});
 
 function outcome<T>(promise: Promise<T>): Promise<T | Error> {
   return promise.catch((error: unknown) => {

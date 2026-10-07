@@ -1,6 +1,7 @@
 import type { Snapshot } from "../../../src/core/snapshot";
 import type { NavigateOptions, ToHost, ToWebview, ViewName } from "../protocol";
 import { mountBoard } from "./board";
+import { proposalsToDecide } from "./board/logic";
 import { mountDiagram } from "./diagram";
 import { mountQuestions } from "./questions";
 import { mountRequirements } from "./requirements";
@@ -93,7 +94,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     mounted.board.update(snapshot, message.asking);
     mounted.requirements.update(snapshot);
     showModelErrors(snapshot.diagnostics);
-    const decide = snapshot.proposals.length + snapshot.drifts.length;
+    const decide = proposalsToDecide(snapshot).length + snapshot.drifts.length;
     const badge = app.querySelector("[data-badge]") as HTMLElement;
     badge.hidden = decide === 0;
     badge.textContent = String(decide);

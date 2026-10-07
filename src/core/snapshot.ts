@@ -110,6 +110,12 @@ export interface DriftView {
   proposal: string | null;
   /** Why the attached Proposal cannot be approved now (draft, rejected, discarded, stale, waiting, invalid…), or null when it can or there is none. */
   proposalBlock: ApprovalBlock | null;
+  /** Title of the attached Proposal; null when there is none or it no longer exists. */
+  proposalTitle: string | null;
+  /** What the attached Proposal changes while it is open; null when there is none or it is not open (still being written, decided). */
+  proposalChanges: FileChange[] | null;
+  /** The agent is reworking the stale attached Proposal: its ghost is drawn in place of that Proposal. `title` is the new Draft's, null until the Draft exists. */
+  rework: { title: string | null } | null;
 }
 
 export interface TaskView {
@@ -142,6 +148,8 @@ export interface AnnouncementView {
   title: string;
   /** A card: Preparing until a Draft exists, Writing once it does. A check: its own phase. */
   phase: "preparing" | "writing" | CheckPhase;
+  /** The Drift whose stale Proposal this announcement reworks: its ghost is drawn inside that Drift. Absent for every other announcement. */
+  drift?: string;
 }
 
 export interface Snapshot extends ModelView {
@@ -284,6 +292,12 @@ export function buildSnapshot(p: Project): Snapshot {
   const proposals = allProposals.filter((x) => x.data.status === "open").map((proposal) => proposalView(p, project, proposal));
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
   const hold = readScanHold(p);
+  const openDrifts = drifts.filter((d) => d.data.status === "open");
+  // A Proposal ghost whose Draft is attached to an open Drift is drawn inside that Drift, like a rework.
+  const announcements = listAnnouncements(p).map((a) => {
+    const drift = a.kind === "proposal" && a.proposal !== null ? openDrifts.find((d) => d.data.proposal === a.proposal) : undefined;
+    return drift ? { ...a, drift: drift.id } : a;
+  });
   return {
     ...modelView(project),
     diagnostics: project.diagnostics,
@@ -300,6 +314,9 @@ export function buildSnapshot(p: Project): Snapshot {
       refs: d.data.refs,
       proposal: d.data.proposal,
       proposalBlock: d.data.proposal === null ? null : approvalBlock(p, d.data.proposal),
+      proposalTitle: (d.data.proposal !== null && proposalById.get(d.data.proposal)?.title) || null,
+      proposalChanges: proposals.find((x) => x.id === d.data.proposal)?.changes ?? null,
+      rework: reworkOf(announcements, d.id, (id) => proposalById.get(id)?.title),
     })),
     tasks: tasks.map((t) => ({
       id: t.id,
@@ -316,15 +333,21 @@ export function buildSnapshot(p: Project): Snapshot {
       blockedBy: blocked.get(t.id) ?? [],
       file: `tasks/${t.name}`,
     })),
-    announcements: listAnnouncements(p).map((a) => announcementView(a, a.proposal === null ? undefined : proposalById.get(a.proposal)?.title)),
+    announcements: announcements.map((a) => announcementView(a, a.proposal === null || a.kind !== "proposal" ? undefined : proposalById.get(a.proposal)?.title)),
     scanHold: { on: hold.reading.kind === "on", held: hold.held.length },
     numbers,
   };
 }
 
+/** The ghost reworking the stale Proposal of Drift `driftId`, if any; its title is the bound Draft's, once there is one. */
+function reworkOf(announcements: Announcement[], driftId: string, titleOf: (proposal: string) => string | undefined): DriftView["rework"] {
+  const a = announcements.find((x) => x.drift === driftId);
+  return a === undefined ? null : { title: (a.proposal !== null && titleOf(a.proposal)) || null };
+}
+
 /** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. */
 export function announcementView(a: Announcement, proposalTitle: string | undefined): AnnouncementView {
-  return { id: a.id, kind: a.kind, title: proposalTitle || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : "writing") };
+  return { id: a.id, kind: a.kind, title: (a.kind === "proposal" && proposalTitle) || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : "writing"), ...(a.drift ? { drift: a.drift } : {}) };
 }
 
 /** The title is shown separately, so the body drops its leading H1. */
