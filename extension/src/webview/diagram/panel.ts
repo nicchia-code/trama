@@ -87,7 +87,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     return li;
   };
 
-  const renderProposal = (p: ProposalView, numbers: CardNumbers, fromDrift: boolean): HTMLElement => {
+  const renderProposal = (p: ProposalView, numbers: CardNumbers): HTMLElement => {
     const box = el("section", "dg-proposal");
     const kind = el("div", "dg-kind", "Proposal ");
     kind.append(idTag(cardNameOf(numbers, "proposal", p.id), "dg-id"));
@@ -126,10 +126,6 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       }
       box.append(ul);
     }
-    if (fromDrift) {
-      box.append(el("div", "dg-note", "This Proposal belongs to a Drift in a worktree: decide it from that Drift on the Board."));
-      return box;
-    }
     const blocker = approveBlocker(p, numbers);
     const row = el("div", "dg-actions");
     row.append(
@@ -144,7 +140,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     render(detail) {
       root.replaceChildren();
       const head = el("header", "dg-panel-head");
-      const driftName = detail.drift && detail.drift.merge !== true ? cardNameOf(detail.numbers, "drift", detail.drift.id) : null;
+      const driftName = detail.drift ? cardNameOf(detail.numbers, "drift", detail.drift.id) : null;
       const kind = el("div", "dg-kind", driftName === null ? detail.kind : "Drift ");
       if (driftName !== null) kind.append(idTag(driftName, "dg-id"));
       head.append(kind);
@@ -172,7 +168,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
         for (const i of s.items) ul.append(renderItem(i));
         root.append(el("div", "dg-heading", s.heading), ul);
       }
-      if (detail.proposal) root.append(renderProposal(detail.proposal, detail.numbers, detail.fromDrift));
+      if (detail.proposal) root.append(renderProposal(detail.proposal, detail.numbers));
     },
   };
 }

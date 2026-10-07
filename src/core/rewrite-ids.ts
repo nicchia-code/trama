@@ -5,7 +5,6 @@ import { listProposals, save as writeProposal } from "./proposals";
 import { canonicalCardId } from "./schema";
 import { type CardEntry, type CardLayout, listCards, type Project, readDocument, sha256, writeDocument } from "./store";
 import { type Drift, listDrifts, listTasks, type Task } from "./work";
-import { worktreeRoundOpen } from "./worktree-round";
 
 export type CardKind = "proposal" | "task" | "drift";
 
@@ -138,13 +137,12 @@ function writeDrift(drift: Drift): void {
 
 /**
  * Gives every numbered Proposal, Task and Drift its own identity.
- * Checks the round, duplicate numbers and colliding identities before it writes anything.
+ * Checks duplicate numbers and colliding identities before it writes anything.
  * Does nothing, and says so, when no card is still numbered.
  */
 export function rewriteNumberedCards(p: Project): RewrittenCard[] {
   const cards = numberedCards(p);
   if (cards.length === 0) return [];
-  if (worktreeRoundOpen(p)) throw new TramaError("A worktree round is open, so numbered cards were not rewritten.");
   refuseDuplicates(cards);
   const ids = refuseCollisions(p, cards);
   const rewritten = new Map(cards.map((card) => [card.entry.name, card]));

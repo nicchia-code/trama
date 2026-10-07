@@ -4,5 +4,3 @@ How the Model and its Requirements change: the agent suggests a change as a Prop
 
 Ogni Proposal ha, accanto all'identità permanente, un numero breve temporaneo (`P3`) per leggerla e citarla a colpo d'occhio: è locale a ogni copia di lavoro e si libera quando la Proposal è decisa.
 
-Con l'interruttore multi-branch acceso su questa copia di lavoro, accettare una Proposal ordinaria la manda in un worktree invece di copiarla nella cartella aperta; il modello arriva quando il giro è unito (vedi il Worktree round).
-

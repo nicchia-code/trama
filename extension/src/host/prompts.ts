@@ -31,7 +31,7 @@ export function buildPrompt(action: ResolvedAction): string {
   }
 }
 
-/** The scan prompt for one Feature, or the whole System when there is none, as the developer starts it by hand; the scan after a round's merge lists several. It names no Proposal. */
+/** The scan prompt for one Feature, or the whole System when there is none, as the developer starts it by hand. It names no Proposal. */
 export function buildScanPrompt(features: string[]): string {
   return features.length === 0
     ? "Use the trama-scan skill on the whole System."
@@ -39,24 +39,17 @@ export function buildScanPrompt(features: string[]): string {
 }
 
 /**
- * The automatic scan after an approval: only what the Proposal changed, read from its scan scope. With
- * `trama.autoImplement` on, the same run goes on to implement that design's Tasks when the scan files no Drift.
+ * The automatic scan after an approval: only what the Proposal changed, read from its scan scope. The run
+ * stops after the scan; the Tasks it files stay in "todo".
  */
-export function buildApprovalScanPrompt(proposal: string, autoImplement: boolean): string {
-  const scan = `Use the trama-scan skill on what Proposal ${proposal} changed: its scan scope is in \`trama proposal show ${proposal}\`. Link every Task you file to it with --proposal ${proposal}.`;
-  return autoImplement
-    ? `${scan} If the scan files no Drift, go on with the trama-implement skill on every Task of Proposal ${proposal} that is in the "todo" column, taking them from \`trama task next --batch --proposal ${proposal}\`, one group at a time, until it says there is none.`
-    : scan;
+export function buildApprovalScanPrompt(proposal: string): string {
+  return `Use the trama-scan skill on what Proposal ${proposal} changed: its scan scope is in \`trama proposal show ${proposal}\`. Link every Task you file to it with --proposal ${proposal}.`;
 }
 
-/** In a Proposal's worktree, after its scan filed Tasks: run them in groups, and leave the whole-System check to the merge. */
-export function buildWorktreeTasksPrompt(proposal: string): string {
-  return `Use the trama-implement skill on every Task of Proposal ${proposal} that is in the "todo" column, taking them from \`trama task next --batch --proposal ${proposal}\`, one group at a time, until it says there is none. Do not scan the whole System at the end: Trama checks the code after the merge.`;
-}
-
-/** In the merge worktree, the reconciliation Task alone, leaving the whole-System check to the merge like the other worktree runs. */
-export function buildReconcilePrompt(task: string): string {
-  return `${buildPrompt({ kind: "implement", task })} Do not scan the whole System at the end: Trama checks the code after the merge.`;
+/** The scan that turning Hold scan off sends: one run over what the held Proposals changed, oldest first. One Proposal is the automatic scan's instruction. */
+export function buildHeldScanPrompt(proposals: readonly string[]): string {
+  if (proposals.length === 1) return buildApprovalScanPrompt(proposals[0] as string);
+  return `Use the trama-scan skill on what Proposals ${proposals.join(", ")} changed: each scan scope is in \`trama proposal show <id>\`. Compare every reference once, against the current Model, and link every Task you file with --proposal to the most recent of those Proposals whose scan scope covers it.`;
 }
 
 /**

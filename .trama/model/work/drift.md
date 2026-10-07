@@ -14,8 +14,6 @@ Keeping what should happen is not one single way: every new Drift also offers th
 
 Both sides are written for a developer reading them at a glance: in terms of behaviour, not of the code's inner workings. A Drift may also note where in the code the difference was seen; that note is only a pointer for whoever fixes the code and plays no part in the decision.
 
-Un Drift nato in un worktree di un giro si decide lo stesso sulla Board del progetto aperto. La decisione è scritta nel worktree: il Task che ne nasce sta lì, e non apre un altro worktree. Il giro rilancia l'agente di quel worktree.
-
 While it is Open a Drift blocks Tasks, because the work on them would be built on a difference nobody has decided yet. It blocks its origin Task, if any, and every Task not yet Done that concerns the same thing: the same element or one inside the other, counting the Requirements that apply to an element as part of it (a Requirement's General section counts only for the Tasks that name it). A Drift found by a Scan has no origin and blocks only the Tasks that concern the same thing. A Drift that no open Task concerns blocks nothing. A blocked Task cannot be started by the agent; see the Task.
 
 ## States

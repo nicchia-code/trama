@@ -7,6 +7,7 @@ import {
   announcementNote,
   announcementsDir,
   bindDraft,
+  changeCheckPhase,
   deliverCard,
   getAnnouncement,
   isQuiet,
@@ -305,5 +306,48 @@ describe("an announcement made by Cursor's chat agent", () => {
     // Written before the field existed: no `chat` line at all.
     writeFileSync(join(announcementsDir(p), "old001.md"), "---\nkind: task\nsource: agent\nproposal: null\ncreated: 2026-01-01T10:00:00.000Z\ntouched: 2026-01-01T10:00:00.000Z\n---\n# Old\n");
     expect(getAnnouncement(p, "old001")?.chat).toBeNull();
+  });
+});
+
+describe("a check", () => {
+  test("is announced with its phase, moves only to scanning, and is delivered by done with its file gone", () => {
+    const id = run(["announce", "check", "Final check of Refunds", "--phase", "verifying"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
+    const check = getAnnouncement(p, id);
+    expect([check?.kind, check?.phase, check?.source, check?.proposal, check?.terminal]).toEqual(["check", "verifying", "agent", null, "ab12cd"]);
+    expect(buildSnapshot(p).announcements.map((a) => [a.kind, a.phase])).toEqual([["check", "verifying"]]);
+
+    expect(JSON.parse(run(["--json", "announce", "phase", id, "scanning"], dir, {}).out).outcome).toBe("changed");
+    expect(getAnnouncement(p, id)?.phase).toBe("scanning");
+    expect(run(["announce", "phase", id, "scanning"], dir, {}).out).toContain("already scanning");
+    expect(() => run(["announce", "phase", id, "verifying"], dir, {})).toThrow(/only move to scanning/);
+
+    expect(run(["announce", "done", id], dir, {}).out).toBe(`Check ${id} is done`);
+    expect(existsSync(join(announcementsDir(p), `${id}.md`))).toBe(false);
+  });
+
+  test("needs --phase, which no other kind takes", () => {
+    expect(() => run(["announce", "check", "Scan of the System"], dir, {})).toThrow(/needs --phase/);
+    expect(() => run(["announce", "task", "Refunds", "--phase", "scanning"], dir, {})).toThrow(/only for a check/);
+    expect(() => run(["announce", "check", "Scan", "--phase", "testing"], dir, {})).toThrow(/--phase must be one of/);
+    expect(readFileSync(join(announcementsDir(p), `${run(["announce", "task", "Plain"], dir, {}).out}.md`), "utf8")).not.toContain("phase");
+  });
+
+  test("an ID that is unknown, finished or not a check succeeds and says the check was not found", () => {
+    const task = run(["announce", "task", "Refunds"], dir, {}).out;
+    for (const id of ["zzzzzz", task]) {
+      for (const args of [["phase", id, "scanning"], ["done", id]]) {
+        const result = run(["announce", ...args], dir, {});
+        expect([result.exit, result.out.includes(`No check "${id}" was found`)]).toEqual([0, true]);
+      }
+    }
+    expect(getAnnouncement(p, task)?.kind).toBe("task");
+  });
+
+  test("announcing and changing the phase start the quiet period again for every announcement", () => {
+    const task = announce(p, { kind: "task", title: "Old" }, t(0));
+    const check = announce(p, { kind: "check", title: "Final check after all Tasks", phase: "verifying" }, t(10));
+    expect(getAnnouncement(p, task.id)?.touched).toBe(t(10).toISOString());
+    changeCheckPhase(p, check.id, "scanning", t(20));
+    expect(listAnnouncements(p).map((a) => a.touched)).toEqual([t(20).toISOString(), t(20).toISOString()]);
   });
 });

@@ -82,12 +82,10 @@ export function snapshotOf(files: FileMap): Snapshot {
     diagnostics: model.diagnostics,
     areas: [],
     proposals: [],
-    inWorktree: [],
-    worktreeProposals: [],
     drifts: [],
     tasks: [],
     announcements: [],
-    multiBranch: false,
+    scanHold: { on: false, held: 0 },
     numbers: { proposal: {}, task: {}, drift: {} },
   };
 }

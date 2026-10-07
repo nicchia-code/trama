@@ -20,12 +20,6 @@ export function sectionMatches(sectionRef: string | null, target: string): boole
   return sectionRef.toLowerCase() === target.toLowerCase();
 }
 
-/**
- * The Proposals the Diagram and the Requirements tab can show: those awaiting a decision, then those attached to a
- * worktree's Drift, which are decided only from their Drift.
- */
-export const viewableProposals = (snapshot: Snapshot): ProposalView[] => [...snapshot.proposals, ...snapshot.worktreeProposals];
-
 /** The Areas as they are (or as the Proposals it requires leave them), with those the Proposal touches replaced by their before-and-after view. */
 export function areasWith(snapshot: Snapshot, proposal: ProposalView | undefined): AreaView[] {
   if (!proposal) return snapshot.areas;

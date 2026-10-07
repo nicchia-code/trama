@@ -1,6 +1,6 @@
 ---
 name: trama-req-ui-agents
-description: Usa quando mostri richieste di design, terminale dell'agente, worktree e multi-branch.
+description: Usa quando mostri richieste di design, terminale dell'agente e Hold scan.
 ---
 # Requirements: Interfaccia, Interfaccia del lavoro dell'agente
 
@@ -20,28 +20,20 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 ## agent-terminal
 
 - La descrizione di `trama.agentLauncher`, in inglese, elenca i valori: `auto` (chat in Cursor, terminale integrato negli altri editor), `terminal` (il terminale integrato dell'editor), `terminal-tab` (il terminale integrato dell'editor, aperto come scheda dell'editor accanto a quella attiva), `external-terminal` (una finestra del terminale predefinito del sistema, fuori dall'editor; solo Linux e macOS) e `chat` (la chat dell'editor).
-- La descrizione di `trama.autoImplement`, in inglese, è `After an automatic scan that files no Drift, the same agent goes on to implement the Tasks it filed.`
+- Con `terminal` (e con `auto` fuori da Cursor) Trama non mostra il terminale dell'agente quando lo apre o lo riusa: l'area dei terminali non si apre se è chiusa, il terminale visibile al suo interno resta quello che era, e cursore e tastiera restano nell'editor o nel pannello in cui erano. Il terminale compare nell'elenco dei terminali con il suo nome, da dove il developer lo apre a mano. Vale per ogni avvio: pulsanti, scansione automatica dopo un'approvazione, «Scan now» e Hold scan spento.
 - Con `terminal-tab` la scheda del terminale si apre in un gruppo accanto a quello attivo, così il pannello Trama resta visibile; se la scheda precedente dell'agente è ancora aperta, una scheda nuova si apre nel gruppo in cui Trama aveva aperto quella, senza creare un altro gruppo. Quando Trama apre o riusa la scheda, la porta in primo piano nel suo gruppo ma non le dà il focus: il cursore e la tastiera restano nell'editor o nel pannello in cui erano. Il titolo della scheda è il nome del terminale: il numero breve del Task o della Proposal (per esempio `T3`, `P2`), oppure `Design`, `Scan`, `All tasks` o `Import` (vedi `rules`).
 - La descrizione di `trama.externalTerminalCommand`, in inglese, dice: comando che apre il terminale esterno con `external-terminal` al posto di quello rilevato; `{command}` è sostituito dalla riga di comando dell'agente, aggiunta in fondo se manca; per esempio `alacritty -e {command}`; vuota (il default) rileva il terminale di sistema; con un valore non vuoto si apre sempre una finestra nuova; vale solo nelle impostazioni utente.
 - Se la finestra esterna non si può aprire: messaggio di errore `Trama could not open an external terminal: <reason>. The instruction was copied to the clipboard.` con `<reason>` uno tra `external terminals are not supported on this platform`, `external terminals are not available in a remote workspace`, `no terminal was found; set trama.externalTerminalCommand`, `the terminal could not be started` e il messaggio dell'errore del sistema. Senza pulsanti.
 - Se il riuso di una finestra esterna fallisce: messaggio di avviso (warning) `Trama could not reuse the external terminal window: <reason>. A new window was opened.` con `<reason>` il messaggio dell'errore dello scripting del terminale, senza pulsanti.
 - Tutti questi testi sono in inglese e non seguono `trama.language`.
 
-## worktree-round
+## scan-hold
 
-- I testi sono in inglese. Il gruppo sulla Board si chiama `In worktree`. Ogni Proposal lì mostra il titolo e un pulsante `Remove from round`, visibile solo prima che l'unione cominci. Non ci sono Approva né Rifiuta.
-- I Task e i Drift di un worktree, sulla Board, hanno il badge `worktree`. I pulsanti Run all To do e Run this design della cartella aperta non li lanciano.
-- Il Merge Drift si disegna come un Drift, in To decide: due colonne, `What happens` e `What should happen`. A destra le due opzioni di fix, la prima con `(recommended)`, e `Keep this` con sotto `A Task is created to reconcile the conflicts`. A sinistra `Keep this` con sotto `Every Proposal in the round returns to To decide and the worktrees are deleted`.
-- I rifiuti dell'accettazione sono avvisi dell'editor: `Import proposals cannot be accepted while multi-branch is on.`; `Turn automatic scan on, or turn multi-branch off, before accepting this Proposal.`; `This Proposal affects no Feature, so multi-branch cannot start a worktree.`; `Set trama.worktreeAgent in your user settings before accepting a Proposal with multi-branch on.`; `Commit or stash your changes before accepting a Proposal with multi-branch on.`; `This folder is not a Git repository, so a worktree cannot be created.`; `This folder is not on a branch, so a worktree cannot be created.`; `A worktree round is already merging. Wait until it finishes.` Un worktree che git rifiuta mostra il motivo di git.
-- L'attesa della cartella pulita avvisa: `Trama has a merge ready. It will update this folder when you are back on <branch> with a clean tree.`
-- La descrizione di `trama.worktreeAgent` dice che è il comando del terminale dei worktree, solo nelle impostazioni utente, e che vuoto impedisce sia di accendere l'interruttore sia l'accettazione con l'interruttore acceso.
-
-## multi-branch
-
-- I testi sono in inglese. In ogni barra che ha `Design…` (Diagramma, Board e Requirements), subito dopo quel pulsante, c'è uno switch con etichetta `Multi-branch`. Nel Diagramma lo switch sta prima di `Scan`.
-- Il tooltip è `When on, accepting an ordinary Proposal runs it in a worktree.`
-- Il nome accessibile è `Multi-branch` e lo stato, acceso o spento, è annunciato. Il controllo è uno switch.
-- Un click cambia subito, senza conferma. Le tre schede mostrano lo stesso stato, anche quella nascosta.
-- Accendere senza il comando dei worktree lascia lo switch spento e mostra l'avviso `Set trama.worktreeAgent in your user settings before turning multi-branch on.`
-- Un file illeggibile mostra lo switch spento e l'avviso `Trama could not read the multi-branch switch, so it is off.`
-- Una scrittura fallita lascia lo switch com'era e mostra l'avviso `Trama could not save the multi-branch switch.`
+- I testi sono in inglese e non seguono `trama.language`. In ogni barra che ha `Design…` (Diagramma, Board e Requirements), subito dopo quel pulsante, c'è uno switch con etichetta `Hold scan`; con N Proposal in sospeso, N > 0, l'etichetta è `Hold scan · N`. Nel Diagramma lo switch sta prima di `Scan`.
+- Il tooltip è `When on, approvals wait and one scan runs when you turn it off.`
+- Il nome accessibile è `Hold scan`, seguito da `, N held` quando N > 0, e lo stato, acceso o spento, è annunciato. Il controllo è uno switch.
+- Un click cambia subito, senza conferma. Le tre schede mostrano lo stesso stato e lo stesso numero, anche quella nascosta.
+- Spegnere quando nessuna Proposal in sospeso tocca più una Feature: avviso `Hold scan is off. The held Proposals no longer affect any Feature, so there was nothing to scan.`
+- Spegnere quando l'istruzione non è consegnata: lo switch resta acceso e compare l'avviso `The held scan was not started, so Hold scan stays on.`, oltre all'eventuale messaggio del launcher.
+- Un file illeggibile mostra lo switch spento e l'avviso `Trama could not read the Hold scan switch, so it is off.`
+- Una scrittura fallita lascia lo switch com'era e mostra l'avviso `Trama could not save the Hold scan switch.`

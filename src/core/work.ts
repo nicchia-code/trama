@@ -6,7 +6,6 @@ import { approveProposal, getProposal, health, type Proposal, rejectProposal } f
 import { loadProject, parseRequirementRef, resolveProjectRef } from "./requirements";
 import { boolField, createdField, enumField, enumOrNull, idField, instantField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
 import { cardName, identityOfShortNumber, syncShortNumbers } from "./short-numbers";
-import { roundWorktrees } from "./worktree-round";
 import {
   compareByCreation,
   createdNow,
@@ -208,7 +207,9 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
     throw new TramaError(`The agent is working on Task ${name}, so it cannot be moved. Take it back first with "trama task take-back ${name}".`);
   }
   if (by === "agent" && column === "doing") {
-    const blockers = blockedTasks(p).get(task.id);
+    // Judged as if the Task had already left Done: a Done Task is never blocked, but one taken from Done may be.
+    const tasks = listTasks(p).map((t) => (t.id === task.id ? { ...t, data: { ...t.data, column: "doing" as Column } } : t));
+    const blockers = computeBlocked(loadProject(p), tasks, listDrifts(p)).get(task.id);
     if (blockers) throw new TramaError(refusalFor(task, blockers, syncShortNumbers(p)));
   }
   // Arriving in Done from another column records the instant; Done to Done keeps it; leaving Done forgets it.
@@ -291,21 +292,6 @@ export function listDrifts(p: Project): Drift[] {
   return listCards(driftsDir(p), "file")
     .map((e) => load(driftsDir(p), e, parseDrift))
     .sort((a, b) => compareByCreation({ id: a.id, created: a.data.created }, { id: b.id, created: b.data.created }));
-}
-
-/**
- * The Tasks and Drifts born in each worktree of the round. A worktree starts from a commit of the open folder and holds
- * copies of its Tasks and Drifts: those belong to the open folder, not to the round.
- */
-export function roundWork(p: Project): { proposal: string; project: Project; tasks: Task[]; drifts: Drift[] }[] {
-  const ownTasks = new Set(listTasks(p).map((t) => t.id));
-  const ownDrifts = new Set(listDrifts(p).map((d) => d.id));
-  return roundWorktrees(p).map(({ proposal, project }) => ({
-    proposal,
-    project,
-    tasks: listTasks(project).filter((t) => !ownTasks.has(t.id)),
-    drifts: listDrifts(project).filter((d) => !ownDrifts.has(d.id)),
-  }));
 }
 
 /** The Drift `id` names. `asArgument` applies the command rules: digits cite only a numbered Drift, and a short number (`D3`) cites the live Drift that has it. */
@@ -417,14 +403,10 @@ export function newDrift(
   return drift;
 }
 
-/**
- * What the developer adds when fixing the code of a Drift: the number of the chosen fix option (from 1) and a free note.
- * `proposal` is the design the fix Task belongs to whatever the Drift came from: the Proposal of the worktree holding it.
- */
+/** What the developer adds when fixing the code of a Drift: the number of the chosen fix option (from 1) and a free note. */
 export interface FixChoice {
   option?: number;
   note?: string;
-  proposal?: string;
 }
 
 /** The body of the Task that fixes the code: both sides, then the chosen option and the note, then where in the code. A Drift written before the sections existed keeps its free text. */
@@ -464,10 +446,9 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
     const option = chosenOption(p, drift, choice.option);
     // A Drift that only contradicts Requirements changes no behaviour, so its Task is technical.
     const touchesModel = drift.data.refs.some((r) => parseRequirementRef(r) === null);
-    // The fix belongs to the given design (a worktree's Proposal) or else to the design of the Task the Drift came
-    // from, if any, even when it is technical.
+    // The fix belongs to the design of the Task the Drift came from, if any, even when it is technical.
     const origin = drift.data.origin ? getTask(p, drift.data.origin) : null;
-    const design = choice.proposal ?? origin?.data.proposal;
+    const design = origin?.data.proposal;
     const task = newTask(p, {
       title: `Fix code to match the ${touchesModel ? "Model" : "Requirements"}: ${drift.title}`,
       refs: drift.data.refs,

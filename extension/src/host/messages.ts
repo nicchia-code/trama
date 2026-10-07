@@ -66,37 +66,28 @@ export function parseToHost(value: unknown): Parsed {
   switch (type) {
     case "ready":
     case "writeDesignRequest":
-    case "abandonRound":
       return { ok: true, message: { type } };
     case "launch": {
       const action = parseAction(raw["action"]);
       return typeof action === "string" ? bad(action) : { ok: true, message: { type, action } };
     }
     case "openModelFile":
+    case "openFile":
       return typeof raw["path"] === "string" && raw["path"] !== "" ? { ok: true, message: { type, path: raw["path"] } } : bad(`${type} needs a path`);
-    case "openFile": {
-      if (typeof raw["path"] !== "string" || raw["path"] === "") return bad("openFile needs a path");
-      if (raw["worktree"] === undefined) return { ok: true, message: { type, path: raw["path"] } };
-      return typeof raw["worktree"] === "string" && ID.test(raw["worktree"]) ? { ok: true, message: { type, path: raw["path"], worktree: raw["worktree"] } } : bad("openFile worktree must be a Proposal ID");
-    }
-    case "setMultiBranch":
-      return typeof raw["on"] === "boolean" ? { ok: true, message: { type, on: raw["on"] } } : bad("setMultiBranch needs on");
+    case "setScanHold":
+      return typeof raw["on"] === "boolean" ? { ok: true, message: { type, on: raw["on"] } } : bad(`${type} needs on`);
     case "approveProposal":
     case "rejectProposal":
-    case "withdrawFromRound":
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };
     case "resolveDrift":
     case "driftBlocked": {
       if (id === undefined) return bad(`${type} needs a valid Drift ID`);
-      const worktree = raw["worktree"];
-      if (worktree !== undefined && (typeof worktree !== "string" || !ID.test(worktree))) return bad(`${type} worktree must be a Proposal ID`);
-      const there = worktree === undefined ? {} : { worktree };
-      if (type === "driftBlocked") return { ok: true, message: { type, id, ...there } };
+      if (type === "driftBlocked") return { ok: true, message: { type, id } };
       if (typeof raw["how"] !== "string" || !HOWS.includes(raw["how"])) return bad(`unknown resolution "${String(raw["how"])}"`);
-      if (raw["how"] !== "fix-code") return { ok: true, message: { type, id, how: raw["how"] as "accept-proposal" | "dismiss", ...there } };
+      if (raw["how"] !== "fix-code") return { ok: true, message: { type, id, how: raw["how"] as "accept-proposal" | "dismiss" } };
       if (raw["option"] !== undefined && !(typeof raw["option"] === "number" && Number.isInteger(raw["option"]))) return bad("resolveDrift option must be a whole number");
       if (raw["note"] !== undefined && typeof raw["note"] !== "string") return bad("resolveDrift note must be text");
-      return { ok: true, message: { type, id, how: "fix-code", ...(raw["option"] !== undefined ? { option: raw["option"] as number } : {}), ...(raw["note"] !== undefined ? { note: raw["note"] as string } : {}), ...there } };
+      return { ok: true, message: { type, id, how: "fix-code", ...(raw["option"] !== undefined ? { option: raw["option"] as number } : {}), ...(raw["note"] !== undefined ? { note: raw["note"] as string } : {}) } };
     }
     case "questionAction": {
       if (!Number.isInteger(raw["round"])) return bad("questionAction needs a round");

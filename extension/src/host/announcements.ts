@@ -9,7 +9,6 @@ import { announcementView } from "../../../src/core/snapshot";
 import type { AnnouncementView } from "../../../src/core/snapshot";
 import { projectAt } from "../../../src/core/store";
 import type { Project } from "../../../src/core/store";
-import { roundWorktrees } from "../../../src/core/worktree-round";
 import type { CursorChatEvent } from "../../../src/core/cursor-chat";
 import { onCursorChatEvent } from "./cursor";
 import { questionRoundClosedAt, questionRoundOpen } from "./question-activity";
@@ -65,12 +64,6 @@ function onCursorChat(event: CursorChatEvent): void {
   else if (event.event === "CONVERSATION_CLOSED") withdrawWaiting(event.root, fromChat, false);
 }
 
-/** The open folder and the worktrees of its round: an agent in any of them announces in its own copy. */
-function copies(root: string): Project[] {
-  const p = projectAt(root);
-  return [p, ...roundWorktrees(p).map((folder) => folder.project)];
-}
-
 function synchronizeTitles(p: Project, waiting: Announcement[]): void {
   for (const a of waiting) {
     if (a.kind !== "proposal" || a.proposal === null) continue;
@@ -107,29 +100,24 @@ function synchronizeTitles(p: Project, waiting: Announcement[]): void {
 }
 
 /**
- * Starting up, announcements left on disk, in the open folder or in a worktree of its round, belong to an agent run
- * that can no longer be told: they are withdrawn with no notice. Then every half minute the quiet period of each copy
- * is checked; changing a file of an announced Draft restarts it, and it does not run while a question round is open and
- * starts again when it closes.
+ * Starting up, announcements left on disk in the open folder belong to an agent run that can no longer be told: they
+ * are withdrawn with no notice. Then every half minute the quiet period is checked; changing a file of an announced
+ * Draft restarts it, and it does not run while a question round is open and starts again when it closes.
  */
 export function watchAnnouncements(root: () => string | undefined): vscode.Disposable {
   const startup = root();
-  if (startup !== undefined) guarded(() => copies(startup).forEach((p) => withdrawAll(p)));
+  if (startup !== undefined) guarded(() => void withdrawAll(projectAt(startup)));
   const timer = setInterval(() => {
     const current = root();
     if (current === undefined) return;
-    let quiet: string[] = [];
+    let quiet = false;
     guarded(() => {
-      quiet = copies(current)
-        .filter((p) => {
-          const waiting = listAnnouncements(p);
-          synchronizeTitles(p, waiting);
-          if (questionRoundOpen()) return false;
-          return isQuiet(waiting, Date.now(), Math.max(questionRoundClosedAt(), boundDraftsChangedAt(p, waiting)));
-        })
-        .map((p) => p.root);
+      const p = projectAt(current);
+      const waiting = listAnnouncements(p);
+      synchronizeTitles(p, waiting);
+      quiet = !questionRoundOpen() && isQuiet(waiting, Date.now(), Math.max(questionRoundClosedAt(), boundDraftsChangedAt(p, waiting)));
     });
-    for (const copy of quiet) withdrawWaiting(copy);
+    if (quiet) withdrawWaiting(current);
   }, CHECK_EVERY_MS);
   const chat = onCursorChatEvent(onCursorChat);
   return new vscode.Disposable(() => (clearInterval(timer), chat.dispose()));

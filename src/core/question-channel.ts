@@ -9,7 +9,6 @@ import { CURSOR_AGENT_ENV } from "./announcements";
 import type { CursorHook } from "./cursor-chat";
 import { parseQuestionRequest, questionAborted, questionFailure, QuestionInterruptedError, unavailableQuestions, type QuestionContext, type QuestionHandler, type QuestionRequest, type QuestionResult } from "./questions";
 import { type Project, projectAt } from "./store";
-import { roundFolders } from "./worktree-round";
 
 export const QUESTION_ENDPOINT_ENV = "TRAMA_QUESTION_ENDPOINT";
 
@@ -385,12 +384,8 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         const value: unknown = JSON.parse(line);
         if (!value || typeof value !== "object" || Array.isArray(value)) throw new UsageError("Question channel message must be an object");
         const message = value as Record<string, unknown>;
-        // The window's own project or a worktree of its round, read again at each connection: worktrees join and leave the round.
-        if (phase === "hello") {
-          const project = message.projectId === record.projectId ? options.project
-            : roundFolders(options.project.root).map(projectAt).find((worktree) => questionProjectId(worktree) === message.projectId);
-          if (project) from = { id: message.projectId, project };
-        }
+        // Only the window's own project.
+        if (phase === "hello" && message.projectId === record.projectId) from = { id: record.projectId, project: options.project };
         if (!from || message.projectId !== from.id) { finish(unavailableQuestions()); return; }
         if (phase === "hello" && message.type === "hello") {
           phase = "ready";

@@ -29,7 +29,6 @@ import type { Diagnostic, FileMap } from "./types";
 import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
 import { cardName, identityOfShortNumber } from "./short-numbers";
 import { SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
-import { proposalIsInWorktree } from "./worktree-round";
 
 /**
  * `draft`: the agent is still writing it; only the agent hands it over and only the developer can discard it.
@@ -52,7 +51,7 @@ interface ProposalData {
   request: string | null;
   /** When the Proposal was created, UTC ISO 8601. Absent on numbered Proposals written before the field existed. */
   created: string | null;
-  /** What a targeted scan compares, written once when an ordinary Proposal is approved or enters a worktree. */
+  /** What a targeted scan compares, written once when an ordinary Proposal is approved. */
   scanScope: ScanScopeEntry[] | null;
 }
 
@@ -275,12 +274,9 @@ function requireStatus(p: Project, proposal: Proposal, status: "draft" | "open",
   throw new TramaError(`Proposal ${name} is ${proposal.data.status}; only ${status === "draft" ? "a Draft" : "open Proposals"} can be ${action}`);
 }
 
-/** A Proposal in a worktree leaves the round only by withdrawal, a lost worktree, abandoning the round or the merge: editing it is refused. */
 function requireEditable(p: Project, proposal: Proposal) {
   if (proposal.data.status !== "draft" && proposal.data.status !== "open")
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is ${proposal.data.status}; only drafts and open Proposals can be edited`);
-  if (proposalIsInWorktree(p, proposal.id))
-    throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is in a worktree; remove it from the round before editing it.`);
 }
 
 /** An edit takes a handed-over Proposal back from the developer: it is a Draft until the next submit. */
@@ -291,6 +287,7 @@ function touch(proposal: Proposal) {
 /**
  * Makes `modelPath` editable inside the Proposal and returns the file to edit.
  * Calling it again for the same file keeps what was recorded for it, but still returns an open Proposal to Draft.
+ * A file already in the Proposal but never registered gets its starting version recorded, its content untouched.
  */
 export function editInProposal(p: Project, id: string, modelPath: string): string {
   const proposal = getProposal(p, id);
@@ -300,18 +297,11 @@ export function editInProposal(p: Project, id: string, modelPath: string): strin
   if (proposal.data.delete.includes(rel)) throw new TramaError(`${rel} is marked for deletion in Proposal ${cardName(p, "proposal", proposal.id)}`);
   touch(proposal);
   markDraftActivity(p, proposal.id);
-  if (existsSync(target)) {
-    save(proposal);
-    return target;
-  }
-
-  const content = baseFiles(p, proposal).get(rel);
-  if (content !== undefined) {
-    proposal.data.base[rel] ??= sha256(content);
-    writeFileEnsuringDir(target, content);
-  } else {
-    proposal.data.base[rel] ??= "new";
-    writeFileEnsuringDir(target, "");
+  const exists = existsSync(target);
+  if (!exists || proposal.data.base[rel] === undefined) {
+    const content = baseFiles(p, proposal).get(rel);
+    proposal.data.base[rel] ??= content !== undefined ? sha256(content) : "new";
+    if (!exists) writeFileEnsuringDir(target, content ?? "");
   }
   save(proposal);
   return target;
@@ -402,7 +392,7 @@ export function changes(p: Project, proposal: Proposal): FileChange[] {
   return paths.map((path) => diffFile(path, before.get(path), after.get(path)));
 }
 
-export type ApprovalBlockKind = "missing" | "draft" | "rejected" | "discarded" | "approved" | "worktree" | "waiting" | "stale" | "unregistered" | "invalid";
+export type ApprovalBlockKind = "missing" | "draft" | "rejected" | "discarded" | "approved" | "waiting" | "stale" | "unregistered" | "invalid";
 
 export interface ApprovalBlock {
   kind: ApprovalBlockKind;
@@ -431,7 +421,6 @@ export function approvalBlock(p: Project, id: string): ApprovalBlock | null {
     case "open":
       break;
   }
-  if (proposalIsInWorktree(p, proposal.id)) return { kind: "worktree", reason: `${name} is in a worktree.` };
   const h = health(p, proposal);
   if (h.requires.length > 0) return { kind: "waiting", reason: `${name} waits for other Proposals: ${h.requires.map((r) => cardName(p, "proposal", r.id)).join(", ")}.` };
   if (h.stale.length > 0) return { kind: "stale", reason: `${name} is stale: the Model changed since it was written.` };
@@ -454,24 +443,10 @@ export function writeProposalFiles(p: Project, id: string, tramaDir: string): Pr
   return proposal;
 }
 
-/**
- * The round has already put this Proposal's files into the open folder by merging.
- * The Proposal becomes approved, with the scan scope it got when it entered its worktree.
- * The files are not copied again and staleness is not checked.
- */
-export function recordMergedProposal(p: Project, id: string, scope: ScanScopeEntry[] | null): void {
-  const proposal = getProposal(p, id);
-  if (proposal.data.status !== "open") return;
-  proposal.data.status = "approved";
-  proposal.data.scanScope = scope;
-  save(proposal);
-}
-
 /** `skillsDirs` are the configured skills folders (besides the usual ones) where the generated `trama-req-*` skills are refreshed. */
 export function approveProposal(p: Project, id: string, skillsDirs: string[] = []): Proposal {
   const proposal = getProposal(p, id);
   requireStatus(p, proposal, "open", "approved");
-  if (proposalIsInWorktree(p, proposal.id)) throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is in a worktree.`);
   const h = health(p, proposal);
   if (h.requires.length > 0)
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} requires other Proposals first:\n${requiredReasons(h.requires, (id) => cardName(p, "proposal", id)).map((r) => `- ${r}`).join("\n")}`);
@@ -494,7 +469,6 @@ export function approveProposal(p: Project, id: string, skillsDirs: string[] = [
 export function rejectProposal(p: Project, id: string, feedback = ""): Proposal {
   const proposal = getProposal(p, id);
   requireStatus(p, proposal, "open", "rejected");
-  if (proposalIsInWorktree(p, proposal.id)) throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is in a worktree.`);
   proposal.data.status = "rejected";
   const text = feedback.trim();
   if (text) proposal.body = `${proposal.body.trimEnd()}\n\n## Feedback\n\n${text}\n`;

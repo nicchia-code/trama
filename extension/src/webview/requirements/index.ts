@@ -3,8 +3,8 @@ import type { AreaView, FragmentView, SectionView, Snapshot } from "../../../../
 import type { NavigateOptions } from "../../protocol";
 import { renderMarkdown } from "../markdown";
 import type { MountView } from "../types";
-import { createMultiBranchSwitch } from "../multi-branch-switch";
-import { areasWith, parseTarget, sectionMatches, viewableProposals, visibleSections } from "./logic";
+import { createScanHoldSwitch } from "../scan-hold-switch";
+import { areasWith, parseTarget, sectionMatches, visibleSections } from "./logic";
 import css from "./requirements.css" with { type: "text" };
 
 const CHANGE_LABEL: Record<SectionView["change"], string> = { added: "added", removed: "removed", changed: "changed", same: "" };
@@ -47,8 +47,8 @@ export const mountRequirements: MountView = (root, context) => {
   label.append(select);
   const filterBox = el("span", "rq-filter");
   toolbar.append(label, filterBox, el("span", "rq-spacer"), button("Quick request…", "trama-btn", "Ask an agent to design a change in one line", () => context.post({ type: "launch", action: { kind: "design" } })), button("Design…", "trama-btn", "Write a design request in Markdown and send it to an agent", () => context.post({ type: "writeDesignRequest" })));
-  const multiBranch = createMultiBranchSwitch((on) => context.post({ type: "setMultiBranch", on }));
-  toolbar.append(multiBranch.element);
+  const scanHold = createScanHoldSwitch((on) => context.post({ type: "setScanHold", on }));
+  toolbar.append(scanHold.element);
   const list = el("div", "rq-list");
   page.append(toolbar, list);
   root.append(page);
@@ -66,8 +66,8 @@ export const mountRequirements: MountView = (root, context) => {
   function renderToolbar() {
     if (!snapshot) return;
     select.replaceChildren(new Option("None", ""));
-    for (const p of viewableProposals(snapshot).filter((x) => x.areas.length > 0))
-      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} ${p.title}${snapshot.worktreeProposals.includes(p) ? " (worktree)" : ""}`, p.id));
+    for (const p of snapshot.proposals.filter((x) => x.areas.length > 0))
+      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} ${p.title}`, p.id));
     select.value = proposalId ?? "";
     select.disabled = select.options.length === 1;
     filterBox.replaceChildren();
@@ -130,10 +130,10 @@ export const mountRequirements: MountView = (root, context) => {
 
   function render() {
     if (!snapshot) return;
-    const proposal = viewableProposals(snapshot).find((p) => p.id === proposalId);
+    const proposal = snapshot.proposals.find((p) => p.id === proposalId);
     if (!proposal) proposalId = null;
     renderToolbar();
-    multiBranch.setOn(snapshot.multiBranch);
+    scanHold.set(snapshot.scanHold.on, snapshot.scanHold.held);
     const areas = areasWith(snapshot, proposal);
     const cards = areas.map(areaNode).filter((n): n is HTMLElement => n !== null);
     if (areas.length === 0) list.replaceChildren(el("p", "rq-muted", "No Requirement Areas in .trama/requirements/. Run “trama skills update” to create the starting ones."));

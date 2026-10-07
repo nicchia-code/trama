@@ -12,9 +12,3 @@ A file of the Requirements was created, changed or deleted, typically edited by 
 
 ### REQUEST_DELETED
 Il file di una richiesta di design, inviata o no, è stato cancellato da qualcuno che non è Trama, per esempio a mano dal developer o dal controllo di versione.
-
-### WORKTREE_LOST
-Un worktree che Trama aveva aperto per un giro non c'è più, cancellato da fuori.
-
-### TREE_READY
-La cartella aperta è di nuovo il branch da cui il giro è partito e non ha modifiche non committate.

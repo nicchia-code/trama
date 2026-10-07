@@ -79,6 +79,23 @@ describe("handing over", () => {
     expect(getProposal(p, prop.id).data.status).toBe("draft");
   });
 
+  test("succeeds once the agent registers the files it wrote before registering them, keeping their content", () => {
+    const prop = newProposal(p, "Late");
+    const order = join(prop.dir, "model", "checkout", "order.md");
+    const ghost = join(prop.dir, "model", "checkout", "ghost.md");
+    const original = readFileSync(join(dir, ".trama", "model", "checkout", "order.md"), "utf8");
+    mkdirSync(join(prop.dir, "model", "checkout"), { recursive: true });
+    writeFileSync(order, addLost(original));
+    writeFileSync(ghost, "# G\n\n## States\n\n### A (initial)\n");
+    expect(() => submitProposal(p, prop.id)).toThrow(/never registered/);
+    editInProposal(p, prop.id, "checkout/order.md");
+    editInProposal(p, prop.id, "checkout/ghost.md");
+    expect(readFileSync(order, "utf8")).toBe(addLost(original));
+    expect(health(p, getProposal(p, prop.id)).stale).toEqual([]);
+    expect(getProposal(p, prop.id).data.base["checkout/ghost.md"]).toBe("new");
+    expect(submitProposal(p, prop.id).data.status).toBe("open");
+  });
+
   test("is not refused for a stale Proposal or one that requires Proposals not approved yet", () => {
     const base = newProposal(p, "Base");
     writeOrder(base.id);

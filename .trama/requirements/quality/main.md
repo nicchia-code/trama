@@ -15,11 +15,6 @@ description: "Use when the work touches performance, security, privacy, accessib
 - Sicurezza: la riga di comando che gira nella finestra esterna contiene l'istruzione solo citata per la shell, e `trama.externalTerminalCommand` si legge solo dalle impostazioni utente, così il file di un repository clonato non può far eseguire un comando al posto del terminale.
 - Riservatezza: il marcatore di fine contiene solo lo stato di uscita, mai l'istruzione, il suo testo o percorsi del progetto.
 
-## worktree-round
-- La cartella aperta non riceve mai i marcatori di conflitto: l'unione si prova solo nel worktree di merge, e si applica alla cartella solo quando è pulita e non ha conflitti.
-- Se un worktree sparisce prima dell'unione, quella Proposal torna da decidere e il developer è avvisato; le altre continuano. Vale anche se a cancellarlo è la pulizia automatica dei worktree di Cursor.
-- Scrivere `trama.worktreeAgent` vuoto nelle impostazioni utente non cancella un comando già impostato.
-
 ## task
 - Una corsa che realizza dei task legge Modello e Requisiti di ciascun task una volta, da `trama task show`, e esegue test, lint e build del progetto una volta, alla fine della corsa, dopo l'ultimo gruppo; mai un sotto-agente.
 - Mentre scrive, l'agente o il sotto-agente non rilancia la suite intera al posto dei test di quel task.

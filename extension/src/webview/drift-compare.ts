@@ -96,10 +96,6 @@ export function driftComparison(d: DriftView, selection: FixSelection = fixSelec
   if (d.proposal === null) keepHappens = { how: "dismiss", consequence: "Closes the Drift; nothing changes", aria, blocked: false, carries: {} };
   else if (d.proposalBlock !== null) keepHappens = { how: "accept-proposal", consequence: d.proposalBlock.reason, aria, blocked: true, carries: {} };
   else keepHappens = { how: "accept-proposal", consequence: `Approves Proposal ${name("proposal", d.proposal)} and changes the Model to match`, aria, blocked: false, carries: {} };
-  if (d.merge === true) {
-    keepShould.consequence = "A Task is created to reconcile the conflicts";
-    keepHappens = { how: "dismiss", consequence: "Every Proposal in the round returns to To decide and the worktrees are deleted", aria, blocked: false, carries: {} };
-  }
   return {
     happens: d.sides?.happens ?? d.body,
     should: d.sides?.should ?? LEGACY_SHOULD,
@@ -205,15 +201,13 @@ function fixControls(d: DriftView, handlers: DriftHandlers, sync: () => void): H
   return box;
 }
 
-/** `keep` is null when the Drift can no longer be decided: the side shows its text only. */
-function column(heading: string, source: string | null, text: string, keep: (() => DriftChoice) | null, handlers: DriftHandlers, primary: boolean, controls?: (sync: () => void) => HTMLElement): HTMLElement {
+function column(heading: string, source: string | null, text: string, keep: () => DriftChoice, handlers: DriftHandlers, primary: boolean, controls?: (sync: () => void) => HTMLElement): HTMLElement {
   const col = el("section", "drift-compare-col");
   const head = el("h4", "drift-compare-head", heading);
   if (source !== null) head.append(" ", el("span", "drift-compare-source", source));
   const body = renderMarkdown(text, handlers.openLink);
   body.classList.add("drift-compare-text");
   col.append(head, body);
-  if (keep === null) return col;
   const { button, consequence, sync } = keepButton(keep, handlers, primary);
   if (controls) col.append(controls(sync));
   col.append(button, consequence);
@@ -225,14 +219,11 @@ export function renderDriftCompare(d: DriftView, handlers: DriftHandlers): HTMLE
   const c = driftComparison(d, fixSelection(d), handlers.name);
   const block = el("div", "drift-compare-block");
   const grid = el("div", "drift-compare");
-  // A worktree's Drift is no longer decided once its round has started merging.
-  const open = d.merging !== true;
   grid.append(
-    column("What happens", null, c.happens, open ? () => driftComparison(d, fixSelection(d), handlers.name).keepHappens : null, handlers, false),
-    column("What should happen", c.shouldSource, c.should, open ? () => driftComparison(d, fixSelection(d), handlers.name).keepShould : null, handlers, true, (sync) => fixControls(d, handlers, sync)),
+    column("What happens", null, c.happens, () => driftComparison(d, fixSelection(d), handlers.name).keepHappens, handlers, false),
+    column("What should happen", c.shouldSource, c.should, () => driftComparison(d, fixSelection(d), handlers.name).keepShould, handlers, true, (sync) => fixControls(d, handlers, sync)),
   );
   block.append(grid);
-  if (!open) block.append(el("p", "drift-compare-consequence", "The round has started merging: this Drift can no longer be decided and goes with the round."));
   if (c.where !== null) {
     const details = el("details", "drift-compare-where");
     details.open = handlers.where?.open ?? false;

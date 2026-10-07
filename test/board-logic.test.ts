@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, doneGroups, formatCounts, interleave, proposalBadges, summarizeChanges, summarizeFile, withdrawnNotice, worktreeCards } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, doneGroups, formatCounts, interleave, proposalBadges, summarizeChanges, summarizeFile, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { runBlocker } from "../src/core/design";
 import { namerOf } from "../src/core/card-names";
 
@@ -21,19 +21,10 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   areas: [],
   ...over,
 });
-const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, worktree: null, ...over });
-const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, finished: null, blockedBy: [], file: "tasks/0012-refunds.md", worktree: null, ...over });
-const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], inWorktree: [], worktreeProposals: [], drifts: [], tasks: [], announcements: [], multiBranch: false, numbers: { proposal: {}, task: {}, drift: {} }, ...over });
+const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, ...over });
+const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, finished: null, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
+const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], announcements: [], scanHold: { on: false, held: 0 }, numbers: { proposal: {}, task: {}, drift: {} }, ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
-
-test("a Proposal in a worktree is its own group and is not a card to decide; Remove from round is only before the merge", () => {
-  const cards = worktreeCards(snapshot({ inWorktree: [{ id: "0008", title: "Ship", removable: true }, { id: "0009", title: "Wait", removable: false }] }));
-  expect(cards).toEqual([
-    { kind: "worktree", key: "worktree:0008", id: "0008", name: { text: "0008", isNumber: false }, heading: "Proposal 0008", title: "Ship", removable: true },
-    { kind: "worktree", key: "worktree:0009", id: "0009", name: { text: "0009", isNumber: false }, heading: "Proposal 0009", title: "Wait", removable: false },
-  ]);
-  expect(buildBoard(snapshot({ inWorktree: [{ id: "0008", title: "Ship", removable: true }] }))[0]?.cards).toEqual([]);
-});
 
 test("groups the snapshot into four columns, Proposals before Drifts in To decide", () => {
   const board = buildBoard(
@@ -188,13 +179,6 @@ test("a blocked Task, alone or inside a design, gets one badge per blocker that 
   ]);
   const inDesign = buildBoard(snapshot({ tasks: [design("0001", "todo"), { ...design("0002", "todo"), blockedBy: [blockedBy[0] as TaskView["blockedBy"][number]] }] }))[1]?.cards[0];
   expect(inDesign?.kind === "design" && inDesign.tasks.map((t) => t.blocks.map((b) => b.label))).toEqual([[], ["blocked 0003"]]);
-  // In a worktree the Diagram does not draw the Drift: both badges lead to the cards of that worktree.
-  const away = buildBoard(snapshot({ tasks: [task({ blockedBy, worktree: "p1" }), task({ id: "0009", worktree: "p1" })] }))[1]?.cards ?? [];
-  expect(away[0]?.kind === "task" && away[0].blocks.map((b) => [b.tooltip.endsWith("Go to its card."), b.target])).toEqual([
-    [true, { kind: "card", key: "worktree:p1:drift:0003" }],
-    [true, { kind: "card", key: "worktree:p1:task:0009" }],
-  ]);
-  expect(away[1]?.key).toBe("worktree:p1:task:0009");
 });
 
 test("a badge that leads to a Task shown as a row of a design card leads to that design card, opened on the row", () => {
@@ -206,9 +190,6 @@ test("a badge that leads to a Task shown as a row of a design card leads to that
   const alone = buildBoard(snapshot({ tasks: [task({ id: "0002", blockedBy: fix }), design("0009", "todo"), design("0010", "todo")] }))[1]?.cards ?? [];
   expect(alone.map((c) => c.key)).toEqual(["task:0002", "design:0007"]);
   expect(alone[0]?.kind === "task" && alone[0].blocks.map((b) => b.target)).toEqual([{ kind: "card", key: "design:0007", row: "task:0009" }]);
-  // In a worktree too.
-  const away = buildBoard(snapshot({ tasks: [{ ...design("0001", "todo"), worktree: "p1", blockedBy: fix }, { ...design("0009", "todo"), worktree: "p1" }] }))[1]?.cards[0];
-  expect(away?.kind === "design" && away.tasks[0]?.blocks.map((b) => b.target)).toEqual([{ kind: "card", key: "design:0007", row: "worktree:p1:task:0009" }]);
 });
 
 const announcement = (over: Partial<AnnouncementView> = {}): AnnouncementView => ({ id: "abc123", kind: "proposal", title: "Refunds", phase: "preparing", ...over });
@@ -247,6 +228,18 @@ test("a ghost says Preparing, Writing, or that the agent waits for the answers w
 
 test("the notice of a withdrawn announcement names its kind and title", () => {
   expect(withdrawnNotice(announcement({ kind: "task", title: "Refunds" }))).toBe("The agent finished without delivering Task Refunds.");
+});
+
+test("a check stands in In progress after the real cards, in the order announced, and shows its phase even while a question round is open", () => {
+  const columns = buildBoard(snapshot({ tasks: [task({ id: "0001", column: "doing" })] }));
+  const placed = announcedGhosts(columns, [announcement({ id: "c00001", kind: "check", title: "Scan of Refunds", phase: "scanning" }), announcement({ id: "c00002", kind: "check", title: "Final check after all Tasks", phase: "verifying" })], true);
+  expect(placed.doing.map((g) => [g.card.title, g.index, g.card.phase])).toEqual([["Scan of Refunds", 1, "Scanning"], ["Final check after all Tasks", 1, "Verifying (tests, lint, build)"]]);
+  expect([placed.decide, placed.todo]).toEqual([[], []]);
+  expect(placed.doing[1]?.card).toMatchObject({ kindLabel: "Check", label: "Agent checking the code: Final check after all Tasks, Verifying (tests, lint, build)" });
+});
+
+test("the notice of a withdrawn check says the agent stopped before finishing it", () => {
+  expect(withdrawnNotice(announcement({ kind: "check", title: "Scan of the System", phase: "scanning" }))).toBe("The agent stopped before finishing Scan of the System.");
 });
 
 test("a rework announcement keeps the Proposal's identity in its file and shows its number while it is live", () => {

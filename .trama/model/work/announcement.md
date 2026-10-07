@@ -8,10 +8,12 @@ An announcement belongs to the agent terminal in which its agent runs, when ther
 
 Un annuncio fatto dall'agente della chat di Cursor non appartiene a nessun terminale ma al progetto: lo ritira anche l'interruzione o la chiusura di una conversazione di Trama dello stesso progetto (vedi l'Actor cursor-chat). Un turno concluso normalmente non lo ritira, perché in una chat l'agente può essersi fermato solo per aspettare una risposta a testo del developer e poi riprendere: in quel caso il timer dei quindici minuti resta la rete di sicurezza.
 
+Un annuncio può anche essere un controllo: non una scheda che arriverà, ma il lavoro che l'agente sta ancora facendo quando nessuna scheda lo mostra più. Lo annuncia l'agente quando comincia la fase finale di una corsa che ha realizzato dei Task (la verifica di test, lint e build e, se tocca, lo scan del System intero), e quando comincia una scansione: quella dopo l'approvazione di una Proposal, quella in sospeso che parte spegnendo Hold scan e quella chiesta a mano dal developer. Il suo ghost sta in In progress, con un titolo che dice di quale lavoro si tratta e una fase, Verifying o Scanning. Un controllo non arriva mai come scheda: finisce quando l'agente dice che ha finito, e allora sparisce senza avvisi. Se invece è ritirato prima (fine del comando, chiusura del terminale, interruzione della chat di Cursor, quindici minuti di quiete) il developer è avvisato che l'agente si è fermato prima di finirlo.
+
 ## States
 
 ### Announced (initial)
-The card has not arrived yet. The Board shows its ghost. Whatever the agent or the clock does with it applies in both sub-States.
+The card has not arrived yet, or the check is not finished. The Board shows its ghost. Whatever the agent or the clock does with it applies in every sub-State.
 - `agent.SUBMIT_PROPOSAL` → Delivered: the agent hands over the Proposal the announcement is bound to, so its card arrives in To decide.
 - `agent.FILE_TASK` → Delivered: the agent files the Task it announced.
 - `agent.FILE_DRIFT` → Delivered: the agent files the Drift it announced.
@@ -23,14 +25,25 @@ The card has not arrived yet. The Board shows its ghost. Whatever the agent or t
 - `time.QUIET_PERIOD_ELAPSED` → Withdrawn: nothing happened for fifteen minutes, so the agent is taken to have stopped; the developer is told, as when the command ends.
 
 #### Preparing (initial)
-The agent is working on it and nothing is written yet; it may be waiting for the developer's answers.
+The agent is working on it and nothing is written yet; it may be waiting for the developer's answers. Un controllo non passa mai da qui: nasce già in Verifying o in Scanning, secondo la fase che l'agente dichiara annunciandolo.
 - `agent.START_PROPOSAL` → Writing: only for an announced Proposal; the new Draft is bound to the announcement and the ghost takes its title. The Draft is taken by the oldest announcement of the developer's request still Preparing, or by the one the agent names.
 
 #### Writing
 The Draft of the Proposal exists and the agent is writing it.
 
+#### Checking
+Solo per un controllo: l'agente sta ancora lavorando dopo che le schede della sua corsa hanno lasciato In progress, o sta scansionando. Il ghost sta in In progress e mostra la fase.
+- `agent.FINISH_CHECK` → Delivered: l'agente dice che il controllo è finito; il ghost sparisce senza avvisi. Le schede che il controllo ha archiviato sono già arrivate da sole.
+
+##### Verifying (initial)
+L'agente esegue la verifica finale della corsa: test, lint e build.
+- `agent.CHANGE_CHECK_PHASE` → Scanning: la verifica è passata e le condizioni dello scan finale sono vere, quindi l'agente comincia a scansionare il System intero.
+
+##### Scanning
+L'agente confronta il codice con il Modello e i Requisiti.
+
 ### Delivered (final)
-The real card has arrived and the ghost is gone.
+The real card has arrived, or the agent finished the check, and the ghost is gone.
 
 ### Withdrawn (final)
 The card never came and the ghost is gone.

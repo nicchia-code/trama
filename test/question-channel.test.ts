@@ -101,32 +101,19 @@ test("an authoritative endpoint for another project refuses without presentation
   expect(presentations).toBe(0);
 });
 
-test("the launching window takes rounds from the worktrees of its round, while they stay in it", async () => {
+test("a worktree of the window's repository is another project, even on a trama branch", async () => {
   const git = (cwd: string, ...args: string[]) => {
     const result = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd });
     if (result.exitCode !== 0) throw new Error(result.stderr.toString());
   };
   git(projectRoot, "init", "-q");
   git(projectRoot, "commit", "-q", "--allow-empty", "-m", "start");
-  const proposal = join(root, "project.trama-worktrees", "abcd1234");
-  const merge = join(root, "project.trama-worktrees", "merge");
-  const foreign = join(root, "foreign");
-  git(projectRoot, "worktree", "add", "-q", "-b", "trama/abcd1234", proposal);
-  git(projectRoot, "worktree", "add", "-q", "-b", "trama/merge", merge);
-  git(projectRoot, "worktree", "add", "-q", "-b", "elsewhere", foreign);
-  const ids = [proposal, merge].map((folder) => questionProjectId(projectAt(folder)));
-  const callers: string[] = [];
-  const editor = await server(async (caller) => { callers.push(questionProjectId(caller)); return answer("choice"); });
-  const from = (folder: string) => askEditor(projectAt(folder), round(), {}, { runtimeDir, env: { [QUESTION_ENDPOINT_ENV]: editor.endpoint } });
-  expect(await from(proposal)).toEqual(answer("choice"));
-  expect(await from(merge)).toEqual(answer("choice"));
-  // The rounds stay anchored to the worktree the agent works in.
-  expect(callers).toEqual(ids);
-  // A worktree outside the round is another project.
-  expect(await from(foreign)).toMatchObject({ status: "unavailable" });
-  git(projectRoot, "worktree", "remove", proposal);
-  expect(await from(proposal)).toMatchObject({ status: "unavailable" });
-  expect(callers).toEqual(ids);
+  const worktree = join(root, "project.trama-worktrees", "abcd1234");
+  git(projectRoot, "worktree", "add", "-q", "-b", "trama/abcd1234", worktree);
+  let presentations = 0;
+  const editor = await server(async () => { presentations++; return answer("choice"); });
+  expect(await askEditor(projectAt(worktree), round(), {}, { runtimeDir, env: { [QUESTION_ENDPOINT_ENV]: editor.endpoint } })).toMatchObject({ status: "unavailable" });
+  expect(presentations).toBe(0);
 });
 
 test("discovery selects focus recency among live same-project windows, never sends rounds to probes", async () => {

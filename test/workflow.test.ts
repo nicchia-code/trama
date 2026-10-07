@@ -217,7 +217,8 @@ describe("Tasks and Drifts", () => {
     expect(() => moveTask(p, id, "doing", "agent")).toThrow(/blocked/);
     expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: false });
     expect(moveTask(p, id, "done", "agent").data.column).toBe("done");
-    expect(moveTask(p, id, "doing", "agent").data).toMatchObject({ column: "doing", agent: true });
+    expect(() => moveTask(p, id, "doing", "agent")).toThrow(new RegExp(`Drift ${named("drift", drift.id)} "Refunds differ"`));
+    expect(getTask(p, id).data).toMatchObject({ column: "done", agent: false });
     expect(moveTask(p, id, "todo", "agent").data.column).toBe("todo");
 
     resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
@@ -242,6 +243,8 @@ describe("Tasks and Drifts", () => {
 
     const finished = origin("done");
     resolveDrift(p, drift(finished), "fix-code", [], { option: 1 });
+    expect(getTask(p, finished).data.column).toBe("done");
+    expect(() => moveTask(p, finished, "doing", "agent")).toThrow(/fixes the code for Drift/);
     expect(getTask(p, finished).data.column).toBe("done");
 
     const dismissedOrigin = origin("doing");

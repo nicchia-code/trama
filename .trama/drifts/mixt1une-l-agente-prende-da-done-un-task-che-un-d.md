@@ -1,13 +1,13 @@
 ---
-status: open
-resolution: null
+status: resolved
+resolution: fix-code
 refs:
   - task/Done/agent.MOVE_TASK_TO_DOING
   - requirements/rules#task
 proposal: null
-task: null
+task: nvrhkpby
 origin: null
-option: null
+option: 1
 note: null
 created: 2026-10-06T21:08:04.309Z
 ---

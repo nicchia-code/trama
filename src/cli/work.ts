@@ -2,14 +2,12 @@ import { approvalBlock, changes, getProposal, health, listProposals, type Propos
 import { requiredReasons } from "../core/required";
 import { hasContent, loadProject, parseRequirementRef, type Area, type ProjectModel, requirementsFor, resolveProjectRef } from "../core/requirements";
 import { requirementSkillNames } from "../core/requirement-skills";
-import { byCreation, type Project } from "../core/store";
+import type { Project } from "../core/store";
 import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
 import { formatDiagnostic } from "../core/model";
 import { placeTasks } from "../core/design";
 import type { Blocker } from "../core/blocking";
-import { blockedTasks, COLUMNS, type Drift, driftOptions, driftSides, listDrifts, listTasks, nextTask, roundWork, type Task } from "../core/work";
-import { inWorktreeProposals, openProposalsAwaitingDecision } from "../core/worktree-round";
-import { readMergeDrift, reconciliationTasks } from "../core/worktree-merge";
+import { blockedTasks, COLUMNS, type Drift, driftOptions, driftSides, listDrifts, listTasks, nextTask, type Task } from "../core/work";
 import { machineReceiverLines, outgoingLines, reactionLines, stateTreeLines } from "./explore";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 
@@ -324,29 +322,13 @@ export function driftListView(p: Project, all: boolean): Result {
 export function boardView(p: Project): Result {
   const numbers = syncShortNumbers(p);
   const allProposals = listProposals(p);
-  const proposals = openProposalsAwaitingDecision(p, allProposals).map((x) => proposalSummary(p, x, numbers));
-  const inWorktree = inWorktreeProposals(p);
+  const proposals = allProposals.filter((x) => x.data.status === "open").map((x) => proposalSummary(p, x, numbers));
   const drafts = allProposals.filter((x) => x.data.status === "draft").map((x) => proposalSummary(p, x, numbers));
   const titles = new Map(allProposals.map((x) => [x.id, x.title]));
-  const folders = roundWork(p);
-  const driftCards = [
-    ...listDrifts(p).filter((d) => d.data.status === "open").map((drift) => ({ drift, worktree: false })),
-    ...folders.flatMap(({ drifts: born }) => born.filter((d) => d.data.status === "open").map((drift) => ({ drift, worktree: true }))),
-  ];
-  const drifts = byCreation(driftCards, (item) => ({ id: item.drift.id, created: item.drift.data.created })).map((item) => ({ ...driftSummary(item.drift, numbers), worktree: item.worktree }));
+  const drifts = listDrifts(p).filter((d) => d.data.status === "open").map((d) => driftSummary(d, numbers));
   const blocked = blockedTasks(p);
-  const taskCards = [
-    ...listTasks(p).map((task) => ({ task, blocked, worktree: false })),
-    ...folders.flatMap(({ project: home, tasks: born }) => {
-      const why = blockedTasks(home);
-      return born.map((task) => ({ task, blocked: why, worktree: true }));
-    }),
-    ...reconciliationTasks(p.root).map((task) => ({ task, blocked: new Map<string, Blocker[]>(), worktree: true })),
-  ];
-  const placed = placeTasks(
-    byCreation(taskCards, (item) => ({ id: item.task.id, created: item.task.data.created })).map((item) => ({ ...taskSummary(item.task, item.blocked, numbers), worktree: item.worktree })),
-  );
-  const line = (t: TaskSummary & { worktree?: boolean }) => `${t.number ?? t.id} ${t.title}${t.technical ? " (technical)" : ""}${t.worktree ? " (worktree)" : ""}${t.agent ? WORKING : ""}${blockedMarks(t.blockedBy, numbers)}`;
+  const placed = placeTasks(listTasks(p).map((task) => taskSummary(task, blocked, numbers)));
+  const line = (t: TaskSummary) => `${t.number ?? t.id} ${t.title}${t.technical ? " (technical)" : ""}${t.agent ? WORKING : ""}${blockedMarks(t.blockedBy, numbers)}`;
   const entries = (column: string) =>
     placed
       .filter((x) => x.column === column)
@@ -363,12 +345,10 @@ export function boardView(p: Project): Result {
     "# Board",
     "",
     ...(drafts.length === 0 ? [] : ["## In writing", bullets(drafts.map((i) => `- Proposal ${i.number ?? i.id} (draft): ${i.title}`)), ""]),
-    ...(inWorktree.length === 0 ? [] : ["## In worktree", bullets(inWorktree.map((i) => `- Proposal ${numbers.name("proposal", i.id)}: ${i.title}`)), ""]),
     "## To decide",
     bullets([
       ...proposals.map((i) => `- Proposal ${i.number ?? i.id}${i.stale ? " (stale)" : ""}: ${i.title}`),
-      ...drifts.map((d) => `- Drift ${d.number ?? d.id}${d.worktree ? " (worktree)" : ""}: ${d.title}${d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : ""}`),
-      ...(readMergeDrift(p.root) ? ["- Merge Drift: Merge"] : []),
+      ...drifts.map((d) => `- Drift ${d.number ?? d.id}: ${d.title}${d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : ""}`),
     ]),
     "",
     "## To do",
@@ -384,7 +364,6 @@ export function boardView(p: Project): Result {
     md,
     json: {
       inWriting: drafts,
-      inWorktree: inWorktree.map((i) => ({ ...i, number: numbers.label("proposal", i.id) })),
       toDecide: { proposals, drifts },
       todo: entries("todo").map((e) => e.json),
       doing: entries("doing").map((e) => e.json),

@@ -42,8 +42,6 @@ export interface Detail {
   toggle: { state: string; expanded: boolean } | null;
   /** Shown with Approve and Reject: the selected element is a ghost of this Proposal, or none is selected. */
   proposal: ProposalView | null;
-  /** The Proposal belongs to a worktree's Drift: it is decided only there, so it has no Approve or Reject of its own. */
-  fromDrift: boolean;
   /** Drawn by the panel as the comparison of what happens and what should happen, with a Keep this for each side. */
   drift: DriftView | null;
   /** The short numbers of the live cards, so the panel writes the cards it names the way the Board does. */
@@ -53,7 +51,7 @@ export interface Detail {
 const item = (text: string, extra: Partial<DetailItem> = {}): DetailItem => ({ text, note: "", change: "same", ref: null, block: false, card: null, ...extra });
 
 function detail(init: Partial<Detail> & Pick<Detail, "kind" | "title">): Detail {
-  return { change: "same", description: "", changes: [], sections: [], file: null, drill: null, toggle: null, proposal: null, fromDrift: false, drift: null, numbers: noNumbers, ...init };
+  return { change: "same", description: "", changes: [], sections: [], file: null, drill: null, toggle: null, proposal: null, drift: null, numbers: noNumbers, ...init };
 }
 
 const transitionItem = (t: MergedTransition): DetailItem => item(`${t.event.owner}.${t.event.name} → ${t.target}`, { note: t.prose, change: t.change });
@@ -282,8 +280,8 @@ export function detailOfSelection(scene: Scene, graph: GraphSpec, selected: stri
   }
   const element = n?.ref ? resolveElement(scene, n.ref) : null;
   const found = element ? detailOfElement(scene, element, n ?? null) : edge ? detailOfEdge(scene, graph, edge) : null;
-  if (!found) return { ...detailOfLevel(scene, graph.level), fromDrift: scene.proposalFromDrift, numbers: scene.numbers };
-  return { ...found, proposal: scene.proposal && found.change !== "same" ? scene.proposal : null, fromDrift: scene.proposalFromDrift, numbers: scene.numbers };
+  if (!found) return { ...detailOfLevel(scene, graph.level), numbers: scene.numbers };
+  return { ...found, proposal: scene.proposal && found.change !== "same" ? scene.proposal : null, numbers: scene.numbers };
 }
 
 /** Plain text for the tooltip of a node or an edge. */

@@ -15,7 +15,6 @@ const drift = (over: Partial<DriftView> = {}): DriftView => ({
   refs: ["order/Shipped"],
   proposal: null,
   proposalBlock: null,
-  worktree: null,
   ...over,
 });
 

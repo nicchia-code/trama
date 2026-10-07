@@ -31,22 +31,16 @@ export type ToHost =
   /** Tracked path: relative to `.trama/model/`, or `requirements/<area>.md`. */
   | { type: "openModelFile"; path: string }
   /** Path relative to `.trama/` (for example `tasks/0003-x.md`). */
-  /** `worktree` is the Proposal whose worktree holds the file, or `merge` for the merge worktree; absent for a file of the open folder. */
-  | { type: "openFile"; path: string; worktree?: string }
-  /** The developer turned the multi-branch switch. `on` is the state they asked for. */
-  | { type: "setMultiBranch"; on: boolean }
+  | { type: "openFile"; path: string }
+  /** The developer turned the Hold scan switch. `on` is the state they asked for. */
+  | { type: "setScanHold"; on: boolean }
   | { type: "approveProposal"; id: string }
   /** The host asks for the feedback with an input box. */
   | { type: "rejectProposal"; id: string }
-  /** Remove one Proposal from the worktree round. Refused once the round has started merging. */
-  | { type: "withdrawFromRound"; id: string }
-  /** Give up a round that is in conflict, being reconciled, or waiting. The open branch is left as it is. */
-  | { type: "abandonRound" }
   /** Keeping what should happen (`fix-code`) carries the number of the selected fix option, from 1, and the note when the developer wrote one; keeping what happens carries neither. */
-  /** `worktree` is the Proposal whose worktree holds the Drift; absent for a Drift of the open folder. The decision is written there. */
-  | { type: "resolveDrift"; id: string; how: "fix-code" | "accept-proposal" | "dismiss"; option?: number; note?: string; worktree?: string }
+  | { type: "resolveDrift"; id: string; how: "fix-code" | "accept-proposal" | "dismiss"; option?: number; note?: string }
   /** The developer clicked "Keep this" on the side of a Drift whose attached Proposal cannot be approved: the host explains why, with a warning. */
-  | { type: "driftBlocked"; id: string; worktree?: string }
+  | { type: "driftBlocked"; id: string }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
   | { type: "openLink"; url: string };
 

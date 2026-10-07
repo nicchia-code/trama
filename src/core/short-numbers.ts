@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { TramaError } from "./errors";
 import { createdField, idField, type Raw } from "./schema";
 import { compareByCreation, listCards, type CardLayout, type Project, readDocument } from "./store";
-import { roundWorktrees, worktreePath, worktreesHome } from "./worktree-round";
 
 export type { CardKind };
 
@@ -50,9 +49,9 @@ const KIND_SPEC: Record<CardKind, { folder: string; layout: CardLayout; field: s
 
 /**
  * The live cards of a kind in one `.trama/` folder, and its Done Tasks that belong to a design. A card that cannot be
- * read has no number: reading it is another command's error to report. `only` keeps the cards whose front matter it accepts.
+ * read has no number: reading it is another command's error to report.
  */
-function cardsIn(dir: string, kind: CardKind, only?: (raw: Raw) => boolean): ReadCard[] {
+function cardsIn(dir: string, kind: CardKind): ReadCard[] {
   const spec = KIND_SPEC[kind];
   const folder = join(dir, spec.folder);
   const cards: ReadCard[] = [];
@@ -60,7 +59,6 @@ function cardsIn(dir: string, kind: CardKind, only?: (raw: Raw) => boolean): Rea
     const file = spec.layout === "folder" ? join(folder, entry.name, "proposal.md") : join(folder, entry.name);
     try {
       const raw = readDocument(file).data;
-      if (only && !only(raw)) continue;
       const state = raw[spec.field] ?? spec.fallback;
       const design = kind === "task" ? designField(raw, file) : null;
       const live = typeof state === "string" && spec.live.includes(state);
@@ -74,26 +72,13 @@ function cardsIn(dir: string, kind: CardKind, only?: (raw: Raw) => boolean): Rea
 }
 
 /**
- * The cards of a kind that hold or may take a number, oldest first. The Tasks and Drifts born in the worktrees of an
- * open round, and the round's reconciliation Task in the merge worktree, are read by this working copy too, so the
- * Board it shows numbers them in its own sequence, whatever the worktree's own file says. A worktree's copy of a card
- * of this working copy is not counted: the card counts as it is here, so resolving or closing it frees its number even
- * during the round. A Done Task is among them only while a Task of its design is in To do or In progress, and then
- * only to keep the number it has.
+ * The cards of a kind that hold or may take a number, oldest first, read only from this working copy. A Done Task is
+ * among them only while a Task of its design is in To do or In progress, and then only to keep the number it has.
  */
 function liveCards(p: Project, kind: CardKind): LiveCard[] {
-  const byId = new Map<string, ReadCard>();
-  for (const card of cardsIn(p.dir, kind)) byId.set(card.id, card);
-  if (kind !== "proposal" && existsSync(worktreesHome(p.root))) {
-    const spec = KIND_SPEC[kind];
-    const own = new Set(listCards(join(p.dir, spec.folder), spec.layout).map((entry) => entry.id));
-    for (const { project } of roundWorktrees(p))
-      for (const card of cardsIn(project.dir, kind)) if (!own.has(card.id) && !byId.has(card.id)) byId.set(card.id, card);
-    if (kind === "task")
-      for (const card of cardsIn(join(worktreePath(p.root, "merge"), ".trama"), kind, (raw) => raw["merge"] === true)) if (!own.has(card.id) && !byId.has(card.id)) byId.set(card.id, card);
-  }
-  const underWay = new Set([...byId.values()].filter((c) => !c.done && c.design !== null).map((c) => c.design));
-  return [...byId.values()]
+  const cards = cardsIn(p.dir, kind);
+  const underWay = new Set(cards.filter((c) => !c.done && c.design !== null).map((c) => c.design));
+  return cards
     .filter((c) => !c.done || underWay.has(c.design))
     .map((c): LiveCard => (c.done ? { id: c.id, created: c.created, keepOnly: true } : { id: c.id, created: c.created }))
     .sort(compareByCreation);

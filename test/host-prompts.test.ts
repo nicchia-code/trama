@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildApprovalScanPrompt, buildPrompt, buildReconcilePrompt, buildScanPrompt, buildWorktreeTasksPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
+import { buildApprovalScanPrompt, buildHeldScanPrompt, buildPrompt, buildScanPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "design", prompt: "  Add refunds to checkout \n" })).toBe("Use the trama-design skill. Add refunds to checkout");
@@ -25,23 +25,16 @@ test("several Features are listed in backticks, comma separated", () => {
   expect(buildScanPrompt([])).toBe("Use the trama-scan skill on the whole System.");
 });
 
-test("in a worktree the Tasks run in groups and leave the whole-System check to the merge", () => {
-  expect(buildWorktreeTasksPrompt("ab12cd34")).toBe(
-    'Use the trama-implement skill on every Task of Proposal ab12cd34 that is in the "todo" column, taking them from `trama task next --batch --proposal ab12cd34`, one group at a time, until it says there is none. Do not scan the whole System at the end: Trama checks the code after the merge.',
+test("the automatic scan after an approval reads the Proposal's scan scope and stops after the scan", () => {
+  expect(buildApprovalScanPrompt("ab12cd34")).toBe(
+    "Use the trama-scan skill on what Proposal ab12cd34 changed: its scan scope is in `trama proposal show ab12cd34`. Link every Task you file to it with --proposal ab12cd34.",
   );
 });
 
-test("the reconciliation Task in the merge worktree leaves the whole-System check to the merge", () => {
-  expect(buildReconcilePrompt("ab12cd34")).toBe(
-    "Use the trama-implement skill on Task ab12cd34. Do not scan the whole System at the end: Trama checks the code after the merge.",
-  );
-});
-
-test("the automatic scan after an approval reads the Proposal's scan scope, and goes on to implement only with autoImplement on", () => {
-  const scan = "Use the trama-scan skill on what Proposal ab12cd34 changed: its scan scope is in `trama proposal show ab12cd34`. Link every Task you file to it with --proposal ab12cd34.";
-  expect(buildApprovalScanPrompt("ab12cd34", false)).toBe(scan);
-  expect(buildApprovalScanPrompt("ab12cd34", true)).toBe(
-    `${scan} If the scan files no Drift, go on with the trama-implement skill on every Task of Proposal ab12cd34 that is in the "todo" column, taking them from \`trama task next --batch --proposal ab12cd34\`, one group at a time, until it says there is none.`,
+test("the held scan names the Proposals oldest first, and is the automatic scan's instruction for one Proposal", () => {
+  expect(buildHeldScanPrompt(["ab12cd34"])).toBe(buildApprovalScanPrompt("ab12cd34"));
+  expect(buildHeldScanPrompt(["aaaa1111", "bbbb2222"])).toBe(
+    "Use the trama-scan skill on what Proposals aaaa1111, bbbb2222 changed: each scan scope is in `trama proposal show <id>`. Compare every reference once, against the current Model, and link every Task you file with --proposal to the most recent of those Proposals whose scan scope covers it.",
   );
 });
 
@@ -58,7 +51,7 @@ test("the agent terminal is named after the work: the card's short number, or a 
 });
 
 test("a chosen language ends the instruction on the same line, trimmed; blank asks nothing", () => {
-  const scan = buildApprovalScanPrompt("ab12cd34", true);
+  const scan = buildApprovalScanPrompt("ab12cd34");
   expect(withLanguage("Use the trama-scan skill on the whole System.", "  Italian ")).toBe(
     "Use the trama-scan skill on the whole System. Write everything you generate in Italian, except code, which always stays in English.",
   );

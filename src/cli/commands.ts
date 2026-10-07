@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TramaError, UsageError } from "../core/errors";
-import { type AgentOrigin, ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote } from "../core/announcements";
+import { type AgentOrigin, ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote, CHECK_PHASES, type CheckPhase, changeCheckPhase, finishCheck } from "../core/announcements";
 import { installSkills, missingSkills, removeRetiredSkills, skillConflicts } from "./skills";
 import {
   approveProposal,
@@ -33,9 +33,7 @@ import type { Model } from "../core/types";
 import type { Warning } from "../core/graph";
 import { rewriteNumberedCards } from "../core/rewrite-ids";
 import { type Drift, getDrift, getTask, moveTask, newDrift, newTask, replaceDriftProposal, resolveDrift, takeBackTask } from "../core/work";
-import { withdrawFromRound, worktreeEarlyRefusal } from "../core/worktree-round";
-import { approvalBySwitch, readMultiBranch } from "../core/multi-branch";
-import { approveWaitMs, EDITOR_UNAVAILABLE, waitApproveResult, writeApprovedNotice, writeApproveRequest } from "../core/approve-request";
+import { writeApprovedNotice } from "../core/approve-request";
 import { approvedScope } from "../core/scope";
 import {
   analyzeView,
@@ -191,7 +189,7 @@ export const COMMANDS: Command[] = [
   {
     name: "ids rewrite",
     args: "",
-    summary: "Give every numbered Proposal, Task and Drift its own identity, keeping number order. Refused while a worktree round is open, when two cards of one kind share a number, or when a new identity would collide. Does nothing when none are numbered",
+    summary: "Give every numbered Proposal, Task and Drift its own identity, keeping number order. Refused when two cards of one kind share a number, or when a new identity would collide. Does nothing when none are numbered",
     developerOnly: true,
     run(ctx) {
       const project = ctx.project(false);
@@ -250,11 +248,27 @@ export const COMMANDS: Command[] = [
     },
   },
 
-  { name: "announce", args: "<kind> <title>", summary: "Say that you are about to create a card, so the Board shows a ghost of it: kind is proposal, task or drift. Prints the announcement ID; pass it as --announcement when you create the card", run(ctx, a) {
+  { name: "announce", args: "<kind> <title>", summary: "Say that you are about to create a card, so the Board shows a ghost of it: kind is proposal, task or drift. Prints the announcement ID; pass it as --announcement when you create the card. Kind check (with --phase verifying or scanning) announces a final check or a scan instead, shown in In progress until announce done", options: { phase: { type: "string" } }, run(ctx, a, o) {
       const kind = a[0] as string;
       if (!(ANNOUNCEMENT_KINDS as readonly string[]).includes(kind)) throw new UsageError(`The kind must be one of ${ANNOUNCEMENT_KINDS.join(", ")}, not "${kind}"`);
-      const announcement = announce(ctx.project(), { kind: kind as AnnouncementKind, title: a[1] as string, ...ctx.origin });
-      return text(announcement.id, { id: announcement.id, kind: announcement.kind, title: announcement.title });
+      const phase = str(o["phase"]);
+      if (kind === "check" && phase === undefined) throw new UsageError(`A check needs --phase ${CHECK_PHASES.join(" or ")}`);
+      if (kind !== "check" && phase !== undefined) throw new UsageError("--phase is only for a check");
+      if (phase !== undefined && !(CHECK_PHASES as readonly string[]).includes(phase)) throw new UsageError(`--phase must be one of ${CHECK_PHASES.join(", ")}, not "${phase}"`);
+      const announcement = announce(ctx.project(), { kind: kind as AnnouncementKind, title: a[1] as string, ...(phase ? { phase: phase as CheckPhase } : {}), ...ctx.origin });
+      return text(announcement.id, { id: announcement.id, kind: announcement.kind, title: announcement.title, ...(announcement.phase ? { phase: announcement.phase } : {}) });
+    } },
+  { name: "announce phase", args: "<id> <phase>", summary: "Move a check you announced from verifying to scanning, when the scan of the whole System starts", run(ctx, a) {
+      const id = a[0] as string;
+      if (a[1] !== "scanning") throw new UsageError(`A check can only move to scanning, not "${a[1]}"`);
+      const outcome = changeCheckPhase(ctx.project(), id, "scanning");
+      const md = outcome === "changed" ? `Check ${id} is now scanning` : outcome === "unchanged" ? `Check ${id} is already scanning; nothing changed.` : `No check "${id}" was found (unknown, already finished or withdrawn, or not a check); nothing changed.`;
+      return text(md, { id, outcome });
+    } },
+  { name: "announce done", args: "<id>", summary: "Say that a check you announced is finished, before you report: its ghost goes away with no notice", run(ctx, a) {
+      const id = a[0] as string;
+      const found = finishCheck(ctx.project(), id);
+      return text(found ? `Check ${id} is done` : `No check "${id}" was found (unknown, already finished or withdrawn, or not a check); nothing changed.`, { id, found });
     } },
   { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code; --announcement <id> names the announcement of this Proposal; --request <id> binds it to the written design request it comes from); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" }, announcement: { type: "string" }, request: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
@@ -294,36 +308,17 @@ export const COMMANDS: Command[] = [
     } },
   { name: "proposal show", args: "<id>", summary: "A Proposal: staleness, structural changes, validation", run: (ctx, a) => proposalShowView(ctx.project(), getProposal(ctx.project(), a[0] as string, true)) },
   { name: "proposal list", args: "", summary: "Draft and open Proposals (--all for every one)", options: { all: { type: "boolean" } }, run: (ctx, _a, o) => proposalListView(ctx.project(), o["all"] === true) },
-  { name: "proposal approve", args: "<id>", summary: "Accept an open Proposal. Off or unreadable applies it in this folder; on asks the open editor to run it in a worktree, as the panel does (--skills-dir adds the configured skills folder when it is applied here)", developerOnly: true, options: { "skills-dir": ref }, run(ctx, a, o) {
+  { name: "proposal approve", args: "<id>", summary: "Accept an open Proposal and apply it in this folder (--skills-dir adds the configured skills folder)", developerOnly: true, options: { "skills-dir": ref }, run(ctx, a, o) {
       const project = ctx.project();
       const id = proposalArg(ctx, a[0] as string);
-      const skillsDirs = list(o["skills-dir"]);
-      const decision = approvalBySwitch(readMultiBranch(project));
-      if (decision.route === "folder") {
-        const { id: approved, features } = approvedScope(project, id, () => approveProposal(project, id, skillsDirs));
-        if (features.length > 0) writeApprovedNotice(project, approved);
-        const line = `Approved Proposal ${numbersOf(ctx).name("proposal", approved)}`;
-        return text(decision.notice ? `${decision.notice}\n${line}` : line, { id: approved, number: numbersOf(ctx).label("proposal", approved), status: "approved", ...(decision.notice ? { notice: decision.notice } : {}) });
-      }
-      const early = worktreeEarlyRefusal(project, id);
-      if (early) throw new TramaError(early);
-      const request = writeApproveRequest(project, id, skillsDirs);
-      const result = waitApproveResult(project, request.nonce, approveWaitMs());
-      if (!result) throw new TramaError(EDITOR_UNAVAILABLE);
-      if (!result.ok) throw new TramaError(result.message);
-      return text(result.message, { id, number: numbersOf(ctx).label("proposal", id), worktree: true });
+      const { id: approved, features } = approvedScope(project, id, () => approveProposal(project, id, list(o["skills-dir"])));
+      if (features.length > 0) writeApprovedNotice(project, approved);
+      return text(`Approved Proposal ${numbersOf(ctx).name("proposal", approved)}`, { id: approved, number: numbersOf(ctx).label("proposal", approved), status: "approved" });
     } },
   { name: "proposal reject", args: "<id>", summary: "Reject a Proposal, optionally with feedback for the agent", developerOnly: true, options: { feedback: { type: "string" } }, run(ctx, a, o) {
       const p = rejectProposal(ctx.project(), proposalArg(ctx, a[0] as string), str(o["feedback"]));
       const n = numbersOf(ctx);
       return text(`Rejected Proposal ${n.name("proposal", p.id)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status });
-    } },
-  { name: "proposal withdraw", args: "<id>", summary: "Remove one Proposal from the worktree round, before the round starts merging", developerOnly: true, run(ctx, a) {
-      const id = proposalArg(ctx, a[0] as string);
-      const { remaining } = withdrawFromRound(ctx.project(), id);
-      const left = remaining === 0 ? "There is no round left." : `${remaining} ${remaining === 1 ? "Proposal remains" : "Proposals remain"} in the round.`;
-      const n = numbersOf(ctx);
-      return text(`Removed Proposal ${n.name("proposal", id)} from the round. It is open again. ${left}`, { id, number: n.label("proposal", id), remaining });
     } },
 
   { name: "task new", args: "<title>", summary: "Create a Task in 'todo' (--ref … or --technical; --proposal <id> links it to the design it comes from; --announcement <id> names the announcement of this Task)", options: { ref, technical: { type: "boolean" }, drift: { type: "string" }, proposal: { type: "string" }, body: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {

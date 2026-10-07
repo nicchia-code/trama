@@ -79,7 +79,7 @@ export class EditorQuestions implements vscode.Disposable {
       server: createQuestionServer({
         project,
         focusedAt: vscode.window.state.focused ? Date.now() : 0,
-        // The channel admits only this project and the worktrees of its round.
+        // The channel admits only this project.
         handler: async (_callerProject, request, context) => {
           if (this.closed || this.service !== service) return unavailableQuestions();
           return queue.ask(request, context);

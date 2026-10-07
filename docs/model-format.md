@@ -183,7 +183,7 @@ base:
 delete:
   - checkout/legacy.md
 request: 2026-10-04T19-05-12 # optional: the written design request it was born from; kept after the request is consumed
-scanScope: # written by Trama when an ordinary Proposal is approved or enters a worktree; never changed afterwards
+scanScope: # written by Trama when an ordinary Proposal is approved; never changed afterwards
   - ref: order/Paid
     reason: changed # or "removed, its container", or "leads into a change"
   - ref: order/Awaiting payment/payment.SUCCEEDED
@@ -207,7 +207,7 @@ Written by the developer on rejection, only when they gave some.
 - **Rejecting** sets `status: rejected` and appends `## Feedback` when the developer gave feedback; it is optional, and an empty or blank one adds nothing. The agent answers with a new Proposal.
 - **Discarding** a draft the agent never finished sets `status: discarded`; no feedback is written. Only drafts can be discarded.
 - **Bound to a written design request**: `request` names the request the agent opened the Proposal for (`trama proposal new --request <id>`); only the first Proposal of a design is bound. Handing it over deletes the request file. Proposals written before the field existed have none.
-- **Scan scope**: `scanScope` lists what a targeted scan compares with the code, worked out from the Model and Requirements before and after the Proposal when an ordinary Proposal is approved or enters a worktree: every State, Transition and Event added or changed, with what it contains; the changed description of a Machine, Feature or Actor, alone; every Requirement section added or changed, compared by Area and reference whatever fragment holds it; a new Machine whole; an element removed as its nearest container that still exists; and the Transitions of any Machine that enter those elements or react to a changed Event. The System description and fragment titles and descriptions add nothing. A Proposal in a worktree carries it in its worktree's copy until the merge brings it here. Imports, Proposals not approved yet and those approved before the field existed have none.
+- **Scan scope**: `scanScope` lists what a targeted scan compares with the code, worked out from the Model and Requirements before and after the Proposal when an ordinary Proposal is approved: every State, Transition and Event added or changed, with what it contains; the changed description of a Machine, Feature or Actor, alone; every Requirement section added or changed, compared by Area and reference whatever fragment holds it; a new Machine whole; an element removed as its nearest container that still exists; and the Transitions of any Machine that enter those elements or react to a changed Event. The System description and fragment titles and descriptions add nothing. Imports, Proposals not approved yet and those approved before the field existed have none.
 - Approved, rejected and discarded Proposals stay on disk as history.
 
 ## Element references
@@ -321,6 +321,7 @@ touched: 2026-01-01T12:03:10.000Z
 - The title is the H1. Once a Draft is bound to it, the ghost shows the Draft's own title instead.
 - An announcement with no Draft is **Preparing**, with one it is **Writing**; both are shown as ghosts. A file that cannot be read is skipped, not reported.
 - `terminal` is the ID (six lowercase letters and digits) the extension gives each agent terminal it starts, in the `TRAMA_TERMINAL` environment variable. Only that terminal's command ending or closing withdraws the announcement; without a terminal (announced from the chat or by an agent Trama did not start, or written before the field existed, which has no `terminal` line) only the quiet period and the editor starting up do.
+- `kind: check` è un controllo: non annuncia una scheda ma la verifica finale di una corsa o una scansione. Ha anche `phase` (`verifying` o `scanning`), che manca negli altri annunci, non ha mai `proposal` e il suo `source` è sempre `agent`. Il ghost sta in In progress; `trama announce done` lo consegna e cancella il file.
 - `chat` is `cursor` when the announcement was made by Cursor's chat agent: the command ran with `CURSOR_AGENT=1` and without `TRAMA_TERMINAL`. It is written only then, so an announcement with `chat` has no `terminal`; announcements written before the field existed have no `chat` line and read as before. Such an announcement belongs to the project: an interrupted or failed turn of a Trama conversation in Cursor's chat for that project withdraws it with the notice, closing such a conversation withdraws it with none, and a turn that ends normally leaves it to the card's arrival or the quiet period.
 - The folder holds a `.gitignore` that ignores everything in it, written with the first announcement, so announcements are never versioned.
 

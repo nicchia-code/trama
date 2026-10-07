@@ -1,15 +1,17 @@
 import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ApprovalOptions, applyApprovedProposal } from "../extension/src/host/approval";
 import { approvalInbox, takeApprovedNotices } from "../src/core/approve-request";
+import { HELD_SCAN_NOT_STARTED, NOTHING_HELD_TO_SCAN, readScanHold, turnScanHoldOff, turnScanHoldOn } from "../src/core/scan-hold";
 import { run } from "../src/cli/main";
-import { approveProposal, editInProposal, getProposal, newProposal } from "../src/core/proposals";
+import { approveProposal, editInProposal, getProposal, newProposal, save } from "../src/core/proposals";
 import { handOver } from "./handover";
 import { type Project, projectAt } from "../src/core/store";
 import { newDrift, resolveDrift } from "../src/core/work";
+import { cardName } from "../src/core/short-numbers";
 
 let dir: string;
 let p: Project;
@@ -32,6 +34,7 @@ const options = (over: Partial<ApprovalOptions> = {}): ApprovalOptions => ({
   launchScan: async (proposal) => {
     scanned.push(proposal);
   },
+  warn: () => {},
   ...over,
 });
 
@@ -109,6 +112,65 @@ describe("one Scan after every approved Proposal", () => {
   });
 });
 
+describe("with Hold scan on, an approval from the panel is held instead of scanned", () => {
+  test("held once, in order, even without an agent command; turning on again keeps what is held", async () => {
+    expect(turnScanHoldOn(p)).toBeNull();
+    const first = proposalEditing("checkout/order.md", orderChange);
+    await applyApprovedProposal(options({ agentConfigured: false }), first, () => approveProposal(p, first));
+    const second = proposalEditing("checkout/order.md", (t) => t.replace("### Lost (final)", "### Lost (final)\n\n### Found (final)"));
+    await applyApprovedProposal(options(), second, () => approveProposal(p, second));
+    expect(scanned).toEqual([]);
+    expect(turnScanHoldOn(p)).toBeNull();
+    expect(readScanHold(p).held).toEqual([first, second]);
+  });
+
+  test("with automatic scan off nothing is held, and an import is never held", async () => {
+    turnScanHoldOn(p);
+    const id = proposalEditing("checkout/order.md", orderChange);
+    await applyApprovedProposal(options({ autoScan: false }), id, () => approveProposal(p, id));
+    const prop = newProposal(p, "Import: checkout", "", { kind: "import" });
+    const file = editInProposal(p, prop.id, "checkout/order.md");
+    writeFileSync(file, readFileSync(file, "utf8").replace("### Lost (final)", "### Gone (final)"));
+    handOver(p, prop.id);
+    await applyApprovedProposal(options(), prop.id, () => approveProposal(p, prop.id));
+    expect(readScanHold(p).held).toEqual([]);
+    expect(scanned).toEqual([]);
+  });
+
+  test("turning off: nothing held sends nothing; undelivered keeps everything; delivered sends one scan oldest first and empties", async () => {
+    turnScanHoldOn(p);
+    const sent: string[][] = [];
+    const send = (delivered: boolean) => async (ids: string[]) => (sent.push(ids), delivered);
+    expect(await turnScanHoldOff(p, send(true))).toBeNull();
+    expect([sent, readScanHold(p).reading.kind]).toEqual([[], "off"]);
+
+    turnScanHoldOn(p);
+    const first = proposalEditing("checkout/order.md", orderChange);
+    await applyApprovedProposal(options(), first, () => approveProposal(p, first));
+    const second = proposalEditing("checkout/order.md", (t) => t.replace("### Lost (final)", "### Lost (final)\n\n### Found (final)"));
+    await applyApprovedProposal(options(), second, () => approveProposal(p, second));
+    expect(await turnScanHoldOff(p, send(false))).toBe(HELD_SCAN_NOT_STARTED);
+    expect(readScanHold(p)).toEqual({ reading: { kind: "on" }, held: [first, second] });
+    expect(await turnScanHoldOff(p, send(true))).toBeNull();
+    expect(sent).toEqual([[first, second], [first, second]]);
+    expect(readScanHold(p)).toEqual({ reading: { kind: "off" }, held: [] });
+  });
+
+  test("turning off when no held Proposal affects a Feature any more sends nothing, empties and says so", async () => {
+    turnScanHoldOn(p);
+    const id = proposalEditing("checkout/order.md", orderChange);
+    await applyApprovedProposal(options(), id, () => approveProposal(p, id));
+    const gone = getProposal(p, id);
+    save({ ...gone, data: { ...gone.data, scanScope: [{ ref: "nowhere", reason: "changed" }] } });
+    const sent: string[][] = [];
+    expect(await turnScanHoldOff(p, async (ids) => (sent.push(ids), true))).toBe(NOTHING_HELD_TO_SCAN);
+    expect(sent).toEqual([]);
+    expect(readScanHold(p).reading.kind).toBe("off");
+    turnScanHoldOn(p);
+    expect(readScanHold(p).held).toEqual([]);
+  });
+});
+
 describe("an approval from the command line reaches the open editor's automatic scan", () => {
   const cli = (...args: string[]) => run(["--root", dir, ...args], dir, {});
 
@@ -148,5 +210,17 @@ describe("an approval from the command line reaches the open editor's automatic 
     cli("proposal", "approve", id);
     expect(takeApprovedNotices(p, Date.now() + 60_000)).toEqual([]);
     expect(takeApprovedNotices(p, 0)).toEqual([]);
+  });
+
+  test("a leftover multi-branch switch is ignored: the Proposal is applied here and the folder is left as it was", () => {
+    const leftover = join(p.dir, "multi-branch");
+    mkdirSync(leftover, { recursive: true });
+    writeFileSync(join(leftover, "state"), "on\n");
+    const id = proposalEditing("checkout/order.md", orderChange);
+    expect(cli("proposal", "approve", id).out).toBe(`Approved Proposal ${cardName(p, "proposal", id)}`);
+    expect(getProposal(p, id).data.status).toBe("approved");
+    expect(getProposal(p, id).data.scanScope).not.toBeNull();
+    expect(readFileSync(join(leftover, "state"), "utf8")).toBe("on\n");
+    expect(() => cli("proposal", "withdraw", id)).toThrow();
   });
 });

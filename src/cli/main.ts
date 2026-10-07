@@ -7,7 +7,8 @@ import { parseQuestionRequest, questionAborted, questionFailure, type QuestionHa
 import { arity, COMMANDS, type Command, makeContext, type Values } from "./commands";
 import type { Result } from "./result";
 
-const GROUPS = ["proposal", "task", "drift", "skills", "ids"];
+/** Command groups; `announce` is also a command of its own (`announce <kind> <title>`) besides `announce phase` and `announce done`. */
+const GROUPS = ["proposal", "task", "drift", "skills", "ids", "announce"];
 
 function help(): string {
   const width = Math.max(...COMMANDS.map((c) => `${c.name} ${c.args}`.length));
@@ -45,8 +46,9 @@ export function splitGlobals(argv: string[]): { rest: string[]; json: boolean; r
 
 export function pickCommand(rest: string[]): { command: Command; tail: string[] } {
   const [first, second] = rest;
+  const grouped = first !== undefined && GROUPS.includes(first) ? COMMANDS.find((c) => c.name === `${first} ${second ?? ""}`.trim()) : undefined;
   const name = first !== undefined && GROUPS.includes(first) ? `${first} ${second ?? ""}`.trim() : first;
-  const command = COMMANDS.find((c) => c.name === name);
+  const command = grouped ?? COMMANDS.find((c) => c.name === first);
   if (!command) {
     const hint = first !== undefined && GROUPS.includes(first) ? `Known "${first}" commands: ${COMMANDS.filter((c) => c.name.startsWith(`${first} `)).map((c) => c.name.slice(first.length + 1)).join(", ")}` : "Run trama --help";
     throw new UsageError(`Unknown command "${name ?? ""}". ${hint}`);

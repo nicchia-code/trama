@@ -424,6 +424,10 @@ Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": 
 | 17 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with the chat launcher the ghost starts with the Draft | ☐ |
 | 18 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
 | 19 | Restore S2. ↻, then `j task move 1 doing` | The card moves to In progress without ever looking busy; no dashed copy of it appears in In progress at any moment | ☐ |
+| 20 | `C=$(j announce check "Final check after all Tasks" --phase verifying)` | In In progress, dopo le schede vere, un ghost `Check` intitolato `Final check after all Tasks` con la riga `Verifying (tests, lint, build)`; il numero della colonna non cambia | ☐ |
+| 21 | `j announce phase $C scanning`, poi di nuovo lo stesso comando | Il ghost passa a `Scanning`; il secondo comando dice che il controllo è già in Scanning | ☐ |
+| 22 | `j announce done $C` | Il ghost sparisce e **nessun** avviso compare | ☐ |
+| 23 | `j announce check "Scan of the System" --phase scanning`, poi impostare `touched` del suo file a 20 minuti fa e salvare | Entro circa 30 secondi il ghost sparisce e compare l'avviso `The agent stopped before finishing Scan of the System.` | ☐ |
 
 ---
 
@@ -453,7 +457,7 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 |---|---|---|---|
 | 1 | Board: **Approve** on Proposal 0001 | The card leaves To decide (count 3). No error banner | ☐ |
 | 2 | Look at the bottom panel | A terminal named **Scan** opens in the project folder | ☐ |
-| 3 | Read the terminal | Exactly **one** command was sent and one line printed: ``Use the trama-scan skill on what Proposal 0001 changed: its scan scope is in `trama proposal show 0001`. Link every Task you file to it with --proposal 0001. If the scan files no Drift, go on with the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column, taking them from `trama task next --batch --proposal 0001`, one group at a time, until it says there is none.`` | ☐ |
+| 3 | Read the terminal | Exactly **one** command was sent and one line printed: ``Use the trama-scan skill on what Proposal 0001 changed: its scan scope is in `trama proposal show 0001`. Link every Task you file to it with --proposal 0001.``, senza nulla su trama-implement | ☐ |
 | 4 | Verification shell: `j validate` | `The Model and its Requirements are valid.` | ☐ |
 | 5 | `grep -c Returned $D/model/checkout/order.md` | `2` | ☐ |
 | 6 | `ls $D/model/checkout` | `cart.md feature.md order.md payment.md return.md` | ☐ |
@@ -462,7 +466,6 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 | 9 | Diagram, System level, selector `None` | User now has `4 events`; Checkout has `4 machines`; no ghosts for 0001 | ☐ |
 | 10 | Selector | `0001` is no longer listed | ☐ |
 | 11 | `j proposal show 1` | After `## Changes`, a `## Scan scope` section, one reference per line with `(changed)`, `(removed, its container)` or `(leads into a change)`, among them `` `return` (changed) ``; `j --json proposal show 1` has `scanScope` as a list of `{ ref, reason }` | ☐ |
-| 12 | ↻. Add `"trama.autoImplement": false` to the settings, approve Proposal 0001 | The line of G1.3 ends after `--proposal 0001.`: nothing about trama-implement | ☐ |
 
 ### G2. Approve from the Diagram panel
 | # | Action | Expected | ✓ |
@@ -558,7 +561,7 @@ Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." -
 
 ## H. Launching the agent (echo mode, S2)
 
-Each launch sends one command to a terminal named after its work (cwd = the demo folder) and the shell prints the prompt: `Scan` for a scan, `Design` for a design request, the Task's short number (for example `T1`) for **Run**, `All tasks` for **Run all To do**.
+Each launch sends one command to a terminal named after its work (cwd = the demo folder) and the shell prints the prompt: `Scan` for a scan, `Design` for a design request, the Task's short number (for example `T1`) for **Run**, `All tasks` for **Run all To do**. Il terminale non si mostra da solo: l'area dei terminali non si apre se è chiusa, il terminale visibile resta quello di prima e il focus resta dove era; aprire a mano il terminale dall'elenco dei terminali per leggere la riga.
 
 | # | Action | Expected in the terminal | ✓ |
 |---|---|---|---|
@@ -639,7 +642,7 @@ Gli scenari del launcher `external-terminal` su Linux o macOS non sono ancora st
 
 Dopo H55 e H57 ripristinare S2 (`echo {prompt}`, senza launcher); al termine degli scenari del terminale esterno rimuovere l'eventuale valore di prova di `trama.externalTerminalCommand` dalle impostazioni utente.
 
-### H71–H78. Agent terminal as an editor tab
+### H71–H77. Agent terminal as an editor tab
 
 Written from the Requirements for the `terminal-tab` launcher; the rows have not been run yet, so note what you see even when it matches. A settings file with the launcher: `printf '{"trama.agentLauncher": "terminal-tab", "trama.agentCommand": "echo {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (**S2t**), then reload the window. A slow agent: the same with `"trama.agentCommand": "sleep 30; echo {prompt}"` (**S2u**). Open the Trama panel alone in one editor group before each row.
 
@@ -651,10 +654,9 @@ Written from the Requirements for the `terminal-tab` launcher; the rows have not
 | H74 | With S2u, close every agent tab and the group of H73, click **Scan System**, then close the group of the new tab while it runs and click **Scan System** again | Each time a new group opens beside the active one, since the previous tab's group is gone | ☐ |
 | H75 | With S2u, **Quick request…** `Tabbed request`, then close the tab while the command runs | The `Tabbed request` ghost appears at once and is withdrawn when the tab closes, as when the integrated terminal closes; the next **Scan System** opens a new tab beside the active group | ☐ |
 | H76 | Drag the `Scan` tab of H71 into another group, then click **Scan System** twice with S2u | The second new tab opens in the group where Trama had opened the first one, not where you dragged it: Trama does not follow a moved tab | ☐ |
-| H77 | Remove `trama.agentLauncher` from the settings (`auto`), reload, **Scan System** in VS Code; then open the demo in Cursor and click it with `"trama.agentLauncher": "auto"` | VS Code: the `Scan` terminal opens in the terminal area, never as a tab. Cursor: the instruction goes to the chat, never to a tab | ☐ |
-| H78 | With S2t, turn **Multi-branch** on, set `trama.worktreeAgent` in the user settings and approve a Proposal | The worktree's `Trama agent` terminal opens in the terminal area, not as a tab | ☐ |
+| H77 | Remove `trama.agentLauncher` from the settings (`auto`), reload, close the terminal area, click in the panel's search box, then **Scan System** in VS Code; then open the demo in Cursor and click it with `"trama.agentLauncher": "auto"` | VS Code: the `Scan` terminal is created in the terminal area, never as a tab, but is not shown: the terminal area stays closed, the keyboard stays in the search box, and `Scan` is in the list of terminals. Cursor: the instruction goes to the chat, never to a tab | ☐ |
 
-After H71–H78, restore S2 and turn Multi-branch off.
+After H71–H77, restore S2.
 
 ---
 
@@ -850,10 +852,30 @@ Start each block with ↻. `$D` and `j` are the ones of S4.
 | V1 | `j task next --batch` | One Task per line, `<number> <title>`, at most four, the first being the one `j task next` names; no two of them concern the same thing (for example never `order` together with `order/Paid`). Nothing moves | ☐ |
 | V2 | `j --json task next --batch` | `batch`: the same Tasks, each with `id`, `number` and `title` | ☐ |
 | V3 | Move every Task in To do to Done with `j task move <id> done`, then `j task next --batch` and `j task next` | The two outputs are identical: `No Task is runnable.` and the Tasks left | ☐ |
-| V4 | `j proposal show 1` before approving it | No `## Scan scope` section: it is written only on approval or acceptance into a worktree | ☐ |
-| V5 | Turn **Multi-branch** on, set `trama.worktreeAgent` to `echo {prompt}` in the user settings, accept Proposal 0001 | The worktree's terminal receives the targeted scan line of G1.3 **without** the trama-implement part. `trama proposal show 1` run inside the worktree has `## Scan scope`; in the open folder it has none until the merge | ☐ |
-| V6 | In that worktree, `trama task new "Born" --ref order --proposal <id of 0001>`, then let the command end | The same terminal receives ``Use the trama-implement skill on every Task of Proposal <id> that is in the "todo" column, taking them from `trama task next --batch --proposal <id>`, one group at a time, until it says there is none. Do not scan the whole System at the end: Trama checks the code after the merge.`` Turn Multi-branch off afterwards | ☐ |
-| V7 | 🪙 With a real agent that has sub-agents, **Run all To do** with at least three Tasks on different Machines | The agent hands each Task of a group to a sub-agent, waits for all, asks `trama task next --batch` again, runs tests, lint and build once at the end, then scans the whole System and reports the Tasks and Drifts that scan filed | ☐ |
+| V4 | `j proposal show 1` before approving it | No `## Scan scope` section: it is written only on approval | ☐ |
+| V5 | 🪙 With a real agent that has sub-agents, **Run all To do** with at least three Tasks on different Machines | The agent hands each Task of a group to a sub-agent, waits for all, asks `trama task next --batch` again, runs tests, lint and build once at the end, then scans the whole System and reports the Tasks and Drifts that scan filed | ☐ |
+
+## W. Hold scan
+
+Modalità echo (S2), con `trama.autoScan` acceso (il valore predefinito). Iniziare ogni blocco con ↻; `$D` e `j` sono quelli di S4. `<P1>` e `<P2>` sono le identità permanenti di Proposal P1 e P2, lette prima di approvarle con `j --json proposal show P1` e `j --json proposal show P2` (campo `id`). Gli scenari non sono ancora stati eseguiti nell'editor: annotare ciò che si osserva anche quando coincide con l'atteso.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| W1 | Leggere la barra di Diagram, Board e Requirements | In ognuna, subito dopo **Design…**, uno switch spento con etichetta `Hold scan`; nel Diagramma sta prima di **Scan**. Tooltip `When on, approvals wait and one scan runs when you turn it off.`; nome accessibile `Hold scan`, ruolo switch, stato spento (DevTools, Accessibility). `ls -A $D` non ha `scan-hold` | ☐ |
+| W2 | Clic su **Hold scan** nella Board | Si accende subito, senza conferma; anche Diagram e Requirements lo mostrano acceso. `cat $D/scan-hold/state` → `on`; `cat $D/scan-hold/held` è vuoto; `cat $D/scan-hold/.gitignore` → `*` | ☐ |
+| W3 | Board: **Approve** su Proposal P1 | La Proposal è approvata (G1.4–G1.8 valgono) ma **nessun** comando va al terminale. L'etichetta diventa `Hold scan · 1` sulle tre schede, nome accessibile `Hold scan, 1 held`. `cat $D/scan-hold/held` → `<P1>` | ☐ |
+| W4 | Board: **Keep this** sotto **WHAT HAPPENS** del Drift D2 (accetta Proposal P2) | Nessun comando al terminale; `Hold scan · 2`; `held` ha `<P1>` e poi `<P2>`, una per riga | ☐ |
+| W5 | Clic su **Scan System** | La solita riga `Use the trama-scan skill on the whole System.` nel terminale `Scan`; il contatore resta `Hold scan · 2` e `held` non cambia | ☐ |
+| W6 | Clic su **Hold scan** per spegnerlo | Nel terminale **Scan** arriva **una sola** riga: ``Use the trama-scan skill on what Proposals <P1>, <P2> changed: each scan scope is in `trama proposal show <id>`. Compare every reference once, against the current Model, and link every Task you file with --proposal to the most recent of those Proposals whose scan scope covers it.``, senza nulla su trama-implement. Lo switch è spento, etichetta `Hold scan`; `state` → `off`, `held` vuoto | ☐ |
+| W7 | ↻, accendere Hold scan, approvare solo P1, spegnere | Una sola riga, identica a quella di G1.3 per `<P1>` (con una Proposal è l'istruzione della scansione automatica) | ☐ |
+| W8 | ↻, accendere e subito spegnere Hold scan | Nessun comando e nessun avviso; `state` → `off` | ☐ |
+| W9 | ↻, accendere, approvare P1, poi `mv $D/model/checkout /tmp/checkout-away` e spegnere | Nessun comando; avviso `Hold scan is off. The held Proposals no longer affect any Feature, so there was nothing to scan.`; `state` → `off`, `held` vuoto. Rimettere la cartella con `mv /tmp/checkout-away $D/model/checkout` | ☐ |
+| W10 | ↻, accendere, approvare P1. Poi `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ricaricare la finestra, spegnere Hold scan e premere Esc nella richiesta del comando dell'agente (H18) | La richiesta compare una volta; dopo Esc nessun comando parte, lo switch resta acceso con `Hold scan · 1` e compare l'avviso `The held scan was not started, so Hold scan stays on.`; `held` ha ancora `<P1>`. Rimettere S2 | ☐ |
+| W11 | ↻, accendere, poi `j proposal approve P1` dalla verification shell | La Proposal è approvata, nessuna scansione parte e il contatore resta `Hold scan`: la riga di comando non tocca il sospeso. Lo stesso per `j drift resolve D2 --accept-proposal` | ☐ |
+| W12 | ↻, impostare `"trama.autoScan": false` in S2, ricaricare, accendere e approvare P1 | Nessun comando e nessun contatore: con la scansione automatica spenta non c'è nulla da mettere in sospeso | ☐ |
+| W13 | ↻, poi `mkdir -p $D/scan-hold && echo maybe > $D/scan-hold/state` | Lo switch è spento sulle tre schede e compare una volta l'avviso `Trama could not read the Hold scan switch, so it is off.` | ☐ |
+| W14 | ↻, `mkdir -p $D/scan-hold && chmod 555 $D/scan-hold`, poi clic su **Hold scan** | Lo switch resta spento e compare l'avviso `Trama could not save the Hold scan switch.`. Poi `chmod 755 $D/scan-hold` | ☐ |
+| W15 | 🔍 In Cursor, con `trama.autoScan` acceso, accendere, approvare P1 e spegnere | L'istruzione va alla chat come ogni pulsante; se Cursor non riesce a crearla da sé ripiega sul deeplink e sugli appunti, mai sull'avviso **Scan now** | ☐ |
 
 ---
 

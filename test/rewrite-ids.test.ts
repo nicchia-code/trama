@@ -8,7 +8,6 @@ import { getProposal } from "../src/core/proposals";
 import { rewrittenId, rewrittenInstant } from "../src/core/rewrite-ids";
 import { type Project, projectAt } from "../src/core/store";
 import { getDrift, getTask } from "../src/core/work";
-import { worktreesHome } from "../src/core/worktree-round";
 
 let dir: string;
 let p: Project;
@@ -19,7 +18,7 @@ beforeEach(() => {
   p = projectAt(dir);
 });
 afterEach(() => {
-  rmSync(worktreesHome(dir), { recursive: true, force: true });
+  rmSync(`${dir}.trama-worktrees`, { recursive: true, force: true });
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -129,7 +128,7 @@ test("does nothing when no card is numbered, and refuses before writing when num
   expect(existsSync(join(p.dir, "short-numbers", ".gitignore"))).toBe(false);
 });
 
-test("an agent cannot run it, and an open worktree round is left untouched", () => {
+test("an agent cannot run it, and worktrees and trama/* branches left over do not stop it", () => {
   writeCard("tasks", "0007-wait.md", "column: todo\ntechnical: true\nrefs: []", "# Wait\n");
   expect(() => run(["--root", dir, "ids", "rewrite"], dir, { TRAMA_AGENT: "1" })).toThrow(/developer's decision.*TRAMA_AGENT/);
   expect(() => run(["--root", dir, "ids", "rewrite"], dir, { CURSOR_AGENT: "1" })).toThrow(/developer's decision.*CURSOR_AGENT/);
@@ -148,15 +147,14 @@ test("an agent cannot run it, and an open worktree round is left untouched", () 
   git(["commit", "-m", "init"]);
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
   writeFileSync(join(dir, "dirty.txt"), "uncommitted\n");
-  const home = worktreesHome(dir);
-  git(["worktree", "add", "-b", "trama/abcd1234", join(home, "abcd1234"), "HEAD"]);
-  expect(() => cli("ids", "rewrite")).toThrow(/worktree round is open/);
-  expect(existsSync(join(p.dir, "tasks", "0007-wait.md"))).toBe(true);
-  expect(readFileSync(join(p.dir, "tasks", "0007-wait.md"), "utf8")).not.toContain("created:");
-  expect(existsSync(join(p.dir, "short-numbers"))).toBe(false);
-  git(["worktree", "remove", "--force", join(home, "abcd1234")]);
-  git(["branch", "-D", "trama/abcd1234"]);
+  const left = join(`${dir}.trama-worktrees`, "abcd1234");
+  git(["worktree", "add", "-b", "trama/abcd1234", left, "HEAD"]);
+  git(["branch", "trama/merge"]);
   expect(cli("ids", "rewrite").exit).toBe(0);
+  expect(existsSync(join(p.dir, "tasks", "0007-wait.md"))).toBe(false);
+  expect(existsSync(join(p.dir, "tasks", `${rewrittenId("task", "0007")}-wait.md`))).toBe(true);
+  expect(existsSync(join(left, ".trama", "tasks", "0007-wait.md"))).toBe(true);
+  expect(spawnSync("git", ["branch", "--list", "trama/*"], { cwd: dir, encoding: "utf8" }).stdout).toContain("trama/abcd1234");
   expect(spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim()).toBe(head);
   expect(existsSync(join(dir, "dirty.txt"))).toBe(true);
 });

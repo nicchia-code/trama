@@ -1,18 +1,16 @@
 import type { CardNumbers } from "./card-names";
-import { type Announcement, type AnnouncementKind, listAnnouncements } from "./announcements";
+import { type Announcement, type AnnouncementKind, type CheckPhase, listAnnouncements } from "./announcements";
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
 import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type Proposal, type ProposalKind } from "./proposals";
-import { inWorktreeProposals, type InWorktreeProposal, mergeWorktreeOpen, openProposalsAwaitingDecision } from "./worktree-round";
-import { mergeDriftDocument, reconciliationTasks } from "./worktree-merge";
 import { appliesUnder, type RequiredProposal } from "./required";
 import { type Area, areaIdOf, buildProject, type Fragment, parseRequirementRef, type ProjectModel } from "./requirements";
-import { multiBranchOn, readMultiBranch } from "./multi-branch";
-import { byCreation, type Project, readTrackedFiles } from "./store";
+import { readScanHold } from "./scan-hold";
+import { type Project, readTrackedFiles } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
-import { type Column, type Drift, type DriftOption, type DriftSides, driftOptions, driftSides, listDrifts, listTasks, roundWork, type Task } from "./work";
+import { type Column, type DriftOption, type DriftSides, driftOptions, driftSides, listDrifts, listTasks } from "./work";
 
 export interface ActorChange {
   id: string;
@@ -112,12 +110,6 @@ export interface DriftView {
   proposal: string | null;
   /** Why the attached Proposal cannot be approved now (draft, rejected, discarded, stale, waiting, invalid…), or null when it can or there is none. */
   proposalBlock: ApprovalBlock | null;
-  /** Proposal whose worktree this Drift lives in, or null when it lives in the open folder. */
-  worktree: string | null;
-  /** The round's Merge Drift: it lives in the merge worktree and is drawn with the round's own choices. */
-  merge?: boolean;
-  /** A worktree's Drift once the round has started merging: it can no longer be decided and goes with the round. */
-  merging?: boolean;
 }
 
 export interface TaskView {
@@ -140,37 +132,28 @@ export interface TaskView {
   blockedBy: Blocker[];
   /** Path relative to `.trama/`, for opening the file. */
   file: string;
-  /** Proposal whose worktree this Task lives in, `merge` for the round's reconciliation Task, or null when it lives in the open folder. */
-  worktree: string | null;
 }
 
-/** A card the agent is about to create, drawn as a ghost in the column it will land in. */
+/** A card the agent is about to create, drawn as a ghost in the column it will land in, or a check drawn in In progress. */
 export interface AnnouncementView {
   id: string;
   kind: AnnouncementKind;
   /** The Draft's own title once a Draft is bound to it, the announced title before. */
   title: string;
-  /** Preparing until a Draft exists, Writing once it does. */
-  phase: "preparing" | "writing";
+  /** A card: Preparing until a Draft exists, Writing once it does. A check: its own phase. */
+  phase: "preparing" | "writing" | CheckPhase;
 }
 
 export interface Snapshot extends ModelView {
   diagnostics: Diagnostic[];
-  /** Open Proposals that still await a decision. A Proposal in a worktree is not among them. */
+  /** Open Proposals that await a decision. */
   proposals: ProposalView[];
-  /** Proposals that have a worktree. They are a group of their own, not awaiting a decision. */
-  inWorktree: InWorktreeProposal[];
-  /**
-   * Proposals attached to an open Drift of a round's worktree, read in that worktree and drawn over its Model. They
-   * can be shown but not decided: they are accepted only from their Drift.
-   */
-  worktreeProposals: ProposalView[];
   drifts: DriftView[];
   tasks: TaskView[];
   /** The announcements that still exist, in the order they were announced. */
   announcements: AnnouncementView[];
-  /** This working copy's multi-branch switch. On only when its file reads as `on`. */
-  multiBranch: boolean;
+  /** This working copy's Hold scan switch and how many Proposals it holds. Off, with nothing held, when its file is missing or unreadable. */
+  scanHold: { on: boolean; held: number };
   /** The short numbers of this working copy's live cards: the panel writes `T3` where a card is live and its identity where it is closed. */
   numbers: CardNumbers;
 }
@@ -237,11 +220,8 @@ const modelView = (project: ProjectModel): ModelView => ({
   areas: project.areas.map((a) => areaView(a, a, a)),
 });
 
-/**
- * A Proposal as the Diagram and the Requirements tab draw it, read in `p` whose Model is `project`. `overHome` draws
- * it over that Model even when it requires nothing, for a Proposal whose Model is not the open folder's.
- */
-function proposalView(p: Project, project: ProjectModel, proposal: Proposal, overHome: boolean): ProposalView {
+/** A Proposal as the Diagram and the Requirements tab draw it, read in `p` whose Model is `project`. */
+function proposalView(p: Project, project: ProjectModel, proposal: Proposal): ProposalView {
   const afterProject = buildProject(applied(p, proposal));
   const after = afterProject.model;
   const h = health(p, proposal);
@@ -270,7 +250,7 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal, ove
     body: stripTitle(proposal.body),
     kind: proposal.data.kind,
     requires: h.requires,
-    base: pending || overHome ? modelView(baseProject) : null,
+    base: pending ? modelView(baseProject) : null,
     stale: h.stale,
     unbased: h.unbased,
     errors: afterProject.diagnostics,
@@ -301,113 +281,50 @@ export function buildSnapshot(p: Project): Snapshot {
   const blocked = computeBlocked(project, tasks, drifts);
 
   const allProposals = listProposals(p);
-  const proposals = openProposalsAwaitingDecision(p, allProposals).map((proposal) => proposalView(p, project, proposal, false));
+  const proposals = allProposals.filter((x) => x.data.status === "open").map((proposal) => proposalView(p, project, proposal));
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
-  const folders = roundWork(p);
-  // A Drift born in a worktree may carry a Proposal that exists only there: it is drawn over that worktree's Model.
-  const shown = new Set(proposals.map((x) => x.id));
-  const worktreeProposals = folders.flatMap(({ project: home, drifts: born }) => {
-    const attached = new Set(born.filter((d) => d.data.status === "open" && d.data.proposal !== null).map((d) => d.data.proposal as string));
-    const found = listProposals(home).filter((x) => attached.has(x.id) && x.data.status === "open" && !shown.has(x.id));
-    if (found.length === 0) return [];
-    const homeProject = buildProject(readTrackedFiles(home));
-    return found.map((x) => {
-      shown.add(x.id);
-      return proposalView(home, homeProject, x, true);
-    });
-  });
-  const merging = mergeWorktreeOpen(p.root);
-  const viewDrift = (home: Project, d: Drift, worktree: string | null): DriftView => ({
-    id: d.id,
-    title: d.title,
-    body: stripTitle(d.body),
-    sides: driftSides(d),
-    options: driftOptions(d),
-    option: d.data.option,
-    note: d.data.note,
-    requirementsOnly: d.data.refs.every((r) => parseRequirementRef(r) !== null),
-    refs: d.data.refs,
-    proposal: d.data.proposal,
-    proposalBlock: d.data.proposal === null ? null : approvalBlock(home, d.data.proposal),
-    worktree,
-    ...(worktree !== null && merging ? { merging: true } : {}),
-  });
-  const viewTask = (t: Task, why: Map<string, Blocker[]>, worktree: string | null): TaskView => ({
-    id: t.id,
-    title: t.title,
-    body: stripTitle(t.body),
-    column: t.data.column,
-    technical: t.data.technical,
-    refs: t.data.refs,
-    drift: t.data.drift,
-    proposal: t.data.proposal,
-    proposalTitle: (t.data.proposal !== null && proposalById.get(t.data.proposal)?.title) || null,
-    agent: t.data.agent,
-    finished: t.data.finished,
-    blockedBy: why.get(t.id) ?? [],
-    file: `tasks/${t.name}`,
-    worktree,
-  });
-  const openDrifts = drifts.filter((d) => d.data.status === "open").map((drift) => ({ drift, home: p, worktree: null as string | null }));
-  const awayDrifts = folders.flatMap(({ proposal, project: home, drifts: born }) =>
-    born.filter((d) => d.data.status === "open").map((drift) => ({ drift, home, worktree: proposal })),
-  );
-  const awayTasks = folders.flatMap(({ proposal, project: home, tasks: born }) => {
-    // What blocks a Task is what the agent in that worktree sees: every Task and Drift there, copies included.
-    const why = computeBlocked(buildProject(readTrackedFiles(home)), listTasks(home), listDrifts(home));
-    return born.map((task) => ({ task, why, worktree: proposal }));
-  });
-  // The reconciliation Task is technical and linked to nothing, so nothing blocks it.
-  for (const task of reconciliationTasks(p.root)) awayTasks.push({ task, why: new Map(), worktree: "merge" });
-  const orderedTasks = byCreation(
-    [...tasks.map((task) => ({ task, why: blocked, worktree: null as string | null })), ...awayTasks],
-    (item) => ({ id: item.task.id, created: item.task.data.created }),
-  );
+  const hold = readScanHold(p);
   return {
     ...modelView(project),
     diagnostics: project.diagnostics,
     proposals,
-    inWorktree: inWorktreeProposals(p),
-    worktreeProposals,
-    drifts: [
-      ...byCreation([...openDrifts, ...awayDrifts], (item) => ({ id: item.drift.id, created: item.drift.data.created })).map((item) => viewDrift(item.home, item.drift, item.worktree)),
-      ...mergeDriftViews(p),
-    ],
-    tasks: orderedTasks.map((item) => viewTask(item.task, item.why, item.worktree)),
-    // The agents in the round's worktrees announce in their own copy; their ghosts belong on this Board too.
-    announcements: [{ home: p, titles: proposalById }, ...folders.map(({ project: home }) => ({ home, titles: new Map(listProposals(home).map((x) => [x.id, x])) }))]
-      .flatMap(({ home, titles }) => listAnnouncements(home).map((a) => ({ a, title: a.proposal === null ? undefined : titles.get(a.proposal)?.title })))
-      .sort((x, y) => x.a.created.localeCompare(y.a.created) || x.a.id.localeCompare(y.a.id))
-      .map(({ a, title }) => announcementView(a, title)),
-    multiBranch: multiBranchOn(readMultiBranch(p)),
+    drifts: drifts.filter((d) => d.data.status === "open").map((d) => ({
+      id: d.id,
+      title: d.title,
+      body: stripTitle(d.body),
+      sides: driftSides(d),
+      options: driftOptions(d),
+      option: d.data.option,
+      note: d.data.note,
+      requirementsOnly: d.data.refs.every((r) => parseRequirementRef(r) !== null),
+      refs: d.data.refs,
+      proposal: d.data.proposal,
+      proposalBlock: d.data.proposal === null ? null : approvalBlock(p, d.data.proposal),
+    })),
+    tasks: tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      body: stripTitle(t.body),
+      column: t.data.column,
+      technical: t.data.technical,
+      refs: t.data.refs,
+      drift: t.data.drift,
+      proposal: t.data.proposal,
+      proposalTitle: (t.data.proposal !== null && proposalById.get(t.data.proposal)?.title) || null,
+      agent: t.data.agent,
+      finished: t.data.finished,
+      blockedBy: blocked.get(t.id) ?? [],
+      file: `tasks/${t.name}`,
+    })),
+    announcements: listAnnouncements(p).map((a) => announcementView(a, a.proposal === null ? undefined : proposalById.get(a.proposal)?.title)),
+    scanHold: { on: hold.reading.kind === "on", held: hold.held.length },
     numbers,
   };
 }
 
-/** The Merge Drift of a round, drawn in To decide. It is not a Drift file of the open folder. */
-function mergeDriftViews(p: Project): DriftView[] {
-  const drift = mergeDriftDocument(p.root);
-  if (!drift) return [];
-  return [{
-    id: drift.id,
-    title: drift.title,
-    body: stripTitle(drift.body),
-    sides: driftSides(drift),
-    options: driftOptions(drift),
-    option: null,
-    note: null,
-    requirementsOnly: false,
-    refs: [],
-    proposal: null,
-    proposalBlock: null,
-    worktree: null,
-    merge: true,
-  }];
-}
-
 /** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. */
 export function announcementView(a: Announcement, proposalTitle: string | undefined): AnnouncementView {
-  return { id: a.id, kind: a.kind, title: proposalTitle || a.title, phase: a.proposal === null ? "preparing" : "writing" };
+  return { id: a.id, kind: a.kind, title: proposalTitle || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : "writing") };
 }
 
 /** The title is shown separately, so the body drops its leading H1. */

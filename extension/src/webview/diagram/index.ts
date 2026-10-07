@@ -1,5 +1,5 @@
 import { cardLabel, noNumbers } from "../../../../src/core/card-names";
-import { createMultiBranchSwitch } from "../multi-branch-switch";
+import { createScanHoldSwitch } from "../scan-hold-switch";
 import type { Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
 import type { MountView, View } from "../types";
@@ -10,7 +10,7 @@ import { type GraphSpec, type Level, sameLevel } from "./graph";
 import { breadcrumb, buildGraph, drillTarget, scanFeature, validLevel } from "./levels";
 import { createPanel } from "./panel";
 import { type Scene, buildScene, pathTo } from "./scene";
-import { viewableProposals, viewOfRef } from "../requirements/logic";
+import { viewOfRef } from "../requirements/logic";
 import css from "./diagram.css" with { type: "text" };
 
 /** The Model reference of what a level shows, for the Requirements attached to it. */
@@ -63,8 +63,8 @@ export const mountDiagram: MountView = (root, context) => {
   const crumbs = $("nav.dg-crumbs");
   const select = $<HTMLSelectElement>("select[data-proposal]");
   const scan = $<HTMLButtonElement>("button[data-scan]");
-  const multiBranch = createMultiBranchSwitch((on) => context.post({ type: "setMultiBranch", on }));
-  scan.before(multiBranch.element);
+  const scanHold = createScanHoldSwitch((on) => context.post({ type: "setScanHold", on }));
+  scan.before(scanHold.element);
 
   let snapshot: Snapshot | null = null;
   let scene: Scene | null = null;
@@ -103,7 +103,7 @@ export const mountDiagram: MountView = (root, context) => {
   /** Rebuilds the Scene and the graph of the current level from the state above. */
   function compute() {
     if (!snapshot) return;
-    if (proposalId && !viewableProposals(snapshot).some((p) => p.id === proposalId)) proposalId = null;
+    if (proposalId && !snapshot.proposals.some((p) => p.id === proposalId)) proposalId = null;
     scene = buildScene(snapshot, proposalId);
     level = validLevel(scene, level);
     graph = buildGraph(scene, level, expanded);
@@ -128,10 +128,9 @@ export const mountDiagram: MountView = (root, context) => {
     });
 
     select.replaceChildren(new Option("None", ""));
-    for (const p of viewableProposals(snapshot)) {
+    for (const p of snapshot.proposals) {
       const marks = [p.stale.length > 0 ? "stale" : "", p.unbased.length > 0 ? "unbased" : "", p.errors.length > 0 ? "invalid" : ""].filter(Boolean);
-      const where = snapshot.worktreeProposals.includes(p) ? " (worktree)" : "";
-      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} · ${p.title}${where}${marks.length > 0 ? ` ⚠ ${marks.join(", ")}` : ""}`, p.id));
+      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} · ${p.title}${marks.length > 0 ? ` ⚠ ${marks.join(", ")}` : ""}`, p.id));
     }
     select.value = proposalId ?? "";
 
@@ -169,7 +168,7 @@ export const mountDiagram: MountView = (root, context) => {
 
   /** Looking at a Drift that comes with an open Proposal shows what accepting it would do: draws that Proposal. Returns whether it changed. */
   function drawProposalOf(drift: { proposal?: string | null } | undefined): boolean {
-    if (!drift?.proposal || drift.proposal === proposalId || !snapshot || !viewableProposals(snapshot).some((p) => p.id === drift.proposal)) return false;
+    if (!drift?.proposal || drift.proposal === proposalId || !snapshot || !snapshot.proposals.some((p) => p.id === drift.proposal)) return false;
     proposalId = drift.proposal;
     return true;
   }
@@ -221,7 +220,7 @@ export const mountDiagram: MountView = (root, context) => {
   }
 
   function apply(options: NavigateOptions) {
-    if (options.proposal && snapshot && viewableProposals(snapshot).some((p) => p.id === options.proposal)) proposalId = options.proposal;
+    if (options.proposal && snapshot && snapshot.proposals.some((p) => p.id === options.proposal)) proposalId = options.proposal;
     if (options.drift) navigateDrift(options.drift);
     else if (options.ref) navigateRef(options.ref);
     else draw(false);
@@ -256,7 +255,7 @@ export const mountDiagram: MountView = (root, context) => {
   const view: View = {
     update(next) {
       snapshot = next;
-      multiBranch.setOn(next.multiBranch);
+      scanHold.set(next.scanHold.on, next.scanHold.held);
       if (pending) {
         const options = pending;
         pending = null;

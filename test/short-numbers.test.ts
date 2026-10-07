@@ -9,7 +9,6 @@ import { newProposal, rejectProposal, submitProposal } from "../src/core/proposa
 import { buildSnapshot } from "../src/core/snapshot";
 import { shortNumbersDir, syncShortNumbers } from "../src/core/short-numbers";
 import { type Project, projectAt } from "../src/core/store";
-import { worktreePath, worktreesHome } from "../src/core/worktree-round";
 import { moveTask, newDrift, newTask, resolveDrift } from "../src/core/work";
 
 let dir: string;
@@ -22,7 +21,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
-  rmSync(worktreesHome(dir), { recursive: true, force: true });
+  rmSync(`${dir}.trama-worktrees`, { recursive: true, force: true });
 });
 
 const assigned = () => join(shortNumbersDir(p), "assigned");
@@ -333,8 +332,8 @@ describe("as a command argument", () => {
   });
 });
 
-describe("cards in the worktrees of a round", () => {
-  test("the open folder numbers them in its own sequence, once, and keeps them while the worktree lasts", () => {
+describe("cards in a worktree left from a round", () => {
+  test("this working copy numbers only its own cards", () => {
     const git = (...args: string[]) => {
       const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, encoding: "utf8" });
       if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
@@ -343,35 +342,13 @@ describe("cards in the worktrees of a round", () => {
     git("init", "-q");
     git("add", "-A");
     git("commit", "-q", "-m", "x");
-    const home = worktreePath(dir, "abcd1234");
+    const home = join(`${dir}.trama-worktrees`, "abcd1234");
     git("worktree", "add", "-q", "-b", "trama/abcd1234", home);
     const theirs = newTask(projectAt(home), { title: "Theirs", refs: ["order"], technical: false });
     const found = newDrift(projectAt(home), { title: "Found", refs: ["order"], options: FIX_OPTIONS, happens: "h", should: "s" });
 
     const numbers = syncShortNumbers(p);
-    expect([numbers.of("task", mine.id), numbers.of("task", theirs.id), numbers.of("drift", found.id)]).toEqual([1, 2, 1]);
-    expect(syncShortNumbers(p).of("task", theirs.id)).toBe(2);
-    expect(existsSync(join(home, ".trama/short-numbers"))).toBe(false);
-  });
-
-  test("a card of the open folder closed during the round frees its number, though the worktree still holds it open", () => {
-    const git = (...args: string[]) => {
-      const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, encoding: "utf8" });
-      if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
-    };
-    const old = drift("Old");
-    const mine = task("Mine");
-    git("init", "-q");
-    git("add", "-A");
-    git("commit", "-q", "-m", "x");
-    git("worktree", "add", "-q", "-b", "trama/abcd1234", worktreePath(dir, "abcd1234"));
-    expect([numberOf("drift", old.id), numberOf("task", mine.id)]).toEqual([1, 1]);
-
-    resolveDrift(p, old.id, "dismiss");
-    moveTask(p, mine.id, "done", "developer");
-
-    expect([numberOf("drift", old.id), numberOf("task", mine.id)]).toEqual([null, null]);
-    expect(numberOf("drift", drift("New").id)).toBe(1);
+    expect([numbers.of("task", mine.id), numbers.of("task", theirs.id), numbers.of("drift", found.id)]).toEqual([1, null, null]);
   });
 });
 

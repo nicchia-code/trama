@@ -28,6 +28,12 @@ The agent files a new Task.
 ### FILE_DRIFT
 The agent files a new Drift.
 
+### CHANGE_CHECK_PHASE
+L'agente dice che un controllo che ha annunciato passa a una nuova fase, per esempio dalla verifica allo scan.
+
+### FINISH_CHECK
+L'agente dice che un controllo che ha annunciato è finito, con la verifica e lo scan conclusi o non necessari.
+
 ### REPLACE_DRIFT_PROPOSAL
 The agent attaches a newer Proposal to a Drift in place of the stale one attached to it, after the developer asked it to rework that Proposal.
 

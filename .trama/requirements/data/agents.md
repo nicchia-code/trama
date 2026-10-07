@@ -1,5 +1,5 @@
 ---
-description: "Usa quando tocchi i dati di richieste di design, worktree, multi-branch e round di domande."
+description: "Usa quando tocchi i dati di richieste di design, Hold scan e round di domande."
 ---
 # Dati del lavoro dell'agente
 
@@ -8,14 +8,11 @@ description: "Usa quando tocchi i dati di richieste di design, worktree, multi-b
 - La cartella ha un suo `.gitignore` che ignora tutto ciò che contiene, così le richieste non sono mai versionate; Trama lo scrive insieme alla prima richiesta.
 - Quali richieste sono state inviate non sta nel file né sotto `.trama/`: l'estensione tiene l'elenco degli ID inviati nel proprio stato per l'area di lavoro, che sopravvive ai riavvii dell'editor. Un ID il cui file non esiste più è tolto dall'elenco. Un file in `requests/` il cui ID non è nell'elenco è una richiesta in Writing.
 
-## worktree-round
-- Il giro non è un file del progetto. Trama lo ricava dai worktree git il cui branch è `trama/<id di una Proposal>` o `trama/merge`, e dalle cartelle sorelle del repository.
-- Il Merge Drift è un file `.trama/merge-drift.md` nel worktree di merge, con le sezioni `## What happens`, `## What should happen` e `## Fix options`, come un Drift. Non è un file `drifts/` della cartella aperta e non resta dopo l'unione.
-- Il Task di riconciliazione è un file di Task nel worktree di merge con `merge: true` nel front matter, `technical: true` e `column` come gli altri Task. Non è copiato nella cartella aperta dall'unione.
-
-## multi-branch
-- Una cartella `.trama/multi-branch/`, locale a questa copia di lavoro e non versionata. Il file `state` contiene `on` oppure `off`, con al più un a capo finale. La cartella ha un suo `.gitignore` che ignora tutto ciò che contiene (il testo `*`), scritto insieme al primo `state`.
-- Cartella o file assenti: l'interruttore è spento. Un file presente che, tolto al più un a capo finale, non è `on` né `off`: l'interruttore è spento e il developer è avvisato.
+## scan-hold
+- Una cartella `.trama/scan-hold/`, locale a questa copia di lavoro e non versionata, con un suo `.gitignore` che ignora tutto ciò che contiene (il testo `*`), scritto insieme al primo file.
+- Il file `state` contiene `on` oppure `off`, con al più un a capo finale. Il file `held` elenca le identità permanenti delle Proposal in sospeso, una per riga, nell'ordine in cui sono entrate (la più vecchia prima). Il contatore mostrato è il numero di righe valide di `held`.
+- Cartella o `state` assenti: l'interruttore è spento e il sospeso è vuoto. `held` assente: sospeso vuoto. Un `state` che, tolto al più un a capo finale, non è `on` né `off`: l'interruttore è spento, `held` non conta e il developer è avvisato.
+- Una riga di `held` vuota, ripetuta o che non nomina una Proposal approvata non conta e si toglie alla scrittura successiva.
 
 ## question-round
 - The request is a JSON object containing `questions` in presentation order. Each question contains a unique non-empty `id`, non-empty `question`, `options` containing `{label, description}`, a zero-based `recommended` option index and a `multi` boolean.

@@ -9,10 +9,15 @@ import { type Project, readDocument, writeDocument, writeFileEnsuringDir } from 
 /**
  * An announcement is a card the agent is about to create, kept in a temporary file so the Board can show a ghost of
  * it meanwhile. It is not a card: nothing decides on it, and it lasts only as long as the agent's work. A delivered or
- * withdrawn announcement ceases to exist, so there is no ended state to read back.
+ * withdrawn announcement ceases to exist, so there is no ended state to read back. A `check` announces no card but the
+ * work the agent still does when no card shows it (the final check of a run, or a scan); it ends when the agent says so.
  */
-export type AnnouncementKind = "proposal" | "task" | "drift";
-export const ANNOUNCEMENT_KINDS: readonly AnnouncementKind[] = ["proposal", "task", "drift"];
+export type AnnouncementKind = "proposal" | "task" | "drift" | "check";
+export const ANNOUNCEMENT_KINDS: readonly AnnouncementKind[] = ["proposal", "task", "drift", "check"];
+
+/** The phase of a check: the final verification (tests, lint, build) or the scan. The only change is Verifying → Scanning. */
+export type CheckPhase = "verifying" | "scanning";
+export const CHECK_PHASES: readonly CheckPhase[] = ["verifying", "scanning"];
 
 /** `agent`: announced by the agent. `request`: announced by Trama when a design request was sent. */
 export type AnnouncementSource = "agent" | "request";
@@ -33,6 +38,8 @@ export interface Announcement {
   terminal: string | null;
   /** `cursor` when Cursor's chat agent made it (see `CURSOR_AGENT_ENV`); null otherwise and in announcements written before this field existed. Never set together with `terminal`. */
   chat: Chat | null;
+  /** The phase of a check; null for every other kind. */
+  phase: CheckPhase | null;
   /** The title as announced; the ghost of a bound Draft shows the Draft's own title instead. */
   title: string;
 }
@@ -105,6 +112,7 @@ function parse(raw: Raw, body: string, id: string, where: string): Announcement 
     touched: stamp("touched"),
     terminal: terminalField(raw, where),
     chat: raw["chat"] === undefined || raw["chat"] === null ? null : enumField(raw, "chat", CHATS, "cursor", where),
+    phase: raw["phase"] === undefined || raw["phase"] === null ? null : enumField(raw, "phase", CHECK_PHASES, "verifying", where),
     title: /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? id,
   };
 }
@@ -121,9 +129,9 @@ function write(p: Project, a: Announcement) {
   // The folder ignores itself and everything in it, so announcements are never versioned.
   const ignore = join(dir, ".gitignore");
   if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
-  const { id, title, chat, ...data } = a;
-  // `chat` is written only when set, so announcements of a terminal or of the developer look as before.
-  writeDocument(join(dir, `${id}.md`), chat ? { ...data, chat } : data, `# ${title}\n`);
+  const { id, title, chat, phase, ...data } = a;
+  // `chat` and `phase` are written only when set, so the other announcements look as before.
+  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}) }, `# ${title}\n`);
 }
 
 function remove(p: Project, id: string) {
@@ -156,11 +164,12 @@ export const getAnnouncement = (p: Project, id: string): Announcement | null => 
 /** Announces a card as soon as it is known it will be created. Refreshes the quiet period of every announcement. */
 export function announce(
   p: Project,
-  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string } & AgentOrigin,
+  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase } & AgentOrigin,
   now = new Date(),
 ): Announcement {
   const title = input.title.trim().replace(/\s+/g, " ");
   if (!title) throw new TramaError("An announcement needs a title");
+  if ((input.kind === "check") !== (input.phase !== undefined)) throw new TramaError(input.kind === "check" ? "A check needs a phase" : "Only a check has a phase");
   markActivity(p, now);
   // Strictly after the latest one, so announcements announced within one millisecond still keep their order.
   const latest = Math.max(0, ...listAnnouncements(p).map((a) => Date.parse(a.created)));
@@ -174,6 +183,7 @@ export function announce(
     touched: stamp,
     terminal: input.terminal ?? null,
     chat: input.terminal ? null : (input.chat ?? null),
+    phase: input.phase ?? null,
     title,
   };
   write(p, announcement);
@@ -234,6 +244,32 @@ export function deliverCard(p: Project, id: string | undefined, kind: "task" | "
   const a = id ? getAnnouncement(p, id) : null;
   if (a?.kind === kind) remove(p, a.id);
   markActivity(p);
+}
+
+const findCheck = (p: Project, id: string) => {
+  const a = getAnnouncement(p, id);
+  return a?.kind === "check" ? a : null;
+};
+
+/**
+ * The agent moves a check to Scanning. Returns `changed`, `unchanged` when it is already Scanning, or `missing` when
+ * `id` is no check that still exists: never an error, so the agent goes on.
+ */
+export function changeCheckPhase(p: Project, id: string, phase: "scanning", now = new Date()): "changed" | "unchanged" | "missing" {
+  const check = findCheck(p, id);
+  if (!check) return "missing";
+  if (check.phase === phase) return "unchanged";
+  markActivity(p, now);
+  write(p, { ...check, phase, touched: now.toISOString() });
+  return "changed";
+}
+
+/** The agent says a check is finished: it is delivered, with no notice. False when `id` is no check that still exists. */
+export function finishCheck(p: Project, id: string): boolean {
+  const check = findCheck(p, id);
+  if (!check) return false;
+  remove(p, check.id);
+  return true;
 }
 
 /** Withdraws every announcement still waiting, or only `ids`; returns what was withdrawn so the developer can be told. */
