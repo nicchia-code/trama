@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -169,7 +169,8 @@
             "Send the prompt to the agent chat built into the editor. In Cursor a new chat sends it by itself; if Cursor does not allow that, the chat waits for your confirmation and Enter, or the prompt is copied to the clipboard. In VS Code it goes to Copilot's chat, or to the clipboard if the chat is not available."
           ],
           "default": "auto",
-          "markdownDescription": "Where the Design, Scan and Run buttons send their prompt. `auto` (the default) uses the chat in Cursor and the integrated terminal elsewhere; `terminal` is the editor's integrated terminal; `terminal-tab` is the editor's integrated terminal, opened as an editor tab beside the active one; `external-terminal` is a window of your system's default terminal, outside the editor (Linux and macOS only); `chat` is the agent chat built into the editor. Choosing `terminal`, `terminal-tab`, `external-terminal` or `chat` always wins."
+          "scope": "application",
+          "markdownDescription": "Where the Design, Scan and Run buttons send their prompt. `auto` (the default) uses the chat in Cursor and the integrated terminal elsewhere; `terminal` is the editor's integrated terminal; `terminal-tab` is the editor's integrated terminal, opened as an editor tab beside the active one; `external-terminal` is a window of your system's default terminal, outside the editor (Linux and macOS only); `chat` is the agent chat built into the editor. Choosing `terminal`, `terminal-tab`, `external-terminal` or `chat` always wins. It only applies in your user settings: a project cannot choose it."
         },
         "trama.externalTerminalCommand": {
           "type": "string",

@@ -47,7 +47,7 @@ export function agentName(context: { fromTramaTerminal?: boolean; fromCursorChat
 /**
  * Where the buttons send their prompt: `auto` (the default) is the chat in Cursor and the integrated terminal (in the
  * terminal area) elsewhere, never the editor tab nor the external one; `terminal`, `terminal-tab`, `external-terminal`
- * or `chat` chosen by hand always win.
+ * or `chat` chosen by hand always win. Application scope: only the user's settings count, never a project's.
  */
 export type AgentLauncher = "terminal" | "terminal-tab" | "external-terminal" | "chat";
 
