@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { closeSync, ftruncateSync, openSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { announcementsDir, isQuiet, listAnnouncements, withdrawAll } from "../../../src/core/announcements";
+import { announcementsDir, listAnnouncements, quietAnnouncements, withdrawAll } from "../../../src/core/announcements";
 import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { boundDraftsChangedAt, getProposal, listProposals } from "../../../src/core/proposals";
@@ -110,14 +110,14 @@ export function watchAnnouncements(root: () => string | undefined): vscode.Dispo
   const timer = setInterval(() => {
     const current = root();
     if (current === undefined) return;
-    let quiet = false;
+    let quiet: string[] = [];
     guarded(() => {
       const p = projectAt(current);
       const waiting = listAnnouncements(p);
       synchronizeTitles(p, waiting);
-      quiet = !questionRoundOpen() && isQuiet(waiting, Date.now(), Math.max(questionRoundClosedAt(), boundDraftsChangedAt(p, waiting)));
+      if (!questionRoundOpen()) quiet = quietAnnouncements(waiting, Date.now(), Math.max(questionRoundClosedAt(), boundDraftsChangedAt(p, waiting))).map((a) => a.id);
     });
-    if (quiet) withdrawWaiting(current);
+    if (quiet.length > 0) withdrawWaiting(current, (a) => quiet.includes(a.id));
   }, CHECK_EVERY_MS);
   const chat = onCursorChatEvent(onCursorChat);
   return new vscode.Disposable(() => (clearInterval(timer), chat.dispose()));

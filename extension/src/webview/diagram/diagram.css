@@ -55,7 +55,8 @@
 
 .dg-panel { flex: none; width: 340px; overflow: auto; padding: 12px 14px 24px; background: var(--vscode-sideBar-background, #252526); border-left: 1px solid var(--dg-border); }
 .dg-kind { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dg-muted); }
-.dg-kind .dg-id { text-transform: none; letter-spacing: 0; font-family: var(--vscode-editor-font-family, monospace); }
+.dg-id { font-family: var(--vscode-editor-font-family, monospace); }
+.dg-kind .dg-id { text-transform: none; letter-spacing: 0; }
 .dg-panel h2 { margin: 2px 0 6px; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .dg-panel h3 { margin: 2px 0 6px; font-size: 13px; }
 .dg-badge { display: inline-block; margin-bottom: 6px; padding: 1px 8px; font-size: 11px; border-radius: 9px; border: 1px solid currentColor; }

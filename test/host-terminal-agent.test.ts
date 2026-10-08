@@ -52,3 +52,10 @@ test("the sub-agents sentence: always for omp and claude, for the others only wi
   expect(subAgentSentence("custom", { ...none, scan: "x" })).toBeUndefined();
   expect(subAgentSentence("cursor", { ...none, analysis: "x" })).toStartWith("Your agent cannot give sub-agents their own model");
 });
+
+test("the settings that choose the program Trama runs only count from the user settings", async () => {
+  const { contributes } = await Bun.file(new URL("../extension/package.json", import.meta.url)).json();
+  for (const key of ["agentCommand", "terminalAgent", "analysis", "scan", "execution", "agentLauncher", "externalTerminalCommand"]) {
+    expect(contributes.configuration.properties[`trama.${key}`].scope).toBe("application");
+  }
+});

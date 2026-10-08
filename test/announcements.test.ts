@@ -10,7 +10,7 @@ import {
   changeCheckPhase,
   deliverCard,
   getAnnouncement,
-  isQuiet,
+  quietAnnouncements,
   listAnnouncements,
   newTerminalId,
   terminalFromEnv,
@@ -217,16 +217,25 @@ describe("the quiet period", () => {
   test("passes fifteen minutes after the agent's last activity, whichever announcement it was about", () => {
     announce(p, { kind: "task", title: "Old" }, t(0));
     announce(p, { kind: "task", title: "Newer" }, t(10));
-    expect(isQuiet(listAnnouncements(p), t(24).getTime())).toBe(false);
-    expect(isQuiet(listAnnouncements(p), t(25).getTime())).toBe(true);
+    expect(quietAnnouncements(listAnnouncements(p), t(24).getTime())).toHaveLength(0);
+    expect(quietAnnouncements(listAnnouncements(p), t(25).getTime())).toHaveLength(2);
+  });
+
+  test("a design request neither refreshes the others nor is withdrawn with them", () => {
+    announce(p, { kind: "task", title: "Agent" }, t(0));
+    announce(p, { kind: "proposal", title: "Request", source: "request" }, t(10));
+    const titles = (m: number) => quietAnnouncements(listAnnouncements(p), t(m).getTime()).map((a) => a.title);
+    expect(titles(14)).toEqual([]);
+    expect(titles(15)).toEqual(["Agent"]);
+    expect(titles(25)).toEqual(["Agent", "Request"]);
   });
 
   test("a question round that closed later restarts the count, and nothing waiting is never quiet", () => {
     announce(p, { kind: "task", title: "Waiting" }, t(0));
-    expect(isQuiet(listAnnouncements(p), t(20).getTime(), t(18).getTime())).toBe(false);
-    expect(isQuiet(listAnnouncements(p), t(33).getTime(), t(18).getTime())).toBe(true);
+    expect(quietAnnouncements(listAnnouncements(p), t(20).getTime(), t(18).getTime())).toHaveLength(0);
+    expect(quietAnnouncements(listAnnouncements(p), t(33).getTime(), t(18).getTime())).toHaveLength(1);
     withdrawAll(p);
-    expect(isQuiet(listAnnouncements(p), t(500).getTime())).toBe(false);
+    expect(quietAnnouncements(listAnnouncements(p), t(500).getTime())).toHaveLength(0);
   });
 
   test("writing, creating or deleting a file of an announced Draft counts as activity; an unannounced Draft does not", () => {
@@ -248,9 +257,9 @@ describe("the quiet period", () => {
     expect(changedAt).toBeGreaterThanOrEqual(now - 1000);
     // Announcements last touched long ago: only the Draft's file keeps the agent from being taken to have stopped.
     const stale = listAnnouncements(p).map((a) => ({ ...a, touched: old.toISOString() }));
-    expect(isQuiet(stale, changedAt + 14 * 60_000)).toBe(true);
-    expect(isQuiet(stale, changedAt + 14 * 60_000, changedAt)).toBe(false);
-    expect(isQuiet(stale, changedAt + 15 * 60_000, changedAt)).toBe(true);
+    expect(quietAnnouncements(stale, changedAt + 14 * 60_000)).not.toHaveLength(0);
+    expect(quietAnnouncements(stale, changedAt + 14 * 60_000, changedAt)).toHaveLength(0);
+    expect(quietAnnouncements(stale, changedAt + 15 * 60_000, changedAt)).not.toHaveLength(0);
 
     for (const path of allIn(prop.dir)) utimesSync(path, old, old);
     rmSync(file);
@@ -372,6 +381,14 @@ describe("a check", () => {
     changeCheckPhase(p, check.id, "scanning", t(20));
     expect(listAnnouncements(p).map((a) => a.touched)).toEqual([t(20).toISOString(), t(20).toISOString()]);
   });
+});
+
+test("the developer's decision to fix the code does not restart the quiet period", () => {
+  const opts = [{ title: "Change the code", text: "Make the code do it." }, { title: "Other", text: "Another way." }];
+  const drift = newDrift(p, { title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts });
+  const a = announce(p, { kind: "task", title: "Waiting" }, new Date("2026-01-01T10:00:00Z"));
+  resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
+  expect(getAnnouncement(p, a.id)?.touched).toBe("2026-01-01T10:00:00.000Z");
 });
 
 describe("the rework announcement of a Drift", () => {

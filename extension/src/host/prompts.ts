@@ -53,8 +53,9 @@ export function buildHeldScanPrompt(proposals: readonly string[]): string {
 }
 
 /**
- * The name of the agent terminal that receives `action`'s instruction: the short number of the Task or Proposal to
- * implement, as `short` gives it in this working copy, or a fixed English word. A free terminal is reused only for the same name.
+ * The name of the agent terminal that receives `action`'s instruction: the name of the Task or Proposal to implement, as
+ * `short` gives it in this working copy (short number while live, else permanent identity: a design runs from an approved
+ * Proposal, which has no number), or a fixed English word. A free terminal is reused only for the same name.
  */
 export function terminalName(action: ResolvedAction, short: (kind: "task" | "proposal", id: string) => string): string {
   switch (action.kind) {

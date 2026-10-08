@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -94,7 +94,8 @@
         "trama.agentCommand": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Command that starts your coding agent in a terminal when `#trama.terminalAgent#` is `custom` (or is empty while this is set). `{prompt}` is replaced by the shell-quoted prompt; if it is missing, the prompt is appended. Examples: `claude {prompt}`, `codex {prompt}`. Trama never calls a model itself."
+          "scope": "application",
+          "markdownDescription": "Command that starts your coding agent in a terminal when `#trama.terminalAgent#` is `custom` (or is empty while this is set). `{prompt}` is replaced by the shell-quoted prompt; if it is missing, the prompt is appended. Examples: `claude {prompt}`, `codex {prompt}`. Trama never calls a model itself. It only applies in your user settings."
         },
         "trama.terminalAgent": {
           "type": "string",

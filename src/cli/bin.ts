@@ -2,10 +2,16 @@
 import { TramaError, UsageError } from "../core/errors";
 import { questionAborted, questionFailure } from "../core/questions";
 import { completeFixChoice } from "./fix-prompt";
-import { agentVariable, asyncCommand, classifyCommand, run, runAsk, runClassify, runCursorHook } from "./main";
+import { agentVariable, asyncCommand, classifyCommand, helpFor, run, runAsk, runClassify, runCursorHook } from "./main";
 
 try {
   const argv = process.argv.slice(2);
+  // `--help` after any command name only prints that command's usage: no stdin, no editor, nothing else.
+  const helped = helpFor(argv);
+  if (helped !== null) {
+    await new Promise<void>((resolve) => process.stdout.write(`${helped}\n`, () => resolve()));
+    process.exit(0);
+  }
   if (argv.length === 1 && argv[0] === "cursor-hook") {
     // Run by Cursor on every prompt: whatever happens, answer it and exit with 0, writing nothing else.
     let out = "{}";

@@ -168,7 +168,7 @@ export function removeReworkOf(p: Project, driftId: string) {
   for (const a of listAnnouncements(p)) if (a.drift === driftId) remove(p, a.id);
 }
 
-/** Announces a card as soon as it is known it will be created. Refreshes the quiet period of every announcement. */
+/** Announces a card as soon as it is known it will be created. Agent announcements refresh the quiet period of every announcement; a design request, sent by the developer, refreshes nothing and starts only its own. */
 export function announce(
   p: Project,
   input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase; drift?: string } & AgentOrigin,
@@ -177,7 +177,7 @@ export function announce(
   const title = input.title.trim().replace(/\s+/g, " ");
   if (!title) throw new TramaError("An announcement needs a title");
   if ((input.kind === "check") !== (input.phase !== undefined)) throw new TramaError(input.kind === "check" ? "A check needs a phase" : "Only a check has a phase");
-  markActivity(p, now);
+  if ((input.source ?? "agent") === "agent") markActivity(p, now);
   const stamp = now.toISOString();
   const announcement: Announcement = {
     id: newId(announcementsDir(p)),
@@ -293,13 +293,11 @@ export function markDraftActivity(p: Project, proposalId: string) {
 }
 
 /**
- * Whether the agent has done nothing about its announced cards for the quiet period. The count starts at the latest
- * activity recorded in the announcements, or at `resumedAt` if later: activity the announcements do not record (a
- * file of an announced Draft changed) or the close of a question round, which does not count. No announcement waiting
- * means nothing to withdraw.
+ * The announcements the agent has left alone for the quiet period. Each counts from its own `touched` (agent activity
+ * refreshes all of them, a design request is born with its own), or from `resumedAt` if later: activity the
+ * announcements do not record (a file of an announced Draft changed) or the close of a question round, which does
+ * not count.
  */
-export function isQuiet(announcements: readonly Announcement[], now: number, resumedAt = 0): boolean {
-  if (announcements.length === 0) return false;
-  const lastActivity = Math.max(...announcements.map((a) => Date.parse(a.touched)));
-  return now - Math.max(lastActivity, resumedAt) >= QUIET_PERIOD_MS;
+export function quietAnnouncements(announcements: readonly Announcement[], now: number, resumedAt = 0): Announcement[] {
+  return announcements.filter((a) => now - Math.max(Date.parse(a.touched), resumedAt) >= QUIET_PERIOD_MS);
 }

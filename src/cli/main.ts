@@ -46,16 +46,47 @@ export function splitGlobals(argv: string[]): { rest: string[]; json: boolean; r
   return { rest, json, root };
 }
 
-export function pickCommand(rest: string[]): { command: Command; tail: string[] } {
+/** The command an argv names, or undefined; `tail` is what follows its name. */
+function findCommand(rest: string[]): { command: Command; tail: string[] } | undefined {
   const [first, second] = rest;
   const grouped = first !== undefined && GROUPS.includes(first) ? COMMANDS.find((c) => c.name === `${first} ${second ?? ""}`.trim()) : undefined;
-  const name = first !== undefined && GROUPS.includes(first) ? `${first} ${second ?? ""}`.trim() : first;
   const command = grouped ?? COMMANDS.find((c) => c.name === first);
-  if (!command) {
-    const hint = first !== undefined && GROUPS.includes(first) ? `Known "${first}" commands: ${COMMANDS.filter((c) => c.name.startsWith(`${first} `)).map((c) => c.name.slice(first.length + 1)).join(", ")}` : "Run trama --help";
-    throw new UsageError(`Unknown command "${name ?? ""}". ${hint}`);
+  return command && { command, tail: rest.slice(command.name.split(" ").length) };
+}
+
+/** Commands that run in the executable (they read stdin or wait for the editor) and have no entry in COMMANDS. */
+const STANDALONE: Record<string, { usage: string; summary: string }> = {
+  ask: { usage: "trama ask [--root <dir>]", summary: "Reads one question round as JSON from stdin, waits for the editor and prints the JSON result on stdout." },
+  classify: { usage: "trama classify --machine <id> [--root <dir>]", summary: "Reads the state of a Machine from stdin and prints conflict, no-conflict or unavailable, as the editor's System 1 classifier answers." },
+  "cursor-hook": { usage: "trama cursor-hook", summary: "Run by Cursor's hooks: reads the hook's JSON from stdin and tells the editor. It always exits with 0." },
+};
+
+export function pickCommand(rest: string[]): { command: Command; tail: string[] } {
+  const picked = findCommand(rest);
+  const [first, second] = rest;
+  if (!picked) {
+    const group = first !== undefined && GROUPS.includes(first);
+    const hint = group ? `Known "${first}" commands: ${COMMANDS.filter((c) => c.name.startsWith(`${first} `)).map((c) => c.name.slice(first.length + 1)).join(", ")}` : "Run trama --help";
+    throw new UsageError(`Unknown command "${(group ? `${first} ${second ?? ""}` : first)?.trim() ?? ""}". ${hint}`);
   }
-  return { command, tail: rest.slice(command.name.split(" ").length) };
+  return picked;
+}
+
+/** `--help` or `-h` after the command name: the usage and description of that command, or null when argv has none. Touches nothing else. */
+export function helpFor(argv: string[]): string | null {
+  const { rest } = splitGlobals(argv);
+  const [first] = rest;
+  if (first === undefined || first === "help" || !rest.slice(1).some((a) => a === "--help" || a === "-h")) return null;
+  const standalone = STANDALONE[first];
+  if (standalone) return `Usage: ${standalone.usage}\n\n${standalone.summary}`;
+  const picked = findCommand(rest);
+  if (picked) {
+    const { command } = picked;
+    const options = Object.entries(command.options ?? {}).map(([k, o]) => `--${k}${o.type === "string" ? " <value>" : ""}`);
+    return [`Usage: trama ${command.name} ${command.args}`.trimEnd(), "", `${command.developerOnly ? "[developer only] " : ""}${command.summary}`, ...(options.length > 0 ? ["", `Options: ${options.join(", ")}`] : [])].join("\n");
+  }
+  if (!GROUPS.includes(first)) return null;
+  return [`Usage: trama ${first} <command>`, "", ...COMMANDS.filter((c) => c.name.startsWith(`${first} `)).map((c) => `  ${c.name} ${c.args}`.trimEnd())].join("\n");
 }
 
 /** Set by the Trama extension in every agent it launches. */
@@ -72,8 +103,11 @@ export function agentVariable(env: Record<string, string | undefined>): string |
 
 export function run(argv: string[], cwd: string, env: Record<string, string | undefined> = process.env): { out: string; exit: number } {
   const { rest, json, root } = splitGlobals(argv);
+  const helped = helpFor(argv);
+  if (helped !== null) return { out: helped, exit: 0 };
   if (rest.length === 0 || rest[0] === "--help" || rest[0] === "-h" || rest[0] === "help") return { out: help(), exit: rest.length === 0 ? 2 : 0 };
-
+  const standalone = STANDALONE[rest[0] as string];
+  if (standalone) throw new UsageError(`Usage: ${standalone.usage}`);
   const { command, tail } = pickCommand(rest);
   let parsed: { values: Values; positionals: string[] };
   try {

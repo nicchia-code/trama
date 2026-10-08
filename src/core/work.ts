@@ -172,7 +172,7 @@ export function getTask(p: Project, id: string, asArgument = false): Task {
 
 export function newTask(
   p: Project,
-  input: { title: string; refs: string[]; technical: boolean; drift?: string; proposal?: string; body?: string; announcement?: string },
+  input: { title: string; refs: string[]; technical: boolean; drift?: string; proposal?: string; body?: string },
 ): Task {
   checkTaskRefs(input.technical, input.refs);
   checkRefs(p, input.refs);
@@ -182,9 +182,7 @@ export function newTask(
   const linked = input.proposal ? getProposal(p, input.proposal).id : null;
   const proposal = input.technical && drift === null ? null : linked;
   const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift, proposal, agent: false, holder: null, created: createdNow(), finished: null };
-  const task = create(tasksDir(p), input.title, data, input.body ?? "", "Task");
-  deliverCard(p, input.announcement, "task");
-  return task;
+  return create(tasksDir(p), input.title, data, input.body ?? "", "Task");
 }
 
 /** The blocked Tasks and why, by Task ID, worked out from the Drifts and Tasks as they are now. */

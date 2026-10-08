@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TramaError, UsageError } from "../core/errors";
-import { type AgentOrigin, ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote, CHECK_PHASES, type CheckPhase, changeCheckPhase, finishCheck } from "../core/announcements";
+import { type AgentOrigin, ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote, CHECK_PHASES, type CheckPhase, changeCheckPhase, deliverCard, finishCheck } from "../core/announcements";
 import { installOmpAgents, installSkills, missingSkills, removeRetiredSkills, skillConflicts } from "./skills";
 import {
   approveProposal,
@@ -330,7 +330,8 @@ export const COMMANDS: Command[] = [
   { name: "task new", args: "<title>", summary: "Create a Task in 'todo' (--ref … or --technical; --proposal <id> links it to the design it comes from; --announcement <id> names the announcement of this Task)", options: { ref, technical: { type: "boolean" }, drift: { type: "string" }, proposal: { type: "string" }, body: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       const note = announcementNote(project, str(o["announcement"]), "task");
-      const t = newTask(project, { title: a[0] as string, refs: list(o["ref"]), technical: o["technical"] === true, drift: optionalArg(ctx, str(o["drift"]), driftArg), proposal: optionalArg(ctx, str(o["proposal"]), proposalArg), body: str(o["body"]), announcement: str(o["announcement"]) });
+      const t = newTask(project, { title: a[0] as string, refs: list(o["ref"]), technical: o["technical"] === true, drift: optionalArg(ctx, str(o["drift"]), driftArg), proposal: optionalArg(ctx, str(o["proposal"]), proposalArg), body: str(o["body"]) });
+      deliverCard(project, str(o["announcement"]), "task");
       const n = numbersOf(ctx);
       return text(`Created Task ${n.name("task", t.id)} at ${t.path}${note ? `\n${note}` : ""}`, { id: t.id, number: n.label("task", t.id), path: t.path, ...(note ? { note } : {}) });
     } },

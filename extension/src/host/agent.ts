@@ -17,6 +17,7 @@ import { agentTemplate, canScan, effectiveAgent, KNOWN_AGENTS, knownCommand, typ
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
 
+/** The custom agent command (`trama.agentCommand`). Application scope: only the user's settings count. */
 export const configuredAgentCommand = (): string => settings().get<string>("agentCommand", "").trim();
 
 /** The agent Trama starts in a terminal (`trama.terminalAgent`, or `custom` with `trama.agentCommand`); undefined when none is chosen yet. Application scope: only the user's settings count. */
