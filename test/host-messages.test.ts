@@ -28,7 +28,7 @@ test("drops fields that are not part of the contract", () => {
   expect(ok({ type: "approveProposal", id: "0001", force: true })).toEqual({ type: "approveProposal", id: "0001" });
 });
 
-test("rejects unknown types, wrong shapes and IDs that are not plain IDs; moving and taking back a Task and the worktree round messages are unknown", () => {
+test("rejects unknown types, wrong shapes and IDs that are not plain IDs; move and take-back messages are unknown", () => {
   const rejected: unknown[] = [
     { type: "moveTask", id: "0003", column: "doing" },
     { type: "takeBackTask", id: "0003" },

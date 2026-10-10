@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TramaError, UsageError } from "../core/errors";
 import { type AgentOrigin, ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote, CHECK_PHASES, type CheckPhase, changeCheckPhase, deliverCard, finishCheck } from "../core/announcements";
-import { installOmpAgents, installSkills, missingSkills, ompAgentConflicts, removeRetiredSkills, skillConflicts } from "./skills";
+import { installOmpAgents, installSkills, missingSkills, ompAgentConflicts, removeRetiredOmpAgents, removeRetiredSkills, skillConflicts } from "./skills";
 import {
   approveProposal,
   deleteInProposal,
@@ -22,6 +22,7 @@ import type { DriftDecisionKind } from "../core/proposals";
 import { convertSingleFileAreas, createDefaultAreas, largeFragmentMessage, largeFragments, loadProject } from "../core/requirements";
 import { describeRequirementSkillSync, syncRequirementSkills } from "../core/requirement-skills";
 import { syncShortNumbers } from "../core/short-numbers";
+import { rewriteNumberedCards } from "../core/rewrite-ids";
 import {
   findProject,
   TRAMA_DIR,
@@ -34,8 +35,8 @@ import {
 } from "../core/store";
 import type { Model } from "../core/types";
 import type { Warning } from "../core/graph";
-import { rewriteNumberedCards } from "../core/rewrite-ids";
-import { type Drift, type DriftOutcome, getDrift, getTask, moveTask, newDrift, newTask, requireNotAttached, resolveDrift, takeBackTask } from "../core/work";
+import { getDrift, getTask, moveTask, newDrift, newTask, requireNotAttached, resolveDrift, takeBackTask, type Drift, type DriftOutcome } from "../core/work";
+import { taskScope } from "../core/task-scope";
 import { writeApprovedNotice } from "../core/approve-request";
 import { requestExists } from "../core/design-requests";
 import { approvedScope } from "../core/scope";
@@ -81,8 +82,7 @@ export interface Command {
   /** Positional arguments: `<required>` and `[optional]`. */
   args: string;
   summary: string;
-  /** Refused when run by an agent (`TRAMA_AGENT` or `CURSOR_AGENT` is set). */
-  developerOnly?: true;
+
   options?: Record<string, OptionSpec>;
   run(ctx: Context, args: string[], opts: Values): Result;
 }
@@ -177,12 +177,14 @@ export const COMMANDS: Command[] = [
       installSkills(skillsDir);
       const agents = installOmpAgents(project.root);
       const removed = removeRetiredSkills(project.root, [skillsDir]);
+      const removedAgents = removeRetiredOmpAgents(project.root);
       const areas = existsSync(requirementsDir(project)) ? [] : createDefaultAreas(project);
       const conversion = convertSingleFileAreas(project);
       const generated = syncRequirementSkills(project, [skillsDir]);
       const lines = [
         changed.length === 0 ? `Skills in ${skillsDir} are already up to date.` : `Updated ${changed.length} skill file(s) in ${skillsDir}:\n${changed.map((c) => `- ${c}`).join("\n")}`,
         removed.length > 0 ? `Deleted the retired trama-fix skill: ${removed.join(", ")}` : "",
+        removedAgents.length > 0 ? `Deleted the retired omp sub-agent definition: ${removedAgents.join(", ")}` : "",
         `Installed omp's sub-agent definitions: ${agents.join(", ")}`,
         areas.length > 0 ? `Created ${areas.length} Requirement Areas in ${requirementsDir(project)}: ${areas.join(", ")}` : "",
         conversion.converted.length > 0
@@ -191,7 +193,7 @@ export const COMMANDS: Command[] = [
         conversion.skipped.length > 0 ? `Left ${conversion.skipped.length} single-file Requirement Area(s) as they were: ${conversion.skipped.map((s) => `${s.id} (${s.reason})`).join(", ")}` : "",
         describeRequirementSkillSync(generated),
       ];
-      return text(lines.filter(Boolean).join("\n"), { skillsDir, changed, removed, agents, areas, conversion, generated });
+      return text(lines.filter(Boolean).join("\n"), { skillsDir, changed, removed, removedAgents, agents, areas, conversion, generated });
     },
   },
 
@@ -199,7 +201,6 @@ export const COMMANDS: Command[] = [
     name: "ids rewrite",
     args: "",
     summary: "Give every numbered Proposal, Task and Drift its own identity, keeping number order. Refused when two cards of one kind share a number, or when a new identity would collide. Does nothing when none are numbered",
-    developerOnly: true,
     run(ctx) {
       const project = ctx.project(false);
       const rewritten = rewriteNumberedCards(project);
@@ -325,7 +326,7 @@ export const COMMANDS: Command[] = [
       const n = numbersOf(ctx);
       return text(`Submitted Proposal ${n.name("proposal", p.id)} for review${consumed}${warningsText(p.warnings)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status, request: p.data.request, requestConsumed: p.requestConsumed, warnings: p.warnings });
     } },
-  { name: "proposal discard", args: "<id>", summary: "Discard a Draft the agent never finished", developerOnly: true, run(ctx, a) {
+  { name: "proposal discard", args: "<id>", summary: "Discard a Draft the agent never finished", run(ctx, a) {
       const project = ctx.project();
       const id = proposalArg(ctx, a[0] as string);
       const p = discardProposal(project, id);
@@ -334,7 +335,7 @@ export const COMMANDS: Command[] = [
     } },
   { name: "proposal show", args: "<id>", summary: "A Proposal: staleness, structural changes, validation", run: (ctx, a) => proposalShowView(ctx.project(), getProposal(ctx.project(), a[0] as string, true)) },
   { name: "proposal list", args: "", summary: "Draft and open Proposals (--all for every one)", options: { all: { type: "boolean" } }, run: (ctx, _a, o) => proposalListView(ctx.project(), o["all"] === true) },
-  { name: "proposal approve", args: "<id>", summary: "Accept an open Proposal and apply it in this folder (--skills-dir adds the configured skills folder)", developerOnly: true, options: { "skills-dir": ref }, run(ctx, a, o) {
+  { name: "proposal approve", args: "<id>", summary: "Accept an open Proposal and apply it in this folder (--skills-dir adds the configured skills folder)", options: { "skills-dir": ref }, run(ctx, a, o) {
       const project = ctx.project();
       const id = proposalArg(ctx, a[0] as string);
       requireNotAttached(project, id);
@@ -345,7 +346,7 @@ export const COMMANDS: Command[] = [
       const lines = resolved.map((d) => `- Drift ${n.name("drift", d.drift)}: ${d.skipped ? "skipped, already resolved" : d.decision === "fix-code" ? `code to be fixed, Task ${d.task ? n.name("task", d.task) : ""} created` : d.decision === "proposal" ? "Model updated to match the code" : "dismissed"}`);
       return text([`Approved Proposal ${n.name("proposal", approved)}`, ...lines].join("\n"), { id: approved, number: n.label("proposal", approved), status: "approved", resolved });
     } },
-  { name: "proposal reject", args: "<id>", summary: "Reject a Proposal, optionally with feedback for the agent", developerOnly: true, options: { feedback: { type: "string" } }, run(ctx, a, o) {
+  { name: "proposal reject", args: "<id>", summary: "Reject a Proposal, optionally with feedback for the agent", options: { feedback: { type: "string" } }, run(ctx, a, o) {
       const id = proposalArg(ctx, a[0] as string);
       requireNotAttached(ctx.project(), id);
       const p = rejectProposal(ctx.project(), id, str(o["feedback"]));
@@ -361,15 +362,35 @@ export const COMMANDS: Command[] = [
       const n = numbersOf(ctx);
       return text(`Created Task ${n.name("task", t.id)} at ${t.path}${note ? `\n${note}` : ""}`, { id: t.id, number: n.label("task", t.id), path: t.path, ...(note ? { note } : {}) });
     } },
+  { name: "task show", args: "<id>", summary: "A Task with its references and the Requirements to implement", run: (ctx, a) => taskShowView(ctx.project(), getTask(ctx.project(), a[0] as string, true)) },
   { name: "task list", args: "", summary: "Tasks grouped by column", options: { column: { type: "string" } }, run: (ctx, _a, o) => taskListView(ctx.project(), str(o["column"])) },
-  { name: "task next", args: "", summary: "The next runnable Task (in To do, not blocked, oldest in creation order), moving nothing; --proposal <id> considers only the Tasks of that design; --batch prints instead the group of a parallel run, up to four runnable Tasks that concern different things, one per line, the first being the next one. When none is runnable it says so and lists the Tasks in To do with what blocks them", options: { proposal: { type: "string" }, batch: { type: "boolean" } }, run: (ctx, _a, o) => taskNextView(ctx.project(), optionalArg(ctx, str(o["proposal"]), proposalArg), o["batch"] === true) },
-  { name: "task show", args: "<id>", summary: "A Task with the current Model text of its references", run: (ctx, a) => taskShowView(ctx.project(), getTask(ctx.project(), a[0] as string, true)) },
+  { name: "task next", args: "", summary: "The next runnable Task (in To do, not blocked, oldest in creation order), moving nothing; --proposal <id> considers only the Tasks of that design; --batch prints instead the group of a parallel run, up to --max runnable Tasks that concern different things (20 by default), one per line, the first being the next one; when none is runnable it lists blocked Tasks", options: { proposal: { type: "string" }, batch: { type: "boolean" }, max: { type: "string" } }, run: (ctx, _a, o) => {
+      const raw = str(o["max"]);
+      const max = raw === undefined ? undefined : Number(raw);
+      if (max !== undefined && (!Number.isInteger(max) || max < 1)) throw new UsageError("--max must be a positive integer");
+      return taskNextView(ctx.project(), optionalArg(ctx, str(o["proposal"]), proposalArg), o["batch"] === true, max);
+    } },
+  { name: "task scope", args: "<id> [<id>…]", summary: "The union of Model and Requirement references named by Tasks and Transitions that enter or react to them; moves nothing", run(ctx, args) {
+      const project = ctx.project();
+      const ids = args.map((id) => {
+        try {
+          return getTask(project, id, true).id;
+        } catch (err) {
+          if (!(err instanceof TramaError) || (!err.message.startsWith("No Task with ID ") && !err.message.startsWith("No live Task has the short number "))) throw err;
+          throw new UsageError(`Task "${id}" was not found: ${err.message}`);
+        }
+      });
+      const scope = taskScope(project, ids);
+      return text(scope.length
+        ? `## Scan scope\n\n${scope.map(({ ref, reason }) => `- \`${ref}\` (${reason})`).join("\n")}`
+        : "## Scan scope\n\n_Nothing to scan._", scope);
+    } },
   { name: "task move", args: "<id> <column>", summary: "Move a Task to todo, doing or done", run(ctx, a) {
       const t = moveTask(ctx.project(), taskArg(ctx, a[0] as string), a[1] as string, ctx.byAgent ? "agent" : "developer", ctx.origin);
       const n = numbersOf(ctx);
       return text(`Task ${n.name("task", t.id)} is now ${t.data.column}`, { id: t.id, number: n.label("task", t.id), column: t.data.column });
     } },
-  { name: "task take-back", args: "<id>", summary: "Take a Task back from the agent that has it; it stays in progress", developerOnly: true, run(ctx, a) {
+  { name: "task take-back", args: "<id>", summary: "Take a Task back from the agent that has it; it stays in progress", run(ctx, a) {
       const t = takeBackTask(ctx.project(), taskArg(ctx, a[0] as string));
       const n = numbersOf(ctx);
       return text(`Task ${n.name("task", t.id)} is yours again (still ${t.data.column})`, { id: t.id, number: n.label("task", t.id), column: t.data.column, agent: t.data.agent });
@@ -384,7 +405,7 @@ export const COMMANDS: Command[] = [
     } },
   { name: "drift list", args: "", summary: "Open Drifts (--all for every one)", options: { all: { type: "boolean" } }, run: (ctx, _a, o) => driftListView(ctx.project(), o["all"] === true) },
   { name: "drift show", args: "<id>", summary: "A Drift with its references and attached Proposal", run: (ctx, a) => driftShowView(ctx.project(), getDrift(ctx.project(), a[0] as string, true)) },
-  { name: "drift resolve", args: "<id>", summary: "Resolve with --fix-code, --accept-proposal or --dismiss. --fix-code takes --option <n> (the number of the chosen fix option, from 1) and the optional --note <text>; the other two take neither. --skills-dir adds the configured skills folder for the approval of --accept-proposal", developerOnly: true, options: { "fix-code": { type: "boolean" }, "accept-proposal": { type: "boolean" }, dismiss: { type: "boolean" }, option: { type: "string" }, note: { type: "string" }, "skills-dir": ref }, run(ctx, a, o) {
+  { name: "drift resolve", args: "<id>", summary: "Resolve with --fix-code, --accept-proposal or --dismiss. --fix-code takes --option <n> (the number of the chosen fix option, from 1) and the optional --note <text>; the other two take neither. --skills-dir adds the configured skills folder for the approval of --accept-proposal", options: { "fix-code": { type: "boolean" }, "accept-proposal": { type: "boolean" }, dismiss: { type: "boolean" }, option: { type: "string" }, note: { type: "string" }, "skills-dir": ref }, run(ctx, a, o) {
       const chosen = (["fix-code", "accept-proposal", "dismiss"] as const).filter((k) => o[k] === true);
       if (chosen.length !== 1) throw new UsageError("Choose exactly one of --fix-code, --accept-proposal, --dismiss");
       const project = ctx.project();
@@ -415,6 +436,6 @@ export const COMMANDS: Command[] = [
 export function arity(command: Command): { min: number; max: number } {
   const tokens = command.args.split(/\s+/).filter(Boolean);
   const min = tokens.filter((t) => t.startsWith("<")).length;
-  const variadic = command.name === "search";
+  const variadic = command.name === "search" || command.name === "task scope";
   return { min, max: variadic ? Number.POSITIVE_INFINITY : tokens.length };
 }

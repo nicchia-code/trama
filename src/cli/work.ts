@@ -263,8 +263,8 @@ export function taskListView(p: Project, column?: string): Result {
  * The next runnable Task, or with `batch` the group of a parallel run, one Task per line; or the statement that
  * there is none with the Tasks in To do that wait, the same either way. Moves nothing.
  */
-export function taskNextView(p: Project, proposal?: string, batch = false): Result {
-  const queue = nextTask(p, proposal);
+export function taskNextView(p: Project, proposal?: string, batch = false, max?: number): Result {
+  const queue = nextTask(p, proposal, max);
   const { next, waiting } = queue;
   const blocked = new Map(waiting.map((w) => [w.task.id, w.blockers]));
   const numbers = syncShortNumbers(p);

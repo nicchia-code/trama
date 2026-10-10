@@ -23,9 +23,9 @@ export function buildPrompt(action: ResolvedAction): string {
     case "implement":
       return `Use the trama-implement skill on Task ${action.task}.`;
     case "implement-all":
-      return 'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch`, one group at a time, until it says there is none.';
+      return 'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, one group at a time, until it says there is none.';
     case "implement-design":
-      return `Use the trama-implement skill on every Task of Proposal ${action.proposal} that is in the "todo" column. Take them from \`trama task next --batch --proposal ${action.proposal}\`, one group at a time, until it says there is none.`;
+      return `Use the trama-implement skill on every Task of Proposal ${action.proposal} that is in the "todo" column. Take them from \`trama task next --batch --proposal ${action.proposal} --max {maxParallelAgents}\`, one group at a time, until it says there is none.`;
     case "import":
       return "Use the trama-import skill on this repository.";
   }
@@ -46,11 +46,6 @@ export function buildApprovalScanPrompt(proposal: string): string {
   return `Use the trama-scan skill on what Proposal ${proposal} changed: its scan scope is in \`trama proposal show ${proposal}\`. Link every Task you file to it with --proposal ${proposal}.`;
 }
 
-/** The scan that turning Hold scan off sends: one run over what the held Proposals changed, oldest first. One Proposal is the automatic scan's instruction. */
-export function buildHeldScanPrompt(proposals: readonly string[]): string {
-  if (proposals.length === 1) return buildApprovalScanPrompt(proposals[0] as string);
-  return `Use the trama-scan skill on what Proposals ${proposals.join(", ")} changed: each scan scope is in \`trama proposal show <id>\`. Compare every reference once, against the current Model, and link every Task you file with --proposal to the most recent of those Proposals whose scan scope covers it.`;
-}
 
 /**
  * The name of the agent terminal that receives `action`'s instruction: the name of the Task or Proposal to implement, as

@@ -8,6 +8,7 @@ import { TRAMA_DIR, type Project, projectAt } from "../../../src/core/store";
 import { configuredSkillsDir } from "./agent";
 import { bundledTrama, cursorHooksFile, isCursor } from "./cursor";
 
+const COPILOT_HOOKS_FILE = "copilot-hooks.json";
 const fileFolders = () => (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file");
 
 /** What every action other than initializing says in a workspace without `.trama/`. */
@@ -34,6 +35,37 @@ function installCursorHooks(): void {
   }
 }
 
+/** Writes Copilot hooks to extension user storage and registers the file in user settings. */
+export async function installCopilotHooks(storageUri: vscode.Uri): Promise<void> {
+  if (isCursor()) return;
+  const program = bundledTrama();
+  if (!program) return;
+  const file = vscode.Uri.joinPath(storageUri, COPILOT_HOOKS_FILE);
+  const command = `"${program}" copilot-hook`;
+  const contents = JSON.stringify({
+    hooks: {
+      UserPromptSubmit: [{ type: "command", command }],
+      Stop: [{ type: "command", command }],
+    },
+  });
+  const storagePath = storageUri.fsPath;
+  try {
+    await vscode.workspace.fs.createDirectory(storageUri);
+    await vscode.workspace.fs.writeFile(file, Buffer.from(`${contents}\n`));
+    const config = vscode.workspace.getConfiguration("chat");
+    const existing = config.inspect<Record<string, boolean>>("hookFilesLocations")?.globalValue ?? {};
+    await config.update("hookFilesLocations", { ...existing, [file.fsPath]: true }, vscode.ConfigurationTarget.Global);
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Trama: could not install Copilot's hooks in ${storagePath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** Installs the hooks for the active editor. */
+async function installEditorHooks(storageUri: vscode.Uri): Promise<void> {
+  if (isCursor()) installCursorHooks();
+  else await installCopilotHooks(storageUri);
+}
+
 /** Asks which workspace folder to initialize when there are several. */
 async function pickFolder(): Promise<string | undefined> {
   const folders = fileFolders();
@@ -47,17 +79,17 @@ async function pickFolder(): Promise<string | undefined> {
 
 /**
  * Runs `trama init` in a workspace folder. When it refuses to overwrite customised skill files, shows why
- * and retries with `--force` only after an explicit modal confirmation. In Cursor it also installs Trama's hooks.
+ * and retries with `--force` only after an explicit modal confirmation. Installs editor hooks after initialization.
  * Returns the new Project, if any.
  */
-export async function initializeProject(): Promise<Project | undefined> {
+export async function initializeProject(storageUri?: vscode.Uri): Promise<Project | undefined> {
   const root = await pickFolder();
   if (root === undefined) return undefined;
   const skillsDir = configuredSkillsDir();
   for (let force = false; ; force = true) {
     try {
       run(["--root", root, "init", "--skills-dir", skillsDir, ...(force ? ["--force"] : [])], root);
-      installCursorHooks();
+      if (storageUri) await installEditorHooks(storageUri);
       return projectAt(root);
     } catch (err) {
       if (!(err instanceof TramaError || err instanceof UsageError)) throw err;
@@ -75,12 +107,12 @@ export async function initializeProject(): Promise<Project | undefined> {
   }
 }
 
-/** Replaces the project's agent skills with the ones shipped in this version of Trama, and says what changed; in Cursor also rewrites Trama's hooks for this version's program. */
-export function updateSkills(project: Project): void {
+/** Replaces the project's skills and rewrites the active editor's hooks for this version's program. */
+export async function updateSkills(project: Project, storageUri?: vscode.Uri): Promise<void> {
   const skillsDir = configuredSkillsDir();
   const { out } = run(["--root", project.root, "skills", "update", "--skills-dir", skillsDir], project.root);
-  const shown = ["Deleted ", "Created ", "Converted ", "Left ", "Requirement skills: ", "Switched "];
+  const shown = ["Deleted ", "Created ", "Converted ", "Left ", "Requirement skills: ", "Switched ", "Installed omp", "Updated "];
   const report = out.split("\n").filter((line, i) => i === 0 || shown.some((start) => line.startsWith(start)));
   void vscode.window.showInformationMessage(`Trama: ${report.join(" ")}`);
-  installCursorHooks();
+  if (storageUri) await installEditorHooks(storageUri);
 }

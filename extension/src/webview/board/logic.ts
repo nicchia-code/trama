@@ -53,6 +53,7 @@ export interface Badge {
   label: string;
   tooltip: string;
   tone: "info" | "warning" | "error";
+  card?: { kind: "proposal"; id: string };
 }
 
 export interface FileSummary {
@@ -87,6 +88,7 @@ export interface ProposalCard {
   name: CardName;
   heading: string;
   title: string;
+  resolution: boolean;
   badges: Badge[];
   changes: ChangeSummary;
   /** Why Approve is disabled; null when the Proposal can be approved. */
@@ -202,7 +204,7 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
   const badges: Badge[] = [];
   if (p.kind === "import") badges.push({ label: "import", tone: "info", tooltip: "Describes existing code; approving it starts no Scan" });
   for (const r of p.requires)
-    badges.push({ label: `requires ${namerOf(numbers)("proposal", r.id)}`, tone: appliesUnder(r.status) ? "info" : "error", tooltip: requiredReasons([r], (id) => namerOf(numbers)("proposal", id)).join("") });
+    badges.push({ label: `requires ${namerOf(numbers)("proposal", r.id)}`, tone: appliesUnder(r.status) ? "info" : "error", tooltip: requiredReasons([r], (id) => namerOf(numbers)("proposal", id)).join(""), card: { kind: "proposal", id: r.id } });
   if (p.stale.length > 0) badges.push({ label: "stale", tone: "warning", tooltip: `The Model changed since the Proposal touched:\n${listed(p.stale)}` });
   if (p.errors.length > 0) badges.push({ label: "invalid", tone: "error", tooltip: `The Model or its Requirements would be invalid:\n${listed(p.errors.map(formatDiagnostic))}` });
   if (p.unfixable.length > 0) badges.push({ label: "unfixable", tone: "error", tooltip: `Resolve Drifts must rewrite the resolution; these Drifts' code can no longer be fixed:\n${listed(p.unfixable)}` });
@@ -221,8 +223,9 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers):
     key: `proposal:${p.id}`,
     id: p.id,
     name,
-    heading: `Proposal ${name.text}`,
+    heading: p.kind === "resolution" ? `Resolution Proposal ${name.text}` : `Proposal ${name.text}`,
     title: p.title,
+    resolution: p.kind === "resolution",
     badges: proposalBadges(p, numbers),
     changes: summarizeChanges(p.changes),
     blocker: approveBlocker(p, numbers),
@@ -284,13 +287,14 @@ export function designCard(proposal: string, title: string | null, tasks: TaskCa
   };
 }
 
-/** The four columns of the Board: open Proposals then open Drifts to decide, Tasks by column. */
+/** The four columns of the Board; open resolution Drifts are represented only on their Proposal card. */
 export function buildBoard(snapshot: Snapshot): BoardColumn[] {
   const numbers = snapshot.numbers ?? noNumbers;
+  const resolving = new Set(snapshot.proposals.filter((p) => p.kind === "resolution").flatMap((p) => p.resolves.map((r) => r.drift)));
   const cards: Record<ColumnId, Card[]> = {
     decide: [
       ...snapshot.proposals.map((p) => proposalCard(p, numbers)),
-      ...snapshot.drifts.map((d) => driftCard(d, numbers)),
+      ...snapshot.drifts.filter((d) => !resolving.has(d.id)).map((d) => driftCard(d, numbers)),
     ],
     todo: [],
     doing: [],
@@ -394,12 +398,12 @@ export interface AnnouncedCard {
 const ANNOUNCED_KIND_LABELS: Record<AnnouncementView["kind"], string> = { proposal: "Proposal", task: "Task", drift: "Drift", check: "Check" };
 
 /** A check shows its own phase, which an open question round does not change. */
-export const announcedPhase = (phase: AnnouncementView["phase"], asking: boolean, kind?: AnnouncementView["kind"]): string =>
-  phase === "verifying" ? "Verifying (tests, lint, build)" : phase === "scanning" ? "Scanning" : asking ? "Waiting for your answers" : phase === "writing" ? (kind === "drift" ? "Writing the Proposal" : "Writing") : "Preparing";
+export const announcedPhase = (phase: AnnouncementView["phase"], asking: boolean): string =>
+  phase === "verifying" ? "Verifying (tests, lint, build)" : phase === "scanning" ? "Scanning" : asking ? "Waiting for your answers" : phase === "writing" ? "Writing" : "Preparing";
 
 export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCard {
   const kindLabel = ANNOUNCED_KIND_LABELS[a.kind];
-  const phase = announcedPhase(a.phase, asking, a.kind);
+  const phase = announcedPhase(a.phase, asking);
   const title = a.title;
   const label = a.kind === "check" ? `Agent checking the code: ${title}, ${phase}` : `${kindLabel} the agent is creating, ${phase.toLowerCase()}: ${title}`;
   return { key: `announced:${a.id}`, kind: a.kind, kindLabel, title, phase, label };

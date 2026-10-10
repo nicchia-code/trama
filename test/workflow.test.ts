@@ -256,17 +256,46 @@ describe("Tasks and Drifts", () => {
     expect(getTask(p, noOrigin).data).toMatchObject({ column: "doing", agent: true });
   });
 
-  test("taking back clears the mark, keeps the Task In progress, and is the developer's command", () => {
+  test("taking back clears the mark and keeps the Task In progress", () => {
     const id = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
     expect(() => takeBackTask(p, id)).toThrow(/has not taken/);
     moveTask(p, id, "doing", "agent");
     const cli = (env: Record<string, string>) => run(["--root", dir, "task", "take-back", id], process.cwd(), env);
 
-    expect(() => cli({ TRAMA_AGENT: "1" })).toThrow(/developer's decision.*TRAMA_AGENT/);
-    expect(getTask(p, id).data.agent).toBe(true);
+    cli({ TRAMA_AGENT: "1" });
+    expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: false });
+    moveTask(p, id, "doing", "agent");
+    cli({ CURSOR_AGENT: "1" });
+    expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: false });
+    moveTask(p, id, "doing", "agent");
     cli({});
+
     expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: false });
     expect(moveTask(p, id, "done", "developer").data.column).toBe("done");
+  });
+
+  test("unrecognized task origins are ownerless and legacy editor holders are released by either chat", () => {
+    const cliTake = (id: string) => run(["--root", dir, "task", "move", id, "doing"], process.cwd(), { TRAMA_AGENT: "1" });
+    const editorEnd = newTask(p, { title: "Editor origin", refs: ["order"], technical: false }).id;
+    const cursorEnd = newTask(p, { title: "Cursor origin", refs: ["order"], technical: false }).id;
+    cliTake(editorEnd);
+    cliTake(cursorEnd);
+    expect([editorEnd, cursorEnd].map((id) => getTask(p, id).data.holder)).toEqual([null, null]);
+    expect(releaseTasks(p, { chat: "editor" }).map((task) => task.id)).toEqual([editorEnd, cursorEnd]);
+
+    const cursorRelease = newTask(p, { title: "Cursor release", refs: ["order"], technical: false }).id;
+    cliTake(cursorRelease);
+    expect(releaseTasks(p, { chat: "cursor" }).map((task) => task.id)).toEqual([cursorRelease]);
+
+    const legacy = newTask(p, { title: "Legacy editor holder", refs: ["order"], technical: false }).id;
+    moveTask(p, legacy, "doing", "agent", { chat: "cursor" });
+    const task = getTask(p, legacy);
+    const content = readFileSync(task.path, "utf8");
+    const legacyContent = content.replace(/^agent: cursor$/m, "agent: editor");
+    expect(legacyContent).not.toBe(content);
+    writeFileSync(task.path, legacyContent);
+    expect(getTask(p, legacy).data.holder).toBeNull();
+    expect(releaseTasks(p, { chat: "cursor" }).map((task) => task.id)).toEqual([legacy]);
   });
 
   test("releasing sends back to To do the Tasks taken by the origin that ended, and those taken with no holder kept", () => {
@@ -373,7 +402,7 @@ describe("Tasks and Drifts", () => {
     expect(cli("task", "next", "--proposal", prop.id).out).toBe(`Next Task in Proposal ${named("proposal", prop.id)}: ${named("task", blockedFirst)} Return flow`);
   });
 
-  test("task next --batch groups up to four runnable Tasks that concern different things, starting with the next one", () => {
+  test("task next --batch groups up to --max runnable Tasks that concern different things, starting with the next one", () => {
     const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
     const add = (title: string, refs: string[], proposal?: string) => newTask(p, { title, refs, technical: false, ...(proposal ? { proposal } : {}) }).id;
     const prop = newProposal(p, "Design");
@@ -383,14 +412,20 @@ describe("Tasks and Drifts", () => {
     const payment = add("Payment", ["payment"], prop.id);
     const cart = add("Cart", ["cart/Empty"]);
     const draft = add("Draft", ["order/Draft", "requirements/ui#General"]);
-    add("Fifth", ["user.CANCEL"]);
+    const fifth = add("Fifth", ["user.CANCEL"]);
+    const sixth = add("Sixth", ["stripe"]);
     newDrift(p, { options: FIX_OPTIONS, title: "Stop", refs: ["warehouse.PACKAGE_READY"], origin: blocked, happens: "One way.", should: "Another." });
 
     // `order` contains `order/Paid`, so it waits for a later group; `order/Draft` is a sibling of `order/Paid` and joins.
-    const group = [paid, payment, cart, draft];
+    const group = [paid, payment, cart, draft, fifth, sixth];
     expect(cli("task", "next", "--batch").out).toBe(group.map((id) => `${named("task", id)} ${getTask(p, id).title}`).join("\n"));
     expect(JSON.parse(cli("--json", "task", "next", "--batch").out).batch.map((t: { id: string; number: string }) => [t.id, t.number])).toEqual(group.map((id) => [id, named("task", id)]));
+    expect(cli("task", "next", "--batch", "--max", "2").out).toBe(group.slice(0, 2).map((id) => `${named("task", id)} ${getTask(p, id).title}`).join("\n"));
+    expect(cli("task", "next", "--batch", "--max", "7").out).toBe(group.map((id) => `${named("task", id)} ${getTask(p, id).title}`).join("\n"));
     expect(cli("task", "next", "--batch", "--proposal", prop.id).out).toBe(`${named("task", paid)} Paid\n${named("task", payment)} Payment`);
+    expect(() => cli("task", "next", "--batch", "--max", "0")).toThrow(/--max must be a positive integer/);
+    expect(() => cli("task", "next", "--batch", "--max", "2.5")).toThrow(/--max must be a positive integer/);
+    expect(() => cli("task", "next", "--batch", "--max", "abc")).toThrow(/--max must be a positive integer/);
     expect(listTasks(p).every((t) => t.data.column === "todo" && !t.data.agent)).toBe(true);
 
     for (const id of [paid, order, payment]) moveTask(p, id, "done", "developer");
@@ -420,7 +455,7 @@ describe("Tasks and Drifts", () => {
   });
 
   test("the textual board shows a design once with its Tasks, while task list stays flat", () => {
-    const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd());
+    const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
     const prop = newProposal(p, "Returns");
     const mk = (title: string, proposal?: string) => newTask(p, { title, refs: ["order"], technical: false, proposal }).id;
     const [a, b, c] = [mk("Return request", prop.id), mk("Refund on return", prop.id), mk("Return label", prop.id)];
@@ -839,21 +874,25 @@ describe("CLI", () => {
     expect(() => cli("machine", "ghost")).toThrow(/Unknown Machine "ghost"/);
   });
 
-  test("an agent (TRAMA_AGENT, or CURSOR_AGENT=1 in Cursor's chat) cannot approve, reject or resolve; the developer can", () => {
+  test("agent decision commands use the same domain checks as developer commands", () => {
     const agent = { TRAMA_AGENT: "1" };
-    expect(() => run(["--root", dir, "task", "take-back", "1"], dir, { CURSOR_AGENT: "1" })).toThrow(/developer's decision.*CURSOR_AGENT/);
-    expect(() => run(["--root", dir, "proposal", "discard", "1"], dir, { CURSOR_AGENT: "1" })).toThrow(/developer's decision/);
     const lost = newProposal(p, "Lost");
     editOrder(lost.id, (t) => t.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
     handOver(p, lost.id);
     const drift = newDrift(p, { options: FIX_OPTIONS, title: "d", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
-    expect(() => run(["--root", dir, "proposal", "approve", lost.id], dir, agent)).toThrow(/developer's decision/);
-    expect(() => run(["--root", dir, "proposal", "reject", lost.id, "--feedback", "no"], dir, agent)).toThrow(/developer's decision/);
-    expect(() => run(["--root", dir, "drift", "resolve", drift.id, "--dismiss"], dir, agent)).toThrow(/developer's decision/);
-    expect(getProposal(p, lost.id).data.status).toBe("open");
-    expect(getDrift(p, drift.id).data.status).toBe("open");
-    expect(run(["--root", dir, "proposal", "list"], dir, agent).exit).toBe(0);
-    expect(run(["--root", dir, "proposal", "approve", lost.id], dir, {}).exit).toBe(0);
+    expect(run(["--root", dir, "proposal", "reject", lost.id, "--feedback", "no"], dir, agent).exit).toBe(0);
+    expect(getProposal(p, lost.id).data.status).toBe("rejected");
+    expect(getProposal(p, lost.id).body).toContain("no");
+    expect(run(["--root", dir, "drift", "resolve", drift.id, "--dismiss"], dir, { CURSOR_AGENT: "1" }).exit).toBe(0);
+    expect(getDrift(p, drift.id).data.status).toBe("resolved");
+    const draft = newProposal(p, "Unfinished");
+    expect(run(["--root", dir, "proposal", "discard", draft.id], dir, agent).exit).toBe(0);
+    expect(getProposal(p, draft.id, true).data.status).toBe("discarded");
+    expect(() => run(["--root", dir, "proposal", "approve", lost.id], dir, agent)).toThrow(/only open Proposals/);
+    const taken = newTask(p, { title: "Taken", refs: ["order"], technical: false });
+    moveTask(p, taken.id, "doing", "agent");
+    expect(run(["--root", dir, "task", "take-back", taken.id], dir, agent).exit).toBe(0);
+    expect(getTask(p, taken.id).data.agent).toBe(false);
   });
 
   test("drift resolve demands exactly one resolution", () => {

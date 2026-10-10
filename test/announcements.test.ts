@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,18 +10,16 @@ import {
   changeCheckPhase,
   deliverCard,
   getAnnouncement,
-  quietAnnouncements,
   listAnnouncements,
-  markActivity,
-  markDraftActivity,
   newTerminalId,
   terminalFromEnv,
   withdrawAll,
+  originFromEnv,
 } from "../src/core/announcements";
-import { run } from "../src/cli/main";
-import { discardProposal, draftChangedAt, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
+import { discardProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { newDrift, resolveDrift } from "../src/core/work";
+import { run } from "../src/cli/main";
 import { type Project, projectAt } from "../src/core/store";
 
 let dir: string;
@@ -46,6 +44,15 @@ describe("announcing", () => {
     expect(getAnnouncement(p, b.id)?.kind).toBe("task");
   });
 
+  test("terminal origin wins; otherwise announcements distinguish Cursor and editor chat", () => {
+    expect(originFromEnv({ TRAMA_TERMINAL: "abc123", CURSOR_AGENT: "1" })).toEqual({ terminal: "abc123" });
+    expect(originFromEnv({ CURSOR_AGENT: "1" })).toEqual({ chat: "cursor" });
+    expect(originFromEnv({})).toEqual({ chat: "editor" });
+    expect(announce(p, { kind: "check", title: "Editor check", phase: "verifying" }).chat).toBe("editor");
+    expect(announce(p, { kind: "task", title: "Cursor task", chat: "cursor" }).chat).toBe("cursor");
+    expect(announce(p, { kind: "task", title: "Terminal task", terminal: "abc123" })).toMatchObject({ terminal: "abc123", chat: null });
+  });
+
   test("the folder ignores itself, so nothing in it is versioned", () => {
     announce(p, { kind: "task", title: "Anything" });
     expect(readFileSync(join(announcementsDir(p), ".gitignore"), "utf8").trim()).toBe("*");
@@ -57,11 +64,6 @@ describe("announcing", () => {
     expect(listAnnouncements(p).map((x) => x.title)).toEqual(["Good"]);
   });
 
-  test("any activity of the agent starts the quiet period again for every announcement", () => {
-    const first = announce(p, { kind: "task", title: "A" }, t(0));
-    announce(p, { kind: "task", title: "B" }, t(10));
-    expect(getAnnouncement(p, first.id)?.touched).toBe(t(10).toISOString());
-  });
 
   test("an announcement cannot have an empty title", () => {
     expect(() => announce(p, { kind: "task", title: "  " })).toThrow(/title/);
@@ -69,25 +71,53 @@ describe("announcing", () => {
 });
 
 describe("a Draft and its announcement", () => {
-  test("a Draft that names an announcement is bound to it, and the ghost follows the Draft's title", () => {
-    const a = announce(p, { kind: "proposal", title: "Planned" });
-    const prop = newProposal(p, "Real title", "", { announcement: a.id });
+  test("an explicitly named announcement is bound only when it belongs to the same origin", () => {
+    const a = announce(p, { kind: "proposal", title: "Planned", terminal: "ab12cd" });
+    const prop = newProposal(p, "Real title", "", { announcement: a.id, origin: { terminal: "ab12cd" } });
     expect(listAnnouncements(p)).toHaveLength(1);
-    const view = buildSnapshot(p).announcements;
-    expect(view).toEqual([{ id: a.id, kind: "proposal", title: "Real title", phase: "writing" }]);
+    expect(buildSnapshot(p).announcements).toEqual([{ id: a.id, kind: "proposal", title: "Real title", phase: "writing" }]);
     expect(getAnnouncement(p, a.id)?.proposal).toBe(prop.id);
   });
 
-  test("with no ID, the Draft takes over the oldest design request still Preparing, not an agent's announcement", () => {
-    announce(p, { kind: "proposal", title: "By the agent" }, t(0));
-    const early = announce(p, { kind: "proposal", title: "Request one", source: "request" }, t(1));
-    const late = announce(p, { kind: "proposal", title: "Request two", source: "request" }, t(2));
-    const prop = newProposal(p, "Draft");
+  test("without an ID, a terminal Draft takes the oldest request for its own terminal", () => {
+    const foreign = announce(p, { kind: "proposal", title: "Other terminal", source: "request", terminal: "zz99yy" }, t(0));
+    const early = announce(p, { kind: "proposal", title: "Request one", source: "request", terminal: "ab12cd" }, t(1));
+    const late = announce(p, { kind: "proposal", title: "Request two", source: "request", terminal: "ab12cd" }, t(2));
+    const prop = newProposal(p, "Draft", "", { origin: { terminal: "ab12cd" } });
     expect(getAnnouncement(p, early.id)).toMatchObject({ proposal: prop.id, title: "Draft" });
     expect(getAnnouncement(p, late.id)?.proposal).toBeNull();
-    expect(listAnnouncements(p)).toHaveLength(3);
+    expect(getAnnouncement(p, foreign.id)).toMatchObject({ proposal: null, title: "Other terminal" });
+  });
+  test("the other terminal's request can be older without changing which request is selected", () => {
+    const requestA = announce(p, { kind: "proposal", title: "A request", source: "request", terminal: "ab12cd" }, t(2));
+    const requestB = announce(p, { kind: "proposal", title: "B request", source: "request", terminal: "zz99yy" }, t(1));
+    const draftB = newProposal(p, "B draft", "", { origin: { terminal: "zz99yy" } });
+    expect(getAnnouncement(p, requestB.id)).toMatchObject({ proposal: draftB.id, title: "B draft" });
+    expect(getAnnouncement(p, requestA.id)?.proposal).toBeNull();
   });
 
+  test("chat and unknown origins cannot claim a terminal request", () => {
+    const request = announce(p, { kind: "proposal", title: "Terminal request", source: "request", terminal: "ab12cd" });
+    const chatDraft = newProposal(p, "Chat design", "", { origin: { chat: "editor" } });
+    const unknownDraft = newProposal(p, "Unknown design");
+    expect(getAnnouncement(p, request.id)?.proposal).toBeNull();
+    expect(listAnnouncements(p).filter((a) => a.proposal === chatDraft.id)).toMatchObject([{ kind: "proposal", title: "Chat design", chat: "editor" }]);
+    expect(listAnnouncements(p).filter((a) => a.proposal === unknownDraft.id)).toMatchObject([{ kind: "proposal", title: "Unknown design" }]);
+  });
+
+  test("an explicit ID from another origin stays unbound without creating a replacement ghost", () => {
+    const foreign = announce(p, { kind: "proposal", title: "Other terminal", terminal: "zz99yy" });
+    const prop = newProposal(p, "Draft", "", { announcement: foreign.id, origin: { terminal: "ab12cd" } });
+    expect(getAnnouncement(p, foreign.id)?.proposal).toBeNull();
+    expect(listAnnouncements(p)).toHaveLength(1);
+    expect(listAnnouncements(p).some((a) => a.proposal === prop.id)).toBe(false);
+  });
+
+  test("with no matching request, the Draft makes its own Writing announcement", () => {
+    const prop = newProposal(p, "Terminal design", "", { origin: { terminal: "ab12cd" } });
+    expect(listAnnouncements(p)).toMatchObject([{ kind: "proposal", title: "Terminal design", terminal: "ab12cd", proposal: prop.id }]);
+    expect(buildSnapshot(p).announcements[0]?.phase).toBe("writing");
+  });
   test("with nothing waiting, the Draft makes its own announcement, already Writing", () => {
     const prop = newProposal(p, "Chat design");
     const [only] = buildSnapshot(p).announcements;
@@ -101,18 +131,18 @@ describe("a Draft and its announcement", () => {
       (invalid) => {
         let id = "zzzzzz";
         if (invalid !== "unknown") {
-          const a = announce(p, { kind: invalid === "wrong kind" ? "task" : "proposal", title: "Named announcement" });
+          const a = announce(p, { kind: invalid === "wrong kind" ? "task" : "proposal", title: "Named announcement", chat: "editor" });
           id = a.id;
-          if (invalid === "delivered") submitProposal(p, newProposal(p, "Delivered", "", { announcement: id }).id);
+          if (invalid === "delivered") submitProposal(p, newProposal(p, "Delivered", "", { announcement: id, origin: { chat: "editor" } }).id);
           if (invalid === "withdrawn") withdrawAll(p, [id]);
-          if (invalid === "already bound") newProposal(p, "Existing Draft", "", { announcement: id });
+          if (invalid === "already bound") newProposal(p, "Existing Draft", "", { announcement: id, origin: { chat: "editor" } });
         }
-        if (waiting) announce(p, { kind: "proposal", title: "Waiting request", source: "request" });
+        if (waiting) announce(p, { kind: "proposal", title: "Waiting request", source: "request", terminal: "ab12cd" });
         const before = buildSnapshot(p).announcements;
-        const result = run(["--json", "proposal", "new", "Without ghost", "--announcement", id], dir, {});
+        const result = run(["--json", "proposal", "new", "Without ghost", "--announcement", id], dir, { CURSOR_AGENT: "0" });
         expect(result.exit).toBe(0);
         const created = JSON.parse(result.out);
-        expect(created.note).toBeString();
+        expect(created.id).toBeString();
         expect(getProposal(p, created.id).data.status).toBe("draft");
         expect(listAnnouncements(p).some((a) => a.proposal === created.id)).toBe(false);
         expect(buildSnapshot(p).announcements).toEqual(before);
@@ -147,15 +177,11 @@ describe("a Draft and its announcement", () => {
     expect(listAnnouncements(p)).toHaveLength(0);
   });
 
-  test("editing a Draft that has a ghost starts the quiet period again", () => {
+  test("editing a Draft does not change announcement metadata", () => {
     const prop = newProposal(p, "Edited");
-    const before = listAnnouncements(p)[0]?.touched as string;
-    const start = Date.now();
-    while (Date.now() === start) {
-      // The stamp has millisecond resolution.
-    }
+    const before = listAnnouncements(p)[0]?.touched;
     editInProposal(p, prop.id, "checkout/order.md");
-    expect((listAnnouncements(p)[0]?.touched as string) > before).toBe(true);
+    expect(listAnnouncements(p)[0]?.touched).toBe(before);
   });
 });
 
@@ -185,21 +211,21 @@ describe("ending announcements", () => {
     expect(existsSync(join(announcementsDir(p), ".gitignore"))).toBe(true);
   });
 
-  test("the ghost of a Draft stays Preparing until a Draft is bound", () => {
-    announce(p, { kind: "proposal", title: "Request", source: "request" });
+  test("the ghost of a Draft stays Preparing until a Draft from the same terminal is bound", () => {
+    const request = announce(p, { kind: "proposal", title: "Request", source: "request", terminal: "ab12cd" });
     expect(buildSnapshot(p).announcements[0]?.phase).toBe("preparing");
-    bindDraft(p, { id: "0099", title: "Whatever" });
-    expect(buildSnapshot(p).announcements[0]?.phase).toBe("writing");
+    bindDraft(p, { id: "0099", title: "Whatever" }, undefined, { terminal: "ab12cd" });
+    expect(buildSnapshot(p).announcements.find((a) => a.id === request.id)?.phase).toBe("writing");
   });
 
   test("a Draft named with a Drift announcement binds to it: it stays a Drift, keeps its title, and only the Drift delivers it", () => {
-    const a = announce(p, { kind: "drift", title: "Drift title" });
+    const a = announce(p, { kind: "drift", title: "Drift title", chat: "editor" });
     expect(announcementNote(p, a.id, "proposal")).toBeNull();
-    const prop = newProposal(p, "Draft title", "", { announcement: a.id });
+    const prop = newProposal(p, "Draft title", "", { announcement: a.id, origin: { chat: "editor" } });
     const all = listAnnouncements(p);
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ id: a.id, kind: "drift", title: "Drift title", proposal: prop.id });
-    expect(buildSnapshot(p).announcements[0]).toMatchObject({ kind: "drift", title: "Drift title", phase: "writing" });
+    expect(buildSnapshot(p).announcements[0]).toMatchObject({ kind: "drift", title: "Draft title", phase: "writing" });
     expect(announcementNote(p, a.id, "drift")).toBeNull();
     submitProposal(p, prop.id);
     expect(listAnnouncements(p)).toHaveLength(1);
@@ -208,89 +234,35 @@ describe("ending announcements", () => {
   });
 
   test("discarding a Draft bound to a Drift announcement withdraws it", () => {
-    const a = announce(p, { kind: "drift", title: "Drift title" });
-    const prop = newProposal(p, "Draft title", "", { announcement: a.id });
+    const a = announce(p, { kind: "drift", title: "Drift title", chat: "editor" });
+    const prop = newProposal(p, "Draft title", "", { announcement: a.id, origin: { chat: "editor" } });
     discardProposal(p, prop.id);
     expect(listAnnouncements(p)).toHaveLength(0);
   });
 });
 
-describe("the quiet period", () => {
-  test("passes fifteen minutes after the agent's last activity, whichever announcement it was about", () => {
-    announce(p, { kind: "task", title: "Old" }, t(0));
-    announce(p, { kind: "task", title: "Newer" }, t(10));
-    expect(quietAnnouncements(listAnnouncements(p), t(24).getTime())).toHaveLength(0);
-    expect(quietAnnouncements(listAnnouncements(p), t(25).getTime())).toHaveLength(2);
+describe("announcements do not expire with time or activity", () => {
+  test("announcements retain their timestamps when other cards are announced or delivered", () => {
+    const first = announce(p, { kind: "task", title: "First" }, t(0));
+    const other = announce(p, { kind: "task", title: "Other" }, t(10));
+    expect(getAnnouncement(p, first.id)?.touched).toBe(t(0).toISOString());
+    deliverCard(p, other.id, "task");
+    expect(getAnnouncement(p, first.id)?.touched).toBe(t(0).toISOString());
+    expect(listAnnouncements(p)).toHaveLength(1);
   });
 
-  test("a design request neither refreshes the others nor is withdrawn with them", () => {
-    announce(p, { kind: "task", title: "Agent" }, t(0));
-    announce(p, { kind: "proposal", title: "Request", source: "request" }, t(10));
-    const titles = (m: number) => quietAnnouncements(listAnnouncements(p), t(m).getTime()).map((a) => a.title);
-    expect(titles(14)).toEqual([]);
-    expect(titles(15)).toEqual(["Agent"]);
-    expect(titles(25)).toEqual(["Agent", "Request"]);
+  test("announcements remain listed regardless of age", () => {
+    const announcement = announce(p, { kind: "task", title: "Waiting" }, t(0));
+    expect(listAnnouncements(p).map((a) => a.id)).toEqual([announcement.id]);
   });
+});
 
-  test("a question round that closed later restarts the count, and nothing waiting is never quiet", () => {
-    announce(p, { kind: "task", title: "Waiting" }, t(0));
-    expect(quietAnnouncements(listAnnouncements(p), t(20).getTime(), t(18).getTime())).toHaveLength(0);
-    expect(quietAnnouncements(listAnnouncements(p), t(33).getTime(), t(18).getTime())).toHaveLength(1);
-    withdrawAll(p);
-    expect(quietAnnouncements(listAnnouncements(p), t(500).getTime())).toHaveLength(0);
-  });
-
-  test("a change to a Draft refreshes only the announcement bound to it; the others keep their own quiet period", () => {
-    const other = announce(p, { kind: "task", title: "Other" });
-    const prop = newProposal(p, "Draft title");
-    const mineId = listAnnouncements(p).find((a) => a.proposal === prop.id)?.id ?? "";
-    markActivity(p, t(0));
-    markDraftActivity(p, prop.id, t(10));
-    expect(getAnnouncement(p, other.id)?.touched).toBe(t(0).toISOString());
-    expect(getAnnouncement(p, mineId)?.touched).toBe(t(10).toISOString());
-    expect(quietAnnouncements(listAnnouncements(p), t(15).getTime()).map((a) => a.title)).toEqual(["Other"]);
-  });
-
-  test("starting a Proposal refreshes only the announcement it binds; an unusable ID refreshes nothing", () => {
-    announce(p, { kind: "task", title: "Other" }, t(0));
-    const mine = announce(p, { kind: "proposal", title: "Planned" }, t(0));
-    bindDraft(p, { id: "0099", title: "Real" }, mine.id, {}, t(10));
-    expect(getAnnouncement(p, mine.id)?.touched).toBe(t(10).toISOString());
-    expect(quietAnnouncements(listAnnouncements(p), t(15).getTime()).map((a) => a.title)).toEqual(["Other"]);
-    bindDraft(p, { id: "0100", title: "Unusable" }, "zzzzzz", {}, t(20));
-    expect(quietAnnouncements(listAnnouncements(p), t(24).getTime()).map((a) => a.title)).toEqual(["Other"]);
-  });
-
-  test("writing, creating or deleting a file of a Draft counts as activity for its own announcement; an unannounced Draft does not", () => {
-    const prop = newProposal(p, "Long writing");
-    const file = editInProposal(p, prop.id, "checkout/order.md");
-    const other = newProposal(p, "Not announced");
-    withdrawAll(p, listAnnouncements(p).filter((a) => a.proposal === other.id).map((a) => a.id));
-    const old = t(0);
-    const allIn = (d: string) => [d, ...readdirSync(d, { recursive: true, encoding: "utf8" }).map((r) => join(d, r))];
-    for (const path of [...allIn(prop.dir), ...allIn(other.dir)]) utimesSync(path, old, old);
-    const now = Date.now();
-    expect(draftChangedAt(p, prop.id)).toBe(old.getTime());
-
-    writeFileSync(join(other.dir, "proposal.md"), "changed");
-    expect(draftChangedAt(p, prop.id)).toBe(old.getTime());
-
-    writeFileSync(file, "# Order\n\nRewritten.\n");
-    const changedAt = draftChangedAt(p, prop.id);
-    expect(changedAt).toBeGreaterThanOrEqual(now - 1000);
-    // Announcements last touched long ago: only the Draft's own change keeps its announcement from being taken to have stopped.
-    const stale = listAnnouncements(p).map((a) => ({ ...a, touched: old.toISOString() }));
-    expect(quietAnnouncements(stale, changedAt + 14 * 60_000, 0, (a) => (a.proposal === prop.id ? changedAt : 0))).toHaveLength(0);
-    expect(quietAnnouncements(stale, changedAt + 15 * 60_000, 0, (a) => (a.proposal === prop.id ? changedAt : 0))).toHaveLength(1);
-
-    for (const path of allIn(prop.dir)) utimesSync(path, old, old);
-    rmSync(file);
-    expect(draftChangedAt(p, prop.id)).toBeGreaterThanOrEqual(now - 1000);
-
-    for (const path of allIn(prop.dir)) utimesSync(path, old, old);
-    writeFileSync(join(prop.dir, "notes.md"), "new file");
-    expect(draftChangedAt(p, prop.id)).toBeGreaterThanOrEqual(now - 1000);
-  });
+test("binding a Draft updates only its announcement timestamp and keeps association", () => {
+  const other = announce(p, { kind: "task", title: "Other" }, t(0));
+  const announcement = announce(p, { kind: "proposal", title: "Planned", source: "request", terminal: "ab12cd" }, t(1));
+  bindDraft(p, { id: "draft001", title: "Current" }, announcement.id, { terminal: "ab12cd" }, t(10));
+  expect(getAnnouncement(p, announcement.id)).toMatchObject({ proposal: "draft001", title: "Current", touched: t(10).toISOString() });
+  expect(getAnnouncement(p, other.id)?.touched).toBe(t(0).toISOString());
 });
 
 describe("the terminal an announcement belongs to", () => {
@@ -336,10 +308,14 @@ describe("the terminal an announcement belongs to", () => {
     expect(() => run(["announce", "card", "x"], dir, {})).toThrow(/The kind must be one of/);
   });
 
-  test("a Draft that takes a design request's announcement leaves it in the terminal the request was typed into", () => {
-    announce(p, { kind: "proposal", title: "Request", source: "request", terminal: "ab12cd" });
+  test("a Draft in another terminal leaves the request untouched and creates its own announcement", () => {
+    const request = announce(p, { kind: "proposal", title: "Request", source: "request", terminal: "ab12cd" });
     run(["proposal", "new", "Draft"], dir, { TRAMA_TERMINAL: "zz99yy" });
-    expect(listAnnouncements(p).map((a) => [a.title, a.proposal !== null, a.terminal])).toEqual([["Draft", true, "ab12cd"]]);
+    expect(listAnnouncements(p).map((a) => [a.title, a.proposal !== null, a.terminal])).toEqual([
+      ["Request", false, "ab12cd"],
+      ["Draft", true, "zz99yy"],
+    ]);
+    expect(getAnnouncement(p, request.id)?.proposal).toBeNull();
   });
 });
 
@@ -348,7 +324,7 @@ describe("an announcement made by Cursor's chat agent", () => {
     const chat = run(["announce", "task", "From the chat"], dir, { CURSOR_AGENT: "1" }).out;
     const both = run(["announce", "task", "Terminal wins"], dir, { CURSOR_AGENT: "1", TRAMA_TERMINAL: "ab12cd" }).out;
     const neither = run(["announce", "task", "Developer"], dir, { CURSOR_AGENT: "0" }).out;
-    expect([chat, both, neither].map((id) => [getAnnouncement(p, id)?.chat, getAnnouncement(p, id)?.terminal])).toEqual([["cursor", null], [null, "ab12cd"], [null, null]]);
+    expect([chat, both, neither].map((id) => [getAnnouncement(p, id)?.chat, getAnnouncement(p, id)?.terminal])).toEqual([["cursor", null], [null, "ab12cd"], ["editor", null]]);
     expect(readFileSync(join(announcementsDir(p), `${chat}.md`), "utf8")).toContain("chat: cursor");
     expect(readFileSync(join(announcementsDir(p), `${both}.md`), "utf8")).not.toContain("chat");
 
@@ -396,16 +372,16 @@ describe("a check", () => {
     expect(getAnnouncement(p, task)?.kind).toBe("task");
   });
 
-  test("announcing and changing the phase start the quiet period again for every announcement", () => {
+  test("changing a check phase updates its touched timestamp without refreshing other announcements", () => {
     const task = announce(p, { kind: "task", title: "Old" }, t(0));
     const check = announce(p, { kind: "check", title: "Final check after all Tasks", phase: "verifying" }, t(10));
-    expect(getAnnouncement(p, task.id)?.touched).toBe(t(10).toISOString());
     changeCheckPhase(p, check.id, "scanning", t(20));
-    expect(listAnnouncements(p).map((a) => a.touched)).toEqual([t(20).toISOString(), t(20).toISOString()]);
+    expect(getAnnouncement(p, task.id)?.touched).toBe(t(0).toISOString());
+    expect(getAnnouncement(p, check.id)?.touched).toBe(t(20).toISOString());
   });
 });
 
-test("the developer's decision to fix the code does not restart the quiet period", () => {
+test("the developer's decision to fix the code does not change announcement timestamps", () => {
   const opts = [{ title: "Change the code", text: "Make the code do it." }, { title: "Other", text: "Another way." }];
   const drift = newDrift(p, { title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts });
   const a = announce(p, { kind: "task", title: "Waiting" }, new Date("2026-01-01T10:00:00Z"));
@@ -417,9 +393,9 @@ describe("a Draft attached to an open Drift", () => {
   const opts = [{ title: "Change the code", text: "Make the code do it." }, { title: "Other", text: "Another way." }];
 
   test("its Proposal ghost is drawn nowhere, but the ghost of a Drift bound to a Draft stays", () => {
-    const a = announce(p, { kind: "proposal", title: "Design" });
-    const draft = newProposal(p, "Archived with a Drift");
-    bindDraft(p, draft, a.id);
+    const a = announce(p, { kind: "proposal", title: "Design", chat: "editor" });
+    const draft = newProposal(p, "Archived with a Drift", "", { origin: { chat: "editor" } });
+    bindDraft(p, draft, a.id, { chat: "editor" });
     const ghosts = () => buildSnapshot(p).announcements.map((v) => v.id);
     expect(ghosts()).toContain(a.id);
     newDrift(p, { title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts, proposal: draft.id });
@@ -436,7 +412,6 @@ describe("a Draft attached to an open Drift", () => {
     expect("drift" in (getAnnouncement(p, a.id) as object)).toBe(false);
     resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
     expect(listAnnouncements(p).map((x) => x.id)).toEqual([a.id]);
-    markActivity(p);
-    expect(readFileSync(file, "utf8")).not.toContain("drift:");
+    expect(readFileSync(file, "utf8")).toContain("drift:");
   });
 });

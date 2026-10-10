@@ -8,16 +8,11 @@ import { TramaError, UsageError } from "./errors";
 import { type AgentOrigin, CURSOR_AGENT_ENV } from "./announcements";
 import type { CursorHook } from "./cursor-chat";
 import { parseQuestionRequest, questionAborted, questionFailure, QuestionInterruptedError, unavailableQuestions, type QuestionContext, type QuestionHandler, type QuestionRequest, type QuestionResult } from "./questions";
+import type { CopilotHook } from "./copilot-chat";
 import { type Project, projectAt } from "./store";
 
 export const QUESTION_ENDPOINT_ENV = "TRAMA_QUESTION_ENDPOINT";
 
-/** What the System 1 classifier says about one Machine; `reason` is one line on why an error counted as a conflict. */
-export interface Classification {
-  answer: "conflict" | "no-conflict" | "unavailable";
-  reason?: string;
-}
-const UNAVAILABLE: Classification = { answer: "unavailable" };
 
 export interface QuestionServer {
   endpoint: string;
@@ -40,14 +35,12 @@ interface ServerOptions {
   focusedAt?: number;
   /** A hook of Cursor's chat, forwarded by `trama cursor-hook`. */
   onCursorHook?: (hook: CursorHook) => void;
-  /** A command of the agent ran: where it ran, as `trama` reports it; `readOnly` when it only read. */
-  onActivity?: (origin: AgentOrigin, readOnly?: boolean) => void;
-  /** The hook of the agent in `terminal` says it is still working. */
-  onAgentAlive?: (terminal: string) => void;
+  /** A hook of Copilot's chat, forwarded by `trama copilot-hook`. */
+  onCopilotHook?: (hook: CopilotHook) => void;
+  /** A command of the agent changed something: where it ran, as Trama reports it. */
+  onActivity?: (origin: AgentOrigin) => void;
   /** The agent in the terminal `terminal` (the hook of its agent said so) has settled: nothing is left to do. `root` is this window's project. */
   onAgentIdle?: (terminal: string, root: string) => void;
-  /** Asks the editor's System 1 classifier whether `machine`'s code, described in `state`, is in conflict. */
-  onClassify?: (machine: string, state: string) => Promise<Classification>;
   onClose?: () => void;
 }
 
@@ -316,6 +309,29 @@ export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: nu
   }
 }
 
+/** Hands a Copilot hook to its project's editor without holding up Copilot. */
+export async function sendCopilotHook(hook: CopilotHook, options: { timeoutMs?: number; runtimeDir?: string } = {}): Promise<boolean> {
+  const controller = new AbortController();
+  const sockets = new Set<Socket>();
+  const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, options.timeoutMs ?? 1000);
+  try {
+    const projectId = questionProjectId(projectAt(hook.root));
+    const editor = await liveEditor(projectId, controller.signal, sockets, options.runtimeDir);
+    if (!editor || controller.signal.aborted) return false;
+    return await new Promise<boolean>((done) => {
+      const { socket } = editor;
+      socket.once("data", () => done(true));
+      socket.once("close", () => done(false));
+      socket.write(`${JSON.stringify({ type: "copilot-hook", projectId, hook })}\n`);
+    });
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+    for (const socket of sockets) socket.destroy();
+  }
+}
+
 /**
  * Tells the editor of the project one thing a `trama` command of the agent knows, found as for `trama ask`; never
  * throws, waits at most `timeoutMs`. Without an editor nothing happens.
@@ -346,53 +362,14 @@ async function tellEditor(project: Project, message: object, options: { env?: Re
  * Tells the editor of the project that a command of the agent changed something, so it counts as the activity of the
  * agent's run: `origin` is the terminal or the Cursor chat it ran in, none for an agent Trama cannot tell.
  */
-export const sendActivity = (project: Project, origin: AgentOrigin, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number; readOnly?: boolean } = {}): Promise<void> =>
-  tellEditor(project, { type: "activity", ...origin, readOnly: options.readOnly === true }, options);
-
+export const sendActivity = (project: Project, origin: AgentOrigin, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<void> =>
+  tellEditor(project, { type: "activity", ...origin }, options);
 /** Tells the editor of the project that the agent in `terminal` has settled. */
 export const sendAgentIdle = (project: Project, terminal: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<void> =>
   tellEditor(project, { type: "agent-idle", terminal }, options);
-/** Tells the editor of the project that the agent in `terminal` is still alive. */
-export const sendAgentAlive = (project: Project, terminal: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<void> =>
-  tellEditor(project, { type: "agent-alive", terminal }, options);
 
 
-/**
- * Hands a Machine and the state the agent prepared to the editor of the project, found as for `trama ask`, and returns
- * its classification: `unavailable` when no editor answers within `timeoutMs`. The key never leaves the editor.
- */
-export async function classifyWithEditor(project: Project, machine: string, state: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<Classification> {
-  const projectId = questionProjectId(project);
-  const sockets = new Set<Socket>();
-  try {
-    const endpoint = (options.env ?? process.env)[QUESTION_ENDPOINT_ENV];
-    const editor = endpoint !== undefined ? await connectEditor(endpoint, projectId, undefined, sockets) : await liveEditor(projectId, undefined, sockets, options.runtimeDir);
-    if (!editor) return UNAVAILABLE;
-    const { promise, resolve } = Promise.withResolvers<Classification>();
-    // The editor's own call to Jev stops after 10 seconds: this only guards against an editor that never answers.
-    const timer = setTimeout(() => resolve(UNAVAILABLE), options.timeoutMs ?? 15_000);
-    const stop = lines(editor.socket, (line) => {
-      try {
-        const value: unknown = JSON.parse(line);
-        const answer = value && typeof value === "object" && "answer" in value ? value.answer : undefined;
-        const reason = value && typeof value === "object" && "reason" in value && typeof value.reason === "string" ? value.reason : undefined;
-        resolve(answer === "conflict" || answer === "no-conflict" ? { answer, ...(reason === undefined ? {} : { reason }) } : UNAVAILABLE);
-      } catch { resolve(UNAVAILABLE); }
-    });
-    editor.socket.once("close", () => resolve(UNAVAILABLE));
-    editor.socket.write(`${JSON.stringify({ type: "classify", projectId, machine, state })}\n`);
-    try {
-      return await promise;
-    } finally {
-      clearTimeout(timer);
-      stop();
-    }
-  } catch {
-    return UNAVAILABLE;
-  } finally {
-    for (const socket of sockets) socket.destroy();
-  }
-}
+
 
 interface ChannelConnection {
   send(value: object, finish?: boolean): void;
@@ -489,7 +466,7 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
           options.onActivity?.({
             ...(typeof message.terminal === "string" ? { terminal: message.terminal } : {}),
             ...(message.chat === "cursor" ? { chat: "cursor" as const } : {}),
-          }, message.readOnly === true);
+          });
           finish({ type: "taken" });
           return;
         }
@@ -499,9 +476,8 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
           finish({ type: "taken" });
           return;
         }
+        // Hooks from older versions may still send this message; consume it without changing editor state.
         if (phase === "ready" && message.type === "agent-alive") {
-          if (typeof message.terminal !== "string" || message.terminal === "") throw new UsageError("A living agent needs its terminal");
-          options.onAgentAlive?.(message.terminal);
           finish({ type: "taken" });
           return;
         }
@@ -512,14 +488,11 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
           finish({ type: "taken" });
           return;
         }
-        if (phase === "ready" && message.type === "classify") {
-          if (typeof message.machine !== "string" || typeof message.state !== "string") throw new UsageError("A classification needs a Machine and its state");
-          phase = "waiting";
-          const classify = options.onClassify ?? (async () => UNAVAILABLE);
-          void classify(message.machine, message.state).then(
-            (result) => finish(result),
-            (error: unknown) => finish({ answer: "conflict", reason: error instanceof Error ? error.message : String(error) }),
-          );
+        if (phase === "ready" && message.type === "copilot-hook") {
+          const hook = message.hook as CopilotHook | undefined;
+          if (!hook || typeof hook !== "object" || typeof hook.conversation !== "string" || typeof hook.root !== "string") throw new UsageError("A Copilot hook needs a conversation and a project folder");
+          options.onCopilotHook?.(hook);
+          finish({ type: "taken" });
           return;
         }
         if (phase !== "ready" || message.type !== "ask") throw new UsageError("Identify the editor before submitting a question round");

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildApprovalScanPrompt, buildHeldScanPrompt, buildPrompt, buildScanPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
+import { buildApprovalScanPrompt, buildPrompt, buildScanPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "design", prompt: "  Add refunds to checkout \n" })).toBe("Use the trama-design skill. Add refunds to checkout");
@@ -10,10 +10,10 @@ test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "scan", feature: "checkout" })).toBe("Use the trama-scan skill on the Feature `checkout`.");
   expect(buildPrompt({ kind: "implement", task: "0012" })).toBe("Use the trama-implement skill on Task 0012.");
   expect(buildPrompt({ kind: "implement-all" })).toBe(
-    'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch`, one group at a time, until it says there is none.',
+    'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, one group at a time, until it says there is none.',
   );
   expect(buildPrompt({ kind: "implement-design", proposal: "0007" })).toBe(
-    'Use the trama-implement skill on every Task of Proposal 0007 that is in the "todo" column. Take them from `trama task next --batch --proposal 0007`, one group at a time, until it says there is none.',
+    'Use the trama-implement skill on every Task of Proposal 0007 that is in the "todo" column. Take them from `trama task next --batch --proposal 0007 --max {maxParallelAgents}`, one group at a time, until it says there is none.',
   );
   expect(buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34", "ef56gh78"] })).toBe(
     "Use the trama-resolve-drifts skill on the open Drifts ab12cd34, ef56gh78: ask the developer what should happen for each one, then write one resolution Proposal.",
@@ -31,12 +31,6 @@ test("the automatic scan after an approval reads the Proposal's scan scope and s
   );
 });
 
-test("the held scan names the Proposals oldest first, and is the automatic scan's instruction for one Proposal", () => {
-  expect(buildHeldScanPrompt(["ab12cd34"])).toBe(buildApprovalScanPrompt("ab12cd34"));
-  expect(buildHeldScanPrompt(["aaaa1111", "bbbb2222"])).toBe(
-    "Use the trama-scan skill on what Proposals aaaa1111, bbbb2222 changed: each scan scope is in `trama proposal show <id>`. Compare every reference once, against the current Model, and link every Task you file with --proposal to the most recent of those Proposals whose scan scope covers it.",
-  );
-});
 
 test("the agent terminal is named after the work: the card's short number, or a fixed word", () => {
   const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
@@ -58,4 +52,10 @@ test("a chosen language ends the instruction on the same line, trimmed; blank as
   expect(withLanguage(scan, "Deutsch")).toBe(`${scan} Write everything you generate in Deutsch, except code, which always stays in English.`);
   expect(withLanguage(scan, "")).toBe(scan);
   expect(withLanguage(scan, " \t ")).toBe(scan);
+});
+test("implementation batch commands receive the configured limit at send time", () => {
+  const all = buildPrompt({ kind: "implement-all" }).replaceAll("{maxParallelAgents}", "7");
+  const design = buildPrompt({ kind: "implement-design", proposal: "0007" }).replaceAll("{maxParallelAgents}", "7");
+  expect(all).toContain("trama task next --batch --max 7");
+  expect(design).toContain("trama task next --batch --proposal 0007 --max 7");
 });

@@ -75,16 +75,20 @@ export function requestTitle(text: string): string {
   const lines = text.split(/\r?\n/);
   let fence: { char: string; length: number } | null = null;
   for (const line of lines) {
-    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    let content = line;
+    while (/^ {0,3}>[ \t]?/.test(content) || /^ {0,3}(?:[-+*]|\d+[.)])[ \t]+/.test(content)) {
+      content = content.replace(/^ {0,3}>[ \t]?/, "").replace(/^ {0,3}(?:[-+*]|\d+[.)])[ \t]+/, "");
+    }
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(content)?.[1];
     if (fence) {
-      if (marker && marker[0] === fence.char && marker.length >= fence.length && line.trim() === marker) fence = null;
+      if (marker && marker[0] === fence.char && marker.length >= fence.length && content.trim() === marker) fence = null;
       continue;
     }
     if (marker) {
       fence = { char: marker[0] as string, length: marker.length };
       continue;
     }
-    const heading = /^ {0,3}#(?:[ \t]+(.*))?$/.exec(line);
+    const heading = /^ {0,3}#(?:[ \t]+(.*))?$/.exec(content);
     if (heading) {
       const title = (heading[1] ?? "").replace(/[ \t]+#+[ \t]*$/, "").replace(/^#+$/, "").trim();
       if (title) return title;

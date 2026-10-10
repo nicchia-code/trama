@@ -75,8 +75,6 @@ export function parseToHost(value: unknown): Parsed {
     case "openModelFile":
     case "openFile":
       return typeof raw["path"] === "string" && raw["path"] !== "" ? { ok: true, message: { type, path: raw["path"] } } : bad(`${type} needs a path`);
-    case "setScanHold":
-      return typeof raw["on"] === "boolean" ? { ok: true, message: { type, on: raw["on"] } } : bad(`${type} needs on`);
     case "approveProposal":
     case "rejectProposal":
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };

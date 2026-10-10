@@ -32,8 +32,6 @@ export type ToHost =
   | { type: "openModelFile"; path: string }
   /** Path relative to `.trama/` (for example `tasks/0003-x.md`). */
   | { type: "openFile"; path: string }
-  /** The developer turned the Hold scan switch. `on` is the state they asked for. */
-  | { type: "setScanHold"; on: boolean }
   | { type: "approveProposal"; id: string }
   /** The host asks for the feedback with an input box. */
   | { type: "rejectProposal"; id: string }

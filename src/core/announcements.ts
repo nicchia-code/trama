@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { TramaError } from "./errors";
 import { enumField, idField, type Raw } from "./schema";
@@ -30,11 +30,11 @@ export interface Announcement {
   source: AnnouncementSource;
   /** The Draft bound to it once there is one: the announcement is then Writing, before that Preparing. */
   proposal: string | null;
-  /** When the agent last did something about an announced card, as an ISO date and time. */
+  /** Timestamp of announcement or Draft binding; check phase changes update it too. */
   touched: string;
   /** The agent terminal it belongs to (see `TERMINAL_ENV`), or null: made from a chat or by an agent Trama did not start, or written before this field existed. */
   terminal: string | null;
-  /** `cursor` when Cursor's chat agent made it (see `CURSOR_AGENT_ENV`); null otherwise and in announcements written before this field existed. Never set together with `terminal`. */
+  /** `cursor` or `editor` when a chat agent made it; null in announcements written before this field existed. Never set together with `terminal`. */
   chat: Chat | null;
   /** The phase of a check; null for every other kind. */
   phase: CheckPhase | null;
@@ -42,10 +42,12 @@ export interface Announcement {
   title: string;
 }
 
-/** How long the agent may do nothing about an announced card before the extension takes it to have stopped. */
+export const announcementsDir = (p: Project) => join(p.dir, "announcements");
+/** Shared only by Task-release and resolution-job timers; announcements never use it. */
 export const QUIET_PERIOD_MS = 15 * 60 * 1000;
 
-export const announcementsDir = (p: Project) => join(p.dir, "announcements");
+
+const checkDeliveryFile = (p: Project, id: string) => join(announcementsDir(p), `.check-delivered-${id}`);
 
 const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 const FILE_PATTERN = /^[a-z0-9]{6}\.md$/;
@@ -71,20 +73,19 @@ export function terminalFromEnv(env: Record<string, string | undefined>): string
 export const CURSOR_AGENT_ENV = "CURSOR_AGENT";
 
 /** The editor chat whose agent made an announcement. */
-export type Chat = "cursor";
-const CHATS: readonly Chat[] = ["cursor"];
-
-/** Where an agent's command runs: the agent terminal Trama started, Cursor's chat, or neither (the developer, or an agent Trama cannot tell). */
+export type Chat = "cursor" | "editor";
+const CHATS: readonly Chat[] = ["cursor", "editor"];
+/** Where an agent's command runs: a Trama-started terminal, Cursor's chat, the editor chat, or neither. */
 export interface AgentOrigin {
   terminal?: string;
   chat?: Chat;
 }
 
-/** The agent terminal wins: Cursor's chat counts only for a command run without `TRAMA_TERMINAL`. */
+/** A recognized terminal wins; otherwise chat announcements belong to Cursor or the editor. */
 export function originFromEnv(env: Record<string, string | undefined>): AgentOrigin {
   const terminal = terminalFromEnv(env);
   if (terminal) return { terminal };
-  return env[CURSOR_AGENT_ENV] === "1" ? { chat: "cursor" } : {};
+  return { chat: env[CURSOR_AGENT_ENV] === "1" ? "cursor" : "editor" };
 }
 
 function newId(dir: string): string {
@@ -142,25 +143,25 @@ function remove(p: Project, id: string) {
 export function listAnnouncements(p: Project): Announcement[] {
   const dir = announcementsDir(p);
   if (!existsSync(dir)) return [];
-  const out: { a: Announcement; born: bigint }[] = [];
+  const out: { a: Announcement; born: bigint; changed: bigint }[] = [];
   for (const name of readdirSync(dir)) {
     if (!FILE_PATTERN.test(name)) continue;
     const id = name.slice(0, -3);
     try {
       const doc = readDocument(join(dir, name));
       const st = statSync(join(dir, name), { bigint: true });
-      // ponytail: announcement order is the file's birth; where the filesystem keeps none (0), the last change stands in.
-      out.push({ a: parse(doc.data, doc.body, id, join(dir, name)), born: st.birthtimeNs > 0n ? st.birthtimeNs : st.mtimeNs });
+      // ponytail: announcement order is the file's birth, with the last change breaking equal birth times.
+      out.push({ a: parse(doc.data, doc.body, id, join(dir, name)), born: st.birthtimeNs > 0n ? st.birthtimeNs : st.mtimeNs, changed: st.mtimeNs });
     } catch {
       // Half written or edited by hand: not an announcement.
     }
   }
-  return out.sort((x, y) => (x.born < y.born ? -1 : x.born > y.born ? 1 : x.a.id.localeCompare(y.a.id))).map((x) => x.a);
+  return out.sort((x, y) => (x.born < y.born ? -1 : x.born > y.born ? 1 : x.changed < y.changed ? -1 : x.changed > y.changed ? 1 : x.a.id.localeCompare(y.a.id))).map((x) => x.a);
 }
 
 export const getAnnouncement = (p: Project, id: string): Announcement | null => listAnnouncements(p).find((a) => a.id === id) ?? null;
 
-/** Announces a card as soon as it is known it will be created. Agent announcements refresh the quiet period of every announcement; a design request, sent by the developer, refreshes nothing and starts only its own. */
+/** Announces a card as soon as it is known it will be created. */
 export function announce(
   p: Project,
   input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase } & AgentOrigin,
@@ -169,7 +170,6 @@ export function announce(
   const title = input.title.trim().replace(/\s+/g, " ");
   if (!title) throw new TramaError("An announcement needs a title");
   if ((input.kind === "check") !== (input.phase !== undefined)) throw new TramaError(input.kind === "check" ? "A check needs a phase" : "Only a check has a phase");
-  if ((input.source ?? "agent") === "agent") markActivity(p, now);
   const stamp = now.toISOString();
   const announcement: Announcement = {
     id: newId(announcementsDir(p)),
@@ -178,18 +178,12 @@ export function announce(
     proposal: input.proposal ?? null,
     touched: stamp,
     terminal: input.terminal ?? null,
-    chat: input.terminal ? null : (input.chat ?? null),
+    chat: input.terminal ? null : (input.source === "request" ? null : (input.chat ?? "editor")),
     phase: input.phase ?? null,
     title,
   };
   write(p, announcement);
   return announcement;
-}
-
-/** The agent did something about an announced card: every announcement starts its quiet period again. */
-export function markActivity(p: Project, now = new Date()) {
-  const stamp = now.toISOString();
-  for (const a of listAnnouncements(p)) write(p, { ...a, touched: stamp });
 }
 
 /**
@@ -207,15 +201,22 @@ export function announcementNote(p: Project, id: string | undefined, kind: Annou
 }
 
 /**
- * A Draft is bound to the usable announcement the agent named, or left without a ghost when that ID is unusable.
- * Only without a named ID does it take the oldest Preparing design request or make its own Writing announcement.
- * Starting it is the first change to the bound announcement's Draft: only that announcement starts its quiet period again.
+ * A Draft uses only an announcement from its own origin. Automatic binding is reserved for terminal requests;
+ * chat and unknown origins cannot claim a request sent to a terminal.
  */
 export function bindDraft(p: Project, proposal: { id: string; title: string }, announcementId?: string, origin: AgentOrigin = {}, now = new Date()): Announcement | null {
   const all = listAnnouncements(p);
   const target = announcementId !== undefined
-    ? all.find((a) => a.id === announcementId && (a.kind === "proposal" || a.kind === "drift") && a.proposal === null)
-    : all.find((a) => a.kind === "proposal" && a.source === "request" && a.proposal === null);
+    ? all.find((a) =>
+        a.id === announcementId
+        && (a.kind === "proposal" || a.kind === "drift")
+        && a.proposal === null
+        && (origin.terminal !== undefined
+          ? a.terminal === origin.terminal && a.chat === null
+          : origin.chat !== undefined && a.chat === origin.chat && a.terminal === null))
+    : origin.terminal !== undefined
+      ? all.find((a) => a.kind === "proposal" && a.source === "request" && a.proposal === null && a.terminal === origin.terminal)
+      : undefined;
   if (target) {
     // A Drift announcement keeps the Drift's title; the Draft's title is the Proposal's own.
     const bound = { ...target, title: target.kind === "drift" ? target.title : proposal.title, proposal: proposal.id, touched: now.toISOString() };
@@ -236,13 +237,11 @@ export function removeBoundTo(p: Project, proposalId: string, handedOver = false
 }
 
 /**
- * A Task or a Drift was filed: that is activity of the agent, and the announcement it names, if it is one of that
- * kind, is delivered. Any other ID is ignored.
+ * A Task or a Drift was filed, and its matching announcement, if any, is delivered. Any other ID is ignored.
  */
 export function deliverCard(p: Project, id: string | undefined, kind: "task" | "drift") {
   const a = id ? getAnnouncement(p, id) : null;
   if (a?.kind === kind) remove(p, a.id);
-  markActivity(p);
 }
 
 const findCheck = (p: Project, id: string) => {
@@ -258,7 +257,6 @@ export function changeCheckPhase(p: Project, id: string, phase: "scanning", now 
   const check = findCheck(p, id);
   if (!check) return "missing";
   if (check.phase === phase) return "unchanged";
-  markActivity(p, now);
   write(p, { ...check, phase, touched: now.toISOString() });
   return "changed";
 }
@@ -267,8 +265,47 @@ export function changeCheckPhase(p: Project, id: string, phase: "scanning", now 
 export function finishCheck(p: Project, id: string): boolean {
   const check = findCheck(p, id);
   if (!check) return false;
+  if (check.title === "Scan of the System")
+    writeFileEnsuringDir(checkDeliveryFile(p, check.id), JSON.stringify({ id: check.id, terminal: check.terminal, chat: check.chat, touched: check.touched }));
   remove(p, check.id);
   return true;
+}
+
+export interface DeliveredSystemCheck {
+  id: string;
+  terminal: string | null;
+  chat: Chat | null;
+  touched: string;
+}
+
+/** Consumes one-shot delivery signals for global System checks; stale or invalid signals are discarded. */
+export function takeDeliveredSystemChecks(p: Project): DeliveredSystemCheck[] {
+  const dir = announcementsDir(p);
+  if (!existsSync(dir)) return [];
+  const delivered: DeliveredSystemCheck[] = [];
+  for (const name of readdirSync(dir)) {
+    const id = /^\.check-delivered-([a-z0-9]{6})$/.exec(name)?.[1];
+    if (!id) continue;
+    const path = join(dir, name);
+    try {
+      const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+      if (value !== null && typeof value === "object") {
+        const raw = value as Record<string, unknown>;
+        const terminal = raw["terminal"];
+        const chat = raw["chat"];
+        const touched = raw["touched"];
+        if (raw["id"] === id && (terminal === null || (typeof terminal === "string" && TERMINAL_PATTERN.test(terminal))) &&
+            (chat === null || chat === "cursor" || chat === "editor") && !(terminal !== null && chat !== null) &&
+            typeof touched === "string" && !Number.isNaN(Date.parse(touched))) {
+          delivered.push({ id, terminal, chat, touched });
+        }
+      }
+      unlinkSync(path);
+    } catch {
+      try { unlinkSync(path); } catch { /* Leave an unreadable marker for startup cleanup. */ }
+    }
+  }
+  return delivered;
 }
 
 /** Withdraws every announcement still waiting, or only `ids`; returns what was withdrawn so the developer can be told. */
@@ -278,18 +315,3 @@ export function withdrawAll(p: Project, ids?: readonly string[]): Announcement[]
   return gone;
 }
 
-/** The agent changed a Draft: only the announcement bound to it starts its quiet period again; the others keep counting. */
-export function markDraftActivity(p: Project, proposalId: string, now = new Date()) {
-  const stamp = now.toISOString();
-  for (const a of listAnnouncements(p)) if (a.proposal === proposalId) write(p, { ...a, touched: stamp });
-}
-
-/**
- * The announcements the agent has left alone for the quiet period. Each counts from its own `touched` (agent activity
- * refreshes all of them, a design request is born with its own), or from `resumedAt` if later: the close of a question
- * round, which does not count. `seenAt` is any other sign of life the editor has for an announcement (a read-only
- * command, a hook's heartbeat, a change to its own bound Draft).
- */
-export function quietAnnouncements(announcements: readonly Announcement[], now: number, resumedAt = 0, seenAt: (a: Announcement) => number = () => 0): Announcement[] {
-  return announcements.filter((a) => now - Math.max(Date.parse(a.touched), resumedAt, seenAt(a)) >= QUIET_PERIOD_MS);
-}

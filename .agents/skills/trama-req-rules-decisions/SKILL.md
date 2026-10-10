@@ -12,6 +12,7 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 ## proposal
 
 - Every new Proposal starts as a Draft, whether it is an ordinary change, an import or one attached to a Drift. Only the agent hands it over, and only a Draft can be handed over.
+- Approvare, rifiutare o scartare una Proposal resta una decisione del developer, anche se l'agente esegue il comando per suo conto: valgono le istruzioni delle skill in `General`, senza un rifiuto della CLI legato all'agente. La consegna di una Proposal non autorizza mai da sola la sua approvazione.
 - A Proposal may only require Proposals that exist and were neither rejected nor discarded when it is created. Required Proposals are applied under it in dependency order (each after the ones it requires) before it is drawn, diffed, checked for staleness or validated; approving a required Proposal therefore does not make it stale.
 - A touched file is stale when its current content (on top of the required Proposals) differs from the hash recorded in `base`, or when it was recorded as new and now exists. A deleted file counts as touched.
 - Editing a file of a Proposal again does not change what was recorded for it; marking for deletion a file the Proposal already holds a copy of is refused; only Drafts and open Proposals can be edited, only open Proposals can be approved or rejected, and only Drafts can be discarded or handed over.

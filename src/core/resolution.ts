@@ -1,6 +1,5 @@
 import { TramaError } from "./errors";
 import { type DriftDecision, type DriftDecisionKind, getProposal, listProposals, type Proposal, requireEditable, resolutionHolding, save, touch } from "./proposals";
-import { markDraftActivity } from "./announcements";
 import { cardName } from "./short-numbers";
 import type { Project } from "./store";
 import { chosenOption, driftOptions, fixCodeRefusal, getDrift, listDrifts } from "./work";
@@ -49,7 +48,6 @@ function commit(p: Project, proposal: Proposal, drifts: DriftDecision[]) {
   const returnedToDraft = proposal.data.status === "open";
   touch(proposal);
   proposal.data.drifts = drifts;
-  markDraftActivity(p, proposal.id);
   save(proposal);
   return { proposal, returnedToDraft };
 }

@@ -1,10 +1,9 @@
+import { basename } from "node:path";
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
 import { resolveDriftsBlocker } from "../../../src/core/resolution";
-import { approvedScope } from "../../../src/core/scope";
-import { holdApproved, noticeForScanHold, readScanHold, SCAN_HOLD_SAVE_FAILED, turnScanHoldOff, turnScanHoldOn } from "../../../src/core/scan-hold";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { namerOf } from "../../../src/core/card-names";
@@ -12,17 +11,19 @@ import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { blockedTasks, getTask, listDrifts, listTasks, requireNotAttached } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
-import { onAnnouncementsWithdrawn } from "./announcements";
-import { agentReady, configuredSkillsDir, type DesignAnnouncement, type Instruction, launchAgent, settings } from "./agent";
+import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
+import { configuredSkillsDir, type DesignAnnouncement, type Instruction, launchAgent, settings } from "./agent";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { driftResolution, onDriftResolutionChange } from "./drift-resolution";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { resolveMarkdownFile } from "./paths";
 import { findProject, initializeProject, NO_PROJECT_WARNING, updateSkills } from "./project";
-import { buildApprovalScanPrompt, buildHeldScanPrompt, buildPrompt, type ResolvedAction, terminalName } from "./prompts";
 import { type ApprovalOptions, applyApprovedProposal } from "./approval";
 import type { QuestionSession } from "./question-session";
+import { rememberGlobalScan } from "./global-scan";
+import type { ScanDestination } from "./global-scan";
+import { buildApprovalScanPrompt, buildPrompt, terminalName, type ResolvedAction } from "./prompts";
 
 const DEBOUNCE_MS = 150;
 
@@ -46,14 +47,12 @@ export class Controller implements vscode.Disposable {
   private project: Project | undefined;
   private timer: NodeJS.Timeout | undefined;
   private disposed = false;
-  /** Hold scan file text last warned about as unreadable. Forgotten when the panel closes, so reopening warns again. */
-  private scanHoldWarned: string | null = null;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly questions?: QuestionSession,
-    /** The extension's watcher of `.trama/`, which outlives the panel: the panel follows it only while open. */
     private readonly tramaFiles?: vscode.FileSystemWatcher,
+    private readonly globalStorageUri?: vscode.Uri,
   ) {}
 
   /**
@@ -77,7 +76,7 @@ export class Controller implements vscode.Disposable {
       const choice = await vscode.window.showInformationMessage("This workspace has no Trama project yet.", "Initialize Project");
       if (choice === undefined) return;
       // Another open command may have initialized the project, or even opened the panel, while the offer waited.
-      project = findProject() ?? (await initializeProject());
+      project = findProject() ?? (await initializeProject(this.globalStorageUri));
       if (!project) return;
     }
     // Another open command may have created the panel while the offer or the initialization waited for the developer.
@@ -92,9 +91,8 @@ export class Controller implements vscode.Disposable {
     return true;
   }
 
-  /** Initializes the workspace and stops there: only opening the panel or a question round opens it. */
   async init(): Promise<void> {
-    await initializeProject();
+    if (this.globalStorageUri) await initializeProject(this.globalStorageUri);
   }
 
   /** Command entry point: launches an agent without needing the panel. */
@@ -117,9 +115,9 @@ export class Controller implements vscode.Disposable {
     if (picked) await this.launchAction(project, { kind: "scan", feature: picked.feature });
   }
 
-  updateSkills(): void {
+  async updateSkills(): Promise<void> {
     const project = this.requireProject();
-    if (project) updateSkills(project);
+    if (project) await updateSkills(project, this.globalStorageUri);
   }
 
   private requireProject(): Project | undefined {
@@ -136,8 +134,8 @@ export class Controller implements vscode.Disposable {
 
   private create(project: Project | undefined): void {
     const dist = vscode.Uri.joinPath(this.extensionUri, "dist");
-    const panel = vscode.window.createWebviewPanel("trama", "Trama", vscode.ViewColumn.Active, {
-      enableScripts: true,
+    const title = this.projectTitle(project);
+    const panel = vscode.window.createWebviewPanel("trama", title, vscode.ViewColumn.Active, {
       retainContextWhenHidden: true,
       localResourceRoots: [dist],
     });
@@ -160,14 +158,12 @@ export class Controller implements vscode.Disposable {
       for (const subscription of subscriptions) subscription.dispose();
       clearTimeout(this.timer);
       this.panel = this.project = undefined;
-      this.scanHoldWarned = null;
       // The round stays open and the agent keeps waiting; the developer is offered a way back to it.
       this.questions?.panelClosed();
       if (!this.disposed && this.questions?.current()) this.offerReopen();
     });
     this.panel = panel;
     this.project = project;
-    this.noteSwitch();
   }
 
   /** The message cannot be withdrawn, so Reopen checks whether the round still exists: without one it only opens the panel. */
@@ -196,31 +192,34 @@ export class Controller implements vscode.Disposable {
     return [watcher.onDidCreate(onChange), watcher.onDidChange(onChange), watcher.onDidDelete(onChange)];
   }
 
-  /**
-   * An unreadable Hold scan switch is off. The warning is shown once per content while the panel stays open,
-   * again when the content changes and is still unreadable, and again after the panel is reopened.
-   */
-  private noteSwitch(): void {
-    const project = this.projectNow();
-    if (!project) return;
-    const hold = noticeForScanHold(readScanHold(project).reading, this.scanHoldWarned);
-    this.scanHoldWarned = hold.warned;
-    if (hold.warning !== null) void vscode.window.showWarningMessage(hold.warning);
-  }
-
-  /** The project the panel shows, looked up again while the panel has none, so a project created after the panel opened appears. */
   private projectNow(): Project | undefined {
     return (this.project ??= findProject());
   }
 
+  private projectTitle(project = this.projectNow()): string {
+    const fallback = basename(project?.root ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd());
+    try {
+      return project ? loadModel(project).system.name.trim() || fallback : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+
   /** Posts a fresh snapshot; if the files cannot be read, posts the error and the view keeps its last snapshot. */
   private refresh(): void {
     const project = this.projectNow();
-    if (!project) return;
-    this.noteSwitch();
+    if (!project) {
+      if (this.panel) this.panel.title = this.projectTitle(undefined);
+      return;
+    }
+    if (this.panel) this.panel.title = this.projectTitle(project);
     try {
       const window = driftResolution();
-      this.post({ type: "snapshot", snapshot: buildSnapshot(project), asking: questionRoundOpen(), resolve: { resolving: window === "resolving", blocker: resolveDriftsBlocker(project, window) } });
+      synchronizeAnnouncementTitles(project);
+      const snapshot = buildSnapshot(project);
+      if (this.panel) this.panel.title = snapshot.system.name.trim() || this.projectTitle(project);
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { resolving: window === "resolving", blocker: resolveDriftsBlocker(project, window) } });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -254,7 +253,7 @@ export class Controller implements vscode.Disposable {
     if (!project) return;
     switch (message.type) {
       case "launch":
-        await this.launchAction(project, message.action);
+        await this.launchAction(project, message.action, true);
         return;
       case "writeDesignRequest":
         await vscode.commands.executeCommand("trama.design");
@@ -269,9 +268,6 @@ export class Controller implements vscode.Disposable {
         return;
       case "openLink":
         await vscode.env.openExternal(vscode.Uri.parse(message.url, true));
-        return;
-      case "setScanHold":
-        await this.turnScanHold(project, message.on);
         return;
       case "approveProposal":
         requireNotAttached(project, message.id);
@@ -298,40 +294,15 @@ export class Controller implements vscode.Disposable {
     await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside, preview: false });
   }
 
-  /**
-   * Turning Hold scan on always succeeds, with nothing held. Turning it off
-   * sends the held scan with the buttons' delivery chain, in a terminal called `Scan`, as a gesture of the developer.
-   */
-  private async turnScanHold(project: Project, on: boolean): Promise<void> {
-    try {
-      const warning = on
-        ? turnScanHoldOn(project)
-        : await turnScanHoldOff(project, async (proposals) => {
-            const instruction = buildHeldScanPrompt(proposals);
-            try {
-              const launch = await launchAgent(project.root, instruction, "Scan");
-              return launch !== undefined && launch !== "not-sent";
-            } catch (err) {
-              void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
-              return false;
-            }
-          });
-      if (warning !== null) void vscode.window.showWarningMessage(warning);
-    } finally {
-      // The view shows the switch at once; this picture puts back the real state if the turn was refused or failed.
-      this.refresh();
-    }
-  }
 
   private approvalOptions(project: Project): ApprovalOptions {
     return {
       project,
       autoScan: settings().get<boolean>("autoScan", true),
-      agentConfigured: agentReady(),
       launchScan: async (proposal) => {
         const instruction = buildApprovalScanPrompt(proposal);
-        if ((await launchAgent(project.root, instruction, "Scan", undefined, true)) !== "not-sent") return;
-        // Cursor could not send it by itself: no chat is left waiting; the developer starts the scan when they want.
+        if ((await launchAgent(project.root, instruction, "Scan", undefined, true)) === "sent") return;
+        // The chat did not send the scan by itself; keep the clipboard notice and offer an explicit start.
         void vscode.window.showInformationMessage(`Trama: Proposal ${cardName(project, "proposal", proposal)} was approved. Scan the Features it affects?`, "Scan now").then(async (choice) => {
           if (choice !== "Scan now") return;
           try {
@@ -348,19 +319,11 @@ export class Controller implements vscode.Disposable {
   /**
    * An approval made outside the panel (`trama proposal approve`, `trama drift resolve --accept-proposal`) already
    * applied an ordinary Proposal that affects a Feature that still exists: start the same automatic scan as the panel.
-   * With Hold scan on nothing starts: the Proposal is held instead, as for the panel's approvals.
    */
   async scanApproved(project: Project, proposalId: string): Promise<void> {
     const options = this.approvalOptions(project);
     this.refresh();
     if (!options.autoScan) return;
-    try {
-      if (holdApproved(project, proposalId)) return;
-    } catch {
-      options.warn(SCAN_HOLD_SAVE_FAILED);
-      return;
-    }
-    if (!options.agentConfigured) return;
     await options.launchScan(proposalId);
   }
 
@@ -372,21 +335,35 @@ export class Controller implements vscode.Disposable {
     });
   }
 
-  private async launchAction(project: Project, action: AgentAction): Promise<void> {
-    // The exclusion between Runs and Resolve Drifts is read from the window's state, never remembered: when the request
-    // arrives, and again at each step before the instruction is really written or sent (see `canSend`).
+
+
+  private async launchAction(project: Project, action: AgentAction, fromButton = false): Promise<void> {
+    // Resolve Drifts and Runs are checked from current state at the request and at each delivery checkpoint.
     const refusal = (): string | null => {
       if (action.kind === "resolve-drifts") {
         const blocker = resolveDriftsBlocker(project, driftResolution());
         return blocker === null ? null : `Resolve Drifts is unavailable: ${blocker}.`;
       }
       const isRun = action.kind === "implement" || action.kind === "implement-design" || action.kind === "implement-all";
-      return isRun && driftResolution() === "resolving" ? "A run cannot start: Drifts are being resolved." : null;
+      if (isRun && driftResolution() === "resolving") return "A run cannot start: Drifts are being resolved.";
+      if (action.kind === "implement-all") {
+        const blocker = runBlocker(runTasks(project), "all", namerOf(syncShortNumbers(project).all()));
+        return blocker === null ? null : `Run all To do is unavailable: ${blocker}.`;
+      }
+      if (action.kind === "implement-design") {
+        const proposal = getProposal(project, action.proposal).id;
+        const blocker = runBlocker(runTasks(project).filter((t) => t.proposal === proposal), "design", namerOf(syncShortNumbers(project).all()));
+        return blocker === null ? null : `Run this design is unavailable: ${blocker}.`;
+      }
+      return null;
     };
     const send = async (resolved: ResolvedAction, announceProposal?: DesignAnnouncement, instruction: Instruction = buildPrompt(resolved)) => {
       let refused: string | null = null;
       const canSend = () => (refused = refusal()) === null;
-      await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, false, canSend, resolved.kind === "implement" || resolved.kind === "implement-design" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : undefined);
+      const trackGlobalScan = fromButton && resolved.kind === "scan" && resolved.feature === undefined
+        ? (startedAt: number, destination: ScanDestination) => rememberGlobalScan(project.root, startedAt, destination)
+        : undefined;
+      await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, false, canSend, resolved.kind === "implement" || resolved.kind === "implement-design" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : undefined, trackGlobalScan);
       // Nothing was sent because the other side started while the request waited: the developer is told why.
       if (refused !== null) throw new TramaError(refused);
     };
@@ -423,14 +400,10 @@ export class Controller implements vscode.Disposable {
         return;
       case "implement-design": {
         const proposal = getProposal(project, action.proposal).id;
-        const blocker = runBlocker(runTasks(project).filter((t) => t.proposal === proposal), "design", namerOf(syncShortNumbers(project).all()));
-        if (blocker !== null) throw new TramaError(`Run this design is unavailable: ${blocker}.`);
         await send({ kind: "implement-design", proposal });
         return;
       }
       case "implement-all": {
-        const blocker = runBlocker(runTasks(project), "all", namerOf(syncShortNumbers(project).all()));
-        if (blocker !== null) throw new TramaError(`Run all To do is unavailable: ${blocker}.`);
         await send(action);
         return;
       }

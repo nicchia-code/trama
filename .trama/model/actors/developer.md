@@ -22,12 +22,6 @@ The developer keeps the side of an open Drift that says what happens, when a Pro
 ### DISMISS_DRIFT
 The developer keeps the side of an open Drift that says what happens, when no Proposal is attached: the code is right and nothing changes. Solo dalla riga di comando.
 
-### TURN_SCAN_HOLD_ON
-Il developer accende l'interruttore Hold scan da una scheda del pannello.
-
-### TURN_SCAN_HOLD_OFF
-Il developer spegne l'interruttore Hold scan da una scheda del pannello.
-
 ### MOVE_TASK_TO_TODO
 The developer moves a Task to the To do column, with the command line. The Board offers no way to do it.
 
@@ -59,6 +53,8 @@ Il developer riscrive, dalla riga di comando, l'identità di ogni Proposal, Task
 
 ### OPEN_PANEL
 The developer opens the Trama panel, or brings it to the front.
+
+Anche il pulsante Reopen della notifica di domande in attesa chiede questa apertura ordinaria: se il round esiste ancora, l'overlay si ripristina; altrimenti si apre soltanto il pannello. Senza un progetto vale la stessa offerta di inizializzazione.
 
 ### CLOSE_PANEL
 The developer closes the Trama panel.
@@ -115,4 +111,4 @@ Il developer chiude l'overlay delle domande o preme Skip all, e gli viene chiest
 Il developer riduce l'overlay delle domande a una barra per guardare il pannello sotto.
 
 ### RESTORE_QUESTIONS
-Il developer riapre le domande in attesa, dalla barra nel pannello o dal pulsante della notifica dell'editor.
+Il developer riapre l'overlay delle domande in attesa dalla barra nel pannello già aperto. Il pulsante Reopen della notifica dell'editor chiede invece OPEN_PANEL.

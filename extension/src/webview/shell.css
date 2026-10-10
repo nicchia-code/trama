@@ -30,13 +30,6 @@ button.trama-btn:disabled { opacity: .5; cursor: default; }
 .shell-model-errors ul { margin: 6px 0 0; padding-left: 18px; }
 .shell-link { background: none; border: 0; padding: 0; color: var(--vscode-textLink-foreground, #3794ff); cursor: pointer; font: inherit; text-decoration: underline; }
 button.trama-btn.is-blocked { opacity: .5; cursor: default; }
-button.trama-switch { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 4px 8px; border: 0; border-radius: 2px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-button.trama-switch:hover { background: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, currentColor 14%, transparent)); }
-button.trama-switch:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: 1px; }
-.trama-switch-track { position: relative; width: 28px; height: 16px; border-radius: 8px; background: var(--vscode-button-secondaryBackground, #3a3d41); flex: none; }
-button.trama-switch[aria-checked="true"] .trama-switch-track { background: var(--vscode-button-background, #0e639c); }
-.trama-switch-thumb { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--vscode-button-foreground, #fff); }
-button.trama-switch[aria-checked="true"] .trama-switch-thumb { left: 14px; }
 .drift-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; margin: 10px 0; }
 .drift-compare-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px 10px; border: 1px solid var(--vscode-panel-border, #444); border-radius: 3px; }
 .drift-compare-head { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }

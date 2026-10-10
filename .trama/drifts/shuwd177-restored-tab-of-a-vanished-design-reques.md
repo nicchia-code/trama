@@ -1,16 +1,16 @@
 ---
-status: open
-resolution: null
+status: resolved
+resolution: fix-code
 refs:
   - design-request/Writing/workspace.REQUEST_DELETED
   - design-request/Sent/workspace.REQUEST_DELETED
   - requirements/rules#design-request
 proposal: null
-task: null
+task: 1ov5x1lu
 origin: null
-option: null
+option: 1
 note: null
-resolvedBy: null
+resolvedBy: g6eu10uj
 created: 2026-10-10T10:53:28.354Z
 ---
 # Restored tab of a vanished design request is closed even with unsaved changes

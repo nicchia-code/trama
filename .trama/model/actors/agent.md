@@ -1,6 +1,6 @@
 # Agent
 
-A coding agent working for the developer. It explores the Model, writes Proposals, files Tasks and Drifts and implements Tasks, through Trama's command line. It can never approve or reject a Proposal or resolve a Drift: those stay with the developer.
+Un agente di programmazione che lavora per il developer. Esplora il Modello, scrive Proposal, archivia Task e Drift e realizza i Task attraverso la riga di comando di Trama. Le decisioni restano del developer: approvare, rifiutare o scartare una Proposal, risolvere un Drift, riprendere un Task e riscrivere le identità delle schede. L'agente può eseguirle per suo conto, ma è istruito a farlo solo quando il developer glielo chiede esplicitamente nella conversazione; senza quella richiesta gli chiede di decidere. Trama non gli impedisce tecnicamente di eseguirle: una decisione eseguita dall'agente produce lo stesso Evento del developer e ha le stesse condizioni e conseguenze.
 
 ## Events
 

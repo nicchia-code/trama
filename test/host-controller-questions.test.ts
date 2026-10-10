@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, expect, mock, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { questionAborted, type QuestionRequest } from "../src/core/questions";
 
 // A minimal editor: one webview panel that records what it is shown and what it is sent.
 interface FakePanel {
+  title: string;
   reveals: unknown[][];
   messages: unknown[];
   receive?: (raw: unknown) => void;
@@ -15,10 +16,12 @@ let workspaceFolders: { uri: { fsPath: string; scheme: string } }[] = [];
 
 mock.module("vscode", () => ({
   window: {
-    createWebviewPanel: () => {
-      const panel: FakePanel = { reveals: [], messages: [] };
+    createWebviewPanel: (_viewType: string, title: string) => {
+      const panel: FakePanel = { title, reveals: [], messages: [] };
       panels.push(panel);
       return {
+        get title() { return panel.title; },
+        set title(value: string) { panel.title = value; },
         reveal: (...args: unknown[]) => void panel.reveals.push(args),
         onDidDispose: () => ({ dispose() {} }),
         dispose() {},
@@ -86,6 +89,7 @@ test("a question round opens the panel even when the workspace has no Trama proj
   const round = session.current();
 
   expect(panels).toHaveLength(1);
+  expect(panels[0]?.title).toBe(basename(dir));
   expect(round).not.toBeNull();
   // The webview says it is ready: the overlay of the open round is sent to it, though there is no snapshot.
   panels[0]?.receive?.({ type: "ready" });
@@ -95,3 +99,22 @@ test("a question round opens the panel even when the workspace has no Trama proj
   await expect(answered).rejects.toThrow(/stopped waiting/);
   controller.dispose();
 });
+
+test("panel title follows the System heading and falls back when the Model becomes unreadable", async () => {
+  cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
+  workspaceFolders = [{ uri: { fsPath: dir, scheme: "file" } }];
+  const controller = new Controller({ fsPath: dir } as never);
+  await controller.open();
+  const panel = panels.at(-1);
+  expect(panel?.title).toBe("Shop");
+
+  writeFileSync(join(dir, ".trama/model/system.md"), "#  New System  \n");
+  (controller as unknown as { refresh(): void }).refresh();
+  expect(panel?.title).toBe("New System");
+
+  writeFileSync(join(dir, ".trama/model/system.md"), "not a valid System");
+  (controller as unknown as { refresh(): void }).refresh();
+  expect(panel?.title).toBe(basename(dir));
+  controller.dispose();
+});
+

@@ -85,7 +85,7 @@ export function snapshotOf(files: FileMap): Snapshot {
     drifts: [],
     tasks: [],
     announcements: [],
-    scanHold: { on: false, held: 0 },
+    tasksSinceScan: 0,
     numbers: { proposal: {}, task: {}, drift: {} },
   };
 }

@@ -6,6 +6,7 @@ import { mountQuestions } from "./questions";
 import { mountRequirements } from "./requirements";
 import css from "./shell.css" with { type: "text" };
 import type { View, ViewContext } from "./types";
+import { buildBoard } from "./board/logic";
 
 declare function acquireVsCodeApi(): { postMessage(message: ToHost): void };
 
@@ -93,7 +94,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     mounted.board.update(snapshot, message.asking, message.resolve);
     mounted.requirements.update(snapshot);
     showModelErrors(snapshot.diagnostics);
-    const decide = snapshot.proposals.length + snapshot.drifts.length;
+    const decide = buildBoard(snapshot)[0]?.cards.length ?? 0;
     const badge = app.querySelector("[data-badge]") as HTMLElement;
     badge.hidden = decide === 0;
     badge.textContent = String(decide);

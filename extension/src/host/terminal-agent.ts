@@ -1,16 +1,7 @@
 import { SUB_AGENTS } from "../../../src/core/sub-agents";
 import { quote, type ShellFamily } from "./quote";
 
-/** The terminal agents Trama knows, in the order the developer is offered them, with the command each one starts. */
-export const KNOWN_AGENTS = [
-  { id: "omp", label: "omp", command: "omp" },
-  { id: "claude", label: "Claude Code", command: "claude" },
-  { id: "codex", label: "Codex", command: "codex" },
-  { id: "copilot", label: "Copilot CLI", command: "copilot -i" },
-  { id: "cursor", label: "Cursor CLI", command: "agent" },
-] as const;
-
-export type TerminalAgent = (typeof KNOWN_AGENTS)[number]["id"] | "custom";
+export type TerminalAgent = "omp" | "claude";
 
 /** The model roles (`trama.analysis`, `trama.scan`, `trama.execution`), trimmed; empty leaves the agent's default. */
 export interface Models {
@@ -20,18 +11,6 @@ export interface Models {
 }
 export type Role = keyof Models;
 
-/**
- * The agent Trama starts in a terminal: `trama.terminalAgent` when chosen, otherwise `custom` when `trama.agentCommand`
- * is set, otherwise none (the developer is asked to choose).
- */
-export function effectiveAgent(chosen: string, command: string): TerminalAgent | undefined {
-  const agent = chosen.trim();
-  if (agent === "custom" || KNOWN_AGENTS.some((known) => known.id === agent)) return agent as TerminalAgent;
-  return command.trim() === "" ? undefined : "custom";
-}
-
-/** The command a known agent starts; undefined for `custom`, which runs `trama.agentCommand`. */
-export const knownCommand = (agent: TerminalAgent): string | undefined => KNOWN_AGENTS.find((known) => known.id === agent)?.command;
 
 /**
  * The role of an instruction, from the name of its terminal: `Design` and `Import` are analysis, `Scan` is scan, the
@@ -40,46 +19,37 @@ export const knownCommand = (agent: TerminalAgent): string | undefined => KNOWN_
 // ponytail: the role follows the terminal name, which the Requirements tie one-to-one to the kind of instruction; pass the role explicitly if a name ever serves two roles.
 export const roleOf = (name: string): Role => (name === "Design" || name === "Import" || name === "Drifts" ? "analysis" : name === "Scan" ? "scan" : "execution");
 
-/** Whether instructions of `role` can scan (every scan and every implement run), so they triage and analyse with sub-agents. */
+/** Whether instructions of `role` can scan (every scan and every implement run) and use the analysis sub-agent. */
 export const canScan = (role: Role): boolean => role !== "analysis";
 
 /**
- * The template of the command line, with `{prompt}` where the quoted prompt goes: a known agent's own line with the run's
- * model and, for instructions that can scan, the sub-agents' models; for `custom`, `command` with every `{model}`
- * replaced by the quoted run's model, or by nothing when the role is empty. `ompHook` is the hook module omp loads to
- * tell Trama when it is idle.
+ * The template of the command line, with `{prompt}` where the quoted prompt goes: an agent's own line with the run's
+ * model; for instructions that can scan, the comparison sub-agent uses the scan role.
+ * `ompHook` tells omp when it is idle and `tramaPath` is the bundled CLI Claude Code uses for its session hooks.
  */
-export function agentTemplate(agent: TerminalAgent, command: string, role: Role, models: Models, family: ShellFamily, ompHook?: string): string {
+export function agentTemplate(agent: TerminalAgent, role: Role, models: Models, family: ShellFamily, ompHook?: string, tramaPath?: string): string {
   const option = (flag: string, value: string) => (value === "" ? [] : [flag, quote(family, value)]);
   const model = models[role];
-  if (agent === "custom") return command.split("{model}").join(model === "" ? "" : quote(family, model));
   const scanning = canScan(role);
   const words: string[] = (() => {
     switch (agent) {
       case "omp":
-        return ["omp", ...(ompHook === undefined ? [] : ["--hook", quote(family, ompHook)]), ...option("--model", model), ...(scanning ? [...option("--smol", models.execution), ...option("--slow", models.analysis)] : [])];
-      case "claude":
-        return ["claude", ...option("--model", model), ...(scanning ? ["--agents", quote(family, claudeAgents(models))] : [])];
-      case "codex":
-        return ["codex", ...option("--model", model)];
-      case "copilot":
-        return ["copilot", ...option("--model", model), "-i"];
-      case "cursor":
-        return ["agent", ...option("--model", model)];
+        return ["omp", ...(ompHook === undefined ? [] : ["--hook", quote(family, ompHook)]), ...option("--model", model), ...(scanning ? option("--slow", models.scan) : [])];
+      case "claude": {
+        const hooks: string[] = [];
+        if (tramaPath !== undefined) {
+          const hook = [{ hooks: [{ type: "command", command: `${quote(family, tramaPath)} agent-event idle`, timeout: 3 }] }];
+          hooks.push("--settings", quote(family, JSON.stringify({ hooks: { Stop: hook, SessionEnd: hook } })));
+        }
+        return ["claude", ...hooks, ...option("--model", model), ...(scanning ? ["--agents", quote(family, claudeAgents(models))] : [])];
+      }
     }
   })();
   return [...words, "{prompt}"].join(" ");
 }
 
-/** Claude Code's `--agents`: the two sub-agents, each with its model only when its role is set. */
+/** Claude Code's Machine-comparison sub-agent, with the scan model only when its role is set. */
 function claudeAgents(models: Models): string {
-  const define = (name: keyof typeof SUB_AGENTS, model: string) => ({ ...SUB_AGENTS[name], ...(model === "" ? {} : { model }) });
-  return JSON.stringify({ "trama-triage": define("trama-triage", models.execution), "trama-analysis": define("trama-analysis", models.analysis) });
+  return JSON.stringify({ "trama-analysis": { ...SUB_AGENTS["trama-analysis"], ...(models.scan === "" ? {} : { model: models.scan }) } });
 }
 
-/** The sentence about sub-agents that follows an instruction that can scan, sent to a terminal agent; undefined when there is none. */
-export function subAgentSentence(agent: TerminalAgent, models: Models): string | undefined {
-  if (agent === "omp" || agent === "claude") return "Triage each Machine with the trama-triage sub-agent and analyse every Machine in conflict with the trama-analysis sub-agent.";
-  if (models.execution !== "" || models.analysis !== "") return "Your agent cannot give sub-agents their own model: triage and analyse on your own model, and say so in the report.";
-  return undefined;
-}

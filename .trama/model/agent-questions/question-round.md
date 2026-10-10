@@ -56,8 +56,8 @@ Il developer sceglie se saltare tutte le domande che non hanno ancora una rispos
 
 #### Out of sight
 Il round è ridotto alla barra delle domande in attesa, oppure il pannello è chiuso. L'agente continua ad aspettare; risposte e posizione restano.
-- `developer.RESTORE_QUESTIONS` → In view: il developer clicca la barra o il pulsante della notifica. Il pannello si apre o torna in primo piano se serve e l'overlay riappare sulla domanda o sul riepilogo che mostrava.
-- `developer.OPEN_PANEL` → In view: il pannello si apre o torna in primo piano con l'overlay riaperto sulla domanda o sul riepilogo che mostrava.
+- `developer.RESTORE_QUESTIONS` → In view: il developer clicca la barra nel pannello già aperto. L'overlay riappare sulla domanda o sul riepilogo che mostrava.
+- `developer.OPEN_PANEL` → In view: il developer apre il pannello con il comando oppure con Reopen sulla notifica. Il pannello si apre o torna in primo piano con l'overlay riaperto sulla domanda o sul riepilogo che mostrava.
 - `developer.CLOSE_PANEL` → Out of sight: il pannello si chiude mentre l'overlay era ridotto. La notifica con l'offerta di riaprire le domande compare come quando si chiude il pannello con l'overlay aperto.
 
 ### Answered (final)

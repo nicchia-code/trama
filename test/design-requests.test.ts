@@ -80,6 +80,9 @@ describe("the title and emptiness of a request", () => {
     expect(requestTitle("intro\n\n```md\n# Inside code\n```\n\n## Second level\n#  Returns after shipping  \n# Later\n")).toBe("Returns after shipping");
     expect(requestTitle("~~~\n# fenced\n~~~\n# Closed heading ##\n")).toBe("Closed heading");
     expect(requestTitle("#hashtag\n# Real\n")).toBe("Real");
+    expect(requestTitle("- ```md\n  # Example title\n  ```\n# Real request\n")).toBe("Real request");
+    expect(requestTitle("> - ~~~md\n>   # Example title\n>   ~~~\n# Real request\n")).toBe("Real request");
+    expect(requestTitle("- ```md\n  # Example title\n  ```\n")).toBe("- ```md");
   });
 
   test("without a heading the title is the first non-empty line, trimmed", () => {

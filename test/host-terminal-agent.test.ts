@@ -1,66 +1,61 @@
 import { expect, test } from "bun:test";
 import { agentCommandLine } from "../extension/src/host/quote";
-import { agentTemplate, effectiveAgent, roleOf, subAgentSentence } from "../extension/src/host/terminal-agent";
+import { agentTemplate, roleOf } from "../extension/src/host/terminal-agent";
 
 const none = { analysis: "", scan: "", execution: "" };
 const all = { analysis: "opus", scan: "it's", execution: "haiku" };
 
-test("the effective agent is the chosen one, else custom with a command, else none", () => {
-  expect(effectiveAgent(" claude ", "x {prompt}")).toBe("claude");
-  expect(effectiveAgent("", "x {prompt}")).toBe("custom");
-  expect(effectiveAgent("", "  ")).toBeUndefined();
-  expect(effectiveAgent("custom", "")).toBe("custom");
-});
-
-test("each instruction's terminal name gives its role", () => {
+test("each instruction's terminal name gives its model role", () => {
   expect(["Design", "Import", "Drifts", "Scan", "T3", "P2", "All tasks", "abc12345"].map(roleOf)).toEqual(["analysis", "analysis", "analysis", "scan", "execution", "execution", "execution", "execution"]);
 });
 
-test("known agents pass --model only with a role set, quoted for the shell", () => {
-  const line = (agent: Parameters<typeof agentTemplate>[0], role: Parameters<typeof agentTemplate>[2], models = all) => agentCommandLine(agentTemplate(agent, "", role, models, "posix"), "go", "posix");
-  expect(line("codex", "scan")).toBe(`codex --model 'it'\\''s' 'go'`);
-  expect(line("copilot", "analysis")).toBe("copilot --model 'opus' -i 'go'");
-  expect(line("cursor", "execution", none)).toBe("agent 'go'");
-  expect(line("copilot", "scan", none)).toBe("copilot -i 'go'");
+test("omp and Claude Code use the scan role for Machine comparison", () => {
+  const line = (agent: Parameters<typeof agentTemplate>[0], role: Parameters<typeof agentTemplate>[1], models = all) =>
+    agentCommandLine(agentTemplate(agent, role, models, "posix"), "go", "posix");
+  expect(line("omp", "scan")).toBe(`omp --model 'it'\\''s' --slow 'it'\\''s' 'go'`);
+  expect(line("omp", "analysis", none)).toBe("omp 'go'");
+  expect(line("claude", "analysis")).toBe("claude --model 'opus' 'go'");
 });
 
-test("omp gets the sub-agents' roles only for instructions that can scan and only when set", () => {
-  expect(agentTemplate("omp", "", "execution", all, "posix")).toBe("omp --model 'haiku' --smol 'haiku' --slow 'opus' {prompt}");
-  expect(agentTemplate("omp", "", "scan", { ...none, analysis: "opus" }, "posix")).toBe("omp --slow 'opus' {prompt}");
-  expect(agentTemplate("omp", "", "analysis", all, "posix")).toBe("omp --model 'opus' {prompt}");
+test("omp idle hooks and Claude session hooks are attached to their own commands", () => {
+  expect(agentTemplate("omp", "analysis", none, "posix", "/ext/omp-hook.js")).toBe("omp --hook '/ext/omp-hook.js' {prompt}");
+  expect(agentTemplate("claude", "analysis", none, "posix")).toBe("claude {prompt}");
+
+  const settings = JSON.stringify({
+    hooks: {
+      Stop: [{ hooks: [{ type: "command", command: "'/ext/bin/trama' agent-event idle", timeout: 3 }] }],
+      SessionEnd: [{ hooks: [{ type: "command", command: "'/ext/bin/trama' agent-event idle", timeout: 3 }] }],
+    },
+  });
+  expect(agentTemplate("claude", "analysis", none, "posix", undefined, "/ext/bin/trama")).toBe(
+    `claude --settings '${settings.replaceAll("'", "'\\''")}' {prompt}`,
+  );
 });
 
-test("omp loads the hook that tells Trama when it is idle; no other agent does", () => {
-  expect(agentTemplate("omp", "", "analysis", none, "posix", "/ext/dist/omp-hook.js")).toBe("omp --hook '/ext/dist/omp-hook.js' {prompt}");
-  expect(agentTemplate("claude", "", "analysis", none, "posix", "/ext/dist/omp-hook.js")).toBe("claude {prompt}");
+test("Claude Code gives its Machine comparison sub-agent the scan model only when set", () => {
+  const models = { ...none, analysis: "opus", scan: "haiku" };
+  const template = agentTemplate("claude", "scan", models, "posix");
+  expect(template).toStartWith("claude --model 'haiku' --agents '");
+  expect(template).toContain('"trama-analysis"');
+  expect(template).toContain('"model":"haiku"');
+  expect(template).not.toContain('"model":"opus"');
+  expect(template).toEndWith("{prompt}");
+  expect(agentTemplate("claude", "scan", { ...none, analysis: "opus" }, "posix")).not.toContain('"model"');
+  expect(agentTemplate("claude", "analysis", { ...none, analysis: "opus" }, "posix")).not.toContain("--agents");
 });
 
-test("claude gets --agents for instructions that can scan, each sub-agent with its model only when set", () => {
-  const template = agentTemplate("claude", "", "scan", { ...none, execution: "haiku" }, "posix");
-  const json = (/--agents '(.*)' \{prompt\}$/.exec(template)?.[1] ?? "").replaceAll("'\\''", "'");
-  const agents = JSON.parse(json) as Record<string, { model?: string; prompt: string; description: string }>;
-  expect(agents["trama-triage"]?.model).toBe("haiku");
-  expect(agents["trama-analysis"]).not.toHaveProperty("model");
-  expect(agents["trama-analysis"]?.prompt).toContain("trama-scan");
-  expect(agentTemplate("claude", "", "analysis", all, "posix")).toBe("claude --model 'opus' {prompt}");
-});
-
-test("custom replaces every {model} with the quoted run's model, or nothing", () => {
-  expect(agentCommandLine(agentTemplate("custom", "my --m {model} {prompt} {model}", "scan", all, "posix"), "go", "posix")).toBe(`my --m 'it'\\''s' 'go' 'it'\\''s'`);
-  expect(agentTemplate("custom", "my --m {model} {prompt}", "scan", none, "posix")).toBe("my --m  {prompt}");
-});
-
-test("the sub-agents sentence: always for omp and claude, for the others only with a sub-agent role set", () => {
-  expect(subAgentSentence("omp", none)).toStartWith("Triage each Machine with the trama-triage sub-agent");
-  expect(subAgentSentence("claude", none)).toStartWith("Triage each Machine");
-  expect(subAgentSentence("codex", none)).toBeUndefined();
-  expect(subAgentSentence("custom", { ...none, scan: "x" })).toBeUndefined();
-  expect(subAgentSentence("cursor", { ...none, analysis: "x" })).toStartWith("Your agent cannot give sub-agents their own model");
-});
-
-test("the settings that choose the program Trama runs only count from the user settings", async () => {
+test("settings expose only chat, omp and Claude Code with a panel-default terminal location", async () => {
   const { contributes } = await Bun.file(new URL("../extension/package.json", import.meta.url)).json();
-  for (const key of ["agentCommand", "terminalAgent", "analysis", "scan", "execution", "agentLauncher", "externalTerminalCommand"]) {
-    expect(contributes.configuration.properties[`trama.${key}`].scope).toBe("application");
-  }
+  const properties = contributes.configuration.properties;
+  expect(properties["trama.agent"].enum).toEqual(["chat", "omp", "claude"]);
+  expect(properties["trama.agent"].default).toBe("chat");
+  expect(properties["trama.agent"].scope).toBe("application");
+  expect(properties["trama.analysis"].markdownDescription).toContain("Resolve Drifts and import");
+  expect(properties["trama.analysis"].markdownDescription).not.toContain("analysis of Machines");
+  expect(properties["trama.scan"].markdownDescription).toContain("sub-agents that compare Machines");
+  expect(properties["trama.terminalLocation"].enum).toEqual(["panel", "editor"]);
+  expect(properties["trama.terminalLocation"].default).toBe("panel");
+  expect(properties["trama.terminalLocation"].scope).toBe("application");
+  for (const key of ["agentLauncher", "terminalAgent", "agentCommand", "externalTerminalCommand", "autoImplement"])
+    expect(properties[`trama.${key}`]).toBeUndefined();
 });

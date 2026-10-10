@@ -145,11 +145,8 @@ test("does nothing when no card is numbered, and refuses before writing when num
   expect(existsSync(join(p.dir, "short-numbers", ".gitignore"))).toBe(false);
 });
 
-test("an agent cannot run it, and worktrees and trama/* branches left over do not stop it", () => {
+test("an agent can run ids rewrite, and worktrees and trama/* branches left over do not stop it", () => {
   writeCard("tasks", "0007-wait.md", "column: todo\ntechnical: true\nrefs: []", "# Wait\n");
-  expect(() => run(["--root", dir, "ids", "rewrite"], dir, { TRAMA_AGENT: "1" })).toThrow(/developer's decision.*TRAMA_AGENT/);
-  expect(() => run(["--root", dir, "ids", "rewrite"], dir, { CURSOR_AGENT: "1" })).toThrow(/developer's decision.*CURSOR_AGENT/);
-  expect(existsSync(join(p.dir, "tasks", "0007-wait.md"))).toBe(true);
 
   const git = (args: string[], cwd = dir) => {
     const result = spawnSync("git", ["-c", "core.autocrlf=false", ...args], {
@@ -167,7 +164,7 @@ test("an agent cannot run it, and worktrees and trama/* branches left over do no
   const left = join(`${dir}.trama-worktrees`, "abcd1234");
   git(["worktree", "add", "-b", "trama/abcd1234", left, "HEAD"]);
   git(["branch", "trama/merge"]);
-  expect(cli("ids", "rewrite").exit).toBe(0);
+  expect(run(["--root", dir, "ids", "rewrite"], dir, { TRAMA_AGENT: "1" }).exit).toBe(0);
   expect(existsSync(join(p.dir, "tasks", "0007-wait.md"))).toBe(false);
   expect(existsSync(join(p.dir, "tasks", `${rewrittenId("task", "0007")}-wait.md`))).toBe(true);
   expect(existsSync(join(left, ".trama", "tasks", "0007-wait.md"))).toBe(true);

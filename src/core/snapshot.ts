@@ -6,11 +6,11 @@ import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health,
 import { appliesUnder, type RequiredProposal } from "./required";
 import { type ResolvedDrift, resolvedDrifts } from "./resolution";
 import { type Area, areaIdOf, buildProject, type Fragment, parseRequirementRef, type ProjectModel } from "./requirements";
-import { readScanHold } from "./scan-hold";
 import { type Project, readTrackedFiles } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
+import { readLastScan } from "./last-scan";
 import { attachedDrift, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, listDrifts, listTasks } from "./work";
 
 export interface ActorChange {
@@ -159,10 +159,10 @@ export interface Snapshot extends ModelView {
   proposals: ProposalView[];
   drifts: DriftView[];
   tasks: TaskView[];
+  /** Done Tasks finished after this working copy's remembered global Scan launch. */
+  tasksSinceScan: number;
   /** The announcements that still exist, in the order they were announced. */
   announcements: AnnouncementView[];
-  /** This working copy's Hold scan switch and how many Proposals it holds. Off, with nothing held, when its file is missing or unreadable. */
-  scanHold: { on: boolean; held: number };
   /** The short numbers of this working copy's live cards: the panel writes `T3` where a card is live and its identity where it is closed. */
   numbers: CardNumbers;
 }
@@ -288,13 +288,14 @@ export function buildSnapshot(p: Project): Snapshot {
   const project = buildProject(readTrackedFiles(p));
 
   const tasks = listTasks(p);
+  const scanInstant = Date.parse(readLastScan(p));
+  const tasksSinceScan = tasks.filter((t) => t.data.column === "done" && t.data.finished !== null && Date.parse(t.data.finished) > scanInstant).length;
   const drifts = listDrifts(p);
   const blocked = computeBlocked(project, tasks, drifts);
 
   const allProposals = listProposals(p);
   const openProposals = allProposals.filter((x) => x.data.status === "open").map((proposal) => proposalView(p, project, proposal));
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
-  const hold = readScanHold(p);
   // The developer does not see attached Proposals, so the ghost of a Proposal whose Draft is attached to an open Drift is drawn nowhere.
   const announcements = listAnnouncements(p).filter((a) => !(a.kind === "proposal" && a.proposal !== null && attachedDrift(p, a.proposal)));
   return {
@@ -316,6 +317,7 @@ export function buildSnapshot(p: Project): Snapshot {
       proposalTitle: (d.data.proposal !== null && proposalById.get(d.data.proposal)?.title) || null,
       proposalChanges: openProposals.find((x) => x.id === d.data.proposal)?.changes ?? null,
     })),
+    tasksSinceScan,
     tasks: tasks.map((t) => ({
       id: t.id,
       title: t.title,
@@ -331,15 +333,14 @@ export function buildSnapshot(p: Project): Snapshot {
       blockedBy: blocked.get(t.id) ?? [],
       file: `tasks/${t.name}`,
     })),
-    announcements: announcements.map((a) => announcementView(a, a.proposal === null || a.kind !== "proposal" ? undefined : proposalById.get(a.proposal)?.title)),
-    scanHold: { on: hold.reading.kind === "on", held: hold.held.length },
+    announcements: announcements.map((a) => announcementView(a, a.proposal === null ? undefined : proposalById.get(a.proposal)?.title)),
     numbers,
   };
 }
 
 /** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. */
 export function announcementView(a: Announcement, proposalTitle: string | undefined): AnnouncementView {
-  return { id: a.id, kind: a.kind, title: (a.kind === "proposal" && proposalTitle) || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : "writing") };
+  return { id: a.id, kind: a.kind, title: (a.proposal !== null && proposalTitle) || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : "writing") };
 }
 
 /** The title is shown separately, so the body drops its leading H1. */

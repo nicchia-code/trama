@@ -1,11 +1,11 @@
 # Terminal
 
-Il terminale in cui Trama avvia il comando dell'agente del developer: il terminale integrato dell'editor, nell'area dei terminali o, con il launcher «terminal-tab», in una scheda dell'editor, oppure, con il launcher «external-terminal», una finestra del terminale di sistema del developer.
+Il terminale integrato dell'editor in cui Trama avvia il comando dell'agente del developer, omp o Claude Code: nell'area dei terminali o, con `trama.terminalLocation` su scheda, in una scheda dell'editor. Non esiste più un terminale esterno all'editor.
 
 ## Events
 
 ### COMMAND_ENDED
-The command running in the agent terminal finished. Reported by the editor's terminal only when it can tell when commands start and end. A window of the external launcher always reports it, with the command's outcome, because the command Trama typed into it is wrapped to announce its own end.
+Il comando che Trama ha scritto nel terminale dell'agente è finito: l'agente è uscito, da sé o perché è stato interrotto o ucciso. Riportato solo quando il terminale sa dire quando i comandi iniziano e finiscono.
 
 ### CLOSED
-The developer or the agent closed the agent terminal. Never reported for a window of the external launcher.
+Il developer, l'agente o Trama stessa (con `trama.autoExit`) ha chiuso il terminale dell'agente.

@@ -79,6 +79,7 @@
   background: var(--vscode-editor-background, #1e1e1e);
 }
 .board-card-proposal { border-left-color: var(--board-blue); }
+.board-card-resolution { border-left-color: var(--board-warning); }
 .board-card-drift { border-left-color: var(--board-error); }
 .board-card-design { border-left-color: var(--board-muted); }
 

@@ -1,5 +1,4 @@
-// DOM builders for Board cards. Every piece of data goes in through textContent, never innerHTML.
-import { type CardName, type CardNumbers, namerOf } from "../../../../src/core/card-names";
+import { type CardName, cardNameOf, type CardNumbers, ID_NAMES, namerOf } from "../../../../src/core/card-names";
 import { runBlocker } from "../../../../src/core/design";
 import { idTag } from "../id-tag";
 import type { ViewContext } from "../types";
@@ -58,20 +57,33 @@ function button(o: ButtonOptions): HTMLButtonElement {
   return node;
 }
 
-function badge(b: { label: string; tone?: Badge["tone"]; tooltip?: string }): HTMLElement {
-  const node = el("span", `board-badge${b.tone ? ` ${b.tone}` : ""}`, b.label);
-  if (b.tooltip) node.title = b.tooltip;
+function badge(b: Badge, numbers: CardNumbers): HTMLElement {
+  const node = el("span", `board-badge ${b.tone}`);
+  if (b.card === undefined) {
+    node.textContent = b.label;
+    node.title = b.tooltip;
+  } else {
+    const name = cardNameOf(numbers, b.card.kind, b.card.id);
+    const distinction = `${name.isNumber ? ID_NAMES.number : ID_NAMES.identity} ${name.text}`;
+    node.title = `${b.tooltip} (${distinction})`;
+    node.append(document.createTextNode("requires "), idTag(name));
+  }
   return node;
 }
 
 /** "blocked D2" / "waiting T4": a link to the Drift on the Diagram or to a card of the Board. It disables nothing. */
 function blockBadgeLink(b: BlockBadge, env: CardEnv): HTMLElement {
-  const node = el("button", "board-badge board-blocked", b.label);
+  const node = el("button", "board-badge board-blocked");
   node.type = "button";
   const target = b.target;
   node.dataset["action"] = target.kind === "diagram" ? `blocked:diagram:${target.drift}` : `blocked:${target.key}`;
-  node.title = b.tooltip;
-  node.setAttribute("aria-label", b.tooltip);
+  const prefix = b.label.startsWith("blocked ") ? "blocked " : "waiting ";
+  const card = target.kind === "diagram" ? target.drift : target.key.slice("task:".length);
+  const name = cardNameOf(env.numbers(), target.kind === "diagram" ? "drift" : "task", card);
+  const distinction = `${name.isNumber ? ID_NAMES.number : ID_NAMES.identity} ${name.text}`;
+  node.title = `${b.tooltip} (${distinction})`;
+  node.setAttribute("aria-label", `${b.tooltip} (${distinction})`);
+  node.append(document.createTextNode(prefix), idTag(name));
   node.addEventListener("click", () => (target.kind === "diagram" ? env.context.navigate("diagram", { drift: target.drift }) : env.showCard(target.key, target.row)));
   return node;
 }
@@ -115,7 +127,8 @@ function head(kind: string | null, name: CardName | null, ...extra: HTMLElement[
 
 function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}`);
-  node.append(head("Proposal", card.name, ...card.badges.map(badge)), el("h3", "board-card-title", card.title));
+  if (card.resolution) node.className += " board-card-resolution";
+  node.append(head(card.resolution ? "Resolution Proposal" : "Proposal", card.name, ...card.badges.map((b) => badge(b, env.numbers()))), el("h3", "board-card-title", card.title));
   if (card.changes.files.length > 0) {
     const list = el("ul", "board-changes");
     for (const file of card.changes.files) {
@@ -187,14 +200,18 @@ function taskDetails(card: TaskCard, env: CardEnv): { body: HTMLElement; toggle:
 function task(card: TaskCard, env: CardEnv): HTMLElement {
   const node = shell(card, `Task ${card.name.text}: ${card.title}`);
   const badges = [
-    ...(card.technical && card.refs.length === 0 ? [badge({ label: "technical" })] : []),
+    ...(card.technical && card.refs.length === 0 ? [badge({ label: "technical", tooltip: "Technical Task", tone: "info" }, env.numbers())] : []),
     ...card.blocks.map((b) => blockBadgeLink(b, env)),
   ];
   const top = head(null, card.name, ...badges);
   top.prepend(statusDot(card));
   node.append(top, el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
-  if (card.drift !== null) node.append(el("p", "board-muted board-origin", `from Drift ${card.driftName ?? card.drift}`));
+  if (card.drift !== null) {
+    const origin = el("p", "board-muted board-origin", "from Drift ");
+    origin.append(idTag(cardNameOf(env.numbers(), "drift", card.drift)));
+    node.append(origin);
+  }
   const details = card.body ? taskDetails(card, env) : null;
   if (details) node.append(details.body);
   const open = button({
@@ -231,7 +248,7 @@ function design(card: DesignCard, env: CardEnv): HTMLElement {
     head(
       "Proposal",
       card.name,
-      badge({ label: `${card.done}/${card.tasks.length} done`, tooltip: `${card.done} of ${card.tasks.length} Tasks are done` }),
+      badge({ label: `${card.done}/${card.tasks.length} done`, tooltip: `${card.done} of ${card.tasks.length} Tasks are done`, tone: "info" }, env.numbers()),
     ),
     el("h3", "board-card-title", card.title),
   );

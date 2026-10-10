@@ -20,8 +20,16 @@ export const SKILLS: Record<string, string> = {
   "trama-resolve-drifts/SKILL.md": resolveDrifts,
 };
 
-/** Skills that earlier versions installed and that no longer exist: updating deletes their folder, whatever it holds. */
+/** Skill folders that earlier versions installed and that no longer exist. */
 export const RETIRED_SKILLS = ["trama-fix"];
+
+/** Removes obsolete omp sub-agent definitions, whatever they contain. */
+export function removeRetiredOmpAgents(root: string): string[] {
+  const path = join(root, ".omp", "agents", "trama-triage.md");
+  if (!existsSync(path)) return [];
+  rmSync(path, { force: true });
+  return [path];
+}
 
 /** Deletes the retired skill folders from the usual skill folders of the project and from `extraDirs`; returns the folders deleted. */
 export function removeRetiredSkills(root: string, extraDirs: string[] = []): string[] {
@@ -56,8 +64,8 @@ export function installSkills(dir: string): string[] {
   });
 }
 
-/** The omp role each sub-agent runs on: Trama passes `--smol` and `--slow` with the developer's models, so no file holds a concrete model. */
-const OMP_ROLES = [["trama-triage", "@smol"], ["trama-analysis", "@slow"]] as const;
+/** omp's default role for the Machine-comparison sub-agent; Trama passes `--slow` with the scan model when set. */
+const OMP_ROLES = [["trama-analysis", "@slow"]] as const;
 
 /** omp's definitions of the scan's sub-agents, as they are installed in the project's `.omp/agents/`: path -> content. */
 export function ompAgentFiles(root: string): Record<string, string> {

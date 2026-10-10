@@ -25,7 +25,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
 });
 const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, finished: null, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
-const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], announcements: [], scanHold: { on: false, held: 0 }, numbers: { proposal: {}, task: {}, drift: {} }, ...over });
+const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
 
 test("groups the snapshot into four columns, Proposals before Drifts in To decide", () => {
@@ -42,6 +42,15 @@ test("groups the snapshot into four columns, Proposals before Drifts in To decid
   expect(board[1]?.cards.map((c) => c.key)).toEqual(["task:0002", "task:0004"]);
   expect(board[2]?.cards.map((c) => c.key)).toEqual(["task:0003"]);
   expect(board[3]?.cards.map((c) => c.key)).toEqual(["task:0001"]);
+});
+
+test("a handed-over resolution replaces only its listed open Drift cards", () => {
+  const resolution = proposal({ id: "res", kind: "resolution", resolves: [{ drift: "0003", title: "Code refunds late", decision: "Closed, nothing changes", note: null }] });
+  const cards = buildBoard(snapshot({ proposals: [proposal({ id: "before" }), resolution], drifts: [drift({ id: "0003" }), drift({ id: "0004" })] }))[0]!.cards;
+  expect(cards.map((card) => card.key)).toEqual(["proposal:before", "proposal:res", "drift:0004"]);
+  expect(cards[1]).toMatchObject({ kind: "proposal", resolution: true, heading: "Resolution Proposal res", resolves: [{ drift: "0003" }] });
+  const returnedToDraft = buildBoard(snapshot({ proposals: [proposal({ id: "res", kind: "change" })], drifts: [drift({ id: "0003" }), drift({ id: "0004" })] }))[0]!.cards;
+  expect(returnedToDraft.map((card) => card.key)).toEqual(["proposal:res", "drift:0003", "drift:0004"]);
 });
 
 test("an empty snapshot gives four empty columns with a hint each", () => {
@@ -225,11 +234,13 @@ test("interleaving puts each ghost before the real card at its index, keeping th
   expect(interleave([], [{ item: "only", index: 0 }])).toEqual(["only"]);
 });
 
-test("the ghost of a Drift says Writing the Proposal once its Draft exists", () => {
+test("a Drift ghost uses Writing once its Draft exists", () => {
   const card = announcedCard(announcement({ kind: "drift", title: "Refunds differ", phase: "writing" }), false);
-  expect(card.phase).toBe("Writing the Proposal");
-  expect(card.label).toContain("writing the proposal");
-  expect(announcedCard(announcement({ kind: "drift", phase: "preparing" }), false).phase).toBe("Preparing");
+  expect(card.phase).toBe("Writing");
+  expect(card.label).toContain("writing");
+  const waiting = announcedCard(announcement({ kind: "drift", phase: "writing" }), true);
+  expect(waiting.phase).toBe("Waiting for your answers");
+  expect(waiting.label).toContain("waiting for your answers");
 });
 
 test("a ghost says Preparing, Writing, or that the agent waits for the answers while a question round is open, and its name tells kind, title and phase", () => {

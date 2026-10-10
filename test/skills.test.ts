@@ -22,46 +22,58 @@ test("init refuses to overwrite customised skill files and creates nothing", () 
   }
 });
 
-test("init and skills update install omp's two sub-agents on roles, never on a concrete model", () => {
+test("init and skills update install the analysis sub-agent on its role, never on a concrete model", () => {
   const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
   try {
     run(["--root", root, "init"], root);
-    const triage = join(root, ".omp/agents/trama-triage.md");
     const analysis = join(root, ".omp/agents/trama-analysis.md");
-    expect(readFileSync(triage, "utf8")).toMatch(/^---\nname: trama-triage\ndescription: ".+"\nmodel: "@smol"\n---\n\n.*trama-scan/);
     expect(readFileSync(analysis, "utf8")).toMatch(/^---\nname: trama-analysis\ndescription: ".+"\nmodel: "@slow"\n---\n\n.*trama-scan/);
     rmSync(join(root, ".omp"), { recursive: true });
     run(["--root", root, "skills", "update"], root);
-    expect(existsSync(triage) && existsSync(analysis)).toBe(true);
+    expect(existsSync(analysis)).toBe(true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("init refuses to overwrite a customised omp sub-agent definition and creates nothing; identical ones are not a conflict", () => {
+test("init ignores retired omp triage files but still refuses customised analysis definitions", () => {
   const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
   try {
     const triage = join(root, ".omp/agents/trama-triage.md");
     mkdirSync(join(triage, ".."), { recursive: true });
-    writeFileSync(triage, "my own triage agent\n");
-
-    expect(() => run(["--root", root, "init"], root)).toThrow(/Refusing to overwrite[\s\S]*trama-triage\.md/);
-    expect(readFileSync(triage, "utf8")).toBe("my own triage agent\n");
-    expect(existsSync(join(root, ".trama"))).toBe(false);
-    expect(existsSync(join(root, ".agents/skills/trama-design"))).toBe(false);
+    writeFileSync(triage, "custom triage\n");
+    expect(run(["--root", root, "init"], root).exit).toBe(0);
+    expect(readFileSync(triage, "utf8")).toBe("custom triage\n");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 
-  const same = mkdtempSync(join(tmpdir(), "trama-skills-"));
+  const root2 = mkdtempSync(join(tmpdir(), "trama-skills-"));
   try {
-    run(["--root", same, "init"], same);
-    rmSync(join(same, ".trama"), { recursive: true });
-    expect(run(["--root", same, "init"], same).exit).toBe(0);
+    const analysis = join(root2, ".omp/agents/trama-analysis.md");
+    mkdirSync(join(analysis, ".."), { recursive: true });
+    writeFileSync(analysis, "custom analysis\n");
+    expect(() => run(["--root", root2, "init"], root2)).toThrow(/trama-analysis\.md/);
+    expect(existsSync(join(root2, ".trama"))).toBe(false);
   } finally {
-    rmSync(same, { recursive: true, force: true });
+    rmSync(root2, { recursive: true, force: true });
   }
 });
+
+test("skills update deletes obsolete omp triage definition regardless of content and reports it", () => {
+  const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
+  try {
+    run(["--root", root, "init"], root);
+    const triage = join(root, ".omp/agents/trama-triage.md");
+    writeFileSync(triage, "custom triage\n");
+    const result = run(["--root", root, "skills", "update"], root);
+    expect(existsSync(triage)).toBe(false);
+    expect(result.out).toContain(`Deleted the retired omp sub-agent definition: ${triage}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 
 test("init --force replaces customised skills, and identical existing files are not a conflict", () => {
   const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
@@ -103,17 +115,15 @@ test("skills update deletes the retired trama-fix folder from every skill folder
     }
 
     const first = run(["--root", root, "skills", "update", "--skills-dir", "tools/agent-skills"], root).out;
-    for (const fix of fixes) {
-      expect(existsSync(fix)).toBe(false);
-      expect(first).toContain(fix);
-    }
-    expect(existsSync(join(root, ".agents/skills/trama-design/SKILL.md"))).toBe(true);
-
-    expect(run(["--root", root, "skills", "update", "--skills-dir", "tools/agent-skills"], root).out).not.toContain("Deleted");
+    for (const fix of fixes) expect(existsSync(fix)).toBe(false);
+    expect(first).toContain("Deleted the retired trama-fix skill:");
+    const second = run(["--root", root, "skills", "update", "--skills-dir", "tools/agent-skills"], root).out;
+    expect(second).not.toContain("Deleted the retired trama-fix skill:");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
 
 test("trama-implement reads each Task once from task show and checks the run once at the end", () => {
   const skill = SKILLS["trama-implement/SKILL.md"] as string;
@@ -128,13 +138,6 @@ test("trama-implement reads each Task once from task show and checks the run onc
   expect(skill).not.toContain("Understand the surroundings");
 });
 
-test("trama-scan runs at most twenty sub-agents at once for triage and comparison, and the other skills keep four", () => {
-  const skill = SKILLS["trama-scan/SKILL.md"] as string;
-  expect(skill).toContain("at most twenty sub-agents at once in all");
-  expect(skill).not.toContain("at most four sub-agents at once in all");
-  expect(SKILLS["trama-design/SKILL.md"] as string).toContain("at most four at once");
-  expect(SKILLS["trama-implement/SKILL.md"] as string).toContain("at most four at once");
-});
 
 test("trama-resolve-drifts splits fragments over 12 KB in the same Proposal, keeping the 4,000-character budget in mind", () => {
   const skill = SKILLS["trama-resolve-drifts/SKILL.md"] as string;

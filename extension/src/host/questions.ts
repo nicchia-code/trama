@@ -1,13 +1,14 @@
 import * as vscode from "vscode";
-import { type Classification, createQuestionServer, questionProjectId, type QuestionServer } from "../../../src/core/question-channel";
+import { createQuestionServer, questionProjectId, type QuestionServer } from "../../../src/core/question-channel";
 import { QuestionRoundQueue } from "../../../src/core/question-rounds";
 import { unavailableQuestions } from "../../../src/core/questions";
 import type { QuestionPresenter } from "../../../src/core/question-rounds";
 import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
 import { receiveCursorHook } from "./cursor";
-import { noteActivity, receiveAgentIdle } from "./drift-resolution";
-import { noteAliveSeen, noteCommandSeen } from "./terminal-activity";
+import { receiveCopilotHook } from "./copilot-chat";
+import { receiveAgentIdle } from "./drift-resolution";
+import { noteCommandSeen } from "./terminal-activity";
 
 interface WindowRoundService {
   identity: string;
@@ -28,8 +29,7 @@ export class EditorQuestions implements vscode.Disposable {
   private closed = false;
   private readonly subscriptions: vscode.Disposable[];
 
-  /** `present` shows a round to the developer: the overlay of the Trama panel; `classify` answers `trama classify`. */
-  constructor(private readonly project: () => Project | undefined, private readonly present: QuestionPresenter, private readonly classify: (machine: string, state: string) => Promise<Classification>) {
+  constructor(private readonly project: () => Project | undefined, private readonly present: QuestionPresenter) {
     windowQuestions = this;
     // Directory deletion/rename does not emit separate events for its children.
     const watcher = vscode.workspace.createFileSystemWatcher("**/.trama");
@@ -87,16 +87,11 @@ export class EditorQuestions implements vscode.Disposable {
           return queue.ask(request, context);
         },
         onCursorHook: receiveCursorHook,
-        onActivity: (origin, readOnly) => {
-          noteActivity(origin);
-          noteCommandSeen(origin, readOnly === true);
-        },
-        onAgentAlive: (terminal) => {
-          noteActivity({ terminal });
-          noteAliveSeen(terminal);
+        onCopilotHook: receiveCopilotHook,
+        onActivity: (origin) => {
+          noteCommandSeen(origin);
         },
         onAgentIdle: receiveAgentIdle,
-        onClassify: this.classify,
         onClose: () => {
           queue.dispose();
           if (this.service === service) this.service = undefined;

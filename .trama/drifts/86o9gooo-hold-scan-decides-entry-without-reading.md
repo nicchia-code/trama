@@ -1,15 +1,15 @@
 ---
-status: open
-resolution: null
+status: resolved
+resolution: fix-code
 refs:
   - requirements/tech#scan-hold
   - scan-hold/On/proposal.APPROVED
 proposal: null
-task: null
+task: 607iyyib
 origin: null
-option: null
+option: 1
 note: null
-resolvedBy: null
+resolvedBy: g6eu10uj
 created: 2026-10-10T10:52:37.676Z
 ---
 # Hold scan decides entry without reading the Proposal's saved scan scope

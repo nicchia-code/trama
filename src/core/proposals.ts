@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { type AgentOrigin, type Announcement, bindDraft, markActivity, markDraftActivity, removeBoundTo } from "./announcements";
+import { type AgentOrigin, type Announcement, bindDraft, removeBoundTo } from "./announcements";
 import { consumeRequest, requestExists } from "./design-requests";
 import { diffFile, type FileChange } from "./diff";
 import { TramaError } from "./errors";
@@ -170,25 +170,6 @@ export function listProposals(p: Project): Proposal[] {
     .sort((a, b) => compareByCreation({ id: a.id, created: a.data.created }, { id: b.id, created: b.data.created }));
 }
 
-/**
- * When the agent last created, changed or deleted a file inside the Draft `proposalId`, in epoch milliseconds; 0 when
- * there is none. Read from the Draft files' times: synchronizing an announcement's title is not activity, and a
- * deletion shows as the change of the folder that held the file.
- */
-export function draftChangedAt(p: Project, proposalId: string): number {
-  const entry = listCards(proposalsDir(p), "folder").find((e) => e.id === proposalId);
-  if (!entry) return 0;
-  const dir = join(proposalsDir(p), entry.name);
-  let latest = 0;
-  for (const rel of ["", ...readdirSync(dir, { recursive: true, encoding: "utf8" })]) {
-    try {
-      latest = Math.max(latest, statSync(join(dir, rel)).mtimeMs);
-    } catch {
-      // Deleted between listing and reading: its folder's time already counts.
-    }
-  }
-  return latest;
-}
 
 /**
  * The Proposal `id` names. `asArgument` applies the command rules: digits cite only a numbered Proposal, and a short
@@ -342,7 +323,6 @@ export function editInProposal(p: Project, id: string, modelPath: string): strin
   const target = trackedLocation(proposal.dir, rel);
   if (proposal.data.delete.includes(rel)) throw new TramaError(`${rel} is marked for deletion in Proposal ${cardName(p, "proposal", proposal.id)}`);
   touch(proposal);
-  markDraftActivity(p, proposal.id);
   const exists = existsSync(target);
   if (!exists || proposal.data.base[rel] === undefined) {
     const content = baseFiles(p, proposal).get(rel);
@@ -362,7 +342,6 @@ export function deleteInProposal(p: Project, id: string, modelPath: string) {
   if (existsSync(trackedLocation(proposal.dir, rel)))
     throw new TramaError(`${rel} is already edited in Proposal ${cardName(p, "proposal", proposal.id)}; remove that copy first`);
   touch(proposal);
-  markDraftActivity(p, proposal.id);
   proposal.data.base[rel] ??= sha256(content);
   if (!proposal.data.delete.includes(rel)) proposal.data.delete.push(rel);
   save(proposal);
@@ -551,7 +530,6 @@ export function submitProposal(p: Project, id: string): Proposal & { requestCons
   proposal.data.status = "open";
   save(proposal);
   removeBoundTo(p, proposal.id, true);
-  markActivity(p);
   const requestConsumed = proposal.data.request !== null && consumeRequest(p, proposal.data.request);
   return { ...proposal, requestConsumed, warnings };
 }

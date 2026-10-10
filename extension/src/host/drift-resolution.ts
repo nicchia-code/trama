@@ -1,16 +1,12 @@
-import type * as vscode from "vscode";
-import { type AgentOrigin, QUIET_PERIOD_MS } from "../../../src/core/announcements";
-import { questionRoundClosedAt, questionRoundOpen } from "./question-activity";
-
 /**
  * What the jobs Trama launched from its buttons are doing, for this window only and only in memory (nothing is written
  * under `.trama/`: reopening the editor starts from Free): the Runs (Run all To do, a Task's Run, Run this design) and
- * the one Resolve Drifts, each with where it runs and when its agent was last seen working.
+ * the one Resolve Drifts, each with where it runs.
  */
 export type JobKind = "run" | "resolve";
 
-/** The terminal (its identity) or the chat a job runs in: Cursor's, whose end is seen once bound (see `startJob`), or another editor's. */
-export type JobPlace = { terminal: string } | { chat: "cursor" | "other" };
+
+export type JobPlace = { terminal: string } | { chat: "cursor" | "copilot" | "other" };
 
 /** The State of the `drift-resolution` Machine. */
 export type DriftResolution = "free" | "running-tasks" | "resolving";
@@ -19,10 +15,7 @@ interface Job {
   kind: JobKind;
   root: string;
   place: JobPlace;
-  /** Whether its end will be seen for certain; only a job whose end is not visible can end by quiet. */
-  endVisible: boolean;
-  lastActivity: number;
-  /** The Trama conversation Cursor's chat started for this job, bound by its first prompt; until then the job waits for it. */
+  /** The conversation that owns this chat job once its first Trama prompt binds it. */
   conversation?: string;
 }
 
@@ -44,12 +37,7 @@ export function onDriftResolutionChange(listener: () => void): { dispose(): void
   listeners.add(listener);
   return { dispose: () => void listeners.delete(listener) };
 }
-
-/**
- * The terminals whose current run is followed by the hook of its agent (omp's): they end when the hook says the agent is
- * idle, when the terminal closes, or when the quiet period ends (the hook may never load). The end of their command says
- * nothing about them.
- */
+/** Hooked terminal jobs end only when the hook reports idle or the terminal closes. */
 const hooked = new Set<string>();
 
 /** Records whether the run just started in `terminal` is followed by its agent's hook; a reused terminal's old answer no longer holds. */
@@ -74,19 +62,28 @@ export function onAgentIdle(listener: (terminal: string, root: string) => void):
 
 /**
  * A job begins when its instruction is really written in the terminal or sent by the chat by itself; never for one left
- * ready in the chat or copied to the clipboard. `endVisible` is false for an external window, a chat that is not Cursor's
- * and (until its commands are seen starting) a terminal without shell integration. A Cursor chat job's end is seen only
- * once it is bound to its conversation (see `bindChatJob`): until then it is quiet like a job whose end is not seen.
- * `sentAt` is when its send began: a chat job binds only a conversation that started from then on, never one begun before the send.
+ * ready in the chat or copied to the clipboard.
  */
-export function startJob(kind: JobKind, root: string, place: JobPlace, endVisible: boolean, now = Date.now(), sentAt = now): void {
-  const job: Job = { kind, root, place, endVisible, lastActivity: now };
-  if ("chat" in place && place.chat === "cursor") {
-    job.conversation = takePendingChat(root, sentAt, now);
-    job.endVisible = job.conversation !== undefined;
+export function startJob(kind: JobKind, root: string, place: JobPlace, _endVisible: boolean, sentAfter = chatEventSequence): void {
+  const job: Job = { kind, root, place };
+  if ("chat" in place && place.chat !== "other") {
+    const pending = takePendingChat(root, place.chat, sentAfter);
+    if (pending?.ended) return;
+    job.conversation = pending?.conversation;
   }
   jobs.add(job);
   changed();
+}
+
+let chatEventSequence = 0;
+
+export function chatJobSendStarted(root: string, chat: "cursor" | "copilot"): number {
+  for (let i = pendingChats.length - 1; i >= 0; i--) {
+    const pending = pendingChats[i];
+    if (pending !== undefined && pending.root === root && pending.chat === chat && pending.sequence <= chatEventSequence)
+      pendingChats.splice(i, 1);
+  }
+  return chatEventSequence;
 }
 
 function endWhere(matches: (job: Job) => boolean): void {
@@ -98,81 +95,49 @@ function endWhere(matches: (job: Job) => boolean): void {
 /** The command Trama wrote in terminal `terminal` ended, or that terminal closed. */
 export const endTerminalJobs = (terminal: string): void => endWhere((j) => "terminal" in j.place && j.place.terminal === terminal);
 
-/**
- * Cursor's chat conversations of Trama already seen in this window, by project and conversation: a job binds only to a
- * conversation that starts after its send, never to one already seen, so a later prompt of one never takes a job.
- */
+/** Trama chat conversations already seen in this window, by project, service and conversation. */
 const seenChats = new Set<string>();
 
-/** A new conversation whose job is not registered yet (its send is still under way), oldest first. */
-const pendingChats: { root: string; conversation: string; at: number }[] = [];
+/** A conversation event that arrived while its send was still being registered, oldest first. */
+const pendingChats: { root: string; chat: "cursor" | "copilot"; conversation: string; sequence: number; ended: boolean }[] = [];
 
-/** How long a new conversation waits for its job to be registered; ponytail: a job registered later never binds it, add a retry if that happens. */
-const PENDING_CHAT_MS = 10_000;
-
-/** Takes the oldest conversation of `root` that started at or after `sentAt` and within `PENDING_CHAT_MS`, dropping the expired ones. */
-function takePendingChat(root: string, sentAt: number, now: number): string | undefined {
-  const live = pendingChats.filter((p) => now - p.at < PENDING_CHAT_MS);
-  const taken = live.find((p) => p.root === root && p.at >= sentAt);
-  pendingChats.splice(0, pendingChats.length, ...live.filter((p) => p !== taken));
-  return taken?.conversation;
+/** Takes the oldest pending conversation for this chat and project that started after its send. */
+function takePendingChat(root: string, chat: "cursor" | "copilot", sentAfter: number): { conversation: string; ended: boolean } | undefined {
+  const taken = pendingChats.find((p) => p.root === root && p.chat === chat && p.sequence > sentAfter);
+  if (taken !== undefined) pendingChats.splice(pendingChats.indexOf(taken), 1);
+  return taken;
 }
 
-/**
- * Cursor's chat started a Trama conversation in the project at `root`: a conversation seen for the first time takes the
- * oldest chat job sent and not yet bound, or waits for the next one; any later prompt of it does nothing. From the binding
- * on, only that conversation's end ends the job.
- */
-export function bindChatJob(root: string, conversation: string, now = Date.now()): void {
-  const key = `${root}\n${conversation}`;
+/** A chat conversation's first Trama prompt binds the oldest unbound job for that chat and project. */
+function bindChatJobFor(chat: "cursor" | "copilot", root: string, conversation: string): void {
+  const key = `${chat}\n${root}\n${conversation}`;
   if (seenChats.has(key)) return;
   seenChats.add(key);
+  const sequence = ++chatEventSequence;
   for (const job of jobs) {
-    if (job.root === root && "chat" in job.place && job.place.chat === "cursor" && job.conversation === undefined) {
+    if (job.root === root && "chat" in job.place && job.place.chat === chat && job.conversation === undefined) {
       job.conversation = conversation;
-      job.endVisible = true;
+      changed();
       return;
     }
   }
-  pendingChats.push({ root, conversation, at: now });
+  pendingChats.push({ root, chat, conversation, sequence, ended: false });
 }
 
-/**
- * A turn of the Trama conversation `conversation` in Cursor's chat ended, was interrupted or was closed: only the job bound
- * to it ends, and a conversation still waiting for its job is no longer a candidate for one.
- */
-export function endChatJobs(root: string, conversation: string): void {
-  const i = pendingChats.findIndex((p) => p.root === root && p.conversation === conversation);
-  if (i >= 0) pendingChats.splice(i, 1);
-  endWhere((j) => j.root === root && j.conversation === conversation && "chat" in j.place && j.place.chat === "cursor");
+/** A new Cursor chat conversation belongs to the oldest Cursor chat job not yet bound. */
+export const bindChatJob = (root: string, conversation: string): void => bindChatJobFor("cursor", root, conversation);
+
+/** A new Copilot conversation belongs to the oldest Copilot chat job not yet bound. */
+export const bindCopilotChatJob = (root: string, conversation: string): void => bindChatJobFor("copilot", root, conversation);
+
+/** The end of one Cursor or Copilot conversation ends only its own bound job. */
+function endChatJobsFor(chat: "cursor" | "copilot", root: string, conversation: string): void {
+  const pending = pendingChats.find((p) => p.chat === chat && p.root === root && p.conversation === conversation);
+  if (pending !== undefined) pending.ended = true;
+  endWhere((j) => j.root === root && j.conversation === conversation && "chat" in j.place && j.place.chat === chat);
 }
 
-/** The command Trama wrote in terminal `terminal` was seen starting, so its end will be seen too. */
-export function endIsVisible(terminal: string): void {
-  for (const job of jobs) if ("terminal" in job.place && job.place.terminal === terminal) job.endVisible = true;
-}
+export const endChatJobs = (root: string, conversation: string): void => endChatJobsFor("cursor", root, conversation);
+export const endCopilotChatJobs = (root: string, conversation: string): void => endChatJobsFor("copilot", root, conversation);
 
-/** A command of the agent that changed something ran in `origin`: its job's quiet period starts again. */
-export function noteActivity(origin: AgentOrigin, now = Date.now()): void {
-  for (const job of jobs) {
-    const same = origin.terminal !== undefined ? "terminal" in job.place && job.place.terminal === origin.terminal : "chat" in job.place && job.place.chat === (origin.chat ?? "other");
-    if (same) job.lastActivity = now;
-  }
-}
 
-/**
- * Ends the jobs whose end Trama cannot see, or whose agent has a hook, and that were left alone for the quiet period. It
- * does not run while a question round is open, and starts again when it closes.
- */
-export function endQuietJobs(now = Date.now()): void {
-  if (questionRoundOpen()) return;
-  endWhere((j) => (!j.endVisible || ("terminal" in j.place && isHooked(j.place.terminal))) && now - Math.max(j.lastActivity, questionRoundClosedAt()) >= QUIET_PERIOD_MS);
-}
-
-const CHECK_EVERY_MS = 30_000;
-
-/** Checks the quiet period every half minute. */
-export function watchQuietJobs(): vscode.Disposable {
-  const timer = setInterval(() => endQuietJobs(), CHECK_EVERY_MS);
-  return { dispose: () => clearInterval(timer) };
-}

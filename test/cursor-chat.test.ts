@@ -87,26 +87,21 @@ test("Trama's hooks replace only Trama's earlier entries, keep the others, and l
   expect(readFileSync(file, "utf8")).toBe("{ broken");
 });
 
-test("a command of the agent tells the project's editor where it ran and whether it only read; a missing editor tells nothing", async () => {
-  const received: { origin: AgentOrigin; readOnly: boolean }[] = [];
-  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onActivity: (origin, readOnly) => received.push({ origin, readOnly: readOnly === true }) });
+test("only commands that change project state tell the editor; read-only commands do not", async () => {
+  const received: AgentOrigin[] = [];
+  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onActivity: (origin) => received.push(origin) });
   try {
     const tell = (argv: string[], env: Record<string, string>) => reportActivity(argv, project, { env, runtimeDir });
     await tell(["task", "move", "abcd1234", "doing"], { TRAMA_TERMINAL: "abc123" });
     await tell(["drift", "new", "x"], { CURSOR_AGENT: "1" });
     await tell(["announce", "task", "x"], {});
     await tell(["task", "list"], { TRAMA_TERMINAL: "abc123" });
-    await tell(["classify", "--machine", "order"], { TRAMA_TERMINAL: "abc123" });
-    await tell(["classify", "--machine", "order"], {});
     await tell(["proposal", "resolve-drift", "abcd1234", "efgh5678", "--remove"], { TRAMA_TERMINAL: "abc123" });
     expect(received).toEqual([
-      { origin: { terminal: "abc123" }, readOnly: false },
-      { origin: { chat: "cursor" }, readOnly: false },
-      { origin: {}, readOnly: false },
-      { origin: { terminal: "abc123" }, readOnly: true },
-      { origin: { terminal: "abc123" }, readOnly: true },
-      { origin: {}, readOnly: true },
-      { origin: { terminal: "abc123" }, readOnly: false },
+      { terminal: "abc123" },
+      { chat: "cursor" },
+      {},
+      { terminal: "abc123" },
     ]);
   } finally {
     await server.dispose();
@@ -127,5 +122,6 @@ test("the hook of an agent in a Trama terminal tells the project's editor it is 
     await server.dispose();
   }
   await runAgentEvent(["agent-event", "idle"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir });
+  await expect(runAgentEvent(["agent-event", "alive"], project, { env: {}, runtimeDir })).rejects.toThrow("Usage: trama agent-event idle");
   await expect(runAgentEvent(["agent-event", "busy"], project, { env: {}, runtimeDir })).rejects.toThrow("Usage: trama agent-event idle");
 });

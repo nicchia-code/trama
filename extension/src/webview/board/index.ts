@@ -1,11 +1,11 @@
 import { namerOf, noNumbers } from "../../../../src/core/card-names";
 import { runBlocker } from "../../../../src/core/design";
 import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
-import { createScanHoldSwitch } from "../scan-hold-switch";
 import type { MountView } from "../types";
 import css from "./board.css" with { type: "text" };
 import { announcedGhosts, buildBoard, type Card, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, DONE_PERIODS, type DonePeriod, doneGroups, interleave, withdrawnNotice } from "./logic";
 import { type CardEnv, renderAnnounced, renderCard } from "./render";
+import { scanButtonLabel } from "../scan-label";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -47,11 +47,9 @@ export const mountBoard: MountView = (root, context) => {
   };
   const runAll = toolbarButton("Run all To do", () => context.post({ type: "launch", action: { kind: "implement-all" } }), true);
   const resolveDrifts = toolbarButton("Resolve Drifts", () => context.post({ type: "launch", action: { kind: "resolve-drifts" } }));
-  toolbarButton("Scan System", () => context.post({ type: "launch", action: { kind: "scan" } }));
+  const scanSystem = toolbarButton("Scan System", () => context.post({ type: "launch", action: { kind: "scan" } }));
   toolbarButton("Quick request…", () => context.post({ type: "launch", action: { kind: "design" } }), false, "Ask an agent to design a change in one line");
   toolbarButton("Design…", () => context.post({ type: "writeDesignRequest" }), false, "Write a design request in Markdown and send it to an agent");
-  const scanHold = createScanHoldSwitch((on) => context.post({ type: "setScanHold", on }));
-  toolbar.append(scanHold.element);
 
   let snapshot: Snapshot | null = null;
   /** Whether a question round is open: the ghosts then say the agent waits for the developer's answers. */
@@ -185,8 +183,12 @@ export const mountBoard: MountView = (root, context) => {
       else button.setAttribute("aria-description", reason);
     };
     setReason(runAll, blocker);
+    const scanLabel = scanButtonLabel("Scan System", snapshot.tasksSinceScan);
+    scanSystem.textContent = scanLabel.text;
+    if (scanLabel.tooltip) scanSystem.title = scanLabel.tooltip;
+    else scanSystem.removeAttribute("title");
+    scanSystem.setAttribute("aria-label", scanLabel.ariaLabel);
     setReason(resolveDrifts, resolve.blocker);
-    scanHold.set(snapshot.scanHold.on, snapshot.scanHold.held);
     for (const key of cache.keys()) if (!live.has(key)) cache.delete(key);
     for (const key of announced.keys()) if (!liveAnnounced.has(key)) announced.delete(key);
 

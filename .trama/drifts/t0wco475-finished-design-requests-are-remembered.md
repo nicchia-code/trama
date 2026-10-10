@@ -1,16 +1,16 @@
 ---
-status: open
-resolution: null
+status: resolved
+resolution: fix-code
 refs:
   - design-request/Abandoned
   - design-request/Consumed
   - requirements/data#design-request
 proposal: null
-task: null
+task: 3i2aehh7
 origin: null
-option: null
+option: 1
 note: null
-resolvedBy: null
+resolvedBy: g6eu10uj
 created: 2026-10-10T10:53:16.939Z
 ---
 # Finished design requests are remembered in workspace state while their tab is open

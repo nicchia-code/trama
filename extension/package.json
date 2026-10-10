@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "publisher": "trama-dev",
   "license": "UNLICENSED",
   "private": true,
@@ -61,23 +61,13 @@
         "command": "trama.updateSkills",
         "title": "Update Agent Skills",
         "category": "Trama"
-      },
-      {
-        "command": "trama.setSystem1ApiKey",
-        "title": "Set System 1 API Key",
-        "category": "Trama"
-      },
-      {
-        "command": "trama.clearSystem1ApiKey",
-        "title": "Clear System 1 API Key",
-        "category": "Trama"
       }
     ],
     "menus": {
       "editor/title": [
         {
           "command": "trama.sendDesignRequest",
-          "when": "trama.designRequest",
+          "when": "resourcePath in trama.designRequestResources",
           "group": "navigation"
         }
       ],
@@ -91,98 +81,71 @@
     "configuration": {
       "title": "Trama",
       "properties": {
-        "trama.agentCommand": {
-          "type": "string",
-          "default": "",
-          "scope": "application",
-          "markdownDescription": "Command that starts your coding agent in a terminal when `#trama.terminalAgent#` is `custom` (or is empty while this is set). `{prompt}` is replaced by the shell-quoted prompt; if it is missing, the prompt is appended. Examples: `claude {prompt}`, `codex {prompt}`. Trama never calls a model itself. It only applies in your user settings."
-        },
-        "trama.terminalAgent": {
+        "trama.agent": {
           "type": "string",
           "enum": [
-            "",
+            "chat",
             "omp",
-            "claude",
-            "codex",
-            "copilot",
-            "cursor",
-            "custom"
+            "claude"
           ],
           "enumDescriptions": [
-            "Not chosen: `custom` when `#trama.agentCommand#` is set, otherwise Trama asks the first time a terminal launcher starts an agent.",
-            "omp, started as `omp`.",
-            "Claude Code, started as `claude`.",
-            "Codex, started as `codex`.",
-            "Copilot CLI, started as `copilot -i`.",
-            "Cursor CLI, started as `agent`.",
-            "Your own command, `#trama.agentCommand#`."
+            "The editor's chat: Copilot in VS Code, Cursor in Cursor.",
+            "omp in the editor's integrated terminal.",
+            "Claude Code in the editor's integrated terminal."
           ],
-          "default": "",
+          "default": "chat",
           "scope": "application",
-          "markdownDescription": "The agent Trama starts in a terminal, for every project: `omp`, `claude` (Claude Code), `codex` (Codex), `copilot` (Copilot CLI), `cursor` (Cursor CLI) or `custom` (uses `#trama.agentCommand#`). Empty (the default) counts as `custom` when `#trama.agentCommand#` is set; otherwise Trama asks the first time a terminal launcher starts an agent. It only applies in your user settings."
+          "markdownDescription": "Agent used for every project and instruction: `chat` (the editor's chat; the default), `omp` or `claude` (in an integrated terminal). It applies only in your user settings."
+        },
+        "trama.terminalLocation": {
+          "type": "string",
+          "enum": [
+            "panel",
+            "editor"
+          ],
+          "enumDescriptions": [
+            "The terminal area.",
+            "A terminal tab beside the active editor."
+          ],
+          "default": "panel",
+          "scope": "application",
+          "markdownDescription": "Where `omp` and Claude Code terminals open: `panel` (the terminal area; the default) or `editor` (a terminal tab beside the active editor). It applies only in your user settings."
         },
         "trama.analysis": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for design work: quick and written design requests, Resolve Drifts and import; inside scans and runs, also the analysis of Machines in conflict. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
+          "markdownDescription": "Model for design work: quick and written design requests, Resolve Drifts and import. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
         },
         "trama.scan": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for scans: of the System, of Features, after an approval and when Hold scan is turned off. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
+          "markdownDescription": "Model for scans: of the System, of Features and after an approval; it also applies to the sub-agents that compare Machines. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
         },
         "trama.execution": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for implementing Tasks: implement, implement all and implement a design, including the final scan of the run; inside scans and runs, also the triage of each Machine. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
+          "markdownDescription": "Model for implementing Tasks: implement, implement all and implement a design, including the selective final scan of the run. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
         },
-        "trama.system1": {
-          "type": "string",
-          "enum": [
-            "",
-            "jev"
-          ],
-          "enumDescriptions": [
-            "No classifier: the agent triages each Machine on its own and nothing leaves your machine.",
-            "Jev: sends to TypeSafe's API, for every scanned Machine, the Model, the Requirements and the code excerpts chosen by the agent."
-          ],
-          "default": "",
+        "trama.autoExit": {
+          "type": "boolean",
+          "default": true,
           "scope": "application",
-          "markdownDescription": "Classifier that triages each scanned Machine. `jev` sends to TypeSafe's API, for every scanned Machine, the Model, the Requirements and the code excerpts chosen by the agent; save its key with **Trama: Set System 1 API Key**. Empty (the default) sends nothing. It only applies in your user settings."
+          "markdownDescription": "Close the agent's terminal as soon as the agent is idle or its command ends (default on). With it off, idle terminals stay open and every instruction still opens a new one. It only applies in your user settings."
         },
-        "trama.agentLauncher": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "terminal",
-            "terminal-tab",
-            "external-terminal",
-            "chat"
-          ],
-          "enumDescriptions": [
-            "The chat in Cursor, the integrated terminal in every other editor. In Cursor `#trama.agentCommand#` is not needed. Never the external terminal.",
-            "Start the agent of `#trama.terminalAgent#` (or `#trama.agentCommand#` when it is `custom`) in the editor's integrated terminal.",
-            "Start the agent of `#trama.terminalAgent#` (or `#trama.agentCommand#` when it is `custom`) in the editor's integrated terminal, opened as an editor tab beside the active one.",
-            "Start the agent of `#trama.terminalAgent#` (or `#trama.agentCommand#` when it is `custom`) in a window of your system's default terminal, outside the editor (Linux and macOS only, and only for a project opened locally).",
-            "Send the prompt to the agent chat built into the editor. In Cursor a new chat sends it by itself; if Cursor does not allow that, the chat waits for your confirmation and Enter, or the prompt is copied to the clipboard. In VS Code it goes to Copilot's chat, or to the clipboard if the chat is not available."
-          ],
-          "default": "auto",
+        "trama.maxParallelAgents": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
           "scope": "application",
-          "markdownDescription": "Where the Design, Scan and Run buttons send their prompt. `auto` (the default) uses the chat in Cursor and the integrated terminal elsewhere; `terminal` is the editor's integrated terminal; `terminal-tab` is the editor's integrated terminal, opened as an editor tab beside the active one; `external-terminal` is a window of your system's default terminal, outside the editor (Linux and macOS only); `chat` is the agent chat built into the editor. Choosing `terminal`, `terminal-tab`, `external-terminal` or `chat` always wins. It only applies in your user settings: a project cannot choose it."
-        },
-        "trama.externalTerminalCommand": {
-          "type": "string",
-          "default": "",
-          "scope": "application",
-          "markdownDescription": "Command that opens the external terminal when `#trama.agentLauncher#` is `external-terminal`, instead of the detected one. `{command}` is replaced by the agent's command line, which is appended if `{command}` is missing; for example `alacritty -e {command}`. Empty (the default) detects your system's terminal. With a value set, every instruction opens a new window. It only applies in your user settings."
+          "markdownDescription": "How many sub-agents the agent may run at once, in a scan, in the exploration of a design and in a run of Tasks (default 20; agents without sub-agents ignore it)."
         },
         "trama.autoScan": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "After you approve a Proposal, launch the agent to Scan the Features it touched. With a terminal launcher (integrated or external) it only applies when `#trama.terminalAgent#` is chosen or `#trama.agentCommand#` is set."
+          "markdownDescription": "After you approve a Proposal, launch the agent to scan the Features it touched. It applies to the chat or terminal agent."
         },
         "trama.skillsDir": {
           "type": "string",

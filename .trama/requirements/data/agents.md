@@ -1,5 +1,5 @@
 ---
-description: "Usa quando tocchi i dati di richieste di design, Hold scan, risoluzione dei Drift e round di domande."
+description: "Usa quando tocchi i dati di richieste di design, risoluzione dei Drift e round di domande."
 ---
 # Dati del lavoro dell'agente
 
@@ -8,14 +8,8 @@ description: "Usa quando tocchi i dati di richieste di design, Hold scan, risolu
 - La cartella ha un suo `.gitignore` che ignora tutto ciò che contiene, così le richieste non sono mai versionate; Trama lo scrive insieme alla prima richiesta.
 - Quali richieste sono state inviate non sta nel file né sotto `.trama/`: l'estensione tiene l'elenco degli ID inviati nel proprio stato per l'area di lavoro, che sopravvive ai riavvii dell'editor. Un ID il cui file non esiste più è tolto dall'elenco. Un file in `requests/` il cui ID non è nell'elenco è una richiesta in Writing.
 
-## scan-hold
-- Una cartella `.trama/scan-hold/`, locale a questa copia di lavoro e non versionata, con un suo `.gitignore` che ignora tutto ciò che contiene (il testo `*`), scritto insieme al primo file.
-- Il file `state` contiene `on` oppure `off`, con al più un a capo finale. Il file `held` elenca le identità permanenti delle Proposal in sospeso, una per riga, nell'ordine in cui sono entrate (la più vecchia prima). Il contatore mostrato è il numero di righe valide di `held`.
-- Cartella o `state` assenti: l'interruttore è spento e il sospeso è vuoto. `held` assente: sospeso vuoto. Un `state` che, tolto al più un a capo finale, non è `on` né `off`: l'interruttore è spento, `held` non conta e il developer è avvisato.
-- Una riga di `held` vuota, ripetuta o che non nomina una Proposal approvata non conta e si toglie alla scrittura successiva.
-
 ## drift-resolution
-- Lo State di Drift resolution sta solo nella memoria dell'host dell'estensione, per finestra: quali Run e quale Resolve Drifts lanciati da quella finestra non sono finiti, ciascuno con il terminale (la sua identità) o la conversazione della chat in cui gira e l'istante dell'ultima attività vista. Non è scritto sotto `.trama/` né nello stato dell'area di lavoro, e riaprire l'editor lo azzera.
+- Lo State di Drift resolution sta solo nella memoria dell'host dell'estensione, per finestra: quali Run e quale Resolve Drifts lanciati da quella finestra non sono finiti, ciascuno con il terminale (la sua identità) o la conversazione della chat in cui gira. Non è scritto sotto `.trama/` né nello stato dell'area di lavoro, e riaprire l'editor lo azzera.
 - Che una Proposal di risoluzione aspetti una decisione non è tenuto in memoria: si calcola dalle Proposal con `kind: resolution` e `status` `draft` o `open`.
 
 ## question-round

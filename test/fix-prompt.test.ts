@@ -69,3 +69,13 @@ test("closing the input before an option is chosen refuses, saying that an optio
   await expect(ask(base(), [])).rejects.toThrow(/An option must be chosen/);
   expect(getDrift(p, id).data.status).toBe("open");
 });
+
+test("EOF names the Drift by its short number when given its permanent ID", async () => {
+  try {
+    await ask(base(), []);
+    throw new Error("Expected EOF to reject");
+  } catch (error) {
+    expect(String(error)).toMatch(/Drift D\d+/);
+    expect(String(error)).not.toContain(id);
+  }
+});

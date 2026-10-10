@@ -42,7 +42,7 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | S1 | Run `cd /home/luca/Developer/Trama && TRAMA_DEMO_DIR=/tmp/trama-demo/shop bun run scripts/harness.ts` | Prints `wrote extension/dist/harness.html`. No error | ☐ |
-| S2 | Make sure your **user** settings have no `trama.terminalAgent` (or have `custom`) and no model roles (`trama.analysis`, `trama.scan`, `trama.execution`). Put `"trama.agentCommand": "echo {prompt}"` in your **user** settings (`bun run scripts/demo-agent.ts echo` prints the line; `trama.agentCommand` has application scope, so the workspace file `/tmp/trama-demo/shop/.vscode/settings.json` is ignored for it) | The user settings contain `"trama.agentCommand": "echo {prompt}"`. From now on the "agent" only prints its prompt: with no agent chosen, an existing command counts as `custom` | ☐ |
+| S2 | Make sure omp is installed and set `"trama.agent": "omp"` in your **user** settings, with no model roles (`trama.analysis`, `trama.scan`, `trama.execution`) | Every Trama instruction starts omp in a new integrated terminal; no workspace setting selects a different agent | ☐ |
 | S3 | Run `code --extensionDevelopmentPath=/home/luca/Developer/Trama/extension --new-window /tmp/trama-demo/shop` (skip if the window is already open) | A VS Code window titled `shop`. If a Welcome dialog appears, close it | ☐ |
 | S4 | In the verification shell paste: `j() { /home/luca/Developer/Trama/dist/trama --root /tmp/trama-demo/shop "$@"; }` and `D=/tmp/trama-demo/shop/.trama` | No output. `j board` prints the board (see S5) | ☐ |
 | S5 | Run `j board` | `To decide`: Proposal `P1`, Proposal `P2`, Drift `D1`, Drift `D2` (Proposal `P2`). `To do`: `T1`, `T2`. `In progress`: `T3`. `Done`: `0004` (its identity, because it has no number) | ☐ |
@@ -71,7 +71,7 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 ### A1. First open
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Initialize Project**, **Trama: Quick Design Request…**, **Trama: Design…**, **Trama: Scan System**, **Trama: Set System 1 API Key**, **Trama: Clear System 1 API Key**. **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
+| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Initialize Project**, **Trama: Quick Design Request…**, **Trama: Design…**, **Trama: Scan System**. **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
 | 2 | Run **Trama: Open** | One new editor tab titled `Trama`, in the editor area | ☐ |
 | 3 | Look at the tab header inside the panel | Two tabs: **Diagram** (selected, underlined) and **Board** with a grey badge `4` | ☐ |
 | 4 | Look under the tabs | No red banner | ☐ |
@@ -340,7 +340,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 5 | Board, Task 0001: click the chip `order/Paid/user.CANCEL` 🔍 | By design the Diagram opens at `order` with the Transition(s) of Paid on `user.CANCEL` selected. Not observed: note what you see | ☐ |
 
 ### E5. The Board has no way to move a Task
-Needs the agent of E12 for row 6 (`trama.agentCommand` as `bash -c "sleep 600" {prompt}`); the other rows need none.
+Needs the real omp agent configured in S2 for row 6; the other rows need none.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | ↻. Look at every Task card, every Task row of a design card and every design card | No ← → buttons, no **Take back** button and no button that removes a card; no card has the `draggable` attribute | ☐ |
@@ -397,7 +397,7 @@ Needs the agent of E12 for row 6 (`trama.agentCommand` as `bash -c "sleep 600" {
 | 14 | `j --json task next` | `"next": null` and a `waiting` list with the same four Tasks, each with its `blockedBy` | ☐ |
 
 ### E12. Ghosts of announced cards
-Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": "bash -c \\"sleep 600\\" {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, and reload the window so the extension reads the settings. `j` below is the verification shell's.
+Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `"trama.autoExit": false` in your **user** settings and `"trama.autoScan": false` in `/tmp/trama-demo/shop/.vscode/settings.json`; ↻ and reload the window. `j` below is the verification shell's.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Board: **Quick request…**, type `Add refunds after pickup`, Enter. Note the To decide count and the number on the Board tab | Within about a second a dashed, translucent skeleton appears in To decide after the last real Proposal and before the first Drift: kind `Proposal`, title `Add refunds after pickup`, the line `Preparing`, and a shimmer on its text lines | ☐ |
@@ -415,8 +415,8 @@ Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": 
 | 13 | `j proposal new "Never finished"`, read the ghost, then `j proposal discard <ID it printed>` | A `Writing` ghost titled `Never finished`; after the discard it disappears and **no** notice is shown | ☐ |
 | 14 | `j announce task "Gone quiet"`, then edit its file under `$D/announcements` and set `touched` to a time 20 minutes ago, save | Within about 30 seconds the ghost disappears and the notice `The agent finished without delivering Task Gone quiet.` appears; the `Drift` ghost of row 9, which also belongs to no terminal, goes with it, with its own notice | ☐ |
 | 15 | `j announce task "Before reload"`, then Developer: Reload Window and open the Board | The ghost is not there and no notice is shown: leftovers are withdrawn at startup | ☐ |
-| 16 | Set `printf '{"trama.agentLauncher": "chat", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, reload, **Quick request…** with any text | The prompt goes to the chat (or the clipboard) and **no** ghost appears | ☐ |
-| 17 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with the chat launcher the ghost starts with the Draft | ☐ |
+| 16 | Set `"trama.agent": "chat"` in your **user** settings and `"trama.autoScan": false` in the workspace settings; reload, **Quick request…** with any text | The prompt goes to Copilot Chat and no terminal ghost appears | ☐ |
+| 17 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with chat, the ghost starts with the Draft | ☐ |
 | 18 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
 | 19 | Restore S2. ↻, then `j task move 1 doing` | The card moves to In progress without ever looking busy; no dashed copy of it appears in In progress at any moment | ☐ |
 | 20 | `C=$(j announce check "Final check after all Tasks" --phase verifying)` | In In progress, dopo le schede vere, un ghost `Check` intitolato `Final check after all Tasks` con la riga `Verifying (tests, lint, build)`; il numero della colonna non cambia | ☐ |
@@ -443,7 +443,7 @@ Needs an agent that does not end by itself. Set `printf '{"trama.agentCommand": 
 
 ---
 
-## G. Developer decisions (agent mode: echo, S2)
+## G. Developer decisions (agent mode: omp, S2)
 
 For every G test, ↻ first, then open the panel and the terminal panel.
 
@@ -553,9 +553,9 @@ Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." -
 
 ---
 
-## H. Launching the agent (echo mode, S2)
+## H. Launching the agent (S2)
 
-Each launch sends one command to a terminal named after its work (cwd = the demo folder) and the shell prints the prompt: `Scan` for a scan, `Design` for a design request, the Task's short number (for example `T1`) for **Run**, `All tasks` for **Run all To do**. Il terminale non si mostra da solo: l'area dei terminali non si apre se è chiusa, il terminale visibile resta quello di prima e il focus resta dove era; aprire a mano il terminale dall'elenco dei terminali per leggere la riga.
+Each launch starts a new agent terminal named after its work (cwd = the demo folder): `Scan` for scans, `Design` for design requests, the Task's short number (for example `T1`) for **Run**, `All tasks` for **Run all To do**. Inspect the command in the terminal list; Trama does not reuse terminals or show the terminal area automatically. The panel, cursor and keyboard stay where they were.
 
 | # | Action | Expected in the terminal | ✓ |
 |---|---|---|---|
@@ -574,18 +574,18 @@ Each launch sends one command to a terminal named after its work (cwd = the demo
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
 | H15 | Palette: **Trama: Quick Design Request…** | Same input box as H5 | ☐ |
-| H16 | After H1 to H15, open the terminal dropdown | Each run of launches with the same name reused one terminal; a launch with another name opened a new terminal and left the previous one open: `Scan` (H1–H4), `Design` (H5–H9), the short number of Task 0001 (H10), `All tasks` (H11), then a new `Scan` (H13–H14) and a new `Design` (H15). No terminal is named `Trama agent`. If an earlier command is still running (for example an agent), the next launch opens a new terminal even with the same name | ☐ |
-| H17 | Set `printf '{"trama.agentCommand": "echo"}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (no `{prompt}`), click **Scan System** | The prompt is appended: `Use the trama-scan skill on the whole System.` | ☐ |
-| H18 | Set `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (no agent chosen in the user settings either), click **Scan System** | A list titled `Choose the agent Trama starts in the terminal`: `omp` (`omp`), `Claude Code` (`claude`), `Codex` (`codex`), `Copilot CLI` (`copilot -i`), `Cursor CLI` (`agent`), `Other command…`. **Press Esc**: nothing is launched and nothing is saved. Choose **Other command…**: an input box `Trama: agent command`, placeholder `claude {prompt}    or    codex {prompt}`; with empty text `Enter the command that starts your agent`; **Esc** again launches nothing. (Choosing an agent or typing a command saves it in your *user* settings: remove `trama.terminalAgent` and `trama.agentCommand` from them afterwards.) | ☐ |
-| H19 | Restore S2. Set `printf '{"trama.agentCommand": "echo {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, approve Proposal 0001 | The Proposal is approved (G1.1, G1.4–G1.8 hold) but **no** command is sent to the terminal | ☐ |
-| H20 | Restore S2 (settings back to `echo {prompt}`) | | ☐ |
-| H21 | Set `printf '{"trama.agentCommand": "echo {prompt}", "trama.autoScan": false, "trama.language": " Italian "}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ↻, click **Scan System** | One line, ending `Use the trama-scan skill on the whole System. Write everything you generate in Italian, except code, which always stays in English.` (the typed text is trimmed). The same ending appears after **Run all To do**, **Run** on a Task, **Quick request…** (after the request), **Send to agent** on a written design request and **Rework** of a stale Proposal | ☐ |
-| H22 | Change `trama.language` to `"   "` (spaces only), ↻, click **Scan System** | The line is exactly `Use the trama-scan skill on the whole System.`, with nothing about language | ☐ |
-| H23 | Restore S2 (settings back to `echo {prompt}`, no `trama.language`) | | ☐ |
+| H16 | After H1 to H15, open the terminal dropdown | Every launch has its own terminal, even when an earlier command with the same name has ended. Terminals are named for their work: `Scan`, `Design`, a Task's short number or `All tasks`; no terminal is reused | ☐ |
+| H17 | Set `"trama.agent": "claude"` in your **user** settings; click **Scan System** | A new terminal named `Scan` runs Claude Code; no choice prompt appears | ☐ |
+| H18 | Set `"trama.agent": "chat"` in your **user** settings; click **Scan System** | Copilot Chat receives the prompt; no terminal is created and no choice prompt appears | ☐ |
+| H19 | Leave `trama.agent` set to `chat`; add the legacy settings `"trama.agentLauncher": "terminal"`, `"trama.terminalAgent": "codex"` and `"trama.agentCommand": "fake {prompt}"` to user settings; approve Proposal 0001 with automatic scanning on | The scan goes to Copilot Chat; legacy values are ignored and remain unchanged | ☐ |
+| H20 | Remove the legacy values; restore `"trama.agent": "omp"` | Future launches use omp without prompting | ☐ |
+| H21 | Set `"trama.language": " Italian "` in user settings; click **Scan System** | The instruction includes `Write everything you generate in Italian, except code, which always stays in English.`; the setting applies to scans, Runs, quick/written design, imports and automatic scans | ☐ |
+| H22 | Change `trama.language` to `"   "`; click **Scan System** | The instruction has no language sentence | ☐ |
+| H23 | Restore S2 and remove `trama.language` | The setup is restored | ☐ |
 
 ### H32–H50. Written design requests
 
-Echo mode (S2). In the verification shell, `ls -A $D/requests` lists the requests. A request ID is the local date and time it was created, like `2026-10-04T19-05-12`.
+With the real agent from S2, in the verification shell, `ls -A $D/requests` lists the requests. A request ID is the local date and time it was created, like `2026-10-04T19-05-12`.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
@@ -609,46 +609,20 @@ Echo mode (S2). In the verification shell, `ls -A $D/requests` lists the request
 | H49 | Reopen the H39 request (its ID is `<id2>`), `chmod a-w $D/requests/<id2>.md`, add a line (the editor cannot save it), then `rm $D/requests/<id2>.md`. Then **Design…**, type `Gone`, wait and `rm` that file | The first tab stays open, marked as deleted, with the unsaved change, and the file is not written back. The second tab closes; nothing is printed for either | ☐ |
 | H50 | With the Trama panel closed, repeat the second half of H49 | The tab still closes | ☐ |
 
-### H51–H70. External terminal
-
-Gli scenari del launcher `external-terminal` su Linux o macOS non sono ancora stati eseguiti: annotare ciò che si osserva anche quando coincide con l'atteso. Configurare `printf '{"trama.agentLauncher": "external-terminal", "trama.agentCommand": "echo {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (**S2x**) e ricaricare la finestra. Per un agente lento usare `"trama.agentCommand": "sleep 30; echo {prompt}"` (**S2y**). `trama.externalTerminalCommand` vale soltanto nelle impostazioni **utente**: il valore in `.vscode/settings.json` della demo viene ignorato. I marcatori di fine sono nella cartella `external-terminals/` dell'archiviazione globale dell'estensione (`find ~/.config/Code/User/globalStorage -name external-terminals`, o l'equivalente dell'editor in uso); chiamarla `$M`.
-
-| # | Action | Expected | ✓ |
-|---|---|---|---|
-| H51 | Set S2x, reload, Board: **Scan System** | A window of the system terminal opens outside the editor, in `/tmp/trama-demo/shop`, titled `Scan` when the terminal allows it. It prints `Use the trama-scan skill on the whole System.` and stays open at the prompt of your login shell. The editor's terminal panel gets **no** `Scan` terminal | ☐ |
-| H52 | In that window run `echo $TRAMA_AGENT $TRAMA_TERMINAL` and `trama proposal approve 1` | `1` and six lowercase letters and digits; the approval is refused as the developer's decision. With a packaged extension (which has the `trama` binary inside), `echo $PATH` starts with the folder of that binary | ☐ |
-| H53 | `ls -A $M` right after H51 | Empty: the marker the script left was read and deleted. No file holds the instruction | ☐ |
-| H54 | Set S2y, reload, Board: **Quick request…**, type `Add refunds after pickup`, Enter | A new window opens, titled `Design` when the terminal allows it. Within about a second the Board shows the `Proposal` ghost `Add refunds after pickup`, `Preparing`; `sed -n 's/^terminal: //p' $D/announcements/*.md` prints the same six characters as `echo $TRAMA_TERMINAL` in the window | ☐ |
-| H55 | Wait for the command to end (30 seconds) | The ghost disappears and the notice `The agent finished without delivering Proposal Add refunds after pickup.` appears at the top of the Board. The window stays open with a shell and `ls -A $M` is empty | ☐ |
-| H56 | With S2y click **Scan System**, then run `TRAMA_AGENT=1 j task move 1 doing` in the verification shell and wait for the command to end | Task 0001 shows the agent dot while the command runs and goes back to To do, with no Take back, when it ends | ☐ |
-| H57 | Con S2y premere **Scan System** due volte, la seconda mentre il primo comando lavora; non inviare altre istruzioni | Due finestre. Ogni fine rilascia i Task e ritira gli annunci della propria finestra, anche per la finestra sostituita; entrambi i marcatori sono eliminati. Gli annunci non consegnati producono i consueti avvisi locali sulla Board | ☐ |
-| H58 | Con S2x sostituire `echo {prompt}` con `sh -c 'exit 3' {prompt}`, ricaricare e premere **Scan System** | La finestra non mostra output dell'agente e resta aperta nella shell; `ls -A $M` è vuoto perché il marcatore di fine è stato elaborato | ☐ |
-| H59 | S2y, click **Scan System**, close the window by hand while the command runs, wait 40 seconds | Nothing happens in the editor: no end, no notice. Task 0001 taken with `TRAMA_AGENT=1 j task move 1 doing` before the click stays taken (agent dot); a ghost announced from the window stays until the fifteen minutes of quiet | ☐ |
-| H60 | S2y, click **Scan System**, then Developer: Reload Window while the command runs and wait 40 seconds | No notice for that end: its marker was deleted at startup or, if it came while the window was closed, when the extension started. `ls -A $M` is empty | ☐ |
-| H63 | Add `"trama.externalTerminalCommand": "/nonexistent/terminal {command}"` to the **user** settings, click **Scan System** | No window. Error `Trama could not open an external terminal: <reason>. The instruction was copied to the clipboard.` with no buttons, `<reason>` being `the terminal could not be started` or the system's error message. Pasting gives `Use the trama-scan skill on the whole System.`. No terminal opens in the editor either, and no ghost or Task changes | ☐ |
-| H64 | With H63 still set, **Quick request…** `Never sent` | The same error; no ghost appears; **Design…** then **Send to agent** with some text fails the same way and the request is not marked as sent: it stays in `$D/requests` and **Send to agent** works again later | ☐ |
-| H65 | Put `"trama.externalTerminalCommand": "xterm -e {command}"` in the **workspace** settings (`.vscode/settings.json`) and remove it from the user settings, click **Scan System** | The workspace value is ignored: the detected terminal opens, not `xterm`. Put it in the user settings instead: a new `xterm` window runs the command and stays open. Remove it again | ☐ |
-| H66 | With `$TERMINAL` unset on Linux, `xdg-terminal-exec` and `x-terminal-emulator` absent and none of the listed terminals on the `PATH` (for example start the editor with `PATH=/usr/bin/nonexistent`), click **Scan System** | Error `Trama could not open an external terminal: no terminal was found; set trama.externalTerminalCommand. The instruction was copied to the clipboard.` | ☐ |
-| H67 | 🔍 Open the demo through Remote - SSH, WSL or a container, click **Scan System** | Error `Trama could not open an external terminal: external terminals are not available in a remote workspace. The instruction was copied to the clipboard.` | ☐ |
-| H68 | 🔍 With kitty detected (`TERMINAL=kitty`), click **Scan System** with S2x, wait for the end, click it again, then wait and click **Quick request…** `Named apart` | The first click opens a kitty window titled `Scan`, started with remote control on its own socket. The second writes the instruction into **the same window**, which shows both runs one after the other and a second prompt; no new window opens. `echo $TRAMA_TERMINAL` there still prints the same six characters, and `$M` holds no marker once each run ended. The design request has another name: a new window titled `Design` opens without a warning and the `Scan` window stays open | ☐ |
-| H69 | 🔍 With the `Design` window of H68 free, close it by hand and click **Quick request…** `Closed by hand` | A new kitty window opens and the warning `Trama could not reuse the external terminal window: <reason>. A new window was opened.` appears with no buttons. If the kitty process itself is gone the reason is the scripting's error; if only the window was closed, kitty's `send-text` reports no error, so look at what you get and write it in the defect log | ☐ |
-| H70 | 🔍 Repeat H68 with WezTerm (`TERMINAL=wezterm`) and, on macOS, with Terminal.app; then with any other terminal (for example `TERMINAL=xterm`) and with `trama.externalTerminalCommand` set | WezTerm and Terminal.app reuse the free window as kitty does, only for the same name; the Terminal.app window is titled `Scan`, then `Design`. With any other terminal, or with the command set, every click opens a new window and no warning appears | ☐ |
-
-Dopo H55 e H57 ripristinare S2 (`echo {prompt}`, senza launcher); al termine degli scenari del terminale esterno rimuovere l'eventuale valore di prova di `trama.externalTerminalCommand` dalle impostazioni utente.
 
 ### H71–H77. Agent terminal as an editor tab
 
-Written from the Requirements for the `terminal-tab` launcher; the rows have not been run yet, so note what you see even when it matches. A settings file with the launcher: `printf '{"trama.agentLauncher": "terminal-tab", "trama.agentCommand": "echo {prompt}", "trama.autoScan": false}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (**S2t**), then reload the window. A slow agent: the same with `"trama.agentCommand": "sleep 30; echo {prompt}"` (**S2u**). Open the Trama panel alone in one editor group before each row.
+Set `trama.agent="omp"` and `trama.terminalLocation="editor"` in **user** settings for S2t, and `"trama.autoScan": false` in the workspace file. For S2u use a real omp agent that remains active; set `trama.autoExit=false` in user settings. Open the Trama panel alone in one editor group before each row.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| H71 | Set S2t, reload, click in the panel's search box (or any editor), then Board: **Scan System** | A tab titled `Scan` opens in a new editor group beside the panel's and prints `Use the trama-scan skill on the whole System.`; it does **not** take the focus: the keyboard stays where it was. The panel stays visible; the terminal area gets **no** `Scan` terminal. `echo $TRAMA_AGENT` in the tab prints `1` | ☐ |
-| H72 | Click on the panel, then **Scan System** again (the first command has ended) | No new tab: the same tab comes to the front of its group, without taking the focus, and prints the line a second time | ☐ |
-| H73 | Impostare S2u, ricaricare, premere **Scan System** e ripeterlo mentre il primo comando lavora | Una seconda scheda `Scan` si apre nello **stesso** gruppo della prima, non in un terzo gruppo; la prima resta aperta. Ogni fine viene seguita come nel terminale integrato: i Task presi tornano a To do come in H56 e gli annunci non consegnati vengono ritirati con avvisi locali. Quando entrambi terminano, **Run all To do** apre una scheda `All tasks` nello stesso gruppo; le schede `Scan` restano aperte | ☐ |
+| H71 | Set S2t, reload, click in the panel's search box (or any editor), then Board: **Scan System** | A `Scan` terminal tab opens in a new editor group beside the panel; it does **not** take focus, the panel stays visible, and the terminal area gets no `Scan` terminal. `echo $TRAMA_AGENT` in the tab prints `1` | ☐ |
+| H72 | Click on the panel, then **Scan System** again | A new tab titled `Scan` opens in the same group without taking focus | ☐ |
+| H73 | With S2u, repeat **Scan System** while the first command runs | A second `Scan` tab opens in the same group; each terminal's end is followed independently, releasing its Tasks and withdrawing undelivered announcements with local notices. After both end, **Run all To do** opens an `All tasks` tab in the same group | ☐ |
 | H74 | With S2u, close every agent tab and the group of H73, click **Scan System**, then close the group of the new tab while it runs and click **Scan System** again | Each time a new group opens beside the active one, since the previous tab's group is gone | ☐ |
 | H75 | With S2u, **Quick request…** `Tabbed request`, then close the tab while the command runs | The `Tabbed request` ghost appears at once and is withdrawn when the tab closes, as when the integrated terminal closes; the next **Scan System** opens a new tab beside the active group | ☐ |
 | H76 | Drag the `Scan` tab of H71 into another group, then click **Scan System** twice with S2u | The second new tab opens in the group where Trama had opened the first one, not where you dragged it: Trama does not follow a moved tab | ☐ |
-| H77 | Remove `trama.agentLauncher` from the settings (`auto`), reload, close the terminal area, click in the panel's search box, then **Scan System** in VS Code; then open the demo in Cursor and click it with `"trama.agentLauncher": "auto"` | VS Code: the `Scan` terminal is created in the terminal area, never as a tab, but is not shown: the terminal area stays closed, the keyboard stays in the search box, and `Scan` is in the list of terminals. Cursor: the instruction goes to the chat, never to a tab | ☐ |
+| H77 | Set `trama.terminalLocation="panel"` and `trama.agent="omp"` in user settings, reload, close the terminal area, click in the panel's search box, then **Scan System**; then set `trama.agent="chat"` and try again in Cursor | omp: a `Scan` terminal is created in the terminal area but not shown; the area stays closed, focus stays in the search box, and `Scan` appears in the terminal list. Cursor with `chat`: the instruction goes to Cursor's chat | ☐ |
 
 After H71–H77, restore S2.
 
@@ -797,7 +771,7 @@ Use the [question request contract](./cli.md#question-rounds) with `trama ask --
 
 ## R. Cursor
 
-Run R1–R4 on **every new Cursor version** before declaring it supported (smoke test). Tested: 3.22.12 and 3.23.12. Open the demo with the packaged extension in Cursor's editor window (not the Agents Window), with no `trama.agentLauncher` in any settings, and run **Trama: Update Agent Skills** once.
+Run R1–R4 on **every new Cursor version** before declaring it supported (smoke test). Tested: 3.22.12 and 3.23.12. Open the demo with the packaged extension in Cursor's editor window (not the Agents Window), select `trama.agent="chat"` in user settings, and run **Trama: Update Agent Skills** once.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
@@ -808,7 +782,7 @@ Run R1–R4 on **every new Cursor version** before declaring it supported (smoke
 | R5 | Interrupt the agent (Stop) while a ghost it announced is on the Board | The ghost disappears and the notice `The agent finished without delivering …` appears. Closing the chat instead removes such a ghost without a notice | ☐ |
 | R5b | Have the agent run `trama task move 1 doing`, then let its turn end | Task 0001 goes back to To do, no longer marked `(agent working)` | ☐ |
 | R7 | Approve a Proposal with `trama.autoScan` on | A new chat starts the scan by itself, with no «Create chat with prompt» confirmation and no **Scan now** notice. Only if Cursor could only fall back, the notice `Trama: Proposal <id> was approved. Scan the Features it affects?` with **Scan now** appears instead, and nothing was put on the clipboard | ☐ |
-| R8 | Set `"trama.agentLauncher": "terminal"` and `"trama.agentCommand": "agent {prompt}"`, click **Scan System** | Cursor's CLI starts in the **Scan** terminal, as any terminal agent | ☐ |
+| R8 | Set `"trama.agent": "omp"` and `"trama.terminalLocation": "editor"` in user settings, then click **Scan System** | omp starts in a `Scan` terminal tab; legacy launcher and command settings do not change the route | ☐ |
 
 ## U. Short numbers
 
@@ -842,57 +816,27 @@ Start each block with ↻. `$D` and `j` are the ones of S4.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| V1 | `j task next --batch` | One Task per line, `<number> <title>`, at most four, the first being the one `j task next` names; no two of them concern the same thing (for example never `order` together with `order/Paid`). Nothing moves | ☐ |
-| V2 | `j --json task next --batch` | `batch`: the same Tasks, each with `id`, `number` and `title` | ☐ |
+| V1 | `j task next --batch --max 2` | Up to two runnable Tasks per line, `<number> <title>`, the first being the one `j task next` names; no two concern the same thing (for example never `order` together with `order/Paid`). Nothing moves. Also try `--max 1` and verify that only the first Task is returned; `--max 0` and `--max x` are usage errors. | ☐ |
+| V2 | `j --json task next --batch --max 2` | `batch`: the same Tasks, each with `id`, `number` and `title` | ☐ |
 | V3 | Move every Task in To do to Done with `j task move <id> done`, then `j task next --batch` and `j task next` | The two outputs are identical: `No Task is runnable.` and the Tasks left | ☐ |
 | V4 | `j proposal show 1` before approving it | No `## Scan scope` section: it is written only on approval | ☐ |
-| V5 | 🪙 With a real agent that has sub-agents, **Run all To do** with at least three Tasks on different Machines | The agent hands each Task of a group to a sub-agent, waits for all, asks `trama task next --batch` again, runs tests, lint and build once at the end, then scans the whole System and reports the Tasks and Drifts that scan filed | ☐ |
+| V5 | 🪙 With a real agent that has sub-agents, **Run all To do** with at least three Tasks on different Machines | The agent hands each Task of a group to a sub-agent, waits for all, asks `trama task next --batch --max <N>` again, runs tests, lint and build once at the end, then scans only the references returned by `trama task scope` for the Tasks it completed and reports the Tasks and Drifts filed | ☐ |
 
-## W. Hold scan
 
-Modalità echo (S2), con `trama.autoScan` acceso (il valore predefinito). Iniziare ogni blocco con ↻; `$D` e `j` sono quelli di S4. `<P1>` e `<P2>` sono le identità permanenti di Proposal P1 e P2, lette prima di approvarle con `j --json proposal show P1` e `j --json proposal show P2` (campo `id`). Gli scenari non sono ancora stati eseguiti nell'editor: annotare ciò che si osserva anche quando coincide con l'atteso.
+## X. Terminal agents and model roles
 
-| # | Action | Expected | ✓ |
-|---|---|---|---|
-| W1 | Leggere la barra di Diagram, Board e Requirements | In ognuna, subito dopo **Design…**, uno switch spento con etichetta `Hold scan`; nel Diagramma sta prima di **Scan**. Tooltip `When on, approvals wait and one scan runs when you turn it off.`; nome accessibile `Hold scan`, ruolo switch, stato spento (DevTools, Accessibility). `ls -A $D` non ha `scan-hold` | ☐ |
-| W2 | Clic su **Hold scan** nella Board | Si accende subito, senza conferma; anche Diagram e Requirements lo mostrano acceso. `cat $D/scan-hold/state` → `on`; `cat $D/scan-hold/held` è vuoto; `cat $D/scan-hold/.gitignore` → `*` | ☐ |
-| W3 | Board: **Approve** su Proposal P1 | La Proposal è approvata (G1.4–G1.8 valgono) ma **nessun** comando va al terminale. L'etichetta diventa `Hold scan · 1` sulle tre schede, nome accessibile `Hold scan, 1 held`. `cat $D/scan-hold/held` → `<P1>` | ☐ |
-| W4 | Board: **Keep this** sotto **WHAT HAPPENS** del Drift D2 (accetta Proposal P2) | Nessun comando al terminale; `Hold scan · 2`; `held` ha `<P1>` e poi `<P2>`, una per riga | ☐ |
-| W5 | Clic su **Scan System** | La solita riga `Use the trama-scan skill on the whole System.` nel terminale `Scan`; il contatore resta `Hold scan · 2` e `held` non cambia | ☐ |
-| W6 | Clic su **Hold scan** per spegnerlo | Nel terminale **Scan** arriva **una sola** riga: ``Use the trama-scan skill on what Proposals <P1>, <P2> changed: each scan scope is in `trama proposal show <id>`. Compare every reference once, against the current Model, and link every Task you file with --proposal to the most recent of those Proposals whose scan scope covers it.``, senza nulla su trama-implement. Lo switch è spento, etichetta `Hold scan`; `state` → `off`, `held` vuoto | ☐ |
-| W7 | ↻, accendere Hold scan, approvare solo P1, spegnere | Una sola riga, identica a quella di G1.3 per `<P1>` (con una Proposal è l'istruzione della scansione automatica) | ☐ |
-| W8 | ↻, accendere e subito spegnere Hold scan | Nessun comando e nessun avviso; `state` → `off` | ☐ |
-| W9 | ↻, accendere, approvare P1, poi `mv $D/model/checkout /tmp/checkout-away` e spegnere | Nessun comando; avviso `Hold scan is off. The held Proposals no longer affect any Feature, so there was nothing to scan.`; `state` → `off`, `held` vuoto. Rimettere la cartella con `mv /tmp/checkout-away $D/model/checkout` | ☐ |
-| W10 | ↻, accendere, approvare P1. Poi `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json`, ricaricare la finestra, spegnere Hold scan e premere Esc nella richiesta del comando dell'agente (H18) | La richiesta compare una volta; dopo Esc nessun comando parte, lo switch resta acceso con `Hold scan · 1` e compare l'avviso `The held scan was not started, so Hold scan stays on.`; `held` ha ancora `<P1>`. Rimettere S2 | ☐ |
-| W11 | ↻, accendere, poi `j proposal approve P1` dalla verification shell | La Proposal è approvata, nessuna scansione parte e il contatore resta `Hold scan`: la riga di comando non tocca il sospeso. Lo stesso per `j drift resolve D2 --accept-proposal` | ☐ |
-| W12 | ↻, impostare `"trama.autoScan": false` in S2, ricaricare, accendere e approvare P1 | Nessun comando e nessun contatore: con la scansione automatica spenta non c'è nulla da mettere in sospeso | ☐ |
-| W13 | ↻, poi `mkdir -p $D/scan-hold && echo maybe > $D/scan-hold/state` | Lo switch è spento sulle tre schede e compare una volta l'avviso `Trama could not read the Hold scan switch, so it is off.` | ☐ |
-| W14 | ↻, `mkdir -p $D/scan-hold && chmod 555 $D/scan-hold`, poi clic su **Hold scan** | Lo switch resta spento e compare l'avviso `Trama could not save the Hold scan switch.`. Poi `chmod 755 $D/scan-hold` | ☐ |
-| W15 | 🔍 In Cursor, con `trama.autoScan` acceso, accendere, approvare P1 e spegnere | L'istruzione va alla chat come ogni pulsante; se Cursor non riesce a crearla da sé ripiega sul deeplink e sugli appunti, mai sull'avviso **Scan now** | ☐ |
-
-## X. Terminal agents, model roles and System 1
-
-Written from the Requirements; the rows have not been run in the editor yet, so note what you see even when it matches. These settings only count in your **user** settings: set them there (Preferences: Open User Settings (JSON)) and remove them at the end. Start with S2's echo mode, then ↻. Check every command line in the terminal list (the integrated terminal named after the work).
+Written from the Requirements; these settings only count in your **user** settings. Set them there (Preferences: Open User Settings (JSON)) and remove them at the end. Start with S2 and inspect the command in each new terminal.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| X1 | Put `"trama.terminalAgent": "codex"` in the workspace settings `/tmp/trama-demo/shop/.vscode/settings.json` (not the user ones), reload, click **Scan System** | The setting is ignored (application scope; the Settings editor says so): the echo command still runs | ☐ |
-| X2 | User settings: `"trama.agentCommand": "echo {model} {prompt}"`, `"trama.terminalAgent": "custom"`, `"trama.scan": "my model"`. Click **Scan System** | The terminal `Scan` prints `my model Use the trama-scan skill on the whole System.` (the model quoted as one word) | ☐ |
-| X3 | Remove `trama.scan`, click **Scan System** | The line has no model: `{model}` became nothing | ☐ |
-| X4 | Set `"trama.execution": "fast"`, click **Run all To do** | The prompt ends with `Your agent cannot give sub-agents their own model: triage and analyse on your own model, and say so in the report.` before any language sentence. **Quick request…** with `x` has no such sentence | ☐ |
-| X5 | 🪙 With omp installed: `"trama.terminalAgent": "omp"`, `"trama.analysis": "opus"`, `"trama.execution": "haiku"`; click **Scan System**, then **Quick request…** with `x` | Scan: `omp --smol 'haiku' --slow 'opus' '<prompt>'` with the prompt ending `Triage each Machine with the trama-triage sub-agent and analyse every Machine in conflict with the trama-analysis sub-agent.` Design: `omp --model 'opus' '<prompt>'` with no sub-agent sentence | ☐ |
-| X6 | 🪙 With Claude Code: `"trama.terminalAgent": "claude"`, the same roles, **Scan System** | `claude --agents '{"trama-triage":{…,"model":"haiku"},"trama-analysis":{…,"model":"opus"}}' '<prompt>'` and the same sub-agent sentence | ☐ |
-| X7 | `"trama.terminalAgent": "copilot"` and `"trama.scan": "gpt-x"`, **Scan System** | `copilot --model 'gpt-x' -i '<prompt>'` | ☐ |
-| X8 | `j skills update` (or **Trama: Update Agent Skills**), then `cat /tmp/trama-demo/shop/.omp/agents/trama-triage.md` | Front matter `name: trama-triage`, a `description`, `model: "@smol"`, then a short English prompt naming `trama-scan`; `trama-analysis.md` the same with `model: "@slow"`. No concrete model in either | ☐ |
-| X9 | With a role set, `"trama.agentLauncher": "chat"`, click **Scan System** twice, then open another project and launch to the chat | Once only, ever: `Trama: model roles (trama.analysis, trama.scan, trama.execution) apply only to terminal agents. The chat uses the model chosen in the chat.` The chat prompt has no model and no sub-agent sentence | ☐ |
-| X10 | **Trama: Set System 1 API Key**, press Esc; again, press Enter with an empty box; again, type `test-key` | A hidden input titled `Jev API key`. Esc and the empty value save nothing and show nothing; `test-key` shows `Trama: the Jev API key is saved.`. `grep -r test-key ~/.config/Code/User/settings.json /tmp/trama-demo/shop` finds nothing | ☐ |
-| X11 | In the terminal Trama opened (`Scan`), run `echo state \| trama classify --machine order` with `trama.system1` empty | `unavailable`, exit 0 | ☐ |
-| X12 | User settings `"trama.system1": "jev"`, the same command | With the fake key: `conflict` and, on stderr, `Jev answered HTTP 401.` (or another one-line reason), exit 0, within 10 seconds, and the editor keeps responding | ☐ |
-| X13 | `echo state \| trama classify --machine nope`; `printf '' \| trama classify --machine order`; the same command with the Trama window closed | `error: Unknown Machine "nope"`, exit 1; the empty-input error, exit 2; `unavailable`, exit 0 | ☐ |
-| X14 | **Trama: Clear System 1 API Key**, then X12's command | `Trama: the Jev API key is cleared.`; then `unavailable` | ☐ |
-| X15 | 🪙 With a real agent and Jev on, run **Scan System** | The report has one line on the triage: Machines skipped and analysed, who decided, and how many classifier errors counted as a conflict | ☐ |
-
-Remove every setting of this section from your user settings at the end.
+| X1 | Keep `"trama.agent": "omp"` in user settings; put `"trama.agent": "claude"` in the workspace settings, reload, click **Scan System** | omp is used; project settings cannot select the agent | ☐ |
+| X2 | User settings: `"trama.agent": "omp"`, `"trama.scan": "my model"`. Click **Scan System** | The omp command uses `--model 'my model'` and the scan instruction | ☐ |
+| X3 | Remove `trama.scan`, click **Scan System** | omp receives no `--model` or `--slow` option | ☐ |
+| X4 | Set `"trama.analysis": "opus"`; click **Scan System**, then **Quick request…** with `x` | The scan uses `trama.scan`, not `trama.analysis`; the design command uses `--model 'opus'` and has no sub-agent sentence | ☐ |
+| X5 | 🪙 With omp installed: set `"trama.scan": "sonnet"`; click **Scan System** | omp uses `--model 'sonnet' --slow 'sonnet'`, and the prompt ends with `Compare each Machine with the trama-analysis sub-agent.` | ☐ |
+| X6 | 🪙 With Claude Code: set `"trama.agent": "claude"` and `"trama.scan": "sonnet"`; click **Scan System** | Claude Code receives `--model 'sonnet'`, an analysis sub-agent with `"model":"sonnet"`, and the sub-agent sentence | ☐ |
+| X7 | Set `"trama.agent": "chat"` and a model role; click **Scan System** twice, then launch in another project | Once only, the notice says `Trama: model roles (trama.analysis, trama.scan, trama.execution) apply only to terminal agents. The chat uses the model chosen in the chat.` Chat prompts have no model or sub-agent sentence | ☐ |
+| X8 | `trama skills update` (or **Trama: Update Agent Skills**), then inspect `/tmp/trama-demo/shop/.omp/agents/trama-analysis.md` and check for `trama-triage.md` | The `trama-analysis` definition has `model: "@slow"` and names `trama-scan`; the obsolete triage file is absent | ☐ |
 
 ---
 

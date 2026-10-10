@@ -68,7 +68,7 @@ export async function completeFixChoice(argv: string[], cwd: string, io: PromptI
     let option: number | undefined;
     while (option === undefined) {
       const answer = await ask(`Option [1]: `);
-      if (answer === null) throw new TramaError(`An option must be chosen to fix the code of Drift ${positionals[0]}: give its number, from 1 to ${options.length}`);
+      if (answer === null) throw new TramaError(`An option must be chosen to fix the code of ${heading.split(": ", 1)[0]}: give its number, from 1 to ${options.length}`);
       const n = answer === "" ? 1 : /^\d+$/.test(answer) ? Number(answer) : 0;
       if (n >= 1 && n <= options.length) option = n;
       else io.output.write(`Choose a number from 1 to ${options.length}, or press Enter for 1.\n`);

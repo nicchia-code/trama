@@ -1,5 +1,4 @@
 import { cardLabel, noNumbers } from "../../../../src/core/card-names";
-import { createScanHoldSwitch } from "../scan-hold-switch";
 import type { Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
 import type { MountView, View } from "../types";
@@ -12,6 +11,7 @@ import { createPanel } from "./panel";
 import { type Scene, buildScene, pathTo } from "./scene";
 import { viewOfRef } from "../requirements/logic";
 import css from "./diagram.css" with { type: "text" };
+import { scanButtonLabel } from "../scan-label";
 
 /** The Model reference of what a level shows, for the Requirements attached to it. */
 const levelRef = (level: Level): string | null =>
@@ -63,8 +63,6 @@ export const mountDiagram: MountView = (root, context) => {
   const crumbs = $("nav.dg-crumbs");
   const select = $<HTMLSelectElement>("select[data-proposal]");
   const scan = $<HTMLButtonElement>("button[data-scan]");
-  const scanHold = createScanHoldSwitch((on) => context.post({ type: "setScanHold", on }));
-  scan.before(scanHold.element);
 
   let snapshot: Snapshot | null = null;
   let scene: Scene | null = null;
@@ -111,6 +109,7 @@ export const mountDiagram: MountView = (root, context) => {
 
   function renderChrome() {
     if (!snapshot || !scene || !graph) return;
+    const feature = level.kind === "feature" ? level.feature : undefined;
     crumbs.replaceChildren();
     const trail = breadcrumb(scene, level);
     trail.forEach((crumb, i) => {
@@ -133,8 +132,16 @@ export const mountDiagram: MountView = (root, context) => {
     }
     select.value = proposalId ?? "";
 
-    const feature = scanFeature(scene, level);
-    scan.title = feature ? `Ask an agent to scan the code against Feature ${feature}` : "Ask an agent to scan the code against the whole System";
+    if (feature) {
+      scan.textContent = "Scan";
+      scan.title = `Ask an agent to scan the code against Feature ${feature}`;
+      scan.setAttribute("aria-label", `Scan. ${scan.title}`);
+    } else {
+      const label = scanButtonLabel("Scan", snapshot.tasksSinceScan);
+      scan.textContent = label.text;
+      scan.title = label.tooltip || "Ask an agent to scan the code against the whole System";
+      scan.setAttribute("aria-label", label.tooltip ? label.ariaLabel : `Scan. ${scan.title}`);
+    }
     $("div.dg-empty").hidden = graph.nodes.length > 0;
     panel.render(currentDetail());
   }
@@ -245,7 +252,6 @@ export const mountDiagram: MountView = (root, context) => {
   const view: View = {
     update(next) {
       snapshot = next;
-      scanHold.set(next.scanHold.on, next.scanHold.held);
       if (pending) {
         const options = pending;
         pending = null;

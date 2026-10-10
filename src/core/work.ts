@@ -41,7 +41,8 @@ interface TaskData {
   agent: boolean;
   /**
    * Who took it, kept in the `agent` field instead of `true`: the agent terminal's ID, or `cursor` for Cursor's chat.
-   * Null when free, and when taken before the holder was recorded or by an agent of unknown origin: any end releases it.
+   * Null when free, taken before the holder was recorded, taken from an unknown origin, or read from legacy `editor`;
+   * any end releases it.
    */
   holder: string | null;
   /** When the Task was created, UTC ISO 8601. Absent on numbered Tasks written before the field existed. */
@@ -97,12 +98,15 @@ function parseTask(raw: Raw, where: string): TaskData {
 /** The `agent` field: false, true, or the holder that took the Task (a terminal ID or `cursor`). */
 function agentField(raw: Raw, where: string): { agent: boolean; holder: string | null } {
   const v = raw["agent"];
-  if (typeof v === "string" && v.trim() !== "") return { agent: true, holder: v.trim() };
+  if (typeof v === "string" && v.trim() !== "") {
+    const holder = v.trim();
+    return { agent: true, holder: holder === "editor" ? null : holder };
+  }
   return { agent: boolField(raw, "agent", false, where), holder: null };
 }
 
-/** The holder recorded for a Task taken from `origin`: the terminal wins over the chat, as in `originFromEnv`. */
-const holderOf = (origin: AgentOrigin): string | null => origin.terminal ?? origin.chat ?? null;
+/** Task ownership recognizes agent terminals and Cursor chat, not the editor's generic chat. */
+const holderOf = (origin: AgentOrigin): string | null => origin.terminal ?? (origin.chat === "cursor" ? "cursor" : null);
 
 function parseDrift(raw: Raw, where: string): DriftData {
   return {
@@ -263,15 +267,15 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
   return task;
 }
 
-/** Most Tasks a parallel run implements together. */
-const BATCH_MAX = 4;
+/** Most Tasks a parallel run implements together without a configured limit. */
+const BATCH_DEFAULT = 20;
 
-/** What a run can take: the next runnable Task, the group of a parallel run, and the Tasks in To do that wait, each with what blocks it. */
+/** What a run can take: the next runnable Task, a bounded group for parallel work, and waiting Tasks. */
 export interface RunQueue {
   next: Task | null;
   /**
    * The group of a parallel run, starting with `next`: each later runnable Task, oldest first, that concerns
-   * the same thing as none already chosen, up to `BATCH_MAX`. Empty when no Task is runnable.
+   * the same thing as none already chosen, up to the requested maximum. Empty when no Task is runnable.
    */
   batch: Task[];
   /** Every Task in To do within the scope that is blocked, in order. */
@@ -282,7 +286,7 @@ export interface RunQueue {
  * The next runnable Task: the oldest Task in To do that is not blocked, worked out from the Tasks and Drifts as
  * they are now. With a Proposal it only considers the Tasks linked to it; the Proposal must exist.
  */
-export function nextTask(p: Project, proposal?: string): RunQueue {
+export function nextTask(p: Project, proposal?: string, max = BATCH_DEFAULT): RunQueue {
   const scope = proposal === undefined ? null : getProposal(p, proposal).id;
   const project = loadProject(p);
   const tasks = listTasks(p);
@@ -290,7 +294,7 @@ export function nextTask(p: Project, proposal?: string): RunQueue {
   const todo = tasks.filter((t) => t.data.column === "todo" && (scope === null || t.data.proposal === scope));
   const batch: Task[] = [];
   for (const task of todo) {
-    if (batch.length === BATCH_MAX) break;
+    if (batch.length === max) break;
     if (!blocked.has(task.id) && !batch.some((chosen) => concernSameThing(project, chosen.data.refs, task.data.refs))) batch.push(task);
   }
   return {

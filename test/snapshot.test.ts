@@ -12,6 +12,8 @@ import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
 import { moveTask, newDrift, newTask } from "../src/core/work";
 import type { FileMap, Machine } from "../src/core/types";
+import { announce, bindDraft, listAnnouncements } from "../src/core/announcements";
+
 
 const ACTOR = "# U\n\n## Events\n\n### GO\nx\n\n### STOP\nx\n";
 function machine(states: string, events = ""): Machine {
@@ -102,6 +104,19 @@ test("the snapshot carries the Model, open Proposals as ghost overlays, Drifts a
   expect(snap.drifts[0]?.body).toContain("see refund.ts");
   expect(snap.tasks[0]).toMatchObject({ title: "Build cart", column: "todo", refs: ["cart"], file: `tasks/${task.name}` });
   expect(JSON.parse(JSON.stringify(snap))).toEqual(snap);
+});
+
+test("a Drift announcement follows its associated Draft title in each snapshot without changing the announcement title", () => {
+  const draft = newProposal(p, "Draft title", "", { origin: { chat: "editor" } });
+  const drift = announce(p, { kind: "drift", title: "Announced Drift title", chat: "editor" });
+  bindDraft(p, draft, drift.id, { chat: "editor" });
+
+  expect(buildSnapshot(p).announcements.find((a) => a.id === drift.id)).toMatchObject({ kind: "drift", title: "Draft title", phase: "writing" });
+  expect(listAnnouncements(p).find((a) => a.id === drift.id)?.title).toBe("Announced Drift title");
+
+  writeFileSync(join(draft.dir, "proposal.md"), readFileSync(join(draft.dir, "proposal.md"), "utf8").replace("# Draft title", "# Updated Draft title"));
+  expect(buildSnapshot(p).announcements.find((a) => a.id === drift.id)).toMatchObject({ kind: "drift", title: "Updated Draft title", phase: "writing" });
+  expect(listAnnouncements(p).find((a) => a.id === drift.id)?.title).toBe("Announced Drift title");
 });
 
 test("a Proposal that would leave the Model invalid reports the errors instead of failing the snapshot", () => {

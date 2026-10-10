@@ -1,20 +1,19 @@
 import * as vscode from "vscode";
 import { closeSync, ftruncateSync, openSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { announcementsDir, listAnnouncements, quietAnnouncements, withdrawAll } from "../../../src/core/announcements";
+import { announcementsDir, listAnnouncements, takeDeliveredSystemChecks, withdrawAll } from "../../../src/core/announcements";
 import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
-import { draftChangedAt, getProposal, listProposals } from "../../../src/core/proposals";
+import { getProposal, listProposals } from "../../../src/core/proposals";
 import { announcementView } from "../../../src/core/snapshot";
 import type { AnnouncementView } from "../../../src/core/snapshot";
 import { projectAt } from "../../../src/core/store";
 import type { Project } from "../../../src/core/store";
 import type { CursorChatEvent } from "../../../src/core/cursor-chat";
+import type { CopilotChatEvent } from "./copilot-chat";
 import { onCursorChatEvent } from "./cursor";
-import { questionRoundClosedAt, questionRoundOpen } from "./question-activity";
-import { aliveSeenAt, readOnlySeenAt } from "./terminal-activity";
-
-const CHECK_EVERY_MS = 30_000;
+import { onCopilotChatEvent } from "./copilot-chat";
+import { forgetWithdrawnGlobalScan } from "./global-scan";
 
 type Listener = (withdrawn: AnnouncementView[]) => void;
 const listeners = new Set<Listener>();
@@ -40,32 +39,39 @@ function guarded(action: () => void): void {
 }
 
 /**
- * The agent went quiet, the command Trama typed into an agent terminal ended or that terminal was closed, or a turn of
- * a Trama conversation in Cursor's chat was interrupted: the announcements still waiting are withdrawn at once and,
- * with `notify`, the panel is told, so the developer learns that the agent finished without delivering. With `which`
- * only the announcements it picks go; without it, every one.
+ * The agent terminal's idle hook, the command Trama typed into it ending, or the terminal closing withdraws its waiting
+ * announcements. Applicable Cursor chat events do the same for chat announcements; elapsed time never withdraws one.
+ * The panel is told when `notify` is true, so the developer learns that the agent finished without delivering. `which`
+ * selects only matching announcements; without it, all waiting announcements are withdrawn.
  */
 export function withdrawWaiting(root: string, which?: (a: Announcement) => boolean, notify = true): void {
   guarded(() => {
     const p = projectAt(root);
     const ids = which === undefined ? undefined : listAnnouncements(p).filter(which).map((a) => a.id);
-    const views = describe(p, withdrawAll(p, ids));
+    const withdrawn = withdrawAll(p, ids);
+    for (const a of withdrawn) forgetWithdrawnGlobalScan(root, a);
+    const views = describe(p, withdrawn);
     if (views.length === 0 || !notify) return;
     for (const listener of [...listeners]) listener(views);
   });
 }
 
 /**
- * The announcements of Cursor's chat agent belong to the project, not to a terminal: an interrupted or failed turn of a
- * Trama conversation withdraws them with the notice, closing one withdraws them silently (the developer chose to).
+ * A conversation ending withdraws the project's chat announcements: a stopped or interrupted turn gives the usual
+ * notice, while closing the conversation is silent.
  */
 function onCursorChat(event: CursorChatEvent): void {
   const fromChat = (a: Announcement) => a.chat !== null;
-  if (event.event === "AGENT_INTERRUPTED") withdrawWaiting(event.root, fromChat);
+  if (event.event === "AGENT_STOPPED" || event.event === "AGENT_INTERRUPTED") withdrawWaiting(event.root, fromChat);
   else if (event.event === "CONVERSATION_CLOSED") withdrawWaiting(event.root, fromChat, false);
 }
 
-function synchronizeTitles(p: Project, waiting: Announcement[]): void {
+function onCopilotChat(event: CopilotChatEvent): void {
+  if (event.event === "AGENT_STOPPED") withdrawWaiting(event.root, (a) => a.chat !== null);
+}
+
+export function synchronizeAnnouncementTitles(p: Project): void {
+  const waiting = listAnnouncements(p);
   for (const a of waiting) {
     if (a.kind !== "proposal" || a.proposal === null) continue;
     let title: string;
@@ -102,26 +108,16 @@ function synchronizeTitles(p: Project, waiting: Announcement[]): void {
 
 /**
  * Starting up, announcements left on disk in the open folder belong to an agent run that can no longer be told: they
- * are withdrawn with no notice. Then every half minute the quiet period is checked; changing a file of an announced
- * Draft restarts it, and it does not run while a question round is open and starts again when it closes.
+ * are withdrawn with no notice. Draft title synchronization runs from the panel's existing snapshot refresh path.
  */
 export function watchAnnouncements(root: () => string | undefined): vscode.Disposable {
   const startup = root();
-  if (startup !== undefined) guarded(() => void withdrawAll(projectAt(startup)));
-  const timer = setInterval(() => {
-    const current = root();
-    if (current === undefined) return;
-    let quiet: string[] = [];
-    guarded(() => {
-      const p = projectAt(current);
-      const waiting = listAnnouncements(p);
-      synchronizeTitles(p, waiting);
-      // A hooked agent's announcements follow the quiet period too: its heartbeat and its read-only commands count. A Draft's
-      // change counts only for the announcement bound to that Draft, and a question round's close for all of them.
-      if (!questionRoundOpen()) quiet = quietAnnouncements(waiting, Date.now(), questionRoundClosedAt(), (a) => Math.max(readOnlySeenAt(), a.terminal === null ? 0 : aliveSeenAt(a.terminal), a.proposal === null ? 0 : draftChangedAt(p, a.proposal))).map((a) => a.id);
-    });
-    if (quiet.length > 0) withdrawWaiting(current, (a) => quiet.includes(a.id));
-  }, CHECK_EVERY_MS);
-  const chat = onCursorChatEvent(onCursorChat);
-  return new vscode.Disposable(() => (clearInterval(timer), chat.dispose()));
+  if (startup !== undefined) guarded(() => {
+    const p = projectAt(startup);
+    withdrawAll(p);
+    takeDeliveredSystemChecks(p);
+  });
+  const cursor = onCursorChatEvent(onCursorChat);
+  const copilot = onCopilotChatEvent(onCopilotChat);
+  return new vscode.Disposable(() => (cursor.dispose(), copilot.dispose()));
 }
