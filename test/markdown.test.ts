@@ -111,3 +111,16 @@ test("headings and block quotes", () => {
 test("tables are not supported: their lines show as written", () => {
   expect(parseMarkdown("| a | b |\n|---|---|\n| 1 | 2 |")).toEqual([{ t: "code", lang: "", text: "| a | b |\n|---|---|\n| 1 | 2 |" }]);
 });
+
+test("a table right after a line of text keeps its rows, the text stays a paragraph", () => {
+  expect(parseMarkdown("Colonne: **due**\n| a | b |\n|---|---|\n| 1 | 2 |")).toEqual([
+    para(text("Colonne: "), { t: "strong", c: [text("due")] }),
+    { t: "code", lang: "", text: "| a | b |\n|---|---|\n| 1 | 2 |" },
+  ]);
+  expect(parseMarkdown("- Colonne:\n  | a | b |\n  |---|---|")).toEqual([
+    { t: "list", ordered: false, start: 1, items: [[para(text("Colonne:")), { t: "code", lang: "", text: "| a | b |\n|---|---|" }]] },
+  ]);
+  expect(parseMarkdown("> Colonne:\n> | a |\n> |---|")).toEqual([
+    { t: "quote", c: [para(text("Colonne:")), { t: "code", lang: "", text: "| a |\n|---|" }] },
+  ]);
+});

@@ -115,6 +115,9 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     if (p.errors.length > 0) {
       box.append(el("div", "dg-problem-head", "The Model with this Proposal applied is invalid"), list("dg-problems", p.errors.map((d) => (d.line > 0 ? `${d.file}:${d.line}: ${d.message}` : `${d.file}: ${d.message}`))));
     }
+    if (p.unfixable.length > 0) {
+      box.append(el("div", "dg-problem-head", "Resolve Drifts must rewrite this resolution"), list("dg-problems", p.unfixable));
+    }
     if (p.changes.length > 0) {
       box.append(el("div", "dg-heading", "Changes"));
       const ul = el("ul", "dg-changes");

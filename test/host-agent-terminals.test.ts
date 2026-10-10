@@ -745,6 +745,25 @@ describe("withdrawing the ghosts", () => {
     }
   });
 
+  test("a quiet period counts once: a Task taken after it stays taken through later checks until the next quiet period", async () => {
+    const { releaseQuietHookedTasks, startExternalRun, watchExternalRuns } = await import("../extension/src/host/agent");
+    const { QUIET_PERIOD_MS } = await import("../src/core/announcements");
+    const p = projectAt(dir);
+    const markers = mkdtempSync(join(tmpdir(), "trama-quiet-once-"));
+    const external = watchExternalRuns(markers);
+    try {
+      startExternalRun(dir, "hook03", "true", "Hooked once", undefined, undefined, true).sent();
+      const quiet = Date.now() + QUIET_PERIOD_MS + 1000;
+      releaseQuietHookedTasks(quiet);
+      const later = moveTask(p, newTask(p, { title: "Taken after quiet", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: "hook03" }).id;
+      releaseQuietHookedTasks(quiet + 30_000);
+      releaseQuietHookedTasks(quiet + QUIET_PERIOD_MS);
+      expect(getTask(p, later).data.column).toBe("doing");
+    } finally {
+      external.dispose();
+    }
+  });
+
   test("only the announcements of the terminal that ended or closed go; those of another terminal and of none stay", async () => {
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const p = projectAt(dir);
@@ -1599,6 +1618,53 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       editor.appName = "Visual Studio Code";
       commandHandler = () => undefined;
       watching.dispose();
+    }
+  });
+
+  test("a chat job binds only a conversation that starts after its send began: one begun before it, by an earlier job, never takes the job", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { bindChatJob, driftResolution, endChatJobs, startJob } = await import("../extension/src/host/drift-resolution");
+    const t0 = Date.now();
+    try {
+      // A scan's conversation starts while the Run's send is still under way, before the Run is registered.
+      bindChatJob(dir, "scan-before-send", t0);
+      startJob("run", dir, { chat: "cursor" }, true, t0 + 2, t0 + 1);
+      expect(driftResolution()).toBe("running-tasks");
+      // The Run's own conversation starts after its send began and binds the Run, so the scan's end does not end it.
+      bindChatJob(dir, "run-own", t0 + 3);
+      endChatJobs(dir, "scan-before-send");
+      expect(driftResolution()).toBe("running-tasks");
+      endChatJobs(dir, "run-own");
+      expect(driftResolution()).toBe("free");
+    } finally {
+      endChatJobs(dir, "scan-before-send");
+      endChatJobs(dir, "run-own");
+    }
+  });
+  test("a Cursor chat job whose conversation never binds it is over after fifteen quiet minutes of its chat's commands; once bound, only the conversation's end ends it", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { bindChatJob, driftResolution, endChatJobs, endQuietJobs, noteActivity, startJob } = await import("../extension/src/host/drift-resolution");
+    const { QUIET_PERIOD_MS } = await import("../src/core/announcements");
+    const t0 = Date.now();
+    try {
+      // Never bound: its conversation was never seen, so only the quiet period ends it, and a command of Cursor's chat restarts it.
+      startJob("run", dir, { chat: "cursor" }, true, t0, t0);
+      noteActivity({ chat: "cursor" }, t0 + QUIET_PERIOD_MS - 1);
+      endQuietJobs(t0 + 2 * QUIET_PERIOD_MS - 2);
+      expect(driftResolution()).toBe("running-tasks");
+      endQuietJobs(t0 + 2 * QUIET_PERIOD_MS - 1);
+      expect(driftResolution()).toBe("free");
+
+      // Bound: the quiet period never ends it, only its conversation's end does.
+      startJob("run", dir, { chat: "cursor" }, false, t0, t0);
+      bindChatJob(dir, "quiet-bound-conversation", t0);
+      endQuietJobs(t0 + 10 * QUIET_PERIOD_MS);
+      expect(driftResolution()).toBe("running-tasks");
+      endChatJobs(dir, "quiet-bound-conversation");
+      expect(driftResolution()).toBe("free");
+    } finally {
+      endChatJobs(dir, "quiet-bound-conversation");
+      endQuietJobs(Number.MAX_SAFE_INTEGER);
     }
   });
   test("a job whose end is not seen is over after fifteen quiet minutes, which an agent command that changed something restarts and an open question round pauses", async () => {

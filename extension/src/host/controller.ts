@@ -285,6 +285,7 @@ export class Controller implements vscode.Disposable {
           ignoreFocusOut: true,
         });
         if (feedback === undefined) return;
+        requireNotAttached(project, message.id);
         rejectProposal(project, message.id, feedback);
         this.refresh();
         return;

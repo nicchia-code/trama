@@ -84,6 +84,8 @@ export interface ProposalView {
   unbased: string[];
   /** Validation errors of the Model and its Requirements with the Proposal applied. */
   errors: Diagnostic[];
+  /** Why a resolution cannot be approved: each open Drift to be fixed in code that no longer has a Model element; empty otherwise. */
+  unfixable: string[];
   /** What this Proposal itself changes, on top of the ones it requires. */
   changes: FileChange[];
   /** Every Machine the Proposal touches, before and after drawn as one. */
@@ -261,7 +263,8 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     base: pending ? modelView(baseProject) : null,
     stale: h.stale,
     unbased: h.unbased,
-    errors: [...afterProject.diagnostics, ...unfixableDrifts(p, proposal).map((message) => ({ file: "proposal.md", line: 0, message }))],
+    errors: afterProject.diagnostics,
+    unfixable: unfixableDrifts(p, proposal),
     changes: touched,
     // A file the Model rejects (bad name, ID taken by a Feature or Actor) is a Machine on neither side; its errors are listed instead.
     machines: [...machineIds].sort().flatMap((id) => {

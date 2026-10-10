@@ -328,7 +328,6 @@ export const COMMANDS: Command[] = [
   { name: "proposal discard", args: "<id>", summary: "Discard a Draft the agent never finished", developerOnly: true, run(ctx, a) {
       const project = ctx.project();
       const id = proposalArg(ctx, a[0] as string);
-      requireNotAttached(project, id);
       const p = discardProposal(project, id);
       const n = numbersOf(ctx);
       return text(`Discarded Proposal ${n.name("proposal", p.id)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status });

@@ -36,3 +36,36 @@ test("every failure of Jev counts as a conflict with one line on why, never nami
     "Jev did not answer within 10 seconds.",
   ]);
 });
+
+test("at most four calls to Jev run at once; the rest start in arrival order as slots free", async () => {
+  let inFlight = 0;
+  let peak = 0;
+  const started: number[] = [];
+  const arrived = [1, 2, 3, 4, 5, 6].map(() => Promise.withResolvers<void>());
+  const holds: { release: () => void }[] = [];
+  const fetcher = (async (_url: string, init: RequestInit) => {
+    const id = Number(JSON.parse(String(init.body)).state);
+    started.push(id);
+    inFlight++;
+    peak = Math.max(peak, inFlight);
+    const hold = Promise.withResolvers<void>();
+    holds.push({ release: hold.resolve });
+    arrived[id - 1]?.resolve();
+    await hold.promise;
+    inFlight--;
+    return new Response(JSON.stringify({ answers: { conflict: { noul: 0 } } }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const answers = [1, 2, 3, 4, 5, 6].map((id) => askJev("k", JSON.stringify(id), fetcher));
+  await Promise.all(arrived.slice(0, 4).map((call) => call.promise));
+  expect(started).toEqual([1, 2, 3, 4]);
+  holds[0]?.release();
+  await arrived[4]?.promise;
+  expect(started).toEqual([1, 2, 3, 4, 5]);
+  for (let i = 1; i < 6; i++) {
+    await arrived[i]?.promise;
+    holds[i]?.release();
+  }
+  expect(await Promise.all(answers)).toHaveLength(6);
+  expect(started).toEqual([1, 2, 3, 4, 5, 6]);
+  expect(peak).toBe(4);
+});

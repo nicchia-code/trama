@@ -16,6 +16,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   stale: [],
   unbased: [],
   errors: [],
+  unfixable: [],
   changes: [],
   machines: [],
   actors: [],
@@ -81,6 +82,11 @@ test("a Proposal can be approved only when it is neither stale, unbased nor inva
   expect(approveBlocker(proposal({ stale: ["a.md"] }))).toContain("Stale");
   expect(approveBlocker(proposal({ unbased: ["a.md"] }))).toContain("registered");
   expect(approveBlocker(proposal({ errors: [{ file: "a.md", line: 1, message: "bad" }] }))).toContain("invalid");
+  const unfixable = proposal({ unfixable: ["The Model elements of Drift D3 no longer exist"] });
+  expect(approveBlocker(unfixable)).toContain("Drift D3");
+  expect(approveBlocker(unfixable)).toContain("Resolve Drifts");
+  expect(approveBlocker(unfixable)).not.toContain("invalid");
+  expect(proposalBadges(unfixable).map((b) => b.label)).toEqual(["unfixable"]);
 });
 
 test("badges name each problem and list the files or the first messages in the tooltip", () => {
@@ -303,7 +309,7 @@ test("blockers, requirements and the reasons that name them use the numbers, whi
   expect(waiting.tooltip).toContain("Waiting for Task T4: Fix it, which fixes the code for Drift D2");
 
   const requires: ProposalView["requires"] = [{ id: "0007", title: "Base", status: "open" }];
-  const base = { stale: [], unbased: [], errors: [], requires };
+  const base = { stale: [], unbased: [], errors: [], unfixable: [], requires };
   expect(proposalBadges({ ...base, kind: "change" }, NUMBERS)[0]).toMatchObject({ label: "requires P1", tooltip: 'Proposal P1 "Base" is not approved yet' });
   expect(approveBlocker(base, NUMBERS)).toContain('Proposal P1 "Base" is not approved yet');
 });

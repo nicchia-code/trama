@@ -44,18 +44,19 @@ export function parseMarkerName(name: string): { terminal: string; run: number }
 /**
  * The script a POSIX shell runs in an external window: sets `TRAMA_AGENT`, the terminal's identity, the address of the
  * editor window that opened it (when its question channel is up, so the agent's questions count as asked from a Trama
- * terminal) and the PATH with the folder of the bundled `trama` first, runs `agentLine`, writes the marker with the exit
+ * terminal) and the PATH with the folder of the bundled `trama` first, enters the project folder `cwd` and runs
+ * `agentLine` there (when the folder is gone the run ends at once, with the error shown), writes the marker with the exit
  * status only (under a temporary name, then renamed, so it is never read half written) and leaves the window open in
  * the developer's login shell. The instruction is only inside `agentLine`, quoted by the caller; the marker never carries it.
  */
-export function externalScript(options: { agentLine: string; terminal: string; marker: string; binDir?: string; endpoint?: string }): string {
+export function externalScript(options: { agentLine: string; terminal: string; marker: string; cwd: string; binDir?: string; endpoint?: string }): string {
   const q = (text: string) => quote("posix", text);
   const path = options.binDir === undefined ? `PATH="$PATH"` : `PATH=${q(options.binDir)}:"$PATH"`;
   const endpoint = options.endpoint === undefined ? "" : ` ${QUESTION_ENDPOINT_ENV}=${q(options.endpoint)}`;
   const temporary = `${options.marker}.tmp`;
   return [
     `export TRAMA_AGENT=1 ${TERMINAL_ENV}=${q(options.terminal)}${endpoint} ${path}`,
-    options.agentLine.trim(),
+    `cd ${q(options.cwd)} && ${options.agentLine.trim()}`,
     "trama_status=$?",
     `printf '%s\\n' "$trama_status" > ${q(temporary)} && mv ${q(temporary)} ${q(options.marker)}`,
     `exec "\${SHELL:-/bin/sh}" -l`,

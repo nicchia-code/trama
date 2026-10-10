@@ -1,16 +1,16 @@
 ---
-status: open
-resolution: null
+status: resolved
+resolution: fix-code
 refs:
   - drift-resolution/Running tasks/cursor-chat.AGENT_STOPPED
   - drift-resolution/Resolving/cursor-chat.AGENT_STOPPED
   - requirements/rules#drift-resolution
 proposal: null
-task: null
+task: ixkd6aqb
 origin: null
-option: null
+option: 1
 note: null
-resolvedBy: null
+resolvedBy: vylr6oj1
 created: 2026-10-10T08:01:51.250Z
 ---
 # A Cursor chat job can bind the conversation of an instruction sent just before it

@@ -46,6 +46,25 @@ describe("answering a round", () => {
     expect(s.confirmed[0]).toEqual({ status: "answered", selected: [], text: "my own way" });
   });
 
+  test("a digit key selects in a single choice and never clears the selected option", () => {
+    let s = run(round(), { type: "pressKey", option: 0 });
+    expect(s.drafts[0]?.selected).toEqual([0]);
+    s = run(s, { type: "pressKey", option: 0 });
+    expect(s.drafts[0]?.selected).toEqual([0]);
+    s = run(s, { type: "pressKey", option: 1 });
+    expect(s.drafts[0]?.selected).toEqual([1]);
+    s = run(s, { type: "next" }, { type: "next" }, { type: "pressKey", option: 2 }, { type: "pressKey", option: 2 });
+    expect(s.drafts[2]?.selected).toEqual([2]);
+  });
+
+  test("a digit key toggles in a multiple choice, as a click does", () => {
+    // The second question is a multiple choice recommended on option 1 (index 0).
+    let s = run(round(), { type: "next" }, { type: "pressKey", option: 2 }, { type: "pressKey", option: 1 });
+    expect(s.drafts[1]?.selected).toEqual([0, 1, 2]);
+    s = run(s, { type: "pressKey", option: 0 });
+    expect(s.drafts[1]?.selected).toEqual([1, 2]);
+  });
+
   test("a single choice keeps one option; a multiple choice toggles each", () => {
     let s = run(round(), { type: "toggleOption", option: 2 });
     expect(s.drafts[0]?.selected).toEqual([2]);

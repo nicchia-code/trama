@@ -128,6 +128,14 @@ test("trama-implement reads each Task once from task show and checks the run onc
   expect(skill).not.toContain("Understand the surroundings");
 });
 
+test("trama-scan runs at most twenty sub-agents at once for triage and comparison, and the other skills keep four", () => {
+  const skill = SKILLS["trama-scan/SKILL.md"] as string;
+  expect(skill).toContain("at most twenty sub-agents at once in all");
+  expect(skill).not.toContain("at most four sub-agents at once in all");
+  expect(SKILLS["trama-design/SKILL.md"] as string).toContain("at most four at once");
+  expect(SKILLS["trama-implement/SKILL.md"] as string).toContain("at most four at once");
+});
+
 test("trama-resolve-drifts splits fragments over 12 KB in the same Proposal, keeping the 4,000-character budget in mind", () => {
   const skill = SKILLS["trama-resolve-drifts/SKILL.md"] as string;
   expect(skill).toContain("larger than 12 KB");

@@ -138,7 +138,7 @@ export function mountQuestions(app: HTMLElement, post: (message: ToHost) => void
     const n = optionKey(e.key, state.questions[state.current]?.options.length ?? 0);
     if (n === null) return;
     e.preventDefault();
-    act({ type: "toggleOption", option: n });
+    act({ type: "pressKey", option: n });
   }, true);
 
   /** While the overlay is open the tabs under it take neither focus nor clicks; minimized, they work again. */

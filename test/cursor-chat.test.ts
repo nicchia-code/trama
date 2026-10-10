@@ -105,6 +105,7 @@ test("a command of the agent tells the project's editor where it ran and whether
       { origin: {}, readOnly: false },
       { origin: { terminal: "abc123" }, readOnly: true },
       { origin: { terminal: "abc123" }, readOnly: true },
+      { origin: {}, readOnly: true },
       { origin: { terminal: "abc123" }, readOnly: false },
     ]);
   } finally {

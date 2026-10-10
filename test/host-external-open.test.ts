@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detectTerminal, type DetectedTerminal, findProgram, openWindow, reusableKind, startDetached, terminalCommand, type WindowRequest } from "../extension/src/host/external-open";
-import { ExternalRuns, type ExternalEnd, externalScript } from "../extension/src/host/external-terminal";
+import { ExternalRuns, type ExternalEnd, externalScript, typedCommand } from "../extension/src/host/external-terminal";
 
 let dir: string;
 let bin: string;
@@ -149,7 +149,7 @@ describe("opening a window that runs the agent line", () => {
     const { runs, ended, marker } = followRun("own111");
     try {
       const out = join(dir, "seen");
-      const script = externalScript({ agentLine: `sh -c 'printf "%s" "$PWD" > ${out}; exit 6'`, terminal: "own111", marker });
+      const script = externalScript({ agentLine: `sh -c 'printf "%s" "$PWD" > ${out}; exit 6'`, terminal: "own111", marker, cwd: dir });
       const window = await withShell(() => openWindow({ custom: `${terminal} -e {command}`, terminal: undefined }, requestFor(script)));
       expect(window).toBeUndefined();
       expect(await ended).toMatchObject({ terminal: "own111", exitCode: 6 });
@@ -163,7 +163,7 @@ describe("opening a window that runs the agent line", () => {
     const terminal = faketerm();
     const { runs, ended, marker } = followRun("det222");
     try {
-      const script = externalScript({ agentLine: "true", terminal: "det222", marker });
+      const script = externalScript({ agentLine: "true", terminal: "det222", marker, cwd: dir });
       const window = await withShell(() => openWindow({ custom: "", terminal: { program: terminal, kind: "other" } }, requestFor(script)));
       expect(window).toBeUndefined();
       expect(await ended).toMatchObject({ terminal: "det222", exitCode: 0 });
@@ -202,9 +202,10 @@ describe("opening a window that runs the agent line", () => {
     const ran = join(dir, "ran");
     const request = { ...requestFor(`echo ok >> ${ran}`), title: "All tasks" };
     // Title commands are logged; `spawn` and `start` run what follows `--`, as WezTerm does in the new pane.
-    const fake = (name: string, spawn: string) =>
+    const fake = (name: string, spawn: string, panes = "[]") =>
       program(bin, name, [
         `if [ "$1 $2" = "cli spawn" ]; then ${spawn}; fi`,
+        `if [ "$1 $2" = "cli list" ]; then echo '${panes}'; exit 0; fi`,
         `if [ "$1" = cli ]; then printf '%s|' "$@" >> ${titles}; echo >> ${titles}; exit 0; fi`,
         `while [ "$1" != -- ]; do shift; done; shift; exec "$@"`,
       ].join("\n"));
@@ -215,10 +216,10 @@ describe("opening a window that runs the agent line", () => {
     expect(readFileSync(titles, "utf8")).toBe("cli|set-tab-title|All tasks|\ncli|set-window-title|All tasks|\n");
     expect(readFileSync(ran, "utf8")).toBe("ok\n");
 
-    // No instance to ask: `cli spawn` fails, so `start` opens one, which cannot be reached again but is named all the same.
+    // No instance to ask: `cli spawn` fails, so `start` opens one, which is found in the listing by the tab title its script sets.
     rmSync(titles);
-    const idle = fake("wezterm-idle", `echo "no running instance" >&2; exit 1`);
-    expect(await openWindow({ custom: "", terminal: { program: idle, kind: "wezterm" } }, request)).toBeUndefined();
+    const idle = fake("wezterm-idle", `echo "no running instance" >&2; exit 1`, '[{"pane_id":3,"tab_title":"other"},{"pane_id":7,"tab_title":"All tasks"}]');
+    expect(await openWindow({ custom: "", terminal: { program: idle, kind: "wezterm" } }, request)).toEqual({ terminal: "wezterm", paneId: 7 });
     expect(readFileSync(titles, "utf8")).toBe("cli|set-tab-title|All tasks|\ncli|set-window-title|All tasks|\n");
     expect(readFileSync(ran, "utf8")).toBe("ok\nok\n");
   });
@@ -233,7 +234,7 @@ describe("opening a window that runs the agent line", () => {
     expect(readFileSync(ran, "utf8")).toBe("ok\n");
   });
 
-  test("Terminal.app is told to type the folder change and the script through sh, titles the window with the request's title, and its window id is remembered", async () => {
+  test("Terminal.app is told to type the script through sh, titles the window with the request's title, and its window id is remembered", async () => {
     const log = join(dir, "osascript-args");
     const osascript = program(bin, "osascript", `printf '%s\\n' "$@" > ${log}\necho 512`);
     const window = await openWindow({ custom: "", terminal: { program: osascript, kind: "terminal-app" } }, { ...requestFor("echo 'it'\\''s'"), title: "T3" });
@@ -241,7 +242,7 @@ describe("opening a window that runs the agent line", () => {
     const args = readFileSync(log, "utf8").split("\n");
     expect(args.filter((_, i) => args[i - 1] === "-e").join("\n")).toContain("do script (item 1 of argv)");
     expect(args.filter((_, i) => args[i - 1] === "-e").join("\n")).toContain("set custom title of selected tab of front window to (item 2 of argv)");
-    expect(args.at(-3)).toBe(`sh -c 'cd '\\''${dir}'\\'' && echo '\\''it'\\''\\'\\'''\\''s'\\'''`);
+    expect(args.at(-3)).toBe(typedCommand("echo 'it'\\''s'"));
     expect(args.at(-2)).toBe("T3");
   });
 });

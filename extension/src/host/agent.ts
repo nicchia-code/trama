@@ -140,11 +140,21 @@ const hookedExternal = new Map<string, { root: string; since: number }>();
 export function releaseQuietHookedTasks(now = Date.now()): void {
   if (questionRoundOpen()) return;
   for (const info of agentTerminals.values()) {
-    if (isHooked(info.id) && now - Math.max(terminalSeenAt(info.id), questionRoundClosedAt()) >= QUIET_PERIOD_MS) releaseTakenTasks(info.root, { terminal: info.id });
+    if (isHooked(info.id) && quietElapsed(info.id, Math.max(terminalSeenAt(info.id), questionRoundClosedAt()), now)) releaseTakenTasks(info.root, { terminal: info.id });
   }
   for (const [terminal, info] of hookedExternal) {
-    if (isHooked(terminal) && now - Math.max(terminalSeenAt(terminal), info.since, questionRoundClosedAt()) >= QUIET_PERIOD_MS) releaseTakenTasks(info.root, { terminal });
+    if (isHooked(terminal) && quietElapsed(terminal, Math.max(terminalSeenAt(terminal), info.since, questionRoundClosedAt()), now)) releaseTakenTasks(info.root, { terminal });
   }
+}
+
+/** The instant each hooked terminal's quiet period started, once that period has been counted: a period counts once, so Tasks taken after it wait for the next one. */
+const quietCounted = new Map<string, number>();
+
+/** Whether the quiet period of `terminal` that started at `since` has elapsed and is not counted yet; if so, counts it. */
+function quietElapsed(terminal: string, since: number, now: number): boolean {
+  if (now - since < QUIET_PERIOD_MS || quietCounted.get(terminal) === since) return false;
+  quietCounted.set(terminal, since);
+  return true;
 }
 
 /**
@@ -302,6 +312,7 @@ export function startExternalRun(root: string, terminal: string, template: strin
     agentLine: agentCommandLine(template, prompt, "posix"),
     terminal,
     marker: externalRuns.markerPath(terminal, run),
+    cwd: root,
     binDir: program === undefined ? undefined : dirname(program),
     endpoint,
   });
@@ -548,10 +559,12 @@ export async function launchAgent(root: string, instruction: Instruction, name: 
   if (!canSend()) return undefined;
   if (agentLauncher() === "chat")
     return inSendTurn(async () => {
+      // The send begins now: only a Trama conversation that starts from here on can be this job's.
+      const sentAt = Date.now();
       const delivery = await openChat(root, withLanguage(textOf(instruction), configuredLanguage()), selfSendingOnly, canSend);
       if (delivery !== "not-sent") noticeChatModelRoles();
-      // Sent by itself: the conversation is the job. Left ready in the chat or on the clipboard, nothing is running.
-      if (delivery === "sent" && job !== undefined) startJob(job, root, { chat: isCursor() ? "cursor" : "other" }, isCursor());
+      // Sent by itself: the job is the chat's next conversation, and its end is seen once that conversation binds it. Left ready in the chat or on the clipboard, nothing is running.
+      if (delivery === "sent" && job !== undefined) startJob(job, root, { chat: isCursor() ? "cursor" : "other" }, false, Date.now(), sentAt);
       return delivery;
     });
   // Never the integrated terminal in place of the external one: the Model forbids that fallback.

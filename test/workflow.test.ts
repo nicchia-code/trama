@@ -491,7 +491,7 @@ describe("Tasks and Drifts", () => {
     const withProposal = newDrift(p, { options: FIX_OPTIONS, title: "Lost", refs: ["order"], proposal: prop.id, happens: "Code does it.", should: "Model says so." });
     handOver(p, prop.id);
     const plain = newDrift(p, { options: FIX_OPTIONS, title: "Plain", refs: ["order"], happens: "Code does it.", should: "Model says so." });
-    for (const choice of [{ option: 1 }, { note: "Why." }]) {
+    for (const choice of [{ option: 1 }, { note: "Why." }, { note: "" }]) {
       expect(() => resolveDrift(p, withProposal.id, "accept-proposal", [], choice)).toThrow(/only goes with fixing the code/);
       expect(() => resolveDrift(p, plain.id, "dismiss", [], choice)).toThrow(/only goes with fixing the code/);
     }
@@ -767,12 +767,11 @@ describe("Tasks and Drifts", () => {
     expect(() => run(["--root", dir, "proposal", "reject", left.id], process.cwd())).toThrow(/is rejected/);
   });
 
-  test("discarding a Draft attached to an open Drift from the command line is refused and changes nothing; fixing the code still sets it aside", () => {
+  test("discarding a Draft attached to an open Drift from the command line works and leaves the Drift as it is; the Drift can still be fixed afterwards", () => {
     const draft = newProposal(p, "Half written");
     const drift = newDrift(p, { options: FIX_OPTIONS, title: "Half done", refs: ["order"], proposal: draft.id, happens: "Code does it.", should: "Model says so." });
-    const refusal = `Proposal ${named("proposal", draft.id)} is attached to Drift ${named("drift", drift.id)}: decide on the Drift with trama drift resolve`;
-    expect(() => run(["--root", dir, "proposal", "discard", draft.id], process.cwd())).toThrow(refusal);
-    expect(getProposal(p, draft.id).data.status).toBe("draft");
+    expect(run(["--root", dir, "proposal", "discard", draft.id], process.cwd(), {}).out).toContain("Discarded Proposal");
+    expect(getProposal(p, draft.id).data.status).toBe("discarded");
     expect(getDrift(p, drift.id).data).toMatchObject({ status: "open", proposal: draft.id });
 
     resolveDrift(p, drift.id, "fix-code", [], { option: 1 });

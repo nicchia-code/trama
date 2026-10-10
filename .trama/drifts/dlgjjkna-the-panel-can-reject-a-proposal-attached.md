@@ -1,15 +1,15 @@
 ---
-status: open
-resolution: null
+status: resolved
+resolution: fix-code
 refs:
   - proposal/Open/developer.REJECT_PROPOSAL
   - requirements/rules#proposal
 proposal: null
-task: null
+task: 4urruhyh
 origin: null
-option: null
+option: 1
 note: null
-resolvedBy: null
+resolvedBy: vylr6oj1
 created: 2026-10-10T08:07:30.018Z
 ---
 # The panel can reject a Proposal attached to a Drift while the feedback box is open

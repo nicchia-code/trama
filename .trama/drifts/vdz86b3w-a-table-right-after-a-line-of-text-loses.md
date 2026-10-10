@@ -1,14 +1,14 @@
 ---
-status: open
-resolution: null
+status: resolved
+resolution: fix-code
 refs:
   - requirements/ui#panel
 proposal: null
-task: null
+task: 17k4x3iq
 origin: null
-option: null
+option: 1
 note: null
-resolvedBy: null
+resolvedBy: vylr6oj1
 created: 2026-10-10T08:09:47.119Z
 ---
 # A table right after a line of text loses its rows in panel Markdown

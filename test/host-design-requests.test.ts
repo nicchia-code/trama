@@ -25,7 +25,7 @@ const fileUri = (fsPath: string): FakeUri => ({ scheme: "file", fsPath, toString
 const listeners = {
   active: [] as Listener<unknown>[],
   change: [] as Listener<{ document: FakeDocument; contentChanges: unknown[] }>[],
-  tabs: [] as Listener<{ closed: unknown[] }>[],
+  tabs: [] as Listener<{ opened: unknown[]; closed: unknown[] }>[],
   deleted: [] as Listener<FakeUri>[],
 };
 const subscribe = <T>(list: Listener<T>[]) => (fn: Listener<T>) => {
@@ -108,7 +108,7 @@ function closeTabs(toClose: FakeTab[]) {
       document.isDirty = false;
     }
   }
-  for (const fn of listeners.tabs) fn({ closed: toClose });
+  for (const fn of listeners.tabs) fn({ opened: [], closed: toClose });
 }
 const tabOf = (document: FakeDocument): FakeTab => ({
   input: new TabInputText(document.uri),
@@ -407,6 +407,31 @@ describe("the list of sent requests", () => {
     again.dispose();
     expect(lastContext()).toBe(false);
   });
+
+  for (const sent of [true, false]) {
+    test(`a request whose file is gone when the editor restores its tab after a restart is closed at once, never saved or sent (sent before: ${sent})`, async () => {
+      const document = await writeRequest("# Restored\n");
+      await document.save();
+      if (sent) await requests.send();
+      const saves = document.saves;
+      deleteFile(document);
+      requests.dispose();
+      // The editor restores the tab with unsaved changes, before the new extension instance exists.
+      tabs.push(tabOf(document));
+      document.isDirty = true;
+      document.text += " unsaved";
+      requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
+      await sleep(10);
+      expect(tabs.filter((tab) => tab.input.uri.fsPath === document.uri.fsPath)).toHaveLength(0);
+      expect(existsSync(document.uri.fsPath)).toBe(false);
+      await sleep(SAVE_DELAY_MS + 100);
+      expect(document.saves).toBe(saves);
+      focus(document);
+      expect(lastContext()).toBe(false);
+      await requests.send();
+      expect(launches).toHaveLength(sent ? 1 : 0);
+    });
+  }
 });
 
 describe("closing the tab of a request", () => {
@@ -651,7 +676,7 @@ describe("closing the tab of a request", () => {
       closeTabs(tabsShowing(document));
       await settle();
       expect(launches).toHaveLength(sentBefore ? 1 : 0);
-      expect(state.get(SENT_KEY, [])).toEqual([]);
+      expect(state.get(SENT_KEY, []).length).toBe(sentBefore ? 1 : 0);
     });
   }
 });

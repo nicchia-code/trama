@@ -22,7 +22,7 @@ Mentre un round di domande dell'agente è aperto, compare in un overlay sopra qu
 - `workspace.MODEL_CHANGED` → Open: after a short pause, one fresh picture is sent to the three tabs. If the files cannot be read, the error is shown and every tab keeps its last picture. If the files read fine but the Model or its Requirements are invalid, a banner counts the errors and links to each one, and the Diagram may be incomplete.
 
 #### Diagram (initial)
-The Model drawn one level at a time, with a selector to draw an open Proposal over it (never one the agent is still writing) and the open Drifts drawn where they point. Selecting something shows its details and its Requirements; from there the developer can approve or reject a Proposal or open the file. Buttons ask the agent to design a change or to scan the whole System or the Feature being looked at. I dettagli di un Drift mostrano solo il titolo e i due lati, senza nessun modo di decidere su di lui.
+The Model drawn one level at a time, with a selector to draw an open Proposal over it (never one the agent is still writing) and the open Drifts drawn where they point. Selecting something shows its details and its Requirements; from there the developer can approve or reject a Proposal or open the file. Buttons ask the agent to design a change or to scan the whole System or the Feature being looked at. I dettagli di un Drift mostrano il titolo, i due lati e i riferimenti del Drift, ognuno collegato all'elemento quando si trova ancora nel Modello, senza nessun modo di decidere su di lui.
 
 Una Proposal allegata a un Drift aperto non compare nel selettore: il developer non la vede (vedi il Drift).
 

@@ -166,6 +166,35 @@ export interface WindowOrigin {
   terminal: DetectedTerminal | undefined;
 }
 
+/** How often, and how many times, to look for the pane of a window WezTerm has just started: its tab is named only once its script runs. */
+const PANE_TRIES = 15;
+const PANE_WAIT_MS = 200;
+
+/** Resolves once `ms` have passed. */
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}
+
+/**
+ * The id of the newest pane of the running WezTerm whose tab is named `title`, or undefined when none is found. Pane ids are handed
+ * out in order, so the newest is the highest. A WezTerm that is not answering yet fails the listing, which is tried again.
+ */
+async function findWeztermPane(program: string, title: string): Promise<number | undefined> {
+  for (let attempt = 0; attempt < PANE_TRIES; attempt++) {
+    if (attempt > 0) await delay(PANE_WAIT_MS);
+    try {
+      const panes = JSON.parse(await runScripting({ program, args: ["cli", "list", "--format", "json"] })) as { pane_id: number; tab_title: string }[];
+      const ids = panes.filter((pane) => pane.tab_title === title).map((pane) => pane.pane_id);
+      if (ids.length > 0) return Math.max(...ids);
+    } catch {
+      // Not answering yet, or no pane is named so far: look again.
+    }
+  }
+  return undefined;
+}
+
 /**
  * Opens a new window running `request.script` in the project folder, through the developer's own terminal command or the
  * detected terminal. Returns how to reach the window again when its terminal allows it (kitty, WezTerm and Terminal.app),
@@ -181,7 +210,7 @@ export async function openWindow(origin: WindowOrigin, request: WindowRequest, c
   if (terminal === undefined) throw new Error("no terminal was found; set trama.externalTerminalCommand");
   if (terminal.kind === "terminal-app") {
     // `do script` types the line into the window's own shell, which may not be POSIX: `sh -c` makes it run the same anywhere.
-    const line = typedCommand(`cd ${quote("posix", request.cwd)} && ${request.script}`);
+    const line = typedCommand(request.script);
     const id = await runScripting({ program: terminal.program, args: [...TERMINAL_APP_SCRIPT.flatMap((text) => ["-e", text]), line, request.title] });
     const windowId = Number.parseInt(id.trim(), 10);
     return Number.isNaN(windowId) ? undefined : { terminal: "terminal-app", windowId };
@@ -199,5 +228,10 @@ export async function openWindow(origin: WindowOrigin, request: WindowRequest, c
   if (!canSend()) throw new Error("the instruction was cancelled");
   const { program, args } = terminalCommand(terminal, request);
   await startDetached(program, args, request.cwd);
+  if (terminal.kind === "wezterm") {
+    // `start` does not return the window it opens: its pane is found by the tab title the script has just set.
+    const paneId = await findWeztermPane(terminal.program, request.title);
+    return paneId === undefined ? undefined : { terminal: "wezterm", paneId };
+  }
   return terminal.kind === "kitty" ? { terminal: "kitty", address: `unix:${request.kittySocket}`, windowId: 1 } : undefined;
 }

@@ -33,7 +33,7 @@ export function resolveDriftInProposal(
   const { decision } = input;
   if (decision === undefined) throw new TramaError("A decision is required: proposal, dismissed or fix-code");
   const note = input.note?.trim() || undefined;
-  if (decision !== "fix-code" && (input.option !== undefined || note !== undefined))
+  if (decision !== "fix-code" && (input.option !== undefined || input.note !== undefined))
     throw new TramaError(`Drift ${driftName}: ${input.option !== undefined ? "an option" : "a note"} only goes with fix-code, not with ${decision}`);
   if (decision === "fix-code") {
     chosenOption(p, drift, input.option);

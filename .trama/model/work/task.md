@@ -39,9 +39,9 @@ The developer's: nobody has taken it.
 - `developer.MOVE_TASK_TO_DONE` → Done: only from the command line.
 
 #### Taken by the agent
-The agent is working on it. The developer cannot move it, from the command line, until it is taken back.
+The agent is working on it. The developer cannot move it, from the command line, until it is taken back. Un Task preso dall'agente senza un terminale o una chat riconosciuti non appartiene a nessun terminale: ogni evento qui sotto che rilascia i Task presi da un terminale dell'agente o dalla chat di Cursor rilascia anche lui, qualunque sia quel terminale o quella chat.
 - `developer.TAKE_BACK_TASK` → Free: only from the command line; the Task stays In progress and becomes the developer's.
-- `terminal.COMMAND_ENDED` → To do: the agent's command ended in the terminal that had taken this Task, so that agent is no longer working on it; the Task is released at once and goes back to To do. The end of another terminal releases nothing here.
+- `terminal.COMMAND_ENDED` → To do: the agent's command ended in the terminal that had taken this Task, so that agent is no longer working on it; the Task is released at once and goes back to To do. The end of another terminal releases nothing here, salvo un Task preso senza un terminale riconosciuto, che la fine del comando di qualsiasi terminale dell'agente rilascia.
 - `agent-hook.IDLE` → To do: l'agente del terminale che aveva preso questo Task ha detto con il suo hook di essere a riposo, quindi non ci lavora più; il Task è rilasciato subito e torna in To do, come alla fine del suo comando. L'hook di un altro terminale non rilascia niente.
 - `terminal.CLOSED` → To do: solo per il terminale integrato di un agente con un hook (omp) che aveva preso questo Task; chiuso quel terminale, il suo hook non dirà più che l'agente è a riposo, quindi il Task è rilasciato subito e torna in To do. La chiusura del terminale di un agente senza hook, o di un altro terminale, non rilascia niente.
 - `cursor-chat.AGENT_STOPPED` → To do: solo per i Task presi dall'agente della chat di Cursor dello stesso progetto; il turno dell'agente è finito, quindi nessun agente sta lavorando adesso; ogni Task preso è rilasciato subito e torna in To do. Se l'agente riprende, lo prende di nuovo.

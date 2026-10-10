@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { customTerminalCommand, ExternalRuns, type ExternalEnd, externalScript, markerName, parseMarkerName, windowMarkerDir } from "../extension/src/host/external-terminal";
@@ -24,7 +24,7 @@ describe("the script written into the external window", () => {
     const marker = join(dir, markerName("abc123", 2));
     const instruction = `Use the trama-design skill. It's "quoted" $HOME \`x\`; rm -rf /`;
     const template = `sh -c 'printf "%s|%s|%s|%s|%s" "$TRAMA_AGENT" "$TRAMA_TERMINAL" "$TRAMA_QUESTION_ENDPOINT" "$PATH" "$0" > ${out}; exit 3' {prompt}`;
-    const script = externalScript({ agentLine: agentCommandLine(template, instruction, "posix"), terminal: "abc123", marker, binDir: "/opt/trama bin", endpoint: "/run/user/1/trama q.sock" });
+    const script = externalScript({ agentLine: agentCommandLine(template, instruction, "posix"), terminal: "abc123", marker, cwd: dir, binDir: "/opt/trama bin", endpoint: "/run/user/1/trama q.sock" });
 
     const result = runScript(script);
 
@@ -36,12 +36,32 @@ describe("the script written into the external window", () => {
     expect(readdirSync(dir).sort()).toEqual(["abc123-2.end", "seen"]);
   });
 
+  test("the agent runs in the project folder whatever folder the window's shell is in, and a missing folder ends the run at once with the marker", () => {
+    const project = join(dir, "project");
+    mkdirSync(project);
+    const out = join(dir, "seen");
+    const marker = join(dir, markerName("abc123", 3));
+    const template = `sh -c 'pwd > ${out}' {prompt}`;
+    const script = externalScript({ agentLine: agentCommandLine(template, "x", "posix"), terminal: "abc123", marker, cwd: project });
+    expect(spawnSync("sh", ["-c", `cd ${dir}; ${script}`], { env: { PATH: process.env.PATH ?? "", SHELL: "/usr/bin/true" }, encoding: "utf8" }).status).toBe(0);
+    expect(readFileSync(out, "utf8")).toBe(`${realpathSync(project)}\n`);
+    expect(readFileSync(marker, "utf8")).toBe("0\n");
+
+    rmSync(out);
+    const gone = join(dir, "gone");
+    const goneMarker = join(dir, markerName("abc123", 4));
+    const goneScript = externalScript({ agentLine: agentCommandLine(template, "x", "posix"), terminal: "abc123", marker: goneMarker, cwd: gone });
+    spawnSync("sh", ["-c", goneScript], { env: { PATH: process.env.PATH ?? "", SHELL: "/usr/bin/true" }, encoding: "utf8" });
+    expect(existsSync(out)).toBe(false);
+    expect(readFileSync(goneMarker, "utf8")).not.toBe("0\n");
+  });
+
   test("a successful command leaves 0 and the window goes on to the login shell", () => {
     const marker = join(dir, markerName("abc123", 1));
     const log = join(dir, "shell");
     const shell = join(dir, "login.sh");
     writeFileSync(shell, `#!/bin/sh\nprintf '%s' "$*" > ${log}\n`, { mode: 0o755 });
-    const script = externalScript({ agentLine: "true", terminal: "abc123", marker });
+    const script = externalScript({ agentLine: "true", terminal: "abc123", marker, cwd: dir });
 
     const result = spawnSync("sh", ["-c", script], { env: { PATH: process.env.PATH ?? "", SHELL: shell }, encoding: "utf8" });
 
@@ -337,7 +357,7 @@ describe("the developer's own terminal command", () => {
     const instruction = `Use the trama-scan skill. It's "quoted" $HOME; rm -rf /`;
     const out = join(dir, "seen");
     const agentLine = agentCommandLine(`sh -c 'printf %s "$0" > ${out}; exit 5' {prompt}`, instruction, "posix");
-    const script = externalScript({ agentLine, terminal: "abc123", marker });
+    const script = externalScript({ agentLine, terminal: "abc123", marker, cwd: dir });
 
     const result = spawnSync("sh", ["-c", customTerminalCommand(`${terminal} -e {command}`, script)], { cwd: dir, env: { PATH: process.env.PATH ?? "", SHELL: "/usr/bin/true" }, encoding: "utf8" });
 

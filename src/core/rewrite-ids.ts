@@ -150,9 +150,11 @@ export function rewriteNumberedCards(p: Project): RewrittenCard[] {
   for (const proposal of listProposals(p)) {
     const card = rewritten.get(proposal.name);
     const requires = proposal.data.requires.map((id) => mapped("proposal", id, ids) as string);
-    const changed = requires.some((id, i) => id !== proposal.data.requires[i]);
+    const drifts = proposal.data.drifts.map((entry) => ({ ...entry, drift: mapped("drift", entry.drift, ids) ?? entry.drift }));
+    const changed = requires.some((id, i) => id !== proposal.data.requires[i]) || drifts.some((entry, i) => entry.drift !== proposal.data.drifts[i]?.drift);
     if (!card && !changed) continue;
     proposal.data.requires = requires;
+    proposal.data.drifts = drifts;
     if (card) proposal.data.created = rewrittenInstant(card.number);
     writeProposal(proposal);
   }
@@ -172,11 +174,13 @@ export function rewriteNumberedCards(p: Project): RewrittenCard[] {
     const proposal = mapped("proposal", drift.data.proposal, ids);
     const task = mapped("task", drift.data.task, ids);
     const origin = mapped("task", drift.data.origin, ids);
-    const changed = proposal !== drift.data.proposal || task !== drift.data.task || origin !== drift.data.origin;
+    const resolvedBy = mapped("proposal", drift.data.resolvedBy, ids);
+    const changed = proposal !== drift.data.proposal || task !== drift.data.task || origin !== drift.data.origin || resolvedBy !== drift.data.resolvedBy;
     if (!card && !changed) continue;
     drift.data.proposal = proposal;
     drift.data.task = task;
     drift.data.origin = origin;
+    drift.data.resolvedBy = resolvedBy;
     if (card) drift.data.created = rewrittenInstant(card.number);
     writeDrift(drift);
   }

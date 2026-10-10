@@ -153,17 +153,16 @@ const READ_ONLY: Record<string, true> = {
 
 /**
  * Tells the editor of the project that a command ran with the terminal or chat it ran in, when it changed something, or
- * when it only read and an agent ran it (`TRAMA_TERMINAL`, or Cursor's `CURSOR_AGENT`). A developer's read-only command counts for nothing.
- * An agent in a chat that is not Cursor's has no origin to tell: the editor counts it for such a chat's run
- * (ponytail: so a developer's own changing command counts too; add an environment variable for those chats if that matters).
+ * when it only read (`TRAMA_TERMINAL`, or Cursor's `CURSOR_AGENT`; with neither the origin is empty). An origin-less
+ * read-only command still counts for the quiet period of the non-Cursor chat jobs, which share one quiet period.
+ * ponytail: a developer's own changing command counts for that quiet period too; add an environment variable for those chats if that matters.
  */
 export async function reportActivity(argv: string[], cwd: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string } = {}): Promise<void> {
   const { rest, root } = splitGlobals(argv);
   const name = classifyCommand(argv) !== null ? "classify" : findCommand(rest)?.command.name;
   const env = options.env ?? process.env;
   const origin = originFromEnv(env);
-  const agentRun = Object.keys(origin).length > 0;
-  if (name === undefined || !(CHANGING[name] === true || (READ_ONLY[name] === true && agentRun))) return;
+  if (name === undefined || !(CHANGING[name] === true || READ_ONLY[name] === true)) return;
   try {
     await sendActivity(makeContext(cwd, root).project(), origin, { env, runtimeDir: options.runtimeDir, readOnly: CHANGING[name] !== true });
   } catch {

@@ -115,6 +115,8 @@ test("the panel's question actions are checked as untrusted input", () => {
   expect(parseToHost({ type: "questionAction", round: 3, action: { type: "toggleOption", option: 1 } })).toEqual({ ok: true, message: { type: "questionAction", round: 3, action: { type: "toggleOption", option: 1 } } });
   expect(parseToHost({ type: "questionAction", round: 3, action: { type: "setText", text: "hi" } })).toEqual({ ok: true, message: { type: "questionAction", round: 3, action: { type: "setText", text: "hi" } } });
   expect(parseToHost({ type: "questionAction", round: 3, action: { type: "send" } })).toEqual({ ok: true, message: { type: "questionAction", round: 3, action: { type: "send" } } });
+  expect(parseToHost({ type: "questionAction", round: 3, action: { type: "pressKey", option: 1 } })).toEqual({ ok: true, message: { type: "questionAction", round: 3, action: { type: "pressKey", option: 1 } } });
+  expect(parseToHost({ type: "questionAction", round: 3, action: { type: "pressKey", option: "1" } }).ok).toBe(false);
   expect(parseToHost({ type: "questionAction", round: "3", action: { type: "send" } }).ok).toBe(false);
   expect(parseToHost({ type: "questionAction", round: 3, action: { type: "toggleOption", option: "1" } }).ok).toBe(false);
   expect(parseToHost({ type: "questionAction", round: 3, action: { type: "explode" } }).ok).toBe(false);

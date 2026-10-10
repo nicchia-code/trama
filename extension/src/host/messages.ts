@@ -46,6 +46,8 @@ function parseQuestionAction(value: unknown): QuestionAction | string {
   switch (type) {
     case "toggleOption":
       return Number.isInteger(raw["option"]) ? { type, option: raw["option"] as number } : "toggleOption needs an option index";
+    case "pressKey":
+      return Number.isInteger(raw["option"]) ? { type, option: raw["option"] as number } : "pressKey needs an option index";
     case "openQuestion":
       return Number.isInteger(raw["index"]) ? { type, index: raw["index"] as number } : "openQuestion needs a question index";
     case "setText":

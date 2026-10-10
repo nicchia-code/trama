@@ -7,9 +7,12 @@ const aliveAt = new Map<string, number>();
 const commandAt = new Map<string, number>();
 let readOnlyAt = 0;
 
-/** A command of an agent reached the editor: a read-only one counts for every announcement, any one for its terminal. */
+/**
+ * A command of an agent reached the editor: a read-only one of a terminal or Cursor's chat counts for every announcement,
+ * any one for its terminal. An origin-less read-only command (a chat that is not Cursor's) counts for no announcement.
+ */
 export function noteCommandSeen(origin: AgentOrigin, readOnly: boolean, now = Date.now()): void {
-  if (readOnly) readOnlyAt = now;
+  if (readOnly && Object.keys(origin).length > 0) readOnlyAt = now;
   if (origin.terminal !== undefined) commandAt.set(origin.terminal, now);
 }
 

@@ -57,6 +57,8 @@ describe("resolution Proposals", () => {
     refused(r.id, a.id, { decision: "fix-code", option: 3 }, /option must be chosen/);
     refused(r.id, a.id, { decision: "dismissed", option: 1 }, /only goes with fix-code/);
     refused(r.id, a.id, { decision: "proposal", note: "x" }, /only goes with fix-code/);
+    refused(r.id, a.id, { decision: "dismissed", note: "" }, /only goes with fix-code/);
+    refused(r.id, a.id, { decision: "proposal", note: "   " }, /only goes with fix-code/);
     resolveDriftInProposal(p, r.id, a.id, { decision: "dismissed" });
     const other = resolution();
     refused(other.id, a.id, { decision: "dismissed" }, /already in resolution/);
@@ -156,7 +158,8 @@ describe("approving a resolution", () => {
     writeFileSync(getDrift(p, b.id).path, readFileSync(getDrift(p, b.id).path, "utf8").replace("- order", "- gone"));
 
     expect(approvalBlock(p, r.id)?.kind).toBe("unfixable");
-    expect(buildSnapshot(p).proposals.find((x) => x.id === r.id)?.errors.map((e) => e.message).join()).toMatch(/no longer exist/);
+    expect(buildSnapshot(p).proposals.find((x) => x.id === r.id)?.unfixable.join()).toMatch(/no longer exist/);
+    expect(buildSnapshot(p).proposals.find((x) => x.id === r.id)?.errors).toEqual([]);
     expect(() => approveProposal(p, r.id)).toThrow(/no longer exist/);
     expect(getProposal(p, r.id).data.status).toBe("open");
     expect([getDrift(p, a.id).data.status, getDrift(p, b.id).data.status]).toEqual(["open", "open"]);

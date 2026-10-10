@@ -499,8 +499,9 @@ export function chosenOption(p: Project, drift: Drift, option: number | undefine
 export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-proposal" | "dismiss", skillsDirs: string[] = [], choice: FixChoice = {}): Drift {
   const drift = getDrift(p, id);
   if (drift.data.status !== "open") throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is already resolved`);
+  // A note is refused with accepting or dismissing even when empty: the check looks at the note as given, before it is cleaned.
   const note = choice.note?.trim() || null;
-  if (how !== "fix-code" && (choice.option !== undefined || note !== null))
+  if (how !== "fix-code" && (choice.option !== undefined || choice.note !== undefined))
     throw new TramaError(`Drift ${cardName(p, "drift", drift.id)}: ${choice.option !== undefined ? "an option" : "a note"} only goes with fixing the code, not with ${how === "dismiss" ? "dismissing" : "accepting the Proposal"}`);
   if (how === "fix-code") {
     fixCode(p, drift, choice.option, note);

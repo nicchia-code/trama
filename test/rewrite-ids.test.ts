@@ -97,6 +97,23 @@ test("rewrites numbered cards to a stable identity, keeps the slug, the body and
   expect(rewrittenInstant("0012") > rewrittenInstant("0001")).toBe(true);
 });
 
+test("a resolution keeps listing its numbered Drifts under their new identities, with the same decisions", () => {
+  writeCard("drifts", "0004-late.md", "status: open\nrefs: [order]\norigin: null", "# Late\n\n## What happens\n\nCode.\n\n## What should happen\n\nModel.\n");
+  writeCard("drifts", "0006-old.md", "status: resolved\nrefs: [order]\norigin: null\nresolution: dismissed\nresolvedBy: \"0005\"", "# Old\n\n## What happens\n\nCode.\n\n## What should happen\n\nModel.\n");
+  writeCard("proposals", "0005-fix", "kind: resolution\nstatus: open\nbase: {}\ndelete: []\ndrifts:\n  - { drift: \"0004\", decision: proposal }\n  - { drift: \"0006\", decision: dismissed }", "# Fix\n\nDecide.\n");
+
+  expect(cli("ids", "rewrite").exit).toBe(0);
+  const fixId = rewrittenId("proposal", "0005");
+  const lateId = rewrittenId("drift", "0004");
+  const oldId = rewrittenId("drift", "0006");
+  const fix = getProposal(p, fixId);
+  expect(fix.data.drifts).toEqual([
+    { drift: lateId, decision: "proposal" },
+    { drift: oldId, decision: "dismissed" },
+  ]);
+  expect(getDrift(p, oldId).data).toMatchObject({ status: "resolved", resolvedBy: fixId });
+});
+
 test("does nothing when no card is numbered, and refuses before writing when numbers or identities collide", () => {
   writeCard("tasks", "abcd1111-free.md", "column: todo\ntechnical: true\nrefs: []\ncreated: 2020-01-01T00:00:00.000Z", "# Free\n");
   expect(cli("ids", "rewrite").out).toBe("No numbered Proposal, Task or Drift to rewrite.");

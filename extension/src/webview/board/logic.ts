@@ -189,21 +189,23 @@ export function summarizeChanges(changes: FileChange[], maxFiles = MAX_FILES): C
 const listed = (items: string[]) => (items.length > MAX_TOOLTIP_ITEMS ? `${items.slice(0, MAX_TOOLTIP_ITEMS).join("\n")}\nand ${items.length - MAX_TOOLTIP_ITEMS} more` : items.join("\n"));
 
 /** The reason a Proposal cannot be approved, or null. Mirrors what the host refuses. */
-export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "requires">, numbers: CardNumbers = noNumbers): string | null {
+export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires">, numbers: CardNumbers = noNumbers): string | null {
   if (p.requires.length > 0) return `Approve the required Proposals first:\n${requiredReasons(p.requires, (id) => namerOf(numbers)("proposal", id)).join("\n")}`;
   if (p.stale.length > 0) return "Stale: the Model changed since this Proposal touched it. Ask the agent for a new Proposal.";
   if (p.unbased.length > 0) return "Some files were never registered with the Proposal.";
   if (p.errors.length > 0) return "Applying this Proposal would leave the Model or its Requirements invalid.";
+  if (p.unfixable.length > 0) return `Cannot be approved, nothing changed:\n${listed(p.unfixable)}\nHave Resolve Drifts rewrite the resolution.`;
   return null;
 }
 
-export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "requires" | "kind">, numbers: CardNumbers = noNumbers): Badge[] {
+export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires" | "kind">, numbers: CardNumbers = noNumbers): Badge[] {
   const badges: Badge[] = [];
   if (p.kind === "import") badges.push({ label: "import", tone: "info", tooltip: "Describes existing code; approving it starts no Scan" });
   for (const r of p.requires)
     badges.push({ label: `requires ${namerOf(numbers)("proposal", r.id)}`, tone: appliesUnder(r.status) ? "info" : "error", tooltip: requiredReasons([r], (id) => namerOf(numbers)("proposal", id)).join("") });
   if (p.stale.length > 0) badges.push({ label: "stale", tone: "warning", tooltip: `The Model changed since the Proposal touched:\n${listed(p.stale)}` });
   if (p.errors.length > 0) badges.push({ label: "invalid", tone: "error", tooltip: `The Model or its Requirements would be invalid:\n${listed(p.errors.map(formatDiagnostic))}` });
+  if (p.unfixable.length > 0) badges.push({ label: "unfixable", tone: "error", tooltip: `Resolve Drifts must rewrite the resolution; these Drifts' code can no longer be fixed:\n${listed(p.unfixable)}` });
   if (p.unbased.length > 0) badges.push({ label: "unregistered files", tone: "warning", tooltip: `Never registered with the Proposal:\n${listed(p.unbased)}` });
   return badges;
 }

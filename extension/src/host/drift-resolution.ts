@@ -9,7 +9,7 @@ import { questionRoundClosedAt, questionRoundOpen } from "./question-activity";
  */
 export type JobKind = "run" | "resolve";
 
-/** The terminal (its identity) or the chat a job runs in; a chat is Cursor's, whose turns end visibly, or another editor's. */
+/** The terminal (its identity) or the chat a job runs in: Cursor's, whose end is seen once bound (see `startJob`), or another editor's. */
 export type JobPlace = { terminal: string } | { chat: "cursor" | "other" };
 
 /** The State of the `drift-resolution` Machine. */
@@ -74,12 +74,17 @@ export function onAgentIdle(listener: (terminal: string, root: string) => void):
 
 /**
  * A job begins when its instruction is really written in the terminal or sent by the chat by itself; never for one left
- * ready in the chat or copied to the clipboard. `endVisible` is false for an external window, a chat that is not
- * Cursor's and (until its commands are seen starting) a terminal without shell integration.
+ * ready in the chat or copied to the clipboard. `endVisible` is false for an external window, a chat that is not Cursor's
+ * and (until its commands are seen starting) a terminal without shell integration. A Cursor chat job's end is seen only
+ * once it is bound to its conversation (see `bindChatJob`): until then it is quiet like a job whose end is not seen.
+ * `sentAt` is when its send began: a chat job binds only a conversation that started from then on, never one begun before the send.
  */
-export function startJob(kind: JobKind, root: string, place: JobPlace, endVisible: boolean, now = Date.now()): void {
+export function startJob(kind: JobKind, root: string, place: JobPlace, endVisible: boolean, now = Date.now(), sentAt = now): void {
   const job: Job = { kind, root, place, endVisible, lastActivity: now };
-  if ("chat" in place && place.chat === "cursor") job.conversation = takePendingChat(root, now);
+  if ("chat" in place && place.chat === "cursor") {
+    job.conversation = takePendingChat(root, sentAt, now);
+    job.endVisible = job.conversation !== undefined;
+  }
   jobs.add(job);
   changed();
 }
@@ -105,17 +110,18 @@ const pendingChats: { root: string; conversation: string; at: number }[] = [];
 /** How long a new conversation waits for its job to be registered; ponytail: a job registered later never binds it, add a retry if that happens. */
 const PENDING_CHAT_MS = 10_000;
 
-/** Takes the oldest conversation of `root` that started within `PENDING_CHAT_MS`, dropping the expired ones. */
-function takePendingChat(root: string, now: number): string | undefined {
+/** Takes the oldest conversation of `root` that started at or after `sentAt` and within `PENDING_CHAT_MS`, dropping the expired ones. */
+function takePendingChat(root: string, sentAt: number, now: number): string | undefined {
   const live = pendingChats.filter((p) => now - p.at < PENDING_CHAT_MS);
-  const taken = live.find((p) => p.root === root);
+  const taken = live.find((p) => p.root === root && p.at >= sentAt);
   pendingChats.splice(0, pendingChats.length, ...live.filter((p) => p !== taken));
   return taken?.conversation;
 }
 
 /**
  * Cursor's chat started a Trama conversation in the project at `root`: a conversation seen for the first time takes the
- * oldest chat job sent and not yet bound, or waits for the next one; any later prompt of it does nothing.
+ * oldest chat job sent and not yet bound, or waits for the next one; any later prompt of it does nothing. From the binding
+ * on, only that conversation's end ends the job.
  */
 export function bindChatJob(root: string, conversation: string, now = Date.now()): void {
   const key = `${root}\n${conversation}`;
@@ -124,6 +130,7 @@ export function bindChatJob(root: string, conversation: string, now = Date.now()
   for (const job of jobs) {
     if (job.root === root && "chat" in job.place && job.place.chat === "cursor" && job.conversation === undefined) {
       job.conversation = conversation;
+      job.endVisible = true;
       return;
     }
   }

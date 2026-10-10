@@ -32,6 +32,7 @@ export interface QuestionRoundState {
 /** What the developer does on the overlay. */
 export type QuestionAction =
   | { type: "toggleOption"; option: number }
+  | { type: "pressKey"; option: number }
   | { type: "setText"; text: string }
   | { type: "next" }
   | { type: "skip" }
@@ -158,6 +159,14 @@ export function applyQuestionAction(state: QuestionRoundState, action: QuestionA
       const has = draft.selected.includes(n);
       // Single choice: clicking the selected option clears it, so the answer can be the text alone.
       const selected = question.multi ? (has ? draft.selected.filter((x) => x !== n) : [...draft.selected, n].sort((a, b) => a - b)) : has ? [] : [n];
+      return withDraft({ ...draft, selected });
+    }
+    case "pressKey": {
+      // A digit key selects in a single choice and never clears it; in a multiple choice it toggles like a click.
+      const n = action.option;
+      if (!Number.isInteger(n) || n < 0 || n >= question.options.length) return refused("there is no such option");
+      const has = draft.selected.includes(n);
+      const selected = question.multi ? (has ? draft.selected.filter((x) => x !== n) : [...draft.selected, n].sort((a, b) => a - b)) : [n];
       return withDraft({ ...draft, selected });
     }
     case "setText":

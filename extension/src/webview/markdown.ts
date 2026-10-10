@@ -277,8 +277,10 @@ const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 const QUOTE = /^ {0,3}>/;
 const ITEM = /^( *)([-*+]|\d{1,9}[.)])[ \t]+(.*)$/;
 const BLANK = /^\s*$/;
-/** The separator row of a table (`|---|:--:|`): tables are not supported, so their lines show as written. */
+/** A table's header row (`| a | b |`) followed by its separator row (`|---|:--:|`): tables are not supported, so their lines show as written. */
 const TABLE_SEPARATOR = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+const tableStart = (lines: string[], i: number): boolean =>
+  (lines[i] as string).includes("|") && i + 1 < lines.length && (lines[i + 1] as string).includes("-") && TABLE_SEPARATOR.test(lines[i + 1] as string);
 
 const startsBlock = (line: string): boolean => FENCE.test(line) || HEADING.test(line) || QUOTE.test(line) || ITEM.test(line);
 
@@ -375,11 +377,12 @@ function parseBlocks(lines: string[]): Block[] {
 
     const para: string[] = [];
     const first = i;
-    while (i < lines.length && !BLANK.test(lines[i] as string) && (para.length === 0 || !startsBlock(lines[i] as string))) {
+    // A table that follows a line of text starts a new block, so its rows keep their place.
+    while (i < lines.length && !BLANK.test(lines[i] as string) && (para.length === 0 || (!startsBlock(lines[i] as string) && !tableStart(lines, i)))) {
       para.push((lines[i] as string).trimStart());
       i++;
     }
-    if (para.length >= 2 && (para[0] as string).includes("|") && TABLE_SEPARATOR.test(para[1] as string) && (para[1] as string).includes("-")) {
+    if (tableStart(lines, first)) {
       blocks.push({ t: "code", lang: "", text: lines.slice(first, i).join("\n") });
       continue;
     }
