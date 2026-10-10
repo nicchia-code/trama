@@ -1,6 +1,6 @@
 import type { Change, MergedMachine, MergedState } from "../../../../src/core/merge";
 import { type CardNumbers, noNumbers } from "../../../../src/core/card-names";
-import type { DriftView, ProposalView, Snapshot } from "../../../../src/core/snapshot";
+import type { AreaView, DriftView, ProposalView, Snapshot } from "../../../../src/core/snapshot";
 import type { Machine, State } from "../../../../src/core/types";
 
 export interface SceneEvent {
@@ -41,6 +41,8 @@ export interface Scene {
   /** The short numbers of the live cards, to write cards the way the Board does. */
   numbers: CardNumbers;
   drifts: DriftView[];
+  /** The Requirement Areas as they are now, for the Requirement references of Drifts. */
+  areas: AreaView[];
 }
 
 function mergedState(s: State): MergedState {
@@ -122,6 +124,7 @@ export function buildScene(snapshot: Snapshot, proposalId: string | null): Scene
     files: new Map(model.machines.map((m) => [m.id, m.file])),
     proposal,
     drifts: snapshot.drifts,
+    areas: snapshot.areas,
     numbers: snapshot.numbers ?? noNumbers,
   };
 }

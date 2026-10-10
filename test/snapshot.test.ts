@@ -113,6 +113,16 @@ test("a Proposal that would leave the Model invalid reports the errors instead o
   expect(view?.errors.map((e) => e.message)).toEqual([expect.stringContaining('unknown State "Nowhere"')]);
 });
 
+test("the snapshot leaves out a Proposal attached to an open Drift and lists the others", () => {
+  const held = newProposal(p, "Held");
+  const free = newProposal(p, "Free");
+  handOver(p, held.id);
+  handOver(p, free.id);
+  expect(buildSnapshot(p).proposals.map((x) => x.id).sort()).toEqual([held.id, free.id].sort());
+  newDrift(p, { options: FIX_OPTIONS, title: "Holds", refs: ["payment"], proposal: held.id, happens: "Code differs.", should: "Model says so." });
+  expect(buildSnapshot(p).proposals.map((x) => x.id)).toEqual([free.id]);
+});
+
 test("an open Drift carries its two sides and why its attached Proposal cannot be approved, stale included", () => {
   const prop = newProposal(p, "Lost orders");
   const payment = editInProposal(p, prop.id, "checkout/payment.md");

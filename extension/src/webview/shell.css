@@ -42,43 +42,6 @@ button.trama-switch[aria-checked="true"] .trama-switch-thumb { left: 14px; }
 .drift-compare-head { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .drift-compare-source { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: .7; }
 .drift-compare-text { flex: 1; margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.drift-compare-where { margin: 0 0 10px; padding: 6px 10px; border: 1px solid var(--vscode-panel-border, #444); border-radius: 3px; }
-.drift-compare-where-head { cursor: pointer; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-.drift-compare-where-text { margin-top: 6px; }
-.drift-compare-col > button { align-self: flex-start; }
-.drift-attached-frame { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border: 1px solid var(--vscode-focusBorder, #007fd4); border-radius: 3px; }
-.drift-attached { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.drift-attached-head { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-.drift-attached-title { overflow-wrap: anywhere; }
-.drift-attached-id { font-family: var(--vscode-editor-font-family, monospace); }
-.drift-attached-state { margin: 0; font-style: italic; opacity: .8; }
-.drift-attached-files { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
-.drift-attached-file { display: flex; gap: 8px; justify-content: space-between; }
-.drift-attached-path { overflow-wrap: anywhere; }
-.drift-attached-counts, .drift-attached-more { white-space: nowrap; opacity: .7; font-variant-numeric: tabular-nums; }
-.drift-attached-ghost { opacity: .7; border: 1px dashed currentColor; border-radius: 3px; padding: 4px 6px; user-select: none; }
-.drift-attached-skeleton { display: flex; flex-direction: column; gap: 6px; }
-.drift-attached-line {
-  display: block;
-  height: 8px;
-  border-radius: 4px;
-  background: linear-gradient(90deg, color-mix(in srgb, currentColor 10%, transparent) 25%, color-mix(in srgb, currentColor 28%, transparent) 50%, color-mix(in srgb, currentColor 10%, transparent) 75%);
-  background-size: 200% 100%;
-  animation: drift-shimmer 1.4s linear infinite;
-}
-.drift-attached-line.is-short { width: 60%; }
-@keyframes drift-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-@media (prefers-reduced-motion: reduce) { .drift-attached-line { animation: none; } }
-.drift-attached-views { display: flex; flex-wrap: wrap; gap: 6px; }
-.drift-compare-consequence { margin: 0; font-size: 12px; opacity: .8; }
-.drift-fix { display: flex; flex-direction: column; gap: 6px; }
-.drift-fix-head { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-.drift-options { display: flex; flex-direction: column; gap: 6px; }
-.drift-option { display: grid; grid-template-columns: auto 1fr; column-gap: 6px; align-items: baseline; }
-.drift-option-title { cursor: pointer; }
-.drift-option-text { grid-column: 2; margin: 0; min-width: 0; overflow-wrap: anywhere; opacity: .85; }
-.drift-note { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
-.drift-note-field { font: inherit; resize: vertical; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #444)); border-radius: 2px; padding: 4px 6px; }
 .md, .md-inline { overflow-wrap: anywhere; user-select: text; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
@@ -90,8 +53,8 @@ button.trama-switch[aria-checked="true"] .trama-switch-thumb { left: 14px; }
 .md .md-heading { margin: .8em 0 .3em; font-size: 1em; font-weight: 700; }
 .md .md-h3, .md .md-h4 { font-weight: 600; }
 .md .md-h5, .md .md-h6 { font-weight: 600; font-style: italic; }
-/* A Drift's texts sit under 11px headings (the two sides, the fix options, where in the code): their own headings never exceed them. */
-.drift-compare-text .md-heading, .drift-compare-where-text .md-heading, .drift-option-text .md-heading { font-size: 11px; }
+/* A Drift's texts sit under 11px headings: their own headings never exceed them. */
+.drift-compare-text .md-heading { font-size: 11px; }
 .md code, .md-inline code { font-family: var(--vscode-editor-font-family, monospace); font-size: .95em; padding: 0 .25em; border-radius: 3px; background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, .2)); }
 .md pre { margin: 0 0 .6em; padding: 6px 8px; overflow-x: auto; border-radius: 3px; background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, .2)); max-width: 100%; }
 .md pre code { padding: 0; background: none; font-size: .95em; white-space: pre; overflow-wrap: normal; }

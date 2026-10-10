@@ -658,6 +658,93 @@ describe("withdrawing the ghosts", () => {
     withdrawAll(p);
   });
 
+  test("closing a hooked agent terminal releases the Tasks it took; closing another terminal releases nothing", async () => {
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { setHooked } = await import("../extension/src/host/drift-resolution");
+    const p = projectAt(dir);
+    const watching = watchAgentTerminal();
+    try {
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
+      const terminal = terminals.at(-1) as FakeTerminal;
+      const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      setHooked(id, true);
+      const task = moveTask(p, newTask(p, { title: "Hooked", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: id }).id;
+      listeners.close.forEach((fn) => fn({ ...terminal }));
+      expect(getTask(p, task).data.column).toBe("doing");
+      listeners.close.forEach((fn) => fn(terminal));
+      expect(getTask(p, task).data.column).toBe("todo");
+    } finally {
+      watching.dispose();
+    }
+  });
+
+  test("the end of a hooked agent's command releases the Tasks that terminal took, not those of another terminal", async () => {
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { setHooked } = await import("../extension/src/host/drift-resolution");
+    const p = projectAt(dir);
+    const watching = watchAgentTerminal();
+    try {
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
+      const terminal = terminals.at(-1) as FakeTerminal;
+      const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      setHooked(id, true);
+      const take = (terminalId: string) => moveTask(p, newTask(p, { title: "Hooked", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: terminalId }).id;
+      const mine = take(id);
+      const other = take("other-terminal");
+      listeners.end.forEach((fn) => fn(shell(terminal)));
+      expect(getTask(p, mine).data.column).toBe("todo");
+      expect(getTask(p, other).data.column).toBe("doing");
+    } finally {
+      watching.dispose();
+    }
+  });
+
+  test("a hooked agent in an external window gives back its Tasks after the quiet period; a plain one keeps them", async () => {
+    const { releaseQuietHookedTasks, startExternalRun, watchExternalRuns } = await import("../extension/src/host/agent");
+    const { QUIET_PERIOD_MS } = await import("../src/core/announcements");
+    const p = projectAt(dir);
+    const markers = mkdtempSync(join(tmpdir(), "trama-quiet-external-"));
+    const external = watchExternalRuns(markers);
+    try {
+      startExternalRun(dir, "hook01", "true", "Hooked", undefined, undefined, true).sent();
+      startExternalRun(dir, "plain1", "true", "Plain").sent();
+      const hooked = moveTask(p, newTask(p, { title: "Hooked external", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: "hook01" }).id;
+      const plain = moveTask(p, newTask(p, { title: "Plain external", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: "plain1" }).id;
+      releaseQuietHookedTasks(Date.now());
+      expect(getTask(p, hooked).data.column).toBe("doing");
+      releaseQuietHookedTasks(Date.now() + QUIET_PERIOD_MS + 1000);
+      expect(getTask(p, hooked).data.column).toBe("todo");
+      expect(getTask(p, plain).data.column).toBe("doing");
+    } finally {
+      external.dispose();
+    }
+  });
+
+  test("a hooked external window stays followed after its first release: a Task it takes later goes back after that quiet period too", async () => {
+    const { releaseQuietHookedTasks, startExternalRun, watchExternalRuns } = await import("../extension/src/host/agent");
+    const { noteCommandSeen } = await import("../extension/src/host/terminal-activity");
+    const { QUIET_PERIOD_MS } = await import("../src/core/announcements");
+    const p = projectAt(dir);
+    const markers = mkdtempSync(join(tmpdir(), "trama-quiet-external-again-"));
+    const external = watchExternalRuns(markers);
+    try {
+      startExternalRun(dir, "hook02", "true", "Hooked again", undefined, undefined, true).sent();
+      const first = moveTask(p, newTask(p, { title: "First external", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: "hook02" }).id;
+      releaseQuietHookedTasks(Date.now() + QUIET_PERIOD_MS + 1000);
+      expect(getTask(p, first).data.column).toBe("todo");
+      // The agent works again in the same window: its command is seen, then it takes another Task.
+      const resumed = Date.now() + 2 * QUIET_PERIOD_MS;
+      noteCommandSeen({ terminal: "hook02" }, false, resumed);
+      const second = moveTask(p, newTask(p, { title: "Second external", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: "hook02" }).id;
+      releaseQuietHookedTasks(resumed + QUIET_PERIOD_MS - 1);
+      expect(getTask(p, second).data.column).toBe("doing");
+      releaseQuietHookedTasks(resumed + QUIET_PERIOD_MS);
+      expect(getTask(p, second).data.column).toBe("todo");
+    } finally {
+      external.dispose();
+    }
+  });
+
   test("only the announcements of the terminal that ended or closed go; those of another terminal and of none stay", async () => {
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const p = projectAt(dir);
@@ -1296,6 +1383,278 @@ describe("Requirement skills in a multi-root workspace", () => {
       vi.useRealTimers();
       workspaceRoots = undefined;
       for (const root of roots) rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the Runs and Resolve Drifts a window has not seen end", () => {
+  test("a Run in a terminal lasts until the command Trama typed ends or the terminal closes, and Drift resolution is Free only when the last Run is over", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { driftResolution, endTerminalJobs } = await import("../extension/src/host/drift-resolution");
+    const watching = watchAgentTerminal();
+    try {
+      expect(driftResolution()).toBe("free");
+      await launchAgent(dir, "Scan", "Scan"); // not a Run: the buttons of the Runs and of Resolve Drifts say so
+      expect(driftResolution()).toBe("free");
+
+      await launchAgent(dir, "Run one", "One", undefined, false, () => true, "run");
+      const one = terminals.at(-1) as FakeTerminal;
+      listeners.start.forEach((fn) => fn(shell(one)));
+      await launchAgent(dir, "Run two", "Two", undefined, false, () => true, "run");
+      const two = terminals.at(-1) as FakeTerminal;
+      listeners.start.forEach((fn) => fn(shell(two)));
+      expect(driftResolution()).toBe("running-tasks");
+
+      listeners.end.forEach((fn) => fn(shell(one, "another command"))); // the end of another command counts for nothing
+      expect(driftResolution()).toBe("running-tasks");
+      listeners.end.forEach((fn) => fn(shell(one)));
+      expect(driftResolution()).toBe("running-tasks");
+      listeners.close.forEach((fn) => fn(two));
+      expect(driftResolution()).toBe("free");
+
+      await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, false, () => true, "resolve");
+      const resolving = terminals.at(-1) as FakeTerminal;
+      expect(driftResolution()).toBe("resolving");
+      listeners.close.forEach((fn) => fn(resolving));
+      expect(driftResolution()).toBe("free");
+      endTerminalJobs("none"); // ending what is not followed changes nothing
+    } finally {
+      watching.dispose();
+    }
+  });
+
+  test("Resolve Drifts and the Runs are checked again when the instruction is sent: a double click or a Run started meanwhile sends nothing, and the Drifts are those open at that moment", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { driftResolution } = await import("../extension/src/host/drift-resolution");
+    const { receiveCursorHook } = await import("../extension/src/host/cursor");
+    const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
+    const watching = watchAgentTerminal();
+    const queries: string[] = [];
+    let open = ["d1"];
+    settingValues["agentLauncher"] = "chat";
+    editor.appName = "Cursor";
+    commandHandler = async (id, ...args) => {
+      await delay(20); // the chat takes its time: the second request arrives before the first is sent
+      if (id === "composer.createNew") queries.push((args[0] as { partialState: { text: string } }).partialState.text);
+    };
+    const resolveOk = () => driftResolution() === "free";
+    const runOk = () => driftResolution() !== "resolving";
+    try {
+      const resolve = () => launchAgent(dir, () => `Resolve ${open.join(",")}`, "Resolve Drifts", undefined, false, resolveOk, "resolve");
+      const run = () => launchAgent(dir, "Run", "Run", undefined, false, runOk, "run");
+
+      // Double click: one agent only, and its instruction names the Drifts open when it is sent.
+      const first = resolve();
+      open = ["d1", "d2"];
+      const second = resolve();
+      expect(await Promise.all([first, second])).toEqual(["sent", "not-sent"]);
+      expect(queries).toHaveLength(1);
+      expect(queries[0]).toContain("Resolve d1,d2");
+      expect(driftResolution()).toBe("resolving");
+      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "c1"); // the chat starts the conversation of the job
+
+      // A Run asked while Resolve Drifts works sends nothing.
+      expect(await run()).toBeUndefined();
+      turn({ hook: "stop", status: "completed" }, "c1");
+      expect(driftResolution()).toBe("free");
+
+      // A Run and Resolve Drifts asked together: the first to send wins, the other sends nothing.
+      queries.length = 0;
+      const runFirst = run();
+      const resolveSecond = resolve();
+      expect(await Promise.all([runFirst, resolveSecond])).toEqual(["sent", "not-sent"]);
+      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "c2");
+      expect(driftResolution()).toBe("running-tasks");
+      expect(queries).toHaveLength(1);
+    } finally {
+      turn({ hook: "stop", status: "completed" }, "c1");
+      turn({ hook: "stop", status: "completed" }, "c2");
+      delete settingValues["agentLauncher"];
+      editor.appName = "Visual Studio Code";
+      commandHandler = () => undefined;
+      watching.dispose();
+    }
+  });
+
+  test("a job in Cursor's chat begins only when the chat sends it by itself and ends with the first turn end, interruption or closing that follows", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { receiveCursorHook } = await import("../extension/src/host/cursor");
+    const { driftResolution } = await import("../extension/src/host/drift-resolution");
+    const watching = watchAgentTerminal();
+    let conversation = "";
+    let loops = 0;
+    const hook = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ root: dir, conversation, ...h });
+    editor.appName = "Cursor";
+    try {
+      commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
+      expect(await launchAgent(dir, "Run", "Run", undefined, false, () => true, "run")).toBe("confirm"); // waits for the developer's Enter
+      clipboard.length = 0;
+      expect(await launchAgent(dir, "Read .env", "Run", undefined, false, () => true, "run")).toBe("clipboard");
+      expect(driftResolution()).toBe("free");
+
+      commandHandler = () => undefined;
+      for (const end of [{ hook: "stop", status: "completed" }, { hook: "stop", status: "error" }, { hook: "sessionEnd", reason: "window_close" }] as const) {
+        conversation = `j${loops++}`; // each job's chat is a new conversation
+        expect(await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, false, () => true, "resolve")).toBe("sent");
+        hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
+        expect(driftResolution()).toBe("resolving");
+        hook({ hook: "stop", status: "completed", conversation: "not-trama" });
+        expect(driftResolution()).toBe("resolving");
+        hook(end);
+        expect(driftResolution()).toBe("free");
+      }
+    } finally {
+      editor.appName = "Visual Studio Code";
+      commandHandler = () => undefined;
+      watching.dispose();
+    }
+  });
+
+  test("a Cursor chat job binds only the conversation that starts after its send: a later prompt of a conversation already seen takes no job, and a first prompt that arrives just before its job waits for it", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { receiveCursorHook } = await import("../extension/src/host/cursor");
+    const { driftResolution } = await import("../extension/src/host/drift-resolution");
+    const watching = watchAgentTerminal();
+    const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
+    const run = () => launchAgent(dir, "Run", "Run", undefined, false, () => true, "run");
+    const resolve = () => launchAgent(dir, "Resolve", "Resolve Drifts", undefined, false, () => true, "resolve");
+    settingValues["agentLauncher"] = "chat";
+    editor.appName = "Cursor";
+    commandHandler = () => undefined;
+    try {
+      // A first prompt that arrives before its job is registered waits for the job.
+      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "early");
+      expect(await run()).toBe("sent");
+      turn({ hook: "stop", status: "completed" }, "early");
+      expect(driftResolution()).toBe("free");
+
+      // A later prompt of a conversation already seen takes no job: the next new conversation does.
+      expect(await resolve()).toBe("sent");
+      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "p");
+      expect(await run()).toBe("sent");
+      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "p");
+      turn({ hook: "stop", status: "completed" }, "p");
+      expect(driftResolution()).toBe("running-tasks");
+      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "q");
+      turn({ hook: "stop", status: "completed" }, "q");
+      expect(driftResolution()).toBe("free");
+    } finally {
+      for (const c of ["early", "p", "q"]) turn({ hook: "sessionEnd", reason: "window_close" }, c);
+      delete settingValues["agentLauncher"];
+      editor.appName = "Visual Studio Code";
+      commandHandler = () => undefined;
+      watching.dispose();
+    }
+  });
+
+  test("a chat job ends only with the turn of its own Trama conversation: another conversation's end, interruption or closing leaves it running", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { receiveCursorHook } = await import("../extension/src/host/cursor");
+    const { driftResolution } = await import("../extension/src/host/drift-resolution");
+    const watching = watchAgentTerminal();
+    const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
+    const run = () => launchAgent(dir, "Run", "Run", undefined, false, () => true, "run");
+    const resolve = () => launchAgent(dir, "Resolve", "Resolve Drifts", undefined, false, () => true, "resolve");
+    const conversations: string[] = [];
+    settingValues["agentLauncher"] = "chat";
+    editor.appName = "Cursor";
+    commandHandler = () => undefined;
+    const ends = [{ hook: "stop", status: "completed" }, { hook: "stop", status: "aborted" }, { hook: "sessionEnd", reason: "user_close" }] as const;
+    try {
+      // Two Runs, each in its own conversation: the end of one of them leaves the other running.
+      for (const [i, end] of ends.entries()) {
+        const [first, second] = [`${i}a`, `${i}b`];
+        conversations.push(first, second);
+        expect(await run()).toBe("sent");
+        turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, first);
+        expect(await run()).toBe("sent");
+        turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, second);
+        expect(driftResolution()).toBe("running-tasks");
+        turn({ hook: "stop", status: "completed" }, "not-trama");
+        turn(end, first);
+        expect(driftResolution()).toBe("running-tasks");
+        turn(end, second);
+        expect(driftResolution()).toBe("free");
+      }
+
+      // Resolve Drifts keeps working when a Run's conversation ends, and ends only with its own.
+      conversations.push("r", "u");
+      expect(await resolve()).toBe("sent");
+      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "r");
+      expect(await run()).toBe("sent");
+      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "u");
+      expect(driftResolution()).toBe("resolving");
+      turn({ hook: "stop", status: "completed" }, "u");
+      expect(driftResolution()).toBe("resolving");
+      turn({ hook: "stop", status: "error" }, "r");
+      expect(driftResolution()).toBe("free");
+    } finally {
+      for (const c of conversations) turn({ hook: "sessionEnd", reason: "window_close" }, c);
+      delete settingValues["agentLauncher"];
+      editor.appName = "Visual Studio Code";
+      commandHandler = () => undefined;
+      watching.dispose();
+    }
+  });
+  test("a job whose end is not seen is over after fifteen quiet minutes, which an agent command that changed something restarts and an open question round pauses", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { driftResolution, endQuietJobs, endTerminalJobs, endIsVisible, noteActivity, setHooked, startJob } = await import("../extension/src/host/drift-resolution");
+    const { questionRoundClosedAt, trackRound } = await import("../extension/src/host/question-activity");
+    const { QUIET_PERIOD_MS } = await import("../src/core/announcements");
+    const t0 = Date.now();
+    try {
+      startJob("run", dir, { terminal: "aaaaaa" }, false, t0);
+      startJob("run", dir, { terminal: "bbbbbb" }, false, t0);
+      startJob("run", dir, { terminal: "cccccc" }, true, t0); // its end is seen: never quiet
+      noteActivity({ terminal: "aaaaaa" }, t0 + QUIET_PERIOD_MS - 1);
+      endQuietJobs(t0 + QUIET_PERIOD_MS - 1);
+      expect(driftResolution()).toBe("running-tasks");
+      endQuietJobs(t0 + QUIET_PERIOD_MS); // bbbbbb is over, aaaaaa was seen working a moment ago
+      endTerminalJobs("cccccc");
+      expect(driftResolution()).toBe("running-tasks");
+      endQuietJobs(t0 + 2 * QUIET_PERIOD_MS - 2);
+      expect(driftResolution()).toBe("running-tasks");
+      endQuietJobs(t0 + 2 * QUIET_PERIOD_MS - 1);
+      expect(driftResolution()).toBe("free");
+
+      startJob("run", dir, { terminal: "dddddd" }, false, t0);
+      endIsVisible("dddddd"); // its command was seen starting, so its end will be seen
+      endQuietJobs(t0 + 10 * QUIET_PERIOD_MS);
+      expect(driftResolution()).toBe("running-tasks");
+      endTerminalJobs("dddddd");
+
+      // A hooked agent's job: its command's end never ends it, but the quiet period does, and its heartbeat restarts that period.
+      startJob("run", dir, { terminal: "eeeeee" }, true, t0);
+      setHooked("eeeeee", true);
+      endIsVisible("eeeeee");
+      endQuietJobs(t0 + QUIET_PERIOD_MS - 1);
+      expect(driftResolution()).toBe("running-tasks");
+      noteActivity({ terminal: "eeeeee" }, t0 + QUIET_PERIOD_MS - 1);
+      endQuietJobs(t0 + 2 * QUIET_PERIOD_MS - 2);
+      expect(driftResolution()).toBe("running-tasks");
+      endQuietJobs(t0 + 2 * QUIET_PERIOD_MS - 1);
+      expect(driftResolution()).toBe("free");
+      setHooked("eeeeee", false);
+
+      startJob("resolve", dir, { chat: "other" }, false, t0);
+      noteActivity({}, t0); // an agent Trama cannot tell, in a chat that is not Cursor's
+      const round = Promise.withResolvers<never>();
+      void trackRound(() => round.promise)({} as never, {} as never).catch(() => undefined);
+      endQuietJobs(t0 + QUIET_PERIOD_MS + 5);
+      expect(driftResolution()).toBe("resolving"); // paused while a round is open
+      round.reject(new Error("closed"));
+      await delay(0);
+      endQuietJobs(questionRoundClosedAt() + QUIET_PERIOD_MS - 1);
+      expect(driftResolution()).toBe("resolving"); // the fifteen minutes start again when the round closes
+      endQuietJobs(questionRoundClosedAt() + QUIET_PERIOD_MS);
+      expect(driftResolution()).toBe("free");
+    } finally {
+      endQuietJobs(Number.MAX_SAFE_INTEGER);
     }
   });
 });

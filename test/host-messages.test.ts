@@ -17,21 +17,11 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "launch", action: { kind: "implement", task: "0003" } })).toEqual({ type: "launch", action: { kind: "implement", task: "0003" } });
   expect(ok({ type: "launch", action: { kind: "implement-all" } })).toEqual({ type: "launch", action: { kind: "implement-all" } });
   expect(ok({ type: "launch", action: { kind: "implement-design", proposal: "0007" } })).toEqual({ type: "launch", action: { kind: "implement-design", proposal: "0007" } });
-  expect(ok({ type: "launch", action: { kind: "rework-drift", drift: "0003" } })).toEqual({ type: "launch", action: { kind: "rework-drift", drift: "0003" } });
+  expect(ok({ type: "launch", action: { kind: "resolve-drifts" } })).toEqual({ type: "launch", action: { kind: "resolve-drifts" } });
   expect(ok({ type: "openModelFile", path: "checkout/order.md" })).toEqual({ type: "openModelFile", path: "checkout/order.md" });
   expect(ok({ type: "openFile", path: "tasks/0003-x.md" })).toEqual({ type: "openFile", path: "tasks/0003-x.md" });
   expect(ok({ type: "approveProposal", id: "0001" })).toEqual({ type: "approveProposal", id: "0001" });
   expect(ok({ type: "rejectProposal", id: "0001" })).toEqual({ type: "rejectProposal", id: "0001" });
-  expect(ok({ type: "resolveDrift", id: "0002", how: "accept-proposal" })).toEqual({ type: "resolveDrift", id: "0002", how: "accept-proposal" });
-  expect(ok({ type: "driftBlocked", id: "0002" })).toEqual({ type: "driftBlocked", id: "0002" });
-});
-
-test("a fix carries the selected option and the note; keeping what happens carries neither; a malformed choice is rejected", () => {
-  expect(ok({ type: "resolveDrift", id: "0002", how: "fix-code", option: 2, note: "Keep the log" })).toEqual({ type: "resolveDrift", id: "0002", how: "fix-code", option: 2, note: "Keep the log" });
-  expect(ok({ type: "resolveDrift", id: "0002", how: "fix-code" })).toEqual({ type: "resolveDrift", id: "0002", how: "fix-code" });
-  expect(ok({ type: "resolveDrift", id: "0002", how: "dismiss", option: 2, note: "x" })).toEqual({ type: "resolveDrift", id: "0002", how: "dismiss" });
-  expect(ok({ type: "resolveDrift", id: "0002", how: "accept-proposal", option: 1 })).toEqual({ type: "resolveDrift", id: "0002", how: "accept-proposal" });
-  for (const choice of [{ option: "2" }, { option: 1.5 }, { note: 3 }]) expect(parseToHost({ type: "resolveDrift", id: "0002", how: "fix-code", ...choice }).ok).toBe(false);
 });
 
 test("drops fields that are not part of the contract", () => {
@@ -42,8 +32,10 @@ test("rejects unknown types, wrong shapes and IDs that are not plain IDs; moving
   const rejected: unknown[] = [
     { type: "moveTask", id: "0003", column: "doing" },
     { type: "takeBackTask", id: "0003" },
-    { type: "driftBlocked" },
-    { type: "driftBlocked", id: "0002`; rm -rf /; `" },
+    { type: "driftBlocked", id: "0002" },
+    { type: "resolveDrift", id: "0002", how: "dismiss" },
+    { type: "resolveDrift", id: "0002", how: "fix-code", option: 2, note: "x" },
+    { type: "launch", action: { kind: "rework-drift", drift: "0003" } },
     null,
     "ready",
     [],
@@ -58,8 +50,6 @@ test("rejects unknown types, wrong shapes and IDs that are not plain IDs; moving
     { type: "launch", action: { kind: "implement", task: 3 } },
     { type: "launch", action: { kind: "implement-design" } },
     { type: "launch", action: { kind: "implement-design", proposal: "0007`; rm -rf /; `" } },
-    { type: "launch", action: { kind: "rework-drift" } },
-    { type: "launch", action: { kind: "rework-drift", drift: "0003`; rm -rf /; `" } },
     { type: "openFile" },
     { type: "openFile", path: "" },
     { type: "openModelFile", path: 7 },
@@ -68,8 +58,6 @@ test("rejects unknown types, wrong shapes and IDs that are not plain IDs; moving
     { type: "abandonRound" },
     { type: "approveProposal", id: "" },
     { type: "rejectProposal", id: { toString: "x" } },
-    { type: "resolveDrift", id: "0002", how: "delete" },
-    { type: "resolveDrift", how: "dismiss" },
   ];
   for (const message of rejected) expect(parseToHost(message).ok).toBe(false);
 });

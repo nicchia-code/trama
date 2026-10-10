@@ -103,3 +103,6 @@ export function aggregateChange(changes: Iterable<Change>): Change {
 
 /** Nodes that carry the drill-in button (and, for States with sub-States, the expand button) on their right. */
 export const hasHandles = (n: GNode): boolean => n.kind === "feature" || n.kind === "machine" || (n.kind === "state" && n.children > 0 && !n.external);
+
+/** States get the expand button only where they can be drawn in place: at Machine level. */
+export const canExpand = (graph: GraphSpec, n: GNode): boolean => graph.level.kind === "machine" && n.kind === "state" && n.children > 0 && !n.external;

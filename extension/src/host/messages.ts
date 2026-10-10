@@ -5,7 +5,6 @@ import { safeLink } from "../../../src/core/links";
 
 export type Parsed = { ok: true; message: ToHost } | { ok: false; reason: string };
 
-const HOWS: readonly string[] = ["fix-code", "accept-proposal", "dismiss"];
 /** Task, Proposal, Drift and Feature IDs: no path separators, no spaces, no quotes. */
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 
@@ -26,10 +25,10 @@ function parseAction(value: unknown): AgentAction | string {
       return typeof raw["task"] === "string" && ID.test(raw["task"]) ? { kind: "implement", task: raw["task"] } : "implement needs a valid Task ID";
     case "implement-all":
       return { kind: "implement-all" };
+    case "resolve-drifts":
+      return { kind: "resolve-drifts" };
     case "implement-design":
       return typeof raw["proposal"] === "string" && ID.test(raw["proposal"]) ? { kind: "implement-design", proposal: raw["proposal"] } : "implement-design needs a valid Proposal ID";
-    case "rework-drift":
-      return typeof raw["drift"] === "string" && ID.test(raw["drift"]) ? { kind: "rework-drift", drift: raw["drift"] } : "rework-drift needs a valid Drift ID";
     default:
       return `unknown action "${String(raw["kind"])}"`;
   }
@@ -79,16 +78,6 @@ export function parseToHost(value: unknown): Parsed {
     case "approveProposal":
     case "rejectProposal":
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };
-    case "resolveDrift":
-    case "driftBlocked": {
-      if (id === undefined) return bad(`${type} needs a valid Drift ID`);
-      if (type === "driftBlocked") return { ok: true, message: { type, id } };
-      if (typeof raw["how"] !== "string" || !HOWS.includes(raw["how"])) return bad(`unknown resolution "${String(raw["how"])}"`);
-      if (raw["how"] !== "fix-code") return { ok: true, message: { type, id, how: raw["how"] as "accept-proposal" | "dismiss" } };
-      if (raw["option"] !== undefined && !(typeof raw["option"] === "number" && Number.isInteger(raw["option"]))) return bad("resolveDrift option must be a whole number");
-      if (raw["note"] !== undefined && typeof raw["note"] !== "string") return bad("resolveDrift note must be text");
-      return { ok: true, message: { type, id, how: "fix-code", ...(raw["option"] !== undefined ? { option: raw["option"] as number } : {}), ...(raw["note"] !== undefined ? { note: raw["note"] as string } : {}) } };
-    }
     case "questionAction": {
       if (!Number.isInteger(raw["round"])) return bad("questionAction needs a round");
       const action = parseQuestionAction(raw["action"]);

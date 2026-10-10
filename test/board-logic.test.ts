@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, attachedDriftOf, attachedSuffix, blockBadge, buildBoard, doneGroups, formatCounts, interleave, proposalBadges, proposalsToDecide, summarizeChanges, summarizeFile, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockBadge, buildBoard, doneGroups, formatCounts, interleave, proposalBadges, summarizeChanges, summarizeFile, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { runBlocker } from "../src/core/design";
 import { namerOf } from "../src/core/card-names";
 
@@ -10,6 +10,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   title: "Returns",
   body: "",
   kind: "change",
+  resolves: [],
   requires: [],
   base: null,
   stale: [],
@@ -21,7 +22,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   areas: [],
   ...over,
 });
-const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null, ...over });
+const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, finished: null, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], announcements: [], scanHold: { on: false, held: 0 }, numbers: { proposal: {}, task: {}, drift: {} }, ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
@@ -218,13 +219,11 @@ test("interleaving puts each ghost before the real card at its index, keeping th
   expect(interleave([], [{ item: "only", index: 0 }])).toEqual(["only"]);
 });
 
-test("the ghost of a Drift says Writing the Proposal once its Draft exists, and a rework ghost is not placed in a column", () => {
+test("the ghost of a Drift says Writing the Proposal once its Draft exists", () => {
   const card = announcedCard(announcement({ kind: "drift", title: "Refunds differ", phase: "writing" }), false);
   expect(card.phase).toBe("Writing the Proposal");
   expect(card.label).toContain("writing the proposal");
   expect(announcedCard(announcement({ kind: "drift", phase: "preparing" }), false).phase).toBe("Preparing");
-  const placed = announcedGhosts(buildBoard(snapshot()), [announcement({ id: "r00001", kind: "proposal", drift: "0003" }), announcement({ id: "r00002", kind: "proposal" })], false);
-  expect(placed.decide.map((g) => g.card.key)).toEqual(["announced:r00002"]);
 });
 
 test("a ghost says Preparing, Writing, or that the agent waits for the answers while a question round is open, and its name tells kind, title and phase", () => {
@@ -251,33 +250,31 @@ test("the notice of a withdrawn check says the agent stopped before finishing it
   expect(withdrawnNotice(announcement({ kind: "check", title: "Scan of the System", phase: "scanning" }))).toBe("The agent stopped before finishing Scan of the System.");
 });
 
-test("a rework announcement keeps the Proposal's identity in its file and shows its number while it is live", () => {
-  const rework = announcement({ title: "Rework of Proposal 0007" });
-  expect(announcedCard(rework, false, NUMBERS)).toMatchObject({ title: "Rework of Proposal P1", label: "Proposal the agent is creating, preparing: Rework of Proposal P1" });
-  expect(withdrawnNotice(rework, NUMBERS)).toBe("The agent finished without delivering Proposal Rework of Proposal P1.");
-  expect(announcedCard(rework, false).title).toBe("Rework of Proposal 0007");
-});
-
 test("ghosts are not cards: the columns and what awaits a decision ignore them", () => {
   const snap = snapshot({ announcements: [announcement(), announcement({ id: "t00001", kind: "task" })] });
   expect(buildBoard(snap).map((c) => c.cards.length)).toEqual([0, 0, 0, 0]);
 });
 
-test("a Proposal attached to an open Drift is not a To decide card and not counted; one of a resolved Drift stays", () => {
-  const snap = snapshot({ proposals: [proposal({ id: "0007" }), proposal({ id: "0009" })], drifts: [drift({ id: "0003", proposal: "0007" })] });
-  expect(buildBoard(snap)[0]?.cards.map((c) => c.key)).toEqual(["proposal:0009", "drift:0003"]);
-  expect(proposalsToDecide(snap).map((p) => p.id)).toEqual(["0009"]);
-  expect(proposalsToDecide(snapshot({ proposals: [proposal({ id: "0007" })] })).map((p) => p.id)).toEqual(["0007"]);
-});
-
-test("a selector lists a Proposal held by an open Drift with its Drift, and others as they are", () => {
-  const snap = snapshot({ numbers: { proposal: {}, task: {}, drift: { "0003": "D2" } }, proposals: [proposal({ id: "0007" })], drifts: [drift({ id: "0003", proposal: "0007" })] });
-  expect(attachedSuffix(snap, "0007")).toBe(" · D2");
-  expect(attachedSuffix(snap, "0009")).toBe("");
-  expect(attachedDriftOf(snapshot({ drifts: [drift({ id: "0004", proposal: "0007" })] }), "0007")?.id).toBe("0004");
-});
-
 const NUMBERS = { proposal: { "0007": "P1" }, task: { "0012": "T3", "0013": "T4" }, drift: { "0003": "D2" } };
+
+test("a resolution's card has one row per Drift, written by number, with the decision and its note; other Proposals have none", () => {
+  const [card, plain] = buildBoard(
+    snapshot({
+      numbers: NUMBERS,
+      proposals: [
+        proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", decision: "Code fixed with option Fix the code", note: "do it today" }, { drift: "0044", title: "Old", decision: "(already resolved)", note: null }] }),
+        proposal({ id: "0009" }),
+      ],
+    }),
+  )[0]?.cards ?? [];
+  expect(card).toMatchObject({
+    resolves: [
+      { drift: "0003", name: { text: "D2", isNumber: true }, title: "Late refunds", decision: "Code fixed with option Fix the code · do it today" },
+      { drift: "0044", name: { text: "0044", isNumber: false }, title: "Old", decision: "(already resolved)" },
+    ],
+  });
+  expect(plain).toMatchObject({ resolves: [] });
+});
 
 test("a live card is written by its short number, a closed one by its identity, never both", () => {
   const board = buildBoard(

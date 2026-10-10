@@ -17,6 +17,17 @@ test("inline formatting: bold, italic, code and snake_case words that stay plain
   ]);
 });
 
+test("bold nested in italic written with asterisks is italic with bold inside, no stray asterisks", () => {
+  expect(parseInline("*Nota: il **pannello** resta aperto.*")).toEqual([
+    { t: "em", c: [text("Nota: il "), { t: "strong", c: [text("pannello")] }, text(" resta aperto.")] },
+  ]);
+  expect(parseInline("*a **b** c*")).toEqual([{ t: "em", c: [text("a "), { t: "strong", c: [text("b")] }, text(" c")] }]);
+  expect(parseInline("_a **b** c_")).toEqual([{ t: "em", c: [text("a "), { t: "strong", c: [text("b")] }, text(" c")] }]);
+  expect(parseInline("***a** b*")).toEqual([{ t: "em", c: [{ t: "strong", c: [text("a")] }, text(" b")] }]);
+  expect(parseInline("***a***")).toEqual([{ t: "em", c: [{ t: "strong", c: [text("a")] }] }]);
+  expect(parseInline("**a *b* c**")).toEqual([{ t: "strong", c: [text("a "), { t: "em", c: [text("b")] }, text(" c")] }]);
+});
+
 test("what cannot be read as Markdown shows as written", () => {
   expect(parseInline("2 * 3 * 4, **unclosed and a lone ` tick")).toEqual([text("2 * 3 * 4, **unclosed and a lone ` tick")]);
 });
@@ -55,8 +66,13 @@ test("literal HTML attributes and comments never become inline Markdown", () => 
     '<span title="**testo**">valore</span>',
     "<span title='> *text* [link](https://example.com) `code`'>value</span>",
     '<!-- **text** > [link](https://example.com) -->',
-    '<span title="**unclosed**',
   ]) expect(parseInline(html)).toEqual([text(html)]);
+  expect(parseInline('<span title="**unclosed**')).toEqual([text('<span title="'), { t: "strong", c: [text("unclosed")] }]);
+  expect(parseInline("x <n per ora, **bold** e [link](https://example.com)")).toEqual([
+    text("x <n per ora, "), { t: "strong", c: [text("bold")] }, text(" e "),
+    { t: "link", href: "https://example.com/", c: [text("link")] },
+  ]);
+  expect(parseInline("a <!-- open **bold**")).toEqual([text("a <!-- open "), { t: "strong", c: [text("bold")] }]);
   expect(parseInline('**before <span title="**">value</span> after**')).toEqual([
     { t: "strong", c: [text('before <span title="**">value</span> after')] },
   ]);

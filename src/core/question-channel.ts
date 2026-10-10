@@ -5,7 +5,7 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { TramaError, UsageError } from "./errors";
-import { CURSOR_AGENT_ENV } from "./announcements";
+import { type AgentOrigin, CURSOR_AGENT_ENV } from "./announcements";
 import type { CursorHook } from "./cursor-chat";
 import { parseQuestionRequest, questionAborted, questionFailure, QuestionInterruptedError, unavailableQuestions, type QuestionContext, type QuestionHandler, type QuestionRequest, type QuestionResult } from "./questions";
 import { type Project, projectAt } from "./store";
@@ -40,6 +40,12 @@ interface ServerOptions {
   focusedAt?: number;
   /** A hook of Cursor's chat, forwarded by `trama cursor-hook`. */
   onCursorHook?: (hook: CursorHook) => void;
+  /** A command of the agent ran: where it ran, as `trama` reports it; `readOnly` when it only read. */
+  onActivity?: (origin: AgentOrigin, readOnly?: boolean) => void;
+  /** The hook of the agent in `terminal` says it is still working. */
+  onAgentAlive?: (terminal: string) => void;
+  /** The agent in the terminal `terminal` (the hook of its agent said so) has settled: nothing is left to do. `root` is this window's project. */
+  onAgentIdle?: (terminal: string, root: string) => void;
   /** Asks the editor's System 1 classifier whether `machine`'s code, described in `state`, is in conflict. */
   onClassify?: (machine: string, state: string) => Promise<Classification>;
   onClose?: () => void;
@@ -311,6 +317,47 @@ export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: nu
 }
 
 /**
+ * Tells the editor of the project one thing a `trama` command of the agent knows, found as for `trama ask`; never
+ * throws, waits at most `timeoutMs`. Without an editor nothing happens.
+ */
+async function tellEditor(project: Project, message: object, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number }): Promise<void> {
+  const controller = new AbortController();
+  const sockets = new Set<Socket>();
+  const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, options.timeoutMs ?? 1000);
+  try {
+    const projectId = questionProjectId(project);
+    const endpoint = (options.env ?? process.env)[QUESTION_ENDPOINT_ENV];
+    const editor = endpoint !== undefined ? await connectEditor(endpoint, projectId, controller.signal, sockets) : await liveEditor(projectId, controller.signal, sockets, options.runtimeDir);
+    if (!editor || controller.signal.aborted) return;
+    await new Promise<void>((done) => {
+      editor.socket.once("data", () => done());
+      editor.socket.once("close", () => done());
+      editor.socket.write(`${JSON.stringify({ ...message, projectId })}\n`);
+    });
+  } catch {
+    // The editor just goes on following the run by its other signals.
+  } finally {
+    clearTimeout(timer);
+    for (const socket of sockets) socket.destroy();
+  }
+}
+
+/**
+ * Tells the editor of the project that a command of the agent changed something, so it counts as the activity of the
+ * agent's run: `origin` is the terminal or the Cursor chat it ran in, none for an agent Trama cannot tell.
+ */
+export const sendActivity = (project: Project, origin: AgentOrigin, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number; readOnly?: boolean } = {}): Promise<void> =>
+  tellEditor(project, { type: "activity", ...origin, readOnly: options.readOnly === true }, options);
+
+/** Tells the editor of the project that the agent in `terminal` has settled. */
+export const sendAgentIdle = (project: Project, terminal: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<void> =>
+  tellEditor(project, { type: "agent-idle", terminal }, options);
+/** Tells the editor of the project that the agent in `terminal` is still alive. */
+export const sendAgentAlive = (project: Project, terminal: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<void> =>
+  tellEditor(project, { type: "agent-alive", terminal }, options);
+
+
+/**
  * Hands a Machine and the state the agent prepared to the editor of the project, found as for `trama ask`, and returns
  * its classification: `unavailable` when no editor answers within `timeoutMs`. The key never leaves the editor.
  */
@@ -436,6 +483,26 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         if (phase === "hello" && message.type === "hello") {
           phase = "ready";
           connection.send({ type: "ready", ...record, caller: from.id });
+          return;
+        }
+        if (phase === "ready" && message.type === "activity") {
+          options.onActivity?.({
+            ...(typeof message.terminal === "string" ? { terminal: message.terminal } : {}),
+            ...(message.chat === "cursor" ? { chat: "cursor" as const } : {}),
+          }, message.readOnly === true);
+          finish({ type: "taken" });
+          return;
+        }
+        if (phase === "ready" && message.type === "agent-idle") {
+          if (typeof message.terminal !== "string" || message.terminal === "") throw new UsageError("An idle agent needs its terminal");
+          options.onAgentIdle?.(message.terminal, options.project.root);
+          finish({ type: "taken" });
+          return;
+        }
+        if (phase === "ready" && message.type === "agent-alive") {
+          if (typeof message.terminal !== "string" || message.terminal === "") throw new UsageError("A living agent needs its terminal");
+          options.onAgentAlive?.(message.terminal);
+          finish({ type: "taken" });
           return;
         }
         if (phase === "ready" && message.type === "cursor-hook") {

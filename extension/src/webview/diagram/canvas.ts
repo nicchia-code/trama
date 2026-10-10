@@ -1,5 +1,5 @@
 import cytoscape from "cytoscape";
-import { type GEdge, type GNode, type GraphSpec, hasHandles } from "./graph";
+import { type GEdge, type GNode, type GraphSpec, canExpand, hasHandles } from "./graph";
 import { type Layout, type Route, edgeLabelSize, layoutGraph, nodeLines, routeOf } from "./layout";
 import { type Palette, mix, readPalette } from "./theme";
 
@@ -231,7 +231,7 @@ export function createCanvas(stage: HTMLElement, container: HTMLElement, handler
       const group = document.createElement("div");
       group.className = "dg-handle-group";
       group.dataset["node"] = n.id;
-      if (n.kind === "state") group.append(button(n.expanded ? "▾" : "▸", `${n.expanded ? "Collapse" : "Expand"} ${n.label}`, () => handlers.toggle(n.id)));
+      if (canExpand(graph, n)) group.append(button(n.expanded ? "▾" : "▸", `${n.expanded ? "Collapse" : "Expand"} ${n.label}`, () => handlers.toggle(n.id)));
       group.append(button("↗", `Drill into ${n.label}`, () => handlers.drill(n.id)));
       handles.append(group);
     }

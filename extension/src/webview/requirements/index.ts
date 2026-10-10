@@ -1,5 +1,4 @@
 import { cardLabel, noNumbers } from "../../../../src/core/card-names";
-import { attachedSuffix } from "../board/logic";
 import type { AreaView, FragmentView, SectionView, Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
 import { renderMarkdown } from "../markdown";
@@ -68,7 +67,7 @@ export const mountRequirements: MountView = (root, context) => {
     if (!snapshot) return;
     select.replaceChildren(new Option("None", ""));
     for (const p of snapshot.proposals.filter((x) => x.areas.length > 0))
-      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} ${p.title}${attachedSuffix(snapshot, p.id)}`, p.id));
+      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} ${p.title}`, p.id));
     select.value = proposalId ?? "";
     select.disabled = select.options.length === 1;
     filterBox.replaceChildren();

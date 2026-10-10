@@ -8,9 +8,9 @@ export interface ScanHoldSwitch {
 }
 
 /**
- * The Hold scan switch. A click asks for the other state at once, with no confirmation; the shown state changes only
- * when `set` is called, so a refused or failed write leaves it as it was. Its label and accessible name count the held
- * Proposals when there are any.
+ * The Hold scan switch. A click shows the other state at once, with no confirmation, and asks the host for it. The host
+ * always answers with a fresh picture: a refused or failed change brings the previous state back through `set`.
+ * Its label and accessible name count the held Proposals when there are any.
  */
 export function createScanHoldSwitch(turn: (on: boolean) => void): ScanHoldSwitch {
   const button = document.createElement("button");
@@ -28,13 +28,19 @@ export function createScanHoldSwitch(turn: (on: boolean) => void): ScanHoldSwitc
   button.append(label, track);
 
   let on = false;
+  let shownHeld = 0;
   const set = (next: boolean, held: number) => {
     on = next;
+    shownHeld = held;
     button.setAttribute("aria-checked", next ? "true" : "false");
     label.textContent = held > 0 ? `${SCAN_HOLD_LABEL} · ${held}` : SCAN_HOLD_LABEL;
     button.setAttribute("aria-label", held > 0 ? `${SCAN_HOLD_LABEL}, ${held} held` : SCAN_HOLD_LABEL);
   };
   set(false, 0);
-  button.addEventListener("click", () => turn(!on));
+  button.addEventListener("click", () => {
+    const next = !on;
+    set(next, shownHeld);
+    turn(next);
+  });
   return { element: button, set };
 }

@@ -149,6 +149,22 @@ test("State level: a State drawn outside the shown one offers no Drill in, even 
   expect(detailOfSelection(s, machine, "s:B").drill).toEqual({ kind: "state", machine: "m", state: "B" });
 });
 
+test("State level: sub-States are never drawn in place, even when their State is in the expanded set", () => {
+  const files: FileMap = new Map([
+    ["system.md", "# S\n"],
+    ["a/feature.md", "# A\n"],
+    ["a/m.md", "# M\n\n## States\n\n### A (initial)\n\n#### A1 (initial)\n\n##### A1a (initial)\n"],
+  ]);
+  const s = buildScene(snapshotOf(files), null);
+  const g = buildGraph(s, { kind: "state", machine: "m", state: "A" }, new Map([["m", new Set(["A1"])]]));
+  expect(nodeOf(g, "s:A1")).toMatchObject({ expanded: false, children: 1 });
+  expect(nodeOf(g, "s:A1a")).toBeUndefined();
+  expect(detailOfSelection(s, g, "s:A1").toggle).toBeNull();
+  expect(detailOfSelection(s, g, "s:A1").drill).toEqual({ kind: "state", machine: "m", state: "A1" });
+  const machine = buildGraph(s, { kind: "machine", machine: "m" }, new Map([["m", new Set(["A"])]]));
+  expect(detailOfSelection(s, machine, "s:A").toggle).toEqual({ state: "A", expanded: true });
+});
+
 test("a Proposal tags Machines, States, Transitions and aggregated edges", () => {
   const snap = shopWithProposals();
   const p = buildScene(snap, snap.proposals[0]?.id ?? "");
@@ -257,20 +273,6 @@ test("the panel carries the Proposal for ghosts and the Drift for Drift ghosts",
   const driftPanel = detailOfSelection(s, order, `d:${shipped}`);
   expect(driftPanel.drift?.id).toBe(shipped);
   expect(driftPanel.proposal).toBeNull();
-});
-
-test("the level details of a drawn attached Proposal carry its Drift, and a free Proposal none", () => {
-  const snap = shopWithProposals();
-  const attached = snap.drifts.find((d) => d.proposal !== null);
-  const free = snap.proposals.find((p) => p.id !== attached?.proposal);
-  expect(attached && free).toBeTruthy();
-  const level = (id: string) => {
-    const s = buildScene(snap, id);
-    return detailOfSelection(s, buildGraph(s, { kind: "system" }, new Map()), null);
-  };
-  expect(level(attached?.proposal ?? "").proposalDrift?.id).toBe(attached?.id);
-  expect(level(free?.id ?? "").proposalDrift).toBeNull();
-  expect(level(free?.id ?? "").proposal?.id).toBe(free?.id);
 });
 
 test("the Requirement sections of the Transitions an edge draws are listed in order of the Transitions, as Markdown blocks", () => {

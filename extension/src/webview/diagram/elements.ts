@@ -1,5 +1,6 @@
 import type { Change, MergedMachine, MergedState, MergedTransition } from "../../../../src/core/merge";
 import type { GraphSpec, Level } from "./graph";
+import { REQUIREMENTS_PREFIX, parseTarget, sectionMatches } from "../requirements/logic";
 import { type Scene, type SceneActor, type SceneFeature, findMergedState, pathTo } from "./scene";
 
 export type EventOwner = { kind: "machine"; machine: MergedMachine } | { kind: "actor"; actor: SceneActor };
@@ -14,6 +15,16 @@ export type Element =
   | { kind: "event"; ref: string; owner: EventOwner; name: string; change: Change };
 
 const EVENT_REF = /^(?:([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.)?([A-Z][A-Z0-9_]*)$/;
+
+/** Whether a Drift reference points at something that exists: a Model element of the Scene, or a Requirement Area or section. */
+export function refResolves(scene: Scene, ref: string): boolean {
+  if (!ref.startsWith(REQUIREMENTS_PREFIX)) return resolveElement(scene, ref) !== null;
+  const target = parseTarget(ref);
+  const area = scene.areas.find((a) => a.id === target.area);
+  if (!area) return false;
+  const section = target.section;
+  return section === null || area.fragments.some((f) => f.sections.some((s) => sectionMatches(s.ref, section)));
+}
 
 /** Resolves `order`, `order/Paid`, `order/Paid/user.CANCEL` or `user.CANCEL` against the Scene; null when nothing matches. */
 export function resolveElement(scene: Scene, ref: string): Element | null {

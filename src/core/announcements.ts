@@ -19,7 +19,7 @@ export const ANNOUNCEMENT_KINDS: readonly AnnouncementKind[] = ["proposal", "tas
 export type CheckPhase = "verifying" | "scanning";
 export const CHECK_PHASES: readonly CheckPhase[] = ["verifying", "scanning"];
 
-/** `agent`: announced by the agent. `request`: announced by Trama when a design request was sent. */
+/** `agent`: announced by the agent. `request`: announced by Trama when a design request or Resolve Drifts was sent. */
 export type AnnouncementSource = "agent" | "request";
 const SOURCES: readonly AnnouncementSource[] = ["agent", "request"];
 
@@ -38,8 +38,6 @@ export interface Announcement {
   chat: Chat | null;
   /** The phase of a check; null for every other kind. */
   phase: CheckPhase | null;
-  /** The Drift whose stale Proposal this announcement reworks; null for every other announcement and in those written before this field existed. */
-  drift: string | null;
   /** The title as announced; the ghost of a bound Draft shows the Draft's own title instead. */
   title: string;
 }
@@ -112,7 +110,6 @@ function parse(raw: Raw, body: string, id: string, where: string): Announcement 
     terminal: terminalField(raw, where),
     chat: raw["chat"] === undefined || raw["chat"] === null ? null : enumField(raw, "chat", CHATS, "cursor", where),
     phase: raw["phase"] === undefined || raw["phase"] === null ? null : enumField(raw, "phase", CHECK_PHASES, "verifying", where),
-    drift: idField(raw, "drift", where),
     title: /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? id,
   };
 }
@@ -129,9 +126,9 @@ function write(p: Project, a: Announcement) {
   // The folder ignores itself and everything in it, so announcements are never versioned.
   const ignore = join(dir, ".gitignore");
   if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
-  const { id, title, chat, phase, drift, ...data } = a;
-  // `chat`, `phase` and `drift` are written only when set, so the other announcements look as before.
-  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}), ...(drift ? { drift } : {}) }, `# ${title}\n`);
+  const { id, title, chat, phase, ...data } = a;
+  // `chat` and `phase` are written only when set, so the other announcements look as before.
+  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}) }, `# ${title}\n`);
 }
 
 function remove(p: Project, id: string) {
@@ -163,15 +160,10 @@ export function listAnnouncements(p: Project): Announcement[] {
 
 export const getAnnouncement = (p: Project, id: string): Announcement | null => listAnnouncements(p).find((a) => a.id === id) ?? null;
 
-/** The announcements that rework the stale Proposal of Drift `driftId` cease to exist, with no notice: the developer kept what should happen. */
-export function removeReworkOf(p: Project, driftId: string) {
-  for (const a of listAnnouncements(p)) if (a.drift === driftId) remove(p, a.id);
-}
-
 /** Announces a card as soon as it is known it will be created. Agent announcements refresh the quiet period of every announcement; a design request, sent by the developer, refreshes nothing and starts only its own. */
 export function announce(
   p: Project,
-  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase; drift?: string } & AgentOrigin,
+  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase } & AgentOrigin,
   now = new Date(),
 ): Announcement {
   const title = input.title.trim().replace(/\s+/g, " ");
@@ -188,7 +180,6 @@ export function announce(
     terminal: input.terminal ?? null,
     chat: input.terminal ? null : (input.chat ?? null),
     phase: input.phase ?? null,
-    drift: input.drift ?? null,
     title,
   };
   write(p, announcement);
@@ -218,9 +209,9 @@ export function announcementNote(p: Project, id: string | undefined, kind: Annou
 /**
  * A Draft is bound to the usable announcement the agent named, or left without a ghost when that ID is unusable.
  * Only without a named ID does it take the oldest Preparing design request or make its own Writing announcement.
+ * Starting it is the first change to the bound announcement's Draft: only that announcement starts its quiet period again.
  */
 export function bindDraft(p: Project, proposal: { id: string; title: string }, announcementId?: string, origin: AgentOrigin = {}, now = new Date()): Announcement | null {
-  markActivity(p, now);
   const all = listAnnouncements(p);
   const target = announcementId !== undefined
     ? all.find((a) => a.id === announcementId && (a.kind === "proposal" || a.kind === "drift") && a.proposal === null)
@@ -287,17 +278,18 @@ export function withdrawAll(p: Project, ids?: readonly string[]): Announcement[]
   return gone;
 }
 
-/** The agent changed a Draft that has an announcement: every announcement starts its quiet period again. */
-export function markDraftActivity(p: Project, proposalId: string) {
-  if (listAnnouncements(p).some((a) => a.proposal === proposalId)) markActivity(p);
+/** The agent changed a Draft: only the announcement bound to it starts its quiet period again; the others keep counting. */
+export function markDraftActivity(p: Project, proposalId: string, now = new Date()) {
+  const stamp = now.toISOString();
+  for (const a of listAnnouncements(p)) if (a.proposal === proposalId) write(p, { ...a, touched: stamp });
 }
 
 /**
  * The announcements the agent has left alone for the quiet period. Each counts from its own `touched` (agent activity
- * refreshes all of them, a design request is born with its own), or from `resumedAt` if later: activity the
- * announcements do not record (a file of an announced Draft changed) or the close of a question round, which does
- * not count.
+ * refreshes all of them, a design request is born with its own), or from `resumedAt` if later: the close of a question
+ * round, which does not count. `seenAt` is any other sign of life the editor has for an announcement (a read-only
+ * command, a hook's heartbeat, a change to its own bound Draft).
  */
-export function quietAnnouncements(announcements: readonly Announcement[], now: number, resumedAt = 0): Announcement[] {
-  return announcements.filter((a) => now - Math.max(Date.parse(a.touched), resumedAt) >= QUIET_PERIOD_MS);
+export function quietAnnouncements(announcements: readonly Announcement[], now: number, resumedAt = 0, seenAt: (a: Announcement) => number = () => 0): Announcement[] {
+  return announcements.filter((a) => now - Math.max(Date.parse(a.touched), resumedAt, seenAt(a)) >= QUIET_PERIOD_MS);
 }

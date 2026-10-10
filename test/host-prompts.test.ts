@@ -15,8 +15,8 @@ test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "implement-design", proposal: "0007" })).toBe(
     'Use the trama-implement skill on every Task of Proposal 0007 that is in the "todo" column. Take them from `trama task next --batch --proposal 0007`, one group at a time, until it says there is none.',
   );
-  expect(buildPrompt({ kind: "rework-drift", drift: "0003", proposal: "0002" })).toBe(
-    "Use the trama-design skill, without asking questions. Proposal 0002, attached to Drift 0003, is stale: write a new Proposal that makes the same change on the current Model and Requirements, attach it to the Drift in place of the stale one as soon as you create it, then hand it over.",
+  expect(buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34", "ef56gh78"] })).toBe(
+    "Use the trama-resolve-drifts skill on the open Drifts ab12cd34, ef56gh78: ask the developer what should happen for each one, then write one resolution Proposal.",
   );
 });
 
@@ -44,7 +44,7 @@ test("the agent terminal is named after the work: the card's short number, or a 
   expect(terminalName({ kind: "implement-design", proposal: "ab" }, short)).toBe("P2");
   expect(terminalName({ kind: "design", prompt: "x" }, short)).toBe("Design");
   expect(terminalName({ kind: "written-design", request: "r" }, short)).toBe("Design");
-  expect(terminalName({ kind: "rework-drift", drift: "d", proposal: "p" }, short)).toBe("Design");
+  expect(terminalName({ kind: "resolve-drifts", drifts: [] }, short)).toBe("Drifts");
   expect(terminalName({ kind: "scan", feature: "checkout" }, short)).toBe("Scan");
   expect(terminalName({ kind: "implement-all" }, short)).toBe("All tasks");
   expect(terminalName({ kind: "import" }, short)).toBe("Import");

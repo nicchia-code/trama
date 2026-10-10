@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runCursorHook } from "../src/cli/main";
+import { reportActivity, runAgentEvent, runCursorHook } from "../src/cli/main";
+import type { AgentOrigin } from "../src/core/announcements";
 import { CursorConversations, type CursorHook, parseCursorHook, writeCursorHooks } from "../src/core/cursor-chat";
 import { createQuestionServer } from "../src/core/question-channel";
 import { projectAt } from "../src/core/store";
@@ -84,4 +85,46 @@ test("Trama's hooks replace only Trama's earlier entries, keep the others, and l
   writeFileSync(file, "{ broken");
   expect(() => writeCursorHooks(file, "/new/bin/trama")).toThrow(/not valid JSON/);
   expect(readFileSync(file, "utf8")).toBe("{ broken");
+});
+
+test("a command of the agent tells the project's editor where it ran and whether it only read; a missing editor tells nothing", async () => {
+  const received: { origin: AgentOrigin; readOnly: boolean }[] = [];
+  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onActivity: (origin, readOnly) => received.push({ origin, readOnly: readOnly === true }) });
+  try {
+    const tell = (argv: string[], env: Record<string, string>) => reportActivity(argv, project, { env, runtimeDir });
+    await tell(["task", "move", "abcd1234", "doing"], { TRAMA_TERMINAL: "abc123" });
+    await tell(["drift", "new", "x"], { CURSOR_AGENT: "1" });
+    await tell(["announce", "task", "x"], {});
+    await tell(["task", "list"], { TRAMA_TERMINAL: "abc123" });
+    await tell(["classify", "--machine", "order"], { TRAMA_TERMINAL: "abc123" });
+    await tell(["classify", "--machine", "order"], {});
+    await tell(["proposal", "resolve-drift", "abcd1234", "efgh5678", "--remove"], { TRAMA_TERMINAL: "abc123" });
+    expect(received).toEqual([
+      { origin: { terminal: "abc123" }, readOnly: false },
+      { origin: { chat: "cursor" }, readOnly: false },
+      { origin: {}, readOnly: false },
+      { origin: { terminal: "abc123" }, readOnly: true },
+      { origin: { terminal: "abc123" }, readOnly: true },
+      { origin: { terminal: "abc123" }, readOnly: false },
+    ]);
+  } finally {
+    await server.dispose();
+  }
+  const started = Date.now();
+  await reportActivity(["task", "move", "abcd1234", "doing"], project, { env: {}, runtimeDir });
+  expect(Date.now() - started).toBeLessThan(1000);
+});
+
+test("the hook of an agent in a Trama terminal tells the project's editor it is idle; without that terminal or an editor it tells nothing and never fails", async () => {
+  const received: [string, string][] = [];
+  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onAgentIdle: (terminal, root) => received.push([terminal, root]) });
+  try {
+    await runAgentEvent(["agent-event", "idle"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir });
+    await runAgentEvent(["agent-event", "idle"], project, { env: {}, runtimeDir });
+    expect(received).toEqual([["abc123", project]]);
+  } finally {
+    await server.dispose();
+  }
+  await runAgentEvent(["agent-event", "idle"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir });
+  await expect(runAgentEvent(["agent-event", "busy"], project, { env: {}, runtimeDir })).rejects.toThrow("Usage: trama agent-event idle");
 });

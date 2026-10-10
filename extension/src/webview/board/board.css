@@ -149,6 +149,13 @@ button.board-blocked:focus-visible { outline: 1px solid var(--vscode-focusBorder
 .board-change-path { overflow-wrap: anywhere; }
 .board-change-counts { white-space: nowrap; color: var(--board-muted); font-variant-numeric: tabular-nums; }
 
+.board-resolves-head { font-size: 11px; font-weight: 600; color: var(--board-muted); }
+.board-resolves { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.board-resolves-row { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; width: 100%; padding: 1px 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.board-resolves-row:hover .board-resolves-title { text-decoration: underline; }
+.board-resolves-title { overflow-wrap: anywhere; }
+.board-resolves-decision { color: var(--board-muted); overflow-wrap: anywhere; }
+
 .board-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 button.board-btn { padding: 2px 8px; }
 

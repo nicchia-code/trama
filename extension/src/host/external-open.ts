@@ -150,7 +150,6 @@ export function startDetached(program: string, args: string[], cwd: string, grac
 const TERMINAL_APP_SCRIPT = [
   "on run argv",
   'tell application "Terminal"',
-  "activate",
   "do script (item 1 of argv)",
   "try",
   "set custom title of selected tab of front window to (item 2 of argv)",

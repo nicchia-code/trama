@@ -283,20 +283,15 @@ j proposal submit <id>           # exit code 1; stays Draft
 ### D1. A Drift without a Proposal
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Machine level `order`, click the red `Drift 0001` ghost | Panel `DRIFT 0001`, title `Code refunds after the package is picked up`, two boxes: **WHAT HAPPENS** with `A shipped order is still refunded after the courier has picked the package up.` (**shipped** in bold) and a two-item bulleted list, and **WHAT SHOULD HAPPEN** `Model` with `A shipped order can no longer be refunded…` (bold) and a `the refund policy` link; under the boxes a collapsed block **Where in the code**; `POINTS AT` `order/Shipped` | ☐ |
-| 2 | Look at the buttons and the lines under them | Each box has one **Keep this**. Under the left one `Closes the Drift; nothing changes`, under the right one (blue) `A Task is created for the agent to fix the code with the chosen option`. No Fix code, Accept Proposal or Dismiss | ☐ |
-| 3 | Click **Where in the code**; select another element and select the Drift again | It opens across the whole width under the two boxes and lists `src/refund.ts` and `src/courier.ts` as code; after selecting the Drift again it is closed. It never holds anything the Keep this buttons depend on | ☐ |
+| 1 | Machine level `order`, click the red `Drift 0001` ghost | Panel `DRIFT 0001`, title `Code refunds after the package is picked up`, two columns: **WHAT HAPPENS** with `A shipped order is still refunded after the courier has picked the package up.` (**shipped** in bold) and a two-item bulleted list, and **WHAT SHOULD HAPPEN** `Model` with `A shipped order can no longer be refunded…` (bold) and a `the refund policy` link; `POINTS AT` `order/Shipped` | ☐ |
+| 2 | Look for controls under the two sides | None: no **Keep this**, no Fix options, no note field, no **Where in the code**, no attached Proposal box. Drifts are decided only with **Resolve Drifts** | ☐ |
+| 3 | Narrow the panel | The two sides stack, **WHAT HAPPENS** first, and the panel does not scroll sideways | ☐ |
 | 4 | Click the link in **WHAT SHOULD HAPPEN** (harness: `window.__posts`) | The webview does not navigate; it posts `{ type: "openLink", url: "https://example.com/policy" }`. In VS Code the system browser opens the address | ☐ |
-| 5 | Look at the right box between its text and **Keep this** | A group headed **FIX OPTIONS** with two radio buttons: **Refuse the refund** `(recommended)`, selected, with its text (bold, bulleted list), and **Refund only after the return**; under it a multi-line field labelled `Note (optional)`. The left box has neither | ☐ |
-| 6 | Click **Refund only after the return**; then in the group press the up and down arrow keys | Exactly one option is selected each time; the arrows move the selection. Leave **Refund only after the return** selected | ☐ |
-| 7 | Read the accessible names (`ariaSnapshot` or the browser's accessibility tree) | The right button is `Keep what should happen for Code refunds after the package is picked up with option Refund only after the return` and changes with the selection; the left one is `Keep what happens for …`; the group is `Fix options for Code refunds after the package is picked up` and the field `Note for Code refunds after the package is picked up` | ☐ |
-| 8 | Type `Keep the audit log` in the note, select another element and select the Drift again | The selection and the text are as you left them (they survive refreshes of the Diagram and the Board during the session); closing and reopening the panel forgets them | ☐ |
-| 9 | Click the right **Keep this** (harness: `window.__posts`) | It posts `{ type: "resolveDrift", id: "0001", how: "fix-code", option: 2, note: "Keep the audit log" }`; with an empty note the `note` field is absent. The left **Keep this** posts `{ type: "resolveDrift", id: "0001", how: "dismiss" }` with neither | ☐ |
 
 ### D2. A Drift with an attached Proposal
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | System level, click `Drift 0002` | Panel shows `DRIFT 0002`, `Code has a Written off payment`, the two boxes, `POINTS AT` `payment`. The left **Keep this** says `Approves Proposal 0002 and changes the Model to match` | ☐ |
+| 1 | System level, click `Drift 0002` | Panel shows `DRIFT 0002`, `Code has a Written off payment`, the two sides, `POINTS AT` `payment`; no button to decide and no attached Proposal box | ☐ |
 | 2 | Look at the selector | It switched to `0002 · Orders can be lost in transit` | ☐ |
 | 3 | Go to `checkout › payment` | A dashed blue `Written off` final State is visible | ☐ |
 
@@ -322,8 +317,8 @@ j proposal submit <id>           # exit code 1; stays Draft
 |---|---|---|---|
 | 1 | Read the first card | `Proposal 0001`, `Returns after shipping`, rows `actors/user.md +1`, `checkout/order.md +2 ~2`, `checkout/return.md +5`, buttons **View on diagram**, **Approve** (blue), **Reject**; a blue left border | ☐ |
 | 2 | Read the second card | `Proposal 0002`, `Orders can be lost in transit`, `checkout/payment.md +1` | ☐ |
-| 3 | Read the third card | `Drift 0001`, title, chip `order/Shipped`, the two boxes with their **Keep this** buttons and lines, the **Fix options** group and the note field in the right box, **View on diagram**; a red left border | ☐ |
-| 4 | Read the fourth card | `Drift 0002`, chip `payment`, a link `Proposal 0002 attached`, the two boxes; the left line says `Approves Proposal 0002 and changes the Model to match`; **View on diagram** | ☐ |
+| 3 | Read the third card | `Drift 0001`, title, chip `order/Shipped`, the two sides side by side (stacked when the panel is narrow) and **View on diagram**; no **Keep this**, Fix options, note, attached Proposal or Where in the code; a red left border | ☐ |
+| 4 | Read the fourth card | `Drift 0002`, chip `payment`, the two sides and **View on diagram**; nothing shows its attached Proposal | ☐ |
 
 ### E3. Task cards
 | # | Action | Expected | ✓ |
@@ -544,7 +539,6 @@ Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." -
 |---|---|---|---|
 | 1 | ↻. Append a blank line to `$D/model/checkout/payment.md` (makes Proposal 0002 stale), then click the left **Keep this** on Drift 0002 | A warning `Proposal 0002 is stale: the Model changed since it was written.` with a **Rework Proposal** button | ☐ |
 | 2 | Click **Rework Proposal** | The terminal prints one line: `Use the trama-design skill, without asking questions. Proposal 0002, attached to Drift 0002, is stale: write a new Proposal that makes the same change on the current Model and Requirements, attach it to the Drift in place of the stale one as soon as you create it, then hand it over.` | ☐ |
-| 3 | `j drift replace-proposal 2 --proposal <new id>` after a new Proposal exists | Drift 0002 shows the new Proposal; Proposal 0002 is rejected with `Replaced by Proposal <new id>` under `## Feedback` | ☐ |
 | 4 | On a Drift whose Proposal is still a Draft, click the left **Keep this** | A warning `… is still being written. Wait until the agent hands it over.` | ☐ |
 
 ### G9. Technical Tasks
@@ -834,7 +828,6 @@ Start each block with ↻. `$D` and `j` are the ones of S4.
 | U10 | `j task new "Extra" --technical --ref requirements/ui#General` | The new Task takes the lowest free number, `T2`, which Task `0002` released. `j task list` shows it as `T2` in To do | ☐ |
 | U11 | `j task move 0004 todo` | Task `0004` leaves Done and takes the lowest free number, `T4` | ☐ |
 | U12 | `j proposal reject P1 --feedback x` (with `TRAMA_AGENT` and `CURSOR_AGENT` unset) | Proposal `0001` is rejected. `j proposal list --all` shows it by its identity `0001`, with no number, and Proposal `P2` keeps its number. `j drift resolve D1 --dismiss` behaves the same way for the Drift | ☐ |
-| U13 | Follow G8b to the end (rework of the stale Proposal of Drift `D2`, naming the new Proposal by its short number), then `grep -rn 'Replaced by' $D/proposals` | The rejected Proposal's feedback reads `Replaced by Proposal <identity>` with the permanent identity, never a `P…` number | ☐ |
 | U14 | ↻, then `rm $D/short-numbers/assigned` and `j task list` | No error. The live cards get their numbers again in creation order (`T1`, `T2`, `T3`, as in U1) and `assigned` exists again | ☐ |
 | U15 | Write a line twice: add `task 0003 1` to `assigned` with `echo 'task 0003 1' >> $D/short-numbers/assigned`, then `j task list` | No error and no duplicate number among the Tasks; the numbers were rebuilt from zero in creation order | ☐ |
 | U16 | Board: read the badge of `0001` in To do and of `0004` in Done | The live Task shows `T…` and the Done Task shows its eight-character or four-digit identity, in the same place, in the same monospaced font; never both on one card | ☐ |

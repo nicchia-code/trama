@@ -38,7 +38,7 @@ export const knownCommand = (agent: TerminalAgent): string | undefined => KNOWN_
  * implement runs (a Task's or a Proposal's short number, `All tasks`) are execution.
  */
 // ponytail: the role follows the terminal name, which the Requirements tie one-to-one to the kind of instruction; pass the role explicitly if a name ever serves two roles.
-export const roleOf = (name: string): Role => (name === "Design" || name === "Import" ? "analysis" : name === "Scan" ? "scan" : "execution");
+export const roleOf = (name: string): Role => (name === "Design" || name === "Import" || name === "Drifts" ? "analysis" : name === "Scan" ? "scan" : "execution");
 
 /** Whether instructions of `role` can scan (every scan and every implement run), so they triage and analyse with sub-agents. */
 export const canScan = (role: Role): boolean => role !== "analysis";
@@ -46,9 +46,10 @@ export const canScan = (role: Role): boolean => role !== "analysis";
 /**
  * The template of the command line, with `{prompt}` where the quoted prompt goes: a known agent's own line with the run's
  * model and, for instructions that can scan, the sub-agents' models; for `custom`, `command` with every `{model}`
- * replaced by the quoted run's model, or by nothing when the role is empty.
+ * replaced by the quoted run's model, or by nothing when the role is empty. `ompHook` is the hook module omp loads to
+ * tell Trama when it is idle.
  */
-export function agentTemplate(agent: TerminalAgent, command: string, role: Role, models: Models, family: ShellFamily): string {
+export function agentTemplate(agent: TerminalAgent, command: string, role: Role, models: Models, family: ShellFamily, ompHook?: string): string {
   const option = (flag: string, value: string) => (value === "" ? [] : [flag, quote(family, value)]);
   const model = models[role];
   if (agent === "custom") return command.split("{model}").join(model === "" ? "" : quote(family, model));
@@ -56,7 +57,7 @@ export function agentTemplate(agent: TerminalAgent, command: string, role: Role,
   const words: string[] = (() => {
     switch (agent) {
       case "omp":
-        return ["omp", ...option("--model", model), ...(scanning ? [...option("--smol", models.execution), ...option("--slow", models.analysis)] : [])];
+        return ["omp", ...(ompHook === undefined ? [] : ["--hook", quote(family, ompHook)]), ...option("--model", model), ...(scanning ? [...option("--smol", models.execution), ...option("--slow", models.analysis)] : [])];
       case "claude":
         return ["claude", ...option("--model", model), ...(scanning ? ["--agents", quote(family, claudeAgents(models))] : [])];
       case "codex":

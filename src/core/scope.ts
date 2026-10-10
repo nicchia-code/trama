@@ -73,7 +73,7 @@ export function approvedScope(p: Project, proposalId: string, apply: () => void)
   const proposal = getProposal(p, proposalId);
   const scope = proposalScope(p, proposal.id);
   apply();
-  if (proposal.data.kind === "import") return { id: proposal.id, features: [] };
+  if (proposal.data.kind !== "change") return { id: proposal.id, features: [] };
   const existing = loadModel(p).features;
   return { id: proposal.id, features: scope.filter((f) => existing.has(f)) };
 }

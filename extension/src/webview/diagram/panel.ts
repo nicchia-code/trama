@@ -1,10 +1,11 @@
 import { type CardName, type CardNumbers, cardNameOf } from "../../../../src/core/card-names";
 import { appliesUnder, REQUIRED_STATUS } from "../../../../src/core/required";
-import type { DriftView, ProposalView } from "../../../../src/core/snapshot";
-import { approveBlocker } from "../board/logic";
+import type { ProposalView } from "../../../../src/core/snapshot";
+import { approveBlocker, resolvedRows } from "../board/logic";
 import { renderDriftCompare } from "../drift-compare";
 import { idTag } from "../id-tag";
 import { renderInline, renderMarkdown } from "../markdown";
+import { renderResolves } from "../resolves";
 import type { Detail, DetailItem } from "./details";
 import type { Level } from "./graph";
 
@@ -16,15 +17,10 @@ export interface PanelActions {
   toggle(state: string): void;
   approve(proposal: string): void;
   reject(proposal: string): void;
-  resolveDrift(drift: string, how: "fix-code" | "accept-proposal" | "dismiss", carries: { option?: number; note?: string }): void;
-  /** "Keep this" clicked on a Drift whose attached Proposal cannot be approved. */
-  driftBlocked(drift: string): void;
   /** An http or https link of a rendered text was followed. */
   openLink(url: string): void;
-  /** Show a Proposal drawn in the Diagram or in the Requirements tab. */
-  viewProposal(view: "diagram" | "requirements", proposal: string): void;
-  /** The "Decide on Drift" link of an attached Proposal: select that Drift in the Diagram. */
-  decideOnDrift(drift: string): void;
+  /** A row of a resolution's Resolves Drifts block: select that Drift in the Diagram. */
+  showDrift(drift: string): void;
 }
 
 export interface Panel {
@@ -91,7 +87,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     return li;
   };
 
-  const renderProposal = (p: ProposalView, numbers: CardNumbers, drift: DriftView | null): HTMLElement => {
+  const renderProposal = (p: ProposalView, numbers: CardNumbers): HTMLElement => {
     const box = el("section", "dg-proposal");
     const kind = el("div", "dg-kind", "Proposal ");
     kind.append(idTag(cardNameOf(numbers, "proposal", p.id), "dg-id"));
@@ -130,16 +126,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       }
       box.append(ul);
     }
-    if (drift) {
-      const row = el("div", "dg-actions");
-      const link = el("button", "dg-link", "Decide on Drift ");
-      link.type = "button";
-      link.append(idTag(cardNameOf(numbers, "drift", drift.id), "dg-id"));
-      link.addEventListener("click", () => actions.decideOnDrift(drift.id));
-      row.append(link);
-      box.append(row);
-      return box;
-    }
+    if (p.resolves.length > 0) box.append(...renderResolves("dg", p.title, resolvedRows(p, numbers), actions.showDrift));
     const blocker = approveBlocker(p, numbers);
     const row = el("div", "dg-actions");
     row.append(
@@ -161,10 +148,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       head.append(el("h2", "", detail.title));
       if (detail.change !== "same") head.append(el("div", `dg-badge change-${detail.change}`, CHANGE_TEXT[detail.change]));
       root.append(head);
-      if (detail.drift) {
-        const d = detail.drift;
-        root.append(renderDriftCompare(d, { keep: (how, carries) => actions.resolveDrift(d.id, how, carries), blocked: () => actions.driftBlocked(d.id), openLink: actions.openLink, numbers: detail.numbers, viewProposal: (view) => actions.viewProposal(view, d.proposal ?? "") }));
-      }
+      if (detail.drift) root.append(renderDriftCompare(detail.drift, { openLink: actions.openLink }));
 
       if (detail.description) root.append(body(detail.description));
       if (detail.changes.length > 0) root.append(el("div", "dg-heading", "What changes"), list("dg-change-lines", detail.changes));
@@ -182,7 +166,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
         for (const i of s.items) ul.append(renderItem(i));
         root.append(el("div", "dg-heading", s.heading), ul);
       }
-      if (detail.proposal) root.append(renderProposal(detail.proposal, detail.numbers, detail.proposalDrift));
+      if (detail.proposal) root.append(renderProposal(detail.proposal, detail.numbers));
     },
   };
 }

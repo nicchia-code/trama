@@ -15,7 +15,7 @@ export interface View {
    * Called with every new snapshot, also while the view is hidden. Must keep the user's zoom, selection and breadcrumb
    * when it can. `asking`: a question round is open.
    */
-  update(snapshot: Snapshot, asking?: boolean): void;
+  update(snapshot: Snapshot, asking?: boolean, resolve?: { resolving: boolean; blocker: string | null }): void;
   /** Called when the view becomes visible or is navigated to. */
   show(options: NavigateOptions): void;
   /** Called when announced cards were withdrawn without being delivered, so the view tells the developer. */

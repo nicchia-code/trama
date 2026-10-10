@@ -38,6 +38,31 @@ test("init and skills update install omp's two sub-agents on roles, never on a c
   }
 });
 
+test("init refuses to overwrite a customised omp sub-agent definition and creates nothing; identical ones are not a conflict", () => {
+  const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
+  try {
+    const triage = join(root, ".omp/agents/trama-triage.md");
+    mkdirSync(join(triage, ".."), { recursive: true });
+    writeFileSync(triage, "my own triage agent\n");
+
+    expect(() => run(["--root", root, "init"], root)).toThrow(/Refusing to overwrite[\s\S]*trama-triage\.md/);
+    expect(readFileSync(triage, "utf8")).toBe("my own triage agent\n");
+    expect(existsSync(join(root, ".trama"))).toBe(false);
+    expect(existsSync(join(root, ".agents/skills/trama-design"))).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  const same = mkdtempSync(join(tmpdir(), "trama-skills-"));
+  try {
+    run(["--root", same, "init"], same);
+    rmSync(join(same, ".trama"), { recursive: true });
+    expect(run(["--root", same, "init"], same).exit).toBe(0);
+  } finally {
+    rmSync(same, { recursive: true, force: true });
+  }
+});
+
 test("init --force replaces customised skills, and identical existing files are not a conflict", () => {
   const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
   try {
@@ -103,8 +128,17 @@ test("trama-implement reads each Task once from task show and checks the run onc
   expect(skill).not.toContain("Understand the surroundings");
 });
 
-test("the four skills name cards by short number and title but write only the permanent identity", () => {
-  for (const name of ["trama-design", "trama-scan", "trama-implement", "trama-import"]) {
+test("trama-resolve-drifts splits fragments over 12 KB in the same Proposal, keeping the 4,000-character budget in mind", () => {
+  const skill = SKILLS["trama-resolve-drifts/SKILL.md"] as string;
+  expect(skill).toContain("larger than 12 KB");
+  expect(skill).toContain("split that fragment in the same Proposal before handing it over");
+  expect(skill).toContain("move the sections without changing their text");
+  expect(skill).toContain("4,000-character budget");
+  expect(skill).toContain("prefer a few medium fragments to many tiny ones");
+});
+
+test("the five skills name cards by short number and title but write only the permanent identity", () => {
+  for (const name of ["trama-design", "trama-scan", "trama-implement", "trama-import", "trama-resolve-drifts"]) {
     const skill = SKILLS[`${name}/SKILL.md`] as string;
     expect(skill).toContain("## Naming cards");
     expect(skill).toContain("by short number and title");
@@ -113,8 +147,8 @@ test("the four skills name cards by short number and title but write only the pe
   }
 });
 
-test("the four skills say which texts follow the chosen language and which stay in English, without naming a language", () => {
-  for (const name of ["trama-design", "trama-scan", "trama-implement", "trama-import"]) {
+test("the five skills say which texts follow the chosen language and which stay in English, without naming a language", () => {
+  for (const name of ["trama-design", "trama-scan", "trama-implement", "trama-import", "trama-resolve-drifts"]) {
     const skill = SKILLS[`${name}/SKILL.md`] as string;
     const section = skill.slice(skill.indexOf("## Language"), skill.indexOf("## Steps"));
     expect(section).toContain("only the prose you produce for Trama goes in that language");

@@ -1,9 +1,8 @@
 import type { Change, MergedMachine, MergedState, MergedTransition } from "../../../../src/core/merge";
 import type { AreaView, DriftView, ProposalView } from "../../../../src/core/snapshot";
 import { type CardName, type CardNumbers, cardLabel, cardNameOf, noNumbers } from "../../../../src/core/card-names";
-import { attachedDriftOf } from "../board/logic";
 import { type UnresolvedRef, unresolvedRefs } from "./drifts";
-import { type Element, resolveElement } from "./elements";
+import { type Element, refResolves, resolveElement } from "./elements";
 import type { GEdge, GNode, GraphSpec, Level } from "./graph";
 import { flows, machineCount, stateCount } from "./overview";
 import { type Scene, type SceneActor, findMergedState, pathTo } from "./scene";
@@ -43,8 +42,6 @@ export interface Detail {
   toggle: { state: string; expanded: boolean } | null;
   /** Shown with Approve and Reject: the selected element is a ghost of this Proposal, or none is selected. */
   proposal: ProposalView | null;
-  /** The open Drift holding `proposal`: its details link to it instead of Approve and Reject. */
-  proposalDrift: DriftView | null;
   /** Drawn by the panel as the comparison of what happens and what should happen, with a Keep this for each side. */
   drift: DriftView | null;
   /** The short numbers of the live cards, so the panel writes the cards it names the way the Board does. */
@@ -54,7 +51,7 @@ export interface Detail {
 const item = (text: string, extra: Partial<DetailItem> = {}): DetailItem => ({ text, note: "", change: "same", ref: null, block: false, card: null, ...extra });
 
 function detail(init: Partial<Detail> & Pick<Detail, "kind" | "title">): Detail {
-  return { change: "same", description: "", changes: [], sections: [], file: null, drill: null, toggle: null, proposal: null, proposalDrift: null, drift: null, numbers: noNumbers, ...init };
+  return { change: "same", description: "", changes: [], sections: [], file: null, drill: null, toggle: null, proposal: null, drift: null, numbers: noNumbers, ...init };
 }
 
 const transitionItem = (t: MergedTransition): DetailItem => item(`${t.event.owner}.${t.event.name} → ${t.target}`, { note: t.prose, change: t.change });
@@ -95,8 +92,8 @@ function actorDetail(scene: Scene, actor: SceneActor, change: Change): Detail {
   });
 }
 
-/** What the panel shows for an element; `node` says whether it can be expanded or drilled into where it is drawn. */
-export function detailOfElement(scene: Scene, element: Element, node: GNode | null): Detail {
+/** What the panel shows for an element; `node` says whether it can be drilled into where it is drawn, and `expandable` whether its States can be expanded in place (Machine level only). */
+export function detailOfElement(scene: Scene, element: Element, node: GNode | null, expandable: boolean): Detail {
   switch (element.kind) {
     case "feature": {
       const f = element.feature;
@@ -145,7 +142,7 @@ export function detailOfElement(scene: Scene, element: Element, node: GNode | nu
         ],
         file: scene.files.get(m.id) ?? null,
         drill: s.children.length > 0 && !node?.external ? { kind: "state", machine: m.id, state: s.name } : null,
-        toggle: node && node.children > 0 && node.kind === "state" && !node.external ? { state: s.name, expanded: node.expanded } : null,
+        toggle: expandable && node && node.children > 0 && node.kind === "state" && !node.external ? { state: s.name, expanded: node.expanded } : null,
       });
     }
     case "transition":
@@ -161,7 +158,7 @@ export function detailOfElement(scene: Scene, element: Element, node: GNode | nu
       });
     case "event": {
       const { owner } = element;
-      return owner.kind === "actor" ? actorDetail(scene, owner.actor, owner.actor.change) : detailOfElement(scene, { kind: "machine", ref: owner.machine.id, machine: owner.machine }, node);
+      return owner.kind === "actor" ? actorDetail(scene, owner.actor, owner.actor.change) : detailOfElement(scene, { kind: "machine", ref: owner.machine.id, machine: owner.machine }, node, expandable);
     }
   }
 }
@@ -195,7 +192,7 @@ export function detailOfDrift(scene: Scene, drift: DriftView): Detail {
       {
         heading: "Points at",
         items: drift.refs.map((ref) => {
-          const ok = resolveElement(scene, ref) !== null;
+          const ok = refResolves(scene, ref);
           return item(ref, { note: ok ? "" : "no longer resolves", ref: ok ? ref : null });
         }),
       },
@@ -272,13 +269,13 @@ export function detailOfSelection(scene: Scene, graph: GraphSpec, selected: stri
     if (drift) return { ...detailOfDrift(scene, drift), numbers: scene.numbers };
   }
   const element = n?.ref ? resolveElement(scene, n.ref) : null;
-  const found = element ? detailOfElement(scene, element, n ?? null) : edge ? detailOfEdge(scene, graph, edge) : null;
+  const found = element ? detailOfElement(scene, element, n ?? null, graph.level.kind === "machine") : edge ? detailOfEdge(scene, graph, edge) : null;
   if (!found) {
     const level = detailOfLevel(scene, graph.level);
-    return { ...level, proposalDrift: level.proposal ? (attachedDriftOf(scene, level.proposal.id) ?? null) : null, numbers: scene.numbers };
+    return { ...level, numbers: scene.numbers };
   }
   const proposal = scene.proposal && found.change !== "same" ? scene.proposal : null;
-  return { ...found, proposal, proposalDrift: proposal ? (attachedDriftOf(scene, proposal.id) ?? null) : null, numbers: scene.numbers };
+  return { ...found, proposal, numbers: scene.numbers };
 }
 
 /** Plain text for the tooltip of a node or an edge. */

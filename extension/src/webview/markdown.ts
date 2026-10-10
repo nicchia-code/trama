@@ -35,7 +35,7 @@ function htmlEnd(s: string, at: number): number {
   if (s[at] !== "<") return -1;
   if (s.startsWith("<!--", at)) {
     const close = s.indexOf("-->", at + 4);
-    return close === -1 ? s.length : close + 3;
+    return close === -1 ? -1 : close + 3;
   }
   if (!/^<(?:\/?[A-Za-z][\w-]*(?=[\s/>])|![A-Z]|\?)/.test(s.slice(at))) return -1;
   let quote: string | undefined;
@@ -46,7 +46,7 @@ function htmlEnd(s: string, at: number): number {
     } else if (ch === '"' || ch === "'") quote = ch;
     else if (ch === ">") return i + 1;
   }
-  return s.length;
+  return -1;
 }
 
 /** Index of the `]` that closes the `[` at `open`, skipping code spans and escapes; -1 when there is none. */
@@ -86,41 +86,76 @@ function linkTarget(s: string, at: number): { url: string; end: number } | null 
   return null;
 }
 
-/** Index of a closing run of exactly the delimiter's kind and at least `n` long, usable as a closer for `ch`; -1 when there is none. */
-function closingDelimiter(s: string, from: number, ch: string, n: number): number {
-  for (let i = from; i < s.length; i++) {
-    if (s[i] === "\\") {
-      i++;
-      continue;
+/** A run of `*` or `_` not paired yet: how many characters are left, and whether it can open or close emphasis. */
+type Delim = { t: "delim"; ch: string; count: number; orig: number; open: boolean; close: boolean };
+type Tok = Inline | Delim;
+
+/** Turns the delimiters that stayed unpaired into text. Only the texts around such a run join: other texts keep their nodes. */
+function plain(toks: Tok[]): Inline[] {
+  const out: Inline[] = [];
+  let joinNext = false;
+  for (const tok of toks) {
+    const last = out.at(-1);
+    if (tok.t === "delim") {
+      const text = tok.ch.repeat(tok.count);
+      if (last?.t === "text") out[out.length - 1] = { t: "text", text: last.text + text };
+      else out.push({ t: "text", text });
+      joinNext = true;
+    } else if (tok.t === "text" && joinNext && last?.t === "text") {
+      out[out.length - 1] = { t: "text", text: last.text + tok.text };
+      joinNext = false;
+    } else {
+      out.push(tok);
+      joinNext = false;
     }
-    if (s[i] === "`") {
-      const run = /^`+/.exec(s.slice(i))?.[0] ?? "`";
-      const end = s.indexOf(run, i + run.length);
-      if (end !== -1) i = end + run.length - 1;
-      continue;
-    }
-    const html = htmlEnd(s, i);
-    if (html !== -1) {
-      i = html - 1;
-      continue;
-    }
-    if (s[i] !== ch) continue;
-    let end = i;
-    while (s[end] === ch) end++;
-    const run = end - i;
-    const usable = run >= n && !isSpace(s[i - 1]) && (ch === "*" || !isWord(s[end]));
-    if (usable) return i + (run - n);
-    i = end - 1;
   }
-  return -1;
+  return out;
+}
+
+/** Whether `tok` can open emphasis that `closer` closes; CommonMark's rule of three keeps `*a**b*` and friends apart. */
+function pairs(tok: Tok | undefined, closer: Delim): tok is Delim {
+  if (tok === undefined || tok.t !== "delim" || !tok.open || tok.ch !== closer.ch || tok.count === 0) return false;
+  const both = (tok.open && tok.close) || (closer.open && closer.close);
+  return !(both && (tok.orig + closer.orig) % 3 === 0 && !(tok.orig % 3 === 0 && closer.orig % 3 === 0));
+}
+
+/** Pairs the runs of a paragraph the way CommonMark does: each closer takes the nearest opener before it, so pairs nest
+ *  in source order, and a run that pairs with nothing is text. */
+function emphasis(toks: Tok[]): Inline[] {
+  let c = 0;
+  while (c < toks.length) {
+    const closer = toks[c];
+    if (closer === undefined || closer.t !== "delim" || !closer.close) {
+      c++;
+      continue;
+    }
+    let o = c - 1;
+    while (o >= 0 && !pairs(toks[o], closer)) o--;
+    if (o < 0) {
+      c++;
+      continue;
+    }
+    const opener = toks[o] as Delim;
+    const n = opener.count >= 2 && closer.count >= 2 ? 2 : 1;
+    opener.count -= n;
+    closer.count -= n;
+    toks.splice(o + 1, c - o - 1, { t: n === 2 ? "strong" : "em", c: plain(toks.slice(o + 1, c)) });
+    c = o + 2;
+    if (opener.count === 0) {
+      toks.splice(o, 1);
+      c--;
+    }
+    if (closer.count === 0) toks.splice(c, 1);
+  }
+  return plain(toks);
 }
 
 /** Inline Markdown of one paragraph or line. Newlines inside are soft breaks (a space), or hard ones after two spaces or a backslash. */
 export function parseInline(s: string): Inline[] {
-  const out: Inline[] = [];
+  const toks: Tok[] = [];
   let text = "";
   const flush = () => {
-    if (text !== "") out.push({ t: "text", text });
+    if (text !== "") toks.push({ t: "text", text });
     text = "";
   };
 
@@ -131,7 +166,7 @@ export function parseInline(s: string): Inline[] {
       const next = s[i + 1];
       if (next === "\n") {
         flush();
-        out.push({ t: "br" });
+        toks.push({ t: "br" });
         i += 2;
       } else if (next !== undefined && PUNCTUATION.test(next)) {
         text += next;
@@ -147,7 +182,7 @@ export function parseInline(s: string): Inline[] {
       if (/ {2,}$/.test(text)) {
         text = text.replace(/ +$/, "");
         flush();
-        out.push({ t: "br" });
+        toks.push({ t: "br" });
       } else text = `${text.replace(/ +$/, "")} `;
       i++;
       while (s[i] === " ") i++;
@@ -168,7 +203,7 @@ export function parseInline(s: string): Inline[] {
       let code = s.slice(i + run.length, close).replace(/\n/g, " ");
       if (code.length > 2 && code.startsWith(" ") && code.endsWith(" ") && code.trim() !== "") code = code.slice(1, -1);
       flush();
-      out.push({ t: "code", text: code });
+      toks.push({ t: "code", text: code });
       i = close + run.length;
       continue;
     }
@@ -192,8 +227,8 @@ export function parseInline(s: string): Inline[] {
           const label = parseInline(s.slice(open + 1, close));
           const href = safeLink(target.url);
           flush();
-          if (href === null) out.push(...label);
-          else out.push({ t: "link", href, c: stripLinks(label) });
+          if (href === null) toks.push(...label);
+          else toks.push({ t: "link", href, c: stripLinks(label) });
         }
         i = target.end;
         continue;
@@ -205,22 +240,15 @@ export function parseInline(s: string): Inline[] {
       while (s[i + run] === ch) run++;
       const before = s[i - 1];
       const after = s[i + run];
-      const opens = !isSpace(after) && (ch === "*" || !isWord(before));
-      if (opens) {
-        const n = Math.min(run, 3);
-        const close = closingDelimiter(s, i + run, ch, n);
-        if (close !== -1 && close > i + run - 1) {
-          const inner = parseInline(s.slice(i + run, close));
-          const lead = run - n;
-          text += ch.repeat(lead);
-          flush();
-          const wrapped: Inline = n === 1 ? { t: "em", c: inner } : n === 2 ? { t: "strong", c: inner } : { t: "em", c: [{ t: "strong", c: inner }] };
-          out.push(wrapped);
-          i = close + n;
-          continue;
-        }
-      }
-      text += ch.repeat(run);
+      flush();
+      toks.push({
+        t: "delim",
+        ch,
+        count: run,
+        orig: run,
+        open: !isSpace(after) && (ch === "*" || !isWord(before)),
+        close: !isSpace(before) && (ch === "*" || !isWord(after)),
+      });
       i += run;
       continue;
     }
@@ -229,7 +257,7 @@ export function parseInline(s: string): Inline[] {
     i++;
   }
   flush();
-  return out;
+  return emphasis(toks);
 }
 
 /** A link inside a link label is not a link: its text stays. */

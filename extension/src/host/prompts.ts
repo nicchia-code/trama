@@ -2,12 +2,12 @@ import type { AgentAction } from "../protocol";
 
 /** An action whose free text has been collected: the host asks for a missing design request first. */
 export type ResolvedAction =
-  | Exclude<AgentAction, { kind: "design" | "rework-drift" }>
+  | Exclude<AgentAction, { kind: "design" | "resolve-drifts" }>
   | { kind: "design"; prompt: string }
   /** A written design request, saved as `.trama/requests/<request>.md`. */
   | { kind: "written-design"; request: string }
-  /** `proposal` is the stale Proposal attached to the Drift, found by the host. */
-  | { kind: "rework-drift"; drift: string; proposal: string };
+  /** `drifts` are the Drifts open when the instruction is built, in creation order: the ones this run covers. */
+  | { kind: "resolve-drifts"; drifts: string[] };
 
 /** The one-line instruction that makes the external agent use the right Trama skill. */
 export function buildPrompt(action: ResolvedAction): string {
@@ -16,8 +16,8 @@ export function buildPrompt(action: ResolvedAction): string {
       return `Use the trama-design skill. ${action.prompt.trim()}`;
     case "written-design":
       return `Use the trama-design skill on the design request in \`.trama/requests/${action.request}.md\`. Bind the first Proposal you open to it with \`--request ${action.request}\`.`;
-    case "rework-drift":
-      return `Use the trama-design skill, without asking questions. Proposal ${action.proposal}, attached to Drift ${action.drift}, is stale: write a new Proposal that makes the same change on the current Model and Requirements, attach it to the Drift in place of the stale one as soon as you create it, then hand it over.`;
+    case "resolve-drifts":
+      return `Use the trama-resolve-drifts skill on the open Drifts ${action.drifts.join(", ")}: ask the developer what should happen for each one, then write one resolution Proposal.`;
     case "scan":
       return buildScanPrompt(action.feature === undefined ? [] : [action.feature]);
     case "implement":
@@ -71,8 +71,9 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
       return "Scan";
     case "design":
     case "written-design":
-    case "rework-drift":
       return "Design";
+    case "resolve-drifts":
+      return "Drifts";
   }
 }
 

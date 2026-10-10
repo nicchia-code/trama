@@ -8,7 +8,7 @@ import { handOver } from "./handover";
 import { approveProposal, discardProposal, editInProposal, getProposal, health, newProposal, rejectProposal } from "../src/core/proposals";
 import { loadModel, type Project, projectAt } from "../src/core/store";
 import { type CardKind, syncShortNumbers } from "../src/core/short-numbers";
-import { driftOptions, driftSides, getDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask, releaseTasks, replaceDriftProposal, resolveDrift, takeBackTask } from "../src/core/work";
+import { type Drift, driftOptions, driftSides, getDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask, releaseTasks, resolveDrift, takeBackTask } from "../src/core/work";
 
 /** The same options as FIX_OPTIONS, as the command line takes them. */
 const CLI_OPTIONS = FIX_OPTIONS.flatMap((o) => ["--option", o.title, "--option-text", o.text]);
@@ -647,6 +647,44 @@ describe("Tasks and Drifts", () => {
     expect(old).not.toContain("What happens");
   });
 
+  test("drift show says which resolution Proposal holds an open Drift, and which one resolved a closed Drift", async () => {
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Lost in transit", refs: ["order"], happens: "It writes off.", should: "It does not." });
+    const res = newProposal(p, "Resolve lost", "", { kind: "resolution" });
+    const file = join(res.dir, "proposal.md");
+    writeFileSync(file, readFileSync(file, "utf8").replace(/^drifts:.*$/m, `drifts:\n  - drift: ${drift.id}\n    decision: dismissed`));
+    const show = () => run(["--root", dir, "drift", "show", drift.id], process.cwd()).out;
+    expect(show()).toContain(`In resolution Proposal ${named("proposal", res.id)} Resolve lost`);
+    expect(JSON.parse(run(["--root", dir, "--json", "drift", "show", drift.id], process.cwd()).out).inResolutionProposal).toMatchObject({ id: res.id, title: "Resolve lost" });
+
+    writeFileSync(drift.path, readFileSync(drift.path, "utf8").replace("status: open", "status: resolved").replace(/^resolvedBy:.*$/m, `resolvedBy: ${res.id}`));
+    expect(show()).not.toContain("In resolution Proposal");
+    expect(show()).toContain(`Resolved by Proposal ${named("proposal", res.id)}`);
+    expect(JSON.parse(run(["--root", dir, "--json", "drift", "show", drift.id], process.cwd()).out).resolvedBy).toBe(res.id);
+  });
+
+  test("proposal show lists the Drifts a resolution resolves with their decisions; list and board mark it; other Proposals are unchanged", () => {
+    const [a, b, c] = ["A", "B", "C"].map((title) => newDrift(p, { options: FIX_OPTIONS, title, refs: ["order"], happens: "It does.", should: "It does not." })) as [Drift, Drift, Drift];
+    const res = newProposal(p, "Resolve all", "", { kind: "resolution" });
+    const out = (...a: string[]) => run(["--root", dir, ...a], process.cwd()).out;
+    const decide = (d: Drift, ...rest: string[]) => out("proposal", "resolve-drift", res.id, d.id, ...rest);
+    decide(a, "--decision", "fix-code", "--option", "2", "--note", "keep log");
+    decide(b, "--decision", "proposal");
+    decide(c, "--decision", "fix-code", "--option", "1", "--note", "stale note");
+    resolveDrift(p, c.id, "dismiss");
+    const show = out("proposal", "show", res.id);
+    expect(show).toContain(`Resolves Drifts\n- ${named("drift", a.id)} A: Code fixed with option Remove the code · keep log\n- ${named("drift", b.id)} B: Model updated to match the code\n- ${named("drift", c.id)} C: (already resolved)`);
+    const json = JSON.parse(out("--json", "proposal", "show", res.id));
+    expect(json).toMatchObject({ kind: "resolution", drifts: [{ drift: a.id }, { drift: b.id }, { drift: c.id }] });
+    expect(json.resolvesDrifts[2]).toMatchObject({ drift: c.id, decision: "(already resolved)" });
+    expect(json.resolvesDrifts[2].note).toBeUndefined();
+    expect(show).not.toContain("stale note");
+    expect(out("proposal", "list")).toContain("(resolves 3 Drifts)");
+    expect(out("board")).toContain("(resolves 3 Drifts)");
+    const plain = newProposal(p, "Plain");
+    expect(out("proposal", "show", plain.id)).not.toContain("Resolves Drifts");
+    expect(out("proposal", "list")).not.toMatch(/Plain.*resolves/);
+  });
+
   test("an attached Proposal shows under its Drift on the board, is marked in list and show, and returns to the lists once its Drift is resolved", async () => {
     const draft = newProposal(p, "Lost orders");
     const drift = newDrift(p, { options: FIX_OPTIONS, title: "Lost in transit", refs: ["order"], proposal: draft.id, happens: "It writes off.", should: "It does not." });
@@ -707,38 +745,6 @@ describe("Tasks and Drifts", () => {
     expect(getDrift(p, drift.id).data).toMatchObject({ status: "open", resolution: null });
   });
 
-  test("the agent replaces a Drift's stale Proposal: the new one is attached, the old one is rejected as replaced, and nothing else qualifies", async () => {
-    const old = newProposal(p, "Lost orders");
-    editOrder(old.id, (t) => `${t}\n`);
-    handOver(p, old.id);
-    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Lost in transit", refs: ["order"], proposal: old.id, happens: "Code writes it off.", should: "Nothing writes it off." });
-    const fresh = newProposal(p, "Lost orders again");
-    const asAgent = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), { TRAMA_AGENT: "1" });
-
-    expect(() => replaceDriftProposal(p, drift.id, fresh.id)).toThrow(/not stale/);
-    appendFileSync(modelFile("checkout/order.md"), "\n");
-    expect(() => replaceDriftProposal(p, drift.id, old.id)).toThrow(/already attached/);
-    expect(() => replaceDriftProposal(p, drift.id, "99")).toThrow(/No Proposal/);
-    const turnedDown = newProposal(p, "Turned down");
-    handOver(p, turnedDown.id);
-    rejectProposal(p, turnedDown.id, "No.");
-    expect(() => replaceDriftProposal(p, drift.id, turnedDown.id)).toThrow(/was rejected/);
-    const held = newProposal(p, "Held elsewhere");
-    newDrift(p, { options: FIX_OPTIONS, title: "Other", refs: ["order"], proposal: held.id, happens: "Code does it.", should: "Model says so." });
-    expect(() => replaceDriftProposal(p, drift.id, held.id)).toThrow(/already attached to Drift/);
-    expect(getProposal(p, old.id).data.status).toBe("open");
-
-    const out = asAgent("drift", "replace-proposal", drift.id, "--proposal", fresh.id).out;
-    expect(out).toContain(`Proposal ${named("proposal", fresh.id)}`);
-    expect(getDrift(p, drift.id).data.proposal).toBe(fresh.id);
-    expect(getProposal(p, old.id).data.status).toBe("rejected");
-    expect(getProposal(p, old.id).body).toContain(`## Feedback\n\nReplaced by Proposal ${fresh.id}`);
-    expect(() => replaceDriftProposal(p, drift.id, turnedDown.id)).toThrow(/only an open, stale Proposal/);
-
-    resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
-    expect(() => asAgent("drift", "replace-proposal", drift.id, "--proposal", fresh.id)).toThrow();
-  });
-
   test("approving or rejecting a Proposal attached to an open Drift is refused and changes nothing; accepting through the Drift works; a resolved Drift lets go", () => {
     const proposal = newProposal(p, "Lost orders");
     handOver(p, proposal.id);
@@ -759,6 +765,19 @@ describe("Tasks and Drifts", () => {
     expect(getDrift(p, done.id).data.proposal).toBeNull();
     expect(getDrift(p, drift.id).data.proposal).toBeNull();
     expect(() => run(["--root", dir, "proposal", "reject", left.id], process.cwd())).toThrow(/is rejected/);
+  });
+
+  test("discarding a Draft attached to an open Drift from the command line is refused and changes nothing; fixing the code still sets it aside", () => {
+    const draft = newProposal(p, "Half written");
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Half done", refs: ["order"], proposal: draft.id, happens: "Code does it.", should: "Model says so." });
+    const refusal = `Proposal ${named("proposal", draft.id)} is attached to Drift ${named("drift", drift.id)}: decide on the Drift with trama drift resolve`;
+    expect(() => run(["--root", dir, "proposal", "discard", draft.id], process.cwd())).toThrow(refusal);
+    expect(getProposal(p, draft.id).data.status).toBe("draft");
+    expect(getDrift(p, drift.id).data).toMatchObject({ status: "open", proposal: draft.id });
+
+    resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
+    expect(getProposal(p, draft.id).data.status).toBe("discarded");
+    expect(getDrift(p, drift.id).data).toMatchObject({ status: "resolved", proposal: null });
   });
 
   test("a Drift takes only a Draft or open Proposal not held by another open Drift; a resolved Drift lets go", () => {

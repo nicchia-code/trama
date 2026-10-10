@@ -1,12 +1,15 @@
 import * as vscode from "vscode";
 import { basename, dirname, join } from "node:path";
-import { type AgentOrigin, announce, newTerminalId, TERMINAL_ENV } from "../../../src/core/announcements";
+import { announce, newTerminalId, QUIET_PERIOD_MS, TERMINAL_ENV, type AgentOrigin } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
 import { QUESTION_ENDPOINT_ENV } from "../../../src/core/question-channel";
-import { bundledTrama, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, toClipboard, withTramaPath } from "./cursor";
+import { bundledOmpHook, bundledTrama, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, toClipboard, withTramaPath } from "./cursor";
 import { withdrawWaiting } from "./announcements";
+import { bindChatJob, endChatJobs, endIsVisible, endTerminalJobs, isHooked, type JobKind, onAgentIdle, setHooked, startJob } from "./drift-resolution";
+import { questionRoundClosedAt, questionRoundOpen } from "./question-activity";
+import { terminalSeenAt } from "./terminal-activity";
 import { ExternalRuns, externalScript, typedCommand } from "./external-terminal";
 import { type ExternalWindow, type ReusableTerminal, runScripting, scriptingCommand } from "./external-reuse";
 import { detectTerminal, openWindow, reusableKind, type WindowOrigin } from "./external-open";
@@ -125,13 +128,35 @@ function releaseTakenTasks(root: string, origin: AgentOrigin): void {
   }
 }
 
+/** The hooked agents running in external windows, by window identity: the project they run for and when their run started. Kept until the window's command ends, so every quiet period of its run counts. */
+const hookedExternal = new Map<string, { root: string; since: number }>();
+
+/**
+ * A hooked agent that has been quiet for the quiet period gives back the Tasks it took in its terminal, integrated or
+ * external. Its run stays with its hook; the quiet period does not run while a question round is open, as for the
+ * announcements. An external window's quiet period starts with its run, so a run that never says anything counts from there.
+ * ponytail: scans every 30 s; index the hooked terminals if it ever matters.
+ */
+export function releaseQuietHookedTasks(now = Date.now()): void {
+  if (questionRoundOpen()) return;
+  for (const info of agentTerminals.values()) {
+    if (isHooked(info.id) && now - Math.max(terminalSeenAt(info.id), questionRoundClosedAt()) >= QUIET_PERIOD_MS) releaseTakenTasks(info.root, { terminal: info.id });
+  }
+  for (const [terminal, info] of hookedExternal) {
+    if (isHooked(terminal) && now - Math.max(terminalSeenAt(terminal), info.since, questionRoundClosedAt()) >= QUIET_PERIOD_MS) releaseTakenTasks(info.root, { terminal });
+  }
+}
+
 /**
  * Follows the commands that start and end in the terminals Trama launches agents in, and the turns of Trama's
  * conversations in Cursor's chat. The end of a terminal's command releases the Tasks taken there.
  */
 export function watchAgentTerminal(): vscode.Disposable {
+  const quietTimer = setInterval(() => releaseQuietHookedTasks(), 30_000);
   return vscode.Disposable.from(
     vscode.window.onDidStartTerminalShellExecution((e) => {
+      const info = agentTerminals.get(e.terminal);
+      if (info !== undefined && isTypedCommand(e.terminal, e.execution.commandLine.value)) endIsVisible(info.id);
       if (e.terminal === lastTerminal && isTypedCommand(e.terminal, e.execution.commandLine.value)) commandRunning = true;
     }),
     vscode.window.onDidEndTerminalShellExecution((e) => {
@@ -141,17 +166,41 @@ export function watchAgentTerminal(): vscode.Disposable {
       // Only the end of the command Trama typed counts as the agent finishing; any other command, or an end that comes
       // without a command line, changes nothing here, not even the Tasks this terminal had taken.
       if (!isTypedCommand(e.terminal, e.execution.commandLine.value)) return;
+      // The run of a hooked agent (omp) ends with its hook, so its job stays; the end of its command only frees the
+      // terminal and, since no agent can still be working there, releases its Tasks and withdraws its announcements.
+      if (isHooked(info.id)) {
+        releaseTakenTasks(info.root, { terminal: info.id });
+        withdrawWaiting(info.root, (a) => a.terminal === info.id);
+        if (e.terminal === lastTerminal) commandRunning = false;
+        return;
+      }
       releaseTakenTasks(info.root, { terminal: info.id });
+      endTerminalJobs(info.id);
       withdrawWaiting(info.root, (a) => a.terminal === info.id);
       if (e.terminal === lastTerminal) commandRunning = false;
     }),
     onCursorChatEvent((e) => {
-      if (e.event !== "PROMPT_SUBMITTED") releaseTakenTasks(e.root, { chat: "cursor" });
+      if (e.event === "PROMPT_SUBMITTED") {
+        bindChatJob(e.root, e.conversation);
+        return;
+      }
+      releaseTakenTasks(e.root, { chat: "cursor" });
+      endChatJobs(e.root, e.conversation);
+    }),
+    onAgentIdle((terminal, root) => {
+      releaseTakenTasks(root, { terminal });
+      endTerminalJobs(terminal);
+      withdrawWaiting(root, (a) => a.terminal === terminal);
     }),
     vscode.window.onDidCloseTerminal((t) => {
       const info = agentTerminals.get(t);
       agentTerminals.delete(t);
-      if (info !== undefined) withdrawWaiting(info.root, (a) => a.terminal === info.id);
+      if (info !== undefined) {
+        // A closed hooked terminal ends its run for good: the hook will never say idle, so its Tasks go back to To do here.
+        if (isHooked(info.id)) releaseTakenTasks(info.root, { terminal: info.id });
+        endTerminalJobs(info.id);
+        withdrawWaiting(info.root, (a) => a.terminal === info.id);
+      }
       if (t === lastTerminal) {
         lastTerminal = undefined;
         commandRunning = false;
@@ -163,6 +212,7 @@ export function watchAgentTerminal(): vscode.Disposable {
       const tab = e.opened.find((t) => t.input instanceof vscode.TabInputTerminal && t.label === name);
       if (tab !== undefined) lastTab.column = tab.group.viewColumn;
     }),
+    { dispose: () => clearInterval(quietTimer) },
   );
 }
 
@@ -172,13 +222,12 @@ function isTypedCommand(terminal: vscode.Terminal, commandLine: string | undefin
   return typed !== undefined && commandLine !== undefined && commandLine.trim() === typed.trim();
 }
 
-/** What a design request announces: its title, or, to rework the stale Proposal of a Drift, the title and that Drift. */
-export type DesignAnnouncement = string | { title: string; drift: string };
+/** What a design request announces: its title. */
+export type DesignAnnouncement = string;
 
-function announceDesignRequest(root: string, request: DesignAnnouncement, terminal: string): void {
+function announceDesignRequest(root: string, title: DesignAnnouncement, terminal: string): void {
   try {
-    const { title, drift } = typeof request === "string" ? { title: request, drift: undefined } : request;
-    announce(projectAt(root), { kind: "proposal", title, source: "request", terminal, ...(drift ? { drift } : {}) });
+    announce(projectAt(root), { kind: "proposal", title, source: "request", terminal });
   } catch (err) {
     if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: could not announce the Proposal: ${err.message}`);
     else throw err;
@@ -202,7 +251,14 @@ let externalUnwatched = "the external terminal's end markers are not being watch
 export function watchExternalRuns(markerDir: string): vscode.Disposable {
   let runs: ExternalRuns<{ root: string }>;
   const release = ({ terminal, context }: { terminal: string; context: { root: string } }) => {
+    if (isHooked(terminal)) {
+      releaseTakenTasks(context.root, { terminal });
+      hookedExternal.delete(terminal);
+      withdrawWaiting(context.root, (a) => a.terminal === terminal);
+      return;
+    }
     releaseTakenTasks(context.root, { terminal });
+    endTerminalJobs(terminal);
     withdrawWaiting(context.root, (a) => a.terminal === terminal);
   };
   try {
@@ -238,7 +294,7 @@ export interface ExternalRunStart {
  * before the window opens because a command may end immediately, but its end is held back until `sent`.
  * The previous instruction remains followed until then. `endpoint` is the question channel of this editor window.
  */
-export function startExternalRun(root: string, terminal: string, template: string, prompt: string, endpoint?: string): ExternalRunStart {
+export function startExternalRun(root: string, terminal: string, template: string, prompt: string, endpoint?: string, job?: JobKind, hooked = false): ExternalRunStart {
   if (externalRuns === undefined) throw new TramaError("The external terminal's end markers are not being watched.");
   const run = externalRuns.nextRun(terminal);
   const program = bundledTrama();
@@ -256,6 +312,10 @@ export function startExternalRun(root: string, terminal: string, template: strin
     sent: (announceProposal) => {
       // Only this window can be reused next; older terminals still report their own command endings.
       lastTerminal = undefined;
+      setHooked(terminal, hooked);
+      if (hooked) hookedExternal.set(terminal, { root, since: Date.now() });
+      else hookedExternal.delete(terminal);
+      if (job !== undefined) startJob(job, root, { terminal }, hooked);
       commandRunning = false;
       if (announceProposal !== undefined) announceDesignRequest(root, announceProposal, terminal);
       commit();
@@ -294,13 +354,15 @@ export async function reuseExternalWindow(
   detected: ReusableTerminal | undefined,
   announceProposal?: DesignAnnouncement,
   canSend: () => boolean = () => true,
+  job?: JobKind,
+  hooked = false,
 ): Promise<ExternalReuse> {
   const previous = lastExternal;
   if (previous === undefined || previous.root !== root || previous.name !== name || detected !== previous.window.terminal) return { kind: "new-window" };
   if (configuredExternalTerminalCommand() !== "" || externalRuns?.idle(previous.terminal) !== true) return { kind: "new-window" };
   const endpoint = await questionEndpoint(root);
   if (!canSend()) return { kind: "cancelled" };
-  const { line, abandon, sent } = startExternalRun(root, previous.terminal, template, prompt, endpoint);
+  const { line, abandon, sent } = startExternalRun(root, previous.terminal, template, prompt, endpoint, job, hooked);
   try {
     // The window's shell may not be POSIX: `sh -c` makes the line run the same in any of them.
     await runScripting(scriptingCommand(previous.window, typedCommand(line)));
@@ -343,10 +405,27 @@ async function externalWindowFailed(prompt: string, reason: string): Promise<und
   return undefined;
 }
 
-/** What a terminal agent receives: the template of its command line, with `{prompt}`, and the prompt. */
+/** What a terminal agent receives: the template of its command line, with `{prompt}`, and the prompt, built when called so it reflects the moment of sending. */
 interface TerminalRun {
   template: (family: ShellFamily) => string;
-  prompt: string;
+  prompt: () => string;
+  /** Whether the run's hook follows it: omp with its hook module in the package. Without it the command ends the run, as for any other agent. */
+  hooked: boolean;
+}
+
+/** An instruction, or a function that builds it at the moment it is sent (the Drifts a resolution covers are those open then). */
+export type Instruction = string | (() => string);
+const textOf = (instruction: Instruction): string => (typeof instruction === "function" ? instruction() : instruction);
+
+/**
+ * Sends overlap only up to the last check: the send steps of the chat and of the external windows (check, send, start of the job)
+ * run one after another, so a request that waited sees the job of the one before it. The developer's choices come before the step.
+ */
+let sendTurn: Promise<unknown> = Promise.resolve();
+function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
+  const run = sendTurn.then(step);
+  sendTurn = run.catch(() => undefined);
+  return run;
 }
 
 /**
@@ -366,43 +445,47 @@ const configuredModels = (): Models => ({
 });
 
 /** The prompt of the run called `name` and its command line template for a shell family, after choosing the agent when none is; undefined when the developer cancels. */
-async function terminalRun(instruction: string, name: string): Promise<TerminalRun | undefined> {
+async function terminalRun(instruction: Instruction, name: string): Promise<TerminalRun | undefined> {
   const chosen = await terminalAgent();
   if (chosen === undefined) return undefined;
   const role = roleOf(name);
   const models = configuredModels();
-  return { template: (family) => agentTemplate(chosen.agent, chosen.command, role, models, family), prompt: terminalPrompt(chosen.agent, instruction, role, models) };
+  const hook = chosen.agent === "omp" ? bundledOmpHook() : undefined;
+  return { template: (family) => agentTemplate(chosen.agent, chosen.command, role, models, family, hook), prompt: () => terminalPrompt(chosen.agent, textOf(instruction), role, models), hooked: hook !== undefined };
 }
 
 /**
  * Sends `instruction` to the agent in a window of the system terminal outside the editor, titled `name`: the free
  * window of the last run when it can be reused, a new one otherwise. Nothing is sent, announced or followed when no window opens.
  */
-async function launchExternal(root: string, instruction: string, name: string, announceProposal: DesignAnnouncement | undefined, canSend: () => boolean): Promise<Launch | undefined> {
+async function launchExternal(root: string, instruction: Instruction, name: string, announceProposal: DesignAnnouncement | undefined, canSend: () => boolean, job?: JobKind): Promise<Launch | undefined> {
   const origin = externalOrigin();
-  if (typeof origin === "string") return externalWindowFailed(terminalPrompt(configuredTerminalAgent(), instruction, roleOf(name), configuredModels()), origin);
+  if (typeof origin === "string") return externalWindowFailed(terminalPrompt(configuredTerminalAgent(), textOf(instruction), roleOf(name), configuredModels()), origin);
   const run = await terminalRun(instruction, name);
-  if (run === undefined || !canSend()) return undefined;
-  const template = run.template("posix");
-  const { prompt } = run;
-  const reuse = await reuseExternalWindow(root, name, template, prompt, reusableKind(origin.terminal), announceProposal, canSend);
-  if (reuse.kind === "cancelled" || !canSend()) return undefined;
-  if (reuse.kind === "reused") return "terminal";
-  const terminalId = newTerminalId();
-  const endpoint = await questionEndpoint(root);
-  if (!canSend()) return undefined;
-  const { line, abandon, sent } = startExternalRun(root, terminalId, template, prompt, endpoint);
-  let window: ExternalWindow | undefined;
-  try {
-    window = await openWindow(origin, { script: line, cwd: root, title: name, kittySocket: join(externalDir, `${terminalId}.sock`) }, canSend);
-  } catch (err) {
-    abandon();
-    return canSend() ? externalWindowFailed(prompt, err instanceof Error ? err.message : String(err)) : undefined;
-  }
-  rememberExternalWindow(terminalId, root, name, window);
-  sent(announceProposal);
-  if (reuse.failure !== undefined) warnExternalReuseFailed(reuse.failure);
-  return "terminal";
+  if (run === undefined) return undefined;
+  return inSendTurn(async () => {
+    if (!canSend()) return undefined;
+    const template = run.template("posix");
+    const prompt = run.prompt();
+    const reuse = await reuseExternalWindow(root, name, template, prompt, reusableKind(origin.terminal), announceProposal, canSend, job, run.hooked);
+    if (reuse.kind === "cancelled" || !canSend()) return undefined;
+    if (reuse.kind === "reused") return "terminal";
+    const terminalId = newTerminalId();
+    const endpoint = await questionEndpoint(root);
+    if (!canSend()) return undefined;
+    const { line, abandon, sent } = startExternalRun(root, terminalId, template, prompt, endpoint, job, run.hooked);
+    let window: ExternalWindow | undefined;
+    try {
+      window = await openWindow(origin, { script: line, cwd: root, title: name, kittySocket: join(externalDir, `${terminalId}.sock`) }, canSend);
+    } catch (err) {
+      abandon();
+      return canSend() ? externalWindowFailed(prompt, err instanceof Error ? err.message : String(err)) : undefined;
+    }
+    rememberExternalWindow(terminalId, root, name, window);
+    sent(announceProposal);
+    if (reuse.failure !== undefined) warnExternalReuseFailed(reuse.failure);
+    return "terminal";
+  });
 }
 
 /**
@@ -461,15 +544,18 @@ async function customAgentCommand(): Promise<string | undefined> {
  * undefined when nothing was sent: the developer cancelled the choice of the agent or its command, or the external window
  * could not be opened (the developer was told and the instruction is on the clipboard).
  */
-export async function launchAgent(root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement, selfSendingOnly = false, canSend: () => boolean = () => true): Promise<Launch | undefined> {
+export async function launchAgent(root: string, instruction: Instruction, name: string, announceProposal?: DesignAnnouncement, selfSendingOnly = false, canSend: () => boolean = () => true, job?: JobKind): Promise<Launch | undefined> {
   if (!canSend()) return undefined;
-  if (agentLauncher() === "chat") {
-    const delivery = await openChat(root, withLanguage(instruction, configuredLanguage()), selfSendingOnly, canSend);
-    if (delivery !== "not-sent") noticeChatModelRoles();
-    return delivery;
-  }
+  if (agentLauncher() === "chat")
+    return inSendTurn(async () => {
+      const delivery = await openChat(root, withLanguage(textOf(instruction), configuredLanguage()), selfSendingOnly, canSend);
+      if (delivery !== "not-sent") noticeChatModelRoles();
+      // Sent by itself: the conversation is the job. Left ready in the chat or on the clipboard, nothing is running.
+      if (delivery === "sent" && job !== undefined) startJob(job, root, { chat: isCursor() ? "cursor" : "other" }, isCursor());
+      return delivery;
+    });
   // Never the integrated terminal in place of the external one: the Model forbids that fallback.
-  if (agentLauncher() === "external-terminal") return launchExternal(root, instruction, name, announceProposal, canSend);
+  if (agentLauncher() === "external-terminal") return launchExternal(root, instruction, name, announceProposal, canSend, job);
   const run = await terminalRun(instruction, name);
   if (run === undefined || !canSend()) return undefined;
 
@@ -498,13 +584,15 @@ export async function launchAgent(root: string, instruction: string, name: strin
         ...(asTab ? { location: { viewColumn: tabColumn(), preserveFocus: true } } : {}),
       });
   const family = shellFamily(vscode.env.shell);
-  const line = agentCommandLine(run.template(family), run.prompt, family);
+  const line = agentCommandLine(run.template(family), run.prompt(), family);
   agentTerminals.set(terminal, { id: terminalId, root, line });
+  setHooked(terminalId, run.hooked);
   if (asTab && !reusable) lastTab = { terminal, name, column: undefined };
   // The agent's tab comes to the front of its group without the focus, which stays where the developer was typing.
   // The terminal in the terminal area is never shown: the developer opens it from the list of terminals.
   if (lastTab?.terminal === terminal) terminal.show(true);
   terminal.sendText(line);
+  if (job !== undefined) startJob(job, root, { terminal: terminalId }, run.hooked);
   // The last external window is no longer reusable; its current run still reports its own ending.
   lastExternal = undefined;
   lastTerminal = terminal;

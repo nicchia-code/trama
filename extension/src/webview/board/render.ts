@@ -7,6 +7,7 @@ import type { AnnouncedCard, Badge, BlockBadge, Card, DesignCard, DriftCard, Pro
 import { COLUMN_TITLES } from "./logic";
 import { renderDriftCompare } from "../drift-compare";
 import { renderMarkdown } from "../markdown";
+import { renderResolves } from "../resolves";
 import { viewOfRef } from "../requirements/logic";
 
 export interface CardEnv {
@@ -18,6 +19,8 @@ export interface CardEnv {
   showCard(key: string, row?: string): void;
   /** The short numbers of the snapshot being drawn. */
   numbers(): CardNumbers;
+  /** The reason every Run is disabled while Resolve Drifts works, otherwise null. It wins over any other reason. */
+  resolvingReason(): string | null;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -123,6 +126,7 @@ function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
     if (card.changes.more > 0) list.append(el("li", "board-change board-muted", `and ${card.changes.more} more ${card.changes.more === 1 ? "file" : "files"}`));
     node.append(list);
   }
+  if (card.resolves.length > 0) node.append(...renderResolves("board", card.title, card.resolves, (drift) => env.context.navigate("diagram", { drift })));
   const touches = card.touches;
   const views: HTMLElement[] = [];
   if (touches.model || !touches.requirements)
@@ -143,17 +147,7 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}`);
   node.append(head("Drift", card.name), el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
-  const whereKey = `${card.key}:where`;
-  node.append(
-    renderDriftCompare(card.drift, {
-      keep: (how, carries) => env.context.post({ type: "resolveDrift", id: card.id, how, ...carries }),
-      blocked: () => env.context.post({ type: "driftBlocked", id: card.id }),
-      openLink: env.context.openLink,
-      where: { open: env.isExpanded(whereKey), toggled: (open) => env.setExpanded(whereKey, open) },
-      numbers: env.numbers(),
-      viewProposal: (view) => env.context.navigate(view, { proposal: card.proposal ?? "" }),
-    }),
-  );
+  node.append(renderDriftCompare(card.drift, { openLink: env.context.openLink }));
   const firstRef = card.refs[0];
   if (firstRef !== undefined) {
     const view = viewOfRef(firstRef);
@@ -213,7 +207,7 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
   node.append(
     actions(
       ...(details ? [details.toggle] : []),
-      ...(runnable ? [button({ label: "Run", aria: `Run task ${card.name.text}`, action: "run", primary: true, onClick: () => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } }) })] : []),
+      ...(runnable ? [button({ label: "Run", aria: `Run task ${card.name.text}`, action: "run", primary: true, disabled: env.resolvingReason() ?? false, onClick: () => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } }) })] : []),
       open,
     ),
   );
@@ -273,7 +267,7 @@ function design(card: DesignCard, env: CardEnv): HTMLElement {
     aria: `Run the Tasks of ${card.heading} that are in To do`,
     action: "run-design",
     primary: true,
-    disabled: runBlocker(card.tasks, "design", namerOf(env.numbers())) ?? false,
+    disabled: env.resolvingReason() ?? runBlocker(card.tasks, "design", namerOf(env.numbers())) ?? false,
     onClick: () => env.context.post({ type: "launch", action: { kind: "implement-design", proposal: card.id } }),
   });
   node.append(actions(run, toggle), list);

@@ -89,10 +89,6 @@ When the instruction names a file `.trama/requests/<id>.md`, the developer wrote
 
 If the developer rejected it, the reason, when they gave one, is under `## Feedback` in `trama proposal show <id>`. Do not patch the rejected Proposal: open a **new** one that addresses the feedback. A stale Proposal (the Model changed under it) is also replaced by a new one.
 
-### Reworking the stale Proposal of a Drift
-
-When the prompt says that Proposal `<p>`, attached to Drift `<d>`, is stale, do not interview the developer. Write a new Proposal that makes the same change on the current Model and Requirements (read `trama proposal show <p>` for what it did; list your choices in the new Proposal body). Right after `trama proposal new`, with the Draft just created, run `trama drift replace-proposal <d> --proposal <new id>`: it attaches the Draft to the Drift and rejects the stale one as replaced, so the new Proposal never shows up alone. Run it once. If it is refused, report why and stop. Then write the files, validate and review the Proposal, and only at the end submit it as usual.
-
 ## Good Model habits
 
 - One Machine per kind of thing (Order, Payment, Cart), not per screen step. UI behaviour gets its own Machine when it has its own States (for example a checkout form), and talks to the domain only through Events.

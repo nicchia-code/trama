@@ -1,9 +1,9 @@
 import { join } from "node:path";
-import { type AgentOrigin, deliverCard, removeReworkOf } from "./announcements";
+import { type AgentOrigin, deliverCard } from "./announcements";
 import { type Blocker, computeBlocked, concernSameThing, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
-import { approveProposal, discardProposal, getProposal, health, type Proposal, rejectProposal } from "./proposals";
-import { loadProject, parseRequirementRef, resolveProjectRef } from "./requirements";
+import { approveProposal, discardProposal, type DriftDecisionKind, getProposal, type Proposal, rejectProposal } from "./proposals";
+import { loadProject, parseRequirementRef, type ProjectModel, resolveProjectRef } from "./requirements";
 import { boolField, createdField, enumField, enumOrNull, idField, instantField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
 import { cardName, identityOfShortNumber, syncShortNumbers } from "./short-numbers";
 import {
@@ -64,6 +64,8 @@ interface DriftData {
   option: number | null;
   /** The developer's note kept with the choice, when there was one. */
   note: string | null;
+  /** The resolution Proposal whose approval resolved the Drift; none for a Drift resolved any other way. */
+  resolvedBy: string | null;
   /** When the Drift was created, UTC ISO 8601. Absent on numbered Drifts written before the field existed. */
   created: string | null;
 }
@@ -112,6 +114,7 @@ function parseDrift(raw: Raw, where: string): DriftData {
     origin: idField(raw, "origin", where),
     option: positiveIntOrNull(raw, "option", where),
     note: textOrNull(raw, "note", where),
+    resolvedBy: idField(raw, "resolvedBy", where),
     created: createdField(raw, where),
   };
 }
@@ -150,6 +153,33 @@ function checkRefs(p: Project, refs: string[]) {
   for (const ref of refs) resolveProjectRef(project, ref);
 }
 
+/**
+ * The references a fix Task points at: those of the Drift that still resolve, and for each that no longer does its
+ * nearest container still there (`order/Gone/user.CANCEL` becomes `order`, `requirements/ui#Gone` becomes `requirements/ui`).
+ * A reference with no container left is dropped; duplicates are folded.
+ */
+function liveRefs(p: Project, refs: string[], project: ProjectModel = loadProject(p)): string[] {
+  const resolves = (ref: string) => {
+    try {
+      resolveProjectRef(project, ref);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const nearest = (ref: string) => {
+    const parts = ref.split("/");
+    // An Event whose owner is gone has no container but the owner itself.
+    const up = parseRequirementRef(ref)
+      ? [ref.split("#")[0] as string]
+      : parts.length > 1
+        ? parts.slice(0, -1).map((_, i) => parts.slice(0, parts.length - 1 - i).join("/"))
+        : [ref.split(".")[0] as string];
+    return up.filter((c) => c !== ref).find(resolves);
+  };
+  return [...new Set(refs.flatMap((ref) => (resolves(ref) ? [ref] : (nearest(ref) ?? []))))];
+}
+
 /** A Technical Task changes no behaviour, so it references no Model element, only Requirements if any; any other Task references at least one Model element. */
 function checkTaskRefs(technical: boolean, refs: string[], where = "") {
   const modelRefs = refs.filter((r) => parseRequirementRef(r) === null);
@@ -176,12 +206,22 @@ export function newTask(
 ): Task {
   checkTaskRefs(input.technical, input.refs);
   checkRefs(p, input.refs);
-  const drift = input.drift ? getDrift(p, input.drift).id : null;
-  // The Proposal must exist, but a Technical Task is never part of a design, so it keeps no link to it,
-  // unless it fixes a Drift: then it belongs to the design of the Task the Drift came from.
+  const drift = input.drift ? getDrift(p, input.drift) : null;
+  // The Proposal must exist. A Task without a Drift belongs to the Proposal it names, unless it is Technical.
+  // A Task that fixes a Drift belongs to the design of the Task the Drift came from, whoever creates it.
   const linked = input.proposal ? getProposal(p, input.proposal).id : null;
-  const proposal = input.technical && drift === null ? null : linked;
-  const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift, proposal, agent: false, holder: null, created: createdNow(), finished: null };
+  let proposal = input.technical ? null : linked;
+  if (drift) {
+    const origin = drift.data.origin ? getTask(p, drift.data.origin).data.proposal : null;
+    if (linked !== null && linked !== origin)
+      throw new TramaError(
+        origin
+          ? `A Task fixing Drift ${cardName(p, "drift", drift.id)} belongs to Proposal ${cardName(p, "proposal", origin)}, the design of its origin Task: drop --proposal or pass that one`
+          : `Drift ${cardName(p, "drift", drift.id)} did not come from a Task of a design, so its fix Task belongs to no Proposal: drop --proposal`,
+      );
+    proposal = origin;
+  }
+  const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift: drift?.id ?? null, proposal, agent: false, holder: null, created: createdNow(), finished: null };
   return create(tasksDir(p), input.title, data, input.body ?? "", "Task");
 }
 
@@ -411,7 +451,7 @@ export function newDrift(
   if (attached) requireAttachable(p, attached);
   const proposal = attached?.id ?? null;
   const origin = input.origin ? getTask(p, input.origin).id : null;
-  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, option: null, note: null, created: createdNow() };
+  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, option: null, note: null, resolvedBy: null, created: createdNow() };
   const sections = [
     `## ${HAPPENS_HEADING}\n\n${happens}`,
     `## ${SHOULD_HEADING}\n\n${should}`,
@@ -440,7 +480,7 @@ function fixTaskBody(drift: Drift, option: DriftOption | null, note: string | nu
 }
 
 /** The option the developer chose for a Drift that has options, or none for one that has none. Refuses a missing or unknown number, and an option for a Drift without options. */
-function chosenOption(p: Project, drift: Drift, option: number | undefined): DriftOption | null {
+export function chosenOption(p: Project, drift: Drift, option: number | undefined): DriftOption | null {
   const options = driftOptions(drift);
   if (options.length === 0) {
     if (option !== undefined) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has no fix options: fix its code without choosing one`);
@@ -463,36 +503,9 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
   if (how !== "fix-code" && (choice.option !== undefined || note !== null))
     throw new TramaError(`Drift ${cardName(p, "drift", drift.id)}: ${choice.option !== undefined ? "an option" : "a note"} only goes with fixing the code, not with ${how === "dismiss" ? "dismissing" : "accepting the Proposal"}`);
   if (how === "fix-code") {
-    const option = chosenOption(p, drift, choice.option);
-    // A Drift that only contradicts Requirements changes no behaviour, so its Task is technical.
-    const touchesModel = drift.data.refs.some((r) => parseRequirementRef(r) === null);
-    // The fix belongs to the design of the Task the Drift came from, if any, even when it is technical.
-    const origin = drift.data.origin ? getTask(p, drift.data.origin) : null;
-    const design = origin?.data.proposal;
-    const task = newTask(p, {
-      title: `Fix code to match the ${touchesModel ? "Model" : "Requirements"}: ${drift.title}`,
-      refs: drift.data.refs,
-      technical: !touchesModel,
-      drift: drift.id,
-      ...(design ? { proposal: design } : {}),
-      body: fixTaskBody(drift, option, note),
-    });
-    removeReworkOf(p, drift.id);
-    drift.data.task = task.id;
-    drift.data.resolution = "fix-code";
-    drift.data.option = option ? (choice.option as number) : null;
-    drift.data.note = note;
-    // The Task the Drift came from goes back to To do and, until the fix Task is Done, is blocked (see computeBlocked).
-    if (origin && origin.data.column !== "done") {
-      origin.data.column = "todo";
-      origin.data.agent = false;
-      origin.data.holder = null;
-      saveItem(origin.path, origin.data, origin.body);
-    }
+    fixCode(p, drift, choice.option, note);
     // The attached Proposal is set aside with the Drift: an open one is rejected, a Draft discarded, a decided one stays.
-    const attached = drift.data.proposal ? getProposal(p, drift.data.proposal) : null;
-    if (attached?.data.status === "open") rejectProposal(p, attached.id, `Drift ${drift.id} resolved by fixing the code`);
-    else if (attached?.data.status === "draft") discardProposal(p, attached.id);
+    setAsideAttached(p, drift, "resolved by fixing the code");
   } else if (how === "accept-proposal") {
     if (!drift.data.proposal) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has no attached Proposal`);
     approveProposal(p, drift.data.proposal, skillsDirs);
@@ -509,28 +522,76 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
   return drift;
 }
 
-/** The open, stale Proposal attached to an open Drift: the only kind that can be reworked and replaced. Refuses otherwise, saying why. */
-export function staleAttachedProposal(p: Project, drift: Drift): Proposal {
-  if (drift.data.status !== "open") throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is already resolved`);
-  if (!drift.data.proposal) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has no attached Proposal to replace`);
-  const old = getProposal(p, drift.data.proposal);
-  if (old.data.status !== "open") throw new TramaError(`Proposal ${cardName(p, "proposal", old.id)} is ${old.data.status}: only an open, stale Proposal can be replaced`);
-  if (health(p, old).stale.length === 0) throw new TramaError(`Proposal ${cardName(p, "proposal", old.id)} is not stale: only a stale Proposal can be replaced`);
-  return old;
+/**
+ * Why the code of a Drift cannot be fixed, or null: it points to the Model but none of its Model elements is left, not even a container, so the fix
+ * Task would have nothing to point at. The Drift can then only be dismissed or accepted.
+ */
+export function fixCodeRefusal(p: Project, drift: Drift, project: ProjectModel = loadProject(p)): string | null {
+  const isModel = (r: string) => parseRequirementRef(r) === null;
+  if (!drift.data.refs.some(isModel) || liveRefs(p, drift.data.refs, project).some(isModel)) return null;
+  return `The Model elements of Drift ${cardName(p, "drift", drift.id)} no longer exist: its code cannot be fixed, the Drift can only be closed`;
 }
 
-/**
- * The agent attaches a newer Proposal to an open Drift in place of the stale one attached to it. The old Proposal is
- * rejected at once, saying it was replaced; Proposals that require it stay blocked (see `requiredProposals`).
- */
-export function replaceDriftProposal(p: Project, id: string, proposalId: string): Drift {
-  const drift = getDrift(p, id);
-  const old = staleAttachedProposal(p, drift);
-  const replacement = getProposal(p, proposalId);
-  if (replacement.id === old.id) throw new TramaError(`Proposal ${cardName(p, "proposal", old.id)} is the one already attached; name a newer one`);
-  requireAttachable(p, replacement, drift.id);
-  rejectProposal(p, old.id, `Replaced by Proposal ${replacement.id}`);
-  drift.data.proposal = replacement.id;
-  saveItem(drift.path, drift.data, drift.body);
-  return drift;
+/** Creates the fix Task of a Drift and moves its origin back to To do; records option, note and the resolution on the Drift (not saved). */
+function fixCode(p: Project, drift: Drift, optionNumber: number | undefined, note: string | null): void {
+  const option = chosenOption(p, drift, optionNumber);
+  const refusal = fixCodeRefusal(p, drift);
+  if (refusal) throw new TramaError(refusal);
+  // A reference that no longer resolves stands for its nearest container still there.
+  const refs = liveRefs(p, drift.data.refs);
+  // A Drift that only contradicts Requirements changes no behaviour, so its Task is technical.
+  const touchesModel = drift.data.refs.some((r) => parseRequirementRef(r) === null);
+  // The fix belongs to the design of the Task the Drift came from, if any, even when it is technical.
+  const origin = drift.data.origin ? getTask(p, drift.data.origin) : null;
+  const design = origin?.data.proposal;
+  const task = newTask(p, {
+    title: `Fix code to match the ${touchesModel ? "Model" : "Requirements"}: ${drift.title}`,
+    refs,
+    technical: !touchesModel,
+    drift: drift.id,
+    ...(design ? { proposal: design } : {}),
+    body: fixTaskBody(drift, option, note),
+  });
+  drift.data.task = task.id;
+  drift.data.resolution = "fix-code";
+  drift.data.option = option ? (optionNumber as number) : null;
+  drift.data.note = note;
+  // The Task the Drift came from goes back to To do and, until the fix Task is Done, is blocked (see computeBlocked).
+  if (origin && origin.data.column !== "done") {
+    origin.data.column = "todo";
+    origin.data.agent = false;
+    origin.data.holder = null;
+    saveItem(origin.path, origin.data, origin.body);
+  }
+}
+
+/** Rejects the open Proposal attached to a Drift with `why` as feedback, discards a Draft, leaves a decided one. */
+function setAsideAttached(p: Project, drift: Drift, why: string): void {
+  const attached = drift.data.proposal ? getProposal(p, drift.data.proposal) : null;
+  if (attached?.data.status === "open") rejectProposal(p, attached.id, `Drift ${drift.id} ${why}`);
+  else if (attached?.data.status === "draft") discardProposal(p, attached.id);
+}
+
+/** What approving a resolution did to its listed Drifts: the decision applied, the fix Task created, or `skipped` when already resolved. */
+export interface DriftOutcome {
+  drift: string;
+  decision: DriftDecisionKind;
+  task: string | null;
+  skipped: boolean;
+}
+
+/** Resolves, in one step, every still-open Drift listed by the approved resolution `proposal` with its recorded decision. */
+export function resolveListedDrifts(p: Project, proposal: Proposal): DriftOutcome[] {
+  return proposal.data.drifts.map(({ drift: id, decision, option, note }) => {
+    const drift = getDrift(p, id);
+    if (drift.data.status !== "open") return { drift: id, decision, task: null, skipped: true };
+    if (decision === "fix-code") fixCode(p, drift, option, note?.trim() || null);
+    else drift.data.resolution = decision;
+    setAsideAttached(p, drift, `resolved by Proposal ${proposal.id}`);
+    drift.data.proposal = null;
+    drift.data.status = "resolved";
+    drift.data.resolvedBy = proposal.id;
+    saveItem(drift.path, drift.data, drift.body);
+    return { drift: id, decision, task: drift.data.task, skipped: false };
+  });
 }

@@ -17,8 +17,8 @@ export type AgentAction =
   | { kind: "implement-design"; proposal: string }
   /** Describe the existing code as Proposals for the Model; the agent asks its own questions. */
   | { kind: "import" }
-  /** The agent writes a new Proposal for the Drift in place of its stale attached one. The host refuses unless that Proposal is open and stale. */
-  | { kind: "rework-drift"; drift: string };
+  /** One agent resolves every Drift open when the instruction is sent. The host refuses it while a Run or a resolution is going on, or one resolution Proposal is still to be decided. */
+  | { kind: "resolve-drifts" };
 
 /** Webview -> host. The host validates everything: the webview is untrusted input. */
 export type ToHost =
@@ -37,10 +37,6 @@ export type ToHost =
   | { type: "approveProposal"; id: string }
   /** The host asks for the feedback with an input box. */
   | { type: "rejectProposal"; id: string }
-  /** Keeping what should happen (`fix-code`) carries the number of the selected fix option, from 1, and the note when the developer wrote one; keeping what happens carries neither. */
-  | { type: "resolveDrift"; id: string; how: "fix-code" | "accept-proposal" | "dismiss"; option?: number; note?: string }
-  /** The developer clicked "Keep this" on the side of a Drift whose attached Proposal cannot be approved: the host explains why, with a warning. */
-  | { type: "driftBlocked"; id: string }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
   | { type: "openLink"; url: string };
 
@@ -57,8 +53,8 @@ export interface NavigateOptions {
 
 /** Host -> webview. */
 export type ToWebview =
-  /** `asking`: a question round is open, so the ghosts of announced cards say the agent waits for the developer's answers. */
-  | { type: "snapshot"; snapshot: Snapshot; asking: boolean }
+  /** `asking`: a question round is open, so the ghosts of announced cards say the agent waits for the developer's answers. `resolve`: whether Resolve Drifts is working, and why the host would refuse it now (null when it would accept). */
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { resolving: boolean; blocker: string | null } }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */

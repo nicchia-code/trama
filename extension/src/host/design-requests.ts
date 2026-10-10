@@ -3,7 +3,7 @@ import { isAbsolute, relative, sep } from "node:path";
 import * as vscode from "vscode";
 import { createRequest, isEmptyRequest, requestFile, requestIdAt, requestsDir, requestTitle } from "../../../src/core/design-requests";
 import type { Project } from "../../../src/core/store";
-import { launchAgent, launched } from "./agent";
+import { type DesignAnnouncement, type Launch, launchAgent, launched } from "./agent";
 import { findProject, NO_PROJECT_WARNING } from "./project";
 import { buildPrompt } from "./prompts";
 
@@ -40,7 +40,7 @@ export class DesignRequests implements vscode.Disposable {
     /** The extension's watcher of `.trama/`, on for the extension's whole life, whether or not the panel is open. */
     tramaFiles: vscode.FileSystemWatcher,
     private readonly project: () => Project | undefined = findProject,
-    private readonly launch: typeof launchAgent = launchAgent,
+    private readonly launch: (root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement, selfSendingOnly?: boolean, canSend?: () => boolean) => Promise<Launch | undefined> = launchAgent,
   ) {
     this.subscriptions = [
       vscode.window.onDidChangeActiveTextEditor(() => this.updateContext()),

@@ -31,7 +31,7 @@ class SwitchNode {
 }
 
 describe("the Hold scan switch control", () => {
-  test("a click asks for the other state at once, the shown state waits for the picture, and the label counts the held Proposals", () => {
+  test("a click shows the other state at once and asks for it; a refused change brings the picture back, and the label counts the held Proposals", () => {
     const previous = (globalThis as { document?: { createElement(tag: string): SwitchNode } }).document;
     (globalThis as { document: { createElement(tag: string): SwitchNode } }).document = { createElement: () => new SwitchNode() };
     try {
@@ -44,11 +44,14 @@ describe("the Hold scan switch control", () => {
       expect([button.children[0]?.textContent, button.attrs.get("aria-label"), button.attrs.get("aria-checked")]).toEqual(["Hold scan", "Hold scan", "false"]);
       button.click();
       expect(asked).toEqual([true]);
+      expect([button.children[0]?.textContent, button.attrs.get("aria-label"), button.attrs.get("aria-checked")]).toEqual(["Hold scan", "Hold scan", "true"]);
+      control.set(false, 0);
       expect(button.attrs.get("aria-checked")).toBe("false");
       control.set(true, 2);
       expect([button.children[0]?.textContent, button.attrs.get("aria-label"), button.attrs.get("aria-checked")]).toEqual(["Hold scan · 2", "Hold scan, 2 held", "true"]);
       button.click();
       expect(asked).toEqual([true, false]);
+      expect(button.attrs.get("aria-checked")).toBe("false");
       control.set(true, 0);
       expect(button.children[0]?.textContent).toBe("Hold scan");
     } finally {

@@ -122,15 +122,25 @@ describe("a Proposal bound to a written design request", () => {
     expect(existsSync(file)).toBe(true);
   });
 
-  test("a request already gone does not stop the hand-over, and a second bound Proposal hands over normally", () => {
-    writeRequest(ID);
+  test("only the first Proposal opened for a request is bound to it; a later one is created unbound and hands over normally", () => {
+    const file = writeRequest(ID);
     const first = newProposal(p, "Lost", "", { request: ID });
     const second = newProposal(p, "Lost again", "", { request: ID });
+    expect(getProposal(p, first.id).data.request).toBe(ID);
+    expect(getProposal(p, second.id).data.request).toBeNull();
+    writeOrder(second.id);
+    expect(submitProposal(p, second.id)).toMatchObject({ requestConsumed: false });
+    expect(existsSync(file)).toBe(true);
     writeOrder(first.id);
     expect(submitProposal(p, first.id).requestConsumed).toBe(true);
-    const later = submitProposal(p, second.id);
-    expect(later.data.status).toBe("open");
-    expect(later.requestConsumed).toBe(false);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  test("a Proposal that depends on the first one, given the same request, is not bound to it", () => {
+    writeRequest(ID);
+    const first = newProposal(p, "Lost", "", { request: ID });
+    const dependent = newProposal(p, "Depends", "", { requires: [first.id], request: ID });
+    expect(getProposal(p, dependent.id).data.request).toBeNull();
   });
 
   test("a Proposal written before the field existed stays valid and unbound", () => {
@@ -146,6 +156,7 @@ describe("the command line", () => {
     expect(bound.out).not.toContain("not found");
     const unbound = run(["proposal", "new", "Other", "--request", "zzz999"], dir, {});
     expect(unbound.out).toContain("Design request zzz999 was not found; the Proposal is not bound to any request.");
+    expect(run(["proposal", "new", "Another", "--request", ID], dir, {}).out).toContain(`Design request ${ID} is already bound to another Proposal; the Proposal is not bound to any request.`);
   });
 
   test("proposal new --request binds an ID with a suffix", () => {

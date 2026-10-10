@@ -78,6 +78,12 @@
 .dg-change-lines { margin: 4px 0; padding-left: 0; list-style: none; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; overflow-wrap: anywhere; }
 .dg-changes { margin: 0; padding: 0; list-style: none; }
 .dg-changes > li { margin-bottom: 6px; }
+.dg-resolves-head { margin: 10px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dg-muted); }
+.dg-resolves { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.dg-resolves-row { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; width: 100%; padding: 1px 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.dg-resolves-row:hover .dg-resolves-title { text-decoration: underline; }
+.dg-resolves-title, .dg-resolves-decision { overflow-wrap: anywhere; }
+.dg-resolves-decision { color: var(--dg-muted); }
 .dg-proposal { margin-top: 18px; padding: 10px 12px; border: 1px dashed var(--dg-blue); border-radius: 4px; }
 .dg-problem-head { margin-top: 8px; font-weight: 600; color: var(--vscode-errorForeground, var(--dg-red)); }
 .dg-problems { margin: 2px 0 0; padding-left: 16px; color: var(--vscode-errorForeground, var(--dg-red)); font-size: 12px; overflow-wrap: anywhere; }

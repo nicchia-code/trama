@@ -3,6 +3,7 @@ import { anchorIn, homeLevel, resolveElement, selectionFor, showsElement } from 
 import { type GraphSpec, sameLevel } from "../extension/src/webview/diagram/graph";
 import { breadcrumb, buildGraph, drillTarget, scanFeature, validLevel } from "../extension/src/webview/diagram/levels";
 import { buildScene } from "../extension/src/webview/diagram/scene";
+import { detailOfDrift } from "../extension/src/webview/diagram/details";
 import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
 
 const scene = buildScene(shopSnapshot(), null);
@@ -132,4 +133,18 @@ test("only Features, Machines and States with sub-States lead further down", () 
   expect(drillTarget(order, "s:Draft")).toBeNull();
   expect(sameLevel({ kind: "state", machine: "order", state: "Paid" }, { kind: "state", machine: "order", state: "Paid" })).toBe(true);
   expect(sameLevel({ kind: "machine", machine: "order" }, { kind: "machine", machine: "cart" })).toBe(false);
+});
+
+test("a Drift's Requirement references resolve to an existing Area or section; only a missing one is marked", () => {
+  const refs = ["requirements/ui", "requirements/ui#order/Paid", "requirements/ui#General", "requirements/ui#nope", "requirements/nope", "order/Nope"];
+  const drift = { id: "0001", title: "t", body: "", refs, proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null };
+  const items = detailOfDrift(scene, drift as never).sections[0]?.items ?? [];
+  expect(items.map((i) => [i.text, i.ref !== null, i.note])).toEqual([
+    ["requirements/ui", true, ""],
+    ["requirements/ui#order/Paid", true, ""],
+    ["requirements/ui#General", true, ""],
+    ["requirements/ui#nope", false, "no longer resolves"],
+    ["requirements/nope", false, "no longer resolves"],
+    ["order/Nope", false, "no longer resolves"],
+  ]);
 });

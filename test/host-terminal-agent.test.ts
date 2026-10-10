@@ -13,7 +13,7 @@ test("the effective agent is the chosen one, else custom with a command, else no
 });
 
 test("each instruction's terminal name gives its role", () => {
-  expect(["Design", "Import", "Scan", "T3", "P2", "All tasks", "abc12345"].map(roleOf)).toEqual(["analysis", "analysis", "scan", "execution", "execution", "execution", "execution"]);
+  expect(["Design", "Import", "Drifts", "Scan", "T3", "P2", "All tasks", "abc12345"].map(roleOf)).toEqual(["analysis", "analysis", "analysis", "scan", "execution", "execution", "execution", "execution"]);
 });
 
 test("known agents pass --model only with a role set, quoted for the shell", () => {
@@ -28,6 +28,11 @@ test("omp gets the sub-agents' roles only for instructions that can scan and onl
   expect(agentTemplate("omp", "", "execution", all, "posix")).toBe("omp --model 'haiku' --smol 'haiku' --slow 'opus' {prompt}");
   expect(agentTemplate("omp", "", "scan", { ...none, analysis: "opus" }, "posix")).toBe("omp --slow 'opus' {prompt}");
   expect(agentTemplate("omp", "", "analysis", all, "posix")).toBe("omp --model 'opus' {prompt}");
+});
+
+test("omp loads the hook that tells Trama when it is idle; no other agent does", () => {
+  expect(agentTemplate("omp", "", "analysis", none, "posix", "/ext/dist/omp-hook.js")).toBe("omp --hook '/ext/dist/omp-hook.js' {prompt}");
+  expect(agentTemplate("claude", "", "analysis", none, "posix", "/ext/dist/omp-hook.js")).toBe("claude {prompt}");
 });
 
 test("claude gets --agents for instructions that can scan, each sub-agent with its model only when set", () => {

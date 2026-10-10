@@ -60,7 +60,7 @@ export function buildGraph(scene: Scene, level: Level, expanded: Expanded): Grap
       ? systemGraph(scene)
       : level.kind === "feature"
         ? featureGraph(scene, level.feature)
-        : machineGraph(scene, level.machine, level.kind === "state" ? level.state : null, expanded.get(level.machine) ?? none);
+        : machineGraph(scene, level.machine, level.kind === "state" ? level.state : null, level.kind === "machine" ? (expanded.get(level.machine) ?? none) : none);
   return withDrifts(base, scene);
 }
 

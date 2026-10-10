@@ -1,5 +1,5 @@
 import { cardLabel } from "../../../../src/core/card-names";
-import { type Element, anchorIn, resolveElement } from "./elements";
+import { type Element, anchorIn, refResolves, resolveElement } from "./elements";
 import type { GEdge, GNode, GraphSpec } from "./graph";
 import { node } from "./graph";
 import type { Scene } from "./scene";
@@ -11,7 +11,7 @@ export interface UnresolvedRef {
 
 /** Drift references that point at nothing in the Scene. */
 export function unresolvedRefs(scene: Scene): UnresolvedRef[] {
-  return scene.drifts.flatMap((d) => d.refs.filter((ref) => !resolveElement(scene, ref)).map((ref) => ({ drift: d.id, ref })));
+  return scene.drifts.flatMap((d) => d.refs.filter((ref) => !refResolves(scene, ref)).map((ref) => ({ drift: d.id, ref })));
 }
 
 /** True when the Drift's element lies below the node that shows it, so the node gets a badge instead of an exact outline. */

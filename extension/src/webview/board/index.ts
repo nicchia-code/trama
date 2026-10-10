@@ -46,6 +46,7 @@ export const mountBoard: MountView = (root, context) => {
     return node;
   };
   const runAll = toolbarButton("Run all To do", () => context.post({ type: "launch", action: { kind: "implement-all" } }), true);
+  const resolveDrifts = toolbarButton("Resolve Drifts", () => context.post({ type: "launch", action: { kind: "resolve-drifts" } }));
   toolbarButton("Scan System", () => context.post({ type: "launch", action: { kind: "scan" } }));
   toolbarButton("Quick request…", () => context.post({ type: "launch", action: { kind: "design" } }), false, "Ask an agent to design a change in one line");
   toolbarButton("Design…", () => context.post({ type: "writeDesignRequest" }), false, "Write a design request in Markdown and send it to an agent");
@@ -55,6 +56,8 @@ export const mountBoard: MountView = (root, context) => {
   let snapshot: Snapshot | null = null;
   /** Whether a question round is open: the ghosts then say the agent waits for the developer's answers. */
   let asking = false;
+  /** Whether Resolve Drifts works, and why the host would refuse it now. */
+  let resolve = { resolving: false, blocker: null as string | null };
   /** What the developer was told about announced cards the agent never delivered; kept until closed, or until the panel closes. */
   const notices: { id: number; text: string }[] = [];
   let nextNotice = 0;
@@ -66,6 +69,7 @@ export const mountBoard: MountView = (root, context) => {
   const env: CardEnv = {
     context,
     numbers: () => snapshot?.numbers ?? noNumbers,
+    resolvingReason: () => (resolve.resolving ? "Drifts are being resolved" : null),
     isExpanded: (key) => expanded.has(key),
     setExpanded: (key, open) => {
       if (open) expanded.add(key);
@@ -126,7 +130,7 @@ export const mountBoard: MountView = (root, context) => {
 
     const live = new Set<string>();
     const columns = buildBoard(snapshot);
-    const placedGhosts = announcedGhosts(columns, snapshot.announcements, asking, snapshot.numbers ?? noNumbers);
+    const placedGhosts = announcedGhosts(columns, snapshot.announcements, asking);
     const liveAnnounced = new Set<string>();
     const nextHeads = new Map<string, HTMLElement>();
     for (const column of columns) {
@@ -134,7 +138,7 @@ export const mountBoard: MountView = (root, context) => {
       part.hint.textContent = column.hint;
       const cardNode = (card: Card) => {
         live.add(card.key);
-        const signature = JSON.stringify(card);
+        const signature = JSON.stringify(card) + resolve.resolving;
         let entry = cache.get(card.key);
         if (entry?.signature !== signature) {
           entry = { signature, node: renderCard(card, env) };
@@ -173,11 +177,15 @@ export const mountBoard: MountView = (root, context) => {
     }
     dayHeads = nextHeads;
     // Run all To do covers the Tasks inside design cards too, which may stand in another column.
-    const blocker = runBlocker(snapshot.tasks, "all", namerOf(snapshot.numbers ?? noNumbers));
-    runAll.disabled = blocker !== null;
-    runAll.title = blocker ?? "";
-    if (blocker === null) runAll.removeAttribute("aria-description");
-    else runAll.setAttribute("aria-description", blocker);
+    const blocker = (resolve.resolving ? "Drifts are being resolved" : null) ?? runBlocker(snapshot.tasks, "all", namerOf(snapshot.numbers ?? noNumbers));
+    const setReason = (button: HTMLButtonElement, reason: string | null) => {
+      button.disabled = reason !== null;
+      button.title = reason ?? "";
+      if (reason === null) button.removeAttribute("aria-description");
+      else button.setAttribute("aria-description", reason);
+    };
+    setReason(runAll, blocker);
+    setReason(resolveDrifts, resolve.blocker);
     scanHold.set(snapshot.scanHold.on, snapshot.scanHold.held);
     for (const key of cache.keys()) if (!live.has(key)) cache.delete(key);
     for (const key of announced.keys()) if (!liveAnnounced.has(key)) announced.delete(key);
@@ -208,13 +216,14 @@ export const mountBoard: MountView = (root, context) => {
   }
 
   return {
-    update(next, isAsking = false) {
+    update(next, isAsking = false, resolveState = { resolving: false, blocker: null }) {
       snapshot = next;
       asking = isAsking;
+      resolve = resolveState;
       render();
     },
     withdrawn(gone: AnnouncementView[]) {
-      for (const a of gone) notices.push({ id: nextNotice++, text: withdrawnNotice(a, snapshot?.numbers ?? noNumbers) });
+      for (const a of gone) notices.push({ id: nextNotice++, text: withdrawnNotice(a) });
       renderNotices();
     },
     show() {},

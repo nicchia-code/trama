@@ -42,9 +42,12 @@ The developer's: nobody has taken it.
 The agent is working on it. The developer cannot move it, from the command line, until it is taken back.
 - `developer.TAKE_BACK_TASK` → Free: only from the command line; the Task stays In progress and becomes the developer's.
 - `terminal.COMMAND_ENDED` → To do: the agent's command ended in the terminal that had taken this Task, so that agent is no longer working on it; the Task is released at once and goes back to To do. The end of another terminal releases nothing here.
+- `agent-hook.IDLE` → To do: l'agente del terminale che aveva preso questo Task ha detto con il suo hook di essere a riposo, quindi non ci lavora più; il Task è rilasciato subito e torna in To do, come alla fine del suo comando. L'hook di un altro terminale non rilascia niente.
+- `terminal.CLOSED` → To do: solo per il terminale integrato di un agente con un hook (omp) che aveva preso questo Task; chiuso quel terminale, il suo hook non dirà più che l'agente è a riposo, quindi il Task è rilasciato subito e torna in To do. La chiusura del terminale di un agente senza hook, o di un altro terminale, non rilascia niente.
 - `cursor-chat.AGENT_STOPPED` → To do: solo per i Task presi dall'agente della chat di Cursor dello stesso progetto; il turno dell'agente è finito, quindi nessun agente sta lavorando adesso; ogni Task preso è rilasciato subito e torna in To do. Se l'agente riprende, lo prende di nuovo.
 - `cursor-chat.AGENT_INTERRUPTED` → To do: come sopra, perché il turno è stato interrotto o è andato in errore.
 - `cursor-chat.CONVERSATION_CLOSED` → To do: come sopra, perché la conversazione è stata chiusa.
+- `time.QUIET_PERIOD_ELAPSED` → To do: solo per un Task preso dal terminale di un agente con un hook (omp), e solo se per quindici minuti quel terminale non ha mostrato attività: né un comando di Trama dell'agente né il segnale di vita del suo hook. L'agente è dato per interrotto, bloccato o ucciso, come per i suoi annunci e il suo Run; il Task è rilasciato e torna in To do. I Task presi da altri terminali, o da un agente senza hook, restano dove sono.
 
 ### Done
 The work is finished. Nothing prevents moving the Task back from the command line. Il Task ricorda l'istante in cui è arrivato in Done; lo dimentica quando lascia Done e ne ricorda uno nuovo quando ci torna. I Task arrivati in Done prima che si ricordasse questo istante non ne hanno uno.

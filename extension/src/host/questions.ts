@@ -6,6 +6,8 @@ import type { QuestionPresenter } from "../../../src/core/question-rounds";
 import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
 import { receiveCursorHook } from "./cursor";
+import { noteActivity, receiveAgentIdle } from "./drift-resolution";
+import { noteAliveSeen, noteCommandSeen } from "./terminal-activity";
 
 interface WindowRoundService {
   identity: string;
@@ -85,6 +87,15 @@ export class EditorQuestions implements vscode.Disposable {
           return queue.ask(request, context);
         },
         onCursorHook: receiveCursorHook,
+        onActivity: (origin, readOnly) => {
+          noteActivity(origin);
+          noteCommandSeen(origin, readOnly === true);
+        },
+        onAgentAlive: (terminal) => {
+          noteActivity({ terminal });
+          noteAliveSeen(terminal);
+        },
+        onAgentIdle: receiveAgentIdle,
         onClassify: this.classify,
         onClose: () => {
           queue.dispose();

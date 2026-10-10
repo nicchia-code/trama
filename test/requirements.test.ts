@@ -290,6 +290,24 @@ describe("Tasks and generated skills", () => {
     expect(JSON.parse(run(["--json", "task", "show", fixed.data.task ?? ""], dir, {}).out)).toMatchObject({ technical: true, proposal: design.id });
   });
 
+  test("a Task filed by hand for a Drift takes the design of the Drift's origin, whoever names the design", () => {
+    const design = newProposal(p, "Design");
+    const other = newProposal(p, "Other");
+    const origin = newTask(p, { title: "Badge", refs: ["order/Paid"], technical: false, proposal: design.id });
+    const loose = newTask(p, { title: "Loose", refs: ["order/Paid"], technical: false });
+    const fromDesign = newDrift(p, { options: FIX_OPTIONS, title: "Badge differs", refs: ["order/Paid"], origin: origin.id, happens: "The code does it one way.", should: "The Model says another." });
+    const fromLoose = newDrift(p, { options: FIX_OPTIONS, title: "Loose differs", refs: ["order/Paid"], origin: loose.id, happens: "The code does it one way.", should: "The Model says another." });
+    const fromNone = newDrift(p, { options: FIX_OPTIONS, title: "Scan differs", refs: ["order/Paid"], happens: "The code does it one way.", should: "The Model says another." });
+    expect(newTask(p, { title: "Fix A", refs: ["order/Paid"], technical: false, drift: fromDesign.id }).data.proposal).toBe(design.id);
+    expect(newTask(p, { title: "Fix A2", refs: ["order/Paid"], technical: false, drift: fromDesign.id, proposal: design.id }).data.proposal).toBe(design.id);
+    expect(newTask(p, { title: "Fix B", refs: ["order/Paid"], technical: false, drift: fromLoose.id }).data.proposal).toBeNull();
+    expect(newTask(p, { title: "Fix C", refs: ["requirements/ui#General"], technical: true, drift: fromDesign.id }).data.proposal).toBe(design.id);
+    expect(() => newTask(p, { title: "Fix D", refs: ["order/Paid"], technical: false, drift: fromDesign.id, proposal: other.id })).toThrow(/belongs to Proposal/);
+    expect(() => newTask(p, { title: "Fix E", refs: ["order/Paid"], technical: false, drift: fromLoose.id, proposal: design.id })).toThrow(/belongs to no Proposal/);
+    expect(() => newTask(p, { title: "Fix F", refs: ["order/Paid"], technical: false, drift: fromNone.id, proposal: design.id })).toThrow(/belongs to no Proposal/);
+    expect(newTask(p, { title: "Fix G", refs: ["order/Paid"], technical: false, drift: fromNone.id }).data.proposal).toBeNull();
+  });
+
   test("task show quotes the Requirements attached to the referenced elements and writes each General section in full", () => {
     const task = newTask(p, { title: "Prepare", refs: ["order/Preparing"], technical: false });
     const out = run(["task", "show", task.id], dir, {});

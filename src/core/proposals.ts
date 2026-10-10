@@ -7,7 +7,7 @@ import { TramaError } from "./errors";
 import { formatDiagnostic } from "./model";
 import { buildProject, largeFragmentMessage, largeFragments, REQUIREMENT_SKILLS_BUDGET } from "./requirements";
 import { requirementSkillMode, syncRequirementSkills } from "./requirement-skills";
-import { canonicalCardId, createdField, enumField, type Raw, stringList, stringMap, textOrNull } from "./schema";
+import { canonicalCardId, createdField, enumField, idField, positiveIntOrNull, type Raw, stringList, stringMap, textOrNull } from "./schema";
 import {
   compareByCreation,
   createdNow,
@@ -28,6 +28,7 @@ import {
 import type { Diagnostic, FileMap } from "./types";
 import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
 import { cardName, identityOfShortNumber } from "./short-numbers";
+import { type DriftOutcome, fixCodeRefusal, listDrifts, resolveListedDrifts } from "./work";
 import { SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
 
 /**
@@ -36,12 +37,29 @@ import { SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
  */
 export type ProposalStatus = "draft" | "open" | "approved" | "rejected" | "discarded";
 
-/** `import`: written by the trama-import skill to describe existing code; approving it starts no Scan. */
-export type ProposalKind = "change" | "import";
+/**
+ * `import`: written by the trama-import skill to describe existing code; approving it starts no Scan.
+ * `resolution`: written by the agent run by Resolve Drifts; lists the open Drifts it resolves, each with the developer's decision. Like an import it starts no Scan.
+ */
+export type ProposalKind = "change" | "import" | "resolution";
+
+export type DriftDecisionKind = "proposal" | "dismissed" | "fix-code";
+
+/** The decision taken on one Drift by a resolution Proposal; `option` and `note` go only with `fix-code`. */
+export interface DriftDecision {
+  drift: string;
+  decision: DriftDecisionKind;
+  option?: number;
+  note?: string;
+}
+
+const DECISIONS: readonly DriftDecisionKind[] = ["proposal", "dismissed", "fix-code"];
 
 interface ProposalData {
   status: ProposalStatus;
   kind: ProposalKind;
+  /** The Drifts a resolution resolves, in the order they were registered; always empty for other kinds. */
+  drifts: DriftDecision[];
   /** IDs of Proposals that must be approved before this one; it is written and validated on top of them. */
   requires: string[];
   /** Tracked path -> sha256 of the file, or "new", when the Proposal first touched it (on top of `requires`). */
@@ -67,12 +85,13 @@ export interface Proposal {
 const proposalsDir = (p: Project) => join(p.dir, "proposals");
 
 const STATUSES: readonly ProposalStatus[] = ["draft", "open", "approved", "rejected", "discarded"];
-const KINDS: readonly ProposalKind[] = ["change", "import"];
+const KINDS: readonly ProposalKind[] = ["change", "import", "resolution"];
 
 function parseData(raw: Raw, where: string): ProposalData {
   const data: ProposalData = {
     status: enumField(raw, "status", STATUSES, "open", where),
     kind: enumField(raw, "kind", KINDS, "change", where),
+    drifts: [],
     requires: stringList(raw, "requires", where),
     base: stringMap(raw, "base", where),
     delete: stringList(raw, "delete", where),
@@ -80,6 +99,7 @@ function parseData(raw: Raw, where: string): ProposalData {
     created: createdField(raw, where),
     scanScope: scanScopeField(raw, where),
   };
+  data.drifts = driftsField(raw, data.kind, where);
   for (const id of data.requires)
     if (!/^[a-z0-9]{8}$/.test(id) && !/^\d+$/.test(id)) throw new TramaError(`${where}: "requires" lists Proposal IDs, not "${id}"`);
   for (const path of [...Object.keys(data.base), ...data.delete]) {
@@ -90,6 +110,23 @@ function parseData(raw: Raw, where: string): ProposalData {
     }
   }
   return data;
+}
+
+function driftsField(raw: Raw, kind: ProposalKind, where: string): DriftDecision[] {
+  const v = raw["drifts"];
+  if (v === undefined || v === null) return [];
+  if (kind !== "resolution") throw new TramaError(`${where}: only a resolution Proposal has "drifts"`);
+  const bad = `${where}: "drifts" must be a list of { drift, decision, option?, note? } with decision one of ${DECISIONS.join(", ")}`;
+  if (!Array.isArray(v)) throw new TramaError(bad);
+  const out = v.map((e): DriftDecision => {
+    const drift = idField(e ?? {}, "drift", where);
+    if (drift === null || !DECISIONS.includes(e.decision)) throw new TramaError(bad);
+    const option = positiveIntOrNull(e, "option", where);
+    const note = textOrNull(e, "note", where);
+    return { drift, decision: e.decision, ...(option === null ? {} : { option }), ...(note === null ? {} : { note }) };
+  });
+  if (new Set(out.map((e) => e.drift)).size !== out.length) throw new TramaError(`${where}: "drifts" lists a Drift more than once`);
+  return out;
 }
 
 function scanScopeField(raw: Raw, where: string): ScanScopeEntry[] | null {
@@ -110,12 +147,13 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
 
 /** Writes `proposal.md` from the Proposal's data, leaving defaults out of the file. */
 export function save(proposal: Proposal) {
-  const { kind, requires, request, created, scanScope, ...rest } = proposal.data;
+  const { kind, drifts, requires, request, created, scanScope, ...rest } = proposal.data;
   // Defaults stay out of the file, so Proposals without dependencies look as they always did.
   // Numbered Proposals have no `created`; writing it would pretend they remember an instant they do not.
   const data = {
     status: rest.status,
     ...(kind === "change" ? {} : { kind }),
+    ...(kind === "resolution" ? { drifts } : {}),
     ...(requires.length === 0 ? {} : { requires }),
     base: rest.base,
     delete: rest.delete,
@@ -133,22 +171,20 @@ export function listProposals(p: Project): Proposal[] {
 }
 
 /**
- * When the agent last created, changed or deleted a file inside a Draft bound to one of `announcements`, in epoch
- * milliseconds; 0 when there is none. Read from the Draft files' times: synchronizing an announcement's title is not
- * activity, and a deletion shows as the change of the folder that held the file.
+ * When the agent last created, changed or deleted a file inside the Draft `proposalId`, in epoch milliseconds; 0 when
+ * there is none. Read from the Draft files' times: synchronizing an announcement's title is not activity, and a
+ * deletion shows as the change of the folder that held the file.
  */
-export function boundDraftsChangedAt(p: Project, announcements: readonly Announcement[]): number {
-  const bound = new Set(announcements.map((a) => a.proposal));
+export function draftChangedAt(p: Project, proposalId: string): number {
+  const entry = listCards(proposalsDir(p), "folder").find((e) => e.id === proposalId);
+  if (!entry) return 0;
+  const dir = join(proposalsDir(p), entry.name);
   let latest = 0;
-  for (const entry of listCards(proposalsDir(p), "folder")) {
-    if (!bound.has(entry.id)) continue;
-    const dir = join(proposalsDir(p), entry.name);
-    for (const rel of ["", ...readdirSync(dir, { recursive: true, encoding: "utf8" })]) {
-      try {
-        latest = Math.max(latest, statSync(join(dir, rel)).mtimeMs);
-      } catch {
-        // Deleted between listing and reading: its folder's time already counts.
-      }
+  for (const rel of ["", ...readdirSync(dir, { recursive: true, encoding: "utf8" })]) {
+    try {
+      latest = Math.max(latest, statSync(join(dir, rel)).mtimeMs);
+    } catch {
+      // Deleted between listing and reading: its folder's time already counts.
     }
   }
   return latest;
@@ -161,6 +197,15 @@ export function boundDraftsChangedAt(p: Project, announcements: readonly Announc
 export function getProposal(p: Project, id: string, asArgument = false): Proposal {
   const cited = asArgument ? identityOfShortNumber(p, "proposal", id) : null;
   return load(p, findCard(proposalsDir(p), cited ?? id, "Proposal", "folder", asArgument && cited === null));
+}
+
+/**
+ * The request a new Proposal binds to: the request when it exists and no other Proposal is bound to it yet, else
+ * null. Only the first Proposal opened for a request is bound to it; the ones after it are created unbound.
+ */
+function requestToBind(p: Project, request: string | undefined): string | null {
+  if (request === undefined || !requestExists(p, request)) return null;
+  return listProposals(p).some((x) => x.data.request === request) ? null : request;
 }
 
 export function newProposal(
@@ -185,11 +230,12 @@ export function newProposal(
     data: {
       status: "draft",
       kind: options.kind ?? "change",
+      drifts: [],
       requires: [...new Set(requires)],
       base: {},
       delete: [],
-      // A request that does not exist binds nothing; the Proposal is created all the same.
-      request: options.request !== undefined && requestExists(p, options.request) ? options.request : null,
+      // Only the first Proposal opened for a request is bound to it; a request that does not exist binds nothing.
+      request: requestToBind(p, options.request),
       created: createdNow(),
       scanScope: null,
     },
@@ -274,13 +320,13 @@ function requireStatus(p: Project, proposal: Proposal, status: "draft" | "open",
   throw new TramaError(`Proposal ${name} is ${proposal.data.status}; only ${status === "draft" ? "a Draft" : "open Proposals"} can be ${action}`);
 }
 
-function requireEditable(p: Project, proposal: Proposal) {
+export function requireEditable(p: Project, proposal: Proposal) {
   if (proposal.data.status !== "draft" && proposal.data.status !== "open")
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is ${proposal.data.status}; only drafts and open Proposals can be edited`);
 }
 
 /** An edit takes a handed-over Proposal back from the developer: it is a Draft until the next submit. */
-function touch(proposal: Proposal) {
+export function touch(proposal: Proposal) {
   if (proposal.data.status === "open") proposal.data.status = "draft";
 }
 
@@ -392,7 +438,7 @@ export function changes(p: Project, proposal: Proposal): FileChange[] {
   return paths.map((path) => diffFile(path, before.get(path), after.get(path)));
 }
 
-export type ApprovalBlockKind = "missing" | "draft" | "rejected" | "discarded" | "approved" | "waiting" | "stale" | "unregistered" | "invalid";
+export type ApprovalBlockKind = "missing" | "draft" | "rejected" | "discarded" | "approved" | "waiting" | "stale" | "unregistered" | "invalid" | "unfixable";
 
 export interface ApprovalBlock {
   kind: ApprovalBlockKind;
@@ -422,10 +468,11 @@ export function approvalBlock(p: Project, id: string): ApprovalBlock | null {
       break;
   }
   const h = health(p, proposal);
-  if (h.requires.length > 0) return { kind: "waiting", reason: `${name} waits for other Proposals: ${h.requires.map((r) => cardName(p, "proposal", r.id)).join(", ")}.` };
+  if (h.requires.length > 0) return { kind: "waiting", reason: `${name} requires other Proposals first: ${requiredReasons(h.requires, (id) => cardName(p, "proposal", id)).join("; ")}.` };
   if (h.stale.length > 0) return { kind: "stale", reason: `${name} is stale: the Model changed since it was written.` };
   if (h.unbased.length > 0) return { kind: "unregistered", reason: `${name} holds files it never registered.` };
   if (validateProposal(p, proposal).length > 0) return { kind: "invalid", reason: `${name} would leave the Model or its Requirements invalid.` };
+  if (unfixableDrifts(p, proposal).length > 0) return { kind: "unfixable", reason: `${name} cannot fix the code of a Drift whose Model elements no longer exist.` };
   return null;
 }
 
@@ -443,8 +490,11 @@ export function writeProposalFiles(p: Project, id: string, tramaDir: string): Pr
   return proposal;
 }
 
-/** `skillsDirs` are the configured skills folders (besides the usual ones) where the generated `trama-req-*` skills are refreshed. */
-export function approveProposal(p: Project, id: string, skillsDirs: string[] = []): Proposal {
+/**
+ * `skillsDirs` are the configured skills folders (besides the usual ones) where the generated `trama-req-*` skills are refreshed.
+ * Approving a resolution resolves its still-open listed Drifts in the same step; `resolved` says what happened to each.
+ */
+export function approveProposal(p: Project, id: string, skillsDirs: string[] = []): Proposal & { resolved: DriftOutcome[] } {
   const proposal = getProposal(p, id);
   requireStatus(p, proposal, "open", "approved");
   const h = health(p, proposal);
@@ -457,12 +507,16 @@ export function approveProposal(p: Project, id: string, skillsDirs: string[] = [
   const errors = validateProposal(p, proposal);
   if (errors.length > 0)
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} would leave the Model invalid:\n${errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n")}`);
+  const unfixable = unfixableDrifts(p, proposal);
+  if (unfixable.length > 0)
+    throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} cannot be approved, nothing changed:\n${unfixable.map((r) => `- ${r}`).join("\n")}\nHave Resolve Drifts rewrite the resolution.`);
 
   const written = writeProposalFiles(p, id, p.dir);
   written.data.status = "approved";
   save(written);
+  const resolved = written.data.kind === "resolution" ? resolveListedDrifts(p, written) : [];
   syncRequirementSkills(p, skillsDirs);
-  return written;
+  return { ...written, resolved };
 }
 
 /** Rejects an open Proposal. The feedback is optional: with text it is appended under `## Feedback`; empty or blank adds nothing. */
@@ -488,6 +542,7 @@ export function submitProposal(p: Project, id: string): Proposal & { requestCons
   const problems: string[] = [];
   const { unbased } = health(p, proposal);
   if (unbased.length > 0) problems.push(`it contains files it never registered: ${unbased.join(", ")}. Use "trama proposal edit" first`);
+  problems.push(...driftListProblems(p, proposal));
   const errors = validateProposal(p, proposal);
   if (errors.length > 0) problems.push(`it would leave the Model invalid:\n${errors.map((d) => `  - ${formatDiagnostic(d)}`).join("\n")}`);
   const warnings = proposalWarnings(p, proposal);
@@ -509,4 +564,41 @@ export function discardProposal(p: Project, id: string): Proposal {
   save(proposal);
   removeBoundTo(p, proposal.id);
   return proposal;
+}
+
+/** The resolution being written or open (other than `exceptId`) that lists Drift `driftId`, or null. A Drift sits in one such resolution at a time. */
+export function resolutionHolding(p: Project, driftId: string, exceptId?: string): Proposal | null {
+  return listProposals(p).find((r) => r.id !== exceptId && r.data.kind === "resolution" && (r.data.status === "draft" || r.data.status === "open") && r.data.drifts.some((d) => d.drift === driftId)) ?? null;
+}
+
+/** What is wrong with the Drift list of a resolution: empty, a Drift no longer open, or one also in another resolution being written or open. Empty for any other Proposal. */
+export function driftListProblems(p: Project, proposal: Proposal): string[] {
+  if (proposal.data.kind !== "resolution") return [];
+  if (proposal.data.drifts.length === 0) return ["its Drift list is empty: list at least one Drift with \"trama proposal resolve-drift\""];
+  const drifts = new Map(listDrifts(p).map((d) => [d.id, d]));
+  const after = buildProject(applied(p, proposal));
+  const problems: string[] = [];
+  for (const { drift: id } of proposal.data.drifts) {
+    const name = cardName(p, "drift", id);
+    const drift = drifts.get(id);
+    if (drift?.data.status !== "open") problems.push(`Drift ${name} is no longer open`);
+    else if (proposal.data.drifts.find((d) => d.drift === id)?.decision === "fix-code") {
+      const refusal = fixCodeRefusal(p, drift, after);
+      if (refusal) problems.push(refusal);
+    }
+    const other = resolutionHolding(p, id, proposal.id);
+    if (other) problems.push(`Drift ${name} is also in resolution ${cardName(p, "proposal", other.id)}, which is still to be decided`);
+  }
+  return problems;
+}
+
+/** Why a resolution cannot be approved: a listed, still-open Drift is to be fixed in code but none of its Model elements is left once the resolution's files are applied. Empty for any other Proposal. */
+export function unfixableDrifts(p: Project, proposal: Proposal): string[] {
+  if (proposal.data.kind !== "resolution") return [];
+  const open = new Map(listDrifts(p).filter((d) => d.data.status === "open").map((d) => [d.id, d]));
+  const after = buildProject(applied(p, proposal));
+  return proposal.data.drifts.flatMap(({ drift, decision }) => {
+    const d = open.get(drift);
+    return (decision === "fix-code" && d && fixCodeRefusal(p, d, after)) || [];
+  });
 }

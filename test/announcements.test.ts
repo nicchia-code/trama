@@ -12,12 +12,14 @@ import {
   getAnnouncement,
   quietAnnouncements,
   listAnnouncements,
+  markActivity,
+  markDraftActivity,
   newTerminalId,
   terminalFromEnv,
   withdrawAll,
 } from "../src/core/announcements";
 import { run } from "../src/cli/main";
-import { boundDraftsChangedAt, discardProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
+import { discardProposal, draftChangedAt, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { newDrift, resolveDrift } from "../src/core/work";
 import { type Project, projectAt } from "../src/core/store";
@@ -238,7 +240,28 @@ describe("the quiet period", () => {
     expect(quietAnnouncements(listAnnouncements(p), t(500).getTime())).toHaveLength(0);
   });
 
-  test("writing, creating or deleting a file of an announced Draft counts as activity; an unannounced Draft does not", () => {
+  test("a change to a Draft refreshes only the announcement bound to it; the others keep their own quiet period", () => {
+    const other = announce(p, { kind: "task", title: "Other" });
+    const prop = newProposal(p, "Draft title");
+    const mineId = listAnnouncements(p).find((a) => a.proposal === prop.id)?.id ?? "";
+    markActivity(p, t(0));
+    markDraftActivity(p, prop.id, t(10));
+    expect(getAnnouncement(p, other.id)?.touched).toBe(t(0).toISOString());
+    expect(getAnnouncement(p, mineId)?.touched).toBe(t(10).toISOString());
+    expect(quietAnnouncements(listAnnouncements(p), t(15).getTime()).map((a) => a.title)).toEqual(["Other"]);
+  });
+
+  test("starting a Proposal refreshes only the announcement it binds; an unusable ID refreshes nothing", () => {
+    announce(p, { kind: "task", title: "Other" }, t(0));
+    const mine = announce(p, { kind: "proposal", title: "Planned" }, t(0));
+    bindDraft(p, { id: "0099", title: "Real" }, mine.id, {}, t(10));
+    expect(getAnnouncement(p, mine.id)?.touched).toBe(t(10).toISOString());
+    expect(quietAnnouncements(listAnnouncements(p), t(15).getTime()).map((a) => a.title)).toEqual(["Other"]);
+    bindDraft(p, { id: "0100", title: "Unusable" }, "zzzzzz", {}, t(20));
+    expect(quietAnnouncements(listAnnouncements(p), t(24).getTime()).map((a) => a.title)).toEqual(["Other"]);
+  });
+
+  test("writing, creating or deleting a file of a Draft counts as activity for its own announcement; an unannounced Draft does not", () => {
     const prop = newProposal(p, "Long writing");
     const file = editInProposal(p, prop.id, "checkout/order.md");
     const other = newProposal(p, "Not announced");
@@ -247,27 +270,26 @@ describe("the quiet period", () => {
     const allIn = (d: string) => [d, ...readdirSync(d, { recursive: true, encoding: "utf8" }).map((r) => join(d, r))];
     for (const path of [...allIn(prop.dir), ...allIn(other.dir)]) utimesSync(path, old, old);
     const now = Date.now();
-    expect(boundDraftsChangedAt(p, listAnnouncements(p))).toBe(old.getTime());
+    expect(draftChangedAt(p, prop.id)).toBe(old.getTime());
 
     writeFileSync(join(other.dir, "proposal.md"), "changed");
-    expect(boundDraftsChangedAt(p, listAnnouncements(p))).toBe(old.getTime());
+    expect(draftChangedAt(p, prop.id)).toBe(old.getTime());
 
     writeFileSync(file, "# Order\n\nRewritten.\n");
-    const changedAt = boundDraftsChangedAt(p, listAnnouncements(p));
+    const changedAt = draftChangedAt(p, prop.id);
     expect(changedAt).toBeGreaterThanOrEqual(now - 1000);
-    // Announcements last touched long ago: only the Draft's file keeps the agent from being taken to have stopped.
+    // Announcements last touched long ago: only the Draft's own change keeps its announcement from being taken to have stopped.
     const stale = listAnnouncements(p).map((a) => ({ ...a, touched: old.toISOString() }));
-    expect(quietAnnouncements(stale, changedAt + 14 * 60_000)).not.toHaveLength(0);
-    expect(quietAnnouncements(stale, changedAt + 14 * 60_000, changedAt)).toHaveLength(0);
-    expect(quietAnnouncements(stale, changedAt + 15 * 60_000, changedAt)).not.toHaveLength(0);
+    expect(quietAnnouncements(stale, changedAt + 14 * 60_000, 0, (a) => (a.proposal === prop.id ? changedAt : 0))).toHaveLength(0);
+    expect(quietAnnouncements(stale, changedAt + 15 * 60_000, 0, (a) => (a.proposal === prop.id ? changedAt : 0))).toHaveLength(1);
 
     for (const path of allIn(prop.dir)) utimesSync(path, old, old);
     rmSync(file);
-    expect(boundDraftsChangedAt(p, listAnnouncements(p))).toBeGreaterThanOrEqual(now - 1000);
+    expect(draftChangedAt(p, prop.id)).toBeGreaterThanOrEqual(now - 1000);
 
     for (const path of allIn(prop.dir)) utimesSync(path, old, old);
     writeFileSync(join(prop.dir, "notes.md"), "new file");
-    expect(boundDraftsChangedAt(p, listAnnouncements(p))).toBeGreaterThanOrEqual(now - 1000);
+    expect(draftChangedAt(p, prop.id)).toBeGreaterThanOrEqual(now - 1000);
   });
 });
 
@@ -391,40 +413,30 @@ test("the developer's decision to fix the code does not restart the quiet period
   expect(getAnnouncement(p, a.id)?.touched).toBe("2026-01-01T10:00:00.000Z");
 });
 
-describe("the rework announcement of a Drift", () => {
-  test("remembers its Drift, shows it in the Snapshot, and is withdrawn silently when the code is kept; other announcements stay", () => {
-    const opts = [{ title: "Change the code", text: "Make the code do it." }, { title: "Other", text: "Another way." }];
-    const mk = (title: string) => newDrift(p, { title, refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts });
-    const [one, two] = [mk("One"), mk("Two")];
-    const a = announce(p, { kind: "proposal", title: "Rework of Proposal x", source: "request", drift: one.id });
-    const b = announce(p, { kind: "proposal", title: "Rework of Proposal y", source: "request", drift: two.id });
-    const plain = announce(p, { kind: "proposal", title: "Plain" });
-    expect(getAnnouncement(p, a.id)?.drift).toBe(one.id);
-    expect(getAnnouncement(p, plain.id)?.drift).toBeNull();
-    expect(readFileSync(join(announcementsDir(p), `${plain.id}.md`), "utf8")).not.toContain("drift:");
-    const views = buildSnapshot(p).announcements;
-    expect(views.find((v) => v.id === a.id)?.drift).toBe(one.id);
-    expect("drift" in (views.find((v) => v.id === plain.id) as object)).toBe(false);
-    const rework = (id: string) => buildSnapshot(p).drifts.find((d) => d.id === id)?.rework;
-    expect(rework(one.id)).toEqual({ title: null });
-    const draft = newProposal(p, "Reworked refunds");
-    bindDraft(p, draft, a.id);
-    expect(rework(one.id)).toEqual({ title: "Reworked refunds" });
-    expect(rework(two.id)).toEqual({ title: null });
+describe("a Draft attached to an open Drift", () => {
+  const opts = [{ title: "Change the code", text: "Make the code do it." }, { title: "Other", text: "Another way." }];
 
-    resolveDrift(p, one.id, "fix-code", [], { option: 1 });
-    expect(listAnnouncements(p).map((x) => x.id).sort()).toEqual([b.id, plain.id].sort());
-  });
-
-  test("a Proposal ghost whose Draft is attached to an open Drift is drawn inside that Drift, and stays in To decide before", () => {
-    const opts = [{ title: "Change the code", text: "Make the code do it." }, { title: "Other", text: "Another way." }];
+  test("its Proposal ghost is drawn nowhere, but the ghost of a Drift bound to a Draft stays", () => {
     const a = announce(p, { kind: "proposal", title: "Design" });
     const draft = newProposal(p, "Archived with a Drift");
     bindDraft(p, draft, a.id);
-    expect(buildSnapshot(p).announcements.find((v) => v.id === a.id)?.drift).toBeUndefined();
-    const d = newDrift(p, { title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts, proposal: draft.id });
-    const snap = buildSnapshot(p);
-    expect(snap.announcements.find((v) => v.id === a.id)?.drift).toBe(d.id);
-    expect(snap.drifts.find((x) => x.id === d.id)?.rework).toEqual({ title: "Archived with a Drift" });
+    const ghosts = () => buildSnapshot(p).announcements.map((v) => v.id);
+    expect(ghosts()).toContain(a.id);
+    newDrift(p, { title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts, proposal: draft.id });
+    expect(ghosts()).not.toContain(a.id);
+    const own = announce(p, { kind: "drift", title: "D2", proposal: draft.id });
+    expect(ghosts()).toContain(own.id);
+  });
+
+  test("keeping the code withdraws no announcement, and a leftover `drift` field is ignored and never rewritten", () => {
+    const drift = newDrift(p, { title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts });
+    const a = announce(p, { kind: "proposal", title: "Old rework", source: "request" });
+    const file = join(announcementsDir(p), `${a.id}.md`);
+    writeFileSync(file, readFileSync(file, "utf8").replace("source: request", `source: request\ndrift: ${drift.id}`));
+    expect("drift" in (getAnnouncement(p, a.id) as object)).toBe(false);
+    resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
+    expect(listAnnouncements(p).map((x) => x.id)).toEqual([a.id]);
+    markActivity(p);
+    expect(readFileSync(file, "utf8")).not.toContain("drift:");
   });
 });

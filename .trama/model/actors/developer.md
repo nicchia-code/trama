@@ -5,22 +5,22 @@ The person who owns the project. Decides what enters the Model, resolves differe
 ## Events
 
 ### APPROVE_PROPOSAL
-The developer approves an open Proposal, from the Board or from the Diagram's detail panel. Una Proposal allegata a un Drift aperto non si approva così: si accetta tenendo ciò che succede sul Drift.
+The developer approves an open Proposal, from the Board or from the Diagram's detail panel. Una Proposal allegata a un Drift aperto non si approva così: si decide con il Drift, dalla riga di comando o con una risoluzione.
 
 ### REJECT_PROPOSAL
-The developer rejects an open Proposal and may give feedback for the agent. Cancelling the feedback prompt rejects nothing; confirming it empty rejects without feedback. Una Proposal allegata a un Drift aperto non si rifiuta così: si mette da parte tenendo ciò che dovrebbe succedere sul Drift.
+The developer rejects an open Proposal and may give feedback for the agent. Cancelling the feedback prompt rejects nothing; confirming it empty rejects without feedback. Una Proposal allegata a un Drift aperto non si rifiuta così: si decide con il Drift, dalla riga di comando o con una risoluzione.
 
 ### DISCARD_PROPOSAL
 The developer discards a Proposal the agent is still writing, with the command line. It is for drafts the agent never finished; a Proposal already handed over is rejected instead.
 
 ### FIX_DRIFT_CODE
-The developer keeps the side of an open Drift that says what should happen: the Model or the Requirement is right and the code must change. La Proposal allegata, se c'è, è messa da parte con il Drift.
+The developer keeps the side of an open Drift that says what should happen: the Model or the Requirement is right and the code must change. La Proposal allegata, se c'è, è messa da parte con il Drift. Solo dalla riga di comando: il pannello non decide su un singolo Drift.
 
 ### ACCEPT_DRIFT_PROPOSAL
-The developer keeps the side of an open Drift that says what happens, when a Proposal is attached: the code is right and the Proposal is accepted.
+The developer keeps the side of an open Drift that says what happens, when a Proposal is attached: the code is right and the Proposal is accepted. Solo dalla riga di comando.
 
 ### DISMISS_DRIFT
-The developer keeps the side of an open Drift that says what happens, when no Proposal is attached: the code is right and nothing changes.
+The developer keeps the side of an open Drift that says what happens, when no Proposal is attached: the code is right and nothing changes. Solo dalla riga di comando.
 
 ### TURN_SCAN_HOLD_ON
 Il developer accende l'interruttore Hold scan da una scheda del pannello.
@@ -41,7 +41,7 @@ The developer moves a Task to the Done column, with the command line.
 The developer takes back a Task that the agent has taken, with the command of the same name; the Board has no button for it. The Task stays In progress and is the developer's again.
 
 ### ASK_AGENT
-The developer asks the coding agent to work, from a button or a command: design a change (with a request typed in), scan the whole System or one Feature, implement one Task, implement every Task in To do, implement the Tasks in To do that come from one design, rework the stale Proposal attached to a Drift, or import the existing code as Proposals.
+The developer asks the coding agent to work, from a button or a command: design a change (with a request typed in), scan the whole System or one Feature, implement one Task, implement every Task in To do, implement the Tasks in To do that come from one design, resolve every open Drift with Resolve Drifts, or import the existing code as Proposals.
 
 Una richiesta di design arriva in due modi: come richiesta rapida di una riga, scritta nella casella che si apre con Quick request, oppure come richiesta scritta, un documento Markdown che il developer compone in una scheda dell'editor e invia con il pulsante Send to agent della scheda o chiudendo la scheda (vedi la Design request).
 
@@ -85,7 +85,7 @@ The developer shows one Machine in the Diagram, by opening it, with the breadcru
 The developer zooms into a State that has sub-States, in the Diagram, aprendolo oppure risalendo con il breadcrumb a uno Stato che contiene quello mostrato.
 
 ### CHOOSE_DRAWN_PROPOSAL
-Il developer cambia la Proposal che il Diagramma disegna sopra il Modello: ne sceglie un'altra, o None, nel selettore del Diagramma, seleziona un Drift che porta con sé una Proposal diversa da quella disegnata, oppure segue un link a una Proposal disegnata sopra il Modello. Il livello del Diagramma resta quello che il developer guardava, finché esiste ancora.
+Il developer cambia la Proposal che il Diagramma disegna sopra il Modello: ne sceglie un'altra, o None, nel selettore del Diagramma, oppure segue un link a una Proposal disegnata sopra il Modello. Selezionare un Drift, nel Diagramma o arrivandoci dalla Board, non cambia la Proposal disegnata. Il livello del Diagramma resta quello che il developer guardava, finché esiste ancora.
 
 ### CHOOSE_ANSWER
 Il developer conferma la domanda corrente con le scelte selezionate, con la risposta scritta o con entrambe.

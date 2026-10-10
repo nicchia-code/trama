@@ -1,21 +1,21 @@
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
-import { type ApprovalBlock, approvalBlock, approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
+import { approveProposal, getProposal, rejectProposal } from "../../../src/core/proposals";
+import { resolveDriftsBlocker } from "../../../src/core/resolution";
 import { approvedScope } from "../../../src/core/scope";
-import { noticeForScanHold, readScanHold, turnScanHoldOff, turnScanHoldOn } from "../../../src/core/scan-hold";
-import { listAnnouncements } from "../../../src/core/announcements";
+import { holdApproved, noticeForScanHold, readScanHold, SCAN_HOLD_SAVE_FAILED, turnScanHoldOff, turnScanHoldOn } from "../../../src/core/scan-hold";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { namerOf } from "../../../src/core/card-names";
 import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
-import { blockedTasks, getDrift, getTask, listTasks, requireNotAttached, resolveDrift, staleAttachedProposal } from "../../../src/core/work";
+import { blockedTasks, getTask, listDrifts, listTasks, requireNotAttached } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn } from "./announcements";
-import { agentReady, configuredSkillsDir, type DesignAnnouncement, launchAgent, settings } from "./agent";
-import { driftBlockedMessage, REWORK_PROPOSAL } from "./drift-blocked";
+import { agentReady, configuredSkillsDir, type DesignAnnouncement, type Instruction, launchAgent, settings } from "./agent";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
+import { driftResolution, onDriftResolutionChange } from "./drift-resolution";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { resolveMarkdownFile } from "./paths";
@@ -58,15 +58,14 @@ export class Controller implements vscode.Disposable {
 
   /**
    * A question round entered Asking: the panel opens in front, on the Diagram, or comes to the front keeping its tab.
-   * Without a project there is no panel to open.
+   * Without a project the panel still opens and shows the round; it has no snapshot to draw until a project exists.
    */
   revealForQuestions(): void {
     if (this.panel) {
       this.panel.reveal(undefined, false);
       return;
     }
-    const project = findProject();
-    if (project) this.create(project);
+    this.create(findProject());
   }
 
   /** Creates the panel, or reveals it. Offers to initialize the workspace when there is no `.trama/`. */
@@ -135,7 +134,7 @@ export class Controller implements vscode.Disposable {
     clearTimeout(this.timer);
   }
 
-  private create(project: Project): void {
+  private create(project: Project | undefined): void {
     const dist = vscode.Uri.joinPath(this.extensionUri, "dist");
     const panel = vscode.window.createWebviewPanel("trama", "Trama", vscode.ViewColumn.Active, {
       enableScripts: true,
@@ -153,6 +152,7 @@ export class Controller implements vscode.Disposable {
       ...(this.tramaFiles ? this.watchChanges(this.tramaFiles) : []),
       onAnnouncementsWithdrawn((announcements) => this.post({ type: "withdrawn", announcements })),
       onQuestionRoundChange(() => this.refresh()),
+      onDriftResolutionChange(() => this.refresh()),
       ...(this.questions ? [this.questions.onChange((round) => this.post({ type: "questions", round }))] : []),
     ];
 
@@ -201,18 +201,26 @@ export class Controller implements vscode.Disposable {
    * again when the content changes and is still unreadable, and again after the panel is reopened.
    */
   private noteSwitch(): void {
-    if (!this.project) return;
-    const hold = noticeForScanHold(readScanHold(this.project).reading, this.scanHoldWarned);
+    const project = this.projectNow();
+    if (!project) return;
+    const hold = noticeForScanHold(readScanHold(project).reading, this.scanHoldWarned);
     this.scanHoldWarned = hold.warned;
     if (hold.warning !== null) void vscode.window.showWarningMessage(hold.warning);
   }
 
+  /** The project the panel shows, looked up again while the panel has none, so a project created after the panel opened appears. */
+  private projectNow(): Project | undefined {
+    return (this.project ??= findProject());
+  }
+
   /** Posts a fresh snapshot; if the files cannot be read, posts the error and the view keeps its last snapshot. */
   private refresh(): void {
-    if (!this.project) return;
+    const project = this.projectNow();
+    if (!project) return;
     this.noteSwitch();
     try {
-      this.post({ type: "snapshot", snapshot: buildSnapshot(this.project), asking: questionRoundOpen() });
+      const window = driftResolution();
+      this.post({ type: "snapshot", snapshot: buildSnapshot(project), asking: questionRoundOpen(), resolve: { resolving: window === "resolving", blocker: resolveDriftsBlocker(project, window) } });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -232,16 +240,19 @@ export class Controller implements vscode.Disposable {
   }
 
   private async dispatch(message: ToHost): Promise<void> {
-    const project = this.project;
+    // The question overlay works without a project: it is what the panel shows when a round opens it.
+    if (message.type === "questionAction") {
+      this.questions?.act(message.round, message.action);
+      return;
+    }
+    if (message.type === "ready") {
+      this.refresh();
+      if (this.questions) this.post({ type: "questions", round: this.questions.current() });
+      return;
+    }
+    const project = this.projectNow();
     if (!project) return;
     switch (message.type) {
-      case "ready":
-        this.refresh();
-        if (this.questions) this.post({ type: "questions", round: this.questions.current() });
-        return;
-      case "questionAction":
-        this.questions?.act(message.round, message.action);
-        return;
       case "launch":
         await this.launchAction(project, message.action);
         return;
@@ -278,32 +289,6 @@ export class Controller implements vscode.Disposable {
         this.refresh();
         return;
       }
-      case "resolveDrift": {
-        const resolve = () => resolveDrift(project, message.id, message.how, [configuredSkillsDir()], { option: message.option, note: message.note });
-        const attached = getDrift(project, message.id).data.proposal;
-        if (message.how === "accept-proposal" && attached !== null) await this.approving(project, attached, resolve);
-        else {
-          resolve();
-          this.refresh();
-        }
-        return;
-      }
-      case "driftBlocked": {
-        const proposal = getDrift(project, message.id).data.proposal;
-        const reworking = listAnnouncements(project).some((a) => a.drift === message.id);
-        // While the agent reworks the stale Proposal the button waits like for a Proposal still being written, and the stale warning's Rework button would start a second rework.
-        const block: ApprovalBlock | null = proposal === null ? null : reworking ? { kind: "draft", reason: `Proposal ${cardName(project, "proposal", proposal)} is being reworked by the agent.` } : approvalBlock(project, proposal);
-        if (block === null) {
-          // The Proposal can be approved now: the developer was looking at an old picture.
-          this.refresh();
-          return;
-        }
-        const stale = block.kind === "stale";
-        const choice = await vscode.window.showWarningMessage(driftBlockedMessage(block), ...(stale ? [REWORK_PROPOSAL] : []));
-        if (choice !== REWORK_PROPOSAL) return;
-        await this.launchAction(project, { kind: "rework-drift", drift: message.id });
-        return;
-      }
     }
   }
 
@@ -317,20 +302,24 @@ export class Controller implements vscode.Disposable {
    * sends the held scan with the buttons' delivery chain, in a terminal called `Scan`, as a gesture of the developer.
    */
   private async turnScanHold(project: Project, on: boolean): Promise<void> {
-    const warning = on
-      ? turnScanHoldOn(project)
-      : await turnScanHoldOff(project, async (proposals) => {
-          const instruction = buildHeldScanPrompt(proposals);
-          try {
-            const launch = await launchAgent(project.root, instruction, "Scan");
-            return launch !== undefined && launch !== "not-sent";
-          } catch (err) {
-            void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
-            return false;
-          }
-        });
-    if (warning !== null) void vscode.window.showWarningMessage(warning);
-    this.refresh();
+    try {
+      const warning = on
+        ? turnScanHoldOn(project)
+        : await turnScanHoldOff(project, async (proposals) => {
+            const instruction = buildHeldScanPrompt(proposals);
+            try {
+              const launch = await launchAgent(project.root, instruction, "Scan");
+              return launch !== undefined && launch !== "not-sent";
+            } catch (err) {
+              void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
+              return false;
+            }
+          });
+      if (warning !== null) void vscode.window.showWarningMessage(warning);
+    } finally {
+      // The view shows the switch at once; this picture puts back the real state if the turn was refused or failed.
+      this.refresh();
+    }
   }
 
   private approvalOptions(project: Project): ApprovalOptions {
@@ -358,12 +347,19 @@ export class Controller implements vscode.Disposable {
   /**
    * An approval made outside the panel (`trama proposal approve`, `trama drift resolve --accept-proposal`) already
    * applied an ordinary Proposal that affects a Feature that still exists: start the same automatic scan as the panel.
-   * With Hold scan on nothing starts, and the Proposal is not held either: only the panel's approvals are.
+   * With Hold scan on nothing starts: the Proposal is held instead, as for the panel's approvals.
    */
   async scanApproved(project: Project, proposalId: string): Promise<void> {
     const options = this.approvalOptions(project);
     this.refresh();
-    if (!options.autoScan || !options.agentConfigured || readScanHold(project).reading.kind === "on") return;
+    if (!options.autoScan) return;
+    try {
+      if (holdApproved(project, proposalId)) return;
+    } catch {
+      options.warn(SCAN_HOLD_SAVE_FAILED);
+      return;
+    }
+    if (!options.agentConfigured) return;
     await options.launchScan(proposalId);
   }
 
@@ -376,9 +372,32 @@ export class Controller implements vscode.Disposable {
   }
 
   private async launchAction(project: Project, action: AgentAction): Promise<void> {
-    const send = (resolved: ResolvedAction, announceProposal?: DesignAnnouncement) =>
-      launchAgent(project.root, buildPrompt(resolved), terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal);
+    // The exclusion between Runs and Resolve Drifts is read from the window's state, never remembered: when the request
+    // arrives, and again at each step before the instruction is really written or sent (see `canSend`).
+    const refusal = (): string | null => {
+      if (action.kind === "resolve-drifts") {
+        const blocker = resolveDriftsBlocker(project, driftResolution());
+        return blocker === null ? null : `Resolve Drifts is unavailable: ${blocker}.`;
+      }
+      const isRun = action.kind === "implement" || action.kind === "implement-design" || action.kind === "implement-all";
+      return isRun && driftResolution() === "resolving" ? "A run cannot start: Drifts are being resolved." : null;
+    };
+    const send = async (resolved: ResolvedAction, announceProposal?: DesignAnnouncement, instruction: Instruction = buildPrompt(resolved)) => {
+      let refused: string | null = null;
+      const canSend = () => (refused = refusal()) === null;
+      await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, false, canSend, resolved.kind === "implement" || resolved.kind === "implement-design" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : undefined);
+      // Nothing was sent because the other side started while the request waited: the developer is told why.
+      if (refused !== null) throw new TramaError(refused);
+    };
+    const blocked = refusal();
+    if (blocked !== null) throw new TramaError(blocked);
     switch (action.kind) {
+      case "resolve-drifts": {
+        // The Drifts are those open when the instruction is sent, not when the button was clicked.
+        const open = () => listDrifts(project).filter((d) => d.data.status === "open").map((d) => d.id);
+        await send({ kind: "resolve-drifts", drifts: [] }, "Resolve Drifts", () => buildPrompt({ kind: "resolve-drifts", drifts: open() }));
+        return;
+      }
       case "design": {
         const request =
           action.prompt?.trim() ||
@@ -417,13 +436,6 @@ export class Controller implements vscode.Disposable {
       case "import":
         await send(action);
         return;
-      case "rework-drift": {
-        const drift = getDrift(project, action.drift);
-        const stale = staleAttachedProposal(project, drift);
-        // The title is written into the announcement's file, so it names the Proposal by its identity; the Board shows its number.
-        await send({ kind: "rework-drift", drift: drift.id, proposal: stale.id }, { title: `Rework of Proposal ${stale.id}`, drift: drift.id });
-        return;
-      }
     }
   }
 }

@@ -2,7 +2,6 @@ import { cardLabel, noNumbers } from "../../../../src/core/card-names";
 import { createScanHoldSwitch } from "../scan-hold-switch";
 import type { Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
-import { attachedSuffix } from "../board/logic";
 import type { MountView, View } from "../types";
 import { createCanvas } from "./canvas";
 import { type Detail, detailOfSelection, requirementItems, tooltipOf } from "./details";
@@ -83,11 +82,8 @@ export const mountDiagram: MountView = (root, context) => {
     toggle: (state) => toggleState(state),
     approve: (id) => context.post({ type: "approveProposal", id }),
     reject: (id) => context.post({ type: "rejectProposal", id }),
-    resolveDrift: (id, how, carries) => context.post({ type: "resolveDrift", id, how, ...carries }),
-    driftBlocked: (id) => context.post({ type: "driftBlocked", id }),
     openLink: context.openLink,
-    viewProposal: (view, proposal) => context.navigate(view, { proposal }),
-    decideOnDrift: (id) => navigateDrift(id),
+    showDrift: (id) => navigateDrift(id),
   });
 
   const canvas = createCanvas(stage, $("div.dg-canvas"), {
@@ -133,7 +129,7 @@ export const mountDiagram: MountView = (root, context) => {
     select.replaceChildren(new Option("None", ""));
     for (const p of snapshot.proposals) {
       const marks = [p.stale.length > 0 ? "stale" : "", p.unbased.length > 0 ? "unbased" : "", p.errors.length > 0 ? "invalid" : ""].filter(Boolean);
-      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} · ${p.title}${marks.length > 0 ? ` ⚠ ${marks.join(", ")}` : ""}${attachedSuffix(snapshot, p.id)}`, p.id));
+      select.append(new Option(`${cardLabel(snapshot.numbers ?? noNumbers, "proposal", p.id)} · ${p.title}${marks.length > 0 ? ` ⚠ ${marks.join(", ")}` : ""}`, p.id));
     }
     select.value = proposalId ?? "";
 
@@ -169,22 +165,14 @@ export const mountDiagram: MountView = (root, context) => {
     draw(changed);
   }
 
-  /** Looking at a Drift that comes with an open Proposal shows what accepting it would do: draws that Proposal. Returns whether it changed. */
-  function drawProposalOf(drift: { proposal?: string | null } | undefined): boolean {
-    if (!drift?.proposal || drift.proposal === proposalId || !snapshot || !snapshot.proposals.some((p) => p.id === drift.proposal)) return false;
-    proposalId = drift.proposal;
-    return true;
-  }
-
   function selectId(id: string | null) {
     selected = id;
-    if (drawProposalOf(scene?.drifts.find((d) => `d:${d.id}` === id))) return draw(false);
     canvas.select(id);
     if (scene && graph) panel.render(currentDetail());
   }
 
   function toggleState(state: string) {
-    if (level.kind !== "machine" && level.kind !== "state") return;
+    if (level.kind !== "machine") return;
     const set = expanded.get(level.machine) ?? new Set<string>();
     if (!set.delete(state)) set.add(state);
     expanded.set(level.machine, set);
@@ -215,7 +203,6 @@ export const mountDiagram: MountView = (root, context) => {
   function navigateDrift(id: string) {
     compute();
     const drift = scene?.drifts.find((d) => d.id === id);
-    if (drawProposalOf(drift)) compute();
     if (!scene || !drift) return draw(false);
     const ref = drift.refs.find((r) => resolveElement(scene as Scene, r) !== null);
     if (ref) navigateRef(ref, id);

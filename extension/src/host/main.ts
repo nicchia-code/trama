@@ -14,6 +14,7 @@ import { MARKER_FOLDER, windowMarkerDir } from "./external-terminal";
 import { findProject } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
+import { watchQuietJobs } from "./drift-resolution";
 import { classifyMachine, clearSystem1ApiKey, setSystem1ApiKey } from "./system1";
 
 const SKILL_SYNC_DEBOUNCE_MS = 300;
@@ -56,6 +57,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("trama.setSystem1ApiKey", guarded(() => setSystem1ApiKey(context.secrets))),
     vscode.commands.registerCommand("trama.clearSystem1ApiKey", guarded(() => clearSystem1ApiKey(context.secrets))),
     watchAgentTerminal(),
+    watchQuietJobs(),
     watchAnnouncements(() => findProject()?.root),
     questions,
     requests,

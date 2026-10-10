@@ -70,6 +70,15 @@ export interface ChangeSummary {
   more: number;
 }
 
+/** One Drift of a resolution on its card: how it is written, its title and what approving the Proposal does to it. */
+export interface ResolvedRow {
+  drift: string;
+  name: CardName;
+  title: string;
+  /** The decision, with ` · note` at the end when it has a note. */
+  decision: string;
+}
+
 export interface ProposalCard {
   kind: "proposal";
   key: string;
@@ -84,6 +93,8 @@ export interface ProposalCard {
   blocker: string | null;
   /** Whether it changes the Model, its Requirements or both: which views can show it. */
   touches: { model: boolean; requirements: boolean };
+  /** The Drifts a resolution resolves, one row each; empty for any other Proposal. */
+  resolves: ResolvedRow[];
 }
 
 export interface DriftCard {
@@ -197,6 +208,10 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
   return badges;
 }
 
+/** The rows of a resolution's `Resolves Drifts` block, in the order the snapshot carries them; none for any other Proposal. */
+export const resolvedRows = (p: Pick<ProposalView, "resolves">, numbers: CardNumbers = noNumbers): ResolvedRow[] =>
+  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}` }));
+
 export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers): ProposalCard {
   const name = cardNameOf(numbers, "proposal", p.id);
   return {
@@ -210,6 +225,7 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers):
     changes: summarizeChanges(p.changes),
     blocker: approveBlocker(p, numbers),
     touches: proposalTouches(p),
+    resolves: resolvedRows(p, numbers),
   };
 }
 
@@ -266,27 +282,12 @@ export function designCard(proposal: string, title: string | null, tasks: TaskCa
   };
 }
 
-/** The open Proposals that await a decision: those attached to an open Drift are decided through the Drift. */
-export function proposalsToDecide(snapshot: Snapshot): Snapshot["proposals"] {
-  const held = new Set(snapshot.drifts.map((d) => d.proposal));
-  return snapshot.proposals.filter((p) => !held.has(p.id));
-}
-
-/** The open Drift that holds Proposal `id`, or undefined. */
-export const attachedDriftOf = (snapshot: Pick<Snapshot, "drifts">, id: string): DriftView | undefined => snapshot.drifts.find((d) => d.proposal === id);
-
-/** The suffix of a Proposal in a selector: ` · D2` when an open Drift holds it, else nothing. */
-export function attachedSuffix(snapshot: Pick<Snapshot, "drifts" | "numbers">, id: string): string {
-  const drift = attachedDriftOf(snapshot, id);
-  return drift ? ` · ${namerOf(snapshot.numbers ?? noNumbers)("drift", drift.id)}` : "";
-}
-
 /** The four columns of the Board: open Proposals then open Drifts to decide, Tasks by column. */
 export function buildBoard(snapshot: Snapshot): BoardColumn[] {
   const numbers = snapshot.numbers ?? noNumbers;
   const cards: Record<ColumnId, Card[]> = {
     decide: [
-      ...proposalsToDecide(snapshot).map((p) => proposalCard(p, numbers)),
+      ...snapshot.proposals.map((p) => proposalCard(p, numbers)),
       ...snapshot.drifts.map((d) => driftCard(d, numbers)),
     ],
     todo: [],
@@ -394,25 +395,17 @@ const ANNOUNCED_KIND_LABELS: Record<AnnouncementView["kind"], string> = { propos
 export const announcedPhase = (phase: AnnouncementView["phase"], asking: boolean, kind?: AnnouncementView["kind"]): string =>
   phase === "verifying" ? "Verifying (tests, lint, build)" : phase === "scanning" ? "Scanning" : asking ? "Waiting for your answers" : phase === "writing" ? (kind === "drift" ? "Writing the Proposal" : "Writing") : "Preparing";
 
-const REWORK_TITLE = /^Rework of Proposal ([a-z0-9]+)$/;
-
-/** The file of a rework announcement names the Proposal by its identity; the Board writes it by its number while it is live. */
-function shownTitle(title: string, numbers: CardNumbers): string {
-  const id = REWORK_TITLE.exec(title)?.[1];
-  return id === undefined ? title : `Rework of Proposal ${namerOf(numbers)("proposal", id)}`;
-}
-
-export function announcedCard(a: AnnouncementView, asking: boolean, numbers: CardNumbers = noNumbers): AnnouncedCard {
+export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCard {
   const kindLabel = ANNOUNCED_KIND_LABELS[a.kind];
   const phase = announcedPhase(a.phase, asking, a.kind);
-  const title = shownTitle(a.title, numbers);
+  const title = a.title;
   const label = a.kind === "check" ? `Agent checking the code: ${title}, ${phase}` : `${kindLabel} the agent is creating, ${phase.toLowerCase()}: ${title}`;
   return { key: `announced:${a.id}`, kind: a.kind, kindLabel, title, phase, label };
 }
 
 /** The sentence the notice of a withdrawn announcement shows: a check was not finished, a card was not delivered. */
-export const withdrawnNotice = (a: AnnouncementView, numbers: CardNumbers = noNumbers): string =>
-  a.kind === "check" ? `The agent stopped before finishing ${a.title}.` : `The agent finished without delivering ${ANNOUNCED_KIND_LABELS[a.kind]} ${shownTitle(a.title, numbers)}.`;
+export const withdrawnNotice = (a: AnnouncementView): string =>
+  a.kind === "check" ? `The agent stopped before finishing ${a.title}.` : `The agent finished without delivering ${ANNOUNCED_KIND_LABELS[a.kind]} ${a.title}.`;
 
 export interface PlacedGhost {
   card: AnnouncedCard;
@@ -424,15 +417,14 @@ export interface PlacedGhost {
  * The ghosts of the announced cards, by column and in the order announced. To decide takes Proposals and Drifts, To do
  * takes Tasks, In progress takes checks. A ghost stands after the real cards of its kind (Proposals before Drifts),
  * where its real card will take its place, so no other card jumps when it arrives; a check stands after every real card.
- * The ghost reworking the Proposal of a Drift is drawn inside that Drift, so it is not here.
+ * A Proposal whose Draft is attached to a Drift is not announced to the Board at all (see `buildSnapshot`).
  */
-export function announcedGhosts(columns: BoardColumn[], announcements: AnnouncementView[], asking: boolean, numbers: CardNumbers = noNumbers): Record<ColumnId, PlacedGhost[]> {
+export function announcedGhosts(columns: BoardColumn[], announcements: AnnouncementView[], asking: boolean): Record<ColumnId, PlacedGhost[]> {
   const real = (id: ColumnId) => columns.find((c) => c.id === id)?.cards ?? [];
   const proposals = real("decide").filter((c) => c.kind === "proposal").length;
   const out: Record<ColumnId, PlacedGhost[]> = { decide: [], todo: [], doing: [], done: [] };
   for (const a of announcements) {
-    if (a.drift !== undefined) continue;
-    const card = announcedCard(a, asking, numbers);
+    const card = announcedCard(a, asking);
     if (a.kind === "task") out.todo.push({ card, index: real("todo").length });
     else if (a.kind === "check") out.doing.push({ card, index: real("doing").length });
     else out.decide.push({ card, index: a.kind === "proposal" ? proposals : real("decide").length });

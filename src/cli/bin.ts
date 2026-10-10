@@ -2,7 +2,7 @@
 import { TramaError, UsageError } from "../core/errors";
 import { questionAborted, questionFailure } from "../core/questions";
 import { completeFixChoice } from "./fix-prompt";
-import { agentVariable, asyncCommand, classifyCommand, helpFor, run, runAsk, runClassify, runCursorHook } from "./main";
+import { agentEventCommand, agentVariable, asyncCommand, classifyCommand, helpFor, reportActivity, run, runAgentEvent, runAsk, runClassify, runCursorHook } from "./main";
 
 try {
   const argv = process.argv.slice(2);
@@ -23,12 +23,17 @@ try {
     await new Promise<void>((resolve) => process.stdout.write(`${out}\n`, () => resolve()));
     process.exit(0);
   }
+  if (agentEventCommand(argv) !== null) {
+    await runAgentEvent(argv, process.cwd());
+    process.exit(0);
+  }
   if (classifyCommand(argv) !== null) {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     const { out, err, exit } = await runClassify(argv, process.cwd(), Buffer.concat(chunks).toString("utf8"));
     if (err !== undefined) console.error(err);
     if (out !== "") await new Promise<void>((resolve) => process.stdout.write(`${out}\n`, () => resolve()));
+    if (exit === 0) await reportActivity(argv, process.cwd());
     process.exit(exit);
   }
   const selected = asyncCommand(argv);
@@ -67,6 +72,7 @@ try {
   const interactive = process.stdin.isTTY && process.stdout.isTTY && !agentVariable(process.env);
   const { out, exit } = run(interactive ? await completeFixChoice(argv, process.cwd(), { input: process.stdin, output: process.stdout }) : argv, process.cwd());
   console.log(out);
+  if (exit === 0) await reportActivity(argv, process.cwd());
   process.exit(exit);
 } catch (err) {
   if (err instanceof UsageError || err instanceof TramaError) {

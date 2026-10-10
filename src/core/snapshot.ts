@@ -2,15 +2,16 @@ import type { CardNumbers } from "./card-names";
 import { type Announcement, type AnnouncementKind, type CheckPhase, listAnnouncements } from "./announcements";
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
-import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type Proposal, type ProposalKind } from "./proposals";
+import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type Proposal, type ProposalKind, unfixableDrifts } from "./proposals";
 import { appliesUnder, type RequiredProposal } from "./required";
+import { type ResolvedDrift, resolvedDrifts } from "./resolution";
 import { type Area, areaIdOf, buildProject, type Fragment, parseRequirementRef, type ProjectModel } from "./requirements";
 import { readScanHold } from "./scan-hold";
 import { type Project, readTrackedFiles } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
-import { type Column, type DriftOption, type DriftSides, driftOptions, driftSides, listDrifts, listTasks } from "./work";
+import { attachedDrift, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, listDrifts, listTasks } from "./work";
 
 export interface ActorChange {
   id: string;
@@ -69,6 +70,8 @@ export interface ProposalView {
   title: string;
   body: string;
   kind: ProposalKind;
+  /** The Drifts a resolution resolves, in creation order, each with what approving does to it; empty for any other Proposal. */
+  resolves: ResolvedDrift[];
   /** Required Proposals not approved yet; Approve stays disabled while any is listed. */
   requires: RequiredProposal[];
   /**
@@ -114,8 +117,6 @@ export interface DriftView {
   proposalTitle: string | null;
   /** What the attached Proposal changes while it is open; null when there is none or it is not open (still being written, decided). */
   proposalChanges: FileChange[] | null;
-  /** The agent is reworking the stale attached Proposal: its ghost is drawn in place of that Proposal. `title` is the new Draft's, null until the Draft exists. */
-  rework: { title: string | null } | null;
 }
 
 export interface TaskView {
@@ -148,13 +149,11 @@ export interface AnnouncementView {
   title: string;
   /** A card: Preparing until a Draft exists, Writing once it does. A check: its own phase. */
   phase: "preparing" | "writing" | CheckPhase;
-  /** The Drift whose stale Proposal this announcement reworks: its ghost is drawn inside that Drift. Absent for every other announcement. */
-  drift?: string;
 }
 
 export interface Snapshot extends ModelView {
   diagnostics: Diagnostic[];
-  /** Open Proposals that await a decision. */
+  /** Open Proposals that await a decision: those attached to an open Drift are left out, decided through the Drift. */
   proposals: ProposalView[];
   drifts: DriftView[];
   tasks: TaskView[];
@@ -257,11 +256,12 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     title: proposal.title,
     body: stripTitle(proposal.body),
     kind: proposal.data.kind,
+    resolves: proposal.data.kind === "resolution" ? resolvedDrifts(p, proposal) : [],
     requires: h.requires,
     base: pending ? modelView(baseProject) : null,
     stale: h.stale,
     unbased: h.unbased,
-    errors: afterProject.diagnostics,
+    errors: [...afterProject.diagnostics, ...unfixableDrifts(p, proposal).map((message) => ({ file: "proposal.md", line: 0, message }))],
     changes: touched,
     // A file the Model rejects (bad name, ID taken by a Feature or Actor) is a Machine on neither side; its errors are listed instead.
     machines: [...machineIds].sort().flatMap((id) => {
@@ -289,19 +289,15 @@ export function buildSnapshot(p: Project): Snapshot {
   const blocked = computeBlocked(project, tasks, drifts);
 
   const allProposals = listProposals(p);
-  const proposals = allProposals.filter((x) => x.data.status === "open").map((proposal) => proposalView(p, project, proposal));
+  const openProposals = allProposals.filter((x) => x.data.status === "open").map((proposal) => proposalView(p, project, proposal));
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
   const hold = readScanHold(p);
-  const openDrifts = drifts.filter((d) => d.data.status === "open");
-  // A Proposal ghost whose Draft is attached to an open Drift is drawn inside that Drift, like a rework.
-  const announcements = listAnnouncements(p).map((a) => {
-    const drift = a.kind === "proposal" && a.proposal !== null ? openDrifts.find((d) => d.data.proposal === a.proposal) : undefined;
-    return drift ? { ...a, drift: drift.id } : a;
-  });
+  // The developer does not see attached Proposals, so the ghost of a Proposal whose Draft is attached to an open Drift is drawn nowhere.
+  const announcements = listAnnouncements(p).filter((a) => !(a.kind === "proposal" && a.proposal !== null && attachedDrift(p, a.proposal)));
   return {
     ...modelView(project),
     diagnostics: project.diagnostics,
-    proposals,
+    proposals: openProposals.filter((v) => !attachedDrift(p, v.id)),
     drifts: drifts.filter((d) => d.data.status === "open").map((d) => ({
       id: d.id,
       title: d.title,
@@ -315,8 +311,7 @@ export function buildSnapshot(p: Project): Snapshot {
       proposal: d.data.proposal,
       proposalBlock: d.data.proposal === null ? null : approvalBlock(p, d.data.proposal),
       proposalTitle: (d.data.proposal !== null && proposalById.get(d.data.proposal)?.title) || null,
-      proposalChanges: proposals.find((x) => x.id === d.data.proposal)?.changes ?? null,
-      rework: reworkOf(announcements, d.id, (id) => proposalById.get(id)?.title),
+      proposalChanges: openProposals.find((x) => x.id === d.data.proposal)?.changes ?? null,
     })),
     tasks: tasks.map((t) => ({
       id: t.id,
@@ -339,15 +334,9 @@ export function buildSnapshot(p: Project): Snapshot {
   };
 }
 
-/** The ghost reworking the stale Proposal of Drift `driftId`, if any; its title is the bound Draft's, once there is one. */
-function reworkOf(announcements: Announcement[], driftId: string, titleOf: (proposal: string) => string | undefined): DriftView["rework"] {
-  const a = announcements.find((x) => x.drift === driftId);
-  return a === undefined ? null : { title: (a.proposal !== null && titleOf(a.proposal)) || null };
-}
-
 /** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. */
 export function announcementView(a: Announcement, proposalTitle: string | undefined): AnnouncementView {
-  return { id: a.id, kind: a.kind, title: (a.kind === "proposal" && proposalTitle) || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : "writing"), ...(a.drift ? { drift: a.drift } : {}) };
+  return { id: a.id, kind: a.kind, title: (a.kind === "proposal" && proposalTitle) || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : "writing") };
 }
 
 /** The title is shown separately, so the body drops its leading H1. */

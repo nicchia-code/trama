@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { announcementsDir, listAnnouncements, quietAnnouncements, withdrawAll } from "../../../src/core/announcements";
 import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
-import { boundDraftsChangedAt, getProposal, listProposals } from "../../../src/core/proposals";
+import { draftChangedAt, getProposal, listProposals } from "../../../src/core/proposals";
 import { announcementView } from "../../../src/core/snapshot";
 import type { AnnouncementView } from "../../../src/core/snapshot";
 import { projectAt } from "../../../src/core/store";
@@ -12,6 +12,7 @@ import type { Project } from "../../../src/core/store";
 import type { CursorChatEvent } from "../../../src/core/cursor-chat";
 import { onCursorChatEvent } from "./cursor";
 import { questionRoundClosedAt, questionRoundOpen } from "./question-activity";
+import { aliveSeenAt, readOnlySeenAt } from "./terminal-activity";
 
 const CHECK_EVERY_MS = 30_000;
 
@@ -115,7 +116,9 @@ export function watchAnnouncements(root: () => string | undefined): vscode.Dispo
       const p = projectAt(current);
       const waiting = listAnnouncements(p);
       synchronizeTitles(p, waiting);
-      if (!questionRoundOpen()) quiet = quietAnnouncements(waiting, Date.now(), Math.max(questionRoundClosedAt(), boundDraftsChangedAt(p, waiting))).map((a) => a.id);
+      // A hooked agent's announcements follow the quiet period too: its heartbeat and its read-only commands count. A Draft's
+      // change counts only for the announcement bound to that Draft, and a question round's close for all of them.
+      if (!questionRoundOpen()) quiet = quietAnnouncements(waiting, Date.now(), questionRoundClosedAt(), (a) => Math.max(readOnlySeenAt(), a.terminal === null ? 0 : aliveSeenAt(a.terminal), a.proposal === null ? 0 : draftChangedAt(p, a.proposal))).map((a) => a.id);
     });
     if (quiet.length > 0) withdrawWaiting(current, (a) => quiet.includes(a.id));
   }, CHECK_EVERY_MS);

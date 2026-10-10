@@ -307,7 +307,7 @@ A Drift is not part of the Model, so it may name code, but only where it helps. 
 ```markdown
 ---
 kind: proposal          # proposal | task | drift
-source: agent           # agent | request (announced by Trama when a design request was sent)
+source: agent           # agent | request (announced by Trama for a design request or for Resolve Drifts)
 proposal: "0021"        # the Draft bound to it; absent until the Draft exists
 terminal: ab12cd        # the agent terminal it belongs to; none when there is none
 chat: cursor            # only when Cursor's chat agent announced it; absent otherwise

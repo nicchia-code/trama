@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
-import { CURSOR_AGENT_ENV, originFromEnv } from "../core/announcements";
+import { CURSOR_AGENT_ENV, originFromEnv, terminalFromEnv } from "../core/announcements";
 import { TramaError, UsageError } from "../core/errors";
-import { askEditor, type Classification, classifyWithEditor, sendCursorHook } from "../core/question-channel";
+import { askEditor, type Classification, classifyWithEditor, sendActivity, sendAgentAlive, sendAgentIdle, sendCursorHook } from "../core/question-channel";
 import { loadModel, type Project } from "../core/store";
 import { hookAnswer, parseCursorHook } from "../core/cursor-chat";
 import { parseQuestionRequest, questionAborted, questionFailure, type QuestionHandler } from "../core/questions";
@@ -24,6 +24,7 @@ function help(): string {
     "Options: --json prints JSON instead of Markdown; --root <dir> uses <dir>/.trama.",
     "trama ask [--root <dir>] reads a question round as JSON from stdin and waits for the editor; stdout is JSON.",
     "trama cursor-hook is run by Cursor's hooks: it reads the hook's JSON from stdin and tells the editor; it always exits with 0.",
+    "trama agent-event idle is run by the hook of an agent in a terminal Trama started, when the agent has settled; it tells the editor and exits with 0.",
     "trama classify --machine <id> [--root <dir>] reads the state of a Machine from stdin and prints conflict, no-conflict or unavailable, as the editor's System 1 classifier answers.",
     "Exit codes: 0 ok, 1 failure (validation errors, unknown element, stale Proposal), 2 usage.",
   ].join("\n");
@@ -59,6 +60,7 @@ const STANDALONE: Record<string, { usage: string; summary: string }> = {
   ask: { usage: "trama ask [--root <dir>]", summary: "Reads one question round as JSON from stdin, waits for the editor and prints the JSON result on stdout." },
   classify: { usage: "trama classify --machine <id> [--root <dir>]", summary: "Reads the state of a Machine from stdin and prints conflict, no-conflict or unavailable, as the editor's System 1 classifier answers." },
   "cursor-hook": { usage: "trama cursor-hook", summary: "Run by Cursor's hooks: reads the hook's JSON from stdin and tells the editor. It always exits with 0." },
+  "agent-event": { usage: "trama agent-event idle|alive [--root <dir>]", summary: "Run by the hook of an agent in a terminal Trama started: `idle` when the agent has settled, which ends the run; `alive` as its heartbeat while it works. It exits with 0, also without an editor or a terminal of Trama's." },
 };
 
 export function pickCommand(rest: string[]): { command: Command; tail: string[] } {
@@ -124,6 +126,49 @@ export function run(argv: string[], cwd: string, env: Record<string, string | un
 
   const result: Result = command.run(makeContext(cwd, root, agent !== undefined, originFromEnv(env)), parsed.positionals, parsed.values);
   return { out: json ? JSON.stringify(result.json, null, 2) : result.md.replace(/\n{3,}/g, "\n\n").trimEnd(), exit: result.exit ?? 0 };
+}
+
+/** The commands that change something the quiet period of a run counts as the agent's activity. */
+const CHANGING: Record<string, true> = {
+  announce: true,
+  "announce phase": true,
+  "announce done": true,
+  "proposal new": true,
+  "proposal edit": true,
+  "proposal delete": true,
+  "proposal resolve-drift": true,
+  "proposal submit": true,
+  "task new": true,
+  "task move": true,
+  "drift new": true,
+};
+
+/** The commands that only read: while an agent runs them they count as its activity too. */
+const READ_ONLY: Record<string, true> = {
+  system: true, feature: true, machine: true, state: true, event: true, requirements: true, paths: true, analyze: true,
+  search: true, validate: true, "proposal show": true, "proposal list": true, "task list": true, "task next": true,
+  "task show": true, "drift list": true, "drift show": true, board: true,
+  classify: true,
+};
+
+/**
+ * Tells the editor of the project that a command ran with the terminal or chat it ran in, when it changed something, or
+ * when it only read and an agent ran it (`TRAMA_TERMINAL`, or Cursor's `CURSOR_AGENT`). A developer's read-only command counts for nothing.
+ * An agent in a chat that is not Cursor's has no origin to tell: the editor counts it for such a chat's run
+ * (ponytail: so a developer's own changing command counts too; add an environment variable for those chats if that matters).
+ */
+export async function reportActivity(argv: string[], cwd: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string } = {}): Promise<void> {
+  const { rest, root } = splitGlobals(argv);
+  const name = classifyCommand(argv) !== null ? "classify" : findCommand(rest)?.command.name;
+  const env = options.env ?? process.env;
+  const origin = originFromEnv(env);
+  const agentRun = Object.keys(origin).length > 0;
+  if (name === undefined || !(CHANGING[name] === true || (READ_ONLY[name] === true && agentRun))) return;
+  try {
+    await sendActivity(makeContext(cwd, root).project(), origin, { env, runtimeDir: options.runtimeDir, readOnly: CHANGING[name] !== true });
+  } catch {
+    // Without a project there is nobody to tell.
+  }
 }
 
 /** The `ask` command, whose asynchronous lifetime is owned by the executable, not the ordinary synchronous command API. */
@@ -192,5 +237,27 @@ export async function runCursorHook(input: string, options: { runtimeDir?: strin
   const hook = parseCursorHook(raw);
   if (hook) await sendCursorHook(hook, options);
   return JSON.stringify(hookAnswer((raw as { hook_event_name?: unknown } | null)?.hook_event_name));
+}
+
+/** The `agent-event` command, which waits for the editor; null for any other command. */
+export function agentEventCommand(argv: string[]): { rest: string[]; root?: string } | null {
+  const { rest, root } = splitGlobals(argv);
+  return rest[0] === "agent-event" ? { rest, root } : null;
+}
+
+/** `trama agent-event idle|alive`: tells the editor the agent of this terminal (`TRAMA_TERMINAL`) has settled (`idle`) or is still working (`alive`). Never fails because of the editor. */
+export async function runAgentEvent(argv: string[], cwd: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string } = {}): Promise<void> {
+  const selected = agentEventCommand(argv);
+  const kind = selected?.rest[1];
+  if (!selected || selected.rest.length !== 2 || (kind !== "idle" && kind !== "alive")) throw new UsageError("Usage: trama agent-event idle|alive [--root <dir>]");
+  const env = options.env ?? process.env;
+  const terminal = terminalFromEnv(env);
+  if (terminal === undefined) return;
+  const send = kind === "idle" ? sendAgentIdle : sendAgentAlive;
+  try {
+    await send(makeContext(cwd, selected.root).project(), terminal, { env, runtimeDir: options.runtimeDir });
+  } catch {
+    // Without a project there is nobody to tell.
+  }
 }
 

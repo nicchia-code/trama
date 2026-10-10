@@ -68,7 +68,7 @@ export async function initializeProject(): Promise<Project | undefined> {
       const choice = await vscode.window.showWarningMessage(
         "Trama did not initialize this project.",
         { modal: true, detail: err.message },
-        "Overwrite Skills and Initialize",
+        "Overwrite and Initialize",
       );
       if (choice === undefined) return undefined;
     }

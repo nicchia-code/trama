@@ -3,7 +3,7 @@ import { COMMANDS } from "../src/cli/commands";
 import { helpFor, run } from "../src/cli/main";
 
 test("every command answers --help and -h with its usage, even for an agent", () => {
-  const names = [...COMMANDS.map((c) => c.name), "ask", "classify", "cursor-hook"];
+  const names = [...COMMANDS.map((c) => c.name), "ask", "classify", "cursor-hook", "agent-event"];
   for (const name of names)
     for (const flag of ["--help", "-h"]) {
       const out = helpFor([...name.split(" "), "x", flag]);

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TramaError, UsageError } from "../core/errors";
 import { type AgentOrigin, ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote, CHECK_PHASES, type CheckPhase, changeCheckPhase, deliverCard, finishCheck } from "../core/announcements";
-import { installOmpAgents, installSkills, missingSkills, removeRetiredSkills, skillConflicts } from "./skills";
+import { installOmpAgents, installSkills, missingSkills, ompAgentConflicts, removeRetiredSkills, skillConflicts } from "./skills";
 import {
   approveProposal,
   deleteInProposal,
@@ -12,10 +12,13 @@ import {
   newProposal,
   rejectProposal,
   proposalWarnings,
+  driftListProblems,
   submitProposal,
   validateProposal,
   warningsText,
 } from "../core/proposals";
+import { resolveDriftInProposal } from "../core/resolution";
+import type { DriftDecisionKind } from "../core/proposals";
 import { convertSingleFileAreas, createDefaultAreas, largeFragmentMessage, largeFragments, loadProject } from "../core/requirements";
 import { describeRequirementSkillSync, syncRequirementSkills } from "../core/requirement-skills";
 import { syncShortNumbers } from "../core/short-numbers";
@@ -32,8 +35,9 @@ import {
 import type { Model } from "../core/types";
 import type { Warning } from "../core/graph";
 import { rewriteNumberedCards } from "../core/rewrite-ids";
-import { type Drift, getDrift, getTask, moveTask, newDrift, newTask, replaceDriftProposal, requireNotAttached, resolveDrift, takeBackTask } from "../core/work";
+import { type Drift, type DriftOutcome, getDrift, getTask, moveTask, newDrift, newTask, requireNotAttached, resolveDrift, takeBackTask } from "../core/work";
 import { writeApprovedNotice } from "../core/approve-request";
+import { requestExists } from "../core/design-requests";
 import { approvedScope } from "../core/scope";
 import {
   analyzeView,
@@ -93,6 +97,8 @@ function explore(ctx: Context, target: string, view: (model: Model, ref: string)
 
 const str = (v: Values[string]): string | undefined => (typeof v === "string" ? v : undefined);
 const list = (v: Values[string]): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+const DECISIONS: readonly string[] = ["proposal", "dismissed", "fix-code"];
+
 /** A command argument: digits cite only a numbered card, and a unique prefix is enough. */
 const proposalArg = (ctx: Context, id: string) => getProposal(ctx.project(), id, true).id;
 const taskArg = (ctx: Context, id: string) => getTask(ctx.project(), id, true).id;
@@ -136,16 +142,16 @@ export const COMMANDS: Command[] = [
   {
     name: "init",
     args: "",
-    summary: "Create .trama/ and install the agent skills (--skills-dir, default .agents/skills; .claude/skills for Claude Code; --force overwrites customised skills)",
+    summary: "Create .trama/ and install the agent skills and omp's sub-agent definitions (--skills-dir, default .agents/skills; .claude/skills for Claude Code; --force overwrites customised skills and definitions)",
     options: { "skills-dir": { type: "string" }, force: { type: "boolean" } },
     run(ctx, _a, o) {
       const root = resolve(ctx.cwd, ctx.rootOption ?? ".");
       const project = projectAt(root);
       if (existsSync(project.dir)) throw new TramaError(`${project.dir} already exists`);
       const skillsDir = resolve(root, str(o["skills-dir"]) ?? ".agents/skills");
-      const conflicts = o["force"] === true ? [] : skillConflicts(skillsDir);
+      const conflicts = o["force"] === true ? [] : [...skillConflicts(skillsDir), ...ompAgentConflicts(root)];
       if (conflicts.length > 0)
-        throw new TramaError(`Refusing to overwrite skill files that differ from Trama's:\n${conflicts.map((c) => `- ${c}`).join("\n")}\nNothing was created. Move them, pick another --skills-dir, or pass --force.`);
+        throw new TramaError(`Refusing to overwrite agent files that differ from Trama's:\n${conflicts.map((c) => `- ${c}`).join("\n")}\nNothing was created. Move them, pick another --skills-dir, or pass --force.`);
       for (const d of ["model/actors", "proposals", "tasks", "drifts"]) {
         mkdirSync(join(project.dir, d), { recursive: true });
         writeFileEnsuringDir(join(project.dir, d, ".gitkeep"), "");
@@ -247,7 +253,8 @@ export const COMMANDS: Command[] = [
       const id = str(o["proposal"]);
       if (id === undefined) return validateView(loadProject(project).diagnostics, "The Model and its Requirements", largeFragments(readTrackedFiles(project)).map((f) => ({ file: f.file, line: 0, message: largeFragmentMessage(f) })));
       const proposal = getProposal(project, id, true);
-      return validateView(validateProposal(project, proposal), `The Model and its Requirements with Proposal ${numbersOf(ctx).name("proposal", proposal.id)} applied`, proposalWarnings(project, proposal));
+      const listProblems = driftListProblems(project, proposal).map((message) => ({ file: "proposal.md", line: 0, message: `Drift list: ${message}` }));
+      return validateView([...validateProposal(project, proposal), ...listProblems], `The Model and its Requirements with Proposal ${numbersOf(ctx).name("proposal", proposal.id)} applied`, proposalWarnings(project, proposal));
     },
   },
 
@@ -273,12 +280,13 @@ export const COMMANDS: Command[] = [
       const found = finishCheck(ctx.project(), id);
       return text(found ? `Check ${id} is done` : `No check "${id}" was found (unknown, already finished or withdrawn, or not a check); nothing changed.`, { id, found });
     } },
-  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code; --announcement <id> names the announcement of this Proposal; --request <id> binds it to the written design request it comes from); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" }, announcement: { type: "string" }, request: { type: "string" } }, run(ctx, a, o) {
+  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code; --resolution for a resolution of Drifts, then record decisions with proposal resolve-drift; --announcement <id> names the announcement of this Proposal; --request <id> binds it to the written design request it comes from); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" }, resolution: { type: "boolean" }, announcement: { type: "string" }, request: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
+      if (o["import"] === true && o["resolution"] === true) throw new UsageError("--import and --resolution cannot go together: a Proposal is one or the other");
       const note = announcementNote(project, str(o["announcement"]), "proposal");
       const request = str(o["request"]);
-      const p = newProposal(project, a[0] as string, str(o["body"]), { requires: list(o["requires"]).map((id) => proposalArg(ctx, id)), kind: o["import"] === true ? "import" : "change", announcement: str(o["announcement"]), origin: ctx.origin, request });
-      const requestNote = request !== undefined && p.data.request === null ? `Design request ${request} was not found; the Proposal is not bound to any request.` : "";
+      const p = newProposal(project, a[0] as string, str(o["body"]), { requires: list(o["requires"]).map((id) => proposalArg(ctx, id)), kind: o["import"] === true ? "import" : o["resolution"] === true ? "resolution" : "change", announcement: str(o["announcement"]), origin: ctx.origin, request });
+      const requestNote = request !== undefined && p.data.request === null ? (requestExists(project, request) ? `Design request ${request} is already bound to another Proposal; the Proposal is not bound to any request.` : `Design request ${request} was not found; the Proposal is not bound to any request.`) : "";
       const notes = [note, requestNote].filter(Boolean).join("\n");
       const n = numbersOf(ctx);
       return text(`Created Draft Proposal ${n.name("proposal", p.id)} at ${p.dir}. Submit it when finished.${notes ? `\n${notes}` : ""}`, { id: p.id, number: n.label("proposal", p.id), path: p.dir, status: p.data.status, request: p.data.request, ...(note ? { note } : {}), ...(requestNote ? { requestNote } : {}) });
@@ -289,6 +297,19 @@ export const COMMANDS: Command[] = [
       const returnedToDraft = getProposal(project, id).data.status === "open";
       const path = editInProposal(project, id, a[1] as string);
       return text(`${path}${returnedToDraft ? "\nProposal returned to Draft; submit it again when finished." : ""}`, { id, number: numbersOf(ctx).label("proposal", id), path, status: "draft", returnedToDraft });
+    } },
+  { name: "proposal resolve-drift", args: "<id> <drift>", summary: "Record or replace, in a resolution Proposal, the decision on an open Drift (--decision proposal|dismissed|fix-code; --option <n> and --note <text> only with fix-code); --remove takes the Drift out of the list. Returns an open resolution to Draft", options: { decision: { type: "string" }, option: { type: "string" }, note: { type: "string" }, remove: { type: "boolean" } }, run(ctx, a, o) {
+      const project = ctx.project();
+      const decision = str(o["decision"]);
+      const remove = o["remove"] === true;
+      if (!remove && !DECISIONS.includes(decision as DriftDecisionKind)) throw new UsageError(`--decision must be one of ${DECISIONS.join(", ")}`);
+      if (remove && (decision !== undefined || o["option"] !== undefined || o["note"] !== undefined)) throw new UsageError("--remove takes no decision, option or note");
+      const option = o["option"] === undefined ? undefined : Number(str(o["option"]));
+      if (option !== undefined && !Number.isInteger(option)) throw new UsageError("--option must be a whole number");
+      const drift = driftArg(ctx, a[1] as string);
+      const { proposal, returnedToDraft } = resolveDriftInProposal(project, proposalArg(ctx, a[0] as string), drift, { ...(decision ? { decision: decision as DriftDecisionKind } : {}), ...(option !== undefined ? { option } : {}), ...(o["note"] !== undefined ? { note: str(o["note"]) ?? "" } : {}), remove });
+      const n = numbersOf(ctx);
+      return text(`${remove ? "Removed" : "Recorded"} Drift ${n.name("drift", drift)} ${remove ? "from" : `as ${decision} in`} Proposal ${n.name("proposal", proposal.id)}.${returnedToDraft ? " Proposal returned to Draft; submit it again when finished." : ""}`, { id: proposal.id, number: n.label("proposal", proposal.id), drift, status: proposal.data.status, returnedToDraft, drifts: proposal.data.drifts });
     } },
   { name: "proposal delete", args: "<id> <model-path>", summary: "Mark a Model file for deletion in a Proposal", run(ctx, a) {
       const project = ctx.project();
@@ -305,7 +326,10 @@ export const COMMANDS: Command[] = [
       return text(`Submitted Proposal ${n.name("proposal", p.id)} for review${consumed}${warningsText(p.warnings)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status, request: p.data.request, requestConsumed: p.requestConsumed, warnings: p.warnings });
     } },
   { name: "proposal discard", args: "<id>", summary: "Discard a Draft the agent never finished", developerOnly: true, run(ctx, a) {
-      const p = discardProposal(ctx.project(), proposalArg(ctx, a[0] as string));
+      const project = ctx.project();
+      const id = proposalArg(ctx, a[0] as string);
+      requireNotAttached(project, id);
+      const p = discardProposal(project, id);
       const n = numbersOf(ctx);
       return text(`Discarded Proposal ${n.name("proposal", p.id)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status });
     } },
@@ -315,9 +339,12 @@ export const COMMANDS: Command[] = [
       const project = ctx.project();
       const id = proposalArg(ctx, a[0] as string);
       requireNotAttached(project, id);
-      const { id: approved, features } = approvedScope(project, id, () => approveProposal(project, id, list(o["skills-dir"])));
+      let resolved: DriftOutcome[] = [];
+      const { id: approved, features } = approvedScope(project, id, () => { resolved = approveProposal(project, id, list(o["skills-dir"])).resolved; });
       if (features.length > 0) writeApprovedNotice(project, approved);
-      return text(`Approved Proposal ${numbersOf(ctx).name("proposal", approved)}`, { id: approved, number: numbersOf(ctx).label("proposal", approved), status: "approved" });
+      const n = numbersOf(ctx);
+      const lines = resolved.map((d) => `- Drift ${n.name("drift", d.drift)}: ${d.skipped ? "skipped, already resolved" : d.decision === "fix-code" ? `code to be fixed, Task ${d.task ? n.name("task", d.task) : ""} created` : d.decision === "proposal" ? "Model updated to match the code" : "dismissed"}`);
+      return text([`Approved Proposal ${n.name("proposal", approved)}`, ...lines].join("\n"), { id: approved, number: n.label("proposal", approved), status: "approved", resolved });
     } },
   { name: "proposal reject", args: "<id>", summary: "Reject a Proposal, optionally with feedback for the agent", developerOnly: true, options: { feedback: { type: "string" } }, run(ctx, a, o) {
       const id = proposalArg(ctx, a[0] as string);
@@ -327,7 +354,7 @@ export const COMMANDS: Command[] = [
       return text(`Rejected Proposal ${n.name("proposal", p.id)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status });
     } },
 
-  { name: "task new", args: "<title>", summary: "Create a Task in 'todo' (--ref … or --technical; --proposal <id> links it to the design it comes from; --announcement <id> names the announcement of this Task)", options: { ref, technical: { type: "boolean" }, drift: { type: "string" }, proposal: { type: "string" }, body: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
+  { name: "task new", args: "<title>", summary: "Create a Task in 'todo' (--ref … or --technical; --proposal <id> links it to the design it comes from; with --drift the design is the origin Task's, and a different --proposal is refused; --announcement <id> names the announcement of this Task)", options: { ref, technical: { type: "boolean" }, drift: { type: "string" }, proposal: { type: "string" }, body: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       const note = announcementNote(project, str(o["announcement"]), "task");
       const t = newTask(project, { title: a[0] as string, refs: list(o["ref"]), technical: o["technical"] === true, drift: optionalArg(ctx, str(o["drift"]), driftArg), proposal: optionalArg(ctx, str(o["proposal"]), proposalArg), body: str(o["body"]) });
@@ -380,13 +407,6 @@ export const COMMANDS: Command[] = [
       }
       const n = numbersOf(ctx);
       return text(`Drift ${n.name("drift", d.id)} resolved (${d.data.resolution})${d.data.task ? `; Task ${n.name("task", d.data.task)} created` : ""}${setAside ? `; attached Proposal ${n.name("proposal", before as string)} ${setAside}` : ""}`, { id: d.id, number: n.label("drift", d.id), resolution: d.data.resolution, task: d.data.task, option: d.data.option, note: d.data.note, ...(setAside ? { proposal: before, proposalSetAside: setAside } : {}) });
-    } },
-  { name: "drift replace-proposal", args: "<id>", summary: "Attach a newer Proposal (--proposal <id>) to an open Drift in place of its stale one, which is rejected", options: { proposal: { type: "string" } }, run(ctx, a, o) {
-      const id = driftArg(ctx, a[0] as string);
-      const old = getDrift(ctx.project(), id).data.proposal;
-      const d = replaceDriftProposal(ctx.project(), id, proposalArg(ctx, required(str(o["proposal"]), "proposal")));
-      const n = numbersOf(ctx);
-      return text(`Drift ${n.name("drift", d.id)} now has Proposal ${n.name("proposal", d.data.proposal as string)}; Proposal ${n.name("proposal", old as string)} was rejected as replaced`, { id: d.id, number: n.label("drift", d.id), proposal: d.data.proposal, replaced: old });
     } },
 
   { name: "board", args: "", summary: "To decide, To do, In progress, Done", run: (ctx) => boardView(ctx.project()) },
