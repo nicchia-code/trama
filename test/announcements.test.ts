@@ -379,7 +379,7 @@ describe("a check", () => {
   /** Runs `body` while a live editor answers the coordinator messages of the command with `onMessage`. */
   async function withEditor(onMessage: (message: Record<string, unknown>) => void | Promise<void>, body: () => Promise<void>) {
     const previousRuntime = process.env.XDG_RUNTIME_DIR;
-    const runtimeRoot = mkdtempSync(join(tmpdir(), "trama-check-phase-"));
+    const runtimeRoot = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-check-phase-") : "/tmp/trama-cp-");
     process.env.XDG_RUNTIME_DIR = runtimeRoot;
     const server = await createQuestionServer({ project: p, runtimeDir: join(runtimeRoot, `trama-q-${process.getuid!()}`), handler: async () => ({ status: "unavailable", reason: "No project coordinator is available." }), onCoordinatorMessage: onMessage });
     try {

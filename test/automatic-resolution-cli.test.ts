@@ -17,7 +17,7 @@ let previousRuntimeDir: string | undefined;
 let server: QuestionServer | undefined;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "trama-auto-resolution-"));
+  root = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-auto-resolution-") : "/tmp/trama-ar-");
   projectRoot = join(root, "project");
   cpSync(join(import.meta.dir, "../examples/shop"), projectRoot, { recursive: true });
   previousRuntimeDir = process.env.XDG_RUNTIME_DIR;

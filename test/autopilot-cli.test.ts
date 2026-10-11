@@ -12,7 +12,7 @@ let runtimeDir: string;
 let server: QuestionServer | undefined;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "trama-autopilot-cli-"));
+  root = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-autopilot-cli-") : "/tmp/trama-ap-");
   projectRoot = join(root, "project");
   cpSync(join(import.meta.dir, "../examples/shop"), projectRoot, { recursive: true });
   runtimeDir = join(root, `trama-q-${process.getuid!()}`);
