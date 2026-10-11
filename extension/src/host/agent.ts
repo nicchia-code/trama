@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
-import { basename } from "node:path";
+import { basename, win32 } from "node:path";
 import { announce, newTerminalId, TERMINAL_ENV, type AgentOrigin } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
@@ -10,7 +10,7 @@ import { bundledOmpHook, bundledTrama, type ChatDelivery, isCursor, onCursorChat
 import { onCopilotChatEvent } from "./copilot-chat";
 import { withdrawWaiting } from "./announcements";
 import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, driftAutopilotMode, endChatJobs, endCopilotChatJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, setHooked, startJob } from "./drift-resolution";
-import { agentCommandLine, type ShellFamily, shellFamily } from "./quote";
+import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint, questionWindowId } from "./questions";
 import { withLanguage } from "./prompts";
 import { agentTemplate, canScan, type Models, type Role, roleOf, type TerminalAgent } from "./terminal-agent";
@@ -93,6 +93,16 @@ let lastTab: { terminal: vscode.Terminal; name: string; column: vscode.ViewColum
 function tabColumn(): vscode.ViewColumn {
   const column = lastTab !== undefined && lastTab.terminal.exitStatus === undefined ? lastTab.column : undefined;
   return column !== undefined && vscode.window.tabGroups.all.some((group) => group.viewColumn === column) ? column : vscode.ViewColumn.Beside;
+}
+
+/** Whether this window has already been told its default shell is replaced; the flag lives as long as the window's extension host. */
+let shellWarned = false;
+
+/** Tells the developer once per window that the agent runs in Windows PowerShell because the default shell is not supported. */
+function warnShellReplaced(shell: string): void {
+  if (shellWarned) return;
+  shellWarned = true;
+  void vscode.window.showInformationMessage(`Trama: the default terminal shell (${programName(shell)}) is not supported for agents on Windows; the agent runs in Windows PowerShell.`);
 }
 
 /** Every active agent terminal and the command Trama typed into it. */
@@ -344,13 +354,19 @@ export async function launchAgent(
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
     const asTab = settings().inspect<string>("terminalLocation")?.globalValue === "editor";
     const terminalId = newTerminalId();
+    const defaultShell = vscode.env.shell;
+    // On Windows a default shell other than Windows PowerShell 5.1, PowerShell 7 or Git Bash is replaced for this terminal only.
+    const replaced = !isSupportedShell(defaultShell);
+    const shellPath = replaced ? win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : undefined;
     const terminal = vscode.window.createTerminal({
       name,
       cwd: root,
+      shellPath,
       env: { TRAMA_AGENT: "1", [QUESTION_ENDPOINT_ENV]: endpoint, [TERMINAL_ENV]: terminalId, ...(jobId === undefined ? {} : { TRAMA_JOB: jobId }) },
       ...(asTab ? { location: { viewColumn: tabColumn(), preserveFocus: true } } : {}),
     });
-    const family = shellFamily(vscode.env.shell);
+    if (replaced) warnShellReplaced(defaultShell);
+    const family = shellFamily(shellPath ?? defaultShell);
     const line = agentCommandLine(run.template(family), run.prompt(), family);
     agentTerminals.set(terminal, { id: terminalId, ...(jobId === undefined ? {} : { jobId }), root, line, since: Date.now() });
     setHooked(terminalId, run.hooked);

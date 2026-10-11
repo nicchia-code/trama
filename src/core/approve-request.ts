@@ -1,6 +1,7 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeFileAtomic } from "./atomic-write";
 import { questionProjectId } from "./question-channel";
 import type { Project } from "./store";
 
@@ -11,9 +12,7 @@ export function approvalInbox(project: Project): string {
 
 function writeJson(file: string, value: unknown): void {
   mkdirSync(join(file, ".."), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value));
-  renameSync(tmp, file);
+  writeFileAtomic(file, JSON.stringify(value));
 }
 
 const APPROVED_PREFIX = "approved-";

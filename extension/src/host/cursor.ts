@@ -27,9 +27,11 @@ export function bundledOmpHook(extensionPath = vscode.extensions.getExtension("t
 /**
  * Cursor starts its agent's commands without the PATH the extension adds to the editor's terminals, so the instruction
  * gets a second line saying where the shipped trama program is; without one for this platform it stays one line.
+ * On Windows the shell of Cursor's agent is unknown, so the line gives the full path of trama.exe with no shell command.
  */
 export function withTramaPath(prompt: string, program = bundledTrama()): string {
   if (program === undefined) return prompt;
+  if (process.platform === "win32") return `${prompt}\nThe trama command may not be on your PATH. Run it by its full path: ${program}`;
   return `${prompt}\nThe trama command may not be on your PATH. Before anything else run: export PATH="${dirname(program)}:$PATH"`;
 }
 

@@ -15,7 +15,8 @@ beforeAll(() => {
   mkdirSync(outside);
   writeFileSync(join(base, "checkout", "order.md"), "# Order\n");
   writeFileSync(join(outside, "notes.md"), "secret\n");
-  symlinkSync(outside, join(base, "link"));
+  // Creating a symlink needs developer mode or administrator rights on Windows: the symlink test is skipped there.
+  if (process.platform !== "win32") symlinkSync(outside, join(base, "link"));
 });
 afterAll(() => rmSync(join(base, ".."), { recursive: true, force: true }));
 
@@ -35,6 +36,7 @@ test("refuses files that are not Markdown", () => {
     expect(() => resolveMarkdownFile(base, rel)).toThrow();
 });
 
-test("refuses a symlink that leads outside the folder", () => {
+// Skipped on Windows: creating the symlink in the fixture needs developer mode or administrator rights there.
+(process.platform === "win32" ? test.skip : test)("refuses a symlink that leads outside the folder", () => {
   expect(() => resolveMarkdownFile(base, "link/notes.md")).toThrow();
 });

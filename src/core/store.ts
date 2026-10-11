@@ -29,7 +29,7 @@ export function findProject(start: string): Project {
 
 export const modelDir = (p: Project) => join(p.dir, "model");
 
-/** Every non-hidden file under `dir`, keyed by `/`-separated relative path. */
+/** Every non-hidden file under `dir`, keyed by `/`-separated relative path, with LF line endings so a CRLF checkout hashes and compares like Linux. */
 export function readTree(dir: string): FileMap {
   const files: FileMap = new Map();
   const visit = (abs: string, rel: string) => {
@@ -37,7 +37,7 @@ export function readTree(dir: string): FileMap {
       if (entry.name.startsWith(".")) continue;
       const childRel = rel ? `${rel}/${entry.name}` : entry.name;
       if (entry.isDirectory()) visit(join(abs, entry.name), childRel);
-      else files.set(childRel, readFileSync(join(abs, entry.name), "utf8"));
+      else files.set(childRel, readFileSync(join(abs, entry.name), "utf8").replace(/\r\n?/g, "\n"));
     }
   };
   if (existsSync(dir)) visit(dir, "");

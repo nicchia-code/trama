@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { tmpdir } from "node:os";
 import { COMMANDS } from "../src/cli/commands";
 import { helpFor, run } from "../src/cli/main";
 
@@ -18,6 +19,6 @@ test("decision commands are not labelled developer-only", () => {
 });
 
 test("an existing command with wrong arguments gives its usage error, not Unknown command", () => {
-  expect(() => run(["ask", "extra"], "/tmp")).toThrow("Usage: trama ask");
-  expect(() => run(["cursor-hook", "extra"], "/tmp")).toThrow("Usage: trama cursor-hook");
+  expect(() => run(["ask", "extra"], tmpdir())).toThrow("Usage: trama ask");
+  expect(() => run(["cursor-hook", "extra"], tmpdir())).toThrow("Usage: trama cursor-hook");
 });

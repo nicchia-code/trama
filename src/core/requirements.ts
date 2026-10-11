@@ -6,7 +6,7 @@ import { buildModel, findState, flattenStates } from "./model";
 import { type Element, resolveRef } from "./refs";
 import { type Project, readTrackedFiles, REQUIREMENTS_PREFIX, requirementsDir, writeFileEnsuringDir } from "./store";
 import type { Diagnostic, FileMap, Machine, Model, State } from "./types";
-import { ID_PATTERN } from "./types";
+import { ID_PATTERN, isWindowsDeviceName } from "./types";
 
 /** A section of an Area: the general part, or the part about one element of the Model. */
 export interface RequirementSection {
@@ -200,6 +200,10 @@ function buildAreas(requirements: FileMap, model: Model, diagnostics: Diagnostic
       diagnostics.push({ file: path, line: 0, message: `Area folder "${folder}" is not a kebab-case name` });
       continue;
     }
+    if (isWindowsDeviceName(folder)) {
+      diagnostics.push({ file: path, line: 0, message: `Area folder "${folder}" is a name Windows reserves for devices` });
+      continue;
+    }
     if (parts.length > 2) {
       diagnostics.push({ file: path, line: 0, message: `No subfolders inside an Area: Requirement files are requirements/${folder}/area.md and requirements/${folder}/<fragment>.md` });
       continue;
@@ -211,6 +215,10 @@ function buildAreas(requirements: FileMap, model: Model, diagnostics: Diagnostic
     const fragment = name.slice(0, -".md".length);
     if (name !== AREA_FILE && !ID_PATTERN.test(fragment)) {
       diagnostics.push({ file: path, line: 0, message: `Fragment "${fragment}" is not a kebab-case name ("area" is reserved for area.md)` });
+      continue;
+    }
+    if (name !== AREA_FILE && isWindowsDeviceName(fragment)) {
+      diagnostics.push({ file: path, line: 0, message: `Fragment "${fragment}" is a name Windows reserves for devices` });
       continue;
     }
     let files = folders.get(folder);
@@ -440,6 +448,10 @@ export function convertSingleFileAreas(p: Project): AreaConversion {
     const id = entry.name.slice(0, -".md".length);
     if (!ID_PATTERN.test(id)) {
       result.skipped.push({ id, reason: `"${id}" is not a kebab-case Area name` });
+      continue;
+    }
+    if (isWindowsDeviceName(id)) {
+      result.skipped.push({ id, reason: `"${id}" is a name Windows reserves for devices` });
       continue;
     }
     const folder = join(dir, id);

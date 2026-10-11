@@ -22,7 +22,7 @@ beforeEach(() => {
   cpSync(join(import.meta.dir, "../examples/shop"), projectRoot, { recursive: true });
   previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
   process.env.XDG_RUNTIME_DIR = root;
-  runtimeDir = join(root, `trama-q-${process.getuid!()}`);
+  runtimeDir = join(root, process.platform === "win32" ? "trama-q" : `trama-q-${process.getuid!()}`);
 });
 afterEach(async () => {
   await server?.dispose();

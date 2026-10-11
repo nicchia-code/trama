@@ -58,6 +58,9 @@ describe("validation rules", () => {
     ["ID shared by a Feature and a Machine", { "feat/feat.md": machine(GOOD_STATES) }, /Duplicate ID "feat"/],
     ["non-kebab-case ID", { "feat/My_Machine.md": machine(GOOD_STATES) }, /Invalid ID "My_Machine"/],
     ["reserved ID", { "feat/system.md": machine(GOOD_STATES) }, /"system" is a reserved name/],
+    ["Windows device name as a Machine ID", { "feat/com1.md": machine(GOOD_STATES) }, /"com1" is a name Windows reserves for devices/],
+    ["Windows device name as a Feature ID", { "nul/feature.md": "# Nul\n\nA feature.\n" }, /"nul" is a name Windows reserves for devices/],
+    ["Windows device name as an Actor ID", { "actors/lpt9.md": "# L\n\nSomeone.\n" }, /"lpt9" is a name Windows reserves for devices/],
     ["Feature folder without feature.md", { "feat/feature.md": null }, /has no feature\.md/],
     ["missing system.md", { "system.md": null }, /Missing system\.md/],
     ["Actor with States", { "actors/user.md": "# U\n\n## States\n\n### A (initial)\n" }, /Unknown section "## States"/],
@@ -67,6 +70,10 @@ describe("validation rules", () => {
       expect(errors(files(overrides)).some((m) => expected.test(m))).toBe(true);
     });
   }
+});
+
+test("a name that only contains a Windows device name stays valid", () => {
+  expect(errors(files({ "feat/console.md": machine(GOOD_STATES), "feat/com-port.md": machine(GOOD_STATES) }))).toEqual([]);
 });
 
 describe("parsing", () => {

@@ -92,3 +92,7 @@ Recheck the coordinator before starting the Run and again before starting each g
 The Run is separate from the resolution agent: do not reuse its terminal or implement during resolution preparation. Keep the normal Run checks and selective end-of-Run scan. That scan belongs to this Run's existing check; do not announce a second check.
 
 `trama.driftAutoPilot` is application-scoped: `disabled` (default), `enabled` (non-critical Drifts only), or `yolo` (also critical Drifts). The host can stop further automatic steps if the setting changes. Repeated automatic cycles have no additional time, cost, or cycle limit; the developer can disable autopilot or interrupt the work. External agent scans are not part of Trama's coordination barrier.
+
+## PowerShell
+
+The examples use POSIX syntax. In PowerShell, pass JSON on standard input with a pipe, for example `Get-Content -Raw round.json | trama ask --root <project>`, not `<`. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Write `--body` and `--reason` values in single quotes, because PowerShell expands `$` and the backtick inside double quotes.

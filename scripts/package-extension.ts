@@ -12,6 +12,7 @@ const TARGETS: Record<string, string> = {
   "linux-x64": "bun-linux-x64",
   "linux-arm64": "bun-linux-arm64",
   "darwin-arm64": "bun-darwin-arm64",
+  "win32-x64": "bun-windows-x64",
   "darwin-x64": "bun-darwin-x64",
 };
 
@@ -26,9 +27,10 @@ copyFileSync("LICENSE", "extension/LICENSE");
 
 for (const target of targets) {
   rmSync("extension/bin", { recursive: true, force: true });
+  const binary = target.startsWith("win32") ? "extension/bin/trama.exe" : "extension/bin/trama";
   mkdirSync("extension/bin");
-  await $`bun build --compile --target=${TARGETS[target]} src/cli/bin.ts --outfile extension/bin/trama`.quiet();
-  chmodSync("extension/bin/trama", 0o755);
+  await $`bun build --compile --target=${TARGETS[target]} src/cli/bin.ts --outfile ${binary}`.quiet();
+  chmodSync(binary, 0o755);
   // Bun appends the app to its runtime after the runtime was signed, which leaves an invalid signature that macOS may
   // refuse to run. Re-signing ad hoc needs codesign, so it only happens when packaging on a Mac.
   if (target.startsWith("darwin") && process.platform === "darwin") await $`codesign --force --sign - extension/bin/trama`;

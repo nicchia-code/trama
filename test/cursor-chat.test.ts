@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reportActivity, runAgentEvent, runCursorHook } from "../src/cli/main";
 import type { AgentOrigin } from "../src/core/announcements";
@@ -12,7 +13,7 @@ let root: string;
 let project: string;
 let runtimeDir: string;
 beforeEach(() => {
-  root = mkdtempSync("/tmp/trama-hook-");
+  root = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-hook-") : "/tmp/trama-hook-");
   project = join(root, "p");
   runtimeDir = join(root, "rt");
   mkdirSync(join(project, ".trama", "model"), { recursive: true });
@@ -52,9 +53,11 @@ test("trama cursor-hook hands the hook, never the prompt, to the project's edito
   try {
     expect(await runCursorHook(JSON.stringify(prompt("Use the trama-design skill. Secret")), { runtimeDir })).toBe('{"continue":true}');
     expect(await runCursorHook(JSON.stringify({ hook_event_name: "stop", conversation_id: "c1", workspace_roots: [project], status: "completed" }), { runtimeDir })).toBe("{}");
+    expect(await runCursorHook("\uFEFF" + JSON.stringify({ hook_event_name: "stop", conversation_id: "c2", workspace_roots: [project], status: "completed" }), { runtimeDir })).toBe("{}");
     expect(received).toEqual([
       { hook: "beforeSubmitPrompt", conversation: "c1", root: project, tramaPrompt: true },
       { hook: "stop", conversation: "c1", root: project, status: "completed" },
+      { hook: "stop", conversation: "c2", root: project, status: "completed" },
     ]);
     expect(JSON.stringify(received)).not.toContain("Secret");
   } finally {
@@ -85,6 +88,16 @@ test("Trama's hooks replace only Trama's earlier entries, keep the others, and l
   writeFileSync(file, "{ broken");
   expect(() => writeCursorHooks(file, "/new/bin/trama")).toThrow(/not valid JSON/);
   expect(readFileSync(file, "utf8")).toBe("{ broken");
+});
+
+test("on Windows Cursor's entries have the PowerShell form, and either form is replaced by the other on update", () => {
+  const file = join(root, ".cursor", "hooks.json");
+  writeCursorHooks(file, "C:\\old\\trama.exe", false);
+  writeCursorHooks(file, "C:\\new\\trama.exe", true);
+  const read = () => JSON.parse(readFileSync(file, "utf8")).hooks;
+  expect(read().stop).toEqual([{ command: '& "C:\\new\\trama.exe" cursor-hook' }]);
+  writeCursorHooks(file, "C:\\newer\\trama.exe", false);
+  expect(read().stop).toEqual([{ command: '"C:\\newer\\trama.exe" cursor-hook' }]);
 });
 
 test("only commands that change project state tell the editor; read-only commands do not", async () => {

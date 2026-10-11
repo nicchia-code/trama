@@ -38,18 +38,14 @@ function installCursorHooks(): void {
 }
 
 /** Writes Copilot hooks to extension user storage and registers the file in user settings. */
-export async function installCopilotHooks(storageUri: vscode.Uri): Promise<void> {
+export async function installCopilotHooks(storageUri: vscode.Uri, windows = process.platform === "win32"): Promise<void> {
   if (isCursor()) return;
   const program = bundledTrama();
   if (!program) return;
   const file = vscode.Uri.joinPath(storageUri, COPILOT_HOOKS_FILE);
   const command = `"${program}" copilot-hook`;
-  const contents = JSON.stringify({
-    hooks: {
-      UserPromptSubmit: [{ type: "command", command }],
-      Stop: [{ type: "command", command }],
-    },
-  });
+  const entry = { type: "command", command, ...(windows ? { windows: `& "${program}" copilot-hook` } : {}) };
+  const contents = JSON.stringify({ hooks: { UserPromptSubmit: [entry], Stop: [entry] } });
   const storagePath = storageUri.fsPath;
   try {
     await vscode.workspace.fs.createDirectory(storageUri);

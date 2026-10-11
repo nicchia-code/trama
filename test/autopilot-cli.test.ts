@@ -15,7 +15,7 @@ beforeEach(() => {
   root = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-autopilot-cli-") : "/tmp/trama-ap-");
   projectRoot = join(root, "project");
   cpSync(join(import.meta.dir, "../examples/shop"), projectRoot, { recursive: true });
-  runtimeDir = join(root, `trama-q-${process.getuid!()}`);
+  runtimeDir = join(root, process.platform === "win32" ? "trama-q" : `trama-q-${process.getuid!()}`);
 });
 afterEach(async () => {
   await server?.dispose();

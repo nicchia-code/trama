@@ -115,7 +115,7 @@ The letters spell out what's inside:
 
 ## Try it
 
-Trama runs in VS Code and Cursor, on Linux (x64) and macOS (Apple silicon).
+Trama runs in VS Code and Cursor, on Linux (x64), macOS (Apple silicon) and Windows (x64, preview).
 
 1. **Install the extension.** Download the `.vsix` for your platform from [Releases](https://github.com/nicchia-code/trama/releases), then run **Extensions: Install from VSIX…** from the command palette, or:
    ```sh
@@ -131,6 +131,10 @@ Trama runs in VS Code and Cursor, on Linux (x64) and macOS (Apple silicon).
 3. **Open your project** and run **Trama: Open**.
 4. Choose **Initialize Project** for a fresh start, or **Import from Code** for an existing app.
 5. Click **Design…** and describe your first feature.
+
+> **Windows is in preview.** The `win32-x64` build is not yet verified end to end on Windows 11 (VS Code and Cursor, omp and Claude Code, Windows PowerShell 5.1, PowerShell 7 and Git Bash); the manual check in [`docs/uat.md`](docs/uat.md) decides when the preview ends.
+>
+> **`trama.exe` is not signed.** Windows SmartScreen or an antivirus may warn the first time it runs. The command line is distributed only inside the `.vsix`, as on the other platforms.
 
 ### Settings
 

@@ -1,9 +1,9 @@
-import { spawn, execFile, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { writeFileAtomic } from "./atomic-write";
 import { TramaError, UsageError } from "./errors";
 import { type AgentOrigin, CURSOR_AGENT_ENV } from "./announcements";
 import type { CursorHook } from "./cursor-chat";
@@ -35,6 +35,8 @@ interface EditorRecord {
   windowId: string;
   endpoint: string;
   focusedAt: number;
+  /** Random secret of this window's start: every request to the editor carries it, and the editor never sends it back. */
+  secret: string;
 }
 
 interface ServerOptions {
@@ -99,6 +101,13 @@ function privateUnixDirectory(directory: string, create: boolean): boolean {
   } catch { return false; }
 }
 
+/** Linux and macOS keep the runtime folder private to the user; Windows trusts the default permissions of `%LOCALAPPDATA%`. */
+function runtimeDirectoryReady(directory: string, create: boolean): boolean {
+  if (process.platform !== "win32") return privateUnixDirectory(directory, create);
+  if (create) mkdirSync(directory, { recursive: true });
+  return existsSync(directory);
+}
+
 function localEndpoint(endpoint: string): boolean {
   if (process.platform === "win32") return /^\\\\[.?]\\pipe\\trama-question-[a-f0-9-]+$/i.test(endpoint);
   if (!isAbsolute(endpoint)) return false;
@@ -111,7 +120,7 @@ function localEndpoint(endpoint: string): boolean {
 function recordValue(value: unknown): EditorRecord | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Partial<EditorRecord>;
-  if (typeof record.projectId !== "string" || typeof record.windowId !== "string" || typeof record.endpoint !== "string" || typeof record.focusedAt !== "number" || !Number.isFinite(record.focusedAt)) return null;
+  if (typeof record.projectId !== "string" || typeof record.windowId !== "string" || typeof record.endpoint !== "string" || typeof record.focusedAt !== "number" || !Number.isFinite(record.focusedAt) || typeof record.secret !== "string" || record.secret === "") return null;
   return record as EditorRecord;
 }
 
@@ -179,7 +188,7 @@ function coordinatorLeasePath(directory: string, projectId: string): string {
   return join(directory, `${projectId}.lease`);
 }
 
-async function probeCoordinatorOwner(lease: CoordinatorLease): Promise<"live" | "stale" | "unverified"> {
+async function probeCoordinatorOwner(directory: string, lease: CoordinatorLease): Promise<"live" | "stale" | "unverified"> {
   const controller = new AbortController();
   const sockets = new Set<Socket>();
   let timedOut = false;
@@ -189,7 +198,8 @@ async function probeCoordinatorOwner(lease: CoordinatorLease): Promise<"live" | 
     for (const socket of sockets) socket.destroy();
   }, 2_000);
   try {
-    const editor = await connectEditor(lease.endpoint, lease.projectId, controller.signal, sockets);
+    const record = records(directory, lease.projectId).find((candidate) => candidate.endpoint === lease.endpoint);
+    const editor = record ? await connectEditor(record, controller.signal, sockets) : null;
     if (!editor) return timedOut ? "unverified" : "stale";
     if (editor.record.windowId !== lease.windowId || editor.record.endpoint !== lease.endpoint
       || editor.record.projectId !== lease.projectId) return "unverified";
@@ -214,18 +224,18 @@ export async function acquireCoordinatorLease(
     directory = runtimeDirectory(options.runtimeDir);
     outsideProject(directory, project);
   } catch { return null; }
-  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory) : privateUnixDirectory(directory, false);
+  const privateDirectory = runtimeDirectoryReady(directory, false);
   if (!privateDirectory || !owner.windowId || !owner.endpoint) return null;
 
   const path = coordinatorLeasePath(directory, projectId);
   const lease: CoordinatorLease = { projectId, windowId: owner.windowId, endpoint: owner.endpoint };
   const current = readCoordinatorLease(path, projectId);
   if (current === null) return null;
-  if (current && !sameCoordinatorLease(current, lease) && await probeCoordinatorOwner(current) !== "stale") return null;
+  if (current && !sameCoordinatorLease(current, lease) && await probeCoordinatorOwner(directory, current) !== "stale") return null;
 
   if (!records(directory, projectId).some((record) =>
     record.windowId === lease.windowId && record.endpoint === lease.endpoint)) return null;
-  if (await probeCoordinatorOwner(lease) !== "live") return null;
+  if (await probeCoordinatorOwner(directory, lease) !== "live") return null;
   if (current && sameCoordinatorLease(current, lease)) return current;
 
   if (current) {
@@ -254,10 +264,10 @@ export async function renewCoordinatorLease(
     directory = runtimeDirectory(options.runtimeDir);
     outsideProject(directory, project);
   } catch { return false; }
-  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory) : privateUnixDirectory(directory, false);
+  const privateDirectory = runtimeDirectoryReady(directory, false);
   if (!privateDirectory || !sameCoordinatorLease(readCoordinatorLease(coordinatorLeasePath(directory, projectId), projectId), lease)
     || !records(directory, projectId).some((record) => record.windowId === lease.windowId && record.endpoint === lease.endpoint)) return false;
-  return await probeCoordinatorOwner(lease) === "live";
+  return await probeCoordinatorOwner(directory, lease) === "live";
 }
 
 /**
@@ -275,11 +285,11 @@ export async function editorWindowLost(
     directory = runtimeDirectory(options.runtimeDir);
     outsideProject(directory, project);
   } catch { return false; }
-  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory) : privateUnixDirectory(directory, false);
+  const privateDirectory = runtimeDirectoryReady(directory, false);
   if (!privateDirectory) return false;
   const found = records(directory, projectId).filter((record) => record.windowId === windowId);
   if (found.length === 0) return true;
-  const states = await Promise.all(found.map((record) => probeCoordinatorOwner({ projectId, windowId, endpoint: record.endpoint })));
+  const states = await Promise.all(found.map((record) => probeCoordinatorOwner(directory, { projectId, windowId, endpoint: record.endpoint })));
   return states.every((state) => state === "stale");
 }
 
@@ -296,7 +306,7 @@ export async function releaseCoordinatorLease(
     directory = runtimeDirectory(options.runtimeDir);
     outsideProject(directory, project);
   } catch { return false; }
-  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory) : privateUnixDirectory(directory, false);
+  const privateDirectory = runtimeDirectoryReady(directory, false);
   const path = coordinatorLeasePath(directory, projectId);
   if (!privateDirectory || !sameCoordinatorLease(readCoordinatorLease(path, projectId), lease)) return false;
   try {
@@ -324,40 +334,69 @@ function lines(stream: NodeJS.ReadableStream, receive: (line: string) => void): 
 
 interface EditorConnection { socket: Socket; record: EditorRecord }
 
-function connectEditor(endpoint: string, projectId: string, signal: AbortSignal | undefined, sockets: Set<Socket>): Promise<EditorConnection | null> {
+/** Every request to an editor is one line carrying the secret of the discovery record the editor was reached by. */
+function requestLine(record: EditorRecord, message: object): string {
+  return `${JSON.stringify({ ...message, secret: record.secret })}\n`;
+}
+
+/** Compares secrets in constant time; a missing or different secret matches nothing. */
+function sameSecret(given: unknown, secret: string): boolean {
+  if (typeof given !== "string") return false;
+  const left = Buffer.from(given);
+  const right = Buffer.from(secret);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+/** The request on a line when it carries the window's secret; any other line gets no answer at all. */
+function authenticatedRequest(line: string, secret: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(line);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const message = value as Record<string, unknown>;
+    return sameSecret(message.secret, secret) ? message : null;
+  } catch { return null; }
+}
+
+/** An editor named by an endpoint is reached only through its own discovery record, which supplies the secret. */
+function connectEndpoint(directory: string, projectId: string, endpoint: string, signal: AbortSignal | undefined, sockets: Set<Socket>): Promise<EditorConnection | null> {
+  const record = records(directory, projectId).find((candidate) => candidate.endpoint === endpoint);
+  return record ? connectEditor(record, signal, sockets) : Promise.resolve(null);
+}
+
+function connectEditor(record: EditorRecord, signal: AbortSignal | undefined, sockets: Set<Socket>): Promise<EditorConnection | null> {
   if (signal?.aborted) return Promise.reject(questionAborted());
-  if (!localEndpoint(endpoint)) return Promise.resolve(null);
-  return new Promise((accept, reject) => {
-    const socket = createConnection({ path: endpoint });
-    socket.setEncoding("utf8");
-    sockets.add(socket);
-    let done = false;
-    const finish = (editor: EditorConnection | null) => {
-      if (done) return;
-      done = true;
-      stopLines();
-      socket.removeListener("close", lost);
-      socket.removeListener("end", lost);
-      socket.removeListener("error", lost);
-      // Keep errors handled between discovery and submission, including unused probe sockets.
-      socket.on("error", () => {});
-      if (!editor) socket.destroy();
-      if (signal?.aborted) { socket.destroy(); reject(questionAborted()); }
-      else accept(editor);
-    };
-    const lost = () => finish(null);
-    const stopLines = lines(socket, (line) => {
-      try {
-        const value = JSON.parse(line) as { type?: unknown; caller?: unknown };
-        const record = recordValue(value);
-        finish(value.type === "ready" && record?.endpoint === endpoint && (record.projectId === projectId || value.caller === projectId) ? { socket, record } : null);
-      } catch { finish(null); }
-    });
-    socket.on("error", lost);
-    socket.on("close", lost);
-    socket.on("end", lost);
-    socket.once("connect", () => socket.write(`${JSON.stringify({ type: "hello", projectId })}\n`));
+  if (!localEndpoint(record.endpoint)) return Promise.resolve(null);
+  const { promise, resolve: accept, reject } = Promise.withResolvers<EditorConnection | null>();
+  const socket = createConnection({ path: record.endpoint });
+  socket.setEncoding("utf8");
+  sockets.add(socket);
+  let done = false;
+  const finish = (editor: EditorConnection | null) => {
+    if (done) return;
+    done = true;
+    stopLines();
+    socket.removeListener("close", lost);
+    socket.removeListener("end", lost);
+    socket.removeListener("error", lost);
+    // Keep errors handled between discovery and submission, including unused probe sockets.
+    socket.on("error", () => {});
+    if (!editor) socket.destroy();
+    if (signal?.aborted) { socket.destroy(); reject(questionAborted()); }
+    else accept(editor);
+  };
+  const lost = () => finish(null);
+  const stopLines = lines(socket, (line) => {
+    try {
+      // The ready answer names the window only: the editor never sends the secret back.
+      const value = JSON.parse(line) as { type?: unknown; projectId?: unknown; windowId?: unknown; endpoint?: unknown };
+      finish(value.type === "ready" && value.projectId === record.projectId && value.windowId === record.windowId && value.endpoint === record.endpoint ? { socket, record } : null);
+    } catch { finish(null); }
   });
+  socket.on("error", lost);
+  socket.on("close", lost);
+  socket.on("end", lost);
+  socket.once("connect", () => socket.write(requestLine(record, { type: "hello", projectId: record.projectId })));
+  return promise;
 }
 
 function resultValue(value: unknown, request: QuestionRequest): QuestionResult | null {
@@ -428,16 +467,16 @@ function submit(editor: EditorConnection, projectId: string, request: QuestionRe
     socket.on("close", lost);
     // From this write onwards the validated round belongs to this editor: never reroute it.
     submitted = true;
-    socket.write(`${JSON.stringify({ type: "ask", projectId, request, fromTramaTerminal: context.fromTramaTerminal === true, fromCursorChat: context.fromCursorChat === true })}\n`);
+    socket.write(requestLine(editor.record, { type: "ask", projectId, request, fromTramaTerminal: context.fromTramaTerminal === true, fromCursorChat: context.fromCursorChat === true }));
   });
 }
 
 /** The live editor of the project that was focused last, found through the local discovery records; null without one. */
 async function liveEditor(projectId: string, signal: AbortSignal | undefined, sockets: Set<Socket>, runtimeDir?: string): Promise<EditorConnection | null> {
   const directory = runtimeDirectory(runtimeDir);
-  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory, signal) : privateUnixDirectory(directory, false);
+  const privateDirectory = runtimeDirectoryReady(directory, false);
   if (!privateDirectory) return null;
-  const live = (await Promise.all(records(directory, projectId).map((record) => connectEditor(record.endpoint, projectId, signal, sockets))))
+  const live = (await Promise.all(records(directory, projectId).map((record) => connectEditor(record, signal, sockets))))
     .filter((connection): connection is EditorConnection => connection !== null && !connection.socket.destroyed && !connection.socket.readableEnded)
     .sort((a, b) => b.record.focusedAt - a.record.focusedAt || a.record.windowId.localeCompare(b.record.windowId));
   for (const unused of live.slice(1)) unused.socket.destroy();
@@ -459,10 +498,10 @@ async function relayCoordinatorMessage(
   if (!payload) throw new UsageError("Coordinator message must be a JSON object");
   const projectId = questionProjectId(project);
   const directory = runtimeDirectory(options.runtimeDir);
-  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory) : privateUnixDirectory(directory, false);
+  const privateDirectory = runtimeDirectoryReady(directory, false);
   if (!privateDirectory) return { delivered: 0, error: "no-live-receiver", responses: [] };
   const candidates = records(directory, projectId);
-  const probed = await Promise.all(candidates.map((record) => connectEditor(record.endpoint, projectId, undefined, new Set())));
+  const probed = await Promise.all(candidates.map((record) => connectEditor(record, undefined, new Set())));
   const connections = probed.filter((connection): connection is EditorConnection => {
     if (!connection) return false;
     const matched = !connection.socket.destroyed && !connection.socket.readableEnded
@@ -502,7 +541,7 @@ async function relayCoordinatorMessage(
       connection.socket.on("error", lost);
       connection.socket.on("end", lost);
       connection.socket.on("close", lost);
-      connection.socket.write(`${JSON.stringify({ type: "coordinator-message", projectId, messageId, message: payload })}\n`);
+      connection.socket.write(requestLine(connection.record, { type: "coordinator-message", projectId, messageId, message: payload }));
     });
   }));
   const count = delivered.filter(Boolean).length;
@@ -561,7 +600,7 @@ export async function askEditor(project: Project, request: QuestionRequest, cont
     const env = options.env ?? process.env;
     const endpoint = env[QUESTION_ENDPOINT_ENV];
     const editor = endpoint !== undefined
-      ? await connectEditor(endpoint, projectId, context.signal, sockets)
+      ? await connectEndpoint(runtimeDirectory(options.runtimeDir), projectId, endpoint, context.signal, sockets)
       : await liveEditor(projectId, context.signal, sockets, options.runtimeDir);
     if (context.signal?.aborted) throw questionAborted();
     if (!editor) return unavailableQuestions();
@@ -589,7 +628,7 @@ export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: nu
       const { socket } = editor;
       socket.once("data", () => done(true));
       socket.once("close", () => done(false));
-      socket.write(`${JSON.stringify({ type: "cursor-hook", projectId, hook })}\n`);
+      socket.write(requestLine(editor.record, { type: "cursor-hook", projectId, hook }));
     });
   } catch {
     return false;
@@ -612,7 +651,7 @@ export async function sendCopilotHook(hook: CopilotHook, options: { timeoutMs?: 
       const { socket } = editor;
       socket.once("data", () => done(true));
       socket.once("close", () => done(false));
-      socket.write(`${JSON.stringify({ type: "copilot-hook", projectId, hook })}\n`);
+      socket.write(requestLine(editor.record, { type: "copilot-hook", projectId, hook }));
     });
   } catch {
     return false;
@@ -633,12 +672,12 @@ async function tellEditor(project: Project, message: object, options: { env?: Re
   try {
     const projectId = questionProjectId(project);
     const endpoint = (options.env ?? process.env)[QUESTION_ENDPOINT_ENV];
-    const editor = endpoint !== undefined ? await connectEditor(endpoint, projectId, controller.signal, sockets) : await liveEditor(projectId, controller.signal, sockets, options.runtimeDir);
+    const editor = endpoint !== undefined ? await connectEndpoint(runtimeDirectory(options.runtimeDir), projectId, endpoint, controller.signal, sockets) : await liveEditor(projectId, controller.signal, sockets, options.runtimeDir);
     if (!editor || controller.signal.aborted) return;
     await new Promise<void>((done) => {
       editor.socket.once("data", () => done());
       editor.socket.once("close", () => done());
-      editor.socket.write(`${JSON.stringify({ ...message, projectId })}\n`);
+      editor.socket.write(requestLine(editor.record, { ...message, projectId }));
     });
   } catch {
     // The editor just goes on following the run by its other signals.
@@ -668,7 +707,7 @@ interface ChannelConnection {
   closed(listener: () => void): void;
 }
 
-function unixConnection(socket: Socket): ChannelConnection {
+function socketConnection(socket: Socket): ChannelConnection {
   socket.setEncoding("utf8");
   socket.on("error", () => socket.destroy());
   return {
@@ -690,21 +729,14 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
   const endpoint = process.platform === "win32" ? `\\\\.\\pipe\\trama-question-${id}` : join(directory, `${id}.sock`);
   if (process.platform !== "win32" && Buffer.byteLength(endpoint) > (process.platform === "darwin" ? 103 : 107)) throw new TramaError("Question runtime socket path is too long");
   const recordPath = join(directory, `${id}.json`);
-  const record: EditorRecord = { projectId: questionProjectId(options.project), windowId: options.windowId ?? id, endpoint, focusedAt: options.focusedAt ?? Date.now() };
+  const record: EditorRecord = { projectId: questionProjectId(options.project), windowId: options.windowId ?? id, endpoint, focusedAt: options.focusedAt ?? Date.now(), secret: randomBytes(32).toString("hex") };
   const connections = new Set<ChannelConnection>();
   let native: Server | undefined;
-  let windows: WindowsListener | undefined;
   let published = false;
   let closed = false;
   let closing: Promise<void> | undefined;
 
-  const publish = () => {
-    const temporary = `${recordPath}.tmp`;
-    try {
-      writeFileSync(temporary, JSON.stringify(record), { mode: 0o600, flag: "wx" });
-      renameSync(temporary, recordPath);
-    } finally { rmSync(temporary, { force: true }); }
-  };
+  const publish = () => writeFileAtomic(recordPath, JSON.stringify(record), { mode: 0o600 });
   const dispose = (): Promise<void> => {
     if (closed) return closing ?? Promise.resolve();
     closed = true;
@@ -714,7 +746,6 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         for (const connection of connections) connection.close();
         connections.clear();
         try {
-          if (windows) await windows.dispose();
           if (native?.listening) await new Promise<void>((done, fail) => native!.close((error) => error ? fail(error) : done()));
         } finally { rmSync(recordPath, { force: true }); }
       }
@@ -740,16 +771,16 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
     };
     connection.receive((line) => {
       if (phase === "done" || phase === "waiting") return;
+      const message = authenticatedRequest(line, record.secret);
+      // A request without the window's secret gets no answer at all: its connection just closes.
+      if (!message) { connection.close(); return; }
       try {
-        const value: unknown = JSON.parse(line);
-        if (!value || typeof value !== "object" || Array.isArray(value)) throw new UsageError("Question channel message must be an object");
-        const message = value as Record<string, unknown>;
         // Only the window's own project.
         if (phase === "hello" && message.projectId === record.projectId) from = { id: record.projectId, project: options.project };
         if (!from || message.projectId !== from.id) { finish(unavailableQuestions()); return; }
         if (phase === "hello" && message.type === "hello") {
           phase = "ready";
-          connection.send({ type: "ready", ...record, caller: from.id });
+          connection.send({ type: "ready", projectId: record.projectId, windowId: record.windowId, endpoint: record.endpoint });
           return;
         }
         if (phase === "ready" && message.type === "coordinator-message") {
@@ -815,19 +846,16 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
   };
 
   try {
-    if (process.platform === "win32") {
-      windows = await windowsListener(directory, `trama-question-${id}`, accept, lostListener);
-    } else {
-      if (!privateUnixDirectory(directory, true)) throw new TramaError("Question runtime directory is not owned exclusively by the current user");
-      native = createServer((socket) => accept(unixConnection(socket)));
-      native.on("close", lostListener);
-      native.on("error", () => { if (published) lostListener(); });
-      await new Promise<void>((done, fail) => {
-        native!.once("error", fail);
-        native!.listen({ path: endpoint, readableAll: false, writableAll: false }, () => { native!.removeListener("error", fail); done(); });
-      });
-      chmodSync(endpoint, 0o600);
-    }
+    if (!runtimeDirectoryReady(directory, true)) throw new TramaError("Question runtime directory is not owned exclusively by the current user");
+    native = createServer((socket) => accept(socketConnection(socket)));
+    native.on("close", lostListener);
+    native.on("error", () => { if (published) lostListener(); });
+    await new Promise<void>((done, fail) => {
+      native!.once("error", fail);
+      native!.listen({ path: endpoint, readableAll: false, writableAll: false }, () => { native!.removeListener("error", fail); done(); });
+    });
+    // A Windows named pipe has no file mode to set: its access is the window's secret, checked on every request.
+    if (process.platform !== "win32") chmodSync(endpoint, 0o600);
     if (closed) throw new TramaError("The editor question listener closed during startup");
     publish();
     published = true;
@@ -844,243 +872,3 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
     dispose,
   };
 }
-
-function powershell(): string {
-  return join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-}
-
-function powershellArguments(script: string): string[] {
-  return ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
-}
-
-async function privateWindowsDirectory(directory: string, signal?: AbortSignal): Promise<boolean> {
-  if (!existsSync(directory)) return false;
-  const script = `$ErrorActionPreference = 'Stop'
-$dir = Get-Item -LiteralPath $env:TRAMA_QUESTION_RUNTIME_DIR
-if (-not $dir.PSIsContainer -or ($dir.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid runtime directory' }
-$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-$acl = $dir.GetAccessControl()
-if (-not $acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]) -ne $sid) { throw 'Runtime directory is not private' }
-foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
-  if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $rule.IdentityReference -ne $sid) { throw 'Runtime directory is not private' }
-}`;
-  return new Promise((done, fail) => {
-    execFile(powershell(), powershellArguments(script), { windowsHide: true, signal, env: { ...process.env, TRAMA_QUESTION_RUNTIME_DIR: directory } }, (error) => {
-      if (signal?.aborted) fail(questionAborted());
-      else done(!error);
-    });
-  });
-}
-
-interface WindowsListener { dispose(): Promise<void> }
-
-/**
- * Windows' default named-pipe DACL permits Everyone/anonymous reads. Node cannot
- * restrict it, so OS Windows PowerShell/.NET Framework creates every instance
- * with PipeSecurity instead. The helper relays question and answer bytes in
- * memory only. A missing/failed helper fails closed.
- */
-async function windowsListener(directory: string, name: string, accept: (connection: ChannelConnection) => void, lost: () => void): Promise<WindowsListener> {
-  const script = `$ErrorActionPreference = 'Stop'
-Add-Type -ReferencedAssemblies 'System.dll','System.Core.dll' -TypeDefinition @'
-${WINDOWS_PIPE_SOURCE}
-'@
-[TramaQuestionPipe]::Run($env:TRAMA_QUESTION_RUNTIME_DIR, $env:TRAMA_QUESTION_PIPE_NAME)`;
-  const child: ChildProcessWithoutNullStreams = spawn(powershell(), powershellArguments(script), {
-    windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, TRAMA_QUESTION_RUNTIME_DIR: directory, TRAMA_QUESTION_PIPE_NAME: name },
-  });
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  const connections = new Map<string, { line?: (line: string) => void; close?: () => void }>();
-  let diagnostic = "";
-  child.stderr.on("data", (chunk: string) => { diagnostic = (diagnostic + chunk).slice(-4096); });
-  let ready = false;
-  let stopping = false;
-  let ended = false;
-  let resolveStartup!: () => void;
-  let rejectStartup!: (error: Error) => void;
-  const startup = new Promise<void>((done, fail) => { resolveStartup = done; rejectStartup = fail; });
-  let resolveExit!: () => void;
-  const exit = new Promise<void>((done) => { resolveExit = done; });
-  const send = (operation: string, id: string, value?: object) => {
-    if (ended || child.stdin.destroyed) return;
-    const payload = value === undefined ? "" : `\t${Buffer.from(JSON.stringify(value)).toString("base64")}`;
-    child.stdin.write(`${operation}\t${id}${payload}\n`);
-  };
-  const closed = () => {
-    if (ended) return;
-    ended = true;
-    stopLines();
-    if (!ready) rejectStartup(new TramaError(`Could not start the private Windows question pipe${diagnostic ? `: ${diagnostic.trim()}` : ""}`));
-    else if (!stopping) lost();
-    for (const connection of connections.values()) connection.close?.();
-    connections.clear();
-    resolveExit();
-  };
-  child.on("error", (error) => { diagnostic = error.message; closed(); });
-  child.on("exit", closed);
-  child.stdin.on("error", () => { child.kill(); });
-  const stopLines = lines(child.stdout, (line) => {
-    const [operation, id, payload] = line.replace(/\r$/, "").split("\t");
-    if (operation === "ready") { ready = true; resolveStartup(); return; }
-    if (operation === "error") { diagnostic = Buffer.from(id ?? "", "base64").toString(); child.kill(); return; }
-    if (!id) return;
-    if (operation === "open") {
-      const callbacks: { line?: (line: string) => void; close?: () => void } = {};
-      connections.set(id, callbacks);
-      accept({
-        send: (value, finish = false) => send(finish ? "end" : "write", id, value),
-        close: () => send("close", id),
-        receive: (listener) => { callbacks.line = listener; },
-        closed: (listener) => { callbacks.close = listener; },
-      });
-    } else if (operation === "data") {
-      connections.get(id)?.line?.(Buffer.from(payload ?? "", "base64").toString("utf8"));
-    } else if (operation === "close") {
-      connections.get(id)?.close?.();
-      connections.delete(id);
-    }
-  });
-  try { await startup; }
-  catch (error) { child.kill(); await exit; throw error; }
-  return { async dispose() { stopping = true; if (!ended) child.stdin.end("stop\n"); await exit; } };
-}
-
-// Framework APIs are available in OS Windows PowerShell 5.1; PowerShell 7 is not required.
-const WINDOWS_PIPE_SOURCE = String.raw`
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.IO.Pipes;
-using System.Security.AccessControl;
-using System.Security.Principal;
-using System.Text;
-using System.Threading;
-
-public static class TramaQuestionPipe {
-  sealed class Connection {
-    public NamedPipeServerStream Pipe;
-    public StreamWriter Writer;
-    public readonly object Gate = new object();
-  }
-  static readonly object Output = new object();
-  static readonly object Gate = new object();
-  static readonly Dictionary<string, Connection> Connections = new Dictionary<string, Connection>();
-  static NamedPipeServerStream Pending;
-  static bool Stopping;
-  static int Sequence;
-
-  static void Emit(string line) { lock (Output) { Console.Out.WriteLine(line); Console.Out.Flush(); } }
-  static string Encode(string text) { return Convert.ToBase64String(Encoding.UTF8.GetBytes(text)); }
-  static void Close(string id) {
-    Connection connection;
-    lock (Gate) {
-      if (!Connections.TryGetValue(id, out connection)) return;
-      Connections.Remove(id);
-    }
-    connection.Pipe.Dispose();
-    Emit("close\t" + id);
-  }
-  static void Read(string id, Connection connection) {
-    try {
-      var reader = new StreamReader(connection.Pipe, new UTF8Encoding(false, true));
-      string line;
-      while ((line = reader.ReadLine()) != null) Emit("data\t" + id + "\t" + Encode(line));
-    } catch (IOException) { } catch (ObjectDisposedException) { } catch (DecoderFallbackException) { }
-    finally { Close(id); }
-  }
-  static NamedPipeServerStream Create(string name, PipeSecurity security) {
-    return new NamedPipeServerStream(name, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances,
-      PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 65536, 65536, security);
-  }
-  static void Accept(string name, PipeSecurity security, NamedPipeServerStream first) {
-    var pipe = first;
-    try {
-      while (true) {
-        pipe.WaitForConnection();
-        var connection = new Connection { Pipe = pipe, Writer = new StreamWriter(pipe, new UTF8Encoding(false)) { AutoFlush = true } };
-        string id;
-        lock (Gate) {
-          if (Stopping) { pipe.Dispose(); return; }
-          id = (++Sequence).ToString();
-          Connections.Add(id, connection);
-          // Keep a secured listening instance alive before announcing the accepted one.
-          Pending = Create(name, security);
-          pipe = Pending;
-        }
-        Emit("open\t" + id);
-        ThreadPool.QueueUserWorkItem(delegate { Read(id, connection); });
-      }
-    } catch (Exception error) {
-      lock (Gate) { if (!Stopping) Emit("error\t" + Encode(error.Message)); }
-    }
-  }
-  static void Send(string operation, string id, string payload) {
-    Connection connection;
-    lock (Gate) { if (!Connections.TryGetValue(id, out connection)) return; }
-    try {
-      lock (connection.Gate) {
-        connection.Writer.WriteLine(Encoding.UTF8.GetString(Convert.FromBase64String(payload)));
-        if (operation == "end") connection.Pipe.WaitForPipeDrain();
-      }
-    } catch (IOException) { } catch (ObjectDisposedException) { }
-    finally { if (operation == "end") Close(id); }
-  }
-  static void PrivateDirectory(string path, SecurityIdentifier sid) {
-    var security = new DirectorySecurity();
-    security.SetAccessRuleProtection(true, false);
-    security.SetOwner(sid);
-    security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl,
-      InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-    if (Directory.Exists(path)) {
-      var info = new DirectoryInfo(path);
-      if ((info.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Runtime directory must not be a reparse point");
-      var old = info.GetAccessControl();
-      if (!old.AreAccessRulesProtected || !old.GetOwner(typeof(SecurityIdentifier)).Equals(sid)) throw new IOException("Runtime directory must be private and owned by the current user");
-      foreach (FileSystemAccessRule rule in old.GetAccessRules(true, true, typeof(SecurityIdentifier)))
-        if (rule.AccessControlType == AccessControlType.Allow && !rule.IdentityReference.Equals(sid)) throw new IOException("Runtime directory is accessible to another user");
-    } else Directory.CreateDirectory(path, security);
-  }
-  public static void Run(string directory, string name) {
-    Console.InputEncoding = new UTF8Encoding(false);
-    Console.OutputEncoding = new UTF8Encoding(false);
-    var sid = WindowsIdentity.GetCurrent().User;
-    PrivateDirectory(directory, sid);
-    var security = new PipeSecurity();
-    security.SetAccessRuleProtection(true, false);
-    security.SetOwner(sid);
-    security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.NetworkSid, null), PipeAccessRights.FullControl, AccessControlType.Deny));
-    security.AddAccessRule(new PipeAccessRule(sid, PipeAccessRights.FullControl, AccessControlType.Allow));
-    Pending = Create(name, security);
-    var first = Pending;
-    var accepting = new Thread(delegate() { Accept(name, security, first); });
-    accepting.IsBackground = true;
-    accepting.Start();
-    Emit("ready");
-    try {
-      string line;
-      while ((line = Console.ReadLine()) != null && line != "stop") {
-        var fields = line.Split(new char[] { '\t' }, 3);
-        if (fields.Length < 2) continue;
-        var operation = fields[0];
-        var id = fields[1];
-        if (operation == "close") Close(id);
-        else if (fields.Length == 3 && (operation == "write" || operation == "end")) {
-          var payload = fields[2];
-          ThreadPool.QueueUserWorkItem(delegate { Send(operation, id, payload); });
-        }
-      }
-    } finally {
-      string[] ids;
-      lock (Gate) {
-        Stopping = true;
-        Pending.Dispose();
-        ids = new string[Connections.Count];
-        Connections.Keys.CopyTo(ids, 0);
-      }
-      foreach (var id in ids) Close(id);
-    }
-  }
-}
-`;

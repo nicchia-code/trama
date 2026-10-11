@@ -107,3 +107,7 @@ If the developer rejected it, the reason, when they gave one, is under `## Feedb
 - Write Requirements as short, checkable statements ("Amounts show two decimals and the currency symbol"), not wishes ("nice formatting").
 - Data fields and formulas go in `data` and `rules`, attached to the Machine or State they concern, never in the Model.
 - A new Area is a new folder `requirements/<area>/` with a kebab-case name, an `area.md` and at least one fragment, for example to split `ui` into `ui-web` and `ui-mobile`.
+
+## PowerShell
+
+The examples use POSIX syntax. In PowerShell, pass JSON on standard input with a pipe, for example `Get-Content -Raw round.json | trama ask --root <project>`, not `<`. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Write `--body` and `--reason` values in single quotes, because PowerShell expands `$` and the backtick inside double quotes.

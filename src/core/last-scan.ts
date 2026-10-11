@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomic } from "./atomic-write";
 import type { Project } from "./store";
 
 const lastScanDir = (p: Project) => join(p.dir, "last-scan");
@@ -16,16 +16,6 @@ function ensureIgnored(dir: string): void {
     if (!existsSync(ignore)) throw error;
   }
 }
-function writeAtomic(path: string, instant: string): void {
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(temporary, `${instant}\n`, { flag: "wx" });
-    renameSync(temporary, path);
-  } catch (error) {
-    try { unlinkSync(temporary); } catch { /* Preserve the write error. */ }
-    throw error;
-  }
-}
 export function readLastScan(p: Project, now = new Date()): string {
   const path = systemFile(p);
   try {
@@ -37,7 +27,7 @@ export function readLastScan(p: Project, now = new Date()): string {
   mkdirSync(dir, { recursive: true });
   ensureIgnored(dir);
   const instant = now.toISOString();
-  writeAtomic(path, instant);
+  writeFileAtomic(path, `${instant}\n`);
   return instant;
 }
 
@@ -47,6 +37,6 @@ export function writeLastScan(p: Project, instant: string): void {
   const dir = lastScanDir(p);
   mkdirSync(dir, { recursive: true });
   ensureIgnored(dir);
-  writeAtomic(systemFile(p), instant);
+  writeFileAtomic(systemFile(p), `${instant}\n`);
 }
 

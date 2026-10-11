@@ -80,3 +80,11 @@ export type FileMap = Map<string, string>;
 export const ID_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 export const EVENT_NAME_PATTERN = /^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$/;
 export const RESERVED_IDS: Record<string, true> = { system: true, feature: true, actors: true, requirements: true };
+
+/** Names Windows reserves for devices: no file or folder can carry one on Windows, so none is valid on any platform. */
+const WINDOWS_DEVICE_NAMES: Record<string, true> = {
+  con: true, prn: true, aux: true, nul: true,
+  com1: true, com2: true, com3: true, com4: true, com5: true, com6: true, com7: true, com8: true, com9: true,
+  lpt1: true, lpt2: true, lpt3: true, lpt4: true, lpt5: true, lpt6: true, lpt7: true, lpt8: true, lpt9: true,
+};
+export const isWindowsDeviceName = (name: string): boolean => Object.hasOwn(WINDOWS_DEVICE_NAMES, name);

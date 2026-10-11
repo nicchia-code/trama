@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { helpFor, runCopilotHook } from "../src/cli/main";
 import { parseCopilotHook, type CopilotHook } from "../src/core/copilot-chat";
@@ -10,7 +11,7 @@ let root: string;
 let project: string;
 let runtimeDir: string;
 beforeEach(() => {
-  root = mkdtempSync("/tmp/trama-copilot-");
+  root = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-copilot-") : "/tmp/trama-copilot-");
   project = join(root, "project");
   runtimeDir = join(root, "rt");
   mkdirSync(join(project, ".trama", "model"), { recursive: true });
@@ -36,8 +37,10 @@ test("trama copilot-hook forwards project hooks without leaking prompts and alwa
   try {
     expect(await runCopilotHook(JSON.stringify(input("UserPromptSubmit", "Use the trama-design skill. private text")), { runtimeDir })).toBe("{}");
     expect(await runCopilotHook(JSON.stringify(input("Stop")), { runtimeDir })).toBe("{}");
+    expect(await runCopilotHook("\uFEFF" + JSON.stringify(input("Stop")), { runtimeDir })).toBe("{}");
     expect(received).toEqual([
       { hook: "UserPromptSubmit", conversation: "session-1", root: project, tramaPrompt: true },
+      { hook: "Stop", conversation: "session-1", root: project },
       { hook: "Stop", conversation: "session-1", root: project },
     ]);
     expect(JSON.stringify(received)).not.toContain("private text");

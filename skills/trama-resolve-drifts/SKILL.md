@@ -95,3 +95,7 @@ Run **`trama ask --root <project>`** with the JSON request on stdin. Make **one 
 - In Cursor's sandbox (`CURSOR_SANDBOX` is set), an initial `status: "unavailable"` may only mean the sandbox hides the editor: run the same `trama ask` once more outside the sandbox, asking Cursor for permission, and treat that result as the real one.
 - Only an initial `status: "unavailable"` result means the editor is unavailable; then use the agent's own question tool, or, if it has none, a numbered round written in the conversation (each question with options `a)`, `b)`, … and a line `➡️ <your recommendation and why>`).
 - A usage error of `trama ask` (exit code 2, wrong arguments, unrecognised command) or an input error is **never** editor unavailability: correct the call and repeat it. Never answer it by switching to the agent's own question tool or a round written in the conversation. A deliberate skip is not re-asked through the fallback either.
+
+## PowerShell
+
+The examples use POSIX syntax. In PowerShell, pass JSON on standard input with a pipe, for example `Get-Content -Raw round.json | trama ask --root <project>`, not `<`. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Write `--body` and `--reason` values in single quotes, because PowerShell expands `$` and the backtick inside double quotes.

@@ -1,5 +1,5 @@
 import { SUB_AGENTS } from "../../../src/core/sub-agents";
-import { quote, type ShellFamily } from "./quote";
+import { hookProgram, quote, type ShellFamily } from "./quote";
 
 export type TerminalAgent = "omp" | "claude";
 
@@ -38,7 +38,7 @@ export function agentTemplate(agent: TerminalAgent, role: Role, models: Models, 
       case "claude": {
         const hooks: string[] = [];
         if (tramaPath !== undefined) {
-          const hook = [{ hooks: [{ type: "command", command: `${quote(family, tramaPath)} agent-event idle`, timeout: 3 }] }];
+          const hook = [{ hooks: [{ type: "command", command: `${hookProgram(tramaPath, family)} agent-event idle`, timeout: 3 }] }];
           hooks.push("--settings", quote(family, JSON.stringify({ hooks: { Stop: hook, SessionEnd: hook } })));
         }
         return ["claude", ...hooks, ...option("--model", model), ...(scanning ? ["--agents", quote(family, claudeAgents(models))] : [])];

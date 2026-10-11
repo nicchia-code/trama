@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   awaitAutopilotResume,
   activeProjectJobs,
@@ -34,7 +36,7 @@ import {
 
 const roots: string[] = [];
 const root = () => {
-  const value = `/tmp/trama-chat-job-${crypto.randomUUID()}`;
+  const value = join(tmpdir(), `trama-chat-job-${crypto.randomUUID()}`);
   roots.push(value);
   return value;
 };

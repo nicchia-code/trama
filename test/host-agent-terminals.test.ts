@@ -844,6 +844,15 @@ describe("the selected chat in Cursor", () => {
       'Use the trama-scan skill on the whole System. Write in Italian.\nThe trama command may not be on your PATH. Before anything else run: export PATH="/ext/bin:$PATH"',
     );
     expect(withTramaPath("Use the trama-scan skill on the whole System.")).toBe("Use the trama-scan skill on the whole System.");
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    try {
+      Object.defineProperty(process, "platform", { value: "win32" });
+      expect(withTramaPath("Use the trama-scan skill on the whole System. Write in Italian.", "C:\\ext\\bin\\trama.exe")).toBe(
+        "Use the trama-scan skill on the whole System. Write in Italian.\nThe trama command may not be on your PATH. Run it by its full path: C:\\ext\\bin\\trama.exe",
+      );
+    } finally {
+      if (platform) Object.defineProperty(process, "platform", platform);
+    }
   });
 });
 

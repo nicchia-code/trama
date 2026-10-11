@@ -37,14 +37,15 @@ export const hookAnswer = (hookName: unknown): object => (hookName === "beforeSu
 
 const text = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-/** An entry `"<path of a trama program>" cursor-hook` is Trama's, whatever version's program it names. */
-const TRAMA_ENTRY = /^".+" cursor-hook$/;
+/** An entry `"<path of a trama program>" cursor-hook`, or its Windows form `& "<path>" cursor-hook`, is Trama's, whatever version's program it names. */
+const TRAMA_ENTRY = /^(& )?".+" cursor-hook$/;
 
 /**
  * Writes Trama's entries into Cursor's user hooks file, one per hook, each running `program`: older Trama entries are
  * replaced, every other entry is kept, a missing file is created. A file that is not valid JSON is left as it is.
+ * On Windows the command has the PowerShell form `& "<program>" cursor-hook` (not tried on Cursor's shell).
  */
-export function writeCursorHooks(file: string, program: string): void {
+export function writeCursorHooks(file: string, program: string, windows = process.platform === "win32"): void {
   let config: { [key: string]: unknown; hooks?: unknown } = { version: 1 };
   if (existsSync(file)) {
     let parsed: unknown;
@@ -53,7 +54,7 @@ export function writeCursorHooks(file: string, program: string): void {
     config = { version: 1, ...parsed };
   }
   const hooks: Record<string, unknown> = typeof config.hooks === "object" && config.hooks !== null && !Array.isArray(config.hooks) ? { ...config.hooks } : {};
-  const command = `"${program}" cursor-hook`;
+  const command = `${windows ? "& " : ""}"${program}" cursor-hook`;
   for (const name of HOOKS) {
     const entries: unknown[] = Array.isArray(hooks[name]) ? hooks[name] : [];
     const others = entries.filter((e) => !(typeof e === "object" && e !== null && "command" in e && typeof e.command === "string" && TRAMA_ENTRY.test(e.command)));

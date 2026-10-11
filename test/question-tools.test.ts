@@ -8,20 +8,28 @@ import { questionAborted, type QuestionRequest, type QuestionResult } from "../s
 import { projectAt, type Project } from "../src/core/store";
 
 let dir: string;
+let runtimeRoot: string;
 let runtimeDir: string;
+let previousRuntime: string | undefined;
 let project: Project;
 let server: QuestionServer | undefined;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-question-tools-"));
-  runtimeDir = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-qr-") : "/tmp/trama-qr-");
+  // The command line finds the window's discovery record in the default runtime directory, so the tests use that one.
+  runtimeRoot = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-qr-") : "/tmp/trama-qr-");
+  previousRuntime = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = runtimeRoot;
+  runtimeDir = join(runtimeRoot, process.platform === "win32" ? "trama-q" : `trama-q-${process.getuid!()}`);
   cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
   project = projectAt(dir);
 });
 afterEach(async () => {
   await server?.dispose();
   server = undefined;
+  if (previousRuntime === undefined) delete process.env.XDG_RUNTIME_DIR;
+  else process.env.XDG_RUNTIME_DIR = previousRuntime;
   rmSync(dir, { recursive: true, force: true });
-  rmSync(runtimeDir, { recursive: true, force: true });
+  rmSync(runtimeRoot, { recursive: true, force: true });
 });
 
 const round = (id = "direction"): QuestionRequest => ({ questions: [{ id, question: "Which direction?", options: [{ label: "North", description: "Through the woods" }, { label: "South", description: "Along the coast" }], recommended: 1, multi: false }] });
@@ -75,6 +83,15 @@ test("`trama ask` prints the editor's answers as JSON", async () => {
   expect(JSON.parse(cli.out)).toEqual({ status: "answered", answers: { direction: { status: "answered", selected: ["South"] } } });
 });
 
+test("a UTF-8 byte order mark before the round on standard input is ignored", async () => {
+  server = await createQuestionServer({ project, runtimeDir: runtimeDir, handler: async (_p, request) => (
+    { status: "answered", answers: { [request.questions[0]!.id]: { status: "answered", selected: ["North"] } } }
+  ) });
+  const cli = await runAsk(["ask", "--root", dir], tmpdir(), `\uFEFF${JSON.stringify(round())}`, { env: { [QUESTION_ENDPOINT_ENV]: server.endpoint } });
+  expect(cli.exit).toBe(0);
+  expect(JSON.parse(cli.out)).toEqual({ status: "answered", answers: { direction: { status: "answered", selected: ["North"] } } });
+});
+
 test("the `mcp` command no longer exists", () => {
   expect(() => run(["mcp"], dir, {})).toThrow(/Unknown command "mcp"/);
   expect(run(["--help"], dir, {}).out).not.toContain("mcp");
@@ -103,7 +120,8 @@ test("CLI ask routes by selected root outside cwd and emits only the interruptio
   }
 });
 
-test("CLI SIGTERM cancels the admitted round and exits with a JSON failure", async () => {
+// Skipped on Windows: SIGTERM is not a signal Windows delivers to a child; the process is terminated outright, so there is no cancellation to observe.
+(process.platform === "win32" ? test.skip : test)("CLI SIGTERM cancels the admitted round and exits with a JSON failure", async () => {
   const entered = deferred<void>();
   const cancelled = deferred<void>();
   server = await createQuestionServer({ project, runtimeDir: runtimeDir, handler: async (_p, _request, context) => {

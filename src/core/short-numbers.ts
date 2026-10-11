@@ -1,6 +1,7 @@
 import type { CardKind, CardNumbers } from "./card-names";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomic } from "./atomic-write";
 import { TramaError } from "./errors";
 import { createdField, idField, type Raw } from "./schema";
 import { compareByCreation, listCards, type CardLayout, type Project, readDocument } from "./store";
@@ -142,18 +143,6 @@ function render(numbers: Numbers): string {
   return lines.map((l) => `${l}\n`).join("");
 }
 
-/** Writes through a temporary file and a rename, so a reader never sees half a file. */
-function writeAtomically(path: string, text: string) {
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, text);
-  try {
-    renameSync(temporary, path);
-  } catch (err) {
-    rmSync(temporary, { force: true });
-    throw err;
-  }
-}
-
 /** The folders whose `assigned` could not be saved, so a command warns once however many times it reads the numbers. */
 const unsaved = new Set<string>();
 
@@ -213,8 +202,8 @@ export function syncShortNumbers(p: Project): ShortNumbers {
   if (text !== current && (text !== "" || existsSync(assignedFile(p)))) {
     try {
       mkdirSync(shortNumbersDir(p), { recursive: true });
-      if (!existsSync(ignoreFile(p))) writeAtomically(ignoreFile(p), "*\n");
-      writeAtomically(assignedFile(p), text);
+      if (!existsSync(ignoreFile(p))) writeFileAtomic(ignoreFile(p), "*\n");
+      writeFileAtomic(assignedFile(p), text);
     } catch (err) {
       // The numbers stay valid for this reading and are rebuilt by the next one; the command goes on.
       if (!unsaved.has(p.dir)) {

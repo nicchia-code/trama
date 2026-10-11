@@ -17,7 +17,7 @@ bun run typecheck
 bun run build            # dist/trama, a single binary
 bun run build:extension  # extension/dist/{host,webview}.js
 bun run harness          # extension/dist/harness.html: the webview in a plain browser, demo data
-bun run package          # a .vsix per platform (linux-x64, darwin-arm64) with the CLI inside
+bun run package          # a .vsix per platform (linux-x64, darwin-arm64, win32-x64) with the CLI inside
 ```
 
 If the shell was launched as a Trama agent or by Cursor's chat agent, use `env -u TRAMA_AGENT -u CURSOR_AGENT bun test`: the isolated test fixtures exercise developer-only commands as well.

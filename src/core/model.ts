@@ -1,6 +1,6 @@
 import { checkId, parseActor, parseDocument, parseMachine } from "./parse";
 import type { Actor, Diagnostic, EventDecl, FileMap, Machine, Model, State } from "./types";
-import { RESERVED_IDS } from "./types";
+import { RESERVED_IDS, isWindowsDeviceName } from "./types";
 
 export function flattenStates(states: State[]): State[] {
   return states.flatMap((s) => [s, ...flattenStates(s.children)]);
@@ -40,6 +40,10 @@ export function buildModel(files: FileMap): Model {
     if (!checkId(file, id, diags)) return false;
     if (RESERVED_IDS[id]) {
       diags.push({ file, line: 0, message: `"${id}" is a reserved name` });
+      return false;
+    }
+    if (isWindowsDeviceName(id)) {
+      diags.push({ file, line: 0, message: `"${id}" is a name Windows reserves for devices` });
       return false;
     }
     const previous = owners.get(id);

@@ -111,6 +111,19 @@ describe("Areas", () => {
     ]);
   });
 
+  test("an Area folder or a fragment cannot be named after a Windows device", () => {
+    writeArea("con", UI_AREA, { main: UI });
+    writeFileSync(reqFile("ui", "nul"), '---\ndescription: "Nul."\n---\n# Nul\n\n## General\nx\n');
+    writeFileSync(reqFile("ui", "com-port"), '---\ndescription: "Port."\n---\n# Port\n');
+    const messages = loadProject(p).diagnostics.map((d) => `${d.file}:${d.line} ${d.message}`);
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^requirements\/con\/area\.md:0 Area folder "con" is a name Windows reserves for devices/),
+      expect.stringMatching(/^requirements\/con\/main\.md:0 Area folder "con" is a name Windows reserves for devices/),
+      expect.stringMatching(/^requirements\/ui\/nul\.md:0 Fragment "nul" is a name Windows reserves for devices/),
+    ]));
+    expect(messages.some((m) => m.startsWith("requirements/ui/com-port.md"))).toBe(false);
+  });
+
   test("a State gets the Requirements of its parent States, Machine and Feature, most specific first", () => {
     const found = requirementsFor(loadProject(p), "order/Preparing").map((r) => `${r.section.ref} via ${r.ref}`);
     expect(found).toEqual(["order/Preparing via order/Preparing", "order/Paid via order/Paid", "checkout via checkout"]);

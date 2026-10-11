@@ -115,6 +115,21 @@ describe("handing over", () => {
   });
 });
 
+describe("line endings", () => {
+  test("a CRLF checkout hashes and compares like Linux: no Proposal goes stale in either direction", () => {
+    const model = join(p.dir, "model/checkout/order.md");
+    writeFileSync(model, readFileSync(model, "utf8").replace(/\n/g, "\r\n"));
+    const prop = newProposal(p, "Lost");
+    writeOrder(prop.id);
+    const copy = join(getProposal(p, prop.id).dir, "model/checkout/order.md");
+    writeFileSync(model, readFileSync(model, "utf8").replace(/\r\n/g, "\n"));
+    expect(health(p, getProposal(p, prop.id)).stale).toEqual([]);
+    writeFileSync(model, readFileSync(model, "utf8").replace(/\n/g, "\r\n"));
+    writeFileSync(copy, readFileSync(copy, "utf8").replace(/\n/g, "\r\n"));
+    expect(health(p, getProposal(p, prop.id))).toEqual({ stale: [], unbased: [], requires: [] });
+  });
+});
+
 describe("changing a Proposal after the hand-over", () => {
   test("registering, rewriting or deleting a file sends an open Proposal back to Draft", () => {
     const prop = newProposal(p, "Lost");

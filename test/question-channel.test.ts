@@ -300,8 +300,12 @@ test("a presenter lost after wire submission cannot turn the round into initial 
   expect(presentations).toBe(0);
 });
 
+// Skipped on Windows: the peer here is a Unix socket file; Windows reaches the editor through a named pipe instead.
 (process.platform === "win32" ? test.skip : test)("an unavailable reply after admission cannot authorize fallback", async () => {
   const endpoint = join(root, "late-unavailable.sock");
+  // The fake presenter is reached as a discovery record names it, and that record supplies the secret.
+  mkdirSync(runtimeDir, { recursive: true });
+  writeFileSync(join(runtimeDir, "late.json"), JSON.stringify({ projectId: questionProjectId(projectAt(projectRoot)), windowId: "lost-presenter", endpoint, focusedAt: 1, secret: "lost-presenter-secret" }), { mode: 0o600 });
   const peer = createServer((socket) => {
     const input = createInterface({ input: socket });
     socket.once("close", () => input.close());
@@ -327,6 +331,58 @@ test("a presenter lost after wire submission cannot turn the round into initial 
   } finally {
     await new Promise<void>((resolve) => peer.close(() => resolve()));
   }
+});
+
+/** The secret the one live window of `runtimeDir` keeps in its discovery record. */
+function windowSecret(): string {
+  const [name] = readdirSync(runtimeDir).filter((file) => file.endsWith(".json"));
+  const record: unknown = JSON.parse(readFileSync(join(runtimeDir, name!), "utf8"));
+  if (!record || typeof record !== "object" || !("secret" in record) || typeof record.secret !== "string") throw new Error("The discovery record holds no secret");
+  return record.secret;
+}
+
+/** The first line the editor sends back to a raw request, or "" when it only closes the connection. */
+function firstReply(endpoint: string, line: string): Promise<string> {
+  const reply = deferred<string>();
+  const socket = createConnection({ path: endpoint });
+  let data = "";
+  socket.setEncoding("utf8");
+  socket.on("data", (chunk: string) => {
+    data += chunk;
+    if (data.includes("\n")) { socket.destroy(); reply.resolve(data); }
+  });
+  socket.on("close", () => reply.resolve(data));
+  socket.on("error", reply.reject);
+  socket.once("connect", () => socket.write(line));
+  return reply.promise;
+}
+
+test("every request must carry the window secret, which the editor never sends back", async () => {
+  const editor = await server(async () => answer("choice"));
+  const secret = windowSecret();
+  expect(secret).toMatch(/^[0-9a-f]{64}$/);
+  const hello = { type: "hello", projectId: questionProjectId(projectAt(projectRoot)) };
+  // Without the right secret the editor answers nothing and closes the connection.
+  expect(await firstReply(editor.endpoint, `${JSON.stringify(hello)}\n`)).toBe("");
+  expect(await firstReply(editor.endpoint, `${JSON.stringify({ ...hello, secret: "guessed" })}\n`)).toBe("");
+  expect(await firstReply(editor.endpoint, "not json\n")).toBe("");
+  // With it, the ready answer names the window and does not repeat the secret.
+  const ready = await firstReply(editor.endpoint, `${JSON.stringify({ ...hello, secret })}\n`);
+  expect(ready).not.toContain(secret);
+  expect(JSON.parse(ready)).toMatchObject({ type: "ready", projectId: hello.projectId });
+  expect(await ask(round())).toEqual(answer("choice"));
+});
+
+test("a discovery record without its secret does not reach the editor, by endpoint or by discovery", async () => {
+  const editor = await server(async () => answer("choice"));
+  const [name] = readdirSync(runtimeDir).filter((file) => file.endsWith(".json"));
+  const recordPath = join(runtimeDir, name!);
+  const record: Record<string, unknown> = JSON.parse(readFileSync(recordPath, "utf8"));
+  writeFileSync(recordPath, JSON.stringify({ ...record, secret: undefined }), { mode: 0o600 });
+  expect(await ask(round())).toMatchObject({ status: "unavailable" });
+  expect(await ask(round(), editor.endpoint)).toMatchObject({ status: "unavailable" });
+  rmSync(recordPath);
+  expect(await ask(round(), editor.endpoint)).toMatchObject({ status: "unavailable" });
 });
 
 test("cancelling a queued caller removes only its round and preserves the oldest remaining round", async () => {
@@ -438,6 +494,7 @@ console.log(server.endpoint);`;
 test("the server rejects an invalid wire round before presenting even its valid first question", async () => {
   let presented = 0;
   const editor = await server(async () => { presented++; return answer("choice"); });
+  const secret = windowSecret();
   const invalid = round();
   invalid.questions.push({ ...round("last").questions[0]!, multi: "yes" as unknown as boolean });
   const socket = createConnection({ path: editor.endpoint });
@@ -445,11 +502,11 @@ test("the server rejects an invalid wire round before presenting even its valid 
   const failure = deferred<unknown>();
   output.on("line", (line) => {
     const value = JSON.parse(line);
-    if (value.type === "ready") socket.write(`${JSON.stringify({ type: "ask", projectId: questionProjectId(projectAt(projectRoot)), request: invalid })}\n`);
+    if (value.type === "ready") socket.write(`${JSON.stringify({ type: "ask", projectId: questionProjectId(projectAt(projectRoot)), request: invalid, secret })}\n`);
     else failure.resolve(value);
   });
   await once(socket, "connect");
-  socket.write(`${JSON.stringify({ type: "hello", projectId: questionProjectId(projectAt(projectRoot)) })}\n`);
+  socket.write(`${JSON.stringify({ type: "hello", projectId: questionProjectId(projectAt(projectRoot)), secret })}\n`);
   expect(await failure.promise).toMatchObject({ error: { code: "invalid-input", message: "questions[1].multi must be a boolean" } });
   expect(presented).toBe(0);
   socket.destroy();
@@ -466,16 +523,17 @@ test("legacy agent-alive messages are consumed without invoking activity or idle
     onAgentIdle: () => idle++,
   });
   servers.push(editor);
+  const secret = windowSecret();
   const socket = createConnection({ path: editor.endpoint });
   const output = createInterface({ input: socket });
   const handled = deferred<void>();
   output.on("line", (line) => {
     const message = JSON.parse(line);
-    if (message.type === "ready") socket.write(`${JSON.stringify({ type: "agent-alive", terminal: "legacy", projectId: questionProjectId(projectAt(projectRoot)) })}\n`);
+    if (message.type === "ready") socket.write(`${JSON.stringify({ type: "agent-alive", terminal: "legacy", projectId: questionProjectId(projectAt(projectRoot)), secret })}\n`);
     else if (message.type === "taken") handled.resolve();
   });
   await once(socket, "connect");
-  socket.write(`${JSON.stringify({ type: "hello", projectId: questionProjectId(projectAt(projectRoot)) })}\n`);
+  socket.write(`${JSON.stringify({ type: "hello", projectId: questionProjectId(projectAt(projectRoot)), secret })}\n`);
   await handled.promise;
   expect(activity).toBe(0);
   expect(idle).toBe(0);
@@ -504,7 +562,7 @@ test("runtime files contain routing identities only, never pending questions or 
       const content = readFileSync(path, "utf8");
       expect(content).not.toContain(secretQuestion);
       expect(content).not.toContain(secretAnswer);
-      expect(Object.keys(JSON.parse(content)).sort()).toEqual(["endpoint", "focusedAt", "projectId", "windowId"]);
+      expect(Object.keys(JSON.parse(content)).sort()).toEqual(["endpoint", "focusedAt", "projectId", "secret", "windowId"]);
       if (process.platform !== "win32") expect(lstatSync(path).mode & 0o777).toBe(0o600);
     }
     expect(readdirSync(projectRoot)).toEqual([]);
@@ -518,6 +576,7 @@ test("runtime files contain routing identities only, never pending questions or 
   expect(readdirSync(runtimeDir)).toEqual([]);
 });
 
+// Skipped on Windows: POSIX mode bits on the runtime folder do not restrict access there.
 (process.platform === "win32" ? test.skip : test)("insecure Unix discovery storage cannot submit questions", async () => {
   let presented = 0;
   await server(async () => { presented++; return answer("choice"); });

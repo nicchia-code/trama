@@ -78,3 +78,7 @@ If the developer said not to ask, use your recommendations and list them in the 
 ## Autopilot boundary
 
 Import describes existing code and only creates import Proposals; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.driftAutoPilot` is active, the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.
+
+## PowerShell
+
+The examples use POSIX syntax. In PowerShell, pass JSON on standard input with a pipe, for example `Get-Content -Raw round.json | trama ask --root <project>`, not `<`. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Write `--body` and `--reason` values in single quotes, because PowerShell expands `$` and the backtick inside double quotes.

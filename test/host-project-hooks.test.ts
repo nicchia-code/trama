@@ -85,6 +85,14 @@ test("Copilot hooks use the bundled program in extension storage and preserve us
   expect(errors).toEqual([]);
 });
 
+test("on Windows the Copilot hook file carries the PowerShell form next to the plain command", async () => {
+  setup();
+  await installCopilotHooks({ fsPath: storage } as never, true);
+  const program = join(extensionPath, "bin", "trama");
+  const entry = { type: "command", command: `"${program}" copilot-hook`, windows: `& "${program}" copilot-hook` };
+  expect(JSON.parse(readFileSync(join(storage, "copilot-hooks.json"), "utf8"))).toEqual({ hooks: { UserPromptSubmit: [entry], Stop: [entry] } });
+});
+
 test("Copilot hook file write failures are reported", async () => {
   setup();
   writeError = new Error("disk full");

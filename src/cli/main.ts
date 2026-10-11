@@ -214,12 +214,17 @@ export async function runAutopilot(argv: string[], cwd: string, options: { runti
   return { out, exit: 0 };
 }
 
+/** Standard input may start with a UTF-8 byte order mark (Windows PowerShell 5.1 adds one to a pipe); it is not part of the JSON. */
+function parseStdinJson(input: string): unknown {
+  return JSON.parse(input.replace(/^\uFEFF/, ""));
+}
+
 /** The blocking JSON-only ask command: question validation and outcomes are shared with the editor's local channel. */
 export async function runAsk(argv: string[], cwd: string, input: string, options: { handler?: QuestionHandler; signal?: AbortSignal; env?: Record<string, string | undefined> } = {}): Promise<{ out: string; exit: number }> {
   try {
     const selected = asyncCommand(argv);
     if (!selected) throw new UsageError("Usage: trama ask [--root <dir>]");
-    const request = parseQuestionRequest(JSON.parse(input));
+    const request = parseQuestionRequest(parseStdinJson(input));
     if (options.signal?.aborted) throw questionAborted();
     const project = makeContext(cwd, selected.root).project();
     const handler: QuestionHandler = options.handler ?? ((project, request, context) => askEditor(project, request, context, { env: options.env }));
@@ -237,7 +242,7 @@ export async function runAsk(argv: string[], cwd: string, input: string, options
  */
 export async function runCursorHook(input: string, options: { runtimeDir?: string } = {}): Promise<string> {
   let raw: unknown;
-  try { raw = JSON.parse(input); } catch { return "{}"; }
+  try { raw = parseStdinJson(input); } catch { return "{}"; }
   const hook = parseCursorHook(raw);
   if (hook) await sendCursorHook(hook, options);
   return JSON.stringify(hookAnswer((raw as { hook_event_name?: unknown } | null)?.hook_event_name));
@@ -246,7 +251,7 @@ export async function runCursorHook(input: string, options: { runtimeDir?: strin
 /** `trama copilot-hook`: forwards Copilot events without blocking the chat. */
 export async function runCopilotHook(input: string, options: { runtimeDir?: string } = {}): Promise<string> {
   let raw: unknown;
-  try { raw = JSON.parse(input); } catch { return "{}"; }
+  try { raw = parseStdinJson(input); } catch { return "{}"; }
   const hook = parseCopilotHook(raw);
   if (hook) await sendCopilotHook(hook, options);
   return "{}";

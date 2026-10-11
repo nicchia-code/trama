@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.2
+
+- Windows (win32-x64) is packaged, tested and smoke-tested by the release workflow.
+- On Windows, Copilot's hook file carries the PowerShell form `& "<trama.exe>" copilot-hook` in `windows` next to `command`, and Cursor's `hooks.json` uses `& "<trama.exe>" cursor-hook`. Update skills replaces Trama's entries in either form instead of adding new ones. The Cursor form has not been tried on Cursor.
+- `trama validate` refuses Windows device names (`con`, `prn`, `aux`, `nul`, `com1` to `com9`, `lpt1` to `lpt9`) as Feature, Machine and Actor IDs and as Area and fragment names on every platform, so a project opens on Windows too. Names that only contain one of them stay valid.
+- Proposal hashes and comparisons read the Model and Requirement files with LF line endings: a CRLF checkout (`core.autocrlf`) no longer makes a Proposal stale, and its shown changes, touched files and scan scope match a Linux checkout.
+
 ## 0.0.1
 
 - First public release, under the GNU AGPL v3 (`AGPL-3.0-only`); the `.vsix` now ships the license text. Earlier tags and releases are gone, and versions restart from 0.0.1.

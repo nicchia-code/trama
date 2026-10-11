@@ -20,6 +20,8 @@ jobs:
             target: linux-x64
           - os: macos-14
             target: darwin-arm64
+          - os: windows-latest
+            target: win32-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -31,11 +33,31 @@ jobs:
       - run: bun test --isolate
       - run: bun run package ${{ matrix.target }}
       - name: Smoke-test the packaged CLI
+        if: runner.os != 'Windows'
         run: |
           mkdir -p smoke && cd smoke
           unzip -q ../dist/trama-${{ matrix.target }}-*.vsix 'extension/bin/trama'
           ./extension/bin/trama --help | head -1
           mkdir project && ./extension/bin/trama --root project init && ./extension/bin/trama --root project validate
+      - name: Smoke-test the packaged CLI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          function Invoke-Trama([string[]] $Arguments) {
+            & "./extension/bin/trama.exe" @Arguments
+            if ($LASTEXITCODE -ne 0) { throw "trama $($Arguments -join ' ') exited with $LASTEXITCODE" }
+          }
+          New-Item -ItemType Directory -Force smoke | Out-Null
+          Copy-Item "dist/trama-${{ matrix.target }}-*.vsix" smoke/package.zip
+          Set-Location smoke
+          Expand-Archive package.zip -DestinationPath . -Force
+          Invoke-Trama @("--help")
+          $answer = '{}' | & "./extension/bin/trama.exe" copilot-hook
+          if ($LASTEXITCODE -ne 0 -or ($answer | Out-String).Trim() -ne "{}") { throw "copilot-hook must answer {} with exit 0, got: $answer" }
+          New-Item -ItemType Directory project | Out-Null
+          Invoke-Trama @("--root", "project", "init")
+          Invoke-Trama @("--root", "project", "validate")
       - name: Check the macOS signature
         if: runner.os == 'macOS'
         run: codesign --verify --verbose smoke/extension/bin/trama

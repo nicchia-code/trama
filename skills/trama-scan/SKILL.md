@@ -97,3 +97,7 @@ The developer reads a Drift at a glance, as a programmer, but not as a code revi
 - A standalone scan is a tracked check: announce it with `trama announce check "<title>" --phase scanning` before reading code, then report its outcome with `trama announce done <id>` on success or `trama announce done <id> --failed` on failure/interruption, before the report. For an autopilot-owned job, pass its explicit `--job <id>` when the host supplied one. A successful check announcement does not itself finish the scan job; let the normal job lifecycle finish it.
 - Inside a `trama-implement` Run, use that Run's existing check; do not create another. Sub-agents never announce checks.
 - Scanning or importing does not authorize resolving any Drift. The autopilot may later select an eligible open Drift, including one filed by a scan or import, but only its separately authorized `trama-resolve-drifts` work can prepare a resolution.
+
+## PowerShell
+
+The examples use POSIX syntax. In PowerShell, pass JSON on standard input with a pipe, for example `Get-Content -Raw round.json | trama ask --root <project>`, not `<`. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Write `--body` and `--reason` values in single quotes, because PowerShell expands `$` and the backtick inside double quotes.
