@@ -6,7 +6,7 @@ import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { askEditor, createQuestionServer, QUESTION_ENDPOINT_ENV, questionProjectId, type QuestionServer } from "../src/core/question-channel";
+import { acquireCoordinatorLease, askEditor, createQuestionServer, QUESTION_ENDPOINT_ENV, questionProjectId, releaseCoordinatorLease, renewCoordinatorLease, requestCoordinatorMessage, sendCoordinatorMessage, type CoordinatorJson, type CoordinatorMessage, type QuestionServer } from "../src/core/question-channel";
 import { QuestionRoundQueue, type CompletedQuestionRound } from "../src/core/question-rounds";
 import { QuestionInterruptedError, type QuestionHandler, type QuestionRequest } from "../src/core/questions";
 import { projectAt } from "../src/core/store";
@@ -52,8 +52,14 @@ function answer(id: string, text?: string): CompletedQuestionRound {
   return { status: "answered", answers: { [id]: { status: "answered", selected: ["Change"], ...(text === undefined ? {} : { text }) } } };
 }
 
-async function server(handler: QuestionHandler, options: { projectRoot?: string; focusedAt?: number; onClose?: () => void } = {}) {
-  const created = await createQuestionServer({ project: projectAt(options.projectRoot ?? projectRoot), runtimeDir, handler, focusedAt: options.focusedAt, onClose: options.onClose });
+async function server(handler: QuestionHandler, options: {
+  projectRoot?: string;
+  focusedAt?: number;
+  windowId?: string;
+  onClose?: () => void;
+  onCoordinatorMessage?: (message: CoordinatorMessage) => CoordinatorJson | void | Promise<CoordinatorJson | void>;
+} = {}) {
+  const created = await createQuestionServer({ project: projectAt(options.projectRoot ?? projectRoot), runtimeDir, handler, windowId: options.windowId, focusedAt: options.focusedAt, onClose: options.onClose, onCoordinatorMessage: options.onCoordinatorMessage });
   servers.push(created);
   return created;
 }
@@ -81,6 +87,93 @@ test("validates the complete round before routing or presenting any question", a
 test("a missing initial editor is unavailable, not an interrupted or answered round", async () => {
   expect(await ask(round())).toMatchObject({ status: "unavailable" });
   expect(existsSync(runtimeDir)).toBe(false);
+});
+
+test("coordinator messages reach every live same-project window without invoking question handlers", async () => {
+  const received: string[] = [];
+  let presentations = 0;
+  await server(async () => { presentations++; return answer("choice"); }, { onCoordinatorMessage: (message) => received.push(String(message.event)) });
+  await server(async () => { presentations++; return answer("choice"); }, { onCoordinatorMessage: (message) => received.push(String(message.event)) });
+
+  expect(await sendCoordinatorMessage(projectAt(projectRoot), { event: "run-started", runId: "run-1" }, { runtimeDir })).toEqual({ delivered: 2 });
+  expect(received).toEqual(["run-started", "run-started"]);
+  expect(presentations).toBe(0);
+});
+
+test("coordinator requests return read-only responses from live editors", async () => {
+  await server(async () => answer("choice"), {
+    onCoordinatorMessage: (message) => message.type === "status-request" ? { coordinator: true, phase: "idle" } : undefined,
+  });
+  const responses = await requestCoordinatorMessage(projectAt(projectRoot), { type: "status-request" }, { runtimeDir });
+  expect(responses).toEqual([{ coordinator: true, phase: "idle" }]);
+});
+
+test("coordinator messages report no receiver when discovery contains only stale endpoints", async () => {
+  const otherRoot = join(root, "other");
+  mkdirSync(otherRoot);
+  await server(async () => answer("choice"), { projectRoot: otherRoot, onCoordinatorMessage: () => { throw new Error("wrong-project delivery"); } });
+  mkdirSync(runtimeDir, { recursive: true });
+  const stale = process.platform === "win32" ? "\\\\.\\pipe\\trama-question-00000000-0000-0000-0000-000000000000" : join(runtimeDir, "gone.sock");
+  writeFileSync(join(runtimeDir, "stale.json"), JSON.stringify({ projectId: questionProjectId(projectAt(projectRoot)), windowId: "stale", endpoint: stale, focusedAt: 1 }), { mode: 0o600 });
+
+  expect(await sendCoordinatorMessage(projectAt(projectRoot), { event: "run-ended" }, { runtimeDir })).toEqual({ delivered: 0, error: "no-live-receiver" });
+});
+
+test("coordinator messages never cross canonical project identities", async () => {
+  const otherRoot = join(root, "other");
+  mkdirSync(otherRoot);
+  const received: string[] = [];
+  await server(async () => answer("choice"), { onCoordinatorMessage: (message) => received.push(String(message.project)) });
+  await server(async () => answer("choice"), { projectRoot: otherRoot, onCoordinatorMessage: (message) => received.push(String(message.project)) });
+
+  expect(await sendCoordinatorMessage(projectAt(projectRoot), { project: "target" }, { runtimeDir })).toEqual({ delivered: 1 });
+  expect(received).toEqual(["target"]);
+});
+
+test("coordinator lease admits one live window and release lets another acquire", async () => {
+  const first = await server(async () => answer("choice"), { windowId: "first-window" });
+  const second = await server(async () => answer("choice"), { windowId: "second-window" });
+  const project = projectAt(projectRoot);
+  const owners = [
+    { windowId: "first-window", endpoint: first.endpoint },
+    { windowId: "second-window", endpoint: second.endpoint },
+  ];
+  const [firstLease, secondLease] = await Promise.all(owners.map((owner) => acquireCoordinatorLease(project, owner, { runtimeDir })));
+  expect(Number(firstLease !== null) + Number(secondLease !== null)).toBe(1);
+  const lease = firstLease ?? secondLease;
+  if (!lease) throw new Error("A live editor did not acquire the coordinator lease");
+  expect(await renewCoordinatorLease(project, lease, { runtimeDir })).toBe(true);
+  expect(await releaseCoordinatorLease(project, { ...lease, windowId: "wrong-window" }, { runtimeDir })).toBe(false);
+  expect(await releaseCoordinatorLease(project, lease, { runtimeDir })).toBe(true);
+  expect(await renewCoordinatorLease(project, lease, { runtimeDir })).toBe(false);
+  const nextOwner = lease.windowId === owners[0]!.windowId ? owners[1]! : owners[0]!;
+  expect(await acquireCoordinatorLease(project, nextOwner, { runtimeDir })).not.toBeNull();
+});
+
+test("coordinator lease reclaims a disposed owner's stale endpoint", async () => {
+  const stale = await server(async () => answer("choice"), { windowId: "stale-window" });
+  const project = projectAt(projectRoot);
+  const lease = await acquireCoordinatorLease(project, { windowId: "stale-window", endpoint: stale.endpoint }, { runtimeDir });
+  if (!lease) throw new Error("The initial live editor did not acquire the coordinator lease");
+  await stale.dispose();
+  const next = await server(async () => answer("choice"), { windowId: "next-window" });
+  expect(await acquireCoordinatorLease(project, { windowId: "next-window", endpoint: next.endpoint }, { runtimeDir })).not.toBeNull();
+});
+
+test("coordinator leases are isolated by canonical project", async () => {
+  const otherRoot = join(root, "other");
+  mkdirSync(otherRoot);
+  const first = await server(async () => answer("choice"), { windowId: "first-window" });
+  const other = await server(async () => answer("choice"), { projectRoot: otherRoot, windowId: "other-window" });
+  const project = projectAt(projectRoot);
+  const otherProject = projectAt(otherRoot);
+  const lease = await acquireCoordinatorLease(project, { windowId: "first-window", endpoint: first.endpoint }, { runtimeDir });
+  if (!lease) throw new Error("The first project did not acquire its coordinator lease");
+  expect(await acquireCoordinatorLease(otherProject, { windowId: "other-window", endpoint: other.endpoint }, { runtimeDir })).not.toBeNull();
+  expect(await acquireCoordinatorLease(project, { windowId: "other-window", endpoint: other.endpoint }, { runtimeDir })).toBeNull();
+  expect(await renewCoordinatorLease(otherProject, lease, { runtimeDir })).toBe(false);
+  expect(await releaseCoordinatorLease(otherProject, lease, { runtimeDir })).toBe(false);
+  expect(await renewCoordinatorLease(project, lease, { runtimeDir })).toBe(true);
 });
 
 test("a stale launching endpoint is authoritative even when another project window is live", async () => {

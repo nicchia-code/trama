@@ -20,6 +20,8 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "launch", action: { kind: "resolve-drifts" } })).toEqual({ type: "launch", action: { kind: "resolve-drifts" } });
   expect(ok({ type: "openModelFile", path: "checkout/order.md" })).toEqual({ type: "openModelFile", path: "checkout/order.md" });
   expect(ok({ type: "openFile", path: "tasks/0003-x.md" })).toEqual({ type: "openFile", path: "tasks/0003-x.md" });
+  expect(ok({ type: "openCard", kind: "drift", id: "drift-1" })).toEqual({ type: "openCard", kind: "drift", id: "drift-1" });
+  expect(ok({ type: "openCard", kind: "task", id: "task-1" })).toEqual({ type: "openCard", kind: "task", id: "task-1" });
   expect(ok({ type: "approveProposal", id: "0001" })).toEqual({ type: "approveProposal", id: "0001" });
   expect(ok({ type: "rejectProposal", id: "0001" })).toEqual({ type: "rejectProposal", id: "0001" });
 });
@@ -53,6 +55,8 @@ test("rejects unknown types, wrong shapes and IDs that are not plain IDs; move a
     { type: "openFile" },
     { type: "openFile", path: "" },
     { type: "openModelFile", path: 7 },
+    { type: "openCard", kind: "proposal", id: "0001" },
+    { type: "openCard", kind: "drift", id: "../secret" },
     { type: "setMultiBranch", on: true },
     { type: "withdrawFromRound", id: "0001" },
     { type: "abandonRound" },

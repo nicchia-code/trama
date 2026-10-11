@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TramaError, UsageError } from "../core/errors";
-import { type AgentOrigin, ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote, CHECK_PHASES, type CheckPhase, changeCheckPhase, deliverCard, finishCheck } from "../core/announcements";
+import { type AgentOrigin, ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote, CHECK_PHASES, type CheckPhase, changeCheckPhase, checkOutcome, deliverCard, forgetCheck, getAnnouncement } from "../core/announcements";
 import { installOmpAgents, installSkills, missingSkills, ompAgentConflicts, removeRetiredOmpAgents, removeRetiredSkills, skillConflicts } from "./skills";
 import {
   approveProposal,
@@ -17,6 +17,7 @@ import {
   validateProposal,
   warningsText,
 } from "../core/proposals";
+import { sendCoordinatorMessageSoon } from "../core/question-channel";
 import { resolveDriftInProposal } from "../core/resolution";
 import type { DriftDecisionKind } from "../core/proposals";
 import { convertSingleFileAreas, createDefaultAreas, largeFragmentMessage, largeFragments, loadProject } from "../core/requirements";
@@ -74,6 +75,8 @@ export interface Context {
   byAgent: boolean;
   /** The agent terminal (`TRAMA_TERMINAL`) or the chat (`CURSOR_AGENT`) the command runs in, when either is known. */
   origin: AgentOrigin;
+  /** The autopilot job this agent terminal was started for (`TRAMA_JOB`), when there is one. */
+  job?: string;
   project(assignNumbers?: boolean): Project;
 }
 
@@ -96,6 +99,8 @@ function explore(ctx: Context, target: string, view: (model: Model, ref: string)
 }
 
 const str = (v: Values[string]): string | undefined => (typeof v === "string" ? v : undefined);
+/** The autopilot job of the agent's terminal (`TRAMA_JOB`), when the environment names one. */
+export const jobFromEnv = (env: Record<string, string | undefined>): string | undefined => env["TRAMA_JOB"]?.trim() || undefined;
 const list = (v: Values[string]): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 const DECISIONS: readonly string[] = ["proposal", "dismissed", "fix-code"];
 
@@ -118,13 +123,14 @@ function required(value: string | undefined, flag: string): string {
   return value;
 }
 
-export function makeContext(cwd: string, rootOption?: string, byAgent = false, origin: AgentOrigin = {}): Context {
+export function makeContext(cwd: string, rootOption?: string, byAgent = false, origin: AgentOrigin = {}, job?: string): Context {
   let numbered = false;
   return {
     cwd,
     rootOption,
     byAgent,
     origin,
+    job,
     project(assignNumbers = true) {
       const project = rootOption === undefined ? findProject(cwd) : projectAt(resolve(cwd, rootOption));
       if (rootOption !== undefined && !existsSync(project.dir)) throw new TramaError(`No ${TRAMA_DIR}/ in ${project.root}. Run "trama init".`);
@@ -259,34 +265,52 @@ export const COMMANDS: Command[] = [
     },
   },
 
-  { name: "announce", args: "<kind> <title>", summary: "Say that you are about to create a card, so the Board shows a ghost of it: kind is proposal, task or drift. Prints the announcement ID; pass it as --announcement when you create the card. Kind check (with --phase verifying or scanning) announces a final check or a scan instead, shown in In progress until announce done", options: { phase: { type: "string" } }, run(ctx, a, o) {
+  { name: "announce", args: "<kind> <title>", summary: "Say that you are about to create a card, so the Board shows a ghost of it: kind is proposal, task or drift. Prints the announcement ID; pass it as --announcement when you create the card. Kind check (with --phase verifying or scanning, optionally --job <id>) announces a final check or a scan instead, shown in In progress until announce done", options: { phase: { type: "string" }, job: { type: "string" } }, run(ctx, a, o) {
       const kind = a[0] as string;
       if (!(ANNOUNCEMENT_KINDS as readonly string[]).includes(kind)) throw new UsageError(`The kind must be one of ${ANNOUNCEMENT_KINDS.join(", ")}, not "${kind}"`);
       const phase = str(o["phase"]);
+      const job = str(o["job"]) ?? (kind === "check" ? ctx.job : undefined);
       if (kind === "check" && phase === undefined) throw new UsageError(`A check needs --phase ${CHECK_PHASES.join(" or ")}`);
       if (kind !== "check" && phase !== undefined) throw new UsageError("--phase is only for a check");
+      if (kind !== "check" && job !== undefined) throw new UsageError("--job is only for a check");
       if (phase !== undefined && !(CHECK_PHASES as readonly string[]).includes(phase)) throw new UsageError(`--phase must be one of ${CHECK_PHASES.join(", ")}, not "${phase}"`);
-      const announcement = announce(ctx.project(), { kind: kind as AnnouncementKind, title: a[1] as string, ...(phase ? { phase: phase as CheckPhase } : {}), ...ctx.origin });
-      return text(announcement.id, { id: announcement.id, kind: announcement.kind, title: announcement.title, ...(announcement.phase ? { phase: announcement.phase } : {}) });
+      const announcement = announce(ctx.project(), { kind: kind as AnnouncementKind, title: a[1] as string, ...(phase ? { phase: phase as CheckPhase } : {}), ...(job ? { job } : {}), ...ctx.origin });
+      return text(announcement.id, { id: announcement.id, kind: announcement.kind, title: announcement.title, ...(announcement.phase ? { phase: announcement.phase } : {}), ...(announcement.job ? { job: announcement.job } : {}) });
     } },
   { name: "announce phase", args: "<id> <phase>", summary: "Move a check you announced from verifying to scanning, when the scan of the whole System starts", run(ctx, a) {
       const id = a[0] as string;
       if (a[1] !== "scanning") throw new UsageError(`A check can only move to scanning, not "${a[1]}"`);
-      const outcome = changeCheckPhase(ctx.project(), id, "scanning");
+      const project = ctx.project();
+      const before = getAnnouncement(project, id);
+      const outcome = changeCheckPhase(project, id, "scanning");
+      if (outcome === "changed") sendCoordinatorMessageSoon(project, { type: "check-phase", root: project.root, id, phase: "scanning", ...(before?.job ? { job: before.job } : {}) }, (reason) => {
+        process.stderr.write(`The editor did not receive the phase change of check ${id} (${reason}).\n`);
+      });
       const md = outcome === "changed" ? `Check ${id} is now scanning` : outcome === "unchanged" ? `Check ${id} is already scanning; nothing changed.` : `No check "${id}" was found (unknown, already finished or withdrawn, or not a check); nothing changed.`;
       return text(md, { id, outcome });
     } },
-  { name: "announce done", args: "<id>", summary: "Say that a check you announced is finished, before you report: its ghost goes away with no notice", run(ctx, a) {
+  { name: "announce done", args: "<id>", summary: "Deliver a finished check; --failed reports its failure to the coordinator", options: { failed: { type: "boolean" } }, run(ctx, a, o) {
       const id = a[0] as string;
-      const found = finishCheck(ctx.project(), id);
-      return text(found ? `Check ${id} is done` : `No check "${id}" was found (unknown, already finished or withdrawn, or not a check); nothing changed.`, { id, found });
+      const failed = o["failed"] === true;
+      const project = ctx.project();
+      const finished = checkOutcome(project, id, failed);
+      if (finished) sendCoordinatorMessageSoon(project, { type: "check", root: project.root, ...finished }, (reason) => {
+        process.stderr.write(`The editor did not receive the outcome of check ${id} (${reason}); no success is assumed.\n`);
+      }, () => forgetCheck(project, id));
+      const outcome = finished ? (failed ? "failed" : "done") : "missing";
+      return text(finished ? `Check ${id} is ${outcome}` : `No check "${id}" was found (unknown, already finished or withdrawn, or not a check); nothing changed.`, { id, found: finished !== null, ...(finished ? { outcome } : {}) });
     } },
-  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code; --resolution for a resolution of Drifts, then record decisions with proposal resolve-drift; --announcement <id> names the announcement of this Proposal; --request <id> binds it to the written design request it comes from); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" }, resolution: { type: "boolean" }, announcement: { type: "string" }, request: { type: "string" } }, run(ctx, a, o) {
+  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code; --resolution for a resolution of Drifts; --automatic only with --resolution; --job <id> binds an automatic resolution Draft to its autopilot job; --announcement <id> names the announcement of this Proposal; --request <id> binds it to the written design request it comes from); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" }, resolution: { type: "boolean" }, automatic: { type: "boolean" }, job: { type: "string" }, announcement: { type: "string" }, request: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       if (o["import"] === true && o["resolution"] === true) throw new UsageError("--import and --resolution cannot go together: a Proposal is one or the other");
+      if (o["job"] !== undefined && (o["automatic"] !== true || o["resolution"] !== true)) throw new UsageError("--job can only be used with --automatic --resolution");
       const note = announcementNote(project, str(o["announcement"]), "proposal");
       const request = str(o["request"]);
-      const p = newProposal(project, a[0] as string, str(o["body"]), { requires: list(o["requires"]).map((id) => proposalArg(ctx, id)), kind: o["import"] === true ? "import" : o["resolution"] === true ? "resolution" : "change", announcement: str(o["announcement"]), origin: ctx.origin, request });
+      const job = str(o["job"]) ?? (o["automatic"] === true && o["resolution"] === true ? ctx.job : undefined);
+      const p = newProposal(project, a[0] as string, str(o["body"]), { requires: list(o["requires"]).map((id) => proposalArg(ctx, id)), kind: o["import"] === true ? "import" : o["resolution"] === true ? "resolution" : "change", automatic: o["automatic"] === true, announcement: str(o["announcement"]), origin: ctx.origin, request });
+      if (job !== undefined) sendCoordinatorMessageSoon(project, { type: "proposal-draft", proposal: p.id, job }, (reason) => {
+        process.stderr.write(`Could not bind automatic resolution Draft ${p.id} to autopilot job ${job}: ${reason}\n`);
+      });
       const requestNote = request !== undefined && p.data.request === null ? (requestExists(project, request) ? `Design request ${request} is already bound to another Proposal; the Proposal is not bound to any request.` : `Design request ${request} was not found; the Proposal is not bound to any request.`) : "";
       const notes = [note, requestNote].filter(Boolean).join("\n");
       const n = numbersOf(ctx);
@@ -321,7 +345,11 @@ export const COMMANDS: Command[] = [
       return text(`Marked ${a[1]} for deletion in Proposal ${n.name("proposal", id)}.${returnedToDraft ? " Proposal returned to Draft; submit it again when finished." : ""}`, { id, number: n.label("proposal", id), status: "draft", returnedToDraft });
     } },
   { name: "proposal submit", args: "<id>", summary: "Hand a valid Draft over to the developer", run(ctx, a) {
-      const p = submitProposal(ctx.project(), proposalArg(ctx, a[0] as string));
+      const project = ctx.project();
+      const p = submitProposal(project, proposalArg(ctx, a[0] as string));
+      if (p.data.automatic) sendCoordinatorMessageSoon(project, { type: "proposal-submitted", proposal: p.id }, (reason) => {
+        process.stderr.write(`Could not hand over automatic resolution Proposal ${p.id} to the autopilot: ${reason}\n`);
+      });
       const consumed = p.requestConsumed ? `\nDeleted design request ${p.data.request}: it is now consumed.` : "";
       const n = numbersOf(ctx);
       return text(`Submitted Proposal ${n.name("proposal", p.id)} for review${consumed}${warningsText(p.warnings)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status, request: p.data.request, requestConsumed: p.requestConsumed, warnings: p.warnings });
@@ -364,11 +392,11 @@ export const COMMANDS: Command[] = [
     } },
   { name: "task show", args: "<id>", summary: "A Task with its references and the Requirements to implement", run: (ctx, a) => taskShowView(ctx.project(), getTask(ctx.project(), a[0] as string, true)) },
   { name: "task list", args: "", summary: "Tasks grouped by column", options: { column: { type: "string" } }, run: (ctx, _a, o) => taskListView(ctx.project(), str(o["column"])) },
-  { name: "task next", args: "", summary: "The next runnable Task (in To do, not blocked, oldest in creation order), moving nothing; --proposal <id> considers only the Tasks of that design; --batch prints instead the group of a parallel run, up to --max runnable Tasks that concern different things (20 by default), one per line, the first being the next one; when none is runnable it lists blocked Tasks", options: { proposal: { type: "string" }, batch: { type: "boolean" }, max: { type: "string" } }, run: (ctx, _a, o) => {
+  { name: "task next", args: "", summary: "The next runnable Task(s), optionally filtered by repeated --task <id> or --proposal <id>; moves nothing", options: { task: { type: "string", multiple: true }, proposal: { type: "string" }, batch: { type: "boolean" }, max: { type: "string" } }, run: (ctx, _a, o) => {
       const raw = str(o["max"]);
       const max = raw === undefined ? undefined : Number(raw);
       if (max !== undefined && (!Number.isInteger(max) || max < 1)) throw new UsageError("--max must be a positive integer");
-      return taskNextView(ctx.project(), optionalArg(ctx, str(o["proposal"]), proposalArg), o["batch"] === true, max);
+      return taskNextView(ctx.project(), optionalArg(ctx, str(o["proposal"]), proposalArg), o["batch"] === true, max, o["task"] === undefined ? undefined : list(o["task"]));
     } },
   { name: "task scope", args: "<id> [<id>…]", summary: "The union of Model and Requirement references named by Tasks and Transitions that enter or react to them; moves nothing", run(ctx, args) {
       const project = ctx.project();
@@ -396,12 +424,12 @@ export const COMMANDS: Command[] = [
       return text(`Task ${n.name("task", t.id)} is yours again (still ${t.data.column})`, { id: t.id, number: n.label("task", t.id), column: t.data.column, agent: t.data.agent });
     } },
 
-  { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; two to five fix options, each --option <title> followed by its --option-text <text>, the first being the one you recommend; --where (optional) says where in the code it was seen, the only place for files and code names; --task <id> names the Task you were implementing when you found it; --announcement <id> names the announcement of this Drift", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, option: ref, "option-text": ref, where: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
+  { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; two to five fix options, each --option <title> followed by its --option-text <text>, the first being the one you recommend; --critical marks an urgent developer decision; --where (optional) says where in the code it was seen, the only place for files and code names; --task <id> names the Task you were implementing when you found it; --announcement <id> names the announcement of this Drift", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, option: ref, "option-text": ref, critical: { type: "boolean" }, where: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       const note = announcementNote(project, str(o["announcement"]), "drift");
-      const d = newDrift(project, { title: a[0] as string, refs: list(o["ref"]), proposal: optionalArg(ctx, str(o["proposal"]), proposalArg), origin: optionalArg(ctx, str(o["task"]), taskArg), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", options: fixOptions(list(o["option"]), list(o["option-text"])), announcement: str(o["announcement"]), ...(o["where"] !== undefined ? { where: str(o["where"]) ?? "" } : {}) });
+      const d = newDrift(project, { title: a[0] as string, refs: list(o["ref"]), proposal: optionalArg(ctx, str(o["proposal"]), proposalArg), origin: optionalArg(ctx, str(o["task"]), taskArg), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", options: fixOptions(list(o["option"]), list(o["option-text"])), critical: o["critical"] === true, announcement: str(o["announcement"]), ...(o["where"] !== undefined ? { where: str(o["where"]) ?? "" } : {}) });
       const n = numbersOf(ctx);
-      return text(`Created Drift ${n.name("drift", d.id)} at ${d.path}${note ? `\n${note}` : ""}`, { id: d.id, number: n.label("drift", d.id), path: d.path, ...(note ? { note } : {}) });
+      return text(`Created Drift ${n.name("drift", d.id)} at ${d.path}${note ? `\n${note}` : ""}`, { id: d.id, number: n.label("drift", d.id), path: d.path, critical: d.data.critical, ...(note ? { note } : {}) });
     } },
   { name: "drift list", args: "", summary: "Open Drifts (--all for every one)", options: { all: { type: "boolean" } }, run: (ctx, _a, o) => driftListView(ctx.project(), o["all"] === true) },
   { name: "drift show", args: "<id>", summary: "A Drift with its references and attached Proposal", run: (ctx, a) => driftShowView(ctx.project(), getDrift(ctx.project(), a[0] as string, true)) },

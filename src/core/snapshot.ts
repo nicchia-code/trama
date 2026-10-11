@@ -70,6 +70,8 @@ export interface ProposalView {
   title: string;
   body: string;
   kind: ProposalKind;
+  /** Marked for automatic resolution under the developer's delegation; the marker grants no approval. */
+  automatic: boolean;
   /** The Drifts a resolution resolves, in creation order, each with what approving does to it; empty for any other Proposal. */
   resolves: ResolvedDrift[];
   /** Required Proposals not approved yet; Approve stays disabled while any is listed. */
@@ -98,26 +100,18 @@ export interface ProposalView {
 export interface DriftView {
   id: string;
   title: string;
-  /** The Drift's text after the title, for a Drift written before the two sides existed. */
+  /** True only when a developer decision is urgently needed. */
+  critical: boolean;
   body: string;
-  /** What the code does, what the Model or Requirement says and where in the code it was seen; null for a Drift written before the two sections existed. */
   sides: DriftSides | null;
-  /** The fix options in their written order, the first being the recommended one; empty for a Drift written before options existed. */
   options: DriftOption[];
-  /** Number, from 1, of the option chosen when the code was fixed; null while Open and in Drifts without options. */
   option: number | null;
-  /** The developer's note kept with the choice; null when there is none. */
   note: string | null;
-  /** True when the Drift points only to Requirements: the "should" side is then what the Requirements say. */
   requirementsOnly: boolean;
   refs: string[];
-  /** ID of the attached Proposal, if any. */
   proposal: string | null;
-  /** Why the attached Proposal cannot be approved now (draft, rejected, discarded, stale, waiting, invalid…), or null when it can or there is none. */
   proposalBlock: ApprovalBlock | null;
-  /** Title of the attached Proposal; null when there is none or it no longer exists. */
   proposalTitle: string | null;
-  /** What the attached Proposal changes while it is open; null when there is none or it is not open (still being written, decided). */
   proposalChanges: FileChange[] | null;
 }
 
@@ -258,6 +252,7 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     title: proposal.title,
     body: stripTitle(proposal.body),
     kind: proposal.data.kind,
+    automatic: proposal.data.automatic,
     resolves: proposal.data.kind === "resolution" ? resolvedDrifts(p, proposal) : [],
     requires: h.requires,
     base: pending ? modelView(baseProject) : null,
@@ -305,6 +300,7 @@ export function buildSnapshot(p: Project): Snapshot {
     drifts: drifts.filter((d) => d.data.status === "open").map((d) => ({
       id: d.id,
       title: d.title,
+      critical: d.data.critical,
       body: stripTitle(d.body),
       sides: driftSides(d),
       options: driftOptions(d),
@@ -338,9 +334,9 @@ export function buildSnapshot(p: Project): Snapshot {
   };
 }
 
-/** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. */
+/** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. Only a Proposal's ghost takes its Draft's title: a Drift keeps its own. */
 export function announcementView(a: Announcement, proposalTitle: string | undefined): AnnouncementView {
-  return { id: a.id, kind: a.kind, title: (a.proposal !== null && proposalTitle) || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : "writing") };
+  return { id: a.id, kind: a.kind, title: (a.kind === "proposal" && a.proposal !== null && proposalTitle) || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : "writing") };
 }
 
 /** The title is shown separately, so the body drops its leading H1. */

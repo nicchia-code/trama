@@ -1,16 +1,16 @@
 ---
-status: open
-resolution: null
+status: resolved
+resolution: fix-code
 refs:
   - agent-terminal
   - requirements/rules#agent-terminal
   - requirements/tech#agent-terminal
 proposal: null
-task: null
+task: 374goew3
 origin: null
-option: null
+option: 1
 note: null
-resolvedBy: null
+resolvedBy: 7jefoyuq
 created: 2026-10-10T18:45:21.954Z
 ---
 # Successful terminal scan still offers Scan now

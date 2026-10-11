@@ -106,16 +106,14 @@ test("the snapshot carries the Model, open Proposals as ghost overlays, Drifts a
   expect(JSON.parse(JSON.stringify(snap))).toEqual(snap);
 });
 
-test("a Drift announcement follows its associated Draft title in each snapshot without changing the announcement title", () => {
+test("a Drift announcement keeps the Drift's title in each snapshot, whatever its Draft is called; only its phase changes to Writing", () => {
   const draft = newProposal(p, "Draft title", "", { origin: { chat: "editor" } });
   const drift = announce(p, { kind: "drift", title: "Announced Drift title", chat: "editor" });
   bindDraft(p, draft, drift.id, { chat: "editor" });
-
-  expect(buildSnapshot(p).announcements.find((a) => a.id === drift.id)).toMatchObject({ kind: "drift", title: "Draft title", phase: "writing" });
-  expect(listAnnouncements(p).find((a) => a.id === drift.id)?.title).toBe("Announced Drift title");
+  expect(buildSnapshot(p).announcements.find((a) => a.id === drift.id)).toMatchObject({ kind: "drift", title: "Announced Drift title", phase: "writing" });
 
   writeFileSync(join(draft.dir, "proposal.md"), readFileSync(join(draft.dir, "proposal.md"), "utf8").replace("# Draft title", "# Updated Draft title"));
-  expect(buildSnapshot(p).announcements.find((a) => a.id === drift.id)).toMatchObject({ kind: "drift", title: "Updated Draft title", phase: "writing" });
+  expect(buildSnapshot(p).announcements.find((a) => a.id === drift.id)).toMatchObject({ kind: "drift", title: "Announced Drift title", phase: "writing" });
   expect(listAnnouncements(p).find((a) => a.id === drift.id)?.title).toBe("Announced Drift title");
 });
 
@@ -142,12 +140,13 @@ test("an open Drift carries its two sides and why its attached Proposal cannot b
   const prop = newProposal(p, "Lost orders");
   const payment = editInProposal(p, prop.id, "checkout/payment.md");
   writeFileSync(payment, readFileSync(payment, "utf8").replace("### Declined (final)", "### Declined (final)\n### Written off (final)"));
-  newDrift(p, { options: FIX_OPTIONS, title: "Lost", refs: ["payment"], proposal: prop.id, happens: "Code writes it off.", should: "Nothing writes it off." });
-  newDrift(p, { options: FIX_OPTIONS, title: "Theme", refs: ["requirements/ui#General"], happens: "Material 2.", should: "Material 3." });
+  const urgent = newDrift(p, { options: FIX_OPTIONS, title: "Lost", refs: ["payment"], proposal: prop.id, happens: "Code writes it off.", should: "Nothing writes it off.", critical: true });
+  const legacy = newDrift(p, { options: FIX_OPTIONS, title: "Theme", refs: ["requirements/ui#General"], happens: "Material 2.", should: "Material 3." });
+  writeFileSync(legacy.path, readFileSync(legacy.path, "utf8").replace(/^critical:.*\n/m, ""));
   const drifts = () => buildSnapshot(p).drifts;
 
-  expect(drifts()[0]).toMatchObject({ sides: { happens: "Code writes it off.", should: "Nothing writes it off." }, requirementsOnly: false, proposalBlock: { kind: "draft" } });
-  expect(drifts()[1]).toMatchObject({ requirementsOnly: true, proposal: null, proposalBlock: null });
+  expect(drifts()[0]).toMatchObject({ id: urgent.id, critical: true, sides: { happens: "Code writes it off.", should: "Nothing writes it off." }, requirementsOnly: false, proposalBlock: { kind: "draft" } });
+  expect(drifts()[1]).toMatchObject({ critical: false, requirementsOnly: true, proposal: null, proposalBlock: null });
   expect(drifts()[0]).toMatchObject({ proposalTitle: "Lost orders", proposalChanges: null });
   handOver(p, prop.id);
   expect(drifts()[0]?.proposalBlock).toBeNull();

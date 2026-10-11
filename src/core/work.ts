@@ -59,15 +59,12 @@ interface DriftData {
   refs: string[];
   proposal: string | null;
   task: string | null;
-  /** The Task the agent was implementing when it filed the Drift; none for a Scan, and absent in Drifts written before the field existed. */
   origin: string | null;
-  /** Number, counted from 1 in the order of the Fix options section, of the option chosen when the code was fixed; none otherwise and in Drifts without options. */
+  /** True only when a developer decision is urgently needed. */
+  critical: boolean;
   option: number | null;
-  /** The developer's note kept with the choice, when there was one. */
   note: string | null;
-  /** The resolution Proposal whose approval resolved the Drift; none for a Drift resolved any other way. */
   resolvedBy: string | null;
-  /** When the Drift was created, UTC ISO 8601. Absent on numbered Drifts written before the field existed. */
   created: string | null;
 }
 
@@ -116,6 +113,7 @@ function parseDrift(raw: Raw, where: string): DriftData {
     proposal: idField(raw, "proposal", where),
     task: idField(raw, "task", where),
     origin: idField(raw, "origin", where),
+    critical: boolField(raw, "critical", false, where),
     option: positiveIntOrNull(raw, "option", where),
     note: textOrNull(raw, "note", where),
     resolvedBy: idField(raw, "resolvedBy", where),
@@ -283,15 +281,16 @@ export interface RunQueue {
 }
 
 /**
- * The next runnable Task: the oldest Task in To do that is not blocked, worked out from the Tasks and Drifts as
- * they are now. With a Proposal it only considers the Tasks linked to it; the Proposal must exist.
+ * The next runnable Task(s) in creation order: only To do, unblocked Tasks in scope, grouped by distinct concerns.
+ * A Proposal and an optional identity set intersect; the Proposal must exist and every identity must name a Task.
  */
-export function nextTask(p: Project, proposal?: string, max = BATCH_DEFAULT): RunQueue {
+export function nextTask(p: Project, proposal?: string, max = BATCH_DEFAULT, taskIds?: string[]): RunQueue {
   const scope = proposal === undefined ? null : getProposal(p, proposal).id;
-  const project = loadProject(p);
   const tasks = listTasks(p);
+  const selected = taskIds === undefined ? null : new Set(taskIds.map((id) => getTask(p, id, true).id));
+  const project = loadProject(p);
   const blocked = computeBlocked(project, tasks, listDrifts(p));
-  const todo = tasks.filter((t) => t.data.column === "todo" && (scope === null || t.data.proposal === scope));
+  const todo = tasks.filter((t) => t.data.column === "todo" && (scope === null || t.data.proposal === scope) && (selected === null || selected.has(t.id)));
   const batch: Task[] = [];
   for (const task of todo) {
     if (batch.length === max) break;
@@ -440,7 +439,7 @@ function requireAttachable(p: Project, proposal: Proposal, driftId?: string) {
 
 export function newDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; happens: string; should: string; options: DriftOption[]; where?: string; announcement?: string },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; happens: string; should: string; options: DriftOption[]; critical?: boolean; where?: string; announcement?: string },
 ): Drift {
   if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with --ref");
   const happens = input.happens.trim();
@@ -455,7 +454,7 @@ export function newDrift(
   if (attached) requireAttachable(p, attached);
   const proposal = attached?.id ?? null;
   const origin = input.origin ? getTask(p, input.origin).id : null;
-  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, option: null, note: null, resolvedBy: null, created: createdNow() };
+  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, critical: input.critical ?? false, option: null, note: null, resolvedBy: null, created: createdNow() };
   const sections = [
     `## ${HAPPENS_HEADING}\n\n${happens}`,
     `## ${SHOULD_HEADING}\n\n${should}`,

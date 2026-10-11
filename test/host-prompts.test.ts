@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildApprovalScanPrompt, buildPrompt, buildScanPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
+import { buildApprovalScanPrompt, buildAutomaticRunPrompt, buildPrompt, buildScanPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "design", prompt: "  Add refunds to checkout \n" })).toBe("Use the trama-design skill. Add refunds to checkout");
@@ -18,6 +18,16 @@ test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34", "ef56gh78"] })).toBe(
     "Use the trama-resolve-drifts skill on the open Drifts ab12cd34, ef56gh78: ask the developer what should happen for each one, then write one resolution Proposal.",
   );
+});
+
+test("automatic resolution and Runs stay scoped to coordinator authorization", () => {
+  const resolve = buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34"], automaticCollection: "collection" });
+  expect(resolve).toContain("first Fix option");
+  expect(resolve).toContain("Do not approve the Proposal or start a Run.");
+  const run = buildAutomaticRunPrompt("collection", ["task-1", "task-2"]);
+  expect(run).toContain("trama task next --batch --task task-1 --task task-2 --max {maxParallelAgents}");
+  expect(run).toContain("trama announce done <check-id> --failed");
+  expect(run).toContain("Do not use the general Task queue");
 });
 
 test("several Features are listed in backticks, comma separated", () => {

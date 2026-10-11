@@ -2,6 +2,8 @@
 
 The person who owns the project. Decides what enters the Model, resolves differences between code and Model, steers the agent and looks at the Diagram, the Board and the Requirements in the editor panel.
 
+Può anche registrare direttamente un Drift dalla riga di comando, per annotare una differenza fra codice e Model o Requisiti; resta una differenza da decidere, come un Drift registrato dall'agente.
+
 ## Events
 
 ### APPROVE_PROPOSAL
@@ -12,6 +14,9 @@ The developer rejects an open Proposal and may give feedback for the agent. Canc
 
 ### DISCARD_PROPOSAL
 The developer discards a Proposal the agent is still writing, with the command line. It is for drafts the agent never finished; a Proposal already handed over is rejected instead.
+
+### FILE_DRIFT
+Il developer registra direttamente un nuovo Drift dalla riga di comando. Il Drift nasce Open e attende una decisione, con le stesse regole di un Drift registrato dall'agente.
 
 ### FIX_DRIFT_CODE
 The developer keeps the side of an open Drift that says what should happen: the Model or the Requirement is right and the code must change. La Proposal allegata, se c'è, è messa da parte con il Drift. Solo dalla riga di comando: il pannello non decide su un singolo Drift.
@@ -38,6 +43,9 @@ The developer takes back a Task that the agent has taken, with the command of th
 The developer asks the coding agent to work, from a button or a command: design a change (with a request typed in), scan the whole System or one Feature, implement one Task, implement every Task in To do, implement the Tasks in To do that come from one design, resolve every open Drift with Resolve Drifts, or import the existing code as Proposals.
 
 Una richiesta di design arriva in due modi: come richiesta rapida di una riga, scritta nella casella che si apre con Quick request, oppure come richiesta scritta, un documento Markdown che il developer compone in una scheda dell'editor e invia con il pulsante Send to agent della scheda o chiudendo la scheda (vedi la Design request).
+
+### SET_DRIFT_AUTOPILOT
+Il developer cambia la propria delega per i Drift: nessuna, soltanto i non critici oppure tutti. Il cambiamento vale prima della prossima scelta, approvazione e avvio automatico; ritirare la delega non annulla decisioni già applicate né interrompe forzatamente un Task già iniziato.
 
 ### CLOSE_REQUEST
 Il developer chiude la scheda di una richiesta di design scritta che non ha mai inviato, quando nessun'altra scheda mostra più quella richiesta. Chiudere la finestra dell'editor con la scheda aperta non è questo Event, né lo è chiudere la scheda di una richiesta già inviata.

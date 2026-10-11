@@ -1,4 +1,5 @@
 import type { AnnouncementView, Snapshot } from "../../src/core/snapshot";
+import type { DriftAutopilotStatus } from "./host/drift-resolution";
 import type { QuestionRoundView } from "./host/question-session";
 import type { QuestionAction } from "./host/question-state";
 
@@ -32,8 +33,9 @@ export type ToHost =
   | { type: "openModelFile"; path: string }
   /** Path relative to `.trama/` (for example `tasks/0003-x.md`). */
   | { type: "openFile"; path: string }
+  /** Open an existing Task or Drift by its permanent identity. */
+  | { type: "openCard"; kind: "task" | "drift"; id: string }
   | { type: "approveProposal"; id: string }
-  /** The host asks for the feedback with an input box. */
   | { type: "rejectProposal"; id: string }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
   | { type: "openLink"; url: string };
@@ -51,8 +53,8 @@ export interface NavigateOptions {
 
 /** Host -> webview. */
 export type ToWebview =
-  /** `asking`: a question round is open, so the ghosts of announced cards say the agent waits for the developer's answers. `resolve`: whether Resolve Drifts is working, and why the host would refuse it now (null when it would accept). */
-  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { resolving: boolean; blocker: string | null } }
+  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, and the accessible autopilot status. */
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; autopilot: DriftAutopilotStatus } }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */

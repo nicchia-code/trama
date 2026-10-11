@@ -21,7 +21,14 @@ export function renderResolves(prefix: "board" | "dg", title: string, rows: Reso
     link.type = "button";
     link.dataset["action"] = `resolves:${row.drift}`;
     link.title = "Show the Drift on the diagram";
-    link.append(idTag(row.name, prefix === "dg" ? "dg-id" : undefined), el("span", `${prefix}-resolves-title`, row.title), el("span", `${prefix}-resolves-decision`, row.decision));
+    link.append(idTag(row.name, prefix === "dg" ? "dg-id" : undefined), el("span", `${prefix}-resolves-title`, row.title));
+    if (row.critical) {
+      const critical = el("span", `${prefix}-critical`, "Critical");
+      critical.title = "Urgent developer decision";
+      critical.setAttribute("aria-label", "Critical Drift: urgent developer decision");
+      link.append(critical);
+    }
+    link.append(el("span", `${prefix}-resolves-decision`, row.decision));
     link.addEventListener("click", () => showDrift(row.drift));
     const item = el("li", `${prefix}-resolves-item`);
     item.append(link);

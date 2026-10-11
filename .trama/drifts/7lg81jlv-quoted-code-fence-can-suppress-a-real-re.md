@@ -1,15 +1,15 @@
 ---
-status: open
-resolution: null
+status: resolved
+resolution: fix-code
 refs:
   - design-request
   - requirements/rules#design-request
 proposal: null
-task: null
+task: hmeuz88e
 origin: null
-option: null
+option: 1
 note: null
-resolvedBy: null
+resolvedBy: 7jefoyuq
 created: 2026-10-10T18:47:36.056Z
 ---
 # Quoted code fence can suppress a real request title

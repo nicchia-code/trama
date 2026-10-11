@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { TramaError } from "./errors";
 import { enumField, idField, type Raw } from "./schema";
@@ -38,6 +38,8 @@ export interface Announcement {
   chat: Chat | null;
   /** The phase of a check; null for every other kind. */
   phase: CheckPhase | null;
+  /** The transient coordinator job bound to this check, when present. */
+  job: string | null;
   /** The title as announced; the ghost of a bound Draft shows the Draft's own title instead. */
   title: string;
 }
@@ -46,8 +48,6 @@ export const announcementsDir = (p: Project) => join(p.dir, "announcements");
 /** Shared only by Task-release and resolution-job timers; announcements never use it. */
 export const QUIET_PERIOD_MS = 15 * 60 * 1000;
 
-
-const checkDeliveryFile = (p: Project, id: string) => join(announcementsDir(p), `.check-delivered-${id}`);
 
 const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 const FILE_PATTERN = /^[a-z0-9]{6}\.md$/;
@@ -111,6 +111,7 @@ function parse(raw: Raw, body: string, id: string, where: string): Announcement 
     terminal: terminalField(raw, where),
     chat: raw["chat"] === undefined || raw["chat"] === null ? null : enumField(raw, "chat", CHATS, "cursor", where),
     phase: raw["phase"] === undefined || raw["phase"] === null ? null : enumField(raw, "phase", CHECK_PHASES, "verifying", where),
+    job: jobField(raw, where),
     title: /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? id,
   };
 }
@@ -121,15 +122,21 @@ function terminalField(raw: Raw, where: string): string | null {
   if (typeof v === "string" && TERMINAL_PATTERN.test(v)) return v;
   throw new TramaError(`${where}: "terminal" must be an ID of six lowercase letters and digits, or none`);
 }
+function jobField(raw: Raw, where: string): string | null {
+  const value = raw["job"];
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") return value;
+  throw new TramaError(`${where}: "job" must be a string or none`);
+}
 
 function write(p: Project, a: Announcement) {
   const dir = announcementsDir(p);
   // The folder ignores itself and everything in it, so announcements are never versioned.
   const ignore = join(dir, ".gitignore");
   if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
-  const { id, title, chat, phase, ...data } = a;
-  // `chat` and `phase` are written only when set, so the other announcements look as before.
-  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}) }, `# ${title}\n`);
+  const { id, title, chat, phase, job, ...data } = a;
+  // `chat`, `phase` and `job` are written only when set, so the other announcements look as before.
+  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}), ...(job ? { job } : {}) }, `# ${title}\n`);
 }
 
 function remove(p: Project, id: string) {
@@ -164,12 +171,13 @@ export const getAnnouncement = (p: Project, id: string): Announcement | null => 
 /** Announces a card as soon as it is known it will be created. */
 export function announce(
   p: Project,
-  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase } & AgentOrigin,
+  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase; job?: string } & AgentOrigin,
   now = new Date(),
 ): Announcement {
   const title = input.title.trim().replace(/\s+/g, " ");
   if (!title) throw new TramaError("An announcement needs a title");
   if ((input.kind === "check") !== (input.phase !== undefined)) throw new TramaError(input.kind === "check" ? "A check needs a phase" : "Only a check has a phase");
+  if (input.job !== undefined && input.kind !== "check") throw new TramaError("Only a check has a job");
   const stamp = now.toISOString();
   const announcement: Announcement = {
     id: newId(announcementsDir(p)),
@@ -180,6 +188,7 @@ export function announce(
     terminal: input.terminal ?? null,
     chat: input.terminal ? null : (input.source === "request" ? null : (input.chat ?? "editor")),
     phase: input.phase ?? null,
+    job: input.job ?? null,
     title,
   };
   write(p, announcement);
@@ -261,52 +270,34 @@ export function changeCheckPhase(p: Project, id: string, phase: "scanning", now 
   return "changed";
 }
 
-/** The agent says a check is finished: it is delivered, with no notice. False when `id` is no check that still exists. */
-export function finishCheck(p: Project, id: string): boolean {
-  const check = findCheck(p, id);
-  if (!check) return false;
-  if (check.title === "Scan of the System")
-    writeFileEnsuringDir(checkDeliveryFile(p, check.id), JSON.stringify({ id: check.id, terminal: check.terminal, chat: check.chat, touched: check.touched }));
-  remove(p, check.id);
-  return true;
-}
-
-export interface DeliveredSystemCheck {
+/** A check the agent finished, as the editor is told it over the local channel. */
+export interface FinishedCheck {
   id: string;
+  title: string;
+  phase: CheckPhase | null;
   terminal: string | null;
   chat: Chat | null;
+  job: string | null;
   touched: string;
+  failed: boolean;
 }
 
-/** Consumes one-shot delivery signals for global System checks; stale or invalid signals are discarded. */
-export function takeDeliveredSystemChecks(p: Project): DeliveredSystemCheck[] {
-  const dir = announcementsDir(p);
-  if (!existsSync(dir)) return [];
-  const delivered: DeliveredSystemCheck[] = [];
-  for (const name of readdirSync(dir)) {
-    const id = /^\.check-delivered-([a-z0-9]{6})$/.exec(name)?.[1];
-    if (!id) continue;
-    const path = join(dir, name);
-    try {
-      const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-      if (value !== null && typeof value === "object") {
-        const raw = value as Record<string, unknown>;
-        const terminal = raw["terminal"];
-        const chat = raw["chat"];
-        const touched = raw["touched"];
-        if (raw["id"] === id && (terminal === null || (typeof terminal === "string" && TERMINAL_PATTERN.test(terminal))) &&
-            (chat === null || chat === "cursor" || chat === "editor") && !(terminal !== null && chat !== null) &&
-            typeof touched === "string" && !Number.isNaN(Date.parse(touched))) {
-          delivered.push({ id, terminal, chat, touched });
-        }
-      }
-      unlinkSync(path);
-    } catch {
-      try { unlinkSync(path); } catch { /* Leave an unreadable marker for startup cleanup. */ }
-    }
-  }
-  return delivered;
+/**
+ * The outcome of a check the agent finished, for the editor over the local channel. Reading it changes nothing: the
+ * caller forgets the ghost with `forgetCheck` only after it has tried the channel, so the editor hears of it first.
+ */
+export function checkOutcome(p: Project, id: string, failed = false): FinishedCheck | null {
+  const check = findCheck(p, id);
+  if (!check) return null;
+  return { id: check.id, title: check.title, phase: check.phase, terminal: check.terminal, chat: check.chat, job: check.job, touched: check.touched, failed };
 }
+
+/** The ghost of a finished check goes, whether or not the editor heard of its outcome. */
+export function forgetCheck(p: Project, id: string): void {
+  remove(p, id);
+}
+
+
 
 /** Withdraws every announcement still waiting, or only `ids`; returns what was withdrawn so the developer can be told. */
 export function withdrawAll(p: Project, ids?: readonly string[]): Announcement[] {

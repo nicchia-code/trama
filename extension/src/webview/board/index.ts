@@ -1,9 +1,10 @@
 import { namerOf, noNumbers } from "../../../../src/core/card-names";
 import { runBlocker } from "../../../../src/core/design";
 import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
+import type { DriftAutopilotStatus } from "../../host/drift-resolution";
 import type { MountView } from "../types";
 import css from "./board.css" with { type: "text" };
-import { announcedGhosts, buildBoard, type Card, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, DONE_PERIODS, type DonePeriod, doneGroups, interleave, withdrawnNotice } from "./logic";
+import { announcedGhosts, autopilotNote, buildBoard, type Card, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, DONE_PERIODS, type DonePeriod, doneGroups, interleave, withdrawnNotice } from "./logic";
 import { type CardEnv, renderAnnounced, renderCard } from "./render";
 import { scanButtonLabel } from "../scan-label";
 
@@ -54,8 +55,12 @@ export const mountBoard: MountView = (root, context) => {
   let snapshot: Snapshot | null = null;
   /** Whether a question round is open: the ghosts then say the agent waits for the developer's answers. */
   let asking = false;
-  /** Whether Resolve Drifts works, and why the host would refuse it now. */
-  let resolve = { resolving: false, blocker: null as string | null };
+  /** Whether Resolve Drifts works and why the host would refuse it now; `runReason` is why every Run is disabled, if any. */
+  let resolve: { blocker: string | null; runReason: string | null; autopilot: DriftAutopilotStatus } = {
+    blocker: null,
+    runReason: null,
+    autopilot: { mode: "disabled", phase: "manual", reason: null, failures: [] },
+  };
   /** What the developer was told about announced cards the agent never delivered; kept until closed, or until the panel closes. */
   const notices: { id: number; text: string }[] = [];
   let nextNotice = 0;
@@ -63,11 +68,13 @@ export const mountBoard: MountView = (root, context) => {
   const expanded = new Set<string>();
   /** The period of the Done column. Kept while the panel lives, so a refresh does not reset it. */
   let period: DonePeriod = "week";
+  /** Whether the Done column is open. It starts collapsed; kept while the panel lives, so a refresh does not reopen it. */
+  let doneOpen = false;
 
   const env: CardEnv = {
     context,
     numbers: () => snapshot?.numbers ?? noNumbers,
-    resolvingReason: () => (resolve.resolving ? "Drifts are being resolved" : null),
+    resolvingReason: () => resolve.runReason,
     isExpanded: (key) => expanded.has(key),
     setExpanded: (key, open) => {
       if (open) expanded.add(key);
@@ -90,11 +97,28 @@ export const mountBoard: MountView = (root, context) => {
     const heading = el("h2", "board-column-head");
     const title = el("span", "board-column-title", COLUMN_TITLES[id]);
     const count = el("span", "board-count");
-    heading.append(title, count);
     const headingId = `board-column-${id}`;
     heading.id = headingId;
     section.setAttribute("aria-labelledby", headingId);
     const body = el("div", "board-column-body");
+    if (id === "done") {
+      const toggle = el("button", "board-collapse");
+      toggle.type = "button";
+      const applyDoneOpen = () => {
+        section.classList.toggle("is-collapsed", !doneOpen);
+        toggle.setAttribute("aria-expanded", String(doneOpen));
+        toggle.setAttribute("aria-label", doneOpen ? "Collapse Done column" : "Expand Done column");
+        toggle.title = doneOpen ? "Collapse Done column" : "Expand Done column";
+        toggle.textContent = doneOpen ? "›" : "‹";
+      };
+      toggle.addEventListener("click", () => {
+        doneOpen = !doneOpen;
+        applyDoneOpen();
+      });
+      applyDoneOpen();
+      heading.append(toggle);
+    }
+    heading.append(title, count);
     section.append(heading);
     if (id === "done") {
       const select = el("select", "board-done-period");
@@ -127,7 +151,7 @@ export const mountBoard: MountView = (root, context) => {
     const focused = active instanceof HTMLElement && board.contains(active) ? { key: active.closest<HTMLElement>("[data-key]")?.dataset["key"], action: active.dataset["action"] } : null;
 
     const live = new Set<string>();
-    const columns = buildBoard(snapshot);
+    const columns = buildBoard(snapshot, resolve.autopilot.failures);
     const placedGhosts = announcedGhosts(columns, snapshot.announcements, asking);
     const liveAnnounced = new Set<string>();
     const nextHeads = new Map<string, HTMLElement>();
@@ -136,7 +160,7 @@ export const mountBoard: MountView = (root, context) => {
       part.hint.textContent = column.hint;
       const cardNode = (card: Card) => {
         live.add(card.key);
-        const signature = JSON.stringify(card) + resolve.resolving;
+        const signature = JSON.stringify(card) + resolve.runReason;
         let entry = cache.get(card.key);
         if (entry?.signature !== signature) {
           entry = { signature, node: renderCard(card, env) };
@@ -175,12 +199,12 @@ export const mountBoard: MountView = (root, context) => {
     }
     dayHeads = nextHeads;
     // Run all To do covers the Tasks inside design cards too, which may stand in another column.
-    const blocker = (resolve.resolving ? "Drifts are being resolved" : null) ?? runBlocker(snapshot.tasks, "all", namerOf(snapshot.numbers ?? noNumbers));
-    const setReason = (button: HTMLButtonElement, reason: string | null) => {
+    const blocker = resolve.runReason ?? runBlocker(snapshot.tasks, "all", namerOf(snapshot.numbers ?? noNumbers));
+    const setReason = (button: HTMLButtonElement, reason: string | null, note: string | null = reason) => {
       button.disabled = reason !== null;
-      button.title = reason ?? "";
-      if (reason === null) button.removeAttribute("aria-description");
-      else button.setAttribute("aria-description", reason);
+      button.title = note ?? "";
+      if (note === null) button.removeAttribute("aria-description");
+      else button.setAttribute("aria-description", note);
     };
     setReason(runAll, blocker);
     const scanLabel = scanButtonLabel("Scan System", snapshot.tasksSinceScan);
@@ -188,7 +212,9 @@ export const mountBoard: MountView = (root, context) => {
     if (scanLabel.tooltip) scanSystem.title = scanLabel.tooltip;
     else scanSystem.removeAttribute("title");
     scanSystem.setAttribute("aria-label", scanLabel.ariaLabel);
-    setReason(resolveDrifts, resolve.blocker);
+    // The priority reason comes first; the mode and any waiting reason follow, as text only: the button stays enabled.
+    const resolveNote = resolve.blocker === null ? autopilotNote(resolve.autopilot) : `${resolve.blocker}\n${autopilotNote(resolve.autopilot)}`;
+    setReason(resolveDrifts, resolve.blocker, resolveNote);
     for (const key of cache.keys()) if (!live.has(key)) cache.delete(key);
     for (const key of announced.keys()) if (!liveAnnounced.has(key)) announced.delete(key);
 
@@ -218,7 +244,7 @@ export const mountBoard: MountView = (root, context) => {
   }
 
   return {
-    update(next, isAsking = false, resolveState = { resolving: false, blocker: null }) {
+    update(next, isAsking = false, resolveState: typeof resolve = { blocker: null, runReason: null, autopilot: { mode: "disabled", phase: "manual", reason: null, failures: [] } }) {
       snapshot = next;
       asking = isAsking;
       resolve = resolveState;

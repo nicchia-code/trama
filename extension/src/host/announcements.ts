@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { closeSync, ftruncateSync, openSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { announcementsDir, listAnnouncements, takeDeliveredSystemChecks, withdrawAll } from "../../../src/core/announcements";
+import { announcementsDir, listAnnouncements, withdrawAll } from "../../../src/core/announcements";
 import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { getProposal, listProposals } from "../../../src/core/proposals";
@@ -13,7 +13,6 @@ import type { CursorChatEvent } from "../../../src/core/cursor-chat";
 import type { CopilotChatEvent } from "./copilot-chat";
 import { onCursorChatEvent } from "./cursor";
 import { onCopilotChatEvent } from "./copilot-chat";
-import { forgetWithdrawnGlobalScan } from "./global-scan";
 
 type Listener = (withdrawn: AnnouncementView[]) => void;
 const listeners = new Set<Listener>();
@@ -49,7 +48,6 @@ export function withdrawWaiting(root: string, which?: (a: Announcement) => boole
     const p = projectAt(root);
     const ids = which === undefined ? undefined : listAnnouncements(p).filter(which).map((a) => a.id);
     const withdrawn = withdrawAll(p, ids);
-    for (const a of withdrawn) forgetWithdrawnGlobalScan(root, a);
     const views = describe(p, withdrawn);
     if (views.length === 0 || !notify) return;
     for (const listener of [...listeners]) listener(views);
@@ -115,7 +113,6 @@ export function watchAnnouncements(root: () => string | undefined): vscode.Dispo
   if (startup !== undefined) guarded(() => {
     const p = projectAt(startup);
     withdrawAll(p);
-    takeDeliveredSystemChecks(p);
   });
   const cursor = onCursorChatEvent(onCursorChat);
   const copilot = onCopilotChatEvent(onCopilotChat);

@@ -18,7 +18,7 @@ export interface CardEnv {
   showCard(key: string, row?: string): void;
   /** The short numbers of the snapshot being drawn. */
   numbers(): CardNumbers;
-  /** The reason every Run is disabled while Resolve Drifts works, otherwise null. It wins over any other reason. */
+  /** The reason every Run is disabled while Drifts are being resolved or a run is in progress, otherwise null. It wins over any other reason. */
   resolvingReason(): string | null;
 }
 
@@ -86,6 +86,14 @@ function blockBadgeLink(b: BlockBadge, env: CardEnv): HTMLElement {
   node.append(document.createTextNode(prefix), idTag(name));
   node.addEventListener("click", () => (target.kind === "diagram" ? env.context.navigate("diagram", { drift: target.drift }) : env.showCard(target.key, target.row)));
   return node;
+}
+
+/** "autopilot failed": the autopilot failed on or excluded this case. The reason is in the tooltip; the badge moves no focus. */
+function failedBadge(reason: string | null, env: CardEnv): HTMLElement[] {
+  if (reason === null) return [];
+  const node = badge({ label: "autopilot failed", tooltip: `Autopilot failed: ${reason}`, tone: "error" }, env.numbers());
+  node.setAttribute("aria-label", `Autopilot failed: ${reason}`);
+  return [node];
 }
 
 function chips(refs: string[], env: CardEnv): HTMLElement {
@@ -158,7 +166,12 @@ function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
 
 function drift(card: DriftCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}`);
-  node.append(head("Drift", card.name), el("h3", "board-card-title", card.title));
+  const critical = card.drift.critical ? el("span", "board-badge error board-critical", "Critical") : null;
+  if (critical) {
+    critical.title = "Urgent developer decision";
+    critical.setAttribute("aria-label", "Critical Drift: urgent developer decision");
+  }
+  node.append(head("Drift", card.name, ...(critical ? [critical] : []), ...failedBadge(card.autopilotFailed, env)), el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
   node.append(renderDriftCompare(card.drift, { openLink: env.context.openLink }));
   const firstRef = card.refs[0];
@@ -202,6 +215,7 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
   const badges = [
     ...(card.technical && card.refs.length === 0 ? [badge({ label: "technical", tooltip: "Technical Task", tone: "info" }, env.numbers())] : []),
     ...card.blocks.map((b) => blockBadgeLink(b, env)),
+    ...failedBadge(card.autopilotFailed, env),
   ];
   const top = head(null, card.name, ...badges);
   top.prepend(statusDot(card));
@@ -260,7 +274,7 @@ function design(card: DesignCard, env: CardEnv): HTMLElement {
     item.dataset["row"] = t.key;
     item.tabIndex = -1;
     item.append(statusDot(t), idTag(t.name, "board-card-kind board-card-id"), el("span", "board-design-title", t.title));
-    item.append(...t.blocks.map((b) => blockBadgeLink(b, env)));
+    item.append(...t.blocks.map((b) => blockBadgeLink(b, env)), ...failedBadge(t.autopilotFailed, env));
     list.append(item);
   }
 

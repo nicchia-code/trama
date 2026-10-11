@@ -1,6 +1,6 @@
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -12,6 +12,16 @@ import type { CopilotHook } from "./copilot-chat";
 import { type Project, projectAt } from "./store";
 
 export const QUESTION_ENDPOINT_ENV = "TRAMA_QUESTION_ENDPOINT";
+
+
+export type CoordinatorJson = null | boolean | number | string | CoordinatorJson[] | { [key: string]: CoordinatorJson };
+export type CoordinatorMessage = { [key: string]: CoordinatorJson };
+
+export interface CoordinatorLease {
+  projectId: string;
+  windowId: string;
+  endpoint: string;
+}
 
 
 export interface QuestionServer {
@@ -41,6 +51,8 @@ interface ServerOptions {
   onActivity?: (origin: AgentOrigin) => void;
   /** The agent in the terminal `terminal` (the hook of its agent said so) has settled: nothing is left to do. `root` is this window's project. */
   onAgentIdle?: (terminal: string, root: string) => void;
+  /** A project-scoped runtime coordinator event, independent of question rounds. */
+  onCoordinatorMessage?: (message: CoordinatorMessage) => CoordinatorJson | void | Promise<CoordinatorJson | void>;
   onClose?: () => void;
 }
 
@@ -103,6 +115,22 @@ function recordValue(value: unknown): EditorRecord | null {
   return record as EditorRecord;
 }
 
+function coordinatorMessage(value: unknown, seen = new Set<object>()): CoordinatorMessage | null {
+  const valid = (item: unknown): boolean => {
+    if (item === null || typeof item === "string" || typeof item === "boolean") return true;
+    if (typeof item === "number") return Number.isFinite(item);
+    if (typeof item !== "object" || seen.has(item)) return false;
+    seen.add(item);
+    const ok = Array.isArray(item)
+      ? item.every(valid)
+      : (Object.getPrototypeOf(item) === Object.prototype || Object.getPrototypeOf(item) === null)
+        && Object.values(item).every(valid);
+    seen.delete(item);
+    return ok;
+  };
+  return value !== null && typeof value === "object" && !Array.isArray(value) && valid(value) ? value as CoordinatorMessage : null;
+}
+
 function records(directory: string, projectId: string): EditorRecord[] {
   const found: EditorRecord[] = [];
   let names: string[];
@@ -119,6 +147,140 @@ function records(directory: string, projectId: string): EditorRecord[] {
     } catch { /* Incomplete, invalid and stale discovery files do not identify live editors. */ }
   }
   return found;
+}
+
+function coordinatorLeaseValue(value: unknown, projectId: string): CoordinatorLease | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const lease = value as Partial<CoordinatorLease>;
+  const endpointLooksLocal = typeof lease.endpoint === "string" && (process.platform === "win32"
+    ? /^\\\\[.?]\\pipe\\trama-question-[a-f0-9-]+$/i.test(lease.endpoint)
+    : isAbsolute(lease.endpoint));
+  if (Object.keys(value).sort().join(",") !== "endpoint,projectId,windowId"
+    || lease.projectId !== projectId || typeof lease.windowId !== "string" || lease.windowId === "" || !endpointLooksLocal) return null;
+  return lease as CoordinatorLease;
+}
+
+function readCoordinatorLease(path: string, projectId: string): CoordinatorLease | null | undefined {
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink()
+      || (process.platform !== "win32" && (stat.uid !== process.getuid!() || (stat.mode & 0o077) !== 0))) return null;
+    return coordinatorLeaseValue(JSON.parse(readFileSync(path, "utf8")), projectId);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? undefined : null;
+  }
+}
+
+function sameCoordinatorLease(left: CoordinatorLease | null | undefined, right: CoordinatorLease): boolean {
+  return !!left && left.projectId === right.projectId && left.windowId === right.windowId && left.endpoint === right.endpoint;
+}
+
+function coordinatorLeasePath(directory: string, projectId: string): string {
+  return join(directory, `${projectId}.lease`);
+}
+
+async function probeCoordinatorOwner(lease: CoordinatorLease): Promise<"live" | "stale" | "unverified"> {
+  const controller = new AbortController();
+  const sockets = new Set<Socket>();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+    for (const socket of sockets) socket.destroy();
+  }, 2_000);
+  try {
+    const editor = await connectEditor(lease.endpoint, lease.projectId, controller.signal, sockets);
+    if (!editor) return timedOut ? "unverified" : "stale";
+    if (editor.record.windowId !== lease.windowId || editor.record.endpoint !== lease.endpoint
+      || editor.record.projectId !== lease.projectId) return "unverified";
+    return "live";
+  } catch {
+    return timedOut ? "unverified" : "stale";
+  } finally {
+    clearTimeout(timer);
+    for (const socket of sockets) socket.destroy();
+  }
+}
+
+/** Claim the project coordinator role for a discovered live editor window. */
+export async function acquireCoordinatorLease(
+  project: Project,
+  owner: Pick<CoordinatorLease, "windowId" | "endpoint">,
+  options: { runtimeDir?: string } = {},
+): Promise<CoordinatorLease | null> {
+  const projectId = questionProjectId(project);
+  let directory: string;
+  try {
+    directory = runtimeDirectory(options.runtimeDir);
+    outsideProject(directory, project);
+  } catch { return null; }
+  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory) : privateUnixDirectory(directory, false);
+  if (!privateDirectory || !owner.windowId || !owner.endpoint) return null;
+
+  const path = coordinatorLeasePath(directory, projectId);
+  const lease: CoordinatorLease = { projectId, windowId: owner.windowId, endpoint: owner.endpoint };
+  const current = readCoordinatorLease(path, projectId);
+  if (current === null) return null;
+  if (current && !sameCoordinatorLease(current, lease) && await probeCoordinatorOwner(current) !== "stale") return null;
+
+  if (!records(directory, projectId).some((record) =>
+    record.windowId === lease.windowId && record.endpoint === lease.endpoint)) return null;
+  if (await probeCoordinatorOwner(lease) !== "live") return null;
+  if (current && sameCoordinatorLease(current, lease)) return current;
+
+  if (current) {
+    if (!sameCoordinatorLease(readCoordinatorLease(path, projectId), current)) return null;
+    try { unlinkSync(path); } catch { return null; }
+  }
+  try {
+    writeFileSync(path, JSON.stringify(lease), { mode: 0o600, flag: "wx" });
+    return lease;
+  } catch {
+    const winner = readCoordinatorLease(path, projectId);
+    return winner && sameCoordinatorLease(winner, lease) ? winner : null;
+  }
+}
+
+/** Confirm the lease owner is still the discovered, live editor for its project. */
+export async function renewCoordinatorLease(
+  project: Project,
+  lease: CoordinatorLease,
+  options: { runtimeDir?: string } = {},
+): Promise<boolean> {
+  const projectId = questionProjectId(project);
+  if (lease.projectId !== projectId) return false;
+  let directory: string;
+  try {
+    directory = runtimeDirectory(options.runtimeDir);
+    outsideProject(directory, project);
+  } catch { return false; }
+  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory) : privateUnixDirectory(directory, false);
+  if (!privateDirectory || !sameCoordinatorLease(readCoordinatorLease(coordinatorLeasePath(directory, projectId), projectId), lease)
+    || !records(directory, projectId).some((record) => record.windowId === lease.windowId && record.endpoint === lease.endpoint)) return false;
+  return await probeCoordinatorOwner(lease) === "live";
+}
+
+/** Release only this window's lease, leaving another owner's claim untouched. */
+export async function releaseCoordinatorLease(
+  project: Project,
+  lease: CoordinatorLease,
+  options: { runtimeDir?: string } = {},
+): Promise<boolean> {
+  const projectId = questionProjectId(project);
+  if (lease.projectId !== projectId) return false;
+  let directory: string;
+  try {
+    directory = runtimeDirectory(options.runtimeDir);
+    outsideProject(directory, project);
+  } catch { return false; }
+  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory) : privateUnixDirectory(directory, false);
+  const path = coordinatorLeasePath(directory, projectId);
+  if (!privateDirectory || !sameCoordinatorLease(readCoordinatorLease(path, projectId), lease)) return false;
+  try {
+    if (!sameCoordinatorLease(readCoordinatorLease(path, projectId), lease)) return false;
+    unlinkSync(path);
+    return true;
+  } catch { return false; }
 }
 
 /** Return complete lines without retaining any already-consumed question content. */
@@ -258,6 +420,111 @@ async function liveEditor(projectId: string, signal: AbortSignal | undefined, so
   for (const unused of live.slice(1)) unused.socket.destroy();
   return live[0] ?? null;
 }
+
+interface CoordinatorRelayResult {
+  delivered: number;
+  error?: "no-live-receiver";
+  responses: CoordinatorMessage[];
+}
+
+async function relayCoordinatorMessage(
+  project: Project,
+  message: CoordinatorMessage,
+  options: { runtimeDir?: string } = {},
+): Promise<CoordinatorRelayResult> {
+  const payload = coordinatorMessage(message);
+  if (!payload) throw new UsageError("Coordinator message must be a JSON object");
+  const projectId = questionProjectId(project);
+  const directory = runtimeDirectory(options.runtimeDir);
+  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory) : privateUnixDirectory(directory, false);
+  if (!privateDirectory) return { delivered: 0, error: "no-live-receiver", responses: [] };
+  const candidates = records(directory, projectId);
+  const probed = await Promise.all(candidates.map((record) => connectEditor(record.endpoint, projectId, undefined, new Set())));
+  const connections = probed.filter((connection): connection is EditorConnection => {
+    if (!connection) return false;
+    const matched = !connection.socket.destroyed && !connection.socket.readableEnded
+      && connection.record.projectId === projectId
+      && candidates.some((record) => record.endpoint === connection.record.endpoint
+        && record.windowId === connection.record.windowId && record.projectId === connection.record.projectId);
+    if (!matched) connection.socket.destroy();
+    return matched;
+  });
+  const responses: CoordinatorMessage[] = [];
+  const delivered = await Promise.all(connections.map((connection) => {
+    const messageId = randomUUID();
+    return new Promise<boolean>((resolve) => {
+      let done = false;
+      const finish = (ok: boolean, response?: CoordinatorMessage) => {
+        if (done) return;
+        done = true;
+        stopLines();
+        connection.socket.removeListener("error", lost);
+        connection.socket.removeListener("end", lost);
+        connection.socket.removeListener("close", lost);
+        connection.socket.destroy();
+        if (response) responses.push(response);
+        resolve(ok);
+      };
+      const lost = () => finish(false);
+      const stopLines = lines(connection.socket, (line) => {
+        try {
+          const reply: unknown = JSON.parse(line);
+          if (!reply || typeof reply !== "object" || Array.isArray(reply)) { finish(false); return; }
+          const value = reply as Record<string, unknown>;
+          const valid = value.type === "coordinator-received" && value.messageId === messageId;
+          const response = coordinatorMessage(value.response);
+          finish(valid, response ?? undefined);
+        } catch { finish(false); }
+      });
+      connection.socket.on("error", lost);
+      connection.socket.on("end", lost);
+      connection.socket.on("close", lost);
+      connection.socket.write(`${JSON.stringify({ type: "coordinator-message", projectId, messageId, message: payload })}\n`);
+    });
+  }));
+  const count = delivered.filter(Boolean).length;
+  return { delivered: count, ...(count === 0 ? { error: "no-live-receiver" as const } : {}), responses };
+}
+
+export async function sendCoordinatorMessage(
+  project: Project,
+  message: CoordinatorMessage,
+  options: { runtimeDir?: string } = {},
+): Promise<{ delivered: number; error?: "no-live-receiver" }> {
+  const { delivered, error } = await relayCoordinatorMessage(project, message, options);
+  return { delivered, ...(error ? { error } : {}) };
+}
+
+const commandMessages = new Set<Promise<unknown>>();
+
+/**
+ * Sends `message` to the project's editor while the command goes on. The executable calls `settleCoordinatorMessages`
+ * before it exits, so the exit does not cut the message off; `undelivered` reports a message no editor received, and
+ * `settled` runs once the attempt is over, delivered or not.
+ */
+export function sendCoordinatorMessageSoon(project: Project, message: CoordinatorMessage, undelivered: (reason: string) => void, settled: () => void = () => {}): void {
+  const sent: Promise<unknown> = sendCoordinatorMessage(project, message)
+    .then(({ delivered, error }) => { if (delivered === 0) undelivered(error ?? "no-live-receiver"); })
+    .catch((error: unknown) => undelivered(error instanceof Error ? error.message : String(error)))
+    .finally(() => { settled(); commandMessages.delete(sent); });
+  commandMessages.add(sent);
+}
+
+/** Waits until every message sent by `sendCoordinatorMessageSoon` has been delivered or has failed. */
+export async function settleCoordinatorMessages(): Promise<void> {
+  await Promise.all(commandMessages);
+}
+
+/** Broadcasts a scoped read-only request to live project editors and returns their coordinator responses. */
+export async function requestCoordinatorMessage(
+  project: Project,
+  message: CoordinatorMessage,
+  options: { runtimeDir?: string } = {},
+): Promise<CoordinatorMessage[]> {
+  const { responses } = await relayCoordinatorMessage(project, message, options);
+  return responses;
+}
+
 
 /** Connect and identify editors before sending the validated round to exactly one window. */
 export async function askEditor(project: Project, request: QuestionRequest, context: QuestionContext, options: { env?: Record<string, string | undefined>; runtimeDir?: string } = {}): Promise<QuestionResult> {
@@ -460,6 +727,21 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         if (phase === "hello" && message.type === "hello") {
           phase = "ready";
           connection.send({ type: "ready", ...record, caller: from.id });
+          return;
+        }
+        if (phase === "ready" && message.type === "coordinator-message") {
+          const payload = coordinatorMessage(message.message);
+          if (!payload || typeof message.messageId !== "string") throw new UsageError("A coordinator message needs a JSON object and message identity");
+          if (!options.onCoordinatorMessage) { finish({ type: "coordinator-unavailable", messageId: message.messageId }); return; }
+          void Promise.resolve(options.onCoordinatorMessage(payload)).then((response) => {
+            const wrapped = response === undefined ? undefined : coordinatorMessage({ response });
+            if (response !== undefined && !wrapped) throw new UsageError("Coordinator response must be JSON");
+            finish({ type: "coordinator-received", messageId: message.messageId, ...(wrapped ? { response: wrapped["response"] } : {}) });
+          }).catch((error: unknown) => finish({
+            type: "coordinator-received",
+            messageId: message.messageId,
+            error: error instanceof Error ? error.message : String(error),
+          }));
           return;
         }
         if (phase === "ready" && message.type === "activity") {

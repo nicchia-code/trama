@@ -6,8 +6,8 @@ export type ResolvedAction =
   | { kind: "design"; prompt: string }
   /** A written design request, saved as `.trama/requests/<request>.md`. */
   | { kind: "written-design"; request: string }
-  /** `drifts` are the Drifts open when the instruction is built, in creation order: the ones this run covers. */
-  | { kind: "resolve-drifts"; drifts: string[] };
+  /** `automaticCollection` names the authorized snapshot; absent means the ordinary developer-question workflow. */
+  | { kind: "resolve-drifts"; drifts: string[]; automaticCollection?: string };
 
 /** The one-line instruction that makes the external agent use the right Trama skill. */
 export function buildPrompt(action: ResolvedAction): string {
@@ -17,7 +17,9 @@ export function buildPrompt(action: ResolvedAction): string {
     case "written-design":
       return `Use the trama-design skill on the design request in \`.trama/requests/${action.request}.md\`. Bind the first Proposal you open to it with \`--request ${action.request}\`.`;
     case "resolve-drifts":
-      return `Use the trama-resolve-drifts skill on the open Drifts ${action.drifts.join(", ")}: ask the developer what should happen for each one, then write one resolution Proposal.`;
+      return action.automaticCollection === undefined
+        ? `Use the trama-resolve-drifts skill on the open Drifts ${action.drifts.join(", ")}: ask the developer what should happen for each one, then write one resolution Proposal.`
+        : `Use the trama-resolve-drifts skill for automatic collection ${action.automaticCollection}, on only the named Drifts ${action.drifts.join(", ")}. Before each choice, run \`trama drift autopilot --json\` and use only Drifts still authorized for this collection. Choose only each Drift's first Fix option; never ask questions, edit the Model or Requirements, or implement code. If an authorized Drift cannot be resolved with that first Fix option, report it with \`trama agent-event failed --drift <id> --reason <reason>\` and omit it. Create and submit a resolution with \`trama proposal new --resolution --automatic\`, then hand control back to the host. Do not approve the Proposal or start a Run.`;
     case "scan":
       return buildScanPrompt(action.feature === undefined ? [] : [action.feature]);
     case "implement":
@@ -29,6 +31,11 @@ export function buildPrompt(action: ResolvedAction): string {
     case "import":
       return "Use the trama-import skill on this repository.";
   }
+}
+
+/** A restricted implementation Run; the agent must recheck the host's current delegated IDs before each group. */
+export function buildAutomaticRunPrompt(collection: string, tasks: string[]): string {
+  return `Use the trama-implement skill for automatic collection ${collection}. Before each group, run \`trama drift autopilot --json\`, then select only the currently authorized Tasks using \`trama task next --batch ${tasks.map((task) => `--task ${task}`).join(" ")} --max {maxParallelAgents}\`. Do not use the general Task queue or start any other Task. If a Task cannot be started/completed or its check fails, report it with \`trama agent-event failed --task <id> --reason <reason>\`; if a Trama check was announced, also complete it with \`trama announce done <check-id> --failed\`. Stop when the authorized set has no runnable Tasks.`;
 }
 
 /** The scan prompt for one Feature, or the whole System when there is none, as the developer starts it by hand. It names no Proposal. */

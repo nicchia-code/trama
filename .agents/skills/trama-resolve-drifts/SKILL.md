@@ -18,7 +18,7 @@ Trama has already announced the first resolution Proposal, so you do not announc
 ## Hard rules
 
 - NEVER edit `.trama/model/` or `.trama/requirements/` directly, nor the generated `trama-req-*` skills. Every change goes through a Proposal.
-- NEVER run `trama proposal approve`, `trama proposal reject`, `trama proposal discard` or `trama drift resolve`. Those are the developer's decisions: after submitting, stop.
+- Agenti possono approvare o rifiutare una Proposal, scartare una Draft o risolvere un Drift solo se il developer chiede esplicitamente quella decisione nella conversazione. Senza la richiesta, fermati e chiedi al developer di decidere. La richiesta di preparare una risoluzione non autorizza da sola a risolvere il Drift.
 - NEVER change the code of the project, and never create Tasks: approving the resolution creates the Task of each Drift to be fixed in the code.
 - Never apply a recommendation for a Drift the developer skipped, and never decide a Drift on your own.
 
@@ -50,6 +50,32 @@ When the instruction asks you to write in a language, only the prose you produce
    With many Drifts, split them into Proposals that build on each other (open the later ones with `--requires <id>` of the earlier ones, and announce them as above), each Drift in exactly one of them. Keep Drifts whose Model changes touch the same files in one Proposal.
 6. **Validate.** `trama validate --proposal <id>` must report no errors, for each Proposal; then `trama proposal show <id>` and read the changes and the Drift list: they must match the answers, and nothing else. Its warnings do not block, but act on them: when it warns of a Requirement fragment larger than 12 KB that the resolution writes into, split that fragment in the same Proposal before handing it over. Cut where it suits the project (usually by Feature or by a group of nearby Machines), give every new fragment a name and a description that say when it is needed, and move the sections without changing their text. Mind the 4,000-character budget of the Requirement skills: prefer a few medium fragments to many tiny ones, since every fragment adds a skill to it.
 7. **Hand over.** Run `trama proposal submit <id>` (the earlier ones first) only after step 6; if refused, correct its problems and repeat validation and review before retrying. Then report, in domain terms: the Proposals with their decisions per Drift, the Drifts left open because their question was skipped or because they were no longer open, and tell the developer to review the resolution on the board or with `trama proposal show <id>`. Stop. Do not approve it, reject it or resolve any Drift.
+
+## Automatic mode
+
+Choose the workflow from the instruction and current host authorization. Manual requests keep the existing question-and-resolution process below; an active setting alone does not authorize you to take an automatic step.
+
+For an automatic job, obtain its exact scope with:
+
+`trama drift autopilot --job <id> --json`
+
+Use only Drift identities listed as currently authorized for that job. Query again immediately before each choice; if the coordinator is unavailable, the job identity is unrecognized, authorization is absent, or the setting no longer permits a Drift, do not choose it. Read each authorized Drift with `trama drift show <id>` and its attached Proposal if present. A Drift is eligible only when it is still open and the current host authorizes it. Do not open a question round, invent Fix options, choose the existing code behavior, alter the Model, resolve a Drift directly, or implement code.
+
+For every authorized Drift, choose **only Fix option 1**. Record it in the automatic resolution with `--decision fix-code --option 1` and no invented note. Make no entry for unauthorized, stale, failed, or inapplicable cases. An attached Proposal does not change this: the host applies its ordinary resolution rules when it approves the submitted resolution.
+
+Create the Draft with the job binding:
+
+`trama proposal new "<title>" --resolution --automatic --job <id> --body "<why>"`
+
+Add the authorized Drift decisions using `trama proposal resolve-drift <proposal-id> <drift-id> --decision fix-code --option 1`, validate it with `trama validate --proposal <proposal-id>`, inspect it with `trama proposal show <proposal-id>`, and submit it with `trama proposal submit <proposal-id>`. `--automatic` marks the resolution and imposes restrictions; it does not approve it. Never approve, reject, discard or implement it. After successful submission, report the Proposal and return control to the host. The host—not this agent—rechecks authorization, performs ordinary approval checks, waits for this resolution agent to finish, and may then launch a separate filtered Run.
+
+If a case cannot be applied or fails, report it to the coordinator using `trama agent-event failed --job <id> --drift <drift-id> --reason "<text>"`; this records no persistent Drift decision and does not retry. If the editor is unavailable or the coordinator cannot be confirmed, stop new automatic work and report the reason; never claim success from a prepared chat prompt, notes, or withdrawn check.
+
+## Autopilot limits
+
+`trama.driftAutoPilot` is application-scoped: `disabled` is the default, `enabled` delegates only non-critical Drifts, and `yolo` also delegates critical ones. A Drift must still have a first Fix option applicable, be open, outside any Draft/open resolution and not excluded after failure. The host coordinates across Trama windows and waits for all tracked scans and Runs; do not treat an idle delay or one archived Drift as clearance. Scans started without Trama are not tracked and must be coordinated by the developer.
+
+The automatic flow is resolution first, then—only after successful host approval and normal agent completion—a distinct Run for that resolution's fix Tasks and their still-incomplete origin Tasks. It excludes unrelated Tasks; it does not approve or implement from this skill. There is no extra cycle, time, or spending limit: later scans may lead to further cycles. The developer can withdraw delegation or interrupt work. A setting change stops new steps, not a Task already started; failed cases are not retried automatically.
 
 ## Asking
 

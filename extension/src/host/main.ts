@@ -1,4 +1,3 @@
-import { cardName } from "../../../src/core/short-numbers";
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import { delimiter, dirname } from "node:path";
 import * as vscode from "vscode";
@@ -12,7 +11,6 @@ import { bundledTrama } from "./cursor";
 import { findProject, installCopilotHooks } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
-import { watchGlobalScans } from "./global-scan";
 
 const SKILL_SYNC_DEBOUNCE_MS = 300;
 
@@ -29,13 +27,18 @@ function guarded<A extends unknown[]>(action: (...args: A) => Promise<void>): (.
   };
 }
 
+function watchAutopilotTicks(): vscode.Disposable {
+  const timer = setInterval(() => void controller?.autopilotTick(), 400);
+  return new vscode.Disposable(() => clearInterval(timer));
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   useGlobalState(context.globalState);
   const session = new QuestionSession(() => trama.revealForQuestions(), agentName);
   const questions = new EditorQuestions(() => findProject(), session.present);
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
   const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
-  const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri);
+  const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri, questions);
   controller = trama;
   const requests = new DesignRequests(context.workspaceState, tramaFiles);
   context.subscriptions.push(
@@ -53,11 +56,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("trama.updateSkills", guarded(async () => trama.updateSkills())),
     watchAgentTerminal(),
     watchAnnouncements(() => findProject()?.root),
-    watchGlobalScans(() => { try { return findProject()?.root; } catch { return undefined; } }),
     questions,
     requests,
     watchRequirements(),
     watchApprovedNotices(),
+    watchAutopilotTicks(),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("trama.driftAutoPilot") || event.affectsConfiguration("trama.submitWhileRunning")) trama.settingsChanged();
+    }),
   );
   void guarded(() => installCopilotHooks(context.globalStorageUri))();
   exposeBundledCli(context);

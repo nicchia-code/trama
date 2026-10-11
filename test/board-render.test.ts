@@ -1,3 +1,4 @@
+import { renderResolves } from "../extension/src/webview/resolves";
 import { describe, expect, test } from "bun:test";
 import type { CardNumbers } from "../src/core/card-names";
 import { renderCard } from "../extension/src/webview/board/render";
@@ -41,7 +42,7 @@ const proposal: ProposalCard = {
 const task: TaskCard = {
   kind: "task", key: "task:liveTask", id: "liveTask", name: { text: "T3", isNumber: true }, title: "A task", technical: false,
   refs: [], drift: "liveDrift", driftName: "D4", proposal: null, agent: false, blocks: [{ label: "blocked D4", tooltip: "Blocked by Drift D4", target: { kind: "diagram", drift: "liveDrift" } }],
-  blockedBy: [], body: "", file: "task.md", column: "todo", finished: null,
+  blockedBy: [], body: "", file: "task.md", column: "todo", finished: null, autopilotFailed: null,
 };
 
 describe("Board card rendering", () => {
@@ -83,6 +84,24 @@ describe("Board card rendering", () => {
       else (globalThis as { document?: unknown }).document = previous;
     }
   });
+  test("marks critical Drift resolution rows with an accessible urgency badge", () => {
+    const previous = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      createElement: (tag: string) => new Node(tag),
+      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
+    };
+    try {
+      const rows = renderResolves("board", "Resolve", [
+        { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Urgent", critical: true, decision: "Fix code" },
+        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, decision: "Dismissed" },
+      ], () => {});
+      const badges = rows.flatMap((row) => (row as unknown as Node).all).filter((node) => node.className.includes("critical"));
+      expect(badges.map((badge) => [badge.textContent, badge.title, badge.attributes["aria-label"]])).toEqual([["Critical", "Urgent developer decision", "Critical Drift: urgent developer decision"]]);
+    } finally {
+      if (previous === undefined) delete (globalThis as { document?: unknown }).document;
+      else (globalThis as { document?: unknown }).document = previous;
+    }
+  });
   test("marks a resolution card accessibly and retains its resolution rows and controls", () => {
     const previous = (globalThis as { document?: unknown }).document;
     (globalThis as { document?: unknown }).document = {
@@ -92,7 +111,7 @@ describe("Board card rendering", () => {
     try {
       const resolution: ProposalCard = {
         ...proposal, heading: "Resolution Proposal P2", resolution: true,
-        resolves: [{ drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", decision: "Closed, nothing changes" }],
+        resolves: [{ drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", critical: false, decision: "Closed, nothing changes" }],
       };
       const rendered = renderCard(resolution, env() as never) as unknown as Node;
       expect(rendered.className).toContain("board-card-resolution");

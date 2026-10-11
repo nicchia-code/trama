@@ -10,6 +10,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   title: "Returns",
   body: "",
   kind: "change",
+  automatic: false,
   resolves: [],
   requires: [],
   base: null,
@@ -23,7 +24,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   areas: [],
   ...over,
 });
-const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, ...over });
+const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", critical: false, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, finished: null, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
@@ -45,7 +46,7 @@ test("groups the snapshot into four columns, Proposals before Drifts in To decid
 });
 
 test("a handed-over resolution replaces only its listed open Drift cards", () => {
-  const resolution = proposal({ id: "res", kind: "resolution", resolves: [{ drift: "0003", title: "Code refunds late", decision: "Closed, nothing changes", note: null }] });
+  const resolution = proposal({ id: "res", kind: "resolution", resolves: [{ drift: "0003", title: "Code refunds late", critical: false, decision: "Closed, nothing changes", note: null }] });
   const cards = buildBoard(snapshot({ proposals: [proposal({ id: "before" }), resolution], drifts: [drift({ id: "0003" }), drift({ id: "0004" })] }))[0]!.cards;
   expect(cards.map((card) => card.key)).toEqual(["proposal:before", "proposal:res", "drift:0004"]);
   expect(cards[1]).toMatchObject({ kind: "proposal", resolution: true, heading: "Resolution Proposal res", resolves: [{ drift: "0003" }] });
@@ -96,6 +97,12 @@ test("a Proposal can be approved only when it is neither stale, unbased nor inva
   expect(approveBlocker(unfixable)).toContain("Resolve Drifts");
   expect(approveBlocker(unfixable)).not.toContain("invalid");
   expect(proposalBadges(unfixable).map((b) => b.label)).toEqual(["unfixable"]);
+});
+
+test("an automatic resolution is marked delegated and its approval controls stay usable", () => {
+  const automatic = { ...proposal({ kind: "resolution" }), automatic: true };
+  expect(proposalBadges(automatic).map((b) => b.label)).toEqual(["delegated"]);
+  expect(approveBlocker(automatic)).toBeNull();
 });
 
 test("badges name each problem and list the files or the first messages in the tooltip", () => {
@@ -279,7 +286,7 @@ test("a resolution's card has one row per Drift, written by number, with the dec
     snapshot({
       numbers: NUMBERS,
       proposals: [
-        proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", decision: "Code fixed with option Fix the code", note: "do it today" }, { drift: "0044", title: "Old", decision: "(already resolved)", note: null }] }),
+        proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", critical: false, decision: "Code fixed with option Fix the code", note: "do it today" }, { drift: "0044", title: "Old", critical: false, decision: "(already resolved)", note: null }] }),
         proposal({ id: "0009" }),
       ],
     }),
@@ -320,7 +327,7 @@ test("blockers, requirements and the reasons that name them use the numbers, whi
   expect(waiting.tooltip).toContain("Waiting for Task T4: Fix it, which fixes the code for Drift D2");
 
   const requires: ProposalView["requires"] = [{ id: "0007", title: "Base", status: "open" }];
-  const base = { stale: [], unbased: [], errors: [], unfixable: [], requires };
+  const base = { stale: [], unbased: [], errors: [], unfixable: [], requires, automatic: false };
   expect(proposalBadges({ ...base, kind: "change" }, NUMBERS)[0]).toMatchObject({ label: "requires P1", tooltip: 'Proposal P1 "Base" is not approved yet' });
   expect(approveBlocker(base, NUMBERS)).toContain('Proposal P1 "Base" is not approved yet');
 });

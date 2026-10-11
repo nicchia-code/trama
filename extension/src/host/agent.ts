@@ -1,20 +1,19 @@
 import * as vscode from "vscode";
+import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import { announce, newTerminalId, TERMINAL_ENV, type AgentOrigin } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
-import { QUESTION_ENDPOINT_ENV } from "../../../src/core/question-channel";
+import { QUESTION_ENDPOINT_ENV, sendCoordinatorMessage, type CoordinatorMessage } from "../../../src/core/question-channel";
 import { bundledOmpHook, bundledTrama, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, toClipboard, withTramaPath } from "./cursor";
 import { onCopilotChatEvent } from "./copilot-chat";
 import { withdrawWaiting } from "./announcements";
-import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endTerminalJobs, isHooked, type JobKind, onAgentIdle, setHooked, startJob } from "./drift-resolution";
-import { forgetGlobalScansForTerminal } from "./global-scan";
+import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, type ShellFamily, shellFamily } from "./quote";
-import { questionEndpoint } from "./questions";
+import { questionEndpoint, questionWindowId } from "./questions";
 import { withLanguage } from "./prompts";
 import { agentTemplate, canScan, type Models, type Role, roleOf, type TerminalAgent } from "./terminal-agent";
-import type { ScanDestination } from "./global-scan";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
 
@@ -83,7 +82,7 @@ function tabColumn(): vscode.ViewColumn {
 }
 
 /** Every active agent terminal and the command Trama typed into it. */
-const agentTerminals = new Map<vscode.Terminal, { id: string; root: string; line: string; since: number }>();
+const agentTerminals = new Map<vscode.Terminal, { id: string; jobId?: string; root: string; line: string; since: number }>();
 
 function releaseTakenTasks(root: string, origin: AgentOrigin): void {
   try {
@@ -103,7 +102,7 @@ export function watchAgentTerminal(): vscode.Disposable {
     vscode.window.onDidEndTerminalShellExecution((e) => {
       const info = agentTerminals.get(e.terminal);
       if (info === undefined || !isTypedCommand(e.terminal, e.execution.commandLine.value)) return;
-      finishAgentTerminal(e.terminal, info);
+      finishAgentTerminal(e.terminal, info, abnormalCommandEnd(e.exitCode));
     }),
     onCursorChatEvent((e) => {
       if (e.event === "PROMPT_SUBMITTED") {
@@ -111,7 +110,9 @@ export function watchAgentTerminal(): vscode.Disposable {
         return;
       }
       releaseTakenTasks(e.root, { chat: "cursor" });
-      endChatJobs(e.root, e.conversation);
+      // Only a completed turn is a normal end: an interrupted or closed conversation never starts the Run that follows it.
+      const abnormal = e.event === "AGENT_STOPPED" ? undefined : e.event === "AGENT_INTERRUPTED" ? "its conversation was interrupted" : "its conversation was closed";
+      for (const job of endChatJobs(e.root, e.conversation, abnormal)) void broadcastJob(e.root, job, false);
     }),
     onCopilotChatEvent((e) => {
       if (e.event === "PROMPT_SUBMITTED") {
@@ -119,7 +120,7 @@ export function watchAgentTerminal(): vscode.Disposable {
         return;
       }
       releaseTakenTasks(e.root, { chat: "editor" });
-      endCopilotChatJobs(e.root, e.conversation);
+      for (const job of endCopilotChatJobs(e.root, e.conversation)) void broadcastJob(e.root, job, false);
     }),
     onAgentIdle((terminal) => {
       for (const [tracked, info] of agentTerminals) {
@@ -130,7 +131,10 @@ export function watchAgentTerminal(): vscode.Disposable {
     }),
     vscode.window.onDidCloseTerminal((terminal) => {
       const info = agentTerminals.get(terminal);
-      if (info !== undefined) finishAgentTerminal(terminal, info, false);
+      if (info !== undefined) {
+        endAgentWork(info, "its terminal was closed");
+        agentTerminals.delete(terminal);
+      }
       if (terminal === lastTab?.terminal) lastTab = undefined;
     }),
     vscode.window.tabGroups.onDidChangeTabs((e) => {
@@ -142,15 +146,28 @@ export function watchAgentTerminal(): vscode.Disposable {
   );
 }
 
-function finishAgentTerminal(terminal: vscode.Terminal, info: { id: string; root: string; line: string; since: number }, disposeTerminal = true): void {
-  if (agentTerminals.get(terminal) !== info) return;
-  agentTerminals.delete(terminal);
-  forgetGlobalScansForTerminal(info.id);
+/**
+ * Ends the agent's work in a terminal: releases what it took and withdraws its waiting announcements.
+ */
+function endAgentWork(info: { id: string; jobId?: string; root: string; line: string; since: number }, abnormal?: string): void {
   setHooked(info.id, false);
   releaseTakenTasks(info.root, { terminal: info.id });
-  endTerminalJobs(info.id);
+  for (const job of endTerminalJobs(info.id, abnormal)) void broadcastJob(info.root, job, false);
   withdrawWaiting(info.root, (announcement) => announcement.terminal === info.id);
-  if (disposeTerminal && settings().get<boolean>("autoExit", true)) {
+}
+
+/** Why a command's end is not a normal end: undefined for exit code 0; an unreported status counts as abnormal. */
+function abnormalCommandEnd(exitCode: number | undefined): string | undefined {
+  if (exitCode === 0) return undefined;
+  return exitCode === undefined ? "its command ended without an exit status" : `its command exited with code ${exitCode}`;
+}
+
+function finishAgentTerminal(terminal: vscode.Terminal, info: { id: string; jobId?: string; root: string; line: string; since: number }, abnormal?: string): void {
+  if (agentTerminals.get(terminal) !== info) return;
+  // An idle or ended terminal is no longer followed: later signals and its close change nothing.
+  agentTerminals.delete(terminal);
+  endAgentWork(info, abnormal);
+  if (settings().get<boolean>("autoExit", true)) {
     if (terminal === lastTab?.terminal) lastTab = undefined;
     terminal.dispose();
   }
@@ -201,7 +218,10 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** The terminal instruction receives the configured limit, then the comparison sentence when eligible, then the language. */
+/** The identity a chat job's agent passes to the coordinator-aware commands: a chat has no environment, so the text gives it. */
+const jobIdentity = (jobId: string): string => `This Trama job has ID ${jobId}. Pass \`--job ${jobId}\` to every Trama command that accepts \`--job\`.`;
+
+/** The instruction with its limit, sub-agent and language sentences on one line; a terminal's job comes from its environment. */
 function terminalPrompt(instruction: string, role: Role): string {
   const limit = configuredMaxParallelAgents();
   const withLimit = withAgentLimit(instruction, limit);
@@ -228,26 +248,67 @@ function terminalRun(agent: TerminalAgent, instruction: Instruction, name: strin
   };
 }
 
-export async function launchAgent(root: string, instruction: Instruction, name: string, announceProposal?: DesignAnnouncement, selfSendingOnly = false, canSend: () => boolean = () => true, job?: JobKind, onSent?: (startedAt: number, destination: ScanDestination) => void): Promise<Launch | undefined> {
+async function broadcastJob(root: string, job: Job, active: boolean): Promise<void> {
+  const abnormal = active ? undefined : jobAbnormalEnd(root, job.id);
+  const message: CoordinatorMessage = {
+    type: "job",
+    id: job.id,
+    root,
+    kind: job.kind,
+    active,
+    origin: job.origin,
+    windowId: job.windowId,
+    place: "terminal" in job.place ? { terminal: job.place.terminal } : { chat: job.place.chat },
+    ...(abnormal !== undefined ? { abnormal } : {}),
+  };
+  try { await sendCoordinatorMessage(projectAt(root), message); }
+  catch { /* An unavailable coordinator suspends automation; it never changes the local job's outcome. */ }
+}
+
+export interface LaunchJobOptions {
+  id?: string;
+  origin?: JobOrigin;
+}
+
+export async function launchAgent(
+  root: string,
+  instruction: Instruction,
+  name: string,
+  announceProposal?: DesignAnnouncement,
+  selfSendingOnly = false,
+  canSend: () => boolean = () => true,
+  job?: JobKind,
+  onSent?: (startedAt: number) => void,
+  jobOptions: LaunchJobOptions = {},
+): Promise<Launch | undefined> {
+  const jobId = job === undefined ? undefined : jobOptions.id ?? randomUUID();
+  const jobOrigin = jobOptions.origin ?? "manual";
+  const windowId = job === undefined ? "" : await questionWindowId(root) ?? "";
   const agent = configuredAgent();
   if ((agent === "chat" || job === undefined) && !canSend()) return undefined;
   const launch = async (): Promise<Launch | undefined> => {
     if (!canSend()) return agent === "chat" ? "not-sent" : undefined;
     if (agent === "chat") {
-      // A real chat send starts at delivery, after the new-chat preparation.
       let sentAfter = 0;
       const chat = isCursor() ? "cursor" : "copilot";
-      const delivery = await openChat(root, () => withLanguage(withAgentLimit(textOf(instruction)), configuredLanguage()), selfSendingOnly, canSend, () => {
+      const prompt = () => {
+        const line = withLanguage(withAgentLimit(textOf(instruction)), configuredLanguage());
+        return jobId === undefined ? line : `${line}\n\n${jobIdentity(jobId)}`;
+      };
+      const delivery = await openChat(root, prompt, selfSendingOnly, canSend, () => {
         sentAfter = chatJobSendStarted(root, chat);
       });
       if (delivery !== "not-sent") noticeChatModelRoles();
-      if (delivery === "sent" && job !== undefined)
-        startJob(job, root, { chat }, false, sentAfter);
-      if (delivery === "sent") onSent?.(Date.now(), { chat: isCursor() ? "cursor" : "copilot" });
+      if (delivery === "sent" && job !== undefined && jobId !== undefined) {
+        const started = startJob(job, root, { chat }, false, sentAfter, jobId, jobOrigin, windowId);
+        if (started !== undefined) void broadcastJob(root, {
+          id: started, kind: job, root, place: { chat }, origin: jobOrigin, windowId,
+        }, true);
+      }
+      if (delivery !== "not-sent") onSent?.(Date.now());
       return delivery;
     }
     const run = terminalRun(agent, instruction, name);
-
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
@@ -256,23 +317,31 @@ export async function launchAgent(root: string, instruction: Instruction, name: 
     const terminal = vscode.window.createTerminal({
       name,
       cwd: root,
-      env: { TRAMA_AGENT: "1", [QUESTION_ENDPOINT_ENV]: endpoint, [TERMINAL_ENV]: terminalId },
+      env: { TRAMA_AGENT: "1", [QUESTION_ENDPOINT_ENV]: endpoint, [TERMINAL_ENV]: terminalId, ...(jobId === undefined ? {} : { TRAMA_JOB: jobId }) },
       ...(asTab ? { location: { viewColumn: tabColumn(), preserveFocus: true } } : {}),
     });
     const family = shellFamily(vscode.env.shell);
     const line = agentCommandLine(run.template(family), run.prompt(), family);
-    agentTerminals.set(terminal, { id: terminalId, root, line, since: Date.now() });
+    agentTerminals.set(terminal, { id: terminalId, ...(jobId === undefined ? {} : { jobId }), root, line, since: Date.now() });
     setHooked(terminalId, run.hooked);
     if (asTab) lastTab = { terminal, name, column: undefined };
     if (asTab) terminal.show(true);
     const startedAt = Date.now();
     terminal.sendText(line);
-    onSent?.(startedAt, { terminal: terminalId });
-    if (job !== undefined) startJob(job, root, { terminal: terminalId }, run.hooked);
+    onSent?.(startedAt);
+    if (job !== undefined && jobId !== undefined) {
+      const started = startJob(job, root, { terminal: terminalId }, run.hooked, undefined, jobId, jobOrigin, windowId);
+      if (started !== undefined) void broadcastJob(root, {
+        id: started, kind: job, root, place: { terminal: terminalId }, origin: jobOrigin, windowId,
+      }, true);
+    }
     if (announceProposal !== undefined) announceDesignRequest(root, announceProposal, terminalId);
     return "terminal";
   };
-  return agent === "chat" || job !== undefined ? inSendTurn(launch) : launch();
+  const result = await (agent === "chat" || job !== undefined ? inSendTurn(launch) : launch());
+  // A Resolve Drifts or scan the developer starts lifts an automatic hold, but only once its instruction really started.
+  if (jobOrigin === "manual" && (job === "resolve" || job === "scan") && launched(result)) releaseAutopilotHold(root);
+  return result;
 }
 
 /** The editor's state for all projects (`ExtensionContext.globalState`), given at activation. */

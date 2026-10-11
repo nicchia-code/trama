@@ -13,9 +13,12 @@ import {
   listAnnouncements,
   newTerminalId,
   terminalFromEnv,
-  withdrawAll,
   originFromEnv,
+  checkOutcome,
+  forgetCheck,
+  withdrawAll,
 } from "../src/core/announcements";
+import { createQuestionServer, settleCoordinatorMessages } from "../src/core/question-channel";
 import { discardProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { newDrift, resolveDrift } from "../src/core/work";
@@ -225,7 +228,7 @@ describe("ending announcements", () => {
     const all = listAnnouncements(p);
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ id: a.id, kind: "drift", title: "Drift title", proposal: prop.id });
-    expect(buildSnapshot(p).announcements[0]).toMatchObject({ kind: "drift", title: "Draft title", phase: "writing" });
+    expect(buildSnapshot(p).announcements[0]).toMatchObject({ kind: "drift", title: "Drift title", phase: "writing" });
     expect(announcementNote(p, a.id, "drift")).toBeNull();
     submitProposal(p, prop.id);
     expect(listAnnouncements(p)).toHaveLength(1);
@@ -339,7 +342,7 @@ describe("an announcement made by Cursor's chat agent", () => {
 });
 
 describe("a check", () => {
-  test("is announced with its phase, moves only to scanning, and is delivered by done with its file gone", () => {
+  test("is announced with its phase, moves only to scanning, and is delivered by done with its file gone", async () => {
     const id = run(["announce", "check", "Final check of Refunds", "--phase", "verifying"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
     const check = getAnnouncement(p, id);
     expect([check?.kind, check?.phase, check?.source, check?.proposal, check?.terminal]).toEqual(["check", "verifying", "agent", null, "ab12cd"]);
@@ -351,8 +354,70 @@ describe("a check", () => {
     expect(() => run(["announce", "phase", id, "verifying"], dir, {})).toThrow(/only move to scanning/);
 
     expect(run(["announce", "done", id], dir, {}).out).toBe(`Check ${id} is done`);
+    await settleCoordinatorMessages();
     expect(existsSync(join(announcementsDir(p), `${id}.md`))).toBe(false);
   });
+  test("a finished check hands its outcome to the caller with its job, and forgetting it leaves nothing to finish", () => {
+    const id = run(["announce", "check", "Final check after completed Task", "--phase", "verifying", "--job", "run-7"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
+    const touched = getAnnouncement(p, id)!.touched;
+    expect(checkOutcome(p, id, true)).toEqual({ id, title: "Final check after completed Task", phase: "verifying", terminal: "ab12cd", chat: null, job: "run-7", touched, failed: true });
+    forgetCheck(p, id);
+    expect(checkOutcome(p, id)).toBeNull();
+  });
+  test("a check announced in a terminal takes the job from TRAMA_JOB unless --job names another", () => {
+    const fromEnv = run(["announce", "check", "Final check after all Tasks", "--phase", "verifying"], dir, { TRAMA_TERMINAL: "ab12cd", TRAMA_JOB: "run-9" }).out;
+    const explicit = run(["announce", "check", "Final check after all Tasks", "--phase", "verifying", "--job", "run-7"], dir, { TRAMA_TERMINAL: "ab12cd", TRAMA_JOB: "run-9" }).out;
+    expect([getAnnouncement(p, fromEnv)?.job, getAnnouncement(p, explicit)?.job]).toEqual(["run-9", "run-7"]);
+    withdrawAll(p);
+  });
+  test("a failed final check is finished with no success outcome", async () => {
+    const id = run(["announce", "check", "Final check after completed Task", "--phase", "verifying"], dir, {}).out;
+    expect(JSON.parse(run(["--json", "announce", "done", id, "--failed"], dir, {}).out).outcome).toBe("failed");
+    await settleCoordinatorMessages();
+    expect(listAnnouncements(p).map((a) => a.id)).not.toContain(id);
+  });
+  /** Runs `body` while a live editor answers the coordinator messages of the command with `onMessage`. */
+  async function withEditor(onMessage: (message: Record<string, unknown>) => void | Promise<void>, body: () => Promise<void>) {
+    const previousRuntime = process.env.XDG_RUNTIME_DIR;
+    const runtimeRoot = mkdtempSync(join(tmpdir(), "trama-check-phase-"));
+    process.env.XDG_RUNTIME_DIR = runtimeRoot;
+    const server = await createQuestionServer({ project: p, runtimeDir: join(runtimeRoot, `trama-q-${process.getuid!()}`), handler: async () => ({ status: "unavailable", reason: "No project coordinator is available." }), onCoordinatorMessage: onMessage });
+    try {
+      await body();
+    } finally {
+      await server.dispose();
+      if (previousRuntime === undefined) delete process.env.XDG_RUNTIME_DIR;
+      else process.env.XDG_RUNTIME_DIR = previousRuntime;
+      rmSync(runtimeRoot, { recursive: true, force: true });
+    }
+  }
+  test("moving a check to scanning tells the editor its job, and a move that changes nothing tells it nothing", async () => {
+    const received: Record<string, unknown>[] = [];
+    await withEditor((message) => { received.push(message); }, async () => {
+      const id = run(["announce", "check", "Final check after completed Task", "--phase", "verifying", "--job", "run-7"], dir, {}).out;
+      run(["announce", "phase", id, "scanning"], dir, {});
+      await settleCoordinatorMessages();
+      run(["announce", "phase", id, "scanning"], dir, {});
+      await settleCoordinatorMessages();
+      expect(received).toHaveLength(1);
+      expect(received[0]).toEqual(expect.objectContaining({ type: "check-phase", id, phase: "scanning", job: "run-7" }));
+    });
+  });
+  test("the ghost of a finished check goes only after the editor has heard of its outcome", async () => {
+    const received: Record<string, unknown>[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    await withEditor(async (message) => { received.push(message); await gate; }, async () => {
+      const id = run(["announce", "check", "Final check after all Tasks", "--phase", "verifying"], dir, {}).out;
+      expect(run(["announce", "done", id], dir, {}).exit).toBe(0);
+      expect(existsSync(join(announcementsDir(p), `${id}.md`))).toBe(true);
+      release();
+      await settleCoordinatorMessages();
+      expect(received).toEqual([expect.objectContaining({ type: "check", id, failed: false })]);
+      expect(existsSync(join(announcementsDir(p), `${id}.md`))).toBe(false);
+    });
+  });
+
 
   test("needs --phase, which no other kind takes", () => {
     expect(() => run(["announce", "check", "Scan of the System"], dir, {})).toThrow(/needs --phase/);

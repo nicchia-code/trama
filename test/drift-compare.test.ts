@@ -6,6 +6,7 @@ const drift = (over: Partial<DriftView> = {}): DriftView => ({
   id: "0003",
   title: "Code refunds late",
   body: "",
+  critical: false,
   sides: { happens: "Refunds go through after pickup.", should: "No refund after pickup.", where: "`src/refund.ts`" },
   options: [{ title: "Refuse the refund", text: "x" }],
   option: null,

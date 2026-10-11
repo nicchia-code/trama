@@ -149,6 +149,12 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       if (driftName !== null) kind.append(idTag(driftName, "dg-id"));
       head.append(kind);
       head.append(el("h2", "", detail.title));
+      if (detail.drift?.critical) {
+        const critical = el("span", "dg-badge dg-critical", "Critical");
+        critical.title = "Urgent developer decision";
+        critical.setAttribute("aria-label", "Critical Drift: urgent developer decision");
+        head.append(critical);
+      }
       if (detail.change !== "same") head.append(el("div", `dg-badge change-${detail.change}`, CHANGE_TEXT[detail.change]));
       root.append(head);
       if (detail.drift) root.append(renderDriftCompare(detail.drift, { openLink: actions.openLink }));

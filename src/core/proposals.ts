@@ -7,7 +7,7 @@ import { TramaError } from "./errors";
 import { formatDiagnostic } from "./model";
 import { buildProject, largeFragmentMessage, largeFragments, REQUIREMENT_SKILLS_BUDGET } from "./requirements";
 import { requirementSkillMode, syncRequirementSkills } from "./requirement-skills";
-import { canonicalCardId, createdField, enumField, idField, positiveIntOrNull, type Raw, stringList, stringMap, textOrNull } from "./schema";
+import { boolField, canonicalCardId, createdField, enumField, idField, positiveIntOrNull, type Raw, stringList, stringMap, textOrNull } from "./schema";
 import {
   compareByCreation,
   createdNow,
@@ -58,6 +58,8 @@ const DECISIONS: readonly DriftDecisionKind[] = ["proposal", "dismissed", "fix-c
 interface ProposalData {
   status: ProposalStatus;
   kind: ProposalKind;
+  /** Automatic authorization marker; not itself permission to approve. */
+  automatic: boolean;
   /** The Drifts a resolution resolves, in the order they were registered; always empty for other kinds. */
   drifts: DriftDecision[];
   /** IDs of Proposals that must be approved before this one; it is written and validated on top of them. */
@@ -91,6 +93,7 @@ function parseData(raw: Raw, where: string): ProposalData {
   const data: ProposalData = {
     status: enumField(raw, "status", STATUSES, "open", where),
     kind: enumField(raw, "kind", KINDS, "change", where),
+    automatic: boolField(raw, "automatic", false, where),
     drifts: [],
     requires: stringList(raw, "requires", where),
     base: stringMap(raw, "base", where),
@@ -99,6 +102,7 @@ function parseData(raw: Raw, where: string): ProposalData {
     created: createdField(raw, where),
     scanScope: scanScopeField(raw, where),
   };
+  if (data.automatic && data.kind !== "resolution") throw new TramaError(`${where}: "automatic" is only valid for a resolution Proposal`);
   data.drifts = driftsField(raw, data.kind, where);
   for (const id of data.requires)
     if (!/^[a-z0-9]{8}$/.test(id) && !/^\d+$/.test(id)) throw new TramaError(`${where}: "requires" lists Proposal IDs, not "${id}"`);
@@ -147,12 +151,13 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
 
 /** Writes `proposal.md` from the Proposal's data, leaving defaults out of the file. */
 export function save(proposal: Proposal) {
-  const { kind, drifts, requires, request, created, scanScope, ...rest } = proposal.data;
+  const { kind, automatic, drifts, requires, request, created, scanScope, ...rest } = proposal.data;
   // Defaults stay out of the file, so Proposals without dependencies look as they always did.
   // Numbered Proposals have no `created`; writing it would pretend they remember an instant they do not.
   const data = {
     status: rest.status,
     ...(kind === "change" ? {} : { kind }),
+    ...(automatic ? { automatic: true } : {}),
     ...(kind === "resolution" ? { drifts } : {}),
     ...(requires.length === 0 ? {} : { requires }),
     base: rest.base,
@@ -180,21 +185,14 @@ export function getProposal(p: Project, id: string, asArgument = false): Proposa
   return load(p, findCard(proposalsDir(p), cited ?? id, "Proposal", "folder", asArgument && cited === null));
 }
 
-/**
- * The request a new Proposal binds to: the request when it exists and no other Proposal is bound to it yet, else
- * null. Only the first Proposal opened for a request is bound to it; the ones after it are created unbound.
- */
-function requestToBind(p: Project, request: string | undefined): string | null {
-  if (request === undefined || !requestExists(p, request)) return null;
-  return listProposals(p).some((x) => x.data.request === request) ? null : request;
-}
-
 export function newProposal(
   p: Project,
   title: string,
   body = "",
-  options: { requires?: string[]; kind?: ProposalKind; announcement?: string; origin?: AgentOrigin; request?: string } = {},
+  options: { requires?: string[]; kind?: ProposalKind; automatic?: boolean; announcement?: string; origin?: AgentOrigin; request?: string } = {},
 ): Proposal {
+  if (options.automatic && (options.kind ?? "change") !== "resolution")
+    throw new TramaError("--automatic can only be used with --resolution");
   const requires = (options.requires ?? []).map((r) => {
     const required = getProposal(p, r);
     if (required.data.status === "rejected" || required.data.status === "discarded")
@@ -211,11 +209,12 @@ export function newProposal(
     data: {
       status: "draft",
       kind: options.kind ?? "change",
+      automatic: options.automatic ?? false,
       drifts: [],
       requires: [...new Set(requires)],
       base: {},
       delete: [],
-      // Only the first Proposal opened for a request is bound to it; a request that does not exist binds nothing.
+      // Only the first Proposal opened for a request binds it; a request that does not exist binds nothing.
       request: requestToBind(p, options.request),
       created: createdNow(),
       scanScope: null,
@@ -226,6 +225,11 @@ export function newProposal(
   bindDraft(p, proposal, options.announcement, options.origin);
   return proposal;
 }
+function requestToBind(p: Project, request: string | undefined): string | null {
+  if (request === undefined || !requestExists(p, request)) return null;
+  return listProposals(p).some((x) => x.data.request === request) ? null : request;
+}
+
 
 /**
  * Every Proposal this one requires, directly or through others, that is not approved yet, in the order they
@@ -384,9 +388,18 @@ export function applied(p: Project, proposal: Proposal): FileMap {
   return files;
 }
 
-/** Validation of the Model and its Requirements with the Proposal applied: a Requirement left pointing at a removed State is an error. */
 export function validateProposal(p: Project, proposal: Proposal): Diagnostic[] {
-  return buildProject(applied(p, proposal)).diagnostics;
+  const errors = buildProject(applied(p, proposal)).diagnostics;
+  if (!proposal.data.automatic) return errors;
+  const problems = [
+    ...(Object.keys(proposal.data.base).length > 0 || proposal.data.delete.length > 0 || newFiles(proposal).size > 0 ? ["an automatic resolution cannot touch or delete Model or Requirements files"] : []),
+    ...proposal.data.drifts.flatMap((d) => [
+      ...(d.decision !== "fix-code" ? [`Drift ${d.drift} must use fix-code`] : []),
+      ...(d.option !== 1 ? [`Drift ${d.drift} must use fix option 1`] : []),
+      ...(d.note !== undefined ? [`Drift ${d.drift} cannot have a note`] : []),
+    ]),
+  ];
+  return [...errors, ...problems.map((message) => ({ file: "proposal.md", line: 0, message }))];
 }
 
 /**

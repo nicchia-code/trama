@@ -15,7 +15,7 @@ import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 /** One-line summary of a Proposal for lists and the board. `number` is its short number (`P3`) while it is live, otherwise null. */
 export function proposalSummary(p: Project, proposal: Proposal, numbers: ShortNumbers) {
   const h = proposal.data.status === "draft" || proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
-  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, stale: h.stale.length > 0, requires: h.requires.map((r) => r.id), attachedTo: attachedDrift(p, proposal.id)?.id ?? null, resolves: proposal.data.kind === "resolution" ? proposal.data.drifts.length : null };
+  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, automatic: proposal.data.automatic, stale: h.stale.length > 0, requires: h.requires.map((r) => r.id), attachedTo: attachedDrift(p, proposal.id)?.id ?? null, resolves: proposal.data.kind === "resolution" ? proposal.data.drifts.length : null };
 }
 
 const resolvesMark = (n: number | null) => (n === null ? "" : ` (resolves ${n} Drift${n === 1 ? "" : "s"})`);
@@ -26,7 +26,7 @@ export function proposalListView(p: Project, all: boolean): Result {
     .filter((x) => all || x.data.status === "draft" || x.data.status === "open")
     .map((x) => proposalSummary(p, x, numbers));
   const flags = (i: (typeof items)[number]) =>
-    [i.status, i.kind === "change" ? "" : i.kind, i.stale ? "stale" : "", i.requires.length > 0 ? `requires ${i.requires.map((r) => numbers.name("proposal", r)).join(", ")}` : ""].filter(Boolean).join(", ");
+    [i.status, i.kind === "change" ? "" : i.kind, i.automatic ? "automatic" : "", i.stale ? "stale" : "", i.requires.length > 0 ? `requires ${i.requires.map((r) => numbers.name("proposal", r)).join(", ")}` : ""].filter(Boolean).join(", ");
   const md = bullets(
     items.map((i) => `- ${numbers.name("proposal", i.id)} [${flags(i)}] ${i.title}${i.status === "draft" ? " (draft)" : ""}${resolvesMark(i.resolves)}${i.attachedTo ? ` (attached to ${numbers.name("drift", i.attachedTo)})` : ""}`),
     "_No Proposals._",
@@ -57,7 +57,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
   const md = [
     proposal.body.trim(),
     "",
-    `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}${proposal.data.kind === "change" ? "" : ` · ${proposal.data.kind}`}`,
+    `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}${proposal.data.kind === "change" ? "" : ` · ${proposal.data.kind}`}${proposal.data.automatic ? " · automatic" : ""}`,
     attached ? `Attached to Drift ${numbers.name("drift", attached.id)} ${attached.title}` : "",
     proposal.data.status === "draft" ? "Still being written; submit when finished. The developer cannot approve or reject it yet." : "",
     proposal.data.requires.length > 0 ? `Requires: ${proposal.data.requires.map((r) => numbers.name("proposal", r)).join(", ")}. Changes and validation below are on top of them.` : "",
@@ -87,6 +87,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
       title: proposal.title,
       status: proposal.data.status,
       kind: proposal.data.kind,
+      automatic: proposal.data.automatic,
       drifts: proposal.data.drifts,
       ...(proposal.data.kind === "resolution" ? { resolvesDrifts: resolvedDrifts } : {}),
       requires: proposal.data.requires,
@@ -126,7 +127,7 @@ const blockedMarks = (blockers: Blocker[], numbers: ShortNumbers) =>
   blockers.map((b) => (b.kind === "drift" ? ` (blocked by Drift ${numbers.name("drift", b.drift)})` : ` (waiting for Task ${numbers.name("task", b.task)})`)).join("");
 
 const taskSummary = (t: Task, blocked: Map<string, Blocker[]>, numbers: ShortNumbers): TaskSummary => ({ id: t.id, number: numbers.label("task", t.id), title: t.title, column: t.data.column, technical: t.data.technical, refs: t.data.refs, drift: t.data.drift, proposal: t.data.proposal, agent: t.data.agent, blockedBy: blocked.get(t.id) ?? [] });
-const driftSummary = (d: Drift, numbers: ShortNumbers) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin });
+const driftSummary = (d: Drift, numbers: ShortNumbers) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, critical: d.data.critical, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin });
 
 /** The current text of a Model element or Requirement, for inlining into a Task or Drift. */
 export function describeRef(project: ProjectModel, ref: string, full = false): string {
@@ -263,8 +264,8 @@ export function taskListView(p: Project, column?: string): Result {
  * The next runnable Task, or with `batch` the group of a parallel run, one Task per line; or the statement that
  * there is none with the Tasks in To do that wait, the same either way. Moves nothing.
  */
-export function taskNextView(p: Project, proposal?: string, batch = false, max?: number): Result {
-  const queue = nextTask(p, proposal, max);
+export function taskNextView(p: Project, proposal?: string, batch = false, max?: number, taskIds?: string[]): Result {
+  const queue = nextTask(p, proposal, max, taskIds);
   const { next, waiting } = queue;
   const blocked = new Map(waiting.map((w) => [w.task.id, w.blockers]));
   const numbers = syncShortNumbers(p);
@@ -316,7 +317,7 @@ export function driftShowView(p: Project, drift: Drift): Result {
     : drift.data.resolvedBy ? `Resolved by Proposal ${numbers.name("proposal", drift.data.resolvedBy)}` : "";
   const resolutionJson = { inResolutionProposal: holding ? { id: holding.id, number: numbers.label("proposal", holding.id), title: holding.title } : null, resolvedBy: drift.data.resolvedBy };
   const md = [
-    `# ${drift.title}`,
+    `# ${drift.title}${drift.data.critical ? " [CRITICAL: urgent developer decision]" : ""}`,
     "",
     ...description,
     ...decision,
@@ -337,7 +338,7 @@ export function driftListView(p: Project, all: boolean): Result {
   const numbers = syncShortNumbers(p);
   const drifts = listDrifts(p).filter((d) => all || d.data.status === "open");
   const md = bullets(
-    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}] ${d.title}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
+    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}]${d.data.critical ? " [CRITICAL: urgent developer decision]" : ""} ${d.title}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
     "_No Drifts._",
   );
   return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map((d) => driftSummary(d, numbers)) } };
@@ -380,7 +381,7 @@ export function boardView(p: Project): Result {
       ...drifts.map((d) => {
         const att = d.proposal ? allProposals.find((x) => x.id === d.proposal) : undefined;
         const nested = att ? `\n  - Proposal ${numbers.label("proposal", att.id) ?? att.id}${att.data.status === "draft" ? " (draft)" : ""}: ${att.title}` : "";
-        return `- Drift ${d.number ?? d.id}: ${d.title}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
+        return `- Drift ${d.number ?? d.id}${d.critical ? " [CRITICAL: urgent developer decision]" : ""}: ${d.title}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
       }),
     ]),
     "",

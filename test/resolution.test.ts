@@ -4,7 +4,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approvalBlock, approveProposal, deleteInProposal, driftListProblems, getProposal, newProposal, rejectProposal, save, submitProposal } from "../src/core/proposals";
-import { awaitingResolution, resolveDriftInProposal, resolveDriftsBlocker } from "../src/core/resolution";
+import { awaitingResolution, resolveDriftInProposal, resolveDriftsBlocker, runWindowBlocker } from "../src/core/resolution";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
 import { getDrift, getTask, moveTask, newDrift, newTask, resolveDrift } from "../src/core/work";
@@ -214,6 +214,16 @@ describe("resolveDriftsBlocker", () => {
   });
 });
 
+describe("runWindowBlocker", () => {
+  test("disables Runs while Drifts are being resolved, and during a run unless submitting while running is enabled", () => {
+    expect(runWindowBlocker("free", false)).toBeNull();
+    expect(runWindowBlocker("running-tasks", false)).toBe("A run is in progress");
+    expect(runWindowBlocker("running-tasks", true)).toBeNull();
+    expect(runWindowBlocker("resolving", false)).toBe("Drifts are being resolved");
+    expect(runWindowBlocker("resolving", true)).toBe("Drifts are being resolved");
+  });
+});
+
 describe("the Board's picture of a resolution", () => {
   test("lists its Drifts in creation order with the decision, follows changes of decision and of the Drifts, and is empty for other Proposals", () => {
     const [a, b, c] = [drift("A"), drift("B"), drift("C")] as const;
@@ -227,9 +237,9 @@ describe("the Board's picture of a resolution", () => {
     const view = () => buildSnapshot(p).proposals;
     const mine = () => view().find((x) => x.id === r.id)?.resolves;
     expect(mine()).toEqual([
-      { drift: a.id, title: "A", decision: "Code fixed with option Remove the code", note: "soon" },
-      { drift: b.id, title: "B", decision: "Model updated to match the code", note: null },
-      { drift: c.id, title: "C", decision: "Closed, nothing changes", note: null },
+      { drift: a.id, title: "A", critical: false, decision: "Code fixed with option Remove the code", note: "soon" },
+      { drift: b.id, title: "B", critical: false, decision: "Model updated to match the code", note: null },
+      { drift: c.id, title: "C", critical: false, decision: "Closed, nothing changes", note: null },
     ]);
     expect(view().find((x) => x.id === plain.id)?.resolves).toEqual([]);
     resolveDriftInProposal(p, r.id, b.id, { decision: "dismissed" });

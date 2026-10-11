@@ -29,6 +29,7 @@ interface FakeTerminal {
 interface ShellEvent {
   terminal: FakeTerminal;
   execution: { commandLine: { value: string } };
+  exitCode?: number;
 }
 /** A tab the editor opened: a terminal tab with its label and the column of its group. */
 interface TabChange {
@@ -37,7 +38,7 @@ interface TabChange {
 const listeners: { start: Listener<ShellEvent>[]; end: Listener<ShellEvent>[]; close: Listener<FakeTerminal>[]; tabs: Listener<TabChange>[] } = { start: [], end: [], close: [], tabs: [] };
 class TabInputTerminal {}
 /** What the editor reports about a command in `terminal`: by default the line Trama typed into it. */
-const shell = (terminal: FakeTerminal, commandLine = terminal.line): ShellEvent => ({ terminal, execution: { commandLine: { value: commandLine } } });
+const shell = (terminal: FakeTerminal, commandLine = terminal.line, exitCode?: number): ShellEvent => ({ terminal, execution: { commandLine: { value: commandLine } }, exitCode });
 const subscribe = <T>(list: Listener<T>[]) => (fn: Listener<T>) => {
   list.push(fn);
   return { dispose() {} };
@@ -173,7 +174,7 @@ mock.module("vscode", () => ({
   ConfigurationTarget: { Global: 1 },
   extensions: { getExtension: () => extensionPath === "" ? undefined : { extensionPath } },
 }));
-mock.module("../extension/src/host/questions", () => ({ questionEndpoint: () => questionEndpoint(), EditorQuestions: class {} }));
+mock.module("../extension/src/host/questions", () => ({ questionEndpoint: () => questionEndpoint(), questionWindowId: async () => "window-id", EditorQuestions: class {} }));
 
 let dir: string;
 beforeAll(() => {
@@ -345,6 +346,17 @@ describe("the identity of an agent terminal", () => {
     withdrawAll(p);
   });
 
+  test("a terminal launch reports the instant its command was sent", async () => {
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    watchAgentTerminal();
+    const sent: number[] = [];
+    const before = Date.now();
+    await launchAgent(dir, "Scan of the System", "Scan", undefined, false, () => true, "scan", (startedAt) => sent.push(startedAt));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toBeGreaterThanOrEqual(before);
+    expect(sent[0]).toBeLessThanOrEqual(Date.now());
+  });
+
   test("an ended terminal is not reused even when the next instruction has the same name", async () => {
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     watchAgentTerminal();
@@ -479,11 +491,14 @@ describe("automatic terminal exit", () => {
       listeners.end.forEach((listener) => listener(shell(nextTerminal)));
       expect(nextTerminal.disposals).toBe(0);
       expect(driftResolution()).toBe("free");
+      announce(p, { kind: "task", title: "Resumed ghost", terminal: id });
       receiveAgentIdle(id, dir);
       listeners.end.forEach((listener) => listener(shell(terminal)));
       listeners.close.forEach((listener) => listener(terminal));
       expect(terminal.disposals).toBe(0);
       expect(driftResolution()).toBe("free");
+      expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Resumed ghost"]);
+      withdrawAll(p);
     } finally {
       watching.dispose();
       delete settingValues.autoExit;
@@ -575,7 +590,7 @@ describe("the agent terminal as an editor tab", () => {
     tabGroups.columns = [1, 2, 3];
     try {
       await launchAgent(dir, instruction, "Scan");
-      expect(created.at(-1)).toMatchObject({ name: "Scan", cwd: dir, env: { TRAMA_AGENT: "1" }, location: { viewColumn: -2, preserveFocus: true } });
+      expect(created.at(-1)).toMatchObject({ name: "Scan", cwd: dir, env: { TRAMA_AGENT: "1", TRAMA_QUESTION_ENDPOINT: "endpoint", TRAMA_TERMINAL: expect.stringMatching(/^[a-z0-9]{6}$/) }, location: { viewColumn: -2, preserveFocus: true } });
       expect(terminals.at(-1)?.shown).toEqual([true]);
       // Not the agent's tab: another label, or not a terminal. Then the agent's tab, then a later one with its label.
       opened("Scan", 3, {});
@@ -1264,6 +1279,41 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     }
   });
 
+  test("a Run whose command exits with a failure or unknown status, or whose terminal closes, records an abnormal end with its reason; a clean exit records none", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { activeProjectJobs, jobAbnormalEnd } = await import("../extension/src/host/drift-resolution");
+    const watching = watchAgentTerminal();
+    try {
+      const startRun = async (name: string) => {
+        await launchAgent(dir, `Run ${name}`, name, undefined, false, () => true, "run");
+        const terminal = terminals.at(-1) as FakeTerminal;
+        listeners.start.forEach((fn) => fn(shell(terminal)));
+        const job = activeProjectJobs(dir).at(-1);
+        expect(job).toBeDefined();
+        return { terminal, id: job?.id ?? "" };
+      };
+
+      const failed = await startRun("failed");
+      listeners.end.forEach((fn) => fn(shell(failed.terminal, failed.terminal.line, 1)));
+      expect(jobAbnormalEnd(dir, failed.id)).toBe("its command exited with code 1");
+
+      const unknown = await startRun("unknown");
+      listeners.end.forEach((fn) => fn(shell(unknown.terminal)));
+      expect(jobAbnormalEnd(dir, unknown.id)).toBe("its command ended without an exit status");
+
+      const clean = await startRun("clean");
+      listeners.end.forEach((fn) => fn(shell(clean.terminal, clean.terminal.line, 0)));
+      expect(jobAbnormalEnd(dir, clean.id)).toBeUndefined();
+
+      const closed = await startRun("closed");
+      listeners.close.forEach((fn) => fn(closed.terminal));
+      expect(jobAbnormalEnd(dir, closed.id)).toBe("its terminal was closed");
+    } finally {
+      watching.dispose();
+    }
+  });
+
   test("Resolve Drifts and the Runs are checked again when the instruction is sent: a double click or a Run started meanwhile sends nothing, and the Drifts are those open at that moment", async () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
@@ -1330,6 +1380,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
     let releaseNewChat!: () => void;
+    const newChatStarted = Promise.withResolvers<void>();
     const preparing = new Promise<void>((resolve) => { releaseNewChat = resolve; });
     let chat: Promise<unknown> | undefined;
     let run: Promise<unknown> | undefined;
@@ -1338,12 +1389,15 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     settingValues.agent = "chat";
     editor.appName = "Visual Studio Code";
     commandHandler = async (id) => {
-      if (id === "workbench.action.chat.newChat") await preparing;
+      if (id === "workbench.action.chat.newChat") {
+        newChatStarted.resolve();
+        await preparing;
+      }
     };
     editorCalls.length = 0;
     try {
       chat = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, false, () => true, "resolve");
-      await Promise.resolve();
+      await newChatStarted.promise;
       expect(editorCalls).toContain("workbench.action.chat.newChat");
 
       settingValues.agent = "omp";
@@ -1674,6 +1728,42 @@ test("Copilot chat releases only originless Tasks at each recognized turn end", 
     watching.dispose();
   }
 });
+test("successful automatic terminal scans do not offer Scan now in panel or editor tabs", async () => {
+  // Load after mock.module replaces vscode so the controller uses the terminal test harness.
+  const { Controller } = await import("../extension/src/host/controller");
+  const root = mkdtempSync(join(tmpdir(), "trama-approved-terminal-scan-"));
+  cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+  const project = projectAt(root);
+  const proposal = newProposal(project, "Terminal scan");
+  const file = editInProposal(project, proposal.id, "checkout/order.md");
+  writeFileSync(file, readFileSync(file, "utf8").replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
+  handOver(project, proposal.id);
+  approveProposal(project, proposal.id);
+  const previousAgent = settingValues.agent;
+  const previousLocation = settingValues.terminalLocation;
+  const previousRoot = workspaceRoot;
+  const controller = new Controller({ scheme: "file" } as never);
+  try {
+    workspaceRoot = root;
+    for (const agent of ["omp", "claude"]) {
+      for (const location of ["panel", "editor"]) {
+        settingValues.agent = agent;
+        settingValues.terminalLocation = location;
+        informationMessages.length = 0;
+        const before = typed.length;
+        await controller.scanApproved(project, proposal.id);
+        expect(typed.length).toBe(before + 1);
+        expect(informationMessages.some((args) => args.includes("Scan now"))).toBe(false);
+      }
+    }
+  } finally {
+    settingValues.agent = previousAgent;
+    settingValues.terminalLocation = previousLocation;
+    workspaceRoot = previousRoot;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("an approval scan fallback offers Scan now; dismissing does not launch and choosing it reuses the targeted scan", async () => {
   // Load after mock.module has replaced vscode for this test harness.
   const { Controller } = await import("../extension/src/host/controller");
@@ -1717,7 +1807,7 @@ test("an approval scan fallback offers Scan now; dismissing does not launch and 
     answerOffer[nextNotice]?.("Scan now");
     await manualScan.promise;
     expect(clipboard).toHaveLength(3);
-    expect(clipboard[0]).toBe(clipboard[2]);
+    expect(clipboard[1]).toBe(clipboard[2]);
   } finally {
     settingValues["agent"] = previousAgent;
     editor.appName = previousApp;

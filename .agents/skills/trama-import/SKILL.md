@@ -18,7 +18,7 @@ Once you have planned the Model (step 4), announce every Proposal you will write
 ## Hard rules
 
 - NEVER edit code, `.trama/model/` or `.trama/requirements/` directly. Everything goes through Proposals opened with `--import`.
-- NEVER run `trama proposal approve`, `trama proposal reject`, `trama proposal discard` or `trama drift resolve`.
+- Agenti possono approvare o rifiutare una Proposal, scartare una Draft o risolvere un Drift solo se il developer chiede esplicitamente quella decisione nella conversazione. Senza la richiesta, fermati e chiedi al developer di decidere. La richiesta di importare o progettare non autorizza da sola a prendere queste decisioni.
 - **The code wins.** Model what the code does. Where the documentation (README, `docs/`, comments, API descriptions) says something else, model the code and record the difference as a doubt. Where the code looks buggy or misses a case, model it as it is and record a doubt.
 - **Never change what is already modelled.** If the Model already has Machines, do not edit their files. You may add new Features, Machines, Actors, Events of existing Actors and Requirement sections. If the code contradicts an existing Machine, do not fix it: list it in your report and suggest a Scan of that Feature.
 - The Model has no code words: no variable, field, function, class, table, endpoint or file names in States, Transitions or Events. Write conditions and consequences in domain words. Code locations belong only in the doubts.
@@ -74,3 +74,7 @@ Run **`trama ask --root <project>`** with the JSON request on stdin, for every r
 - **No question tool:** write the round as a numbered list, each question with options `a)`, `b)`, … and a line `➡️ <your recommendation and why>`, and end the message there.
 
 If the developer said not to ask, use your recommendations and list them in the report.
+
+## Autopilot boundary
+
+Import describes existing code and only creates import Proposals; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.driftAutoPilot` is active, the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.

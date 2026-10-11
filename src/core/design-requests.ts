@@ -73,19 +73,38 @@ export function isEmptyRequest(text: string): boolean {
  */
 export function requestTitle(text: string): string {
   const lines = text.split(/\r?\n/);
-  let fence: { char: string; length: number } | null = null;
+  let fence: { char: string; length: number; containers: string[] } | null = null;
   for (const line of lines) {
     let content = line;
-    while (/^ {0,3}>[ \t]?/.test(content) || /^ {0,3}(?:[-+*]|\d+[.)])[ \t]+/.test(content)) {
-      content = content.replace(/^ {0,3}>[ \t]?/, "").replace(/^ {0,3}(?:[-+*]|\d+[.)])[ \t]+/, "");
+    const containers: string[] = [];
+    while (true) {
+      const quote = /^ {0,3}>[ \t]?/.exec(content);
+      if (quote) {
+        containers.push(">");
+        content = content.slice(quote[0].length);
+        continue;
+      }
+      const list = /^ {0,3}([-+*]|\d+[.)])[ \t]+/.exec(content);
+      if (list) {
+        containers.push(list[1]!);
+        content = content.slice(list[0].length);
+        continue;
+      }
+      break;
     }
+    const scope = containers.filter((container) => container === ">");
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(content)?.[1];
     if (fence) {
-      if (marker && marker[0] === fence.char && marker.length >= fence.length && content.trim() === marker) fence = null;
-      continue;
+      if (scope.length < fence.containers.length ||
+          fence.containers.some((container, index) => scope[index] !== container)) {
+        fence = null;
+      } else {
+        if (marker && marker[0] === fence.char && marker.length >= fence.length && content.trim() === marker) fence = null;
+        continue;
+      }
     }
     if (marker) {
-      fence = { char: marker[0] as string, length: marker.length };
+      fence = { char: marker[0] as string, length: marker.length, containers: scope };
       continue;
     }
     const heading = /^ {0,3}#(?:[ \t]+(.*))?$/.exec(content);

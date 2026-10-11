@@ -74,3 +74,7 @@ Run **`trama ask --root <project>`** with the JSON request on stdin, for every r
 - **No question tool:** write the round as a numbered list, each question with options `a)`, `b)`, … and a line `➡️ <your recommendation and why>`, and end the message there.
 
 If the developer said not to ask, use your recommendations and list them in the report.
+
+## Autopilot boundary
+
+Import describes existing code and only creates import Proposals; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.driftAutoPilot` is active, the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.

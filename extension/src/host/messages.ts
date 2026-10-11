@@ -75,6 +75,10 @@ export function parseToHost(value: unknown): Parsed {
     case "openModelFile":
     case "openFile":
       return typeof raw["path"] === "string" && raw["path"] !== "" ? { ok: true, message: { type, path: raw["path"] } } : bad(`${type} needs a path`);
+    case "openCard":
+      return (raw["kind"] === "drift" || raw["kind"] === "task") && id !== undefined
+        ? { ok: true, message: { type, kind: raw["kind"], id } }
+        : bad("openCard needs a Drift or Task identity");
     case "approveProposal":
     case "rejectProposal":
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
 import { handOver } from "./handover";
-import { approveProposal, discardProposal, editInProposal, getProposal, health, newProposal, rejectProposal } from "../src/core/proposals";
+import { approveProposal, discardProposal, editInProposal, getProposal, health, newProposal, rejectProposal, submitProposal, validateProposal } from "../src/core/proposals";
 import { loadModel, type Project, projectAt } from "../src/core/store";
 import { type CardKind, syncShortNumbers } from "../src/core/short-numbers";
 import { type Drift, driftOptions, driftSides, getDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask, releaseTasks, resolveDrift, takeBackTask } from "../src/core/work";
@@ -428,8 +428,23 @@ describe("Tasks and Drifts", () => {
     expect(() => cli("task", "next", "--batch", "--max", "abc")).toThrow(/--max must be a positive integer/);
     expect(listTasks(p).every((t) => t.data.column === "todo" && !t.data.agent)).toBe(true);
 
+
     for (const id of [paid, order, payment]) moveTask(p, id, "done", "developer");
     expect(cli("task", "next", "--batch", "--proposal", prop.id).out).toBe(cli("task", "next", "--proposal", prop.id).out);
+  });
+  test("task next filters, de-duplicates and validates identities while preserving proposal and blocker scope", () => {
+    const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
+    const prop = newProposal(p, "Filtered");
+    const first = newTask(p, { title: "First", refs: ["order"], technical: false, proposal: prop.id }).id;
+    const blocked = newTask(p, { title: "Blocked", refs: ["payment"], technical: false, proposal: prop.id }).id;
+    const outside = newTask(p, { title: "Outside", refs: ["cart"], technical: false }).id;
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Block", refs: ["payment"], origin: blocked, happens: "A.", should: "B." });
+
+    expect(cli("task", "next", "--task", first, "--task", first, "--batch").out).toBe(`${named("task", first)} First`);
+    expect(cli("task", "next", "--task", first, "--task", outside, "--proposal", prop.id).out).toBe(`Next Task in Proposal ${named("proposal", prop.id)}: ${named("task", first)} First`);
+    expect(cli("task", "next", "--task", blocked, "--batch").out).toContain(`(blocked by Drift ${named("drift", drift.id)})`);
+    expect(() => cli("task", "next", "--task", "not-a-task")).toThrow(/No Task with ID/);
+    expect(listTasks(p).every((t) => t.data.column === "todo" && !t.data.agent)).toBe(true);
   });
 
   test("the command line takes the Task only inside the terminal Trama started or Cursor's chat", async () => {
@@ -590,18 +605,32 @@ describe("Tasks and Drifts", () => {
     const task = newTask(p, { title: "Cancel flow", refs: ["order"], technical: false });
     expect(() => newDrift(p, { options: FIX_OPTIONS, title: "x", refs: ["order"], origin: "42", happens: "The code does it one way.", should: "The Model says another." })).toThrow(/No Task/);
     const viaCore = newDrift(p, { options: FIX_OPTIONS, title: "Core", refs: ["order"], origin: task.id, happens: "The code does it one way.", should: "The Model says another." });
-    expect(getDrift(p, viaCore.id).data.origin).toBe(task.id);
 
     const viaCli = run(["--root", dir, "drift", "new", "Cli", "--ref", "order", "--task", task.id, "--happens", "Code does it.", "--should", "Model says so.", ...CLI_OPTIONS], process.cwd());
     const cliId = /Created Drift (D\d+)/.exec(viaCli.out)?.[1] ?? "";
     expect(getDrift(p, cliId, true).data.origin).toBe(task.id);
-
+    expect(getDrift(p, viaCore.id).data.origin).toBe(task.id);
     expect(() => run(["--root", dir, "drift", "new", "Missing", "--ref", "order", "--task", "42", "--happens", "Code does it.", "--should", "Model says so.", ...CLI_OPTIONS], process.cwd())).toThrow(/No Task/);
 
     const scanned = newDrift(p, { options: FIX_OPTIONS, title: "From a scan", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
     expect(getDrift(p, scanned.id).data.origin).toBeNull();
     writeFileSync(scanned.path, readFileSync(scanned.path, "utf8").replace(/^origin:.*\n/m, ""));
     expect(getDrift(p, scanned.id).data.origin).toBeNull();
+  });
+  test("records, lists, and shows critical Drifts explicitly", () => {
+    const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd());
+    const critical = cli("--json", "drift", "new", "Urgent", "--ref", "order", "--happens", "Code differs.", "--should", "Model says so.", "--critical", ...CLI_OPTIONS);
+    const criticalId = JSON.parse(critical.out).id as string;
+    expect(getDrift(p, criticalId).data.critical).toBe(true);
+    expect(readFileSync(getDrift(p, criticalId).path, "utf8")).toContain("critical: true");
+    const ordinary = cli("--json", "drift", "new", "Ordinary", "--ref", "order", "--happens", "Code differs.", "--should", "Model says so.", ...CLI_OPTIONS);
+    const ordinaryId = JSON.parse(ordinary.out).id as string;
+    expect(readFileSync(getDrift(p, ordinaryId).path, "utf8")).toContain("critical: false");
+    expect(cli("--json", "drift", "show", criticalId).out).toContain('"critical": true');
+    expect(cli("drift", "show", criticalId).out).toContain("CRITICAL: urgent developer decision");
+    expect(cli("drift", "show", ordinaryId).out).not.toContain("CRITICAL");
+    expect(cli("drift", "list").out).toContain("CRITICAL: urgent developer decision");
+    expect(cli("board").out).toContain("CRITICAL: urgent developer decision");
   });
 
   test("a Drift may say where in the code it was seen: kept as a third section, carried by the fix Task, shown by drift show", async () => {
@@ -718,6 +747,54 @@ describe("Tasks and Drifts", () => {
     const plain = newProposal(p, "Plain");
     expect(out("proposal", "show", plain.id)).not.toContain("Resolves Drifts");
     expect(out("proposal", "list")).not.toMatch(/Plain.*resolves/);
+  });
+  test("automatic resolution Proposals persist their marker and accept only the delegated first code fix", () => {
+    expect(() => run(["--root", dir, "proposal", "new", "Not a resolution", "--automatic"], process.cwd())).toThrow(/--automatic can only be used with --resolution/);
+    const created = run(["--root", dir, "--json", "proposal", "new", "Automatic fix", "--resolution", "--automatic"], process.cwd());
+    const id = JSON.parse(created.out).id as string;
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Repair", refs: ["order"], happens: "Code differs.", should: "Code follows the Model." });
+    run(["--root", dir, "proposal", "resolve-drift", id, drift.id, "--decision", "fix-code", "--option", "1"], process.cwd());
+
+    let proposal = getProposal(p, id);
+    expect(proposal.data).toMatchObject({ kind: "resolution", automatic: true, drifts: [{ drift: drift.id, decision: "fix-code", option: 1 }] });
+    expect(readFileSync(join(proposal.dir, "proposal.md"), "utf8")).toContain("automatic: true");
+    expect(submitProposal(p, id).data.status).toBe("open");
+    approveProposal(p, id);
+    proposal = getProposal(p, id);
+    expect(proposal.data).toMatchObject({ status: "approved", automatic: true });
+    expect(run(["--root", dir, "--json", "proposal", "show", id], process.cwd()).out).toContain('"automatic": true');
+  });
+
+  test("automatic resolution validation and hand-over reject other decisions, options, notes, and file changes", () => {
+    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Repair", refs: ["order"], happens: "Code differs.", should: "Code follows the Model." });
+    const res = newProposal(p, "Automatic", "", { kind: "resolution", automatic: true });
+    run(["--root", dir, "proposal", "resolve-drift", res.id, drift.id, "--decision", "fix-code", "--option", "1"], process.cwd());
+    const proposalPath = join(res.dir, "proposal.md");
+    const valid = readFileSync(proposalPath, "utf8");
+
+    for (const [replacement, message] of [
+      ["decision: proposal", "must use fix-code"],
+      ["decision: fix-code\n    option: 2", "must use fix option 1"],
+      ["decision: fix-code\n    option: 1\n    note: invented", "cannot have a note"],
+    ] as const) {
+      writeFileSync(proposalPath, valid.replace(/decision: fix-code\n    option: 1/, replacement));
+      expect(validateProposal(p, getProposal(p, res.id)).map((d) => d.message).join("\n")).toContain(message);
+      expect(() => submitProposal(p, res.id)).toThrow(new RegExp(message));
+    }
+
+    writeFileSync(proposalPath, valid);
+    const copied = editInProposal(p, res.id, "checkout/order.md");
+    writeFileSync(copied, readFileSync(copied, "utf8") + "\nchanged");
+    expect(validateProposal(p, getProposal(p, res.id)).map((d) => d.message).join("\n")).toContain("cannot touch or delete Model or Requirements files");
+    expect(() => submitProposal(p, res.id)).toThrow(/cannot touch or delete Model or Requirements files/);
+    const unregisteredDrift = newDrift(p, { options: FIX_OPTIONS, title: "Unregistered", refs: ["order"], happens: "Code differs.", should: "Code follows the Model." });
+    const unregistered = newProposal(p, "Automatic unregistered", "", { kind: "resolution", automatic: true });
+    run(["--root", dir, "proposal", "resolve-drift", unregistered.id, unregisteredDrift.id, "--decision", "fix-code", "--option", "1"], process.cwd());
+    const ghost = join(unregistered.dir, "model", "checkout", "ghost.md");
+    mkdirSync(join(unregistered.dir, "model", "checkout"), { recursive: true });
+    writeFileSync(ghost, "# Ghost\n");
+    expect(validateProposal(p, getProposal(p, unregistered.id)).map((d) => d.message).join("\n")).toContain("cannot touch or delete Model or Requirements files");
+    expect(() => submitProposal(p, unregistered.id)).toThrow(/cannot touch or delete Model or Requirements files/);
   });
 
   test("an attached Proposal shows under its Drift on the board, is marked in list and show, and returns to the lists once its Drift is resolved", async () => {

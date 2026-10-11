@@ -1,0 +1,19 @@
+---
+description: "Usa quando implementi la scelta dell'agente, i ruoli dei modelli e il confronto delle Machine nella scansione."
+---
+# Regole di agenti, modelli e confronto
+
+## agent-launching
+- Ruolo di ogni istruzione: quick design request, written design request, Resolve Drifts e import → `trama.analysis`; scan del System, scan di Feature e scansione automatica dopo un'approvazione → `trama.scan`; implement, implement all e implement a design → `trama.execution`, anche per la scansione mirata di fine corsa.
+- La preparazione della risoluzione automatica usa `trama.analysis`, come Resolve Drifts; il Run separato delle correzioni e delle origini usa `trama.execution`, con `trama.scan` per i sotto-agenti del suo controllo mirato. Restano launcher, lingua e limite dei sotto-agenti già scelti, senza un quarto ruolo.
+- Dentro ogni istruzione che può scansionare, il sotto-agente che confronta una Machine usa `trama.scan`.
+- Un ruolo vuoto, o fatto solo di spazi, non passa nessun modello: l'agente usa il suo predefinito. Trama non controlla mai che un nome di modello esista; un nome sbagliato lo segnala l'agente nel suo terminale.
+- L'agente si sceglie una volta per tutti i progetti con `trama.agent` (vedi `agent-terminal`): non c'è nessuna scelta al primo avvio e nessun comando personalizzato. I ruoli valgono solo con `omp` e `claude`.
+- Frase dei sotto-agenti, aggiunta sulla stessa riga dopo l'istruzione e la frase del limite e prima della frase della lingua, solo nelle istruzioni che possono scansionare e solo con `omp` o `claude`: "Compare each Machine with the trama-analysis sub-agent."
+- In chat nessuna frase dei sotto-agenti. Quando un'istruzione parte verso la chat e almeno uno fra `trama.analysis`, `trama.scan` e `trama.execution` non è vuoto, la prima volta compare l'avviso dei ruoli (vedi `ui`); da allora non compare più, per nessun progetto.
+- Il limite dei sotto-agenti insieme vale per ogni ventaglio: i sotto-agenti di una scansione, quelli dell'esplorazione del design e i Task di un gruppo di una corsa. Un agente senza sotto-agenti lo ignora e lavora un passo alla volta.
+
+## work
+- Ogni Machine dell'ambito della scansione è confrontata direttamente con il codice, una per sotto-agente, senza smistamento: non c'è più un classificatore, una soglia né una Machine «senza conflitto» saltata senza leggerla. Le sezioni General e quelle che non sono di una Machine restano all'agente che guida la scansione, come oggi.
+- Il confronto di una Machine può concludere che non c'è nulla da archiviare; i suoi Task e Drift si archiviano come oggi.
+- Il resoconto della scansione dice quante Machine sono state confrontate e quante hanno prodotto Task o Drift; non c'è più una riga sullo smistamento.

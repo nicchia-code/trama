@@ -1,13 +1,13 @@
 import { parseArgs } from "node:util";
 import { CURSOR_AGENT_ENV, originFromEnv, terminalFromEnv } from "../core/announcements";
 import { TramaError, UsageError } from "../core/errors";
-import { askEditor, sendActivity, sendAgentIdle, sendCursorHook } from "../core/question-channel";
+import { askEditor, requestCoordinatorMessage, sendActivity, sendAgentIdle, sendCursorHook } from "../core/question-channel";
 import { loadModel, type Project } from "../core/store";
 import { hookAnswer, parseCursorHook } from "../core/cursor-chat";
 import { sendCopilotHook } from "../core/question-channel";
 import { parseCopilotHook } from "../core/copilot-chat";
 import { parseQuestionRequest, questionAborted, questionFailure, type QuestionHandler } from "../core/questions";
-import { arity, COMMANDS, type Command, makeContext, type Values } from "./commands";
+import { arity, COMMANDS, type Command, jobFromEnv, makeContext, type Values } from "./commands";
 import type { Result } from "./result";
 
 /** Command groups; `announce` is also a command of its own (`announce <kind> <title>`) besides `announce phase` and `announce done`. */
@@ -25,9 +25,10 @@ function help(): string {
     "",
     "Options: --json prints JSON instead of Markdown; --root <dir> uses <dir>/.trama.",
     "trama ask [--root <dir>] reads a question round as JSON from stdin and waits for the editor; stdout is JSON.",
+    "trama drift autopilot [--root <project>] [--job <id>] [--json] reads autopilot status from the project coordinator; --job returns only work authorized for that job.",
     "trama cursor-hook is run by Cursor's hooks: it reads the hook's JSON from stdin and tells the editor; it always exits with 0.",
     "trama copilot-hook is run by VS Code's hooks: it reads the hook's JSON from stdin and tells the editor; it always exits with 0.",
-    "trama agent-event idle is run by the hook of an agent in a terminal Trama started, when the agent has settled; it tells the editor and exits with 0.",
+    "trama agent-event idle or failed is run by an agent hook to report completion or an autopilot failure.",
     "Exit codes: 0 ok, 1 failure (validation errors, unknown element, stale Proposal), 2 usage.",
   ].join("\n");
 }
@@ -62,7 +63,8 @@ const STANDALONE: Record<string, { usage: string; summary: string }> = {
   ask: { usage: "trama ask [--root <dir>]", summary: "Reads one question round as JSON from stdin, waits for the editor and prints the JSON result on stdout." },
   "cursor-hook": { usage: "trama cursor-hook", summary: "Run by Cursor's hooks: reads the hook's JSON from stdin and tells the editor. It always exits with 0." },
   "copilot-hook": { usage: "trama copilot-hook", summary: "Run by VS Code's hooks: reads the hook's JSON from stdin and tells the editor. It always exits with 0." },
-  "agent-event": { usage: "trama agent-event idle [--root <dir>]", summary: "Run by the hook of an agent in a terminal Trama started when the main agent has settled. It exits with 0, also without an editor or a terminal of Trama's." },
+  "agent-event": { usage: "trama agent-event idle [--root <dir>] | failed --job <id> (--drift <id> | --task <id>) --reason <text>", summary: "Tell the editor when an agent settles or when an autopilot job fails." },
+  "drift autopilot": { usage: "trama drift autopilot [--root <project>] [--job <id>] [--json]", summary: "Show the editor coordinator's autopilot status; --job includes only work authorized for that job." },
 };
 
 export function pickCommand(rest: string[]): { command: Command; tail: string[] } {
@@ -81,6 +83,7 @@ export function helpFor(argv: string[]): string | null {
   const { rest } = splitGlobals(argv);
   const [first] = rest;
   if (first === undefined || first === "help" || !rest.slice(1).some((a) => a === "--help" || a === "-h")) return null;
+  if (first === "drift" && rest[1] === "autopilot") return `Usage: ${STANDALONE["drift autopilot"]!.usage}\n\n${STANDALONE["drift autopilot"]!.summary}`;
   const standalone = STANDALONE[first];
   if (standalone) return `Usage: ${standalone.usage}\n\n${standalone.summary}`;
   const picked = findCommand(rest);
@@ -110,7 +113,7 @@ export function run(argv: string[], cwd: string, env: Record<string, string | un
   const helped = helpFor(argv);
   if (helped !== null) return { out: helped, exit: 0 };
   if (rest.length === 0 || rest[0] === "--help" || rest[0] === "-h" || rest[0] === "help") return { out: help(), exit: rest.length === 0 ? 2 : 0 };
-  const standalone = STANDALONE[rest[0] as string];
+  const standalone = STANDALONE[rest[0] as string] ?? (rest[0] === "drift" && rest[1] === "autopilot" ? STANDALONE["drift autopilot"] : undefined);
   if (standalone) throw new UsageError(`Usage: ${standalone.usage}`);
   const { command, tail } = pickCommand(rest);
   let parsed: { values: Values; positionals: string[] };
@@ -124,7 +127,7 @@ export function run(argv: string[], cwd: string, env: Record<string, string | un
     throw new UsageError(`Usage: trama ${command.name} ${command.args}`.trimEnd());
   const agent = agentVariable(env);
 
-  const result: Result = command.run(makeContext(cwd, root, agent !== undefined, originFromEnv(env)), parsed.positionals, parsed.values);
+  const result: Result = command.run(makeContext(cwd, root, agent !== undefined, originFromEnv(env), jobFromEnv(env)), parsed.positionals, parsed.values);
   return { out: json ? JSON.stringify(result.json, null, 2) : result.md.replace(/\n{3,}/g, "\n\n").trimEnd(), exit: result.exit ?? 0 };
 }
 
@@ -152,6 +155,63 @@ export async function reportActivity(argv: string[], cwd: string, options: { env
 export function asyncCommand(argv: string[]): { command: "ask"; root?: string } | null {
   const { rest, root } = splitGlobals(argv);
   return rest.length === 1 && rest[0] === "ask" ? { command: "ask", root } : null;
+}
+
+/** The read-only autopilot query runs in the executable so it can await the editor. */
+export function autopilotCommand(argv: string[]): { rest: string[]; root?: string; json: boolean } | null {
+  const { rest, root, json } = splitGlobals(argv);
+  return rest[0] === "drift" && rest[1] === "autopilot" ? { rest, root, json } : null;
+}
+
+/** Queries the project's coordinator without exposing delegated work unless that job is authorized. */
+export async function runAutopilot(argv: string[], cwd: string, options: { runtimeDir?: string; env?: Record<string, string | undefined> } = {}): Promise<{ out: string; exit: number }> {
+  const selected = autopilotCommand(argv);
+  if (!selected) throw new UsageError("Usage: trama drift autopilot [--root <project>] [--job <id>] [--json]");
+  let job: string | undefined;
+  let positionals: string[];
+  try {
+    const parsed = parseArgs({ args: selected.rest.slice(2), options: { job: { type: "string" } }, strict: true, allowPositionals: true });
+    job = (typeof parsed.values.job === "string" ? parsed.values.job : undefined) ?? jobFromEnv(options.env ?? process.env);
+    positionals = parsed.positionals;
+  } catch (error) {
+    throw new UsageError(`trama drift autopilot: ${(error as Error).message}`);
+  }
+  if (positionals.length || (job !== undefined && !job.trim()))
+    throw new UsageError("Usage: trama drift autopilot [--root <project>] [--job <id>] [--json]");
+  const responses = await requestCoordinatorMessage(makeContext(cwd, selected.root).project(), { type: "autopilot-status-request", ...(job === undefined ? {} : { job }) }, { runtimeDir: options.runtimeDir });
+  const response = responses.find((item) => item.coordinator === true);
+  const unavailable = response === undefined;
+  const disabled = response?.mode === "disabled";
+  const authorized = job !== undefined && response !== undefined && !disabled && response.authorized === true;
+  const drifts = authorized && response !== undefined && Array.isArray(response.drifts) ? response.drifts.filter((id): id is string => typeof id === "string") : [];
+  const tasks = authorized && response !== undefined && Array.isArray(response.tasks) ? response.tasks.filter((id): id is string => typeof id === "string") : [];
+  const status = {
+    status: unavailable ? "unavailable" : disabled ? "disabled" : "available",
+    ...(response ? {
+      ...(response.mode === undefined ? {} : { mode: response.mode }),
+      ...(response.phase === undefined ? {} : { phase: response.phase }),
+      ...(response.reason === undefined ? {} : { reason: response.reason }),
+      ...(response.collection === undefined ? {} : { collection: response.collection }),
+      ...(response.proposal === undefined ? {} : { proposal: response.proposal }),
+      ...(response.remoteWindow === true ? { remoteWindow: true } : {}),
+      ...(typeof response.lastFailedScan === "string" ? { lastFailedScan: response.lastFailedScan } : {}),
+    } : { reason: "No project coordinator is available." }),
+    drifts,
+    tasks,
+  };
+  const out = selected.json ? JSON.stringify(status, null, 2) : [
+    `Autopilot: ${status.status}`,
+    ...(status.mode === undefined ? [] : [`Mode: ${String(status.mode)}`]),
+    ...(status.phase === undefined ? [] : [`Phase: ${String(status.phase)}`]),
+    ...(status.reason === undefined ? [] : [`Reason: ${String(status.reason)}`]),
+    ...(status.remoteWindow === true ? ["Work is active in another editor window."] : []),
+    ...(status.collection === undefined ? [] : [`Collection: ${String(status.collection)}`]),
+    ...(status.proposal === undefined ? [] : [`Proposal: ${String(status.proposal)}`]),
+    ...(drifts.length ? [`Drifts: ${drifts.map(String).join(", ")}`] : []),
+    ...(tasks.length ? [`Tasks: ${tasks.map(String).join(", ")}`] : []),
+    ...(status.lastFailedScan === undefined ? [] : [`Last failed scan: ${String(status.lastFailedScan)}`]),
+  ].join("\n");
+  return { out, exit: 0 };
 }
 
 /** The blocking JSON-only ask command: question validation and outcomes are shared with the editor's local channel. */
@@ -198,10 +258,37 @@ export function agentEventCommand(argv: string[]): { rest: string[]; root?: stri
   return rest[0] === "agent-event" ? { rest, root } : null;
 }
 
-/** `trama agent-event idle`: tells the editor the agent of this terminal (`TRAMA_TERMINAL`) has settled. Never fails because of the editor. */
+/** `trama agent-event idle`: tells the editor the agent of this terminal (`TRAMA_TERMINAL`) has settled. */
 export async function runAgentEvent(argv: string[], cwd: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string } = {}): Promise<void> {
   const selected = agentEventCommand(argv);
-  if (!selected || selected.rest.length !== 2 || selected.rest[1] !== "idle") throw new UsageError("Usage: trama agent-event idle [--root <dir>]");
+  if (!selected) throw new UsageError("Usage: trama agent-event idle [--root <dir>] | failed --job <id> (--drift <id> | --task <id>) --reason <text>");
+  if (selected.rest[1] === "failed") {
+    const usage = "Usage: trama agent-event failed --job <id> (--drift <id> | --task <id>) --reason <text>";
+    let job: string | undefined;
+    let drift: string | undefined;
+    let task: string | undefined;
+    let reason: string | undefined;
+    let positionals: string[];
+    try {
+      const parsed = parseArgs({ args: selected.rest.slice(2), options: { job: { type: "string" }, drift: { type: "string" }, task: { type: "string" }, reason: { type: "string" } }, strict: true, allowPositionals: true });
+      const values = parsed.values;
+      job = (typeof values.job === "string" ? values.job : undefined) ?? jobFromEnv(options.env ?? process.env);
+      drift = typeof values.drift === "string" ? values.drift : undefined;
+      task = typeof values.task === "string" ? values.task : undefined;
+      reason = typeof values.reason === "string" ? values.reason : undefined;
+      positionals = parsed.positionals;
+    } catch (error) {
+      throw new UsageError(`trama agent-event: ${(error as Error).message}`);
+    }
+    if (positionals.length || !job?.trim() || (!!drift === !!task) || !(drift ?? task)?.trim() || !reason?.trim()) throw new UsageError(usage);
+    const responses = await requestCoordinatorMessage(makeContext(cwd, selected.root).project(), {
+      type: "autopilot-failed", job, ...(drift ? { drift } : { task: task! }), reason,
+    }, { runtimeDir: options.runtimeDir });
+    if (!responses.some((response) => response.coordinator === true && response.received === true))
+      throw new TramaError("No project autopilot coordinator accepted the failure event.");
+    return;
+  }
+  if (selected.rest.length !== 2 || selected.rest[1] !== "idle") throw new UsageError("Usage: trama agent-event idle [--root <dir>]");
   const env = options.env ?? process.env;
   const terminal = terminalFromEnv(env);
   if (terminal === undefined) return;

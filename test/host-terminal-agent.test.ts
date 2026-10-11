@@ -50,12 +50,18 @@ test("settings expose only chat, omp and Claude Code with a panel-default termin
   expect(properties["trama.agent"].enum).toEqual(["chat", "omp", "claude"]);
   expect(properties["trama.agent"].default).toBe("chat");
   expect(properties["trama.agent"].scope).toBe("application");
+  expect(properties["trama.driftAutoPilot"].enum).toEqual(["disabled", "enabled", "yolo"]);
+  expect(properties["trama.driftAutoPilot"].default).toBe("disabled");
+  expect(properties["trama.driftAutoPilot"].scope).toBe("application");
+  expect(properties["trama.driftAutoPilot"].markdownDescription).toContain("explicit Resolve Drifts request");
+  expect(properties["trama.driftAutoPilot"].markdownDescription).toContain("Disabling stops new automatic steps");
   expect(properties["trama.analysis"].markdownDescription).toContain("Resolve Drifts and import");
   expect(properties["trama.analysis"].markdownDescription).not.toContain("analysis of Machines");
   expect(properties["trama.scan"].markdownDescription).toContain("sub-agents that compare Machines");
   expect(properties["trama.terminalLocation"].enum).toEqual(["panel", "editor"]);
   expect(properties["trama.terminalLocation"].default).toBe("panel");
   expect(properties["trama.terminalLocation"].scope).toBe("application");
+  expect(properties["trama.driftAutoPilot"].markdownDescription).toContain("critical Drifts");
   for (const key of ["agentLauncher", "terminalAgent", "agentCommand", "externalTerminalCommand", "autoImplement"])
     expect(properties[`trama.${key}`]).toBeUndefined();
 });

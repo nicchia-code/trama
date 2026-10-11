@@ -111,6 +111,26 @@
           "scope": "application",
           "markdownDescription": "Where `omp` and Claude Code terminals open: `panel` (the terminal area; the default) or `editor` (a terminal tab beside the active editor). It applies only in your user settings."
         },
+        "trama.driftAutoPilot": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "enabled",
+            "yolo"
+          ],
+          "default": "disabled",
+          "scope": "application",
+          "markdownDescription": "Automatically resolve Drift recommendations: `disabled` (manual, the default), `enabled` (recommends, approves and fixes non-critical Drifts) or `yolo` (also critical Drifts, the ones where your decision is urgently needed). It applies only in your user settings. After opening the editor, an explicit Resolve Drifts request or a finished scan is required before automatic collection resumes. A Task whose origin Drift is being fixed runs only after its fix Tasks are Done. A scan that failed or was interrupted counts as finished and does not suspend the delegation. It can run repeated cycles without an additional limit. Disabling stops new automatic steps but does not interrupt a Task already started."
+        },
+        "trama.submitWhileRunning": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "enabled"
+          ],
+          "default": "disabled",
+          "markdownDescription": "`disabled` (the default: Run, Run this design and Run all To do are unavailable while a run started by Trama is in progress) and `enabled` (a run can start while another one is in progress)."
+        },
         "trama.analysis": {
           "type": "string",
           "default": "",

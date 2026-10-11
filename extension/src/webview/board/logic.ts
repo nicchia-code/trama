@@ -8,6 +8,7 @@ import { designColumn, placeTasks } from "../../../../src/core/design";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import { proposalTouches } from "../requirements/logic";
 import { type CardName, cardNameOf, type CardNumbers, namerOf, noNumbers } from "../../../../src/core/card-names";
+import type { DriftAutopilotFailure, DriftAutopilotMode, DriftAutopilotStatus } from "../../host/drift-resolution";
 
 export type ColumnId = "decide" | Column;
 
@@ -71,12 +72,11 @@ export interface ChangeSummary {
   more: number;
 }
 
-/** One Drift of a resolution on its card: how it is written, its title and what approving the Proposal does to it. */
 export interface ResolvedRow {
   drift: string;
   name: CardName;
   title: string;
-  /** The decision, with ` · note` at the end when it has a note. */
+  critical: boolean;
   decision: string;
 }
 
@@ -110,6 +110,8 @@ export interface DriftCard {
   proposal: string | null;
   /** The Drift as the snapshot carries it: the card shows its two sides and its choices (see `driftComparison`). */
   drift: DriftView;
+  /** The reason the autopilot failed on or excluded this Drift; null when it did not. */
+  autopilotFailed: string | null;
 }
 
 export interface TaskCard {
@@ -132,6 +134,8 @@ export interface TaskCard {
   blocks: BlockBadge[];
   /** What blocks the Task, as the snapshot carries it; Run this design reads it. */
   blockedBy: Blocker[];
+  /** The reason the autopilot failed on or excluded this Task; null when it did not. */
+  autopilotFailed: string | null;
   /** The Task's text after its title, in Markdown; empty when it has none. */
   body: string;
   /** Path relative to `.trama/`. */
@@ -200,9 +204,10 @@ export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "erro
   return null;
 }
 
-export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires" | "kind">, numbers: CardNumbers = noNumbers): Badge[] {
+export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires" | "kind" | "automatic">, numbers: CardNumbers = noNumbers): Badge[] {
   const badges: Badge[] = [];
   if (p.kind === "import") badges.push({ label: "import", tone: "info", tooltip: "Describes existing code; approving it starts no Scan" });
+  if (p.automatic) badges.push({ label: "delegated", tone: "info", tooltip: "Marked for automatic resolution under your delegation. The marker grants no approval: Approve and Reject stay available." });
   for (const r of p.requires)
     badges.push({ label: `requires ${namerOf(numbers)("proposal", r.id)}`, tone: appliesUnder(r.status) ? "info" : "error", tooltip: requiredReasons([r], (id) => namerOf(numbers)("proposal", id)).join(""), card: { kind: "proposal", id: r.id } });
   if (p.stale.length > 0) badges.push({ label: "stale", tone: "warning", tooltip: `The Model changed since the Proposal touched:\n${listed(p.stale)}` });
@@ -214,7 +219,7 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
 
 /** The rows of a resolution's `Resolves Drifts` block, in the order the snapshot carries them; none for any other Proposal. */
 export const resolvedRows = (p: Pick<ProposalView, "resolves">, numbers: CardNumbers = noNumbers): ResolvedRow[] =>
-  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}` }));
+  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, critical: r.critical, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}` }));
 
 export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers): ProposalCard {
   const name = cardNameOf(numbers, "proposal", p.id);
@@ -234,7 +239,7 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers):
   };
 }
 
-export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers): DriftCard {
+export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers, autopilotFailed: string | null = null): DriftCard {
   const name = cardNameOf(numbers, "drift", d.id);
   return {
     kind: "drift",
@@ -246,10 +251,11 @@ export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers): Drift
     refs: d.refs,
     proposal: d.proposal,
     drift: d,
+    autopilotFailed,
   };
 }
 
-export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers): TaskCard {
+export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, autopilotFailed: string | null = null): TaskCard {
   const name = namerOf(numbers);
   return {
     kind: "task",
@@ -269,6 +275,7 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers): TaskCar
     file: t.file,
     column: t.column,
     finished: t.finished,
+    autopilotFailed,
   };
 }
 
@@ -287,14 +294,39 @@ export function designCard(proposal: string, title: string | null, tasks: TaskCa
   };
 }
 
+/** What each Drift autopilot mode means, for the Resolve Drifts tooltip. */
+const autopilotModes: Record<DriftAutopilotMode, string> = {
+  disabled: "Drift autopilot is off: Resolve Drifts uses the manual flow.",
+  enabled: "Drift autopilot is on (enabled): it approves and fixes non-critical Drifts; critical ones stay manual.",
+  yolo: "Drift autopilot is on (yolo): it approves and fixes all eligible Drifts, critical ones too.",
+};
+
+/** The autopilot mode and, when automation waits or is suspended, why. For the Resolve Drifts tooltip; it grants nothing. */
+export function autopilotNote(status: DriftAutopilotStatus): string {
+  const mode = autopilotModes[status.mode];
+  return status.reason === null ? mode : `${mode}\n${status.reason}.`;
+}
+
+/** The reason each Drift or Task the autopilot failed on or excluded carries, keyed `drift:<id>` or `task:<id>`. Scan failures name no case and are left out. */
+function failedReasons(failures: readonly DriftAutopilotFailure[]): Map<string, string> {
+  const reasons = new Map<string, string>();
+  for (const f of failures) {
+    if (f.reason === undefined) continue;
+    if (f.drift !== undefined) reasons.set(`drift:${f.drift}`, f.reason);
+    if (f.task !== undefined) reasons.set(`task:${f.task}`, f.reason);
+  }
+  return reasons;
+}
+
 /** The four columns of the Board; open resolution Drifts are represented only on their Proposal card. */
-export function buildBoard(snapshot: Snapshot): BoardColumn[] {
+export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilotFailure[] = []): BoardColumn[] {
   const numbers = snapshot.numbers ?? noNumbers;
+  const failed = failedReasons(failures);
   const resolving = new Set(snapshot.proposals.filter((p) => p.kind === "resolution").flatMap((p) => p.resolves.map((r) => r.drift)));
   const cards: Record<ColumnId, Card[]> = {
     decide: [
       ...snapshot.proposals.map((p) => proposalCard(p, numbers)),
-      ...snapshot.drifts.filter((d) => !resolving.has(d.id)).map((d) => driftCard(d, numbers)),
+      ...snapshot.drifts.filter((d) => !resolving.has(d.id)).map((d) => driftCard(d, numbers, failed.get(`drift:${d.id}`) ?? null)),
     ],
     todo: [],
     doing: [],
@@ -302,8 +334,9 @@ export function buildBoard(snapshot: Snapshot): BoardColumn[] {
   };
   // Tasks of one design are shown together once there are enough of them (see `placeTasks`).
   for (const placed of placeTasks(snapshot.tasks)) {
-    if (!placed.design) cards[placed.column].push(taskCard(placed.task, numbers));
-    else cards[placed.column].push(designCard(placed.proposal, placed.tasks[0]?.proposalTitle ?? null, placed.tasks.map((t) => taskCard(t, numbers)), numbers));
+    const task = (t: TaskView) => taskCard(t, numbers, failed.get(`task:${t.id}`) ?? null);
+    if (!placed.design) cards[placed.column].push(task(placed.task));
+    else cards[placed.column].push(designCard(placed.proposal, placed.tasks[0]?.proposalTitle ?? null, placed.tasks.map(task), numbers));
   }
   // A badge that leads to a Task shown as a row of a design card leads to that design card, opened on the row.
   const all = Object.values(cards).flat();

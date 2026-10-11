@@ -66,6 +66,13 @@ export function resolveDriftsBlocker(p: Project, window: "free" | "running-tasks
   return listDrifts(p).some((d) => d.data.status === "open") ? null : "No open Drifts";
 }
 
+/** Why every Run is disabled now (the first reason that holds), or null: Drifts are being resolved, or a run in progress unless `trama.submitWhileRunning` is `enabled`. `window` is the state of Drift resolution in this window. */
+export function runWindowBlocker(window: "free" | "running-tasks" | "resolving", submitWhileRunning: boolean): string | null {
+  if (window === "resolving") return "Drifts are being resolved";
+  if (window === "running-tasks" && !submitWhileRunning) return "A run is in progress";
+  return null;
+}
+
 /** What approving a resolution does to a Drift with this decision, in words; `optionTitle` is the title of the fix option chosen. */
 export function decisionText(decision: DriftDecisionKind, optionTitle?: string): string {
   if (decision === "proposal") return "Model updated to match the code";
@@ -77,7 +84,7 @@ export function decisionText(decision: DriftDecisionKind, optionTitle?: string):
 export interface ResolvedDrift {
   drift: string;
   title: string;
-  /** The words of the decision (see `decisionText`), or `(already resolved)`. */
+  critical: boolean;
   decision: string;
   note: string | null;
 }
@@ -89,6 +96,6 @@ export function resolvedDrifts(p: Project, proposal: Proposal): ResolvedDrift[] 
     if (!d) return [];
     const already = drift.data.status === "resolved" && drift.data.resolvedBy !== proposal.id;
     const option = d.option === undefined ? undefined : driftOptions(drift)[d.option - 1]?.title;
-    return [{ drift: drift.id, title: drift.title, decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
+    return [{ drift: drift.id, title: drift.title, critical: drift.data.critical, decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
   });
 }

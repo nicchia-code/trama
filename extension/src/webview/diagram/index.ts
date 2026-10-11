@@ -109,7 +109,7 @@ export const mountDiagram: MountView = (root, context) => {
 
   function renderChrome() {
     if (!snapshot || !scene || !graph) return;
-    const feature = level.kind === "feature" ? level.feature : undefined;
+    const feature = scanFeature(scene, level);
     crumbs.replaceChildren();
     const trail = breadcrumb(scene, level);
     trail.forEach((crumb, i) => {

@@ -12,6 +12,7 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 ## agent-launching
 
 - Ruolo di ogni istruzione: quick design request, written design request, Resolve Drifts e import → `trama.analysis`; scan del System, scan di Feature e scansione automatica dopo un'approvazione → `trama.scan`; implement, implement all e implement a design → `trama.execution`, anche per la scansione mirata di fine corsa.
+- La preparazione della risoluzione automatica usa `trama.analysis`, come Resolve Drifts; il Run separato delle correzioni e delle origini usa `trama.execution`, con `trama.scan` per i sotto-agenti del suo controllo mirato. Restano launcher, lingua e limite dei sotto-agenti già scelti, senza un quarto ruolo.
 - Dentro ogni istruzione che può scansionare, il sotto-agente che confronta una Machine usa `trama.scan`.
 - Un ruolo vuoto, o fatto solo di spazi, non passa nessun modello: l'agente usa il suo predefinito. Trama non controlla mai che un nome di modello esista; un nome sbagliato lo segnala l'agente nel suo terminale.
 - L'agente si sceglie una volta per tutti i progetti con `trama.agent` (vedi `agent-terminal`): non c'è nessuna scelta al primo avvio e nessun comando personalizzato. I ruoli valgono solo con `omp` e `claude`.

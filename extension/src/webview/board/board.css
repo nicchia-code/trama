@@ -35,6 +35,8 @@
   background: var(--vscode-sideBar-background, color-mix(in srgb, currentColor 4%, transparent));
 }
 
+.board-columns:has(> [data-column="done"].is-collapsed) { grid-template-columns: repeat(3, minmax(250px, 1fr)) 40px; }
+
 .board-column-head {
   display: flex;
   align-items: center;
@@ -47,6 +49,12 @@
   letter-spacing: .04em;
   border-bottom: 1px solid var(--board-border);
 }
+.board-collapse { padding: 0 4px; font: inherit; font-size: 16px; line-height: 1; color: inherit; background: none; border: 0; border-radius: 3px; cursor: pointer; }
+.board-collapse:hover { background: var(--vscode-toolbar-hoverBackground, transparent); }
+.board-column.is-collapsed > :not(.board-column-head) { display: none; }
+.board-column.is-collapsed .board-column-head { flex-direction: column; border-bottom: 0; padding: 8px 6px; }
+.board-column.is-collapsed .board-column-title { writing-mode: vertical-rl; text-transform: none; letter-spacing: .02em; }
+.board-column.is-collapsed .board-count { display: none; }
 .board-count {
   font-weight: 400;
   padding: 0 7px;
@@ -110,6 +118,7 @@
 .board-badge.warning { border-color: var(--board-warning); background: color-mix(in srgb, var(--board-warning) 22%, transparent); }
 .board-badge.error { border-color: var(--board-error); background: color-mix(in srgb, var(--board-error) 22%, transparent); }
 .board-badge.info { border-color: var(--board-blue); background: color-mix(in srgb, var(--board-blue) 18%, transparent); }
+.board-critical { color: var(--board-error); }
 
 /* A Task the agent has taken: its dot is the accent colour and pulses, unless the system asks for reduced motion, leaving a still dot. */
 .board-dot.is-agent { background: var(--board-accent); border-color: var(--board-accent); animation: board-working-pulse 1.2s ease-in-out infinite; }

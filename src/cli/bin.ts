@@ -1,8 +1,9 @@
 // The `trama` executable. Kept apart from main.ts, which the extension bundles as a library.
 import { TramaError, UsageError } from "../core/errors";
+import { settleCoordinatorMessages } from "../core/question-channel";
 import { questionAborted, questionFailure } from "../core/questions";
 import { completeFixChoice } from "./fix-prompt";
-import { agentEventCommand, agentVariable, asyncCommand, helpFor, reportActivity, run, runAgentEvent, runAsk, runCopilotHook, runCursorHook } from "./main";
+import { agentEventCommand, agentVariable, asyncCommand, autopilotCommand, helpFor, reportActivity, run, runAgentEvent, runAsk, runAutopilot, runCopilotHook, runCursorHook } from "./main";
 
 try {
   const argv = process.argv.slice(2);
@@ -32,6 +33,11 @@ try {
     } catch { /* Copilot is answered all the same. */ }
     await new Promise<void>((resolve) => process.stdout.write("{}\n", () => resolve()));
     process.exit(0);
+  }
+  if (autopilotCommand(argv) !== null) {
+    const { out, exit } = await runAutopilot(argv, process.cwd());
+    await new Promise<void>((resolve) => process.stdout.write(`${out}\n`, () => resolve()));
+    process.exit(exit);
   }
   if (agentEventCommand(argv) !== null) {
     await runAgentEvent(argv, process.cwd());
@@ -74,6 +80,7 @@ try {
   const { out, exit } = run(interactive ? await completeFixChoice(argv, process.cwd(), { input: process.stdin, output: process.stdout }) : argv, process.cwd());
   console.log(out);
   if (exit === 0) await reportActivity(argv, process.cwd());
+  await settleCoordinatorMessages();
   process.exit(exit);
 } catch (err) {
   if (err instanceof UsageError || err instanceof TramaError) {
