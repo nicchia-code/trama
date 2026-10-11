@@ -69,6 +69,9 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 ## A. Opening the panel
 
 ### A1. First open
+
+Startup regression check: open the panel, switch through Diagram, Board and Requirements, then close and reopen it. The System data must load again, with no blank page or JavaScript errors. The editor webview must enable scripts; the browser harness alone cannot catch a disabled-script panel. Verified in a real Code - OSS extension development host against `examples/shop`.
+
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Initialize Project**, **Trama: Quick Design Request…**, **Trama: Design…**, **Trama: Scan System**. **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
@@ -413,16 +416,22 @@ Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `
 | 11 | `TRAMA_TERMINAL=$T j announce task "Left behind"`, then in the **Design** terminal press Ctrl+C | The `Task` ghost disappears at once. At the top of the Board one notice, `The agent finished without delivering Task Left behind.`, with a **Close** button. The `Drift` ghost of row 9 stays: it belongs to no terminal | ☐ |
 | 12 | Click **Close** on the notice, switch to the Diagram tab and back | The notice is gone; closing the Trama tab and opening it again shows none | ☐ |
 | 13 | `j proposal new "Never finished"`, read the ghost, then `j proposal discard <ID it printed>` | A `Writing` ghost titled `Never finished`; after the discard it disappears and **no** notice is shown | ☐ |
-| 14 | `j announce task "Gone quiet"`, then edit its file under `$D/announcements` and set `touched` to a time 20 minutes ago, save | Within about 30 seconds the ghost disappears and the notice `The agent finished without delivering Task Gone quiet.` appears; the `Drift` ghost of row 9, which also belongs to no terminal, goes with it, with its own notice | ☐ |
-| 15 | `j announce task "Before reload"`, then Developer: Reload Window and open the Board | The ghost is not there and no notice is shown: leftovers are withdrawn at startup | ☐ |
-| 16 | Set `"trama.agent": "chat"` in your **user** settings and `"trama.autoScan": false` in the workspace settings; reload, **Quick request…** with any text | The prompt goes to Copilot Chat and no terminal ghost appears | ☐ |
-| 17 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with chat, the ghost starts with the Draft | ☐ |
-| 18 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
-| 19 | Restore S2. ↻, then `j task move 1 doing` | The card moves to In progress without ever looking busy; no dashed copy of it appears in In progress at any moment | ☐ |
-| 20 | `C=$(j announce check "Final check after all Tasks" --phase verifying)` | In In progress, dopo le schede vere, un ghost `Check` intitolato `Final check after all Tasks` con la riga `Verifying (tests, lint, build)`; il numero della colonna non cambia | ☐ |
-| 21 | `j announce phase $C scanning`, poi di nuovo lo stesso comando | Il ghost passa a `Scanning`; il secondo comando dice che il controllo è già in Scanning | ☐ |
-| 22 | `j announce done $C` | Il ghost sparisce e **nessun** avviso compare | ☐ |
-| 23 | `j announce check "Scan of the System" --phase scanning`, poi impostare `touched` del suo file a 20 minuti fa e salvare | Entro circa 30 secondi il ghost sparisce e compare l'avviso `The agent stopped before finishing Scan of the System.` | ☐ |
+| 14 | `j announce task "Before reload"`, then Developer: Reload Window and open the Board | The ghost is not there and no notice is shown: leftovers are withdrawn at startup | ☐ |
+| 15 | Set `"trama.agent": "chat"` in your **user** settings and `"trama.autoScan": false` in the workspace settings; reload, **Quick request…** with any text | The prompt goes to Copilot Chat and no terminal ghost appears | ☐ |
+| 16 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with chat, the ghost starts with the Draft | ☐ |
+| 17 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
+| 18 | Restore S2. ↻, then `j task move 1 doing` | The card moves to In progress without ever looking busy; no dashed copy of it appears in In progress at any moment | ☐ |
+| 19 | `C=$(j announce check "Final check after all Tasks" --phase verifying)` | In In progress, dopo le schede vere, un ghost `Check` intitolato `Final check after all Tasks` con la riga `Verifying (tests, lint, build)`; il numero della colonna non cambia | ☐ |
+| 20 | `j announce phase $C scanning`, poi di nuovo lo stesso comando | Il ghost passa a `Scanning`; il secondo comando dice che il controllo è già in Scanning | ☐ |
+| 21 | `j announce done $C` | Il ghost sparisce e **nessun** avviso compare | ☐ |
+
+### E13. Collapse the Done column
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| 1 | Open the Board the first time after opening the panel | The Done column is collapsed: a narrow strip with a `‹` button (accessible name `Expand Done column`, not expanded) and the title `Done` read top to bottom; no cards, no period menu, no count, no `Nothing done in this period`; To decide, To do and In progress share the freed space | ☐ |
+| 2 | Activate the button | The column opens with the period menu, count and cards; the button reads `Collapse Done column` and reports expanded; focus stays on the button | ☐ |
+| 3 | Collapse it again, then edit a Task file so the Board refreshes | The column stays collapsed after the refresh | ☐ |
+| 4 | Close the Trama panel and open it again | The column starts collapsed again | ☐ |
 
 ---
 
@@ -776,7 +785,9 @@ Run R1–R4 on **every new Cursor version** before declaring it supported (smoke
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | R1 | `cat ~/.cursor/hooks.json` | `version: 1` and, under each of `beforeSubmitPrompt`, `stop` and `sessionEnd`, one entry `"<extension folder>/bin/trama" cursor-hook`; entries you had before are still there | ☐ |
+| R1b | `cat ~/.cursor/agents/trama-analysis.md` after **Update Agent Skills**, with `"trama.scan": "sonnet"` | Front matter `name: trama-analysis`, a `description`, and `model: "sonnet"`; the body begins `Compare one Machine following the trama-scan skill`. With `trama.scan` empty, `model: inherit` | ☐ |
 | R2 | Board: **Quick request…** with `Orders can also be returned` | A **new** chat opens and sends `Use the trama-design skill. Orders can also be returned` by itself, with a second line `The trama command may not be on your PATH. Before anything else run: export PATH="…/bin:$PATH"`. No «Create chat with prompt» confirmation and no clipboard notice | ☐ |
+| R2b | With `"trama.analysis": "sonnet"`, **Quick request…** with `Orders can also be returned` | The new chat runs on `sonnet`, shown in the chat, with Max mode off; the chats already open keep their model. If the chat fell back to the deeplink or the clipboard, it starts without a model | ☐ |
 | R3 | Let the agent ask its questions | `trama ask` brings the Trama panel forward in this window with the overlay of P1, the agent named `Cursor`. If the agent first gets `unavailable` inside Cursor's sandbox, it retries once outside it after asking permission; it keeps waiting when Cursor moves the command to the background | ☐ |
 | R4 | In the chat's terminal output, check that `trama proposal approve 1` run by the agent would be refused | The agent reports `"trama proposal approve" is the developer's decision … (CURSOR_AGENT is set)` | ☐ |
 | R5 | Interrupt the agent (Stop) while a ghost it announced is on the Board | The ghost disappears and the notice `The agent finished without delivering …` appears. Closing the chat instead removes such a ghost without a notice | ☐ |
@@ -835,8 +846,29 @@ Written from the Requirements; these settings only count in your **user** settin
 | X4 | Set `"trama.analysis": "opus"`; click **Scan System**, then **Quick request…** with `x` | The scan uses `trama.scan`, not `trama.analysis`; the design command uses `--model 'opus'` and has no sub-agent sentence | ☐ |
 | X5 | 🪙 With omp installed: set `"trama.scan": "sonnet"`; click **Scan System** | omp uses `--model 'sonnet' --slow 'sonnet'`, and the prompt ends with `Compare each Machine with the trama-analysis sub-agent.` | ☐ |
 | X6 | 🪙 With Claude Code: set `"trama.agent": "claude"` and `"trama.scan": "sonnet"`; click **Scan System** | Claude Code receives `--model 'sonnet'`, an analysis sub-agent with `"model":"sonnet"`, and the sub-agent sentence | ☐ |
-| X7 | Set `"trama.agent": "chat"` and a model role; click **Scan System** twice, then launch in another project | Once only, the notice says `Trama: model roles (trama.analysis, trama.scan, trama.execution) apply only to terminal agents. The chat uses the model chosen in the chat.` Chat prompts have no model or sub-agent sentence | ☐ |
+| X7 | Set `"trama.agent": "chat"` and `"trama.scan": "sonnet"` in user settings; click **Scan System**, then **Quick request…** with `x` | Cursor: the scan's new conversation runs on `sonnet` with Max mode off, and its prompt ends with `Compare each Machine with the trama-analysis sub-agent.`. Copilot: `sonnet` is selected in the chat picker, or the warning `Trama: no Copilot model is named "sonnet" (trama.scan). The instruction was sent with the model chosen in the chat.` appears. The design prompt has no sub-agent sentence and no model notice appears in either editor | ☐ |
 | X8 | `trama skills update` (or **Trama: Update Agent Skills**), then inspect `/tmp/trama-demo/shop/.omp/agents/trama-analysis.md` and check for `trama-triage.md` | The `trama-analysis` definition has `model: "@slow"` and names `trama-scan`; the obsolete triage file is absent | ☐ |
+
+---
+
+## Y. Drift autopilot
+
+These are acceptance scenarios for the coordinated automatic flow. Use a disposable project with controllable Trama agent launches and at least two editor windows on the same canonical project. Run queries as `trama drift autopilot --root <project> --json`; automatic agent prompts must carry the job ID supplied by Trama.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| Y1 | Set user setting `"trama.driftAutoPilot": "disabled"`; start Resolve Drifts | Existing manual question and developer-review flow; no automatic delegation | ☐ |
+| Y2 | Set `"trama.driftAutoPilot": "enabled"` with open ordinary and critical Drifts; allow the tracked scan/Run barrier to clear | Only eligible non-critical Drifts can be delegated; critical and exceptional cases remain manual. No new automatic collection starts while any tracked scan or Run in either project window is active | ☐ |
+| Y3 | Set `"trama.driftAutoPilot": "yolo"`; test an eligible Drift with Fix options and another with no applicable first Fix option | Only the authorized eligible Drift is prepared with `fix-code`, option 1, no note; the other stays out. The agent submits but neither approves nor implements the resolution | ☐ |
+| Y4 | Query autopilot with the active job ID, then query without it or with an unknown ID; inspect status from a second editor window | The known job reports only its own current authorized permanent IDs; an unknown/missing job grants no usable delegation. The Board shows no autopilot status line, and `trama drift autopilot` reports work active in another window | ☐ |
+| Y5 | Submit an automatic resolution and inspect host actions while its agent is still running | Host does not start the separate implementation Run before normal resolution-agent completion; after approval it filters Run Tasks to that collection's fix Tasks and incomplete origins, excluding unrelated Tasks | ☐ |
+| Y6 | Change setting to `disabled`, or change `yolo` to `enabled`, while automatic work is running | No new steps start; already-started work is not killed. Critical residual work is no longer authorized in `enabled` | ☐ |
+| Y7 | Force a resolution choice or fix Task to fail; then let an unrelated eligible case proceed, edit the failed Drift, and run a successful developer scan | Failure is reported against its permanent Drift/Task ID and reason; failed work is not retried by the next automatic cycle, while independent work may continue. A changed Drift or successful developer scan makes failed cases eligible for evaluation again | ☐ |
+| Y8 | Make a Trama scan fail after it has filed a Drift; then, with no other scan or Run in progress, let the autopilot run. Separately, end a scan without a successful check (close its agent early) | A failed or interrupted scan does not suspend new automatic collections: once no other scan or Run is active, collection starts on the eligible open Drifts. A finished scan or explicit Resolve Drifts lifts the wait after the editor opens | ☐ |
+| Y9 | Start a scan with an external agent not launched by Trama | It does not appear in Trama's coordination barrier; the developer coordinates that work manually | ☐ |
+| Y10 | Allow a successful Run and its selective scan to produce another eligible Drift | The existing Run check represents its selective scan once; a later cycle may run without an extra built-in cycle/time/spending limit. The developer can stop further cycles by withdrawing delegation or interrupting work | ☐ |
+| Y11 | Trigger a failed resolution or Task case, then find its card in the Board | The card of the failed Drift or Task shows an `autopilot failed` badge; its tooltip and accessible name `Autopilot failed: <reason>` give the reason. Focus does not move and the panel does not open by itself; selecting the card opens the permanent Drift or Task card, and keyboard focus survives status refresh | ☐ |
+| Y12 | Set `"trama.submitWhileRunning": "disabled"` (default); start a Run, then look at Run all To do, a design's Run this design button and a Task's Run button while the Run is in progress; set the setting to `enabled` and look again | With `disabled`, those Run buttons are disabled while the Run is in progress, and a launch is refused with `A run cannot start: A run is in progress.`; with `enabled` they are available. Scan System, Quick request… and Resolve Drifts are not affected by the setting | ☐ |
 
 ---
 
