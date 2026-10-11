@@ -2,3 +2,4 @@ node_modules
 dist
 extension/dist
 extension/bin
+extension/LICENSE

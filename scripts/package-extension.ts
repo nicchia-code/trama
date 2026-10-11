@@ -5,7 +5,7 @@
 //
 // Output: dist/trama-<target>-<version>.vsix. macOS binaries are signed ad hoc only when packaging on a Mac; release
 // builds for macOS come from the macOS runner in .github/workflows/release.yml.
-import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { $ } from "bun";
 
 const TARGETS: Record<string, string> = {
@@ -22,6 +22,7 @@ for (const t of targets) if (!TARGETS[t]) throw new Error(`Unknown target "${t}"
 const version: string = JSON.parse(readFileSync("extension/package.json", "utf8")).version;
 mkdirSync("dist", { recursive: true });
 await $`bun run scripts/build-extension.ts`;
+copyFileSync("LICENSE", "extension/LICENSE");
 
 for (const target of targets) {
   rmSync("extension/bin", { recursive: true, force: true });
@@ -32,7 +33,8 @@ for (const target of targets) {
   // refuse to run. Re-signing ad hoc needs codesign, so it only happens when packaging on a Mac.
   if (target.startsWith("darwin") && process.platform === "darwin") await $`codesign --force --sign - extension/bin/trama`;
   const out = `../dist/trama-${target}-${version}.vsix`;
-  await $`bunx @vscode/vsce package --target ${target} --no-dependencies --skip-license --allow-missing-repository -o ${out}`.cwd("extension");
+  await $`bunx @vscode/vsce package --target ${target} --no-dependencies --allow-missing-repository -o ${out}`.cwd("extension");
   console.log(`packaged dist/trama-${target}-${version}.vsix`);
 }
 rmSync("extension/bin", { recursive: true, force: true });
+rmSync("extension/LICENSE", { force: true });

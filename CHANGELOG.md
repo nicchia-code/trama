@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.0.1
 
+- First public release, under the GNU AGPL v3 (`AGPL-3.0-only`); the `.vsix` now ships the license text. Earlier tags and releases are gone, and versions restart from 0.0.1.
 - The automatic Run no longer carries a fixed list of Task identities from its launch: before each group it reads the authorized Tasks from `trama drift autopilot --json`, so an origin Task whose fix Tasks became Done during the Run is picked up, and nothing outside the authorization is started.
 - When the Drift autopilot leaves `disabled`, the window that coordinates the project imports the jobs the other editor windows still run, before it judges the barrier: a Run, scan or Resolve Drifts started in another window during `disabled` is no longer unknown to the coordinator that already held the role.
 - With the Drift autopilot `disabled`, a window no longer shares its jobs or send reservations with the other editor windows of the project: another window's Run, scan or Resolve Drifts no longer makes Resolve Drifts or the Run buttons unavailable here, and a send no longer waits behind another window's send. Sharing starts when the autopilot is enabled.
