@@ -1,27 +1,41 @@
 name: Release
 
 # Builds the platform .vsix files on their own OS (so the macOS CLI is signed ad hoc by Bun on a Mac), runs the
-# tests there, and attaches the packages to a GitHub release when a `v*` tag is pushed.
+# tests there, and attaches the packages to a GitHub release when a `v*` tag is pushed. A manual run builds the
+# chosen target (default all) and creates the release v<package.json version> from the run's commit.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      target:
+        description: Platform to build and release
+        type: choice
+        default: all
+        options: [all, linux-x64, darwin-arm64, win32-x64]
 
 permissions:
   contents: write
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          all='[{"os":"ubuntu-latest","target":"linux-x64"},{"os":"macos-14","target":"darwin-arm64"},{"os":"windows-latest","target":"win32-x64"}]'
+          if [ -n "$TARGET" ] && [ "$TARGET" != all ]; then all=$(jq -c --arg t "$TARGET" 'map(select(.target == $t))' <<< "$all"); fi
+          echo "matrix={\"include\":$all}" >> "$GITHUB_OUTPUT"
+
   package:
+    needs: plan
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: linux-x64
-          - os: macos-14
-            target: darwin-arm64
-          - os: windows-latest
-            target: win32-x64
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -68,9 +82,10 @@ jobs:
 
   release:
     needs: package
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: packages
@@ -78,6 +93,11 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" packages/*.vsix --repo "${{ github.repository }}" \
-            --title "Trama ${{ github.ref_name }}" --prerelease \
-            --notes "Install with: code --install-extension trama-<platform>-<version>.vsix"
+          # A pushed tag names the release; a manual run names it after the version in package.json and creates the tag.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"; else tag="v$(jq -r .version package.json)"; fi
+          notes="Install with: code --install-extension trama-<platform>-<version>.vsix"
+          if ls packages/*win32-x64*.vsix > /dev/null 2>&1; then
+            notes="$notes"$'\n\n'"**Windows is untested.** The win32-x64 package is built, and its tests and smoke test run, on a Windows CI runner only. Nobody has tried it by hand on a Windows machine, in VS Code or in Cursor. Cursor's hook form on Windows (\`& \"<trama.exe>\" cursor-hook\`) is a guess. Expect rough edges and please report them."
+          fi
+          gh release create "$tag" packages/*.vsix --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Trama $tag" --prerelease --notes "$notes"
