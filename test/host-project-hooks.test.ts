@@ -73,7 +73,7 @@ afterEach(() => {
 test("Copilot hooks use the bundled program in extension storage and preserve user registrations", async () => {
   setup();
   const file = join(storage, "copilot-hooks.json");
-  await installCopilotHooks({ fsPath: storage } as never);
+  await installCopilotHooks({ fsPath: storage } as never, false);
   expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
     hooks: {
       UserPromptSubmit: [{ type: "command", command: `"${join(extensionPath, "bin", "trama")}" copilot-hook` }],

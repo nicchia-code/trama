@@ -71,13 +71,13 @@ test("trama cursor-hook hands the hook, never the prompt, to the project's edito
 
 test("Trama's hooks replace only Trama's earlier entries, keep the others, and leave a file that is not JSON alone", () => {
   const file = join(root, ".cursor", "hooks.json");
-  writeCursorHooks(file, "/old/bin/trama");
+  writeCursorHooks(file, "/old/bin/trama", false);
   const read = () => JSON.parse(readFileSync(file, "utf8"));
   const mine = (program: string) => [{ command: `"${program}" cursor-hook` }];
   expect(read()).toEqual({ version: 1, hooks: { beforeSubmitPrompt: mine("/old/bin/trama"), stop: mine("/old/bin/trama"), sessionEnd: mine("/old/bin/trama") } });
 
   writeFileSync(file, JSON.stringify({ version: 1, hooks: { stop: [{ command: "./mine.sh" }, ...mine("/old/bin/trama")], afterFileEdit: [{ command: "fmt" }] } }));
-  writeCursorHooks(file, "/new/bin/trama");
+  writeCursorHooks(file, "/new/bin/trama", false);
   expect(read().hooks).toEqual({
     stop: [{ command: "./mine.sh" }, ...mine("/new/bin/trama")],
     afterFileEdit: [{ command: "fmt" }],
