@@ -1,54 +1,219 @@
 # Trama
 
-Program from a layered Model of every state your software can be in, plus the Requirements that say how it must be built. Both are plain Markdown in `.trama/`; an agent explores them through the `trama` CLI; you review changes as Proposals.
+**T**asks · **R**equirements · **A**nalysis · **M**ap · **A**gents
 
-Vocabulary: [CONTEXT.md](./CONTEXT.md). Decisions: [docs/adr](./docs/adr). File format: [docs/model-format.md](./docs/model-format.md). CLI: [docs/cli.md](./docs/cli.md).
+**Your AI agent writes code fast. Trama makes sure it's the code you meant.**
 
-## Status
+![The Diagram of the shop's Order Machine, then the Payment Machine](docs/images/diagram.gif)
 
-Implemented:
-- Model format, validation and the `trama` CLI (exploring, Proposals, Tasks, Drifts, board). A Drift is written at the level of behaviour, with two to five **fix options** the developer chooses from when keeping what should happen (and an optional note), and an optional **Where in the code** section for files. An open Drift blocks the Tasks that concern the same thing: the agent cannot start them and runs skip them; the board marks them.
-- The agent reaches Trama only through the `trama` command line, run in the editor's terminals or anywhere else, and asks the developer with `trama ask` (ADR 0009). In a terminal Trama started (`TRAMA_AGENT` set), and in Cursor's chat (`CURSOR_AGENT=1`, ADR 0010), the developer's decisions are refused to the agent and its moves to In progress take the Task (ADR 0005).
-- Shared agent question rounds through JSON-stdin `trama ask`: an overlay in the Trama panel with an index, free text beside the options, a summary sent with Send to agent, confirmed skips, window-local FIFO and isolated caller cancellation. Editor loss interrupts admitted rounds with `editor-interrupted`, without partial answers or fallback; initial absence remains `unavailable`. [Question contract](./docs/cli.md#question-rounds).
-- Nell'overlay delle domande, `Next` e `Review` seguono subito la risposta visibile anche dopo aver deselezionato tutte le opzioni: il solo testo non vuoto permette la conferma, mentre cancellarlo o lasciare soltanto spazi la disabilita.
-- Le notifiche esterne sono state eliminate. Il trasporto locale di domande e hook e gli avvisi locali dell'editor restano disponibili; le impostazioni utente non vengono riscritte.
-- Cursor è supportato come editor (3.22.12 e 3.23.12): `trama.agent` predefinito invia le istruzioni alla chat. Gli hook in `~/.cursor/hooks.json`, scritti da Initialize e Update skills, eseguono `trama cursor-hook` per seguire le conversazioni Trama, ritirare i ghost e rilasciare i Task. Vedi il [README dell'estensione](./extension/README.md#cursor). La Agents Window di Cursor non è supportata.
-- `trama.agent` sceglie globalmente chat (predefinito), omp o Claude Code; `trama.terminalLocation` sceglie area terminali o scheda editor per i due agenti terminali. Ogni invio, inclusi import, progetto appena inizializzato e scansione automatica, segue la stessa scelta. I terminali sono nuovi e non vengono riutilizzati.
-- Gli agenti terminali usano l'area terminali senza aprirla, oppure una scheda editor senza prendere il focus; ogni terminale è seguito separatamente fino alla fine del comando. Vedi il [README dell'estensione](./extension/README.md).
-- Two ways to ask for a design: **Quick request…** sends one line; **Design…** creates an empty `.trama/requests/<id>.md` named after the date and time (never versioned) and opens it; Trama saves it while you write, and **Send to agent**, or closing the tab, sends the agent an instruction naming the file, once (closing it empty deletes it). The agent binds its first Proposal to it (`proposal new --request <id>`), and handing that Proposal over deletes the request.
-- Una richiesta scritta è segnata inviata solo quando il terminale riceve l'istruzione o la chat la invia automaticamente. Gli appunti e la chat di Cursor in attesa di conferma la lasciano mai inviata: **Send to agent** conserva la scheda per riprovare; chiudendola volontariamente, il file resta recuperabile dall'esploratore.
-- Proposals start as Drafts, outside the decision count and diagram overlays. The agent finishes every file, validates and reviews the changes, then runs `proposal submit`. Later edits withdraw an open Proposal back to Draft. The developer alone can discard an unfinished Draft.
-- Una Proposal tocca le Feature solo attraverso file del Modello effettivamente cambiati: registrare una Machine, una descrizione di Feature o un Actor senza modificarne il contenuto non avvia scansioni aggiuntive.
-- Multi-branch e giro di worktree sono stati rimossi: accettare una Proposal la applica sempre nella cartella aperta. Una cartella `.trama/multi-branch/`, un valore di `trama.worktreeAgent` o worktree e branch `trama/*` rimasti da prima non sono letti né eliminati; si tolgono a mano, con git.
-- Short numbers: every live Proposal, Task and Drift has a temporary number (`P3`, `T3`, `D3`) beside its permanent eight-character identity. The Board, the panel and the command line show the number while the card is live and the identity only once it is closed, never both; every command that names a card accepts the number (`trama task move T3 doing`) and refuses a wrong letter or a number nobody has; `--json` gives `id` and `number`. Numbers live only in `.trama/short-numbers/assigned` of each working copy (not versioned), and files, branches and instructions to the agent always use the identity. The skills name cards by number and title and write only identities. See [CLI](./docs/cli.md#conventions).
-- Four agent skills in [skills/](./skills): `trama-design` (an interview in rounds of questions with recommendations, then a Proposal), `trama-scan` (Model vs code → Tasks and Drifts), `trama-implement` (Task → code; files a Drift when the Model cannot be followed. Asked for one Task it stops there; in a run over several Tasks, Run all To do or Run this design, it takes the Tasks in groups from `trama task next --batch`, skips the blocked ones, goes on past a Drift, and ends with a report of what it implemented, the Drifts it filed and the Tasks left unrun), `trama-import` (existing code → Proposals describing it as it is, with doubts; ADR 0008). `trama init` installs them into `.agents/skills/` (VS Code, Codex, Cursor); `--skills-dir .claude/skills` for Claude Code; `trama skills update` refreshes them and deletes the `trama-fix` skill that earlier versions installed.
-- Faster agent runs: `trama task next --batch` gives the group of a parallel run (up to four runnable Tasks that concern different things), which `trama-implement` hands to the agent's own sub-agents in the same folder, then scans the whole System at the end of a clean run; `trama-scan` gives each Machine to a sub-agent and `trama-design` explores with sub-agents. After an approval the automatic scan reads only the Proposal's `## Scan scope` (`trama proposal show`) e si ferma dopo aver archiviato i Task, che il developer avvia dalla Board (per esempio con Run this design). See [CLI](./docs/cli.md).
-- Agenti e ruoli: `trama.agent` seleziona chat, omp o Claude Code; `trama.terminalLocation` sceglie la posizione dei terminali. `trama.analysis`, `trama.scan` e `trama.execution` scelgono il modello per ruolo, mentre le impostazioni legacy per launcher/agente/comandi personalizzati sono ignorate e non riscritte. I ruoli valgono solo per gli agenti terminali.
-- The VS Code extension in [extension/](./extension): Diagram, Board, Requirements (every description and body shown in them is rendered as Markdown), a ghost on the Board of each card the agent is about to create, and buttons that send prompts to the selected chat or terminal agent (`trama.agent`). The Board is read-only for Tasks: it has no way to move a Task, drag a card or take a Task back from the agent; those stay in the command line (`trama task move`, `trama task take-back`). When the agent's command ends, the Tasks it had taken go back to To do.
-- Packaging: `bun run package` builds a `.vsix` per platform (linux-x64, darwin-arm64) with the CLI inside; tagged releases are built by GitHub Actions.
+When an agent writes most of the code, it's easy to lose track of what your software actually does. Every prompt adds behaviour nobody looked at.
 
-Not done yet: licensing.
+Trama gives you and your agent a shared **map of your app**: every situation it can be in, and what moves it from one to the next. The agent writes the map as plain text, and Trama draws the diagram from it, automatically and always up to date. You never drag a box or draw an arrow. The agent reads the map before it writes a line.
 
-## Develop
+## See it in action
 
-```sh
-bun install
-bun test
-bun run typecheck
-bun run build          # dist/trama, a single binary
-bun run build:extension # extension/dist/{host,webview}.js
-bun run harness        # extension/dist/harness.html: the webview in a plain browser, demo data
+Let's add returns to a small online shop: the [shop example](./examples/shop) that comes with Trama.
+
+### 1. Say what you want
+
+Write it the way you'd tell a colleague. One line is enough, or take a whole page. Send it from the tab's menu; closing the tab sends it too.
+
+![Writing a design request in Trama](docs/images/design-request.png)
+
+Your agent picks it up right away, in the chat or terminal you already use, and starts reading the map.
+
+### 2. Answer a few questions
+
+The agent asks only what it can't decide alone. For returns it had nine questions, starting with how a delivery should be modelled, since the 14 days start from it. Each one comes with the agent's recommendation already selected, so most of the time you just confirm. Skip the ones you don't care about: the agent uses its recommendation and lists it as an assumption for you to check.
+
+![The agent's questions, with its recommended answer already selected](docs/images/questions.png)
+
+### 3. See the change before any code exists
+
+When the agent is done, pick its Proposal on the map: new parts in blue, removed parts in red. Here, returns bring in a new Actor, time, which closes the return window. The side panel sums up every decision and every assumption.
+
+![The returns Proposal drawn on the map, with its decisions beside it](docs/images/proposal-diagram.png)
+
+On the board, the Proposal lists every file it touches. Approve it, or reject it with a note.
+
+![The Proposal on the Board, with Approve and Reject](docs/images/proposal-approve.png)
+
+### 4. Watch it get built
+
+Approve, and the agent checks what changed against the code, one sub-agent per Machine, in parallel.
+
+![The scan of the approved Proposal, with one sub-agent per Machine](docs/images/scan.png)
+
+Tasks appear on the board as the agent prepares them.
+
+![Tasks appearing on the Board while the agent prepares them](docs/images/tasks-preparing.png)
+
+The returns design became nine Tasks, grouped under it.
+
+![Nine Tasks grouped under the returns design](docs/images/tasks-ready.png)
+
+Click **Run this design**, and the agent works through them while you follow along.
+
+### 5. Know when code and map disagree
+
+When the code does something the map doesn't say, or breaks one of your rules, Trama calls it a **Drift**.
+
+A Drift is not a bug report. It only says that the code and the map no longer tell the same story, and it doesn't decide which one is right:
+
+- **The code may be wrong.** The agent misread a Task, or a quick hand fix skipped a case: a bug.
+- **The map may be out of date.** You changed your mind while coding, or the code handles a case nobody thought to draw: the code is right, and the map should catch up.
+- **Both may be reasonable.** Two valid answers to a question the map never asked: it's a decision only you can make.
+
+Small details that change neither the diagram nor one of your rules aren't Drifts: Trama raises one only when the behaviour itself differs.
+
+Each Drift shows what happens, what should happen, and two to five ways to fix the code, with the agent's recommendation first. You pick one. Or you keep the code as it is, and the map is updated to match. Until you decide, the agent won't start any Task about that part of the app, so nothing new gets built on shaky ground.
+
+### 6. Set the rules once
+
+Tech stack, design, data, business rules: write them once, next to the map, and the agent follows them on every task.
+
+Rules grow with the map. The returns design added its own: the window ends at 23:59 on the 14th day after delivery, a return covers the whole order, and the refund is the full total. Each rule is tied to the exact part of the map it applies to, like `order/Delivered`.
+
+![Requirements next to the map: data, business rules and interface](docs/images/requirements.png)
+
+## Yes, it's slower than raw vibe coding
+
+Trama is still vibe coding: you describe what you want, and the agent writes the code. What changes is what happens in between.
+
+With raw vibe coding, you type a prompt and code appears. With Trama, you answer questions, look at the change on the map, approve it, and only then does the agent write code. Every feature takes more steps, and you'll feel it.
+
+That time isn't lost. It's spent where it's cheapest:
+
+- **Deciding before building.** A question answered now is cheaper than a feature rebuilt later. Changing a line on the map takes a second; ripping out code that went the wrong way takes an afternoon.
+- **Never explaining twice.** The map and your rules stay in the repo. Every new session, every agent, every teammate starts from what's already decided, not from an empty chat.
+- **Catching mistakes while they're small.** A Drift flags code that went off the map as soon as it's scanned, before more features get piled on top of it.
+- **Letting agents work in parallel.** Because every Task is tied to a clear part of the map, several agents can build at once without stepping on each other.
+
+The first feature is slower. The fiftieth isn't, because the app is still one you understand.
+
+If you're hacking a weekend prototype you'll throw away on Monday, raw vibe coding is fine. Trama is for software you mean to keep.
+
+## Already have a project?
+
+Point Trama at your existing code. The agent draws the map of what your app does today, and flags anything that looks wrong along the way.
+
+## What's in the name
+
+*Trama* is Italian for the **weft**: the thread a weaver passes back and forth through the loom until a pattern appears. Once the cloth is woven, the pattern holds. You can't change it by tugging at a single thread: a stray pull shows at once, and a new pattern has to be woven on purpose.
+
+That's the idea behind Trama. Your agent is a very fast weaver, and the map is the pattern. Every change to the design is woven in deliberately, as a Proposal you approve, and a thread pulled out of place in the code shows up as a Drift.
+
+In Italian, *trama* is also the **plot** of a story: what happens, in what order, and why. A map of every state your app can be in, and every event that moves it on, is exactly that.
+
+The letters spell out what's inside:
+
+- **Tasks**: the work the agent picks up, on a board you can follow.
+- **Requirements**: how your app must be built, written once and followed every time.
+- **Analysis**: the agent compares your code with the map and tells you where they disagree.
+- **Map**: every situation your app can be in, drawn for you as a diagram.
+- **Agents**: works with the one you already use: Copilot Chat, Cursor, Claude Code or omp.
+
+## Try it
+
+Trama runs in VS Code and Cursor, on Linux (x64) and macOS (Apple silicon).
+
+1. **Install the extension.** Download the `.vsix` for your platform from [Releases](https://github.com/nicchia-code/trama/releases), then run **Extensions: Install from VSIX…** from the command palette, or:
+   ```sh
+   code --install-extension trama-<platform>-<version>.vsix
+   ```
+   The `trama` command line comes inside the extension, so there's nothing else to install.
+2. **Pick your agent** in Settings (`trama.agent`), *before* you initialize a project:
+   - `chat` (default): Copilot Chat in VS Code, or the chat in Cursor.
+   - `claude`: Claude Code in a terminal. Also set `trama.skillsDir` to `.claude/skills`, so Claude Code finds Trama's skills.
+   - `omp`: omp in a terminal.
+
+   Terminal agents must already be installed and on your `PATH`.
+3. **Open your project** and run **Trama: Open**.
+4. Choose **Initialize Project** for a fresh start, or **Import from Code** for an existing app.
+5. Click **Design…** and describe your first feature.
+
+### Settings
+
+For Claude Code, writing in Italian, a typical setup looks like this:
+
+```jsonc
+// settings.json
+{
+  "trama.agent": "claude",
+  "trama.skillsDir": ".claude/skills",
+  "trama.language": "Italian"
+}
 ```
 
-If the shell was launched as a Trama agent or by Cursor's chat agent, use `env -u TRAMA_AGENT -u CURSOR_AGENT bun test`: the isolated test fixtures exercise developer-only commands as well.
+| Setting | Default | What it does |
+|---|---|---|
+| `trama.agent` | `chat` | Where Trama sends its instructions: `chat`, `claude` or `omp`. |
+| `trama.skillsDir` | `.agents/skills` | Where **Initialize Project** installs the agent skills. Use `.claude/skills` for Claude Code. |
+| `trama.language` | *empty* | Language for the prose the agent writes (descriptions, Proposals, Tasks, Drifts), e.g. `Italian`. Code, names, titles and IDs stay in English. |
+| `trama.terminalLocation` | `panel` | Where terminal agents open: `panel` (terminal area, in the background) or `editor` (a tab beside your code). |
+| `trama.analysis` | *empty* | Model for design requests, Drift resolution and import. |
+| `trama.scan` | *empty* | Model for scans, including the sub-agents that compare each Machine. |
+| `trama.execution` | *empty* | Model for implementing Tasks. |
+| `trama.autoScan` | `true` | After you approve a Proposal, scan what it changed and create the Tasks. |
+| `trama.autoExit` | `true` | Close an agent's terminal as soon as it's done. |
+| `trama.maxParallelAgents` | `20` | How many sub-agents the agent may run at once. |
+| `trama.submitWhileRunning` | `disabled` | `enabled` lets you start a run while another is in progress. |
+| `trama.driftAutoPilot` | `disabled` | Let the agent resolve Drifts on its own: `enabled` for non-critical ones, `yolo` for all of them. |
 
-Try it on the example Model:
+For the three model settings, write the model name as your agent accepts it, or leave it empty for the agent's default. In the chat they pick the model of the new conversation: in Copilot, a model with that name; in Cursor, the conversation's starting model. Every setting except `trama.autoScan`, `trama.skillsDir`, `trama.language` and `trama.submitWhileRunning` lives in your user settings only, so it can't be overridden per workspace. All the details are in the [extension README](./extension/README.md).
 
-```sh
-cd examples/shop
-bun run ../../src/cli/bin.ts machine order
-bun run ../../src/cli/bin.ts paths order Draft Shipped
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph repo[".trama/ in your repo"]
+    M[Model]
+    R[Requirements]
+    W[Proposals · Tasks · Drifts]
+  end
+  E[Editor extension] -->|reads, renders| repo
+  E -->|sends instructions| A[Your agent]
+  A -->|loads| S[Skills]
+  A -->|explores, writes through| C[trama CLI]
+  C --> repo
+  R -.->|generated into| S
+  A -->|writes| Code[Your code]
 ```
 
-`src/core` has no dependency on Bun, so the extension reuses it. `src/cli` is the command line. To run the extension, open `extension/` in VS Code and press F5 after `bun run build:extension`.
+**Everything is plain Markdown in your repo.** `.trama/` lives next to your code and is versioned with it: the Model in `model/`, the Requirements in `requirements/`, and the work in `proposals/`, `tasks/` and `drifts/`. No database, no cloud service, no account.
 
+**The Model is a set of state machines.** A System is split into Features. Each Feature groups Machines, and each Machine is one file listing its States, the Events that move it, and where each move leads, with conditions written as plain prose. States can nest. Machines never call each other: they react to Events, emitted by other Machines or by Actors outside the System (the user, a payment provider, time). The Diagram is generated from these files and laid out automatically. It's read-only: to change it, you ask the agent for a Proposal, so the files stay the single source of truth. [File format](./docs/model-format.md).
+
+**Requirements become skills.** Requirements are grouped into Areas (`ui`, `tech`, `quality`, `data`, `rules`, or your own), split into fragments. Each Area and fragment says when an agent needs it, and each section applies to the whole System or to one Feature, Machine or State. Whenever a Requirement file changes, Trama regenerates them as agent skills (`trama-req-<area>-<fragment>`), with that "when" as the skill's description. The agent's own skill loader then pulls in only the rules that matter for the task at hand. Past a size budget, each Area becomes one index skill instead, so a large rulebook never floods the agent's context.
+
+**Agents go through the CLI.** The `trama` CLI is a single binary bundled with the extension. Agents use it to explore the Model (`trama machine order`, `trama paths order Draft Shipped`, `trama search refund`), check it (`trama validate`, `trama analyze`), and create Proposals, Tasks and Drifts. It never reads your code: comparing the Model with the code is the agent's job.
+
+**Skills drive the workflow.** `trama init` installs five agent skills into your project, each one step of the loop:
+
+| Skill | Does |
+|---|---|
+| `trama-design` | Asks you questions in rounds, then writes a Proposal |
+| `trama-scan` | Compares Model and Requirements with the code; files Tasks and Drifts |
+| `trama-implement` | Turns Tasks into code; files a Drift when the Model can't be followed |
+| `trama-resolve-drifts` | Asks you how to settle each Drift, then records your choices in one Proposal |
+| `trama-import` | Describes existing code as Proposals |
+
+**Nothing changes without you.** A Proposal holds the full new version of every file it touches and must pass validation against the whole Model before you see it. Nothing changes until you approve it. Decisions such as approving, rejecting or resolving a Drift are yours: agents take them only when you explicitly ask. An open Drift blocks every Task about the same part of the Model until you resolve it.
+
+**Built for parallel agents.** A scan gives each Machine to its own sub-agent. Implementation runs hand out Tasks in groups that touch different parts of the Model. After you approve a Proposal, only what it changed is scanned again.
+
+**The editor never calls a model.** The extension renders the Diagram, Board and Requirements, shows the agent's questions in its own panel, and sends instructions to the agent you choose. All the reasoning happens in your agent, with your subscription.
+
+## Learn more
+
+- [What the words mean](./CONTEXT.md)
+- [Command line reference](./docs/cli.md)
+- [Contributing](./CONTRIBUTING.md)
+
+## License
+
+Trama is open source under the [GNU AGPL v3](./LICENSE): use it, change it and share it, as long as your changes stay open too.
+
+Want to use Trama in a closed-source product? [Get in touch](mailto:luca.soda@gmail.com) for a commercial license.
+
+Copyright © 2026 Luca Soda
