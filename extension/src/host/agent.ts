@@ -5,11 +5,11 @@ import { announce, newTerminalId, TERMINAL_ENV, type AgentOrigin } from "../../.
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
-import { QUESTION_ENDPOINT_ENV, sendCoordinatorMessage, type CoordinatorMessage } from "../../../src/core/question-channel";
+import { QUESTION_ENDPOINT_ENV, requestCoordinatorMessage, sendCoordinatorMessage, type CoordinatorMessage } from "../../../src/core/question-channel";
 import { bundledOmpHook, bundledTrama, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, toClipboard, withTramaPath } from "./cursor";
 import { onCopilotChatEvent } from "./copilot-chat";
 import { withdrawWaiting } from "./announcements";
-import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, setHooked, startJob } from "./drift-resolution";
+import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, driftAutopilotMode, endChatJobs, endCopilotChatJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint, questionWindowId } from "./questions";
 import { withLanguage } from "./prompts";
@@ -48,22 +48,36 @@ export function agentName(context: { fromTramaTerminal?: boolean; fromCursorChat
 }
 
 /**
+ * The Copilot model that the role's name picks, as `workbench.action.chat.open` takes it: the first model named
+ * `<name> (<vendor>)`, or `<name>` for Copilot's own models. Not found: the warning says so and the chat keeps its model.
+ */
+async function copilotModelSelector(role: Role): Promise<{ vendor: string; id: string } | undefined> {
+  const name = configuredModels()[role];
+  if (name === "") return undefined;
+  const found = (await vscode.lm.selectChatModels()).find((model) => name === `${model.name} (${model.vendor})` || (model.vendor === "copilot" && name === model.name));
+  if (found) return { vendor: found.vendor, id: found.id };
+  void vscode.window.showWarningMessage(`Trama: no Copilot model is named "${name}" (trama.${role}). The instruction was sent with the model chosen in the chat.`);
+  return undefined;
+}
+
+/**
  * Starts a new agent-mode conversation in the editor's chat with `prompt`. Cursor has its own chain of steps. Elsewhere
  * `workbench.action.chat.open` with `{ query, mode }` is how VS Code's own actions do it, but it is not a documented
  * API: if it fails, the prompt goes to the clipboard instead.
  */
-async function openChat(root: string, prompt: () => string, selfSendingOnly: boolean, canSend: () => boolean, onSendStart: () => void): Promise<ChatDelivery> {
+async function openChat(root: string, prompt: () => string, selfSendingOnly: boolean, canSend: () => boolean, onSendStart: () => void, role: Role): Promise<ChatDelivery> {
   if (!canSend()) return "not-sent";
   if (isCursor()) {
     onSendStart();
-    return openCursorChat(root, withTramaPath(prompt()), selfSendingOnly, canSend);
+    return openCursorChat(root, withTramaPath(prompt()), selfSendingOnly, canSend, configuredModels()[role]);
   }
   try {
+    const modelSelector = await copilotModelSelector(role);
     await vscode.commands.executeCommand("workbench.action.chat.newChat");
     if (!canSend()) return "not-sent";
     const query = prompt();
     onSendStart();
-    await vscode.commands.executeCommand("workbench.action.chat.open", { query, mode: "agent" });
+    await vscode.commands.executeCommand("workbench.action.chat.open", { query, mode: "agent", ...(modelSelector === undefined ? {} : { modelSelector }) });
     return "sent";
   } catch {
     if (!canSend()) return "not-sent";
@@ -221,8 +235,8 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
 /** The identity a chat job's agent passes to the coordinator-aware commands: a chat has no environment, so the text gives it. */
 const jobIdentity = (jobId: string): string => `This Trama job has ID ${jobId}. Pass \`--job ${jobId}\` to every Trama command that accepts \`--job\`.`;
 
-/** The instruction with its limit, sub-agent and language sentences on one line; a terminal's job comes from its environment. */
-function terminalPrompt(instruction: string, role: Role): string {
+/** The instruction with its limit, sub-agent and language sentences on one line, for the chat and the terminal alike; a terminal's job comes from its environment. */
+function agentPrompt(instruction: string, role: Role): string {
   const limit = configuredMaxParallelAgents();
   const withLimit = withAgentLimit(instruction, limit);
   const withSubAgent = canScan(role) ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
@@ -230,7 +244,7 @@ function terminalPrompt(instruction: string, role: Role): string {
 }
 
 /** The model roles, trimmed (`trama.analysis`, `trama.scan`, `trama.execution`). Application scope: only the user's settings count. */
-const configuredModels = (): Models => ({
+export const configuredModels = (): Models => ({
   analysis: settings().get<string>("analysis", "").trim(),
   scan: settings().get<string>("scan", "").trim(),
   execution: settings().get<string>("execution", "").trim(),
@@ -243,9 +257,24 @@ function terminalRun(agent: TerminalAgent, instruction: Instruction, name: strin
   const tramaPath = agent === "claude" ? bundledTrama() : undefined;
   return {
     template: (family) => agentTemplate(agent, role, models, family, hook, tramaPath),
-    prompt: () => terminalPrompt(textOf(instruction), role),
+    prompt: () => agentPrompt(textOf(instruction), role),
     hooked: hook !== undefined || tramaPath !== undefined,
   };
+}
+
+/**
+ * Reserves the project's next send with its coordinator, which answers for the whole project. Without a coordinator in
+ * reach nothing is reserved, as before; a project with a send reserved refuses this one.
+ */
+async function reserveSendWithCoordinator(root: string, id: string, windowId: string): Promise<boolean> {
+  const responses = await requestCoordinatorMessage(projectAt(root), { type: "reserve-send", root, id, windowId }).catch(() => []);
+  const owner = responses.find((response) => response.coordinator === true);
+  return owner === undefined || owner["reserved"] === true;
+}
+
+/** Gives the reservation `id` back to the coordinator, whether its send started or not. */
+async function releaseSendWithCoordinator(root: string, id: string): Promise<void> {
+  await requestCoordinatorMessage(projectAt(root), { type: "release-send", root, id }).catch(() => undefined);
 }
 
 async function broadcastJob(root: string, job: Job, active: boolean): Promise<void> {
@@ -285,6 +314,8 @@ export async function launchAgent(
   const jobOrigin = jobOptions.origin ?? "manual";
   const windowId = job === undefined ? "" : await questionWindowId(root) ?? "";
   const agent = configuredAgent();
+  // Under `disabled` the window reserves no send and announces no job start to the other windows: it knows only its own work.
+  const shared = driftAutopilotMode(settings().inspect<unknown>("driftAutoPilot")?.globalValue) !== "disabled";
   if ((agent === "chat" || job === undefined) && !canSend()) return undefined;
   const launch = async (): Promise<Launch | undefined> => {
     if (!canSend()) return agent === "chat" ? "not-sent" : undefined;
@@ -292,16 +323,15 @@ export async function launchAgent(
       let sentAfter = 0;
       const chat = isCursor() ? "cursor" : "copilot";
       const prompt = () => {
-        const line = withLanguage(withAgentLimit(textOf(instruction)), configuredLanguage());
+        const line = agentPrompt(textOf(instruction), roleOf(name));
         return jobId === undefined ? line : `${line}\n\n${jobIdentity(jobId)}`;
       };
       const delivery = await openChat(root, prompt, selfSendingOnly, canSend, () => {
         sentAfter = chatJobSendStarted(root, chat);
-      });
-      if (delivery !== "not-sent") noticeChatModelRoles();
+      }, roleOf(name));
       if (delivery === "sent" && job !== undefined && jobId !== undefined) {
         const started = startJob(job, root, { chat }, false, sentAfter, jobId, jobOrigin, windowId);
-        if (started !== undefined) void broadcastJob(root, {
+        if (started !== undefined && shared) await broadcastJob(root, {
           id: started, kind: job, root, place: { chat }, origin: jobOrigin, windowId,
         }, true);
       }
@@ -331,29 +361,27 @@ export async function launchAgent(
     onSent?.(startedAt);
     if (job !== undefined && jobId !== undefined) {
       const started = startJob(job, root, { terminal: terminalId }, run.hooked, undefined, jobId, jobOrigin, windowId);
-      if (started !== undefined) void broadcastJob(root, {
+      if (started !== undefined && shared) await broadcastJob(root, {
         id: started, kind: job, root, place: { terminal: terminalId }, origin: jobOrigin, windowId,
       }, true);
     }
     if (announceProposal !== undefined) announceDesignRequest(root, announceProposal, terminalId);
     return "terminal";
   };
-  const result = await (agent === "chat" || job !== undefined ? inSendTurn(launch) : launch());
+  // Under an active autopilot a Run, scan or resolution is reserved with the project's coordinator before its check and send; the reservation goes
+  // back once the send has started or not, so another window's send or an automatic step cannot start meanwhile.
+  const reservation = shared && job !== undefined ? jobId : undefined;
+  if (reservation !== undefined && !await reserveSendWithCoordinator(root, reservation, windowId)) {
+    if (jobOrigin === "manual") void vscode.window.showWarningMessage("Trama: another instruction is being sent to this project; try again in a moment.");
+    return undefined;
+  }
+  let result: Launch | undefined;
+  try {
+    result = await (agent === "chat" || job !== undefined ? inSendTurn(launch) : launch());
+  } finally {
+    if (reservation !== undefined) await releaseSendWithCoordinator(root, reservation);
+  }
   // A Resolve Drifts or scan the developer starts lifts an automatic hold, but only once its instruction really started.
   if (jobOrigin === "manual" && (job === "resolve" || job === "scan") && launched(result)) releaseAutopilotHold(root);
   return result;
-}
-
-/** The editor's state for all projects (`ExtensionContext.globalState`), given at activation. */
-let globalState: vscode.Memento | undefined;
-export const useGlobalState = (state: vscode.Memento): void => void (globalState = state);
-
-const CHAT_ROLES_NOTICE_SHOWN = "trama.chatModelRolesNoticeShown";
-
-/** The first instruction sent to the chat while a model role is set tells the developer, once for all projects, that the chat ignores the roles. */
-function noticeChatModelRoles(): void {
-  if (globalState === undefined || globalState.get<boolean>(CHAT_ROLES_NOTICE_SHOWN) === true) return;
-  if (Object.values(configuredModels()).every((model) => model === "")) return;
-  void globalState.update(CHAT_ROLES_NOTICE_SHOWN, true);
-  void vscode.window.showInformationMessage("Trama: model roles (trama.analysis, trama.scan, trama.execution) apply only to terminal agents. The chat uses the model chosen in the chat.");
 }

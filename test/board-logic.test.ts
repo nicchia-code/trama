@@ -241,11 +241,11 @@ test("interleaving puts each ghost before the real card at its index, keeping th
   expect(interleave([], [{ item: "only", index: 0 }])).toEqual(["only"]);
 });
 
-test("a Drift ghost uses Writing once its Draft exists", () => {
-  const card = announcedCard(announcement({ kind: "drift", title: "Refunds differ", phase: "writing" }), false);
-  expect(card.phase).toBe("Writing");
-  expect(card.label).toContain("writing");
-  const waiting = announcedCard(announcement({ kind: "drift", phase: "writing" }), true);
+test("a Drift ghost says Writing the Proposal once its Draft exists, and its name repeats it", () => {
+  const card = announcedCard(announcement({ kind: "drift", title: "Refunds differ", phase: "writing-proposal" }), false);
+  expect(card.phase).toBe("Writing the Proposal");
+  expect(card.label).toContain("writing the proposal");
+  const waiting = announcedCard(announcement({ kind: "drift", phase: "writing-proposal" }), true);
   expect(waiting.phase).toBe("Waiting for your answers");
   expect(waiting.label).toContain("waiting for your answers");
 });
@@ -298,6 +298,19 @@ test("a resolution's card has one row per Drift, written by number, with the dec
     ],
   });
   expect(plain).toMatchObject({ resolves: [] });
+});
+
+test("an open resolution's row carries the autopilot failure of its Drift, and no card is made for that Drift", () => {
+  const failures = [{ job: "j1", title: "Drift 0003: Not authorized any more", drift: "0003", reason: "Not authorized any more" }];
+  const cards = buildBoard(
+    snapshot({
+      proposals: [proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", critical: false, decision: "Code fixed with option Fix the code", note: null }, { drift: "0044", title: "Old", critical: false, decision: "(already resolved)", note: null }] })],
+      drifts: [drift({ id: "0003" })],
+    }),
+    failures,
+  )[0]?.cards ?? [];
+  expect(cards.map((card) => card.key)).toEqual(["proposal:0007"]);
+  expect(cards[0]).toMatchObject({ resolves: [{ drift: "0003", autopilotFailed: "Not authorized any more" }, { drift: "0044", autopilotFailed: null }] });
 });
 
 test("a live card is written by its short number, a closed one by its identity, never both", () => {

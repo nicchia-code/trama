@@ -44,11 +44,11 @@ function projectRootKey(root: string): string {
   return process.platform === "win32" ? canonical.toLowerCase() : canonical;
 }
 
-/** Active Trama-launched jobs known to this window for a project, deduplicated by their transitory identity. */
-export function activeProjectJobs(root: string): Job[] {
+/** Active Trama-launched jobs known to this window for a project, deduplicated by their transitory identity. Without `shared` (autopilot `disabled`) only this window's own jobs count. */
+export function activeProjectJobs(root: string, shared = true): Job[] {
   const key = projectRootKey(root);
   const byId = new Map<string, Job>();
-  for (const job of [...jobs, ...remoteJobs.values()])
+  for (const job of shared ? [...jobs, ...remoteJobs.values()] : jobs)
     if (projectRootKey(job.root) === key) byId.set(job.id, job);
   return [...byId.values()];
 }
@@ -58,9 +58,9 @@ export function localProjectJobs(root: string): Job[] {
   return [...jobs].filter((job) => projectRootKey(job.root) === key);
 }
 
-/** Resolve Drifts and Runs are exclusive; scans remain visible to the autopilot barrier but do not block manual actions. */
-export function driftResolution(root?: string): DriftResolution {
-  const all = root === undefined ? [...jobs, ...remoteJobs.values()] : activeProjectJobs(root);
+/** Resolve Drifts and Runs are exclusive; scans remain visible to the autopilot barrier but do not block manual actions. Under `disabled` (`shared` false) other windows' jobs are not seen. */
+export function driftResolution(root?: string, shared = true): DriftResolution {
+  const all = root === undefined ? [...jobs, ...(shared ? remoteJobs.values() : [])] : activeProjectJobs(root, shared);
   return all.some((j) => j.kind === "resolve") ? "resolving" : all.some((j) => j.kind === "run") ? "running-tasks" : "free";
 }
 
@@ -112,7 +112,7 @@ export function receiveCoordinatorMessage(message: Record<string, unknown>): voi
     const abnormal = message["abnormal"];
     if (typeof abnormal === "string") abnormalEnds.set(key, abnormal);
     const ended = remoteJobs.get(key);
-    if (ended?.kind === "scan" && !checkSucceeded.has(key)) noteScanFailure(projectRootKey(message["root"]), ended.id, "Scan ended without a successful check");
+    if (ended?.kind === "scan") noteScanEnd(projectRootKey(message["root"]), ended.id);
     if (remoteJobs.delete(key)) changed();
     return;
   }
@@ -190,14 +190,12 @@ function receiveCheck(message: Record<string, unknown>): void {
   const developerScan = knownJobOrigins.get(jobKey) === "manual" && scanActive;
   let failures = scanFailures.get(key);
   if (failures === undefined) scanFailures.set(key, failures = new Map());
+  // A check declared after its scan ended, or a Run's final check, proves neither success nor the end of a scan: it lifts no wait.
   if (phase === "scanning" && failed) {
     setScanFailure(failures, job, title);
     if (developerScan) failedCases.delete(key);
-    readyProjects.add(key);
-  } else if (phase === "scanning" && !scanActive) {
-    // A check declared after its scan ended does not prove success: the scan stays failed, and the wait still clears.
-    readyProjects.add(key);
-  } else if (phase === "scanning") {
+  } else if (phase === "scanning" && scanActive) {
+    // The wait lifts when this scan ends (noteScanEnd), not at its check: a declared check alone is no end.
     failures.delete(job);
     checkSucceeded.add(jobKey);
     if (knownJobOrigins.get(jobKey) === "manual") {
@@ -207,7 +205,6 @@ function receiveCheck(message: Record<string, unknown>): void {
       for (const failedJob of failures.keys()) if (!activeScans.has(failedJob)) failures.delete(failedJob);
       if (developerScan) failedCases.delete(key);
     }
-    readyProjects.add(key);
   }
   changed();
 }
@@ -219,6 +216,12 @@ function noteScanFailure(key: string, job: string, title: string): void {
   setScanFailure(failures, job, title);
   if (knownJobOrigins.get(`${key}\n${job}`) === "manual") failedCases.delete(key);
   readyProjects.add(key);
+}
+
+/** The end of a scan lifts the initial wait with any outcome; a scan that ended without a successful check is also shown as failed. */
+function noteScanEnd(key: string, job: string): void {
+  if (checkSucceeded.has(`${key}\n${job}`)) readyProjects.add(key);
+  else noteScanFailure(key, job, "Scan ended without a successful check");
 }
 
 /** Keeps the latest failure last in order, so `lastFailedScan` reads the most recent one. */
@@ -272,6 +275,68 @@ export function resumeAutopilot(root: string): void {
   heldProjects.delete(key);
   readyProjects.add(key);
   scanFailures.get(key)?.clear();
+  changed();
+}
+
+/** The sends reserved per project, with their coordinator: one at a time, from their check to their start or refusal. */
+const sendReservations = new Map<string, Map<string, string>>();
+
+/** Reserves the next send of the project for `id`, from the editor window `windowId`; refused while another send holds a reservation there. */
+export function reserveSend(root: string, id: string, windowId = ""): boolean {
+  const key = projectRootKey(root);
+  const held = sendReservations.get(key) ?? new Map<string, string>();
+  if (held.size > 0) return false;
+  held.set(id, windowId);
+  sendReservations.set(key, held);
+  return true;
+}
+
+/** Gives back the reservation `id`, whether its send started or not. A reservation is not a running job. */
+export function releaseSend(root: string, id: string): void {
+  sendReservations.get(projectRootKey(root))?.delete(id);
+}
+
+/** Whether a send is reserved in the project: an automatic step waits for it. */
+export function sendReserved(root: string): boolean {
+  return (sendReservations.get(projectRootKey(root))?.size ?? 0) > 0;
+}
+
+/** Losing the coordinator role clears the sends this window reserved: the new coordinator decides what is reserved from now on. */
+export function clearSendReservations(root: string): void {
+  sendReservations.delete(projectRootKey(root));
+}
+
+/** The editor windows that reserved a send or announced a job in the project; a window with no identity is not named. */
+export function projectWindowIds(root: string): string[] {
+  const key = projectRootKey(root);
+  const windows = new Set<string>();
+  for (const owner of sendReservations.get(key)?.values() ?? []) if (owner !== "") windows.add(owner);
+  for (const job of remoteJobs.values()) if (projectRootKey(job.root) === key && job.windowId !== "") windows.add(job.windowId);
+  return [...windows];
+}
+
+/**
+ * Forgets what the editor window `windowId` reserved or announced in the project: it can no longer end that work, so
+ * what it left must not block the project. A scan it left unfinished counts as finished, never as successful.
+ */
+export function forgetWindow(root: string, windowId: string): void {
+  const key = projectRootKey(root);
+  const reservations = sendReservations.get(key);
+  if (reservations !== undefined) for (const [id, owner] of reservations) if (owner === windowId) reservations.delete(id);
+  for (const [jobKey, job] of remoteJobs) {
+    if (projectRootKey(job.root) !== key || job.windowId !== windowId) continue;
+    remoteJobs.delete(jobKey);
+    if (job.kind === "scan") noteScanEnd(key, job.id);
+  }
+  changed();
+}
+
+/**
+ * A window that just took over the coordination waits again: the scan ends it remembers were seen before it coordinated,
+ * so only a new scan's end or a Resolve Drifts request resumes the delegation. Owning the role frees nothing by itself.
+ */
+export function awaitAutopilotResume(root: string): void {
+  readyProjects.delete(projectRootKey(root));
   changed();
 }
 
@@ -333,6 +398,12 @@ export function recordSkippedDrift(root: string, drift: string, signature: strin
   excludeAutopilotDrift(root, drift, signature);
 }
 
+/** A skipped question is no automation failure: its reason is shown only where the autopilot would collect that Drift. */
+export function shownAutopilotFailures(failures: DriftAutopilotFailure[], mode: DriftAutopilotMode, isCritical: (drift: string) => boolean): DriftAutopilotFailure[] {
+  return failures.filter((failure) => failure.job !== SKIPPED_QUESTION_JOB
+    || (mode !== "disabled" && (mode === "yolo" || failure.drift === undefined || !isCritical(failure.drift))));
+}
+
 /** A developer-started scan makes the skipped Drifts judgeable again. */
 export function forgetSkippedDrifts(root: string): void {
   const cases = failedCases.get(projectRootKey(root));
@@ -360,7 +431,7 @@ export function isKnownSuccessfulScan(root: string, job: string): boolean {
 
 /** Accessible status summary for the Board; it never grants an authorization. */
 export function driftAutopilotStatus(root: string, mode: DriftAutopilotMode, windowId?: string): DriftAutopilotStatus {
-  const jobs = activeProjectJobs(root);
+  const jobs = activeProjectJobs(root, mode !== "disabled");
   const failures = autopilotFailures(root);
   const remoteWindow = windowId !== undefined && jobs.some((job) => job.windowId !== "" && job.windowId !== windowId);
   const status = { mode, failures, ...(remoteWindow ? { remoteWindow: true } : {}) };
@@ -446,8 +517,7 @@ function endWhere(matches: (job: Job) => boolean, abnormal?: string): Job[] {
   const ended: Job[] = [];
   for (const job of [...jobs]) {
     if (!matches(job) || !jobs.delete(job)) continue;
-    if (job.kind === "scan" && !checkSucceeded.has(`${projectRootKey(job.root)}\n${job.id}`))
-      noteScanFailure(projectRootKey(job.root), job.id, "Scan ended without a successful check");
+    if (job.kind === "scan") noteScanEnd(projectRootKey(job.root), job.id);
     if (abnormal !== undefined) abnormalEnds.set(`${projectRootKey(job.root)}\n${job.id}`, abnormal);
     ended.push(job);
   }

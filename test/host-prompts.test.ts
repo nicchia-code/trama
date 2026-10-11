@@ -24,8 +24,9 @@ test("automatic resolution and Runs stay scoped to coordinator authorization", (
   const resolve = buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34"], automaticCollection: "collection" });
   expect(resolve).toContain("first Fix option");
   expect(resolve).toContain("Do not approve the Proposal or start a Run.");
-  const run = buildAutomaticRunPrompt("collection", ["task-1", "task-2"]);
-  expect(run).toContain("trama task next --batch --task task-1 --task task-2 --max {maxParallelAgents}");
+  const run = buildAutomaticRunPrompt("collection");
+  expect(run).toContain("Before each group, run `trama drift autopilot --json` and take the authorized Task IDs from its `tasks` field");
+  expect(run).not.toContain("--task task-");
   expect(run).toContain("trama announce done <check-id> --failed");
   expect(run).toContain("Do not use the general Task queue");
 });

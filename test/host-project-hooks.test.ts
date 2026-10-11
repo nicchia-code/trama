@@ -1,7 +1,8 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import * as os from "node:os";
 
 let storage: string;
 let extensionPath: string;
@@ -10,6 +11,9 @@ let writeError: Error | undefined;
 let updateError: Error | undefined;
 const errors: string[] = [];
 const updates: unknown[] = [];
+const home = mkdtempSync(join(os.tmpdir(), "trama-hook-home-"));
+mock.module("node:os", () => ({ ...os, homedir: () => home }));
+afterAll(() => rmSync(home, { recursive: true, force: true }));
 
 mock.module("vscode", () => ({
   env: { appName: "Visual Studio Code" },

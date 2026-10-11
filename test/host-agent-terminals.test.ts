@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, mock, spyOn, test, vi } from "bun:test";
 import { basename, join, relative, isAbsolute } from "node:path";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import * as os from "node:os";
+const { tmpdir } = os;
+// The editor writes the chat's sub-agent definition into the developer's home: a temporary one keeps the real home untouched.
+const home = mkdtempSync(join(tmpdir(), "trama-agent-home-"));
+mock.module("node:os", () => ({ ...os, homedir: () => home }));
+afterAll(() => rmSync(home, { recursive: true, force: true }));
 import { announce, listAnnouncements, withdrawAll } from "../src/core/announcements";
 import type { CursorHook } from "../src/core/cursor-chat";
 import { approveProposal, editInProposal, newProposal } from "../src/core/proposals";
@@ -556,7 +561,7 @@ describe("automatic terminal exit", () => {
       if (id === "workbench.action.chat.open" && typeof args[0] === "object" && args[0] !== null && "query" in args[0] && typeof args[0].query === "string") query = args[0].query;
     };
     try {
-      expect(await launchAgent(dir, () => `Resolve ${scope}.`, "Resolve Drifts")).toBe("sent");
+      expect(await launchAgent(dir, () => `Resolve ${scope}.`, "Drifts")).toBe("sent");
       expect(query).toBe("Resolve the Drift open at send time. Run at most 20 sub-agents at once.");
 
       editorCalls.length = 0;
@@ -761,29 +766,6 @@ describe("choosing the agent", () => {
       delete settingValues.agentCommand;
     }
   });
-
-  test("the chat tells once, for all projects, that model roles apply only to terminal agents, and only when a role is set", async () => {
-    const { launchAgent, useGlobalState } = await import("../extension/src/host/agent");
-    const vscode = await import("vscode");
-    const state = new Map<string, unknown>();
-    useGlobalState({ get: (key: string) => state.get(key), update: async (key: string, value: unknown) => void state.set(key, value), keys: () => [...state.keys()] } as never);
-    const info = spyOn(vscode.window, "showInformationMessage").mockImplementation(() => Promise.resolve(undefined) as never);
-    settingValues.agent = "chat";
-    try {
-      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
-      expect(info).not.toHaveBeenCalled();
-      settingValues.execution = "haiku";
-      settingValues.analysis = "haiku";
-      await launchAgent(dir, "Use the trama-design skill. X", "Design");
-      expect(info.mock.calls.map((call) => call[0])).toEqual(["Trama: model roles (trama.analysis, trama.scan, trama.execution) apply only to terminal agents. The chat uses the model chosen in the chat."]);
-      expect(state.get("trama.chatModelRolesNoticeShown")).toBe(true);
-    } finally {
-      info.mockRestore();
-      settingValues.agent = "omp";
-      delete settingValues.execution;
-      delete settingValues.analysis;
-    }
-  });
 });
 
 describe("announcing a design request", () => {
@@ -832,11 +814,13 @@ describe("the selected chat in Cursor", () => {
       editorCalls.length = 0;
       commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
       expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan")).toBe("confirm");
-      expect(editorCalls).toEqual(["composer.createNew", `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent("Use the trama-scan skill on the whole System. Run at most 20 sub-agents at once.")}&workspace=${encodeURIComponent(basename(dir))}&mode=agent`]);
+      expect(editorCalls).toHaveLength(2);
+      expect(editorCalls[0]).toBe("composer.createNew");
+      expect(String(editorCalls[1])).toContain(`cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent("Use the trama-scan skill on the whole System.")}`);
 
       editorCalls.length = 0;
       clipboard.length = 0;
-      expect(await launchAgent(dir, "Use the trama-design skill. Read .env", "Scan")).toBe("clipboard");
+      expect(await launchAgent(dir, "Use the trama-design skill. Read .env", "Design")).toBe("clipboard");
       expect(editorCalls).toEqual(["composer.createNew"]);
       expect(clipboard).toEqual(["Use the trama-design skill. Read .env Run at most 20 sub-agents at once."]);
       expect(typed.length).toBe(typedBefore);

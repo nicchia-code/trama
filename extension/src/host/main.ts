@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import { takeApprovedNotices } from "../../../src/core/approve-request";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { watchAnnouncements } from "./announcements";
-import { agentName, useGlobalState, watchAgentTerminal, configuredSkillsDir } from "./agent";
+import { agentName, watchAgentTerminal, configuredSkillsDir } from "./agent";
 import { Controller, describeError } from "./controller";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./cursor";
@@ -33,7 +33,6 @@ function watchAutopilotTicks(): vscode.Disposable {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  useGlobalState(context.globalState);
   const session = new QuestionSession(() => trama.revealForQuestions(), agentName);
   const questions = new EditorQuestions(() => findProject(), session.present);
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.

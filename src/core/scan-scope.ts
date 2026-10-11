@@ -1,7 +1,7 @@
 import { flattenStates } from "./model";
 import { receivers } from "./refs";
 import type { ProjectModel } from "./requirements";
-import type { EventDecl, Machine, State } from "./types";
+import type { EventDecl, Machine, Model, State } from "./types";
 
 export type ScanReason = "changed" | "removed, its container" | "leads into a change";
 
@@ -33,9 +33,8 @@ export function scanScope(before: ProjectModel, after: ProjectModel): ScanScopeE
   };
   const changedEvents: { owner: string; name: string }[] = [];
   const changedStates: { machine: Machine; state: State }[] = [];
-  /** `machine/state` keys (lowercase) of the States inside a changed State: its entry already brings them. */
-  const inside = new Set<string>();
-  const newMachines = new Set<string>();
+  /** Machines whose whole content a changed Machine reference covers: its entries come with it. */
+  const changedMachines = new Set<string>();
 
   const diffEvents = (owner: string, old: EventDecl[] | undefined, now: EventDecl[]) => {
     const oldByName = new Map((old ?? []).map((e) => [e.name, e]));
@@ -60,12 +59,15 @@ export function scanScope(before: ProjectModel, after: ProjectModel): ScanScopeE
   for (const m of is.machines.values()) {
     const o = was.machines.get(m.id);
     if (!o) {
-      newMachines.add(m.id);
+      changedMachines.add(m.id);
       add(m.id, "changed");
       diffEvents(m.id, undefined, m.events);
       continue;
     }
-    if (o.name !== m.name || o.description !== m.description) add(m.id, "changed");
+    if (o.name !== m.name || o.description !== m.description) {
+      changedMachines.add(m.id);
+      add(m.id, "changed");
+    }
     const oldStates = new Map(flattenStates(o.states).map((s) => [s.name.toLowerCase(), s]));
     const newStates = new Map(flattenStates(m.states).map((s) => [s.name.toLowerCase(), s]));
     for (const [key, s] of newStates) {
@@ -73,7 +75,6 @@ export function scanScope(before: ProjectModel, after: ProjectModel): ScanScopeE
       if (!os || os.description !== s.description || os.initial !== s.initial || os.final !== s.final || os.parent?.toLowerCase() !== s.parent?.toLowerCase()) {
         add(`${m.id}/${s.name}`, "changed");
         changedStates.push({ machine: m, state: s });
-        for (const d of flattenStates(s.children)) inside.add(`${m.id}/${d.name.toLowerCase()}`);
         continue;
       }
       const oldGroups = transitionGroups(os);
@@ -91,24 +92,57 @@ export function scanScope(before: ProjectModel, after: ProjectModel): ScanScopeE
   }
   for (const o of was.machines.values()) if (!is.machines.has(o.id) && is.features.has(o.feature)) add(o.feature, "removed, its container");
 
+  return [...closeScope(is, out, changedMachines, changedStates, changedEvents), ...requirementScope(before, after)];
+}
+
+/** A changed State, by its Machine, as the Model holds it after the change. */
+export interface ChangedState {
+  machine: Machine;
+  state: State;
+}
+
+/** A changed Event, by its owner's ID and its name. */
+export interface ChangedEvent {
+  owner: string;
+  name: string;
+}
+
+/**
+ * The scope a targeted scan compares, from the elements that changed or were removed (`changed`) and the Model they belong to.
+ * A Proposal and a finished Task both call it, so the same named elements give the same scope:
+ * - a changed Machine covers everything inside it (States, Transitions, Events): those entries are dropped;
+ * - a changed State covers the States and Transitions inside it: those entries are dropped;
+ * - the Transitions of any Machine that enter a changed State or react to a changed Event are added, as `leads into a change`.
+ */
+export function closeScope(model: Model, changed: ReadonlyMap<string, ScanReason>, changedMachines: ReadonlySet<string>, changedStates: ChangedState[], changedEvents: ChangedEvent[]): ScanScopeEntry[] {
+  const out = new Map(changed);
+  const add = (ref: string, reason: ScanReason) => {
+    const held = out.get(ref);
+    if (held === undefined || SCAN_REASONS.indexOf(reason) < SCAN_REASONS.indexOf(held)) out.set(ref, reason);
+  };
   for (const { machine, state } of changedStates) {
     const targets = new Set(flattenStates([state]).map((s) => s.name.toLowerCase()));
     for (const s of flattenStates(machine.states))
       for (const t of s.transitions) if (targets.has(t.target.toLowerCase())) add(`${machine.id}/${s.name}/${t.event.owner}.${t.event.name}`, "leads into a change");
   }
   for (const { owner, name } of changedEvents)
-    for (const r of receivers(is, owner, name)) add(`${r.machine.id}/${r.state.name}/${owner}.${name}`, "leads into a change");
+    for (const r of receivers(model, owner, name)) add(`${r.machine.id}/${r.state.name}/${owner}.${name}`, "leads into a change");
 
-  const model = [...out].filter(([ref]) => {
-    const parts = ref.split("/");
-    const head = parts[0] as string;
-    if (parts.length === 1) return !(head.includes(".") && newMachines.has(head.split(".")[0] as string));
-    if (newMachines.has(head)) return false;
-    const state = `${head}/${(parts[1] as string).toLowerCase()}`;
-    if (inside.has(state)) return false;
-    return parts.length === 2 || !changedStates.some((c) => `${c.machine.id}/${c.state.name.toLowerCase()}` === state);
-  });
-  return [...model.map(([ref, reason]) => ({ ref, reason })), ...requirementScope(before, after)];
+  /** `machine/state` keys (lowercase) of the States inside a changed State: its entry already brings them. */
+  const inside = new Set<string>();
+  for (const { machine, state } of changedStates) for (const d of flattenStates(state.children)) inside.add(`${machine.id}/${d.name.toLowerCase()}`);
+  const changedKeys = new Set(changedStates.map(({ machine, state }) => `${machine.id}/${state.name.toLowerCase()}`));
+  return [...out]
+    .filter(([ref]) => {
+      const parts = ref.split("/");
+      const head = parts[0] as string;
+      if (parts.length === 1) return !(head.includes(".") && changedMachines.has(head.split(".")[0] as string));
+      if (changedMachines.has(head)) return false;
+      const state = `${head}/${(parts[1] as string).toLowerCase()}`;
+      if (inside.has(state)) return false;
+      return parts.length === 2 || !changedKeys.has(state);
+    })
+    .map(([ref, reason]) => ({ ref, reason }));
 }
 
 /** A State's Transitions grouped by Event, as `--ref` names them, each group as comparable text. */

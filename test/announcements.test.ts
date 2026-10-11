@@ -228,7 +228,7 @@ describe("ending announcements", () => {
     const all = listAnnouncements(p);
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ id: a.id, kind: "drift", title: "Drift title", proposal: prop.id });
-    expect(buildSnapshot(p).announcements[0]).toMatchObject({ kind: "drift", title: "Drift title", phase: "writing" });
+    expect(buildSnapshot(p).announcements[0]).toMatchObject({ kind: "drift", title: "Drift title", phase: "writing-proposal" });
     expect(announcementNote(p, a.id, "drift")).toBeNull();
     submitProposal(p, prop.id);
     expect(listAnnouncements(p)).toHaveLength(1);

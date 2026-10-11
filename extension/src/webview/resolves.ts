@@ -32,6 +32,13 @@ export function renderResolves(prefix: "board" | "dg", title: string, rows: Reso
     link.addEventListener("click", () => showDrift(row.drift));
     const item = el("li", `${prefix}-resolves-item`);
     item.append(link);
+    if (row.autopilotFailed !== null) {
+      // The reason is in the tooltip and the accessible name; the badge moves no focus.
+      const failed = el("span", "board-badge error", "autopilot failed");
+      failed.title = `Autopilot failed: ${row.autopilotFailed}`;
+      failed.setAttribute("aria-label", `Autopilot failed: ${row.autopilotFailed}`);
+      item.append(failed);
+    }
     list.append(item);
   }
   return [el("div", `${prefix}-resolves-head`, "Resolves Drifts"), list];

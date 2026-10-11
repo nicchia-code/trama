@@ -92,11 +92,29 @@ describe("Board card rendering", () => {
     };
     try {
       const rows = renderResolves("board", "Resolve", [
-        { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Urgent", critical: true, decision: "Fix code" },
-        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, decision: "Dismissed" },
+        { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Urgent", critical: true, decision: "Fix code", autopilotFailed: null },
+        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, decision: "Dismissed", autopilotFailed: null },
       ], () => {});
       const badges = rows.flatMap((row) => (row as unknown as Node).all).filter((node) => node.className.includes("critical"));
       expect(badges.map((badge) => [badge.textContent, badge.title, badge.attributes["aria-label"]])).toEqual([["Critical", "Urgent developer decision", "Critical Drift: urgent developer decision"]]);
+    } finally {
+      if (previous === undefined) delete (globalThis as { document?: unknown }).document;
+      else (globalThis as { document?: unknown }).document = previous;
+    }
+  });
+  test("shows the autopilot failed badge beside a failed resolution row, with the reason in its tooltip and name", () => {
+    const previous = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      createElement: (tag: string) => new Node(tag),
+      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
+    };
+    try {
+      const rows = renderResolves("board", "Resolve", [
+        { drift: "failed", name: { text: "D4", isNumber: true }, title: "Refunds", critical: false, decision: "Fix code", autopilotFailed: "Not authorized any more" },
+        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, decision: "Dismissed", autopilotFailed: null },
+      ], () => {});
+      const badges = rows.flatMap((row) => (row as unknown as Node).all).filter((node) => node.className.includes("board-badge error"));
+      expect(badges.map((badge) => [badge.textContent, badge.title, badge.attributes["aria-label"]])).toEqual([["autopilot failed", "Autopilot failed: Not authorized any more", "Autopilot failed: Not authorized any more"]]);
     } finally {
       if (previous === undefined) delete (globalThis as { document?: unknown }).document;
       else (globalThis as { document?: unknown }).document = previous;
@@ -111,7 +129,7 @@ describe("Board card rendering", () => {
     try {
       const resolution: ProposalCard = {
         ...proposal, heading: "Resolution Proposal P2", resolution: true,
-        resolves: [{ drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", critical: false, decision: "Closed, nothing changes" }],
+        resolves: [{ drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", critical: false, decision: "Closed, nothing changes", autopilotFailed: null }],
       };
       const rendered = renderCard(resolution, env() as never) as unknown as Node;
       expect(rendered.className).toContain("board-card-resolution");

@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import {
+  awaitAutopilotResume,
   activeProjectJobs,
   autopilotFailedCase,
   bindChatJob,
@@ -9,6 +10,11 @@ import {
   driftAutopilotMode,
   driftAutopilotStatus,
   driftResolution,
+  clearSendReservations,
+  forgetWindow,
+  projectWindowIds,
+  reserveSend,
+  sendReserved,
   endChatJobs,
   endCopilotChatJobs,
   isKnownSuccessfulScan,
@@ -19,6 +25,9 @@ import {
   receiveCoordinatorMessage,
   recordAutopilotFailure,
   recordSkippedDrift,
+  shownAutopilotFailures,
+  autopilotFailures,
+  autopilotReady,
   resumeAutopilot,
   startJob,
 } from "../extension/src/host/drift-resolution";
@@ -72,6 +81,20 @@ test("a skipped Drift stays out of automatic resolution until it changes or a de
   forgetSkippedDrifts(project);
   expect(autopilotFailedCase(project, "skipped")).toBe(false);
   expect(autopilotFailedCase(project, "failed")).toBe(true);
+});
+
+test("a skipped question shows only with the autopilot on, and not for a critical Drift in enabled mode", () => {
+  const project = root();
+  recordSkippedDrift(project, "plain", "signature-1");
+  recordSkippedDrift(project, "critical", "signature-1");
+  recordAutopilotFailure(project, "job", "failed", undefined, "fix did not apply");
+  const failures = autopilotFailures(project);
+  const isCritical = (drift: string) => drift === "critical";
+  const ids = (mode: "disabled" | "enabled" | "yolo") => shownAutopilotFailures(failures, mode, isCritical).map((f) => f.drift ?? f.job);
+  expect(ids("disabled")).toEqual(["failed"]);
+  expect(ids("enabled")).toEqual(["plain", "failed"]);
+  expect(ids("yolo")).toEqual(["plain", "critical", "failed"]);
+  expect(autopilotFailedCase(project, "critical")).toBe(true);
 });
 
 test("a skip forwarded from another window keeps its Drift out until its question is answered or a developer scan starts", () => {
@@ -253,10 +276,71 @@ test("a check declared after its scan ended does not make the scan successful", 
   expect(isKnownSuccessfulScan(project, "late-scan")).toBe(false);
 });
 
+test("a successful scan lifts the initial wait when its work ends, not at its check", () => {
+  const project = root();
+  awaitAutopilotResume(project);
+  receiveCoordinatorMessage({ type: "job", id: "ok-scan", root: project, kind: "scan", active: true, place: { terminal: "terminal" } });
+  receiveCoordinatorMessage({ type: "check", root: project, job: "ok-scan", title: "System scan", phase: "scanning", failed: false });
+  expect(autopilotReady(project)).toBe(false);
+  receiveCoordinatorMessage({ type: "job", id: "ok-scan", root: project, kind: "scan", active: false, place: { terminal: "terminal" } });
+  expect(autopilotReady(project)).toBe(true);
+});
+
+test("a check declared for a finished scan or a Run lifts no wait after the editor reopens", () => {
+  const project = root();
+  receiveCoordinatorMessage({ type: "job", id: "old-scan", root: project, kind: "scan", active: true, place: { terminal: "terminal" } });
+  receiveCoordinatorMessage({ type: "job", id: "old-scan", root: project, kind: "scan", active: false, place: { terminal: "terminal" } });
+  receiveCoordinatorMessage({ type: "job", id: "old-run", root: project, kind: "run", active: true, place: { terminal: "terminal-2" } });
+  receiveCoordinatorMessage({ type: "job", id: "old-run", root: project, kind: "run", active: false, place: { terminal: "terminal-2" } });
+  awaitAutopilotResume(project);
+  receiveCoordinatorMessage({ type: "check", root: project, job: "old-scan", title: "System scan", phase: "scanning", failed: false });
+  receiveCoordinatorMessage({ type: "check", root: project, job: "old-run", title: "Final check", phase: "scanning", failed: false });
+  expect(autopilotReady(project)).toBe(false);
+});
+
 test("autopilot status identifies jobs active in a different editor window", () => {
   const project = root();
   receiveCoordinatorMessage({ type: "job", id: "remote-scan", root: project, kind: "scan", active: true, place: { terminal: "remote" }, windowId: "window-b" });
   expect(driftAutopilotStatus(project, "enabled", "window-a").remoteWindow).toBe(true);
   expect(driftAutopilotStatus(project, "enabled", "window-b").remoteWindow).toBeUndefined();
   receiveCoordinatorMessage({ type: "job", id: "remote-scan", root: project, kind: "scan", active: false, place: { terminal: "remote" }, windowId: "window-b" });
+});
+
+test("a lost editor window takes its reserved send and its jobs with it, and the other windows keep theirs", () => {
+  const project = root();
+  expect(reserveSend(project, "send-a", "window-a")).toBe(true);
+  expect(reserveSend(project, "send-b", "window-b")).toBe(false);
+  receiveCoordinatorMessage({ type: "job", id: "run-a", root: project, kind: "run", active: true, origin: "manual", windowId: "window-a", place: { terminal: "term-a" } });
+  receiveCoordinatorMessage({ type: "job", id: "run-b", root: project, kind: "run", active: true, origin: "manual", windowId: "window-b", place: { terminal: "term-b" } });
+  expect(projectWindowIds(project).sort()).toEqual(["window-a", "window-b"]);
+
+  forgetWindow(project, "window-a");
+
+  expect(projectWindowIds(project)).toEqual(["window-b"]);
+  expect(activeProjectJobs(project).map((job) => job.id)).toEqual(["run-b"]);
+  expect(sendReserved(project)).toBe(false);
+  expect(reserveSend(project, "send-b", "window-b")).toBe(true);
+  expect(driftResolution(project)).toBe("running-tasks");
+  forgetWindow(project, "window-b");
+});
+
+test("losing the coordinator role clears the sends this window reserved", () => {
+  const project = root();
+  expect(reserveSend(project, "send-a", "window-a")).toBe(true);
+  expect(sendReserved(project)).toBe(true);
+
+  clearSendReservations(project);
+
+  expect(sendReserved(project)).toBe(false);
+  expect(reserveSend(project, "send-b", "window-b")).toBe(true);
+  clearSendReservations(project);
+});
+
+test("under disabled a window sees only its own jobs; another window's Run blocks it only while the autopilot is on", () => {
+  const project = root();
+  receiveCoordinatorMessage({ type: "job", id: "other-run", root: project, kind: "run", active: true, place: { terminal: "terminal" }, origin: "manual", windowId: "other-window" });
+  expect(driftResolution(project, false)).toBe("free");
+  expect(activeProjectJobs(project, false)).toEqual([]);
+  expect(driftResolution(project)).toBe("running-tasks");
+  receiveCoordinatorMessage({ type: "job", id: "other-run", root: project, kind: "run", active: false, place: { terminal: "terminal" } });
 });

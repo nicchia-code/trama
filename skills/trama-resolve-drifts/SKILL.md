@@ -69,6 +69,8 @@ Create the Draft with the job binding:
 
 Add the authorized Drift decisions using `trama proposal resolve-drift <proposal-id> <drift-id> --decision fix-code --option 1`, validate it with `trama validate --proposal <proposal-id>`, inspect it with `trama proposal show <proposal-id>`, and submit it with `trama proposal submit <proposal-id>`. `--automatic` marks the resolution and imposes restrictions; it does not approve it. Never approve, reject, discard or implement it. After successful submission, report the Proposal and return control to the host. The host—not this agent—rechecks authorization, performs ordinary approval checks, waits for this resolution agent to finish, and may then launch a separate filtered Run.
 
+When the authorized Drifts do not fit one Proposal, split them into a chain as in step 5: each Proposal with `--automatic --job <id>`, a later one opened with `--requires <id>` of the earlier ones, each Drift in exactly one of them. Validate and submit them in dependency order, one at a time: the host approves each one as you submit it, so submit an earlier Proposal before writing the next. Never wait for an approval, and never approve one yourself.
+
 If a case cannot be applied or fails, report it to the coordinator using `trama agent-event failed --job <id> --drift <drift-id> --reason "<text>"`; this records no persistent Drift decision and does not retry. If the editor is unavailable or the coordinator cannot be confirmed, stop new automatic work and report the reason; never claim success from a prepared chat prompt, notes, or withdrawn check.
 
 ## Autopilot limits

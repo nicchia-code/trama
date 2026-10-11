@@ -135,19 +135,19 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for design work: quick and written design requests, Resolve Drifts and import. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
+          "markdownDescription": "Model for design work: quick and written design requests, Resolve Drifts and import. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. It only applies in your user settings."
         },
         "trama.scan": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for scans: of the System, of Features and after an approval; it also applies to the sub-agents that compare Machines. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
+          "markdownDescription": "Model for scans: of the System, of Features and after an approval; it also applies to the sub-agents that compare Machines. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. The chats' sub-agents get it with Update skills. It only applies in your user settings."
         },
         "trama.execution": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for implementing Tasks: implement, implement all and implement a design, including the selective final scan of the run. Write the name as your agent accepts it. Empty (the default) leaves the agent's default model. It does not apply in the chat. It only applies in your user settings."
+          "markdownDescription": "Model for implementing Tasks: implement, implement all and implement a design, including the selective final scan of the run. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. It only applies in your user settings."
         },
         "trama.autoExit": {
           "type": "boolean",

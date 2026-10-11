@@ -71,11 +71,13 @@ export const deeplinkAccepts = (prompt: string): boolean => prompt.trim() !== ""
  * and Enter; 3) the clipboard, with a notice. With `selfSendingOnly` (an automatic scan) only the first step is tried,
  * so no chat is left waiting for the developer.
  */
-export async function openCursorChat(root: string, prompt: string, selfSendingOnly = false, canSend: () => boolean = () => true): Promise<ChatDelivery> {
+export async function openCursorChat(root: string, prompt: string, selfSendingOnly = false, canSend: () => boolean = () => true, model = ""): Promise<ChatDelivery> {
   if (!canSend()) return "not-sent";
   try {
     // Its result does not count: Cursor always returns nothing, so only an error moves to the deeplink.
-    await vscode.commands.executeCommand("composer.createNew", { partialState: { text: prompt, richText: prompt, unifiedMode: "agent" }, openInNewTab: true, autoSubmit: true });
+    // The role's model starts this new conversation only, with Max mode off; the later steps carry none.
+    const partialState = { text: prompt, richText: prompt, unifiedMode: "agent", ...(model === "" ? {} : { modelConfig: { modelName: model, maxMode: false } }) };
+    await vscode.commands.executeCommand("composer.createNew", { partialState, openInNewTab: true, autoSubmit: true });
     return "sent";
   } catch {
     // Missing in this version of Cursor, or failed: the deeplink is next.

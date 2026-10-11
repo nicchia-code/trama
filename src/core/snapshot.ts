@@ -143,8 +143,8 @@ export interface AnnouncementView {
   kind: AnnouncementKind;
   /** The Draft's own title once a Draft is bound to it, the announced title before. */
   title: string;
-  /** A card: Preparing until a Draft exists, Writing once it does. A check: its own phase. */
-  phase: "preparing" | "writing" | CheckPhase;
+  /** A card: Preparing until a Draft exists, then Writing (a Proposal) or Writing the Proposal (a Drift's Draft). A check: its own phase. */
+  phase: "preparing" | "writing" | "writing-proposal" | CheckPhase;
 }
 
 export interface Snapshot extends ModelView {
@@ -336,7 +336,7 @@ export function buildSnapshot(p: Project): Snapshot {
 
 /** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. Only a Proposal's ghost takes its Draft's title: a Drift keeps its own. */
 export function announcementView(a: Announcement, proposalTitle: string | undefined): AnnouncementView {
-  return { id: a.id, kind: a.kind, title: (a.kind === "proposal" && a.proposal !== null && proposalTitle) || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : "writing") };
+  return { id: a.id, kind: a.kind, title: (a.kind === "proposal" && a.proposal !== null && proposalTitle) || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : a.kind === "drift" ? "writing-proposal" : "writing") };
 }
 
 /** The title is shown separately, so the body drops its leading H1. */

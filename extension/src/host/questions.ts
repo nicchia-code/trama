@@ -12,7 +12,7 @@ import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
 import { receiveCursorHook } from "./cursor";
 import { receiveCopilotHook } from "./copilot-chat";
-import { clearAutopilotFailure, localProjectJobs, receiveCoordinatorMessage, receiveAgentIdle, recordSkippedDrift } from "./drift-resolution";
+import { awaitAutopilotResume, clearAutopilotFailure, clearSendReservations, localProjectJobs, receiveCoordinatorMessage, receiveAgentIdle, recordSkippedDrift } from "./drift-resolution";
 import { noteCommandSeen } from "./terminal-activity";
 interface WindowRoundService {
   identity: string;
@@ -86,10 +86,21 @@ export class EditorQuestions implements vscode.Disposable {
     }
     service.lease = undefined;
     service.coordinatorReady = false;
+    // Losing the role frees what this window reserved; the coordinator that holds the role now decides from here on.
+    clearSendReservations(root);
     const lease = await acquireCoordinatorLease(service.project, { windowId: service.windowId, endpoint: server.endpoint });
     if (!lease || this.closed || this.service !== service) return false;
     service.lease = lease;
+    // The role just taken over waits for a scan end or Resolve Drifts again, in any mode; a request arriving now comes after this.
+    awaitAutopilotResume(service.project.root);
     return this.synchronizeJobs(service);
+  }
+
+  /** Asks every live window for the jobs it runs, so a coordinator that kept its role learns of work started while the autopilot was disabled. */
+  async importJobs(root: string): Promise<boolean> {
+    if (!await this.isCoordinator(root)) return false;
+    const service = this.service;
+    return service !== undefined && this.synchronizeJobs(service);
   }
 
   async windowId(root: string): Promise<string | undefined> {

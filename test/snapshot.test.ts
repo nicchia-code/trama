@@ -106,14 +106,14 @@ test("the snapshot carries the Model, open Proposals as ghost overlays, Drifts a
   expect(JSON.parse(JSON.stringify(snap))).toEqual(snap);
 });
 
-test("a Drift announcement keeps the Drift's title in each snapshot, whatever its Draft is called; only its phase changes to Writing", () => {
+test("a Drift announcement keeps the Drift's title in each snapshot, whatever its Draft is called; only its phase changes to Writing the Proposal", () => {
   const draft = newProposal(p, "Draft title", "", { origin: { chat: "editor" } });
   const drift = announce(p, { kind: "drift", title: "Announced Drift title", chat: "editor" });
   bindDraft(p, draft, drift.id, { chat: "editor" });
-  expect(buildSnapshot(p).announcements.find((a) => a.id === drift.id)).toMatchObject({ kind: "drift", title: "Announced Drift title", phase: "writing" });
+  expect(buildSnapshot(p).announcements.find((a) => a.id === drift.id)).toMatchObject({ kind: "drift", title: "Announced Drift title", phase: "writing-proposal" });
 
   writeFileSync(join(draft.dir, "proposal.md"), readFileSync(join(draft.dir, "proposal.md"), "utf8").replace("# Draft title", "# Updated Draft title"));
-  expect(buildSnapshot(p).announcements.find((a) => a.id === drift.id)).toMatchObject({ kind: "drift", title: "Announced Drift title", phase: "writing" });
+  expect(buildSnapshot(p).announcements.find((a) => a.id === drift.id)).toMatchObject({ kind: "drift", title: "Announced Drift title", phase: "writing-proposal" });
   expect(listAnnouncements(p).find((a) => a.id === drift.id)?.title).toBe("Announced Drift title");
 });
 

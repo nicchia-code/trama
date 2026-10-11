@@ -260,6 +260,29 @@ export async function renewCoordinatorLease(
   return await probeCoordinatorOwner(lease) === "live";
 }
 
+/**
+ * Whether the editor window `windowId` of the project is lost: no discovery record names it, or every record of it no
+ * longer answers on its endpoint. An unverified answer (a timeout) is not a loss, so nothing is forgotten by guess.
+ */
+export async function editorWindowLost(
+  project: Project,
+  windowId: string,
+  options: { runtimeDir?: string } = {},
+): Promise<boolean> {
+  const projectId = questionProjectId(project);
+  let directory: string;
+  try {
+    directory = runtimeDirectory(options.runtimeDir);
+    outsideProject(directory, project);
+  } catch { return false; }
+  const privateDirectory = process.platform === "win32" ? await privateWindowsDirectory(directory) : privateUnixDirectory(directory, false);
+  if (!privateDirectory) return false;
+  const found = records(directory, projectId).filter((record) => record.windowId === windowId);
+  if (found.length === 0) return true;
+  const states = await Promise.all(found.map((record) => probeCoordinatorOwner({ projectId, windowId, endpoint: record.endpoint })));
+  return states.every((state) => state === "stale");
+}
+
 /** Release only this window's lease, leaving another owner's claim untouched. */
 export async function releaseCoordinatorLease(
   project: Project,

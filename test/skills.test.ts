@@ -138,6 +138,13 @@ test("trama-implement reads each Task once from task show and checks the run onc
   expect(skill).not.toContain("Understand the surroundings");
 });
 
+test("trama-scan reports how many Machines were compared and how many produced cards, with no triage line", () => {
+  const skill = SKILLS["trama-scan/SKILL.md"] as string;
+  expect(skill).toContain("count of Machines compared");
+  expect(skill).toContain("the count of those that produced at least one Task or Drift");
+  expect(skill).not.toContain("Do not report triage, skipped-Machine, or classifier-error counts");
+});
+
 
 test("trama-resolve-drifts splits fragments over 12 KB in the same Proposal, keeping the 4,000-character budget in mind", () => {
   const skill = SKILLS["trama-resolve-drifts/SKILL.md"] as string;

@@ -28,10 +28,15 @@ describe("task scope", () => {
     const scope = JSON.parse(cli("--json", "task", "scope", a.id, "T2", c.id).out) as { ref: string; reason: string }[];
     expect(output.out).toContain("## Scan scope");
     expect(scope.filter((entry) => entry.ref === "order/Paid")).toEqual([{ ref: "order/Paid", reason: "changed" }]);
-    expect(scope).toContainEqual({ ref: "order/Paid/user.CANCEL", reason: "changed" });
+    expect(scope).not.toContainEqual({ ref: "order/Paid/user.CANCEL", reason: "changed" });
     expect(scope.filter((entry) => entry.ref === "user.CANCEL")).toEqual([{ ref: "user.CANCEL", reason: "changed" }]);
     expect(listTasks(p).map((task) => readFileSync(task.path, "utf8"))).toEqual(before);
     expect(getTask(p, a.id).data.column).toBe("todo");
+  });
+
+  test("a named Machine brings its States, Transitions and Events with it", () => {
+    const m = newTask(p, { title: "Machine", refs: ["order"], technical: false });
+    expect(JSON.parse(cli("--json", "task", "scope", m.id).out)).toEqual([{ ref: "order", reason: "changed" }]);
   });
 
   test("Requirement sections count; Area and General add nothing; supports short and permanent IDs", () => {

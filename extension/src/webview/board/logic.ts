@@ -78,6 +78,8 @@ export interface ResolvedRow {
   title: string;
   critical: boolean;
   decision: string;
+  /** The reason the autopilot failed on or excluded this Drift; null when it did not. */
+  autopilotFailed: string | null;
 }
 
 export interface ProposalCard {
@@ -218,10 +220,10 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
 }
 
 /** The rows of a resolution's `Resolves Drifts` block, in the order the snapshot carries them; none for any other Proposal. */
-export const resolvedRows = (p: Pick<ProposalView, "resolves">, numbers: CardNumbers = noNumbers): ResolvedRow[] =>
-  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, critical: r.critical, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}` }));
+export const resolvedRows = (p: Pick<ProposalView, "resolves">, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null): ResolvedRow[] =>
+  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, critical: r.critical, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, autopilotFailed: failed(r.drift) }));
 
-export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers): ProposalCard {
+export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null): ProposalCard {
   const name = cardNameOf(numbers, "proposal", p.id);
   return {
     kind: "proposal",
@@ -235,7 +237,7 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers):
     changes: summarizeChanges(p.changes),
     blocker: approveBlocker(p, numbers),
     touches: proposalTouches(p),
-    resolves: resolvedRows(p, numbers),
+    resolves: resolvedRows(p, numbers, failed),
   };
 }
 
@@ -325,7 +327,7 @@ export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilot
   const resolving = new Set(snapshot.proposals.filter((p) => p.kind === "resolution").flatMap((p) => p.resolves.map((r) => r.drift)));
   const cards: Record<ColumnId, Card[]> = {
     decide: [
-      ...snapshot.proposals.map((p) => proposalCard(p, numbers)),
+      ...snapshot.proposals.map((p) => proposalCard(p, numbers, (drift) => failed.get(`drift:${drift}`) ?? null)),
       ...snapshot.drifts.filter((d) => !resolving.has(d.id)).map((d) => driftCard(d, numbers, failed.get(`drift:${d.id}`) ?? null)),
     ],
     todo: [],
@@ -422,7 +424,7 @@ export interface AnnouncedCard {
   /** "Proposal", "Task", "Drift" or "Check". */
   kindLabel: string;
   title: string;
-  /** "Preparing", "Writing", or "Waiting for your answers" while a question round is open; for a check, its own phase. */
+  /** "Preparing", "Writing", "Writing the Proposal", or "Waiting for your answers" while a question round is open; for a check, its own phase. */
   phase: string;
   /** What assistive technology reads: the kind, the title and the phase. */
   label: string;
@@ -432,7 +434,7 @@ const ANNOUNCED_KIND_LABELS: Record<AnnouncementView["kind"], string> = { propos
 
 /** A check shows its own phase, which an open question round does not change. */
 export const announcedPhase = (phase: AnnouncementView["phase"], asking: boolean): string =>
-  phase === "verifying" ? "Verifying (tests, lint, build)" : phase === "scanning" ? "Scanning" : asking ? "Waiting for your answers" : phase === "writing" ? "Writing" : "Preparing";
+  phase === "verifying" ? "Verifying (tests, lint, build)" : phase === "scanning" ? "Scanning" : asking ? "Waiting for your answers" : phase === "writing" ? "Writing" : phase === "writing-proposal" ? "Writing the Proposal" : "Preparing";
 
 export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCard {
   const kindLabel = ANNOUNCED_KIND_LABELS[a.kind];

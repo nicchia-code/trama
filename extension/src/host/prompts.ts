@@ -33,9 +33,9 @@ export function buildPrompt(action: ResolvedAction): string {
   }
 }
 
-/** A restricted implementation Run; the agent must recheck the host's current delegated IDs before each group. */
-export function buildAutomaticRunPrompt(collection: string, tasks: string[]): string {
-  return `Use the trama-implement skill for automatic collection ${collection}. Before each group, run \`trama drift autopilot --json\`, then select only the currently authorized Tasks using \`trama task next --batch ${tasks.map((task) => `--task ${task}`).join(" ")} --max {maxParallelAgents}\`. Do not use the general Task queue or start any other Task. If a Task cannot be started/completed or its check fails, report it with \`trama agent-event failed --task <id> --reason <reason>\`; if a Trama check was announced, also complete it with \`trama announce done <check-id> --failed\`. Stop when the authorized set has no runnable Tasks.`;
+/** A restricted implementation Run: the Task identities are not named here, the agent reads the coordinator's current authorization before each group. */
+export function buildAutomaticRunPrompt(collection: string): string {
+  return `Use the trama-implement skill for automatic collection ${collection}. Before each group, run \`trama drift autopilot --json\` and take the authorized Task IDs from its \`tasks\` field, then select only those using \`trama task next --batch --task <id>… --max {maxParallelAgents}\`, passing each ID as a repeated \`--task\`. Do not use the general Task queue or start any other Task. If a Task cannot be started/completed or its check fails, report it with \`trama agent-event failed --task <id> --reason <reason>\`; if a Trama check was announced, also complete it with \`trama announce done <check-id> --failed\`. Stop when the authorized set has no runnable Tasks.`;
 }
 
 /** The scan prompt for one Feature, or the whole System when there is none, as the developer starts it by hand. It names no Proposal. */

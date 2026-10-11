@@ -2,7 +2,7 @@ import { basename } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
-import { sendCoordinatorMessage, type CoordinatorJson } from "../../../src/core/question-channel";
+import { editorWindowLost, sendCoordinatorMessage, type CoordinatorJson } from "../../../src/core/question-channel";
 import { approveProposal, getProposal, listProposals, rejectProposal, type Proposal } from "../../../src/core/proposals";
 import { resolveDriftsBlocker, runWindowBlocker } from "../../../src/core/resolution";
 import { buildSnapshot } from "../../../src/core/snapshot";
@@ -15,7 +15,7 @@ import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
 import { configuredSkillsDir, type DesignAnnouncement, type Instruction, type Launch, launchAgent, launched, settings } from "./agent";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
-import { activeProjectJobs, autopilotFailedCase, autopilotReady, clearAutopilotFailure, driftAutopilotMode, driftAutopilotStatus, driftResolution, excludeAutopilotDrift, forgetSkippedDrifts, holdAutopilot, jobAbnormalEnd, lastFailedScan, observeAutopilotMode, onDriftResolutionChange, recordAutopilotFailure, resumeAutopilot, setCoordinatorAvailable, type DriftAutopilotMode } from "./drift-resolution";
+import { activeProjectJobs, autopilotFailedCase, autopilotReady, clearAutopilotFailure, driftAutopilotMode, driftAutopilotStatus, driftResolution, excludeAutopilotDrift, forgetSkippedDrifts, forgetWindow, holdAutopilot, jobAbnormalEnd, lastFailedScan, observeAutopilotMode, onDriftResolutionChange, projectWindowIds, recordAutopilotFailure, releaseSend, reserveSend, resumeAutopilot, sendReserved, setCoordinatorAvailable, shownAutopilotFailures, type DriftAutopilotMode } from "./drift-resolution";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { resolveMarkdownFile } from "./paths";
@@ -79,6 +79,8 @@ export class Controller implements vscode.Disposable {
   private collection: AutopilotCollection | undefined;
   private coordinatorSubscription: vscode.Disposable | undefined;
   private ownedCoordinatorRoot: string | undefined;
+  /** Projects whose other windows' jobs were imported since the autopilot last left `disabled`. */
+  private readonly importedRoots = new Set<string>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -281,15 +283,19 @@ export class Controller implements vscode.Disposable {
     }
     if (this.panel) this.panel.title = this.projectTitle(project);
     try {
-      const window = driftResolution(project.root);
+      const window = driftResolution(project.root, this.mode() !== "disabled");
       synchronizeAnnouncementTitles(project);
       const snapshot = buildSnapshot(project);
       if (this.panel) this.panel.title = snapshot.system.name.trim() || this.projectTitle(project);
       const status = driftAutopilotStatus(project.root, driftAutopilotMode(settings().inspect<unknown>("driftAutoPilot")?.globalValue), this.coordinator?.currentWindowId(project.root));
+      const failures = shownAutopilotFailures(status.failures, status.mode, (id) => {
+        try { return getDrift(project, id).data.critical; } catch { return true; }
+      });
+      const shown = { ...status, failures };
       // A window that does not coordinate the project says why automatic resolution waits: the coordinator must resume it first.
-      const autopilot = status.mode !== "disabled" && this.ownedCoordinatorRoot !== project.root && status.phase === "idle"
-        ? { ...status, reason: "Automatic resolution waits for the project coordinator to resume" }
-        : status;
+      const autopilot = shown.mode !== "disabled" && this.ownedCoordinatorRoot !== project.root && shown.phase === "idle"
+        ? { ...shown, reason: "Automatic resolution waits for the project coordinator to resume" }
+        : shown;
       this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, window), runReason: runWindowBlocker(window, settings().get<string>("submitWhileRunning", "disabled") === "enabled"), autopilot } });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
@@ -353,6 +359,16 @@ export class Controller implements vscode.Disposable {
       resumeAutopilot(root);
       void this.autopilotTick();
       return { coordinator: true, received: true };
+    }
+    if (message["type"] === "reserve-send" || message["type"] === "release-send") {
+      if (!await this.coordinator?.isCoordinator(root)) return { coordinator: false, reason: "Project coordinator unavailable" };
+      const id = typeof message["id"] === "string" ? message["id"] : "";
+      if (message["type"] === "release-send") {
+        releaseSend(root, id);
+        return { coordinator: true };
+      }
+      await this.forgetLostWindows(projectAt(root));
+      return { coordinator: true, reserved: reserveSend(root, id, typeof message["windowId"] === "string" ? message["windowId"] : "") };
     }
     if (message["type"] !== "autopilot-status-request") return;
     const owner = await this.coordinator?.isCoordinator(root) ?? false;
@@ -440,14 +456,25 @@ export class Controller implements vscode.Disposable {
     }
     return [...tasks];
   }
+  /** Forgets the sends and jobs of editor windows that no longer answer: they can no longer end that work, so they must not block the project. */
+  private async forgetLostWindows(project: Project): Promise<void> {
+    const own = this.coordinator?.currentWindowId(project.root);
+    for (const windowId of projectWindowIds(project.root)) {
+      if (windowId !== own && await editorWindowLost(project, windowId)) forgetWindow(project.root, windowId);
+    }
+  }
   private async coordinate(project: Project): Promise<void> {
     const root = project.root;
     const mode = this.mode();
     observeAutopilotMode(root, mode);
     if (mode === "disabled") {
+      // Under `disabled` the windows share no jobs: the next active mode imports them again.
+      this.importedRoots.delete(root);
       if (this.collection?.root === root) this.collection = undefined;
       return;
     }
+    // An active autopilot forgets the sends and jobs of lost editors: a dead window must not block Resolve Drifts or a Run. Under `disabled` a window knows only its own work.
+    await this.forgetLostWindows(project);
     const owner = await this.coordinator?.isCoordinator(root) ?? false;
     if (!owner) {
       setCoordinatorAvailable(root, true);
@@ -459,12 +486,14 @@ export class Controller implements vscode.Disposable {
     }
     setCoordinatorAvailable(root, true);
     this.ownedCoordinatorRoot = root;
+    // Jobs other windows started while the autopilot was disabled reach this coordinator only when it asks: import them before the barrier is judged.
+    if (!this.importedRoots.has(root) && await this.coordinator?.importJobs(root)) this.importedRoots.add(root);
     if (this.collection && this.collection.root !== root) this.collection = undefined;
     if (this.collection) {
       await this.advanceCollection(project, this.collection);
       return;
     }
-    if (activeProjectJobs(root).length > 0 || !autopilotReady(root)) return;
+    if (activeProjectJobs(root).length > 0 || !autopilotReady(root) || sendReserved(root)) return;
     if (driftAutopilotStatus(root, mode).phase === "suspended") return;
     const drifts = this.eligibleDrifts(project, mode);
     if (drifts.length > 0) await this.startAutomaticResolution(project, drifts);
@@ -490,7 +519,12 @@ export class Controller implements vscode.Disposable {
       && this.mode() !== "disabled"
       && activeProjectJobs(project.root).length === 0
       && currentDrifts().length > 0;
-    const instruction = () => buildPrompt({ kind: "resolve-drifts", drifts: currentDrifts(), automaticCollection: collection.id });
+    // The instruction is built only when it is really sent: the collection then keeps exactly the Drifts it names, so a Drift no longer eligible then is left out without failing.
+    const instruction = () => {
+      const named = currentDrifts();
+      collection.drifts = named;
+      return buildPrompt({ kind: "resolve-drifts", drifts: named, automaticCollection: collection.id });
+    };
     const launchedNow = await this.deliverAutomatic(project.root, canSend, (guarded) => launchAgent(project.root, instruction, "Drifts", "Resolve Drifts", true, guarded, "resolve", undefined, { id, origin: "automatic" }));
     // Not delivered: nothing ran, so the reservation is released. A refused start is taken again by the next check; a held one waits for the developer.
     if (!launchedNow && this.collection === collection) this.collection = undefined;
@@ -517,7 +551,7 @@ export class Controller implements vscode.Disposable {
       return false;
     }
     if (launched(result)) return true;
-    if (refused) return false;
+    if (refused || result === undefined) return false;
     holdAutopilot(root, this.mode());
     // The clipboard fallback has shown its own notice already.
     if (result !== "clipboard") void vscode.window.showWarningMessage("Trama: the automatic Drift step did not reach the agent, so it is paused. Resolve Drifts or start a scan to resume it.");
@@ -604,13 +638,16 @@ export class Controller implements vscode.Disposable {
     return invalid !== null && invalid.length === 0;
   }
 
-  /** The Drifts of an automatic resolution Proposal whose decision no longer applies; null when the Proposal itself no longer matches the collection. */
+  /**
+   * The Drifts of an automatic resolution Proposal whose decision no longer applies; null when the Proposal itself no longer
+   * matches the collection. Other Drafts or open resolutions of this collection do not count: a chain is approved one by one.
+   */
   private invalidAutomaticDecisions(project: Project, proposal: Proposal, collection: AutopilotCollection, mode: DriftAutopilotMode): string[] | null {
     const ids = proposal.data.drifts.map((decision) => decision.drift);
     if (mode === "disabled" || proposal.data.kind !== "resolution" || proposal.data.automatic !== true
       || proposal.data.status !== "open" || Object.keys(proposal.data.base).length > 0 || proposal.data.delete.length > 0
       || ids.length === 0 || new Set(ids).size !== ids.length
-      || listProposals(project).some((other) => other.id !== proposal.id && other.data.kind === "resolution"
+      || listProposals(project).some((other) => other.id !== proposal.id && !collection.proposals.includes(other.id) && other.data.kind === "resolution"
         && (other.data.status === "draft" || other.data.status === "open"))) return null;
     return proposal.data.drifts
       .filter((decision) => {
@@ -659,7 +696,7 @@ export class Controller implements vscode.Disposable {
     collection.stage = "running";
     const delivered = await this.deliverAutomatic(project.root, canSend, (guarded) => launchAgent(
       project.root,
-      buildAutomaticRunPrompt(collection.id, tasks),
+      buildAutomaticRunPrompt(collection.id),
       "All tasks",
       undefined,
       true,
@@ -830,12 +867,12 @@ export class Controller implements vscode.Disposable {
     // Resolve Drifts and Runs are checked from current state at the request and at each delivery checkpoint.
     const refusal = (): string | null => {
       if (action.kind === "resolve-drifts") {
-        const blocker = resolveDriftsBlocker(project, driftResolution(project.root));
+        const blocker = resolveDriftsBlocker(project, driftResolution(project.root, this.mode() !== "disabled"));
         return blocker === null ? null : `Resolve Drifts is unavailable: ${blocker}.`;
       }
       const isRun = action.kind === "implement" || action.kind === "implement-design" || action.kind === "implement-all";
       const submitWhileRunning = settings().get<string>("submitWhileRunning", "disabled") === "enabled";
-      const runBlock = isRun ? runWindowBlocker(driftResolution(project.root), submitWhileRunning) : null;
+      const runBlock = isRun ? runWindowBlocker(driftResolution(project.root, this.mode() !== "disabled"), submitWhileRunning) : null;
       if (runBlock !== null) return `A run cannot start: ${runBlock}.`;
       if (action.kind === "implement-all") {
         const blocker = runBlocker(runTasks(project), "all", namerOf(syncShortNumbers(project).all()));
