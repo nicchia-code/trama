@@ -4,7 +4,7 @@
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
   "version": "1.0.9",
   "publisher": "trama-dev",
-  "license": "UNLICENSED",
+  "license": "AGPL-3.0-only",
   "private": true,
   "engines": {
     "vscode": "^1.95.0"
