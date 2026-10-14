@@ -27,6 +27,16 @@ function guarded<A extends unknown[]>(action: (...args: A) => Promise<void>): (.
   };
 }
 
+/** A "Trama" button in the status bar that runs Open Trama. */
+function statusBarItem(): vscode.StatusBarItem {
+  const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  item.text = "Trama";
+  item.tooltip = "Open Trama";
+  item.command = "trama.open";
+  item.show();
+  return item;
+}
+
 function watchAutopilotTicks(): vscode.Disposable {
   const timer = setInterval(() => void controller?.autopilotTick(), 400);
   return new vscode.Disposable(() => clearInterval(timer));
@@ -42,6 +52,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const requests = new DesignRequests(context.workspaceState, tramaFiles);
   context.subscriptions.push(
     tramaFiles,
+    statusBarItem(),
     vscode.commands.registerCommand("trama.open", guarded(() => trama.open())),
     vscode.commands.registerCommand(
       "trama.init",

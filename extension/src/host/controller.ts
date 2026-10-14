@@ -207,6 +207,10 @@ export class Controller implements vscode.Disposable {
       retainContextWhenHidden: true,
       localResourceRoots: [dist],
     });
+    panel.iconPath = {
+      light: vscode.Uri.joinPath(this.extensionUri, "media", "trama-icon-dark.svg"),
+      dark: vscode.Uri.joinPath(this.extensionUri, "media", "trama-icon-light.svg"),
+    };
     panel.webview.html = webviewHtml({
       cspSource: panel.webview.cspSource,
       nonce: randomBytes(16).toString("base64"),

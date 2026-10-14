@@ -64,6 +64,8 @@ The developer opens the Trama panel, or brings it to the front.
 
 Anche il pulsante Reopen della notifica di domande in attesa chiede questa apertura ordinaria: se il round esiste ancora, l'overlay si ripristina; altrimenti si apre soltanto il pannello. Senza un progetto vale la stessa offerta di inizializzazione.
 
+Il developer lo chiede con il comando, con l'icona di Trama in alto, nella barra dell'editor, oppure con il pulsante «Trama» nella barra di stato in basso. L'icona si trova in ogni finestra con almeno una cartella aperta, anche dove non c'è ancora un progetto: lì l'icona porta alla stessa offerta di inizializzazione. Con il pannello già aperto l'icona e il pulsante, come il comando, lo portano in primo piano tenendo la sua scheda.
+
 ### CLOSE_PANEL
 The developer closes the Trama panel.
 

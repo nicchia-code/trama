@@ -14,6 +14,7 @@
     "Other"
   ],
   "main": "./dist/host.js",
+  "icon": "media/icon.png",
   "activationEvents": [
     "workspaceContains:.trama/model/system.md"
   ],
@@ -21,8 +22,12 @@
     "commands": [
       {
         "command": "trama.open",
-        "title": "Open",
-        "category": "Trama"
+        "title": "Open Trama",
+        "category": "Trama",
+        "icon": {
+          "light": "media/trama-icon-dark.svg",
+          "dark": "media/trama-icon-light.svg"
+        }
       },
       {
         "command": "trama.init",
@@ -68,7 +73,12 @@
         {
           "command": "trama.sendDesignRequest",
           "when": "resourcePath in trama.designRequestResources",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "trama.open",
+          "when": "workspaceFolderCount > 0",
+          "group": "navigation@2"
         }
       ],
       "commandPalette": [

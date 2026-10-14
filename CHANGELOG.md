@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The editor title bar shows an Open Trama icon at the right of every editor group in a window with a folder open, also without a Trama project and also while the panel is the active tab; on an unsent design request it sits to the right of Send to agent. The `Open` command is now titled `Open Trama` in the palette.
+
 ## 0.0.2
 
 - Windows (win32-x64) is packaged and smoke-tested by the release workflow, and a manual run can release a single platform. Windows is untested: its test suite has known failures and nobody has tried the package by hand.

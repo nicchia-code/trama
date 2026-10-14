@@ -6,3 +6,4 @@
 !dist/webview.js
 !dist/omp-hook.js
 !bin/**
+!media/**
