@@ -77,10 +77,15 @@ export interface ResolvedRow {
   name: CardName;
   title: string;
   critical: boolean;
+  /** The Drift this one follows, as its identity and title, when it is recurring. */
+  previous: { id: string; title: string } | null;
   decision: string;
   /** The reason the autopilot failed on or excluded this Drift; null when it did not. */
   autopilotFailed: string | null;
 }
+
+/** The text of a recurring Drift's badge, its tooltip and accessible name: the identity and title of the Drift it follows. */
+export const recurringLabel = (previous: { id: string; title: string }): string => `Recurring: follows Drift ${previous.id} – ${previous.title}`;
 
 export interface ProposalCard {
   kind: "proposal";
@@ -221,7 +226,7 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
 
 /** The rows of a resolution's `Resolves Drifts` block, in the order the snapshot carries them; none for any other Proposal. */
 export const resolvedRows = (p: Pick<ProposalView, "resolves">, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null): ResolvedRow[] =>
-  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, critical: r.critical, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, autopilotFailed: failed(r.drift) }));
+  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, critical: r.critical, previous: r.previous, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, autopilotFailed: failed(r.drift) }));
 
 export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null): ProposalCard {
   const name = cardNameOf(numbers, "proposal", p.id);

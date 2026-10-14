@@ -51,8 +51,8 @@ const REOPEN = "Reopen";
 
 const notBlank = (message: string) => (value: string) => (value.trim() === "" ? message : undefined);
 
-/** A Drift is fixed automatically only when its first Fix option exists and its Model elements still do; otherwise it stays for the developer. */
-const automaticallyFixable = (project: Project, drift: Drift): boolean => driftOptions(drift).length > 0 && fixCodeRefusal(project, drift) === null;
+/** A Drift is fixed automatically only when its first Fix option exists and its Model elements still do, and it is not recurring: a recurring Drift stays for the developer in every mode. */
+const automaticallyFixable = (project: Project, drift: Drift): boolean => driftOptions(drift).length > 0 && drift.data.previous === null && fixCodeRefusal(project, drift) === null;
 
 interface AutopilotCollection {
   root: string;

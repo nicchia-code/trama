@@ -1,7 +1,7 @@
 import { type CardName, type CardNumbers, cardNameOf } from "../../../../src/core/card-names";
 import { appliesUnder, REQUIRED_STATUS } from "../../../../src/core/required";
 import type { ProposalView } from "../../../../src/core/snapshot";
-import { approveBlocker, resolvedRows } from "../board/logic";
+import { approveBlocker, recurringLabel, resolvedRows } from "../board/logic";
 import { renderDriftCompare } from "../drift-compare";
 import { idTag } from "../id-tag";
 import { renderInline, renderMarkdown } from "../markdown";
@@ -154,6 +154,13 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
         critical.title = "Urgent developer decision";
         critical.setAttribute("aria-label", "Critical Drift: urgent developer decision");
         head.append(critical);
+      }
+      const previous = detail.drift?.previous;
+      if (previous) {
+        const recurring = el("span", "dg-badge dg-recurring", "recurring");
+        recurring.title = recurringLabel(previous);
+        recurring.setAttribute("aria-label", recurringLabel(previous));
+        head.append(recurring);
       }
       if (detail.change !== "same") head.append(el("div", `dg-badge change-${detail.change}`, CHANGE_TEXT[detail.change]));
       root.append(head);

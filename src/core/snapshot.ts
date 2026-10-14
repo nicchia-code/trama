@@ -11,7 +11,7 @@ import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
 import { readLastScan } from "./last-scan";
-import { attachedDrift, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, listDrifts, listTasks } from "./work";
+import { attachedDrift, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, followedDrift, listDrifts, listTasks } from "./work";
 
 export interface ActorChange {
   id: string;
@@ -102,6 +102,8 @@ export interface DriftView {
   title: string;
   /** True only when a developer decision is urgently needed. */
   critical: boolean;
+  /** The Drift this one follows, as its identity and title, when it is recurring. */
+  previous: { id: string; title: string } | null;
   body: string;
   sides: DriftSides | null;
   options: DriftOption[];
@@ -301,6 +303,7 @@ export function buildSnapshot(p: Project): Snapshot {
       id: d.id,
       title: d.title,
       critical: d.data.critical,
+      previous: followedDrift(p, d),
       body: stripTitle(d.body),
       sides: driftSides(d),
       options: driftOptions(d),

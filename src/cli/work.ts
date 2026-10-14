@@ -7,7 +7,8 @@ import type { Project } from "../core/store";
 import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
 import { formatDiagnostic } from "../core/model";
 import { placeTasks } from "../core/design";
-import type { Blocker } from "../core/blocking";
+import { type Blocker, concernSameThing } from "../core/blocking";
+import { UsageError } from "../core/errors";
 import { attachedDrift, blockedTasks, COLUMNS, type Drift, driftOptions, driftSides, listDrifts, listTasks, nextTask, type Task } from "../core/work";
 import { machineReceiverLines, outgoingLines, reactionLines, stateTreeLines } from "./explore";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
@@ -127,7 +128,7 @@ const blockedMarks = (blockers: Blocker[], numbers: ShortNumbers) =>
   blockers.map((b) => (b.kind === "drift" ? ` (blocked by Drift ${numbers.name("drift", b.drift)})` : ` (waiting for Task ${numbers.name("task", b.task)})`)).join("");
 
 const taskSummary = (t: Task, blocked: Map<string, Blocker[]>, numbers: ShortNumbers): TaskSummary => ({ id: t.id, number: numbers.label("task", t.id), title: t.title, column: t.data.column, technical: t.data.technical, refs: t.data.refs, drift: t.data.drift, proposal: t.data.proposal, agent: t.data.agent, blockedBy: blocked.get(t.id) ?? [] });
-const driftSummary = (d: Drift, numbers: ShortNumbers) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, critical: d.data.critical, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin });
+const driftSummary = (d: Drift, numbers: ShortNumbers) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, critical: d.data.critical, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous });
 
 /** The current text of a Model element or Requirement, for inlining into a Task or Drift. */
 export function describeRef(project: ProjectModel, ref: string, full = false): string {
@@ -316,9 +317,14 @@ export function driftShowView(p: Project, drift: Drift): Result {
     ? `In resolution Proposal ${numbers.name("proposal", holding.id)} ${holding.title}`
     : drift.data.resolvedBy ? `Resolved by Proposal ${numbers.name("proposal", drift.data.resolvedBy)}` : "";
   const resolutionJson = { inResolutionProposal: holding ? { id: holding.id, number: numbers.label("proposal", holding.id), title: holding.title } : null, resolvedBy: drift.data.resolvedBy };
+  // A recurring Drift names the Drift it follows. A resolved Drift has no short number, so it is named by its identity.
+  const previous = drift.data.previous;
+  const followed = previous === null ? undefined : listDrifts(p).find((d) => d.id === previous);
+  const followsLine = previous === null ? "" : `Follows Drift ${numbers.name("drift", previous)}${followed ? ` ${followed.title} (${followed.data.resolution})` : ""}`;
   const md = [
     `# ${drift.title}${drift.data.critical ? " [CRITICAL: urgent developer decision]" : ""}`,
     "",
+    ...(previous === null ? [] : [followsLine, ""]),
     ...description,
     ...decision,
     "",
@@ -334,11 +340,21 @@ export function driftShowView(p: Project, drift: Drift): Result {
   return { md, json: { ...driftSummary(drift, numbers), body: drift.body, happens: sides?.happens ?? null, should: sides?.should ?? null, where: sides?.where ?? null, options, option: drift.data.option, note: drift.data.note, proposalBlock: block, ...resolutionJson } };
 }
 
-export function driftListView(p: Project, all: boolean): Result {
+export function driftListView(p: Project, all: boolean, refs: string[] = []): Result {
   const numbers = syncShortNumbers(p);
-  const drifts = listDrifts(p).filter((d) => all || d.data.status === "open");
+  const model = loadProject(p);
+  // A reference that does not resolve is a usage error, not an empty list.
+  for (const ref of refs) {
+    try {
+      resolveProjectRef(model, ref);
+    } catch (error) {
+      throw new UsageError(error instanceof Error ? error.message : `Cannot resolve "${ref}"`);
+    }
+  }
+  // The same test that decides which Tasks a Drift blocks: the same element, or one inside the other.
+  const drifts = listDrifts(p).filter((d) => (all || d.data.status === "open") && (refs.length === 0 || concernSameThing(model, d.data.refs, refs)));
   const md = bullets(
-    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}]${d.data.critical ? " [CRITICAL: urgent developer decision]" : ""} ${d.title}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
+    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}]${d.data.critical ? " [CRITICAL: urgent developer decision]" : ""} ${d.title}${d.data.previous === null ? "" : " (recurring)"}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
     "_No Drifts._",
   );
   return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map((d) => driftSummary(d, numbers)) } };
@@ -381,7 +397,7 @@ export function boardView(p: Project): Result {
       ...drifts.map((d) => {
         const att = d.proposal ? allProposals.find((x) => x.id === d.proposal) : undefined;
         const nested = att ? `\n  - Proposal ${numbers.label("proposal", att.id) ?? att.id}${att.data.status === "draft" ? " (draft)" : ""}: ${att.title}` : "";
-        return `- Drift ${d.number ?? d.id}${d.critical ? " [CRITICAL: urgent developer decision]" : ""}: ${d.title}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
+        return `- Drift ${d.number ?? d.id}${d.critical ? " [CRITICAL: urgent developer decision]" : ""}: ${d.title}${d.previous === null ? "" : " (recurring)"}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
       }),
     ]),
     "",

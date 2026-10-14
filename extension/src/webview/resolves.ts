@@ -1,4 +1,4 @@
-import type { ResolvedRow } from "./board/logic";
+import { type ResolvedRow, recurringLabel } from "./board/logic";
 import { idTag } from "./id-tag";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -27,6 +27,12 @@ export function renderResolves(prefix: "board" | "dg", title: string, rows: Reso
       critical.title = "Urgent developer decision";
       critical.setAttribute("aria-label", "Critical Drift: urgent developer decision");
       link.append(critical);
+    }
+    if (row.previous !== null) {
+      const recurring = el("span", `${prefix}-recurring`, "recurring");
+      recurring.title = recurringLabel(row.previous);
+      recurring.setAttribute("aria-label", recurringLabel(row.previous));
+      link.append(recurring);
     }
     link.append(el("span", `${prefix}-resolves-decision`, row.decision));
     link.addEventListener("click", () => showDrift(row.drift));

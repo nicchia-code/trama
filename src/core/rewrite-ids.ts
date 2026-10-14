@@ -175,11 +175,13 @@ export function rewriteNumberedCards(p: Project): RewrittenCard[] {
     const task = mapped("task", drift.data.task, ids);
     const origin = mapped("task", drift.data.origin, ids);
     const resolvedBy = mapped("proposal", drift.data.resolvedBy, ids);
-    const changed = proposal !== drift.data.proposal || task !== drift.data.task || origin !== drift.data.origin || resolvedBy !== drift.data.resolvedBy;
+    const previous = mapped("drift", drift.data.previous, ids);
+    const changed = proposal !== drift.data.proposal || task !== drift.data.task || origin !== drift.data.origin || resolvedBy !== drift.data.resolvedBy || previous !== drift.data.previous;
     if (!card && !changed) continue;
     drift.data.proposal = proposal;
     drift.data.task = task;
     drift.data.origin = origin;
+    drift.data.previous = previous;
     drift.data.resolvedBy = resolvedBy;
     if (card) drift.data.created = rewrittenInstant(card.number);
     writeDrift(drift);

@@ -114,6 +114,14 @@ test("a resolution keeps listing its numbered Drifts under their new identities,
   expect(getDrift(p, oldId).data).toMatchObject({ status: "resolved", resolvedBy: fixId });
 });
 
+test("a recurring Drift keeps naming the Drift it follows under that Drift's new identity", () => {
+  writeCard("drifts", "0004-first.md", "status: open\nrefs: [order]\norigin: null", "# First\n\n## What happens\n\nCode.\n\n## What should happen\n\nModel.\n");
+  writeCard("drifts", "0006-again.md", "status: open\nrefs: [order]\norigin: null\nprevious: \"0004\"", "# Again\n\n## What happens\n\nCode.\n\n## What should happen\n\nModel.\n");
+
+  expect(cli("ids", "rewrite").exit).toBe(0);
+  expect(getDrift(p, rewrittenId("drift", "0006")).data.previous).toBe(rewrittenId("drift", "0004"));
+});
+
 test("does nothing when no card is numbered, and refuses before writing when numbers or identities collide", () => {
   writeCard("tasks", "abcd1111-free.md", "column: todo\ntechnical: true\nrefs: []\ncreated: 2020-01-01T00:00:00.000Z", "# Free\n");
   expect(cli("ids", "rewrite").out).toBe("No numbered Proposal, Task or Drift to rewrite.");

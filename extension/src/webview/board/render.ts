@@ -3,7 +3,7 @@ import { runBlocker } from "../../../../src/core/design";
 import { idTag } from "../id-tag";
 import type { ViewContext } from "../types";
 import type { AnnouncedCard, Badge, BlockBadge, Card, DesignCard, DriftCard, ProposalCard, TaskCard } from "./logic";
-import { COLUMN_TITLES } from "./logic";
+import { COLUMN_TITLES, recurringLabel } from "./logic";
 import { renderDriftCompare } from "../drift-compare";
 import { renderMarkdown } from "../markdown";
 import { renderResolves } from "../resolves";
@@ -171,7 +171,13 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
     critical.title = "Urgent developer decision";
     critical.setAttribute("aria-label", "Critical Drift: urgent developer decision");
   }
-  node.append(head("Drift", card.name, ...(critical ? [critical] : []), ...failedBadge(card.autopilotFailed, env)), el("h3", "board-card-title", card.title));
+  const previous = card.drift.previous;
+  const recurring = previous === null ? null : el("span", "board-badge info board-recurring", "recurring");
+  if (previous !== null && recurring) {
+    recurring.title = recurringLabel(previous);
+    recurring.setAttribute("aria-label", recurringLabel(previous));
+  }
+  node.append(head("Drift", card.name, ...(critical ? [critical] : []), ...(recurring ? [recurring] : []), ...failedBadge(card.autopilotFailed, env)), el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
   node.append(renderDriftCompare(card.drift, { openLink: env.context.openLink }));
   const firstRef = card.refs[0];

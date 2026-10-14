@@ -2,7 +2,7 @@ import { TramaError } from "./errors";
 import { type DriftDecision, type DriftDecisionKind, getProposal, listProposals, type Proposal, requireEditable, resolutionHolding, save, touch } from "./proposals";
 import { cardName } from "./short-numbers";
 import type { Project } from "./store";
-import { chosenOption, driftOptions, fixCodeRefusal, getDrift, listDrifts } from "./work";
+import { chosenOption, driftOptions, fixCodeRefusal, followedDrift, getDrift, listDrifts } from "./work";
 
 /**
  * Records, replaces or (`remove`) removes the decision on `driftId` in a resolution Proposal, a Draft or an open one;
@@ -85,6 +85,8 @@ export interface ResolvedDrift {
   drift: string;
   title: string;
   critical: boolean;
+  /** The Drift this one follows, when it is recurring. */
+  previous: { id: string; title: string } | null;
   decision: string;
   note: string | null;
 }
@@ -96,6 +98,6 @@ export function resolvedDrifts(p: Project, proposal: Proposal): ResolvedDrift[] 
     if (!d) return [];
     const already = drift.data.status === "resolved" && drift.data.resolvedBy !== proposal.id;
     const option = d.option === undefined ? undefined : driftOptions(drift)[d.option - 1]?.title;
-    return [{ drift: drift.id, title: drift.title, critical: drift.data.critical, decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
+    return [{ drift: drift.id, title: drift.title, critical: drift.data.critical, previous: followedDrift(p, drift), decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
   });
 }

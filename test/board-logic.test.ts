@@ -24,7 +24,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   areas: [],
   ...over,
 });
-const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", critical: false, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, ...over });
+const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", title: "Code refunds late", body: "line one\n\nline two\nline three", critical: false, previous: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, finished: null, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
@@ -46,7 +46,7 @@ test("groups the snapshot into four columns, Proposals before Drifts in To decid
 });
 
 test("a handed-over resolution replaces only its listed open Drift cards", () => {
-  const resolution = proposal({ id: "res", kind: "resolution", resolves: [{ drift: "0003", title: "Code refunds late", critical: false, decision: "Closed, nothing changes", note: null }] });
+  const resolution = proposal({ id: "res", kind: "resolution", resolves: [{ drift: "0003", title: "Code refunds late", critical: false, previous: null, decision: "Closed, nothing changes", note: null }] });
   const cards = buildBoard(snapshot({ proposals: [proposal({ id: "before" }), resolution], drifts: [drift({ id: "0003" }), drift({ id: "0004" })] }))[0]!.cards;
   expect(cards.map((card) => card.key)).toEqual(["proposal:before", "proposal:res", "drift:0004"]);
   expect(cards[1]).toMatchObject({ kind: "proposal", resolution: true, heading: "Resolution Proposal res", resolves: [{ drift: "0003" }] });
@@ -286,7 +286,7 @@ test("a resolution's card has one row per Drift, written by number, with the dec
     snapshot({
       numbers: NUMBERS,
       proposals: [
-        proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", critical: false, decision: "Code fixed with option Fix the code", note: "do it today" }, { drift: "0044", title: "Old", critical: false, decision: "(already resolved)", note: null }] }),
+        proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", critical: false, previous: null, decision: "Code fixed with option Fix the code", note: "do it today" }, { drift: "0044", title: "Old", critical: false, previous: null, decision: "(already resolved)", note: null }] }),
         proposal({ id: "0009" }),
       ],
     }),
@@ -304,7 +304,7 @@ test("an open resolution's row carries the autopilot failure of its Drift, and n
   const failures = [{ job: "j1", title: "Drift 0003: Not authorized any more", drift: "0003", reason: "Not authorized any more" }];
   const cards = buildBoard(
     snapshot({
-      proposals: [proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", critical: false, decision: "Code fixed with option Fix the code", note: null }, { drift: "0044", title: "Old", critical: false, decision: "(already resolved)", note: null }] })],
+      proposals: [proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", critical: false, previous: null, decision: "Code fixed with option Fix the code", note: null }, { drift: "0044", title: "Old", critical: false, previous: null, decision: "(already resolved)", note: null }] })],
       drifts: [drift({ id: "0003" })],
     }),
     failures,

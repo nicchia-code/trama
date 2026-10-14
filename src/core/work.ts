@@ -60,6 +60,8 @@ interface DriftData {
   proposal: string | null;
   task: string | null;
   origin: string | null;
+  /** The Drift this one follows, when it is recurring: set at creation and never changed. */
+  previous: string | null;
   /** True only when a developer decision is urgently needed. */
   critical: boolean;
   option: number | null;
@@ -113,6 +115,7 @@ function parseDrift(raw: Raw, where: string): DriftData {
     proposal: idField(raw, "proposal", where),
     task: idField(raw, "task", where),
     origin: idField(raw, "origin", where),
+    previous: idField(raw, "previous", where),
     critical: boolField(raw, "critical", false, where),
     option: positiveIntOrNull(raw, "option", where),
     note: textOrNull(raw, "note", where),
@@ -133,6 +136,8 @@ function saveItem(path: string, data: object, body: string) {
   const copy: Record<string, unknown> = { ...data };
   if (copy["created"] == null) delete copy["created"];
   if (copy["finished"] === null) delete copy["finished"];
+  if (copy["previous"] === null) delete copy["previous"];
+  if (copy["resolvedBy"] === null) delete copy["resolvedBy"];
   if ("holder" in copy) {
     if (copy["agent"] === true && typeof copy["holder"] === "string") copy["agent"] = copy["holder"];
     delete copy["holder"];
@@ -352,6 +357,13 @@ export function getDrift(p: Project, id: string, asArgument = false): Drift {
   return load(driftsDir(p), findCard(driftsDir(p), cited ?? id, "Drift", "file", asArgument && cited === null), parseDrift);
 }
 
+/** The identity and title of the Drift `drift` follows, when it is recurring; null otherwise. A Drift whose file is gone keeps its identity as title. */
+export function followedDrift(p: Project, drift: Drift): { id: string; title: string } | null {
+  const id = drift.data.previous;
+  if (id === null) return null;
+  return { id, title: listDrifts(p).find((d) => d.id === id)?.title ?? id };
+}
+
 const HAPPENS_HEADING = "What happens";
 const SHOULD_HEADING = "What should happen";
 const WHERE_HEADING = "Where in the code";
@@ -437,9 +449,28 @@ function requireAttachable(p: Project, proposal: Proposal, driftId?: string) {
   if (holder) throw new TramaError(`Proposal ${name} is already attached to Drift ${cardName(p, "drift", holder.id)}`);
 }
 
+/**
+ * The Drift a new one follows, when it is recurring: the Drift that the origin Task fixes, or else the one named with
+ * `previous`. That Drift must be resolved by fixing the code or with a Proposal; otherwise, or when a named one differs
+ * from the origin's, the creation is refused, saying why.
+ */
+function previousOf(p: Project, named: string | undefined, origin: string | null): string | null {
+  const fixed = origin ? getTask(p, origin).data.drift : null;
+  const chosen = named === undefined ? null : getDrift(p, named).id;
+  if (fixed !== null && chosen !== null && chosen !== fixed)
+    throw new TramaError(`The origin Task fixes Drift ${cardName(p, "drift", fixed)}, so that is the previous Drift: drop --previous or name that one`);
+  const id = fixed ?? chosen;
+  if (id === null) return null;
+  const previous = getDrift(p, id);
+  if (previous.data.status !== "resolved") throw new TramaError(`Drift ${cardName(p, "drift", id)} is still open: a recurring Drift follows a Drift already resolved`);
+  if (previous.data.resolution !== "fix-code" && previous.data.resolution !== "proposal")
+    throw new TramaError(`Drift ${cardName(p, "drift", id)} was ${previous.data.resolution ?? "resolved without a decision"}: a recurring Drift follows one resolved by fixing the code or by a Proposal`);
+  return previous.id;
+}
+
 export function newDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; happens: string; should: string; options: DriftOption[]; critical?: boolean; where?: string; announcement?: string },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; critical?: boolean; where?: string; announcement?: string },
 ): Drift {
   if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with --ref");
   const happens = input.happens.trim();
@@ -447,18 +478,20 @@ export function newDrift(
   const where = input.where?.trim();
   if (!happens) throw new TramaError(`A Drift needs its "${HAPPENS_HEADING}" text: what the code does, in terms of behaviour`);
   if (!should) throw new TramaError(`A Drift needs its "${SHOULD_HEADING}" text: what the Model or the Requirement says`);
-  const options = checkOptions(input.options);
+  const options = input.options.length === 0 ? [] : checkOptions(input.options);
   if (where === "") throw new TramaError(`The "${WHERE_HEADING}" text is optional, but when given it needs text: the files where the difference was seen`);
   checkRefs(p, input.refs);
   const attached = input.proposal ? getProposal(p, input.proposal) : null;
   if (attached) requireAttachable(p, attached);
+  if (options.length === 0 && attached === null) throw new TramaError("A Drift without Fix options needs an attached Proposal that fixes the Model or the Requirements: give --proposal with its Draft, or two to five fix options");
   const proposal = attached?.id ?? null;
   const origin = input.origin ? getTask(p, input.origin).id : null;
-  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, critical: input.critical ?? false, option: null, note: null, resolvedBy: null, created: createdNow() };
+  const previous = previousOf(p, input.previous, origin);
+  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, critical: input.critical ?? false, option: null, note: null, resolvedBy: null, created: createdNow() };
   const sections = [
     `## ${HAPPENS_HEADING}\n\n${happens}`,
     `## ${SHOULD_HEADING}\n\n${should}`,
-    `## ${OPTIONS_HEADING}\n\n${options.map((o) => `### ${o.title}\n\n${o.text}`).join("\n\n")}`,
+    ...(options.length === 0 ? [] : [`## ${OPTIONS_HEADING}\n\n${options.map((o) => `### ${o.title}\n\n${o.text}`).join("\n\n")}`]),
     ...(where ? [`## ${WHERE_HEADING}\n\n${where}`] : []),
   ];
   const drift = create(driftsDir(p), input.title, data, sections.join("\n\n"), "Drift");
@@ -533,7 +566,8 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
 export function fixCodeRefusal(p: Project, drift: Drift, project: ProjectModel = loadProject(p)): string | null {
   const isModel = (r: string) => parseRequirementRef(r) === null;
   if (!drift.data.refs.some(isModel) || liveRefs(p, drift.data.refs, project).some(isModel)) return null;
-  return `The Model elements of Drift ${cardName(p, "drift", drift.id)} no longer exist: its code cannot be fixed, the Drift can only be closed`;
+  const close = drift.data.proposal === null ? "dismissing it (`drift resolve --dismiss`)" : "accepting its attached Proposal (`drift resolve --accept-proposal`)";
+  return `The Model elements of Drift ${cardName(p, "drift", drift.id)} no longer exist: its code cannot be fixed, the Drift can only be closed by ${close}`;
 }
 
 /** Creates the fix Task of a Drift and moves its origin back to To do; records option, note and the resolution on the Drift (not saved). */

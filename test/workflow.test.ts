@@ -674,7 +674,6 @@ describe("Tasks and Drifts", () => {
     expect(driftOptions(kept).map((o) => o.title)).toEqual(["A", "B", "C", "D", "E"]);
     expect(driftSides(kept)).toMatchObject({ should: "Model says so.", where: null });
 
-    expect(() => file([])).toThrow(/from 2 to 5 fix options.*found 0/);
     expect(() => file(FIX_OPTIONS.slice(0, 1))).toThrow(/from 2 to 5 fix options.*found 1/);
     expect(() => file([...five, { title: "F", text: "Way F." }])).toThrow(/from 2 to 5 fix options.*found 6/);
     expect(() => file([{ title: "A", text: "Way A." }, { title: "", text: "Way B." }])).toThrow(/Fix option 2 needs its title/);
@@ -687,7 +686,6 @@ describe("Tasks and Drifts", () => {
     expect(() => run([...args, "--option", "A", "--option-text", "Way A."], process.cwd())).toThrow(/from 2 to 5 fix options.*found 1/);
     expect(() => run([...args, "--option", "A", "--option-text", "Way A.", "--option", "B"], process.cwd())).toThrow(/Fix option 2 \("B"\) needs its text/);
     expect(() => run([...args, "--option", "A", "--option-text", "Way A.", "--option-text", "Way B."], process.cwd())).toThrow(/Fix option 2 needs its title/);
-    expect(() => run(args, process.cwd())).toThrow(/from 2 to 5 fix options.*found 0/);
     const created = /Created Drift (D\d+)/.exec(run([...args, ...CLI_OPTIONS], process.cwd()).out)?.[1] ?? "";
     expect(driftOptions(getDrift(p, created, true))).toEqual(FIX_OPTIONS);
 
@@ -720,7 +718,7 @@ describe("Tasks and Drifts", () => {
     expect(show()).toContain(`In resolution Proposal ${named("proposal", res.id)} Resolve lost`);
     expect(JSON.parse(run(["--root", dir, "--json", "drift", "show", drift.id], process.cwd()).out).inResolutionProposal).toMatchObject({ id: res.id, title: "Resolve lost" });
 
-    writeFileSync(drift.path, readFileSync(drift.path, "utf8").replace("status: open", "status: resolved").replace(/^resolvedBy:.*$/m, `resolvedBy: ${res.id}`));
+    writeFileSync(drift.path, readFileSync(drift.path, "utf8").replace("status: open", `status: resolved\nresolvedBy: ${res.id}`));
     expect(show()).not.toContain("In resolution Proposal");
     expect(show()).toContain(`Resolved by Proposal ${named("proposal", res.id)}`);
     expect(JSON.parse(run(["--root", dir, "--json", "drift", "show", drift.id], process.cwd()).out).resolvedBy).toBe(res.id);

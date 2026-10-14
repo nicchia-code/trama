@@ -15,20 +15,22 @@ A new Proposal starts as a **Draft**, not approvable. Finish every file, validat
 
 Once you have planned the Model (step 4), announce every Proposal you will write, each as soon as you know its title: `trama announce proposal "<title>"` prints an announcement ID. Pass it when you open that Proposal: `trama proposal new … --import --announcement <id>`. The Board shows a ghost of each Proposal meanwhile. Never wait for a ghost to show and never skip or delay a Proposal because of it; an unknown ID is only noted in the output.
 
+Announce every Drift you will file the same way, before you file it: `trama announce drift "<title>"` prints an announcement ID, and `trama drift new … --announcement <id>` takes it. Never wait for its ghost to show.
+
 ## Hard rules
 
 - NEVER edit code, `.trama/model/` or `.trama/requirements/` directly. Everything goes through Proposals opened with `--import`.
 - Agenti possono approvare o rifiutare una Proposal, scartare una Draft o risolvere un Drift solo se il developer chiede esplicitamente quella decisione nella conversazione. Senza la richiesta, fermati e chiedi al developer di decidere. La richiesta di importare o progettare non autorizza da sola a prendere queste decisioni.
-- **The code wins.** Model what the code does. Where the documentation (README, `docs/`, comments, API descriptions) says something else, model the code and record the difference as a doubt. Where the code looks buggy or misses a case, model it as it is and record a doubt.
+- **The code wins.** Model what the code does. Where the documentation (README, `docs/`, comments, API descriptions) says something else, model the code and file a Drift for that difference, as described in "Drifts for documentation differences". Where the code looks buggy or misses a case that the documentation does not mention, model it as it is and record a doubt.
 - **Never change what is already modelled.** If the Model already has Machines, do not edit their files. You may add new Features, Machines, Actors, Events of existing Actors and Requirement sections. If the code contradicts an existing Machine, do not fix it: list it in your report and suggest a Scan of that Feature.
-- The Model has no code words: no variable, field, function, class, table, endpoint or file names in States, Transitions or Events. Write conditions and consequences in domain words. Code locations belong only in the doubts.
+- The Model has no code words: no variable, field, function, class, table, endpoint or file names in States, Transitions or Events. Write conditions and consequences in domain words. Code locations belong only in the doubts and in the `--where` of a Drift.
 - Import only **evident and stable** Requirements: `tech` (language, framework, main libraries, platform, as declared in manifests and configuration), `data` (main entities and their fields, from schemas or models), `rules` (formulas, limits and policies written explicitly in the code). Never `ui` or `quality`: the code does not tell what was intended there.
 
 ## Naming cards
 
-Every live Proposal has a temporary **short number** (`P3`) besides its **permanent identity** of eight characters.
+Every live Proposal and Drift has a temporary **short number** (`P3`, `D2`) besides its **permanent identity** of eight characters.
 
-- Name Proposals to the developer by short number and title, for example "Proposal P3 – Import: title", also in the final report. A closed Proposal has no number: use its permanent identity.
+- Name Proposals and Drifts to the developer by short number and title, for example "Proposal P3 – Import: title" or "Drift D2 – title", also in the final report. A closed card has no number: use its permanent identity.
 - In every command you run and every file you write (`--requires`, the Proposal bodies, the doubts) use **only the permanent identity**, taken from `--json` (field `id`; the number is the field `number`) or from the file or folder name. **Never write a short number in a file**: it changes from one working copy to another.
 
 ## Language
@@ -46,14 +48,25 @@ When the instruction asks you to write in a language, only the prose you produce
 4. **Plan the Model.** One Machine per kind of thing with a lifecycle (an order, a payment, a subscription, a document), its States taken from the code's status values and the situations its handlers distinguish, its Transitions from the code paths that move between them, and the guards and side effects as prose. Who triggers what from outside (people, other systems, webhooks, time) are Actors that emit Events. Screens and navigation become a UI Machine only when the app has real navigation flows. Follow the format in [FORMAT.md](../trama-design/FORMAT.md).
 5. **First Proposal: the System and its Actors.** `trama proposal new "Import: System and Actors" --import --body "<what was imported and from where>"`. Write `system.md` (only if it still has placeholder text or does not exist), every new Actor with the Events it emits, and the General sections of `tech` and `data`. Requirements live in Area folders: `area.md` for the Area's description and title, fragments `requirements/<area>/<fragment>.md` for the sections (see "Requirements" in [FORMAT.md](../trama-design/FORMAT.md)). On a partly modelled project, skip this Proposal if nothing is new.
 6. **One Proposal per Feature.** `trama proposal new "Import: <Feature>" --import --requires <first Proposal ID> [--requires <ID of another Feature's Proposal whose Events this one reacts to>]`. Write `<feature>/feature.md`, its Machines, and the `data` and `rules` sections attached to them (`## order`, `## order/Paid`), in a fragment of the Area that suits that Feature, usually one fragment per Feature with a description saying when it is needed. Each Proposal is written and validated on top of the ones it requires, so only list Proposals you actually build on.
-7. **Write the doubts.** End the body of each Proposal (`--body`, or edit `proposal.md`) with a `## Doubts` section, one line each:
-   - documentation versus code: what the documentation says, where, and what the code does instead (file and line);
-   - code that looks like a bug, a missing case or dead code, with its location;
+7. **Record the differences.** File one Drift for each difference between the documentation and the code, as described in "Drifts for documentation differences". Then end the body of each Proposal (`--body`, or edit `proposal.md`) with a `## Doubts` section, one line each:
+   - code that looks like a bug, a missing case or dead code, with its location, where the documentation does not say otherwise;
    - behaviour you could not determine.
-   Write "None." if there are none.
+   Write "None." if there are none. Documentation differences are Drifts, never doubts.
 8. **Validate every Proposal.** `trama validate --proposal <id>` must report no errors. When it warns of a fragment larger than 12 KB that the Proposal writes into, split that fragment in the same Proposal before handing it over: cut by Feature or by a group of nearby Machines, give every new fragment a name and a description that say when it is needed, move the sections without changing their text, and prefer a few medium fragments to many tiny ones (every fragment counts against the 4,000-character budget of the Requirement skills). Then `trama proposal show <id>`: the changes must describe the code and nothing else.
 9. **Hand every Proposal over.** After validation and review, run `trama proposal submit <id>` for each. A dependency need not be approved for submission. Correct any refusal, validate and review again, then retry before continuing.
-10. **Report and stop.** After every submission succeeds, list the Proposals in the order to approve them, with how many doubts each has, the folders you skipped, and any contradiction with Machines that were already modelled (suggest a Scan for those Features). Approving an import Proposal starts no Scan: the Model already matches the code.
+10. **Report and stop.** After every submission succeeds, list the Proposals in the order to approve them, with how many doubts each has, the Drifts you filed (each named by short number and title), the differences you could not file yet, the folders you skipped, and any contradiction with Machines that were already modelled (suggest a Scan for those Features). Approving an import Proposal starts no Scan: the Model already matches the code.
+
+## Drifts for documentation differences
+
+A difference between the documentation and the code is a **Drift**, not a doubt: the developer decides, for each one, whether the code or the documentation is right. File it once with `trama drift new`, without `--task`, and with `--proposal` only in the case below: no Proposal fixes it and no Task implements it otherwise.
+
+- Before filing, run `trama drift list --all --ref <ref>` for each element or Requirement it concerns: a difference that a resolved Drift closed stays closed while the Model or the Requirement there still says the same thing, so do not file it again. If it is back after a fix of the code or an adaptation of the Model, pass `--previous <id>` of that resolved Drift; the command refuses a previous Drift that is open, dismissed or unknown.
+- `--ref` names an element or a Requirement section that already exists in the Model or the Requirements, because `trama drift new` refuses a reference that does not resolve. Name the nearest one that does, for example the Area's section for a stated rule. If the difference is about an element this import is still to create, record it as a doubt in its Proposal and list it in the report.
+- **No fix respects both.** When no fix of the code respects the Model and the Requirements together (for example, two Requirements contradict each other), file the Drift with no `--option` and with `--proposal` of a Draft that repairs the Model or the Requirements: a design Proposal, `trama proposal new` without `--import`, written as `trama-scan` describes under "Drift without Fix options, with a Proposal". A Drift without Fix options is refused without a Proposal.
+- The command: `trama drift new "<title>" --ref <ref> --happens "<what the code does>" --should "<what the documentation says and why it differs>" --option "<title of the way you recommend>" --option-text "<what it changes and costs>" --option "<title of another way>" --option-text "<…>" [up to five] [--where "<where in the code>"] --announcement <id>`. The two texts are required, and so are two to five options, the recommended one first, with different titles, except in the no-fix case above.
+- Write both sides and the options at the level of behaviour: what the System does and what the documentation promises, in the words of the domain, not how the code does it. Name no variable, function, class, field or file unless the difference cannot be understood without it. Code locations go only in `--where`, the files and no line numbers. Use short Markdown: short paragraphs, a bulleted list for several points, **bold** for the terms that carry the difference, about 100 words per side and about 60 per option.
+- Fix options reach what should happen without changing the Model or any Requirement, and respect every Requirement that applies to the elements of the Drift, not only those it names. An option that asks for an exception to, or a change of, the Model or a Requirement is not a fix option.
+- Omit `--critical`. Pass it only when the developer urgently needs to take a position on this difference; technical severity or complexity alone does not qualify.
 
 ## Asking
 
@@ -77,7 +90,7 @@ If the developer said not to ask, use your recommendations and list them in the 
 
 ## Autopilot boundary
 
-Import describes existing code and only creates import Proposals; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.driftAutoPilot` is active, the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.
+Import describes existing code and only creates import Proposals and the Drifts of "Drifts for documentation differences"; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.driftAutoPilot` is active, the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.
 
 ## PowerShell
 

@@ -136,7 +136,7 @@ describe("approving a resolution", () => {
     writeFileSync(getDrift(p, a.id).path, readFileSync(getDrift(p, a.id).path, "utf8").replace("- order", "- gone/Paid\n  - requirements/ui#General"));
     const r = resolution();
     expect(() => resolveDriftInProposal(p, r.id, a.id, { decision: "fix-code", option: 1 })).toThrow(/no longer exist/);
-    expect(() => resolveDrift(p, a.id, "fix-code", [], { option: 1 })).toThrow(/no longer exist/);
+    expect(() => resolveDrift(p, a.id, "fix-code", [], { option: 1 })).toThrow(/no longer exist.*drift resolve --dismiss/);
     expect(getDrift(p, a.id).data.status).toBe("open");
 
     // A decision recorded while the Machine was there is refused at delivery once it is gone.
@@ -237,9 +237,9 @@ describe("the Board's picture of a resolution", () => {
     const view = () => buildSnapshot(p).proposals;
     const mine = () => view().find((x) => x.id === r.id)?.resolves;
     expect(mine()).toEqual([
-      { drift: a.id, title: "A", critical: false, decision: "Code fixed with option Remove the code", note: "soon" },
-      { drift: b.id, title: "B", critical: false, decision: "Model updated to match the code", note: null },
-      { drift: c.id, title: "C", critical: false, decision: "Closed, nothing changes", note: null },
+      { drift: a.id, title: "A", critical: false, previous: null, decision: "Code fixed with option Remove the code", note: "soon" },
+      { drift: b.id, title: "B", critical: false, previous: null, decision: "Model updated to match the code", note: null },
+      { drift: c.id, title: "C", critical: false, previous: null, decision: "Closed, nothing changes", note: null },
     ]);
     expect(view().find((x) => x.id === plain.id)?.resolves).toEqual([]);
     resolveDriftInProposal(p, r.id, b.id, { decision: "dismissed" });

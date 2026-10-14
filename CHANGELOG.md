@@ -3,6 +3,12 @@
 ## Unreleased
 
 - The editor title bar shows an Open Trama icon at the right of every editor group in a window with a folder open, also without a Trama project and also while the panel is the active tab; on an unsent design request it sits to the right of Send to agent. The `Open` command is now titled `Open Trama` in the palette.
+- The `trama-scan`, `trama-implement` and `trama-import` skills follow the Drift rules: Fix options reach what should happen without changing the Model or the Requirements; a Drift without Fix options comes with a Proposal when no fix of the code respects both; they read the resolved Drifts on the same references before filing and name a recurring one with `--previous`. `trama-import` files a Drift for each difference between the documentation and the code, instead of a doubt; its doubts keep only the code that looks buggy where the documentation says nothing, and behaviour it could not determine.
+- `drift new --previous <id>` records the resolved Drift a new one follows, making it recurring; a Drift whose origin Task fixes another Drift follows that one by itself. Recurring Drifts are left out of the Drift autopilot in every mode.
+- `drift show` of a recurring Drift has a `Follows Drift <id> <title> (<resolution>)` line under its title; `drift list` and the textual `board` mark it `(recurring)`; the Snapshot and the JSON of these commands carry `previous`.
+- The Board card, the resolution rows and the Diagram details of a recurring Drift show a `recurring` badge whose tooltip and accessible name say `Recurring: follows Drift <id> – <title>`.
+- `drift list --ref <ref>` (repeatable) keeps only the Drifts that concern the same thing as one of the references, with the test that decides Task blocks; combined with `--all` it shows the resolved ones too. A reference that does not resolve is a usage error.
+- `drift new` with no `--option` files a Drift without Fix options, which needs `--proposal` (its Draft fixes the Model or the Requirements); without it the filing is refused. One or more than five options are still refused.
 
 ## 0.0.2
 
