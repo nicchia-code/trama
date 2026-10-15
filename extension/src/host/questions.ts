@@ -10,19 +10,23 @@ import { getDrift } from "../../../src/core/work";
 import type { QuestionPresenter } from "../../../src/core/question-rounds";
 import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
+import type { QuestionSession } from "./question-session";
 import { receiveCursorHook } from "./cursor";
 import { receiveCopilotHook } from "./copilot-chat";
-import { awaitAutopilotResume, clearAutopilotFailure, clearSendReservations, localProjectJobs, receiveCoordinatorMessage, receiveAgentIdle, recordSkippedDrift } from "./drift-resolution";
+import { awaitAutopilotResume, clearAutopilotFailure, clearSendReservations, localProjectJobs, receiveCoordinatorMessage, receiveAgentIdle, recordSkippedDrift, setJobsVerified } from "./drift-resolution";
 import { noteCommandSeen } from "./terminal-activity";
 interface WindowRoundService {
   identity: string;
   windowId: string;
   project: Project;
-  queue: QuestionRoundQueue;
+  /** Rounds this service admitted and has not finished; a detached service is disposed once this is zero. */
+  inFlight: number;
   server: Promise<QuestionServer>;
   lease?: CoordinatorLease;
   coordinatorReady: boolean;
   lastRenewedAt: number;
+  /** The window no longer has this project: it admits no new round, while the rounds already admitted run to their end. */
+  detached?: boolean;
 }
 
 /**
@@ -50,6 +54,9 @@ function recordDriftAnswers(project: Project, present: QuestionPresenter): Quest
   };
 }
 
+/** A live window that does not acknowledge the jobs request within this time leaves its jobs unknown, so automatic steps wait. */
+const JOBS_QUERY_TIMEOUT_MS = 2000;
+
 let windowQuestions: EditorQuestions | undefined;
 
 /** Wait for the launching window's endpoint rather than discovering another window. */
@@ -63,6 +70,10 @@ export function questionWindowId(root: string): Promise<string | undefined> {
 /** The window-owned queue serves every local `trama ask` connection. */
 export class EditorQuestions implements vscode.Disposable {
   private service: WindowRoundService | undefined;
+  /** The window's one queue: its rounds are presented one at a time, in order, whichever service admitted them. */
+  private queue: QuestionRoundQueue;
+  /** Services whose project is gone but whose admitted rounds are still in progress; each is disposed when its last round ends. */
+  private readonly retired = new Set<WindowRoundService>();
   private closed = false;
   private readonly subscriptions: vscode.Disposable[];
   private readonly coordinatorHandlers = new Set<(message: Record<string, unknown>) => CoordinatorJson | void | Promise<CoordinatorJson | void>>();
@@ -81,22 +92,26 @@ export class EditorQuestions implements vscode.Disposable {
     if (service.lease && service.coordinatorReady && Date.now() - service.lastRenewedAt < 500) return true;
     if (service.lease && await renewCoordinatorLease(service.project, service.lease)) {
       service.lastRenewedAt = Date.now();
-      if (!service.coordinatorReady) return this.synchronizeJobs(service);
+      // The role stays with this window while the jobs of the other windows are unverified; the verification withholds automatic steps only.
+      if (!service.coordinatorReady) await this.synchronizeJobs(service);
       return true;
     }
     service.lease = undefined;
     service.coordinatorReady = false;
     // Losing the role frees what this window reserved; the coordinator that holds the role now decides from here on.
     clearSendReservations(root);
+    // Losing the role leaves no unverified jobs picture behind; the role taken over verifies its own.
+    setJobsVerified(root, true);
     const lease = await acquireCoordinatorLease(service.project, { windowId: service.windowId, endpoint: server.endpoint });
     if (!lease || this.closed || this.service !== service) return false;
     service.lease = lease;
     // The role just taken over waits for a scan end or Resolve Drifts again, in any mode; a request arriving now comes after this.
     awaitAutopilotResume(service.project.root);
-    return this.synchronizeJobs(service);
+    await this.synchronizeJobs(service);
+    return true;
   }
 
-  /** Asks every live window for the jobs it runs, so a coordinator that kept its role learns of work started while the autopilot was disabled. */
+  /** Asks every live window for the jobs it runs and tells whether every one answered while this window holds the role. A coordinator that kept its role learns of work started while the autopilot was disabled; a new automatic step needs this to be true. */
   async importJobs(root: string): Promise<boolean> {
     if (!await this.isCoordinator(root)) return false;
     const service = this.service;
@@ -116,8 +131,9 @@ export class EditorQuestions implements vscode.Disposable {
   }
 
 
-  constructor(private readonly project: () => Project | undefined, private readonly present: QuestionPresenter) {
+  constructor(private readonly project: () => Project | undefined, private readonly session: QuestionSession) {
     windowQuestions = this;
+    this.queue = new QuestionRoundQueue(session.present);
     // Directory deletion/rename does not emit separate events for its children.
     const watcher = vscode.workspace.createFileSystemWatcher("**/.trama");
     this.subscriptions = [
@@ -146,14 +162,18 @@ export class EditorQuestions implements vscode.Disposable {
     if (this.closed) return;
     this.closed = true;
     if (windowQuestions === this) windowQuestions = undefined;
+    this.queue.dispose();
     for (const subscription of this.subscriptions) subscription.dispose();
     this.closeService();
+    for (const service of this.retired) this.disposeService(service);
+    this.retired.clear();
   }
 
   private refresh(): void {
     if (this.closed) return;
     const project = this.project();
-    if (!project) { this.closeService(); return; }
+    this.session.setProject(project ? questionProjectId(project) : undefined);
+    if (!project) { this.detachService(); return; }
     this.ensure(project);
   }
 
@@ -161,19 +181,26 @@ export class EditorQuestions implements vscode.Disposable {
     const identity = questionProjectId(project);
     const current = this.service;
     if (current && current.identity === identity) return current;
-    this.closeService();
-    const queue = new QuestionRoundQueue(recordDriftAnswers(project, trackRound(this.present)));
+    this.detachService();
     const windowId = randomUUID();
     const service: WindowRoundService = {
-      identity, windowId, project, queue, coordinatorReady: false, lastRenewedAt: 0,
+      identity, windowId, project, inFlight: 0, coordinatorReady: false, lastRenewedAt: 0,
       server: createQuestionServer({
         project,
         windowId,
         focusedAt: vscode.window.state.focused ? Date.now() : 0,
-        // The channel admits only this project.
+        // A window whose project is gone refuses new connections, so the round is answered unavailable before submission.
+        serves: () => !this.closed && !service.detached && this.service === service,
+        // The channel admits only this project. The round joins the window's queue, behind any round still in progress.
         handler: async (_callerProject, request, context) => {
-          if (this.closed || this.service !== service) return unavailableQuestions();
-          return queue.ask(request, context);
+          if (this.closed || service.detached || this.service !== service) return unavailableQuestions();
+          service.inFlight++;
+          try {
+            return await this.queue.ask(request, context, recordDriftAnswers(project, trackRound(this.session.presentFor(identity))));
+          } finally {
+            service.inFlight--;
+            this.retireIdle(service);
+          }
         },
         onCursorHook: receiveCursorHook,
         onCopilotHook: receiveCopilotHook,
@@ -201,8 +228,12 @@ export class EditorQuestions implements vscode.Disposable {
           }
         },
         onClose: () => {
-          queue.dispose();
-          if (this.service === service) this.service = undefined;
+          this.retired.delete(service);
+          // Losing the editor that serves this window interrupts every round of the window.
+          if (this.service === service) {
+            this.service = undefined;
+            this.interruptRounds();
+          }
         },
       }),
     };
@@ -213,8 +244,12 @@ export class EditorQuestions implements vscode.Disposable {
 
   private async synchronizeJobs(service: WindowRoundService): Promise<boolean> {
     if (this.service !== service || !service.lease) return false;
-    const result = await sendCoordinatorMessage(service.project, { type: "jobs-query", root: service.project.root });
-    service.coordinatorReady = result.delivered > 0 && await renewCoordinatorLease(service.project, service.lease);
+    const root = service.project.root;
+    const result = await sendCoordinatorMessage(service.project, { type: "jobs-query", root }, { timeoutMs: JOBS_QUERY_TIMEOUT_MS });
+    // Every live window must answer: one that does not leaves its jobs unknown, so the picture is not verified.
+    const verified = result.live > 0 && result.delivered === result.live;
+    setJobsVerified(root, verified);
+    service.coordinatorReady = verified && await renewCoordinatorLease(service.project, service.lease);
     if (service.coordinatorReady) service.lastRenewedAt = Date.now();
     return service.coordinatorReady;
   }
@@ -222,8 +257,35 @@ export class EditorQuestions implements vscode.Disposable {
   private closeService(): void {
     const service = this.service;
     this.service = undefined;
+    if (service) this.disposeService(service);
+  }
+
+  /** The project left the window: a service with no round in progress closes now, otherwise it stays until its round ends. */
+  private detachService(): void {
+    const service = this.service;
     if (!service) return;
-    service.queue.dispose();
+    if (service.inFlight === 0) { this.closeService(); return; }
+    service.detached = true;
+    this.service = undefined;
+    this.retired.add(service);
+    service.coordinatorReady = false;
+    const lease = service.lease;
+    service.lease = undefined;
+    if (lease) void releaseCoordinatorLease(service.project, lease).catch((error: unknown) => this.report(error));
+  }
+
+  private retireIdle(service: WindowRoundService): void {
+    if (!service.detached || service.inFlight > 0 || !this.retired.delete(service)) return;
+    this.disposeService(service);
+  }
+
+  /** Editor loss: every round of the window, presented or queued, is interrupted; the window gets a fresh queue for what comes next. */
+  private interruptRounds(): void {
+    this.queue.dispose();
+    this.queue = new QuestionRoundQueue(this.session.present);
+  }
+
+  private disposeService(service: WindowRoundService): void {
     void service.server.then(async (server) => {
       if (service.lease) await releaseCoordinatorLease(service.project, service.lease);
       await server.dispose();

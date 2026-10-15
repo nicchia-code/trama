@@ -4,6 +4,7 @@ import { mountBoard } from "./board";
 import { mountDiagram } from "./diagram";
 import { mountQuestions } from "./questions";
 import { mountRequirements } from "./requirements";
+import { mountSettings } from "./settings";
 import css from "./shell.css" with { type: "text" };
 import type { View, ViewContext } from "./types";
 import { buildBoard } from "./board/logic";
@@ -23,6 +24,7 @@ app.innerHTML = `
     <button class="shell-tab" data-view="diagram" role="tab">Diagram</button>
     <button class="shell-tab" data-view="board" role="tab">Board<span class="shell-badge" data-badge hidden></span></button>
     <button class="shell-tab" data-view="requirements" role="tab">Requirements</button>
+    <button class="shell-tab" data-view="settings" role="tab">Settings</button>
     <span class="shell-spacer"></span>
   </div>
   <div class="shell-error" data-error hidden><span data-error-text></span><button data-dismiss aria-label="Dismiss">×</button></div>
@@ -30,7 +32,7 @@ app.innerHTML = `
   <div class="shell-views"></div>`;
 
 const views = app.querySelector(".shell-views") as HTMLElement;
-const roots: Record<ViewName, HTMLElement> = { diagram: document.createElement("div"), board: document.createElement("div"), requirements: document.createElement("div") };
+const roots: Record<ViewName, HTMLElement> = { diagram: document.createElement("div"), board: document.createElement("div"), requirements: document.createElement("div"), settings: document.createElement("div") };
 for (const root of Object.values(roots)) {
   root.className = "shell-view";
   views.append(root);
@@ -47,10 +49,12 @@ function navigate(view: ViewName, options: NavigateOptions = {}) {
 }
 
 const context: ViewContext = { post, navigate, openLink: (url) => post({ type: "openLink", url }) };
+const settings = mountSettings(roots.settings, context);
 const mounted: Record<ViewName, View> = {
   diagram: mountDiagram(roots.diagram, context),
   board: mountBoard(roots.board, context),
   requirements: mountRequirements(roots.requirements, context),
+  settings,
 };
 
 const questions = mountQuestions(app, post, context.openLink);
@@ -104,6 +108,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     showError(message.message);
   } else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal });
   else if (message.type === "questions") questions.update(message.round);
+  else if (message.type === "settings") settings.receive(message);
 });
 
 navigate(current);

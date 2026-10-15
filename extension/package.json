@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "trama-dev",
   "license": "AGPL-3.0-only",
   "private": true,
@@ -105,7 +105,7 @@
           ],
           "default": "chat",
           "scope": "application",
-          "markdownDescription": "Agent used for every project and instruction: `chat` (the editor's chat; the default), `omp` or `claude` (in an integrated terminal). It applies only in your user settings."
+          "markdownDescription": "Agent used for every project and instruction: `chat` (the editor's chat: Copilot in VS Code, Cursor in Cursor; the default), `omp` (omp in the editor's integrated terminal) or `claude` (Claude Code in the editor's integrated terminal). It applies only in your user settings."
         },
         "trama.terminalLocation": {
           "type": "string",
@@ -128,6 +128,11 @@
             "enabled",
             "yolo"
           ],
+          "enumDescriptions": [
+            "Manual: you decide on every Drift (the default).",
+            "The agent recommends, approves and fixes non-critical Drifts on its own.",
+            "Like enabled, critical Drifts included: the ones where your decision is urgently needed."
+          ],
           "default": "disabled",
           "scope": "application",
           "markdownDescription": "Automatically resolve Drift recommendations: `disabled` (manual, the default), `enabled` (recommends, approves and fixes non-critical Drifts) or `yolo` (also critical Drifts, the ones where your decision is urgently needed). It applies only in your user settings. After opening the editor, an explicit Resolve Drifts request or a finished scan is required before automatic collection resumes. A Task whose origin Drift is being fixed runs only after its fix Tasks are Done. A scan that failed or was interrupted counts as finished and does not suspend the delegation. It can run repeated cycles without an additional limit. Disabling stops new automatic steps but does not interrupt a Task already started."
@@ -137,6 +142,10 @@
           "enum": [
             "disabled",
             "enabled"
+          ],
+          "enumDescriptions": [
+            "Run, Run this design and Run all To do wait until the run started by Trama has finished (the default).",
+            "A run can start while another one is in progress."
           ],
           "default": "disabled",
           "markdownDescription": "`disabled` (the default: Run, Run this design and Run all To do are unavailable while a run started by Trama is in progress) and `enabled` (a run can start while another one is in progress)."
@@ -151,7 +160,7 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for scans: of the System, of Features and after an approval; it also applies to the sub-agents that compare Machines. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. The chats' sub-agents get it with Update skills. It only applies in your user settings."
+          "markdownDescription": "Model for scans: of the System, of Features, and for the sub-agents that compare Machines, including those of the pre-flight check at the start of each Run. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. The chats' sub-agents get it with Update skills. It only applies in your user settings."
         },
         "trama.execution": {
           "type": "string",
@@ -166,16 +175,11 @@
           "markdownDescription": "Close the agent's terminal as soon as the agent is idle or its command ends (default on). With it off, idle terminals stay open and every instruction still opens a new one. It only applies in your user settings."
         },
         "trama.maxParallelAgents": {
-          "type": "number",
+          "type": "integer",
           "default": 20,
           "minimum": 1,
           "scope": "application",
           "markdownDescription": "How many sub-agents the agent may run at once, in a scan, in the exploration of a design and in a run of Tasks (default 20; agents without sub-agents ignore it)."
-        },
-        "trama.autoScan": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "After you approve a Proposal, launch the agent to scan the Features it touched. It applies to the chat or terminal agent."
         },
         "trama.skillsDir": {
           "type": "string",

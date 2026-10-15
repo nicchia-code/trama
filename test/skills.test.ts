@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
-import { SKILLS } from "../src/cli/skills";
+import { ompAgentConflicts, SKILLS, skillConflicts } from "../src/cli/skills";
 
 
 test("init refuses to overwrite customised skill files and creates nothing", () => {
@@ -138,6 +138,18 @@ test("trama-implement reads each Task once from task show and checks the run onc
   expect(skill).not.toContain("Understand the surroundings");
 });
 
+test("trama-implement runs the pre-flight scan before the first group, and its failure does not stop the Run", () => {
+  const skill = SKILLS["trama-implement/SKILL.md"] as string;
+  const steps = skill.slice(skill.indexOf("## Steps"));
+  expect(steps.indexOf("**Pre-flight, before the first group.**")).toBeGreaterThan(-1);
+  expect(steps.indexOf("**Pre-flight, before the first group.**")).toBeLessThan(steps.indexOf("1. **Pick the Task.**"));
+  expect(skill).toContain("`trama task scope --pre-flight`");
+  expect(skill).toContain("`trama announce check \"<title>\" --phase scanning`");
+  expect(skill).toContain("Pre-flight scan failed: the Run continues without it.");
+  expect(skill).toContain("file only Drifts with no origin (no `--task`)");
+  expect(skill).toContain("never to file a Task, announce a check or run `trama task next`");
+});
+
 test("trama-scan reports how many Machines were compared and how many produced cards, with no triage line", () => {
   const skill = SKILLS["trama-scan/SKILL.md"] as string;
   expect(skill).toContain("count of Machines compared");
@@ -174,5 +186,27 @@ test("the five skills say which texts follow the chosen language and which stay 
     expect(section).toContain("the `(initial)` and `(final)` markers");
     expect(section).toContain("never translate the whole file");
     expect(section).not.toMatch(/Italian|French|German|Spanish/);
+  }
+});
+
+test("a CRLF checkout (core.autocrlf) of installed skills and omp definitions is not a conflict, and an update leaves it as it is", () => {
+  const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
+  try {
+    run(["--root", root, "init"], root);
+    const skill = join(root, ".agents/skills/trama-scan/SKILL.md");
+    const analysis = join(root, ".omp/agents/trama-analysis.md");
+    for (const path of [skill, analysis]) writeFileSync(path, readFileSync(path, "utf8").replace(/\n/g, "\r\n"));
+    const crlf = readFileSync(skill, "utf8");
+    expect(crlf).toContain("\r\n");
+    expect(skillConflicts(join(root, ".agents/skills"))).toEqual([]);
+    expect(ompAgentConflicts(root)).toEqual([]);
+    expect(run(["--root", root, "skills", "update"], root).out).toContain("already up to date");
+    expect(readFileSync(skill, "utf8")).toBe(crlf);
+    expect(readFileSync(analysis, "utf8")).toContain("\r\n");
+
+    writeFileSync(skill, "custom scan skill\r\n");
+    expect(skillConflicts(join(root, ".agents/skills"))).toEqual([skill]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

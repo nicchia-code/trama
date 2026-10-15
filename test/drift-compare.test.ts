@@ -4,6 +4,7 @@ import { driftComparison } from "../extension/src/webview/drift-compare";
 
 const drift = (over: Partial<DriftView> = {}): DriftView => ({
   id: "0003",
+  created: null,
   title: "Code refunds late",
   body: "",
   critical: false,
@@ -12,6 +13,7 @@ const drift = (over: Partial<DriftView> = {}): DriftView => ({
   options: [{ title: "Refuse the refund", text: "x" }],
   option: null,
   note: null,
+  closedUnchanged: null,
   requirementsOnly: false,
   refs: ["order/Shipped"],
   proposal: "0002",

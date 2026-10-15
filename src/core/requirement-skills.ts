@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { stringify } from "yaml";
 import { type Area, type Fragment, hasContent, loadProject, REQUIREMENT_SKILLS_BUDGET, type RequirementSection } from "./requirements";
-import { type Project, writeFileEnsuringDir } from "./store";
+import { type Project, readTextLf, writeFileEnsuringDir } from "./store";
 
 /** Folders, relative to the project root, where agents look for skills and Trama may have installed its own. */
 export const SKILL_DIRS = [".agents/skills", ".claude/skills", ".github/skills"];
@@ -165,7 +165,7 @@ export function syncRequirementSkills(p: Project, extraDirs: string[] = []): Req
   for (const dir of dirs) {
     for (const [rel, content] of wanted) {
       const file = join(dir, rel);
-      if (existsSync(file) && readFileSync(file, "utf8") === content) continue;
+      if (existsSync(file) && readTextLf(file) === content) continue;
       writeFileEnsuringDir(file, content);
       changed.push(file);
     }

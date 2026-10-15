@@ -87,6 +87,44 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     return li;
   };
 
+  const link = (ref: string): HTMLButtonElement => {
+    const b = el("button", "dg-link", ref);
+    b.type = "button";
+    b.addEventListener("click", () => actions.jump(ref));
+    return b;
+  };
+
+  const renderTasks = (p: ProposalView): HTMLElement => {
+    const section = el("section", "dg-proposal-tasks");
+    section.append(el("div", "dg-heading", "Tasks"));
+    const ul = el("ul", "dg-items");
+    for (const t of p.tasks) {
+      const li = el("li", "dg-item");
+      li.append(el("span", "dg-item-text", t.title));
+      if (t.technical) li.append(" ", el("span", "dg-tag", "Technical"));
+      for (const ref of t.refs) li.append(" ", link(ref));
+      if (t.body.trim() !== "") {
+        const text = body(t.body);
+        text.hidden = true;
+        const toggle = button("Show details", () => {
+          text.hidden = !text.hidden;
+          toggle.textContent = text.hidden ? "Show details" : "Hide details";
+          toggle.setAttribute("aria-expanded", String(!text.hidden));
+        });
+        toggle.setAttribute("aria-expanded", "false");
+        li.append(toggle, text);
+      }
+      ul.append(li);
+    }
+    for (const r of p.removals) {
+      const li = el("li", "dg-item");
+      li.append("Remove code of ", link(r.ref), " ", el("span", "dg-tag", "on approval"));
+      ul.append(li);
+    }
+    section.append(ul);
+    return section;
+  };
+
   const renderProposal = (p: ProposalView, numbers: CardNumbers): HTMLElement => {
     const box = el("section", "dg-proposal");
     const kind = el("div", "dg-kind", "Proposal ");
@@ -130,6 +168,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       box.append(ul);
     }
     if (p.resolves.length > 0) box.append(...renderResolves("dg", p.title, resolvedRows(p, numbers), actions.showDrift));
+    if (p.tasks.length + p.removals.length > 0) box.append(renderTasks(p));
     const blocker = approveBlocker(p, numbers);
     const row = el("div", "dg-actions");
     row.append(

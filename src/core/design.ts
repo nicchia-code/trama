@@ -28,19 +28,26 @@ export type Waits = { kind: "drift"; drift: string } | { kind: "fix"; task: stri
 
 /**
  * Why a run over these Tasks, in creation order, is unavailable, or null. Run all To do gets every Task, Run this
- * design the design's. Unavailable when the agent has taken one of them (this reason comes first), when none is in
- * To do, or when every one in To do is blocked, naming the Drift or the fix Task of the first of them.
+ * design the design's. Every reason that holds comes, in order: the agent has taken one of them; then, when none is
+ * in To do, that is said; otherwise, when every one in To do is blocked, the Drift or the fix Task of the first.
  */
 export function runBlocker(tasks: { id: string; column: TaskColumn; agent: boolean; blockedBy: readonly Waits[] }[], scope: "all" | "design", name: Namer = identityNamer): string | null {
-  const taken = takenBlocker(tasks, name);
-  if (taken !== null) return taken;
   const todo = tasks.filter((t) => t.column === "todo");
   const first = todo[0];
-  if (first === undefined) return scope === "all" ? "No Task is in To do" : "No Task of this design is in To do";
-  if (!todo.every((t) => t.blockedBy.length > 0)) return null;
-  const why = first.blockedBy[0];
-  const reason = why?.kind === "fix" ? `waiting for Task ${name("task", why.task)}, which fixes its Drift` : `blocked by Drift ${why === undefined ? "" : name("drift", why.drift)}`;
-  return `All the Tasks ${scope === "all" ? "in To do" : "of this design in To do"} are blocked: Task ${name("task", first.id)} is ${reason}`;
+  let idle: string | null = null;
+  if (first === undefined) idle = scope === "all" ? "No Task is in To do" : "No Task of this design is in To do";
+  else if (todo.every((t) => t.blockedBy.length > 0)) {
+    const why = first.blockedBy[0];
+    const reason = why?.kind === "fix" ? `waiting for Task ${name("task", why.task)}, which fixes its Drift` : `blocked by Drift ${why === undefined ? "" : name("drift", why.drift)}`;
+    idle = `All the Tasks ${scope === "all" ? "in To do" : "of this design in To do"} are blocked: Task ${name("task", first.id)} is ${reason}`;
+  }
+  return joinReasons([takenBlocker(tasks, name), idle]);
+}
+
+/** The reasons that hold, in the order given, as one text (each reason a sentence); null when none holds. */
+export function joinReasons(reasons: readonly (string | null)[]): string | null {
+  const held = reasons.filter((r): r is string => r !== null);
+  return held.length === 0 ? null : held.join(". ");
 }
 
 /** What stands in a column of the Board: a Task on its own, or a design with its Tasks in creation order. */

@@ -39,12 +39,14 @@ describe("task scope", () => {
     expect(JSON.parse(cli("--json", "task", "scope", m.id).out)).toEqual([{ ref: "order", reason: "changed" }]);
   });
 
-  test("Requirement sections count; Area and General add nothing; supports short and permanent IDs", () => {
+  test("Requirement sections count, a named General section enters as changed, Area alone adds nothing; supports short and permanent IDs", () => {
     const req = newTask(p, { title: "Requirement", refs: ["requirements/ui#checkout"] , technical: true });
-    const empty = newTask(p, { title: "Area only", refs: ["requirements/ui", "requirements/ui#General"] , technical: true });
+    const general = newTask(p, { title: "General", refs: ["requirements/ui#General"] , technical: true });
+    const area = newTask(p, { title: "Area only", refs: ["requirements/ui"] , technical: true });
     const reqOutput = cli("task", "scope", "T1", req.id).out;
     expect(reqOutput).toContain("`checkout` (changed)");
-    expect(cli("--json", "task", "scope", empty.id).out).toBe("[]");
+    expect(JSON.parse(cli("--json", "task", "scope", general.id).out)).toEqual([{ ref: "requirements/ui#General", reason: "changed" }]);
+    expect(cli("--json", "task", "scope", area.id).out).toBe("[]");
   });
 
   test("missing Task is a usage error and text output lists the scope", () => {
@@ -57,5 +59,16 @@ describe("task scope", () => {
     const task = newTask(p, { title: "Broken", refs: ["order/Paid"], technical: false });
     writeFileSync(task.path, "---\nrefs: broken\n---\n# Broken\n");
     expect(() => cli("task", "scope", task.id)).toThrow(TramaError);
+  });
+
+  test("--pre-flight names each runnable Task's exact references once, without added Transitions, General sections or Areas", () => {
+    newTask(p, { title: "Order", refs: ["order/Paid", "requirements/ui#checkout", "requirements/ui#General"], technical: false });
+    newTask(p, { title: "Other", refs: ["order/Paid", "order/Paid/user.CANCEL", "requirements/ui"], technical: false });
+    const json = JSON.parse(cli("--json", "task", "scope", "--pre-flight").out) as { refs: { ref: string }[]; tasks: { number: string }[] };
+    expect(json.refs.map((r) => r.ref).sort()).toEqual(["checkout", "order/Paid", "order/Paid/user.CANCEL"]);
+    expect(json.tasks.map((t) => t.number)).toEqual(["T1", "T2"]);
+    expect(cli("task", "scope", "--pre-flight").out).toContain("`order/Paid/user.CANCEL`");
+    expect(() => cli("task", "scope")).toThrow(/Name at least one Task ID/);
+    expect(() => cli("task", "scope", "--pre-flight", "T1")).toThrow(/takes no Task ID/);
   });
 });

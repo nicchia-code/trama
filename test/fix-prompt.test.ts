@@ -17,7 +17,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-fixprompt-"));
   cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
   p = projectAt(dir);
-  id = newDrift(p, { options: FIX_OPTIONS, title: "Refund too late", refs: ["order"], happens: "Code does it.", should: "Model says so." }).id;
+  id = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Refund too late", refs: ["order"], happens: "Code does it.", should: "Model says so." }).id;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 

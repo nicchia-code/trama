@@ -50,10 +50,13 @@ test("rewrites numbered cards to a stable identity, keeps the slug, the body and
   const billingId = rewrittenId("proposal", "0012");
   const taskId = rewrittenId("task", "0003");
   const driftId = rewrittenId("drift", "0004");
-  expect(out.out).toContain(`proposal 0001 → ${proposalId}`);
+  expect(out.out).toContain("proposal 0001 → P1");
   expect(out.out).toContain(`proposal 0012 → ${billingId}`);
-  expect(out.out).toContain(`task 0003 → ${taskId}`);
-  expect(out.out).toContain(`drift 0004 → ${driftId}`);
+  expect(out.out).toContain("task 0003 → T1");
+  expect(out.out).toContain("drift 0004 → D1");
+  expect(out.out).not.toContain(proposalId);
+  expect(out.out).not.toContain(taskId);
+  expect(out.out).not.toContain(driftId);
 
   const returns = getProposal(p, proposalId);
   expect(returns.name).toBe(`${proposalId}-returns`);
@@ -89,7 +92,7 @@ test("rewrites numbered cards to a stable identity, keeps the slug, the body and
     const other = projectAt(again);
     mkdirSync(join(other.dir, "tasks"), { recursive: true });
     writeFileSync(join(other.dir, "tasks", "0003-label.md"), "---\ncolumn: todo\ntechnical: false\nrefs: [order]\n---\n# Label\n\nPrint it.\n");
-    expect(run(["--root", again, "ids", "rewrite"], again, {}).out).toContain(`task 0003 → ${taskId}`);
+    expect(run(["--root", again, "ids", "rewrite"], again, {}).out).toContain("task 0003 → T1");
     expect(getTask(other, taskId).data.created).toBe(rewrittenInstant("0003"));
   } finally {
     rmSync(again, { recursive: true, force: true });
@@ -151,6 +154,18 @@ test("does nothing when no card is numbered, and refuses before writing when num
   expect(readFileSync(join(p.dir, "tasks", `${taken}-taken.md`), "utf8")).toBe("---\ncolumn: todo\ntechnical: true\nrefs: []\ncreated: 2020-01-01T00:00:00.000Z\n---\n# Taken\n");
   expect(readFileSync(assigned, "utf8")).toBe(registry);
   expect(existsSync(join(p.dir, "short-numbers", ".gitignore"))).toBe(false);
+});
+
+test("a card that does not read stops the rewrite before any numbered card changes", () => {
+  writeCard("proposals", "0005-fix", "kind: resolution\nstatus: open\nbase: {}\ndelete: []\ndrifts: []", "# Fix\n\nDecide.\n");
+  writeCard("tasks", "0009-broken.md", "column: [unclosed", "# Broken\n");
+  const proposal = join(p.dir, "proposals", "0005-fix", "proposal.md");
+  const before = readFileSync(proposal, "utf8");
+
+  expect(() => cli("ids", "rewrite")).toThrow();
+  expect(readFileSync(proposal, "utf8")).toBe(before);
+  expect(existsSync(join(p.dir, "proposals", "0005-fix"))).toBe(true);
+  expect(existsSync(join(p.dir, "tasks", "0009-broken.md"))).toBe(true);
 });
 
 test("an agent can run ids rewrite, and worktrees and trama/* branches left over do not stop it", () => {

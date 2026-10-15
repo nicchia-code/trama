@@ -36,6 +36,9 @@ The developer moves a Task to the In progress column, with the command line.
 ### MOVE_TASK_TO_DONE
 The developer moves a Task to the Done column, with the command line.
 
+### CLOSE_TASK_UNCHANGED
+Il developer chiude, dalla riga di comando, un Task di correzione senza cambiare il codice, perché il codice fa già ciò che dicono il Model o il Requisito, con una nota che dice perché.
+
 ### TAKE_BACK_TASK
 The developer takes back a Task that the agent has taken, with the command of the same name; the Board has no button for it. The Task stays In progress and is the developer's again.
 
@@ -45,7 +48,7 @@ The developer asks the coding agent to work, from a button or a command: design 
 Una richiesta di design arriva in due modi: come richiesta rapida di una riga, scritta nella casella che si apre con Quick request, oppure come richiesta scritta, un documento Markdown che il developer compone in una scheda dell'editor e invia con il pulsante Send to agent della scheda o chiudendo la scheda (vedi la Design request).
 
 ### SET_DRIFT_AUTOPILOT
-Il developer cambia la propria delega per i Drift: nessuna, soltanto i non critici oppure tutti. Il cambiamento vale prima della prossima scelta, approvazione e avvio automatico; ritirare la delega non annulla decisioni già applicate né interrompe forzatamente un Task già iniziato.
+Il developer cambia la propria delega per i Drift: nessuna, soltanto i non critici oppure tutti. Il cambiamento vale prima della prossima scelta, approvazione e avvio automatico; ritirare la delega non annulla decisioni già applicate né interrompe forzatamente un Task già iniziato. La cambia nelle impostazioni dell'editor o dalla scheda Settings del pannello, dove aumentarla chiede prima conferma.
 
 ### CLOSE_REQUEST
 Il developer chiude la scheda di una richiesta di design scritta che non ha mai inviato, quando nessun'altra scheda mostra più quella richiesta. Chiudere la finestra dell'editor con la scheda aperta non è questo Event, né lo è chiudere la scheda di una richiesta già inviata.
@@ -77,6 +80,12 @@ The developer switches to the Board tab.
 
 ### SHOW_REQUIREMENTS
 The developer switches to the Requirements tab, or follows a link to a Requirement.
+
+### SHOW_SETTINGS
+Il developer passa alla scheda Settings del pannello.
+
+### CHANGE_SETTING
+Il developer cambia un'impostazione di Trama dalla scheda Settings: sceglie un valore in un menu, spunta o toglie una casella, oppure conferma un campo di testo o numerico.
 
 ### OPEN_SYSTEM_LEVEL
 The developer zooms the Diagram out to the whole System, with the breadcrumb or by following a link to a Feature or an Actor.

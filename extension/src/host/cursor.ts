@@ -70,10 +70,10 @@ export const deeplinkAccepts = (prompt: string): boolean => prompt.trim() !== ""
  * Sends `prompt` to a new agent conversation in Cursor's chat. Each step that is missing or fails moves silently to the
  * next, and none is tried twice, so no two chats get the same text: 1) `composer.createNew` with `autoSubmit`, which
  * sends it by itself (internal and undocumented); 2) the prompt deeplink, which waits for the developer's confirmation
- * and Enter; 3) the clipboard, with a notice. With `selfSendingOnly` (an automatic scan) only the first step is tried,
- * so no chat is left waiting for the developer.
+ * and Enter; 3) the clipboard, with a notice. Automatic instructions take the same steps: one left waiting or on the
+ * clipboard starts nothing, so the automatic flow holds until the developer acts.
  */
-export async function openCursorChat(root: string, prompt: string, selfSendingOnly = false, canSend: () => boolean = () => true, model = ""): Promise<ChatDelivery> {
+export async function openCursorChat(root: string, prompt: string, canSend: () => boolean = () => true, model = ""): Promise<ChatDelivery> {
   if (!canSend()) return "not-sent";
   try {
     // Its result does not count: Cursor always returns nothing, so only an error moves to the deeplink.
@@ -84,7 +84,7 @@ export async function openCursorChat(root: string, prompt: string, selfSendingOn
   } catch {
     // Missing in this version of Cursor, or failed: the deeplink is next.
   }
-  if (selfSendingOnly || !canSend()) return "not-sent";
+  if (!canSend()) return "not-sent";
   if (deeplinkAccepts(prompt)) {
     const query = `text=${encodeURIComponent(prompt)}&workspace=${encodeURIComponent(basename(root))}&mode=agent`;
     try {

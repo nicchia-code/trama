@@ -1,6 +1,7 @@
 import type { Raw } from "../../../src/core/schema";
 import type { AgentAction, ToHost } from "../protocol";
 import type { QuestionAction } from "./question-state";
+import { type SettingSchema, type SettingValue, settingValueError } from "./settings-schema";
 import { safeLink } from "../../../src/core/links";
 
 export type Parsed = { ok: true; message: ToHost } | { ok: false; reason: string };
@@ -57,8 +58,8 @@ function parseQuestionAction(value: unknown): QuestionAction | string {
   }
 }
 
-/** Checks a message from the webview, which is untrusted input, against the `ToHost` contract. */
-export function parseToHost(value: unknown): Parsed {
+/** Checks a message from the webview, which is untrusted input, against the `ToHost` contract. `settings` is the manifest's schema: only its keys can be set. */
+export function parseToHost(value: unknown, settings: readonly SettingSchema[] = []): Parsed {
   if (typeof value !== "object" || value === null) return bad("not a message");
   const raw = value as Raw;
   if (typeof raw["type"] !== "string") return bad("not a message");
@@ -90,6 +91,12 @@ export function parseToHost(value: unknown): Parsed {
     case "openLink": {
       const url = typeof raw["url"] === "string" ? safeLink(raw["url"]) : null;
       return url === null ? bad("openLink needs an http or https address") : { ok: true, message: { type, url } };
+    }
+    case "setSetting": {
+      const setting = settings.find((s) => s.key === raw["key"]);
+      if (setting === undefined) return bad("setSetting needs a key of the Trama settings");
+      const reason = settingValueError(setting, raw["value"]);
+      return reason === null ? { ok: true, message: { type, key: setting.key, value: raw["value"] as SettingValue } } : bad(`${setting.key}: ${reason}`);
     }
     default:
       return bad(`unknown message type "${type}"`);

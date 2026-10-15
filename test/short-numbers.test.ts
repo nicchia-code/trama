@@ -27,7 +27,7 @@ afterEach(() => {
 const assigned = () => join(shortNumbersDir(p), "assigned");
 const task = (title: string) => newTask(p, { title, refs: ["order"], technical: false });
 const drift = (title: string) =>
-  newDrift(p, { title, refs: ["order"], options: FIX_OPTIONS, happens: "The code does it.", should: "The Model says otherwise." });
+  newDrift(p, { where: "src/refund.ts", title, refs: ["order"], options: FIX_OPTIONS, happens: "The code does it.", should: "The Model says otherwise." });
 const numberOf = (kind: "proposal" | "task" | "drift", id: string) => syncShortNumbers(p).of(kind, id);
 
 describe("assignment", () => {
@@ -276,7 +276,7 @@ describe("as a command argument", () => {
     cli("task", "move", "T1", "doing");
     expect(readFileSync(a.path, "utf8")).toContain("column: doing");
 
-    const filed = cli("drift", "new", "Found", "--ref", "order", "--happens", "h", "--should", "s", "--task", "T2", "--option", "x", "--option-text", "y", "--option", "z", "--option-text", "w");
+    const filed = cli("drift", "new", "Found", "--where", "src/refund.ts", "--ref", "order", "--happens", "h", "--should", "s", "--task", "T2", "--option", "x", "--option-text", "y", "--option", "z", "--option-text", "w");
     expect(filed.exit).toBe(0);
     const text = readdirSync(join(p.dir, "drifts")).map((f) => readFileSync(join(p.dir, "drifts", f), "utf8")).join("");
     expect(text).toContain(`origin: ${b.id}`);
@@ -345,7 +345,7 @@ describe("cards in a worktree left from a round", () => {
     const home = join(`${dir}.trama-worktrees`, "abcd1234");
     git("worktree", "add", "-q", "-b", "trama/abcd1234", home);
     const theirs = newTask(projectAt(home), { title: "Theirs", refs: ["order"], technical: false });
-    const found = newDrift(projectAt(home), { title: "Found", refs: ["order"], options: FIX_OPTIONS, happens: "h", should: "s" });
+    const found = newDrift(projectAt(home), { where: "src/refund.ts", title: "Found", refs: ["order"], options: FIX_OPTIONS, happens: "h", should: "s" });
 
     const numbers = syncShortNumbers(p);
     expect([numbers.of("task", mine.id), numbers.of("task", theirs.id), numbers.of("drift", found.id)]).toEqual([1, null, null]);
@@ -388,7 +388,7 @@ describe("as the command line shows cards", () => {
 
   test("a block names its blockers by number, and the card they concern too", () => {
     const a = task("A");
-    const open = newDrift(p, { title: "Found", refs: ["order"], options: FIX_OPTIONS, origin: a.id, happens: "h", should: "s" });
+    const open = newDrift(p, { where: "src/refund.ts", title: "Found", refs: ["order"], options: FIX_OPTIONS, origin: a.id, happens: "h", should: "s" });
     const shown = cli("task", "show", "T1");
     expect(shown).toContain("(blocked by Drift D1)");
     expect(shown).toContain("Blocked by Drift D1: Found");

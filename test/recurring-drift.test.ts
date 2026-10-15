@@ -18,7 +18,7 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const drift = (title: string, extra: { previous?: string; origin?: string } = {}) =>
-  newDrift(p, { options: FIX_OPTIONS, title, refs: ["order"], happens: "The code does it one way.", should: "The Model says another.", ...extra });
+  newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title, refs: ["order"], happens: "The code does it one way.", should: "The Model says another.", ...extra });
 
 describe("a recurring Drift follows a Drift already resolved", () => {
   test("the named previous Drift, resolved by fixing the code, is kept in the file", () => {

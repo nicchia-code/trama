@@ -306,7 +306,7 @@ describe("the terminal an announcement belongs to", () => {
     expect(listAnnouncements(p)).toEqual([]);
 
     const driftOptions = ["--option", "Change the code", "--option-text", "Make it so.", "--option", "Remove the code", "--option-text", "Drop it."];
-    const unknown = run(["--root", dir, "drift", "new", "Late refund", "--ref", "order/Shipped", "--happens", "The code refunds late.", "--should", "The Model forbids it.", "--announcement", "zzzzzz", ...driftOptions], dir, {});
+    const unknown = run(["--root", dir, "drift", "new", "Late refund", "--where", "src/refund.ts", "--ref", "order/Shipped", "--happens", "The code refunds late.", "--should", "The Model forbids it.", "--announcement", "zzzzzz", ...driftOptions], dir, {});
     expect(unknown.out).toContain('No announcement "zzzzzz" was found');
     expect(() => run(["announce", "card", "x"], dir, {})).toThrow(/The kind must be one of/);
   });
@@ -449,7 +449,7 @@ describe("a check", () => {
 
 test("the developer's decision to fix the code does not change announcement timestamps", () => {
   const opts = [{ title: "Change the code", text: "Make the code do it." }, { title: "Other", text: "Another way." }];
-  const drift = newDrift(p, { title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts });
+  const drift = newDrift(p, { where: "src/refund.ts", title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts });
   const a = announce(p, { kind: "task", title: "Waiting" }, new Date("2026-01-01T10:00:00Z"));
   resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
   expect(getAnnouncement(p, a.id)?.touched).toBe("2026-01-01T10:00:00.000Z");
@@ -464,14 +464,14 @@ describe("a Draft attached to an open Drift", () => {
     bindDraft(p, draft, a.id, { chat: "editor" });
     const ghosts = () => buildSnapshot(p).announcements.map((v) => v.id);
     expect(ghosts()).toContain(a.id);
-    newDrift(p, { title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts, proposal: draft.id });
+    newDrift(p, { where: "src/refund.ts", title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts, proposal: draft.id });
     expect(ghosts()).not.toContain(a.id);
     const own = announce(p, { kind: "drift", title: "D2", proposal: draft.id });
     expect(ghosts()).toContain(own.id);
   });
 
   test("keeping the code withdraws no announcement, and a leftover `drift` field is ignored and never rewritten", () => {
-    const drift = newDrift(p, { title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts });
+    const drift = newDrift(p, { where: "src/refund.ts", title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts });
     const a = announce(p, { kind: "proposal", title: "Old rework", source: "request" });
     const file = join(announcementsDir(p), `${a.id}.md`);
     writeFileSync(file, readFileSync(file, "utf8").replace("source: request", `source: request\ndrift: ${drift.id}`));

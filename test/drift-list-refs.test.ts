@@ -19,7 +19,7 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const drift = (title: string, refs: string[]) =>
-  newDrift(p, { options: FIX_OPTIONS, title, refs, happens: "The code does it one way.", should: "The Model says another." });
+  newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title, refs, happens: "The code does it one way.", should: "The Model says another." });
 
 describe("drift list --ref", () => {
   test("keeps the Drifts that concern the same thing as a reference, the same element or one inside the other", () => {

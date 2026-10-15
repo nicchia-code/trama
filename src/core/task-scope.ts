@@ -1,7 +1,8 @@
 import { loadProject, resolveProjectRef, type ProjectElement } from "./requirements";
 import type { Project } from "./store";
 import { closeScope, type ChangedEvent, type ChangedState, type ScanReason, type ScanScopeEntry } from "./scan-scope";
-import { getTask } from "./work";
+import { getTask, runnableTasks, type Task } from "./work";
+import { TramaError } from "./errors";
 
 /**
  * The targeted scan scope named by finished Tasks: the same computation as a Proposal's `scanScope`, fed with the
@@ -26,7 +27,37 @@ export function taskScope(p: Project, ids: string[]): ScanScopeEntry[] {
       else if (element.section?.ref) {
         const target = resolveProjectRef(project, element.section.ref);
         if (target.kind !== "requirement") named(target);
-      }
+      } else if (element.section) changed.set(`requirements/${element.area.id}#General`, "changed");
     }
   return closeScope(project.model, changed, changedMachines, changedStates, changedEvents);
+}
+
+/**
+ * The exact references the runnable Tasks of a scope name, for the pre-flight comparison: each reference once, a
+ * Requirement section as the element it is about, no General section, Area, or Transition added. A reference that no
+ * longer resolves is skipped. Chooses the Tasks as `trama task next` does, and returns them too.
+ */
+export function preflightScope(p: Project, proposal?: string, taskIds?: string[]): { refs: string[]; tasks: Task[] } {
+  const project = loadProject(p);
+  const tasks = runnableTasks(p, proposal, taskIds);
+  const refs = new Set<string>();
+  const resolve = (ref: string) => {
+    try {
+      return resolveProjectRef(project, ref);
+    } catch (err) {
+      if (err instanceof TramaError) return null;
+      throw err;
+    }
+  };
+  for (const task of tasks)
+    for (const ref of task.data.refs) {
+      const element = resolve(ref);
+      if (element === null) continue;
+      if (element.kind !== "requirement") refs.add(element.ref);
+      else if (element.section?.ref) {
+        const target = resolve(element.section.ref);
+        if (target !== null && target.kind !== "requirement") refs.add(target.ref);
+      }
+    }
+  return { refs: [...refs], tasks };
 }

@@ -15,23 +15,26 @@ import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
 import { configuredSkillsDir, type DesignAnnouncement, type Instruction, type Launch, launchAgent, launched, settings } from "./agent";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
-import { activeProjectJobs, autopilotFailedCase, autopilotReady, clearAutopilotFailure, driftAutopilotMode, driftAutopilotStatus, driftResolution, excludeAutopilotDrift, forgetSkippedDrifts, forgetWindow, holdAutopilot, jobAbnormalEnd, lastFailedScan, observeAutopilotMode, onDriftResolutionChange, projectWindowIds, recordAutopilotFailure, releaseSend, reserveSend, resumeAutopilot, sendReserved, setCoordinatorAvailable, shownAutopilotFailures, type DriftAutopilotMode } from "./drift-resolution";
+import { activeProjectJobs, autopilotFailedCase, autopilotReady, clearAutopilotFailure, driftAutopilotMode, driftAutopilotStatus, driftResolution, driftWork, excludeAutopilotDrift, forgetSkippedDrifts, forgetWindow, holdAutopilot, jobAbnormalEnd, lastFailedScan, observeAutopilotMode, onDriftResolutionChange, projectWindowIds, recordAutopilotFailure, releaseSend, reserveSend, resumeAutopilot, sendReserved, setCoordinatorAvailable, shownAutopilotFailures, type DriftAutopilotMode } from "./drift-resolution";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
+import { DELEGATION_KEY, DELEGATION_QUESTIONS, explanationOf, raisesDelegation, settingsSchema, storedValue, type SettingSchema, type SettingsValues, type SettingValue } from "./settings-schema";
 import { resolveMarkdownFile } from "./paths";
 import { findProject, initializeProject, NO_PROJECT_WARNING, updateSkills } from "./project";
-import { type ApprovalOptions, applyApprovedProposal } from "./approval";
 import type { QuestionSession } from "./question-session";
 import type { EditorQuestions } from "./questions";
 import { writeLastScan } from "../../../src/core/last-scan";
-import { buildApprovalScanPrompt, buildAutomaticRunPrompt, buildPrompt, terminalName, type ResolvedAction } from "./prompts";
+import { buildAutomaticRunPrompt, buildPrompt, terminalName, type ResolvedAction } from "./prompts";
 
 const DEBOUNCE_MS = 150;
+
+/** The key under the `trama` section for a manifest key: `trama.driftAutoPilot` is read and written as `driftAutoPilot`. */
+const sectionKey = (key: string): string => key.slice("trama.".length);
 
 export const describeError = (err: unknown): string =>
   err instanceof TramaError || err instanceof UsageError ? err.message : `Unexpected error: ${err instanceof Error ? err.message : String(err)}`;
 
-/** Remembers the instant a System scan's instruction left Trama, so the Scan button's count restarts; a failed write keeps the previous instant and is reported. */
+/** Remembers the instant a System scan's instruction left Trama, so the Scan count restarts; a failed write keeps the previous instant and is reported. */
 function rememberDeliveredScan(project: Project, startedAt: number): void {
   try {
     writeLastScan(project, new Date(startedAt).toISOString());
@@ -104,10 +107,15 @@ export class Controller implements vscode.Disposable {
     this.create(findProject());
   }
 
-  /** Creates the panel, or reveals it. Offers to initialize the workspace when there is no `.trama/`. */
+  /** Creates the panel, or reveals it. With an open question round it shows the round even without `.trama/`; otherwise it offers to initialize the workspace. */
   async open(): Promise<void> {
     this.questions?.restore();
     if (this.revealPanel()) return;
+    // An open round is shown even without a project: its questions do not depend on one, and the agent is waiting for them.
+    if (this.questions?.current()) {
+      this.create(findProject());
+      return;
+    }
     let project = findProject();
     if (!project) {
       const choice = await vscode.window.showInformationMessage("This workspace has no Trama project yet.", "Initialize Project");
@@ -165,7 +173,50 @@ export class Controller implements vscode.Disposable {
 
   settingsChanged(): void {
     this.refresh();
+    this.postSettings();
     void this.autopilotTick();
+  }
+
+  /** The Trama settings as the manifest declares them, read at run time: the Settings tab and the check of its messages both use them. */
+  private manifestSettings(): SettingSchema[] {
+    return settingsSchema(vscode.extensions.getExtension("trama-dev.trama")?.packageJSON);
+  }
+
+  /** Sends the Settings tab the schema, each key's user value, and the workspace value of the keys that are not application-scoped. */
+  private postSettings(): void {
+    const config = settings();
+    const schema = this.manifestSettings();
+    const values: Record<string, SettingsValues> = {};
+    for (const setting of schema) {
+      const inspected = config.inspect<unknown>(sectionKey(setting.key));
+      values[setting.key] = setting.scope === "application"
+        ? { user: inspected?.globalValue }
+        : { user: inspected?.globalValue, workspace: inspected?.workspaceValue };
+    }
+    this.post({ type: "settings", schema, values });
+  }
+
+  /**
+   * Saves a Trama setting in the developer's user settings, never the workspace's. A raised delegation first waits for
+   * the developer's Enable in a modal question; cancelling saves nothing. The Settings tab is sent again either way, so
+   * its controls show the values that really hold.
+   */
+  private async saveSetting(key: string, value: SettingValue): Promise<void> {
+    const setting = this.manifestSettings().find((s) => s.key === key);
+    if (setting === undefined) throw new TramaError(`Unknown Trama setting ${key}`);
+    if (key === DELEGATION_KEY && typeof value === "string" && raisesDelegation(driftAutopilotMode(settings().inspect<unknown>(sectionKey(key))?.globalValue), value)) {
+      const choice = await vscode.window.showWarningMessage(DELEGATION_QUESTIONS[value] ?? "", { modal: true, detail: explanationOf(setting, value) }, "Enable");
+      if (choice !== "Enable") {
+        this.postSettings();
+        return;
+      }
+    }
+    try {
+      await settings().update(sectionKey(key), storedValue(setting, value), vscode.ConfigurationTarget.Global);
+    } catch (error) {
+      void vscode.window.showErrorMessage(`Trama: could not save ${setting.title}: ${error instanceof Error ? error.message : String(error)}.`);
+    }
+    this.postSettings();
   }
 
   async autopilotTick(): Promise<void> {
@@ -196,6 +247,10 @@ export class Controller implements vscode.Disposable {
     this.disposed = true;
     this.coordinatorSubscription?.dispose();
     this.panel?.dispose();
+    if (this.collection) {
+      try { this.abandonCollection(projectAt(this.collection.root), "The coordinator window closed during the Run"); }
+      catch { this.collection = undefined; }
+    }
     clearTimeout(this.timer);
   }
 
@@ -300,7 +355,7 @@ export class Controller implements vscode.Disposable {
       const autopilot = shown.mode !== "disabled" && this.ownedCoordinatorRoot !== project.root && shown.phase === "idle"
         ? { ...shown, reason: "Automatic resolution waits for the project coordinator to resume" }
         : shown;
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, window), runReason: runWindowBlocker(window, settings().get<string>("submitWhileRunning", "disabled") === "enabled"), autopilot } });
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, window), runReason: runWindowBlocker(driftWork(project.root, this.mode() !== "disabled"), settings().get<string>("submitWhileRunning", "disabled") === "enabled"), autopilot } });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -441,7 +496,9 @@ export class Controller implements vscode.Disposable {
       try {
         const drift = getDrift(project, id);
         const fix = drift.data.task;
-        return drift.data.status === "resolved" && drift.data.resolution === "fix-code"
+        // A fix Task closed without changes dismisses its Drift and keeps the Drift's Task: that is a success too, not a failure.
+        const fixed = drift.data.resolution === "fix-code" || (drift.data.resolution === "dismissed" && drift.data.task !== null);
+        return drift.data.status === "resolved" && fixed
           && (!drift.data.critical || mode === "yolo")
           && fix !== null && collection.fixTasks.get(fix) === id;
       } catch { return false; }
@@ -474,7 +531,7 @@ export class Controller implements vscode.Disposable {
     if (mode === "disabled") {
       // Under `disabled` the windows share no jobs: the next active mode imports them again.
       this.importedRoots.delete(root);
-      if (this.collection?.root === root) this.collection = undefined;
+      this.withdrawCollection(project);
       return;
     }
     // An active autopilot forgets the sends and jobs of lost editors: a dead window must not block Resolve Drifts or a Run. Under `disabled` a window knows only its own work.
@@ -483,7 +540,7 @@ export class Controller implements vscode.Disposable {
     if (!owner) {
       setCoordinatorAvailable(root, true);
       if (this.ownedCoordinatorRoot === root) {
-        this.collection = undefined;
+        this.abandonCollection(project, "The project coordinator lost its role during the Run");
         this.ownedCoordinatorRoot = undefined;
       }
       return;
@@ -500,7 +557,8 @@ export class Controller implements vscode.Disposable {
     if (activeProjectJobs(root).length > 0 || !autopilotReady(root) || sendReserved(root)) return;
     if (driftAutopilotStatus(root, mode).phase === "suspended") return;
     const drifts = this.eligibleDrifts(project, mode);
-    if (drifts.length > 0) await this.startAutomaticResolution(project, drifts);
+    // A new automatic step is granted only after every live window has answered the jobs request; otherwise the status shows why it waits.
+    if (drifts.length > 0 && await this.coordinator?.importJobs(root)) await this.startAutomaticResolution(project, drifts);
   }
 
   private async startAutomaticResolution(project: Project, drifts: string[]): Promise<void> {
@@ -529,7 +587,7 @@ export class Controller implements vscode.Disposable {
       collection.drifts = named;
       return buildPrompt({ kind: "resolve-drifts", drifts: named, automaticCollection: collection.id });
     };
-    const launchedNow = await this.deliverAutomatic(project.root, canSend, (guarded) => launchAgent(project.root, instruction, "Drifts", "Resolve Drifts", true, guarded, "resolve", undefined, { id, origin: "automatic" }));
+    const launchedNow = await this.deliverAutomatic(project.root, canSend, (guarded) => launchAgent(project.root, instruction, "Drifts", "Resolve Drifts", guarded, "resolve", undefined, { id, origin: "automatic" }));
     // Not delivered: nothing ran, so the reservation is released. A refused start is taken again by the next check; a held one waits for the developer.
     if (!launchedNow && this.collection === collection) this.collection = undefined;
   }
@@ -563,9 +621,15 @@ export class Controller implements vscode.Disposable {
   }
 
   private async advanceCollection(project: Project, collection: AutopilotCollection): Promise<void> {
-    if (this.mode() === "disabled") { this.collection = undefined; return; }
+    if (this.mode() === "disabled") { this.withdrawCollection(project); return; }
     if (collection.stage === "resolving") {
       if (activeProjectJobs(project.root).some((job) => job.id === collection.resolutionJob) || collection.handovers.size > 0) return;
+      // A resolution the developer approved by hand while the agent worked counts as the host's approval: its fix Tasks join the collection.
+      for (const id of collection.proposals) {
+        let approvedProposal: Proposal;
+        try { approvedProposal = getProposal(project, id); } catch { continue; }
+        if (approvedProposal.data.status === "approved") this.absorbApproved(project, collection, approvedProposal);
+      }
       const abnormal = jobAbnormalEnd(project.root, collection.resolutionJob);
       if (abnormal !== undefined) {
         this.failCollection(project, collection, `The resolution agent ended abnormally (${abnormal}), so no Run starts`);
@@ -604,6 +668,11 @@ export class Controller implements vscode.Disposable {
       this.failCollection(project, collection, describeError(error));
       return;
     }
+    // Approved by hand before this handover was read: its fix Tasks join the collection as the host's approval would.
+    if (proposal.data.status === "approved") {
+      this.absorbApproved(project, collection, proposal);
+      return;
+    }
     const driftIds = proposal.data.drifts.map((decision) => decision.drift);
     const invalid = this.invalidAutomaticDecisions(project, proposal, collection, this.mode());
     if (invalid === null || invalid.length > 0) {
@@ -613,20 +682,13 @@ export class Controller implements vscode.Disposable {
     }
     try {
       let approved: Proposal & { resolved: DriftOutcome[] } | undefined;
-      await this.approving(project, proposal.id, () => {
+      this.approving(() => {
         if (this.mode() === "disabled" || !this.automaticProposalAllowed(project, getProposal(project, proposal.id), collection, this.mode()))
           throw new TramaError("Automatic authorization changed before approval");
         approved = approveProposal(project, proposal.id, [configuredSkillsDir()]);
       });
       if (!approved) throw new TramaError("Resolution Proposal approval produced no result");
-      for (const outcome of approved.resolved) {
-        if (outcome.decision !== "fix-code" || outcome.task === null) continue;
-        collection.approvedDrifts.add(outcome.drift);
-        collection.fixTasks.set(outcome.task, outcome.drift);
-        const origin = getDrift(project, outcome.drift).data.origin;
-        if (origin && listTasks(project).some((task) => task.id === origin && task.data.column !== "done"))
-          collection.origins.set(origin, outcome.drift);
-      }
+      this.absorbApproved(project, collection, approved);
     } catch (error) {
       const stale = this.invalidAutomaticDecisions(project, proposal, collection, this.mode()) ?? [];
       const message = describeError(error);
@@ -634,6 +696,25 @@ export class Controller implements vscode.Disposable {
       const named = driftIds.filter((drift) => new RegExp(`(?<![A-Za-z0-9])${cardName(project, "drift", drift)}(?![A-Za-z0-9])`).test(message));
       const failing = [...new Set([...stale, ...named])];
       for (const drift of failing.length > 0 ? failing : driftIds) this.failCase(project, collection.resolutionJob, drift, undefined, `${message}; the Proposal stays open for intervention`);
+    }
+  }
+
+  /**
+   * Records the fix Tasks an approved resolution of this collection created, whoever approved it: the host or the developer.
+   * A Drift recorded in `approvedDrifts` keeps its outcome, so the end-of-agent check and a failed collection leave it alone.
+   */
+  private absorbApproved(project: Project, collection: AutopilotCollection, proposal: Proposal): void {
+    for (const { drift: id, decision } of proposal.data.drifts) {
+      if (decision !== "fix-code") continue;
+      let drift: Drift;
+      try { drift = getDrift(project, id); } catch { continue; }
+      // A Drift a Proposal skipped as already resolved, or that another Proposal resolved, does not belong to this approval.
+      if (drift.data.resolvedBy !== proposal.id || drift.data.task === null) continue;
+      collection.approvedDrifts.add(id);
+      collection.fixTasks.set(drift.data.task, id);
+      const origin = drift.data.origin;
+      if (origin && listTasks(project).some((task) => task.id === origin && task.data.column !== "done"))
+        collection.origins.set(origin, id);
     }
   }
 
@@ -668,14 +749,10 @@ export class Controller implements vscode.Disposable {
 
   private async startAuthorizedRun(project: Project, collection: AutopilotCollection): Promise<void> {
     const mode = this.mode();
-    if (mode === "disabled") { this.collection = undefined; return; }
+    if (mode === "disabled") { this.withdrawCollection(project); return; }
     // Only Runs and resolutions block the automatic Run: a scan started after the collection goes to the next cycle.
     if (activeProjectJobs(project.root).some((job) => job.kind !== "scan") || driftAutopilotStatus(project.root, mode).phase === "suspended") return;
     const tasks = this.authorizedCollectionTasks(project, collection, mode);
-    for (const drift of collection.approvedDrifts) {
-      if (getDrift(project, drift).data.critical && mode !== "yolo")
-        this.failCase(project, collection.resolutionJob, drift, undefined, "Critical Drift requires yolo authorization");
-    }
     if (tasks.length === 0) { this.collection = undefined; return; }
     const states = runTasks(project);
     const runnable = new Set(states.filter((task) => tasks.includes(task.id) && task.column === "todo" && task.blockedBy.length === 0).map((task) => task.id));
@@ -690,6 +767,7 @@ export class Controller implements vscode.Disposable {
       this.collection = undefined;
       return;
     }
+    if (!await this.coordinator?.importJobs(project.root)) return;
     const job = randomUUID();
     const canSend = () => this.ownedCoordinatorRoot === project.root
       && this.mode() !== "disabled"
@@ -703,7 +781,6 @@ export class Controller implements vscode.Disposable {
       buildAutomaticRunPrompt(collection.id),
       "All tasks",
       undefined,
-      true,
       guarded,
       "run",
       undefined,
@@ -721,6 +798,19 @@ export class Controller implements vscode.Disposable {
     for (const task of [...collection.fixTasks.keys(), ...collection.origins.keys()]) {
       if (!done.has(task)) this.failCase(project, collection.resolutionJob, undefined, task, `${reason}; the Task was not done`);
     }
+  }
+
+  /** Ends the collection early: its unfinished Tasks keep the reason, so the Board shows why they wait. */
+  private abandonCollection(project: Project, reason: string): void {
+    const collection = this.collection;
+    if (!collection || collection.root !== project.root) return;
+    this.failUnfinishedTasks(project, collection, reason);
+    this.collection = undefined;
+  }
+
+  /** Withdrawing the delegation stops only new automatic steps: unstarted Tasks stay in their column without a failure, and a started one ends normally. */
+  private withdrawCollection(project: Project): void {
+    if (this.collection?.root === project.root) this.collection = undefined;
   }
 
   private failCollection(project: Project, collection: AutopilotCollection, reason: string): void {
@@ -750,7 +840,7 @@ export class Controller implements vscode.Disposable {
 
 
   private async handle(raw: unknown): Promise<void> {
-    const parsed = parseToHost(raw);
+    const parsed = parseToHost(raw, this.manifestSettings());
     if (!parsed.ok) {
       this.post({ type: "error", message: `Ignored an invalid message from the view: ${parsed.reason}.` });
       return;
@@ -770,14 +860,19 @@ export class Controller implements vscode.Disposable {
     }
     if (message.type === "ready") {
       this.refresh();
+      this.postSettings();
       if (this.questions) this.post({ type: "questions", round: this.questions.current() });
+      return;
+    }
+    if (message.type === "setSetting") {
+      await this.saveSetting(message.key, message.value);
       return;
     }
     const project = this.projectNow();
     if (!project) return;
     switch (message.type) {
       case "launch":
-        await this.launchAction(project, message.action, true);
+        await this.launchAction(project, message.action);
         return;
       case "writeDesignRequest":
         await vscode.commands.executeCommand("trama.design");
@@ -800,7 +895,7 @@ export class Controller implements vscode.Disposable {
         return;
       case "approveProposal":
         requireNotAttached(project, message.id);
-        await this.approving(project, message.id, () => approveProposal(project, message.id, [configuredSkillsDir()]));
+        this.approving(() => approveProposal(project, message.id, [configuredSkillsDir()]));
         return;
       case "rejectProposal": {
         requireNotAttached(project, message.id);
@@ -823,51 +918,13 @@ export class Controller implements vscode.Disposable {
     await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside, preview: false });
   }
 
-
-  private approvalOptions(project: Project): ApprovalOptions {
-    return {
-      project,
-      autoScan: settings().get<boolean>("autoScan", true),
-      launchScan: async (proposal) => {
-        const instruction = buildApprovalScanPrompt(proposal);
-        const jobId = randomUUID();
-        const origin = getProposal(project, proposal).data.automatic ? "automatic" : "manual";
-        if (launched(await launchAgent(project.root, instruction, "Scan", undefined, true, () => true, "scan", undefined, { id: jobId, origin }))) return;
-        void vscode.window.showInformationMessage(`Trama: Proposal ${cardName(project, "proposal", proposal)} was approved. Scan the Features it affects?`, "Scan now").then(async (choice) => {
-          if (choice !== "Scan now") return;
-          try {
-            await launchAgent(project.root, instruction, "Scan", undefined, false, () => true, "scan", undefined, { id: jobId, origin: "manual" });
-          } catch (err) {
-            void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
-          }
-        });
-      },
-      warn: (message) => void vscode.window.showWarningMessage(message),
-    };
-  }
-
-  /**
-   * An approval made outside the panel (`trama proposal approve`, `trama drift resolve --accept-proposal`) already
-   * applied an ordinary Proposal that affects a Feature that still exists: start the same automatic scan as the panel.
-   */
-  async scanApproved(project: Project, proposalId: string): Promise<void> {
-    const options = this.approvalOptions(project);
+  /** Every path that approves a Proposal goes through here, always in the open folder; the view is refreshed after it. */
+  private approving(apply: () => void): void {
+    apply();
     this.refresh();
-    if (!options.autoScan) return;
-    await options.launchScan(proposalId);
   }
 
-  /** Every path that approves a Proposal goes through here, always in the open folder; the view is refreshed before any agent is launched. */
-  private async approving(project: Project, proposalId: string, apply: () => void): Promise<void> {
-    await applyApprovedProposal(this.approvalOptions(project), proposalId, () => {
-      apply();
-      this.refresh();
-    });
-  }
-
-
-
-  private async launchAction(project: Project, action: AgentAction, fromButton = false): Promise<void> {
+  private async launchAction(project: Project, action: AgentAction): Promise<void> {
     // Resolve Drifts and Runs are checked from current state at the request and at each delivery checkpoint.
     const refusal = (): string | null => {
       if (action.kind === "resolve-drifts") {
@@ -876,7 +933,7 @@ export class Controller implements vscode.Disposable {
       }
       const isRun = action.kind === "implement" || action.kind === "implement-design" || action.kind === "implement-all";
       const submitWhileRunning = settings().get<string>("submitWhileRunning", "disabled") === "enabled";
-      const runBlock = isRun ? runWindowBlocker(driftResolution(project.root, this.mode() !== "disabled"), submitWhileRunning) : null;
+      const runBlock = isRun ? runWindowBlocker(driftWork(project.root, this.mode() !== "disabled"), submitWhileRunning) : null;
       if (runBlock !== null) return `A run cannot start: ${runBlock}.`;
       if (action.kind === "implement-all") {
         const blocker = runBlocker(runTasks(project), "all", namerOf(syncShortNumbers(project).all()));
@@ -892,10 +949,10 @@ export class Controller implements vscode.Disposable {
     const send = async (resolved: ResolvedAction, announceProposal?: DesignAnnouncement, instruction: Instruction = buildPrompt(resolved), checkSend: () => string | null = () => null) => {
       let refused: string | null = null;
       const canSend = () => (refused = refusal() ?? checkSend()) === null;
-      const rememberScan = fromButton && resolved.kind === "scan" && resolved.feature === undefined
+      const rememberScan = resolved.kind === "scan" && resolved.feature === undefined
         ? (startedAt: number) => rememberDeliveredScan(project, startedAt)
         : undefined;
-      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, false, canSend, resolved.kind === "implement" || resolved.kind === "implement-design" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan);
+      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-design" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan);
       if (refused !== null) throw new TramaError(refused);
       return result;
     };

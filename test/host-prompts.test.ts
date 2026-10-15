@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildApprovalScanPrompt, buildAutomaticRunPrompt, buildPrompt, buildScanPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
+import { buildAutomaticRunPrompt, buildPrompt, buildScanPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "design", prompt: "  Add refunds to checkout \n" })).toBe("Use the trama-design skill. Add refunds to checkout");
@@ -36,13 +36,6 @@ test("several Features are listed in backticks, comma separated", () => {
   expect(buildScanPrompt([])).toBe("Use the trama-scan skill on the whole System.");
 });
 
-test("the automatic scan after an approval reads the Proposal's scan scope and stops after the scan", () => {
-  expect(buildApprovalScanPrompt("ab12cd34")).toBe(
-    "Use the trama-scan skill on what Proposal ab12cd34 changed: its scan scope is in `trama proposal show ab12cd34`. Link every Task you file to it with --proposal ab12cd34.",
-  );
-});
-
-
 test("the agent terminal is named after the work: the card's short number, or a fixed word", () => {
   const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
   expect(terminalName({ kind: "implement", task: "abc" }, short)).toBe("T3");
@@ -56,7 +49,7 @@ test("the agent terminal is named after the work: the card's short number, or a 
 });
 
 test("a chosen language ends the instruction on the same line, trimmed; blank asks nothing", () => {
-  const scan = buildApprovalScanPrompt("ab12cd34");
+  const scan = buildScanPrompt(["checkout"]);
   expect(withLanguage("Use the trama-scan skill on the whole System.", "  Italian ")).toBe(
     "Use the trama-scan skill on the whole System. Write everything you generate in Italian, except code, which always stays in English.",
   );

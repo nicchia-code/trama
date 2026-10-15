@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, mock, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { questionAborted, type QuestionRequest } from "../src/core/questions";
@@ -10,8 +10,10 @@ interface FakePanel {
   reveals: unknown[][];
   messages: unknown[];
   receive?: (raw: unknown) => void;
+  closed?: () => void;
 }
 const panels: FakePanel[] = [];
+const informationMessages: string[] = [];
 let workspaceFolders: { uri: { fsPath: string; scheme: string } }[] = [];
 
 mock.module("vscode", () => ({
@@ -23,7 +25,10 @@ mock.module("vscode", () => ({
         get title() { return panel.title; },
         set title(value: string) { panel.title = value; },
         reveal: (...args: unknown[]) => void panel.reveals.push(args),
-        onDidDispose: () => ({ dispose() {} }),
+        onDidDispose: (listener: () => void) => {
+          panel.closed = listener;
+          return { dispose() {} };
+        },
         dispose() {},
         webview: {
           html: "",
@@ -40,7 +45,10 @@ mock.module("vscode", () => ({
         },
       };
     },
-    showInformationMessage: async () => undefined,
+    showInformationMessage: async (message: string) => {
+      informationMessages.push(message);
+      return undefined;
+    },
     showWarningMessage: () => undefined,
     showErrorMessage: () => undefined,
   },
@@ -49,7 +57,10 @@ mock.module("vscode", () => ({
       return workspaceFolders;
     },
     getWorkspaceFolder: () => undefined,
+    getConfiguration: () => ({ get: () => undefined, inspect: () => undefined, update: async () => undefined }),
   },
+  extensions: { getExtension: () => ({ packageJSON: JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8")) }) },
+  ConfigurationTarget: { Global: 1, Workspace: 2 },
   Uri: {
     joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: join(base.fsPath, ...parts), toString: () => join(base.fsPath, ...parts) }),
     file: (path: string) => ({ fsPath: path, toString: () => path }),
@@ -92,6 +103,36 @@ test("a question round opens the panel even when the workspace has no Trama proj
   expect(panels[0]?.title).toBe(basename(dir));
   expect(round).not.toBeNull();
   // The webview says it is ready: the overlay of the open round is sent to it, though there is no snapshot.
+  panels[0]?.receive?.({ type: "ready" });
+  expect(panels[0]?.messages).toContainEqual({ type: "questions", round: expect.objectContaining({ id: round?.id }) });
+
+  asking.abort(questionAborted());
+  await expect(answered).rejects.toThrow(/stopped waiting/);
+  controller.dispose();
+});
+
+test("reopening the panel with an open round shows the round without offering to initialize a project", async () => {
+  // No `.trama/` in the workspace. The developer closes the panel while the round is open, then Reopen runs.
+  panels.length = 0;
+  workspaceFolders = [{ uri: { fsPath: dir, scheme: "file" } }];
+  let controller: InstanceType<typeof Controller> | undefined;
+  const session = new QuestionSession(() => controller?.revealForQuestions());
+  controller = new Controller({ fsPath: dir } as never, session);
+
+  const asking = new AbortController();
+  const answered = session.present(request, { signal: asking.signal });
+  const round = session.current();
+  informationMessages.length = 0;
+  panels[0]?.closed?.();
+  expect(informationMessages).toEqual(["Trama has questions from the agent waiting."]);
+
+  panels.length = 0;
+  await controller.open();
+
+  expect(informationMessages).toHaveLength(1);
+  expect(panels).toHaveLength(1);
+  expect(panels[0]?.title).toBe(basename(dir));
+  expect(session.current()?.id).toBe(round?.id);
   panels[0]?.receive?.({ type: "ready" });
   expect(panels[0]?.messages).toContainEqual({ type: "questions", round: expect.objectContaining({ id: round?.id }) });
 

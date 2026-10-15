@@ -4,7 +4,8 @@ import { type GraphSpec, sameLevel } from "../extension/src/webview/diagram/grap
 import { breadcrumb, buildGraph, drillTarget, scanFeature, validLevel } from "../extension/src/webview/diagram/levels";
 import { buildScene } from "../extension/src/webview/diagram/scene";
 import { detailOfDrift } from "../extension/src/webview/diagram/details";
-import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
+import type { FileMap } from "../src/core/types";
+import { shopSnapshot, shopWithProposals, snapshotOf } from "./diagram-fixture";
 
 const scene = buildScene(shopSnapshot(), null);
 const none = new Map<string, ReadonlySet<string>>();
@@ -125,14 +126,33 @@ test("a Scan started at Feature or Machine level is limited to that Feature", ()
 });
 
 test("only Features, Machines and States with sub-States lead further down", () => {
-  expect(drillTarget(graphAt({ kind: "system" }), "f:checkout")).toEqual({ kind: "feature", feature: "checkout" });
-  expect(drillTarget(graphAt({ kind: "system" }), "a:user")).toBeNull();
-  expect(drillTarget(graphAt({ kind: "feature", feature: "checkout" }), "m:order")).toEqual({ kind: "machine", machine: "order" });
+  expect(drillTarget(scene, graphAt({ kind: "system" }), "f:checkout")).toEqual({ kind: "feature", feature: "checkout" });
+  expect(drillTarget(scene, graphAt({ kind: "system" }), "a:user")).toBeNull();
+  expect(drillTarget(scene, graphAt({ kind: "feature", feature: "checkout" }), "m:order")).toEqual({ kind: "machine", machine: "order" });
   const order = graphAt({ kind: "machine", machine: "order" });
-  expect(drillTarget(order, "s:Paid")).toEqual({ kind: "state", machine: "order", state: "Paid" });
-  expect(drillTarget(order, "s:Draft")).toBeNull();
+  expect(drillTarget(scene, order, "s:Paid")).toEqual({ kind: "state", machine: "order", state: "Paid" });
+  expect(drillTarget(scene, order, "s:Draft")).toBeNull();
   expect(sameLevel({ kind: "state", machine: "order", state: "Paid" }, { kind: "state", machine: "order", state: "Paid" })).toBe(true);
   expect(sameLevel({ kind: "machine", machine: "order" }, { kind: "machine", machine: "cart" })).toBe(false);
+});
+
+test("from a Feature level a Machine of another Feature opens that Feature, and a link to it goes there and selects it", () => {
+  const files: FileMap = new Map([
+    ["system.md", "# S\n"],
+    ["a/feature.md", "# A\n"],
+    ["a/m1.md", "# M1\n\n## States\n\n### X (initial)\n- `m2.PING` → X\n\n## Events\n\n### HELLO\nx\n"],
+    ["b/feature.md", "# B\n"],
+    ["b/m2.md", "# M2\n\n## States\n\n### P (initial)\n- `m1.HELLO` → P\n\n## Events\n\n### PING\nx\n"],
+  ]);
+  const two = buildScene(snapshotOf(files), null);
+  const atB = buildGraph(two, { kind: "feature", feature: "b" }, none);
+  expect(atB.nodes.find((n) => n.id === "m:m1")).toMatchObject({ external: true });
+  expect(drillTarget(two, atB, "m:m1")).toEqual({ kind: "feature", feature: "a" });
+  expect(drillTarget(two, atB, "m:m2")).toEqual({ kind: "machine", machine: "m2" });
+  const m1 = resolveElement(two, "m1") as never;
+  expect(showsElement(atB, m1)).toBe(false);
+  expect(homeLevel(m1)).toEqual({ kind: "feature", feature: "a" });
+  expect(selectionFor(buildGraph(two, { kind: "feature", feature: "a" }, none), m1)).toBe("m:m1");
 });
 
 test("a Drift's Requirement references resolve to an existing Area or section; only a missing one is marked", () => {
@@ -147,4 +167,17 @@ test("a Drift's Requirement references resolve to an existing Area or section; o
     ["requirements/nope", false, "no longer resolves"],
     ["order/Nope", false, "no longer resolves"],
   ]);
+});
+
+test("a State of another Machine, reached from a Machine's level, opens that Machine's level with the State selected", () => {
+  const order = buildGraph(scene, { kind: "machine", machine: "order" }, none);
+  const idle = resolveElement(scene, "payment/Idle");
+  expect(idle).not.toBeNull();
+  if (!idle) return;
+  expect(showsElement(order, idle)).toBe(false);
+  const level = homeLevel(idle);
+  expect(level).toEqual({ kind: "machine", machine: "payment" });
+  const payment = buildGraph(scene, level, none);
+  expect(showsElement(payment, idle)).toBe(true);
+  expect(selectionFor(payment, idle)).toBe("s:Idle");
 });

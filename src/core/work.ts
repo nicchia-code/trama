@@ -3,11 +3,11 @@ import { type AgentOrigin, deliverCard } from "./announcements";
 import { type Blocker, computeBlocked, concernSameThing, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
 import { approveProposal, discardProposal, type DriftDecisionKind, getProposal, type Proposal, rejectProposal } from "./proposals";
+import type { RemovedElement } from "./scan-scope";
 import { loadProject, parseRequirementRef, type ProjectModel, resolveProjectRef } from "./requirements";
-import { boolField, createdField, enumField, enumOrNull, idField, instantField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
+import { boolField, compareByCreation, createdField, enumField, enumOrNull, idField, instantField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
 import { cardName, identityOfShortNumber, syncShortNumbers } from "./short-numbers";
 import {
-  compareByCreation,
   createdNow,
   findCard,
   listCards,
@@ -49,6 +49,11 @@ interface TaskData {
   created: string | null;
   /** When the Task arrived in Done from another column, UTC ISO 8601; absent outside Done and on Tasks that reached Done before the field existed. */
   finished: string | null;
+  /**
+   * The note of a fix Task closed without changes (the code already did what the Drift says), with what was checked;
+   * null otherwise. Set only when arriving in Done that way, and forgotten when the Task leaves Done.
+   */
+  unchanged: string | null;
 }
 
 export type DriftResolution = "fix-code" | "proposal" | "dismissed";
@@ -89,6 +94,7 @@ function parseTask(raw: Raw, where: string): TaskData {
     ...agentField(raw, where),
     created: createdField(raw, where),
     finished: instantField(raw, "finished", where),
+    unchanged: textOrNull(raw, "unchanged", where),
   };
   checkTaskRefs(data.technical, data.refs, `${where}: `);
   return data;
@@ -136,6 +142,7 @@ function saveItem(path: string, data: object, body: string) {
   const copy: Record<string, unknown> = { ...data };
   if (copy["created"] == null) delete copy["created"];
   if (copy["finished"] === null) delete copy["finished"];
+  if (copy["unchanged"] === null) delete copy["unchanged"];
   if (copy["previous"] === null) delete copy["previous"];
   if (copy["resolvedBy"] === null) delete copy["resolvedBy"];
   if ("holder" in copy) {
@@ -214,10 +221,10 @@ export function newTask(
   checkTaskRefs(input.technical, input.refs);
   checkRefs(p, input.refs);
   const drift = input.drift ? getDrift(p, input.drift) : null;
-  // The Proposal must exist. A Task without a Drift belongs to the Proposal it names, unless it is Technical.
+  // The Proposal must exist. A Task written with a Proposal belongs to its design, Technical or not.
   // A Task that fixes a Drift belongs to the design of the Task the Drift came from, whoever creates it.
   const linked = input.proposal ? getProposal(p, input.proposal).id : null;
-  let proposal = input.technical ? null : linked;
+  let proposal = linked;
   if (drift) {
     const origin = drift.data.origin ? getTask(p, drift.data.origin).data.proposal : null;
     if (linked !== null && linked !== origin)
@@ -228,8 +235,59 @@ export function newTask(
       );
     proposal = origin;
   }
-  const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift: drift?.id ?? null, proposal, agent: false, holder: null, created: createdNow(), finished: null };
+  const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift: drift?.id ?? null, proposal, agent: false, holder: null, created: createdNow(), finished: null, unchanged: null };
   return create(tasksDir(p), input.title, data, input.body ?? "", "Task");
+}
+
+/** A Task an ordinary Proposal creates when it is approved: the file it will be, in To do. */
+export interface ApprovalTask {
+  name: string;
+  data: TaskData;
+  body: string;
+}
+
+const REMOVED_NOUN: Record<RemovedElement["kind"], string> = {
+  feature: "the Feature",
+  actor: "the Actor",
+  machine: "the Machine",
+  state: "the State",
+  transition: "the Transition",
+  event: "the Event",
+};
+
+/**
+ * The Tasks an ordinary Proposal creates when it is approved, all in To do and all created at `created`: one per Task
+ * file of the Proposal, under its own identity, and one `Remove code of <ref>` per removed element. Refuses, before
+ * anything is written, a Task identity the project already has.
+ */
+export function planApprovalTasks(p: Project, proposal: Proposal, removed: RemovedElement[], created: string): ApprovalTask[] {
+  const taken = new Set(listCards(tasksDir(p), "file").map((c) => c.id));
+  const planned: ApprovalTask[] = [];
+  for (const task of proposal.tasks) {
+    if (taken.has(task.id))
+      throw new TramaError(`Task ${task.id} of Proposal ${cardName(p, "proposal", proposal.id)} is already a Task of the project: nothing changed`);
+    taken.add(task.id);
+    const data: TaskData = { column: "todo", technical: task.technical, refs: task.refs, drift: null, proposal: proposal.id, agent: false, holder: null, created, finished: null, unchanged: null };
+    planned.push({ name: task.name, data, body: `${task.body.trim()}\n` });
+  }
+  const taskDirs = [tasksDir(p), ...listCards(join(p.dir, "proposals"), "folder").map((e) => join(p.dir, "proposals", e.name, "tasks"))];
+  for (const element of removed) {
+    let id: string;
+    do id = newCardId(taskDirs, "file", "Task");
+    while (taken.has(id));
+    taken.add(id);
+    const title = `Remove code of ${element.ref}`;
+    const technical = element.container === null;
+    const data: TaskData = { column: "todo", technical, refs: technical ? [] : [element.container as string], drift: null, proposal: proposal.id, agent: false, holder: null, created, finished: null, unchanged: null };
+    const body = `# ${title}\n\nTogli dal codice ${REMOVED_NOUN[element.kind]} \`${element.ref}\`, che la Proposal rimuove dal Modello.\n`;
+    planned.push({ name: `${id}-${slugify(title)}.md`, data, body });
+  }
+  return planned;
+}
+
+/** Writes the Tasks planned by `planApprovalTasks`. */
+export function writeApprovalTasks(p: Project, tasks: ApprovalTask[]) {
+  for (const task of tasks) saveItem(join(tasksDir(p), task.name), task.data, task.body);
 }
 
 /** The blocked Tasks and why, by Task ID, worked out from the Drifts and Tasks as they are now. */
@@ -242,8 +300,12 @@ export type Mover = "agent" | "developer";
  * Moves a Task. The agent takes it by moving it to In progress (and keeps it when it does so again); moving it to
  * To do or Done clears the mark. The developer never takes a Task and cannot move one the agent has taken.
  * The agent cannot start a blocked Task, from any column, nor keep one In progress; nothing changes then.
+ *
+ * `unchanged` closes a fix Task into Done without changes, with the note of what was checked: only from a Drift still
+ * in Code to be fixed (or already dismissed by this Task), and the Drift becomes Dismissed in the same step. Refused,
+ * nothing changes, when the Task is not a fix Task of such a Drift, is already Done, or the note is empty.
  */
-export function moveTask(p: Project, id: string, column: string, by: Mover, origin: AgentOrigin = {}): Task {
+export function moveTask(p: Project, id: string, column: string, by: Mover, origin: AgentOrigin = {}, unchanged?: string): Task {
   if (!COLUMNS.includes(column as Column))
     throw new TramaError(`Unknown column "${column}" (expected ${COLUMNS.join(", ")})`);
   const task = getTask(p, id);
@@ -257,9 +319,13 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
     const blockers = computeBlocked(loadProject(p), tasks, listDrifts(p)).get(task.id);
     if (blockers) throw new TramaError(refusalFor(task, blockers, syncShortNumbers(p)));
   }
+  const drift = unchanged === undefined ? null : unchangedDrift(p, task, column, unchanged);
   // Arriving in Done from another column records the instant; Done to Done keeps it; leaving Done forgets it.
   if (column !== "done") task.data.finished = null;
   else if (task.data.column !== "done") task.data.finished = createdNow();
+  // The note of a closed-unchanged Task stays while it is in Done, and is forgotten when it leaves.
+  if (column !== "done") task.data.unchanged = null;
+  else if (unchanged !== undefined) task.data.unchanged = unchanged.trim();
   task.data.column = column as Column;
   if (by === "agent") {
     // Moving a taken Task to In progress again keeps the mark and who holds it.
@@ -267,7 +333,34 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
     task.data.agent = column === "doing";
   }
   saveItem(task.path, task.data, task.body);
+  if (drift) {
+    drift.data.status = "resolved";
+    drift.data.resolution = "dismissed";
+    saveItem(drift.path, drift.data, drift.body);
+  }
   return task;
+}
+
+/**
+ * The Drift a fix Task closed without changes dismisses, or a refusal saying why nothing may change: the Task must be
+ * moving to Done from another column, be the fix Task registered in a Drift in Code to be fixed (or already dismissed
+ * by it), and come with a note.
+ */
+function unchangedDrift(p: Project, task: Task, column: string, note: string): Drift {
+  const name = cardName(p, "task", task.id);
+  if (column !== "done") throw new TramaError(`Only a move to done can close Task ${name} without changes: nothing changed`);
+  if (task.data.column === "done") throw new TramaError(`Task ${name} is already Done: nothing changed`);
+  if (task.data.drift === null) throw new TramaError(`Task ${name} does not fix a Drift: only a fix Task can be closed without changes`);
+  if (note.trim() === "") throw new TramaError(`Closing Task ${name} without changes needs a note saying what was checked`);
+  const drift = getDrift(p, task.data.drift);
+  const dname = cardName(p, "drift", drift.id);
+  if (drift.data.status === "resolved" && drift.data.task !== null && drift.data.task !== task.id)
+    throw new TramaError(`Drift ${dname} is fixed by Task ${cardName(p, "task", drift.data.task)}: only that Task can close it without changes, so Task ${name} cannot`);
+  const inCodeToBeFixed = drift.data.status === "resolved" && drift.data.resolution === "fix-code";
+  const dismissedHere = drift.data.status === "resolved" && drift.data.resolution === "dismissed" && drift.data.task === task.id;
+  if (!inCodeToBeFixed && !dismissedHere)
+    throw new TramaError(`Drift ${dname} is not in Code to be fixed nor dismissed by Task ${name}: Task ${name} cannot be closed without changes`);
+  return drift;
 }
 
 /** Most Tasks a parallel run implements together without a configured limit. */
@@ -290,12 +383,7 @@ export interface RunQueue {
  * A Proposal and an optional identity set intersect; the Proposal must exist and every identity must name a Task.
  */
 export function nextTask(p: Project, proposal?: string, max = BATCH_DEFAULT, taskIds?: string[]): RunQueue {
-  const scope = proposal === undefined ? null : getProposal(p, proposal).id;
-  const tasks = listTasks(p);
-  const selected = taskIds === undefined ? null : new Set(taskIds.map((id) => getTask(p, id, true).id));
-  const project = loadProject(p);
-  const blocked = computeBlocked(project, tasks, listDrifts(p));
-  const todo = tasks.filter((t) => t.data.column === "todo" && (scope === null || t.data.proposal === scope) && (selected === null || selected.has(t.id)));
+  const { project, blocked, todo } = scopedTodo(p, proposal, taskIds);
   const batch: Task[] = [];
   for (const task of todo) {
     if (batch.length === max) break;
@@ -306,6 +394,23 @@ export function nextTask(p: Project, proposal?: string, max = BATCH_DEFAULT, tas
     batch,
     waiting: todo.flatMap((task) => (blocked.has(task.id) ? [{ task, blockers: blocked.get(task.id) as Blocker[] }] : [])),
   };
+}
+
+/** The runnable Tasks of a scope in creation order: To do and unblocked, the same set `nextTask` chooses from. */
+export function runnableTasks(p: Project, proposal?: string, taskIds?: string[]): Task[] {
+  const { blocked, todo } = scopedTodo(p, proposal, taskIds);
+  return todo.filter((t) => !blocked.has(t.id));
+}
+
+/** The To do Tasks of a scope with the blocking of every Task. A Proposal and every identity must exist. */
+function scopedTodo(p: Project, proposal?: string, taskIds?: string[]) {
+  const scope = proposal === undefined ? null : getProposal(p, proposal).id;
+  const selected = taskIds === undefined ? null : new Set(taskIds.map((id) => getTask(p, id, true).id));
+  const tasks = listTasks(p);
+  const project = loadProject(p);
+  const blocked = computeBlocked(project, tasks, listDrifts(p));
+  const todo = tasks.filter((t) => t.data.column === "todo" && (scope === null || t.data.proposal === scope) && (selected === null || selected.has(t.id)));
+  return { project, blocked, todo };
 }
 
 /** The developer's decision to get a Task back from the agent: the mark is cleared and the Task stays In progress. */
@@ -362,6 +467,16 @@ export function followedDrift(p: Project, drift: Drift): { id: string; title: st
   const id = drift.data.previous;
   if (id === null) return null;
   return { id, title: listDrifts(p).find((d) => d.id === id)?.title ?? id };
+}
+
+/**
+ * The fix Task that dismissed a Drift by being closed without changes, with its note while that Task is in Done; the
+ * note is null once the Task has left Done. Null for any other Drift. Read from the files; the Drift itself stores nothing new.
+ */
+export function closedUnchanged(p: Project, drift: Drift, tasks: Task[] = listTasks(p)): { task: string; note: string | null } | null {
+  if (drift.data.resolution !== "dismissed" || drift.data.task === null) return null;
+  const task = tasks.find((t) => t.id === drift.data.task);
+  return { task: drift.data.task, note: task?.data.column === "done" ? task.data.unchanged : null };
 }
 
 const HAPPENS_HEADING = "What happens";
@@ -470,16 +585,16 @@ function previousOf(p: Project, named: string | undefined, origin: string | null
 
 export function newDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; critical?: boolean; where?: string; announcement?: string },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; critical?: boolean; where: string; announcement?: string },
 ): Drift {
   if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with --ref");
   const happens = input.happens.trim();
   const should = input.should.trim();
-  const where = input.where?.trim();
+  const where = input.where.trim();
   if (!happens) throw new TramaError(`A Drift needs its "${HAPPENS_HEADING}" text: what the code does, in terms of behaviour`);
   if (!should) throw new TramaError(`A Drift needs its "${SHOULD_HEADING}" text: what the Model or the Requirement says`);
   const options = input.options.length === 0 ? [] : checkOptions(input.options);
-  if (where === "") throw new TramaError(`The "${WHERE_HEADING}" text is optional, but when given it needs text: the files where the difference was seen`);
+  if (!where) throw new TramaError(`A Drift needs its "${WHERE_HEADING}" text: the files and code elements where the difference was seen in the code`);
   checkRefs(p, input.refs);
   const attached = input.proposal ? getProposal(p, input.proposal) : null;
   if (attached) requireAttachable(p, attached);

@@ -1,4 +1,6 @@
-import { FIX_OPTIONS } from "./fix-options";
+import { run } from "../src/cli/main";
+import { cardName } from "../src/core/short-numbers";
+ import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,7 +21,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const drift = (title: string) => newDrift(p, { title, refs: ["order"], happens: "Code does it.", should: "Model says so.", options: FIX_OPTIONS });
+const drift = (title: string) => newDrift(p, { where: "src/refund.ts", title, refs: ["order"], happens: "Code does it.", should: "Model says so.", options: FIX_OPTIONS });
 const resolution = () => newProposal(p, "Resolve", "", { kind: "resolution" });
 
 describe("resolution Proposals", () => {
@@ -93,9 +95,9 @@ describe("approving a resolution", () => {
   test("resolves the listed open Drifts with their decisions, sets aside attached Proposals and skips Drifts resolved meanwhile", () => {
     const origin = newTask(p, { title: "Origin", refs: ["order"], technical: false });
     moveTask(p, origin.id, "doing", "agent");
-    const a = newDrift(p, { title: "A", refs: ["order"], happens: "x", should: "y", options: FIX_OPTIONS, origin: origin.id });
+    const a = newDrift(p, { where: "src/refund.ts", title: "A", refs: ["order"], happens: "x", should: "y", options: FIX_OPTIONS, origin: origin.id });
     const attached = newProposal(p, "Attached");
-    const b = newDrift(p, { title: "B", refs: ["order"], happens: "x", should: "y", options: FIX_OPTIONS, proposal: attached.id });
+    const b = newDrift(p, { where: "src/refund.ts", title: "B", refs: ["order"], happens: "x", should: "y", options: FIX_OPTIONS, proposal: attached.id });
     const c = drift("C");
     const r = resolution();
     resolveDriftInProposal(p, r.id, a.id, { decision: "fix-code", option: 2, note: "keep log" });
@@ -165,6 +167,20 @@ describe("approving a resolution", () => {
     expect([getDrift(p, a.id).data.status, getDrift(p, b.id).data.status]).toEqual(["open", "open"]);
   });
 
+  test("validate --proposal names the Drift whose code cannot be fixed, as approval does", () => {
+    const [a, b] = [drift("A"), drift("B")] as const;
+    const r = resolution();
+    resolveDriftInProposal(p, r.id, a.id, { decision: "dismissed" });
+    resolveDriftInProposal(p, r.id, b.id, { decision: "fix-code", option: 1 });
+    submitProposal(p, r.id);
+    writeFileSync(getDrift(p, b.id).path, readFileSync(getDrift(p, b.id).path, "utf8").replace("- order", "- gone"));
+
+    const out = run(["--root", dir, "validate", "--proposal", r.id], dir, {});
+    expect(out.exit).toBe(1);
+    expect(out.out).toContain(cardName(p, "drift", b.id));
+    expect(out.out).toMatch(/no longer exist/);
+  });
+
   test("a resolution whose own files remove the Machine of a fix-code Drift is refused at hand-over and at approval, changing nothing", () => {
     const [a, b] = [drift("A"), drift("B")] as const;
     const r = resolution();
@@ -180,7 +196,7 @@ describe("approving a resolution", () => {
 
   test("an open attached Proposal is rejected with the Drift in its feedback; rejecting the resolution leaves Drifts open", () => {
     const attached = submitProposal(p, newProposal(p, "Attached").id);
-    const a = newDrift(p, { title: "A", refs: ["order"], happens: "x", should: "y", options: FIX_OPTIONS, proposal: attached.id });
+    const a = newDrift(p, { where: "src/refund.ts", title: "A", refs: ["order"], happens: "x", should: "y", options: FIX_OPTIONS, proposal: attached.id });
     const r = resolution();
     resolveDriftInProposal(p, r.id, a.id, { decision: "proposal" });
     submitProposal(p, r.id);
@@ -216,11 +232,16 @@ describe("resolveDriftsBlocker", () => {
 
 describe("runWindowBlocker", () => {
   test("disables Runs while Drifts are being resolved, and during a run unless submitting while running is enabled", () => {
-    expect(runWindowBlocker("free", false)).toBeNull();
-    expect(runWindowBlocker("running-tasks", false)).toBe("A run is in progress");
-    expect(runWindowBlocker("running-tasks", true)).toBeNull();
-    expect(runWindowBlocker("resolving", false)).toBe("Drifts are being resolved");
-    expect(runWindowBlocker("resolving", true)).toBe("Drifts are being resolved");
+    const free = { resolving: false, running: false };
+    expect(runWindowBlocker(free, false)).toBeNull();
+    expect(runWindowBlocker({ resolving: false, running: true }, false)).toBe("A run is in progress");
+    expect(runWindowBlocker({ resolving: false, running: true }, true)).toBeNull();
+    expect(runWindowBlocker({ resolving: true, running: false }, false)).toBe("Drifts are being resolved");
+    expect(runWindowBlocker({ resolving: true, running: false }, true)).toBe("Drifts are being resolved");
+  });
+  test("gives every reason that holds, the resolution first, when a resolution and a run are both going", () => {
+    expect(runWindowBlocker({ resolving: true, running: true }, false)).toBe("Drifts are being resolved. A run is in progress");
+    expect(runWindowBlocker({ resolving: true, running: true }, true)).toBe("Drifts are being resolved");
   });
 });
 

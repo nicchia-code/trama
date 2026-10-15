@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { acquireCoordinatorLease, askEditor, createQuestionServer, QUESTION_ENDPOINT_ENV, questionProjectId, releaseCoordinatorLease, renewCoordinatorLease, requestCoordinatorMessage, sendCoordinatorMessage, type CoordinatorJson, type CoordinatorMessage, type QuestionServer } from "../src/core/question-channel";
 import { QuestionRoundQueue, type CompletedQuestionRound } from "../src/core/question-rounds";
-import { QuestionInterruptedError, type QuestionHandler, type QuestionRequest } from "../src/core/questions";
+import { QuestionInterruptedError, unavailableQuestions, type QuestionHandler, type QuestionRequest } from "../src/core/questions";
 import { projectAt } from "../src/core/store";
 
 let root: string;
@@ -89,15 +89,30 @@ test("a missing initial editor is unavailable, not an interrupted or answered ro
   expect(existsSync(runtimeDir)).toBe(false);
 });
 
+test("a window that no longer serves the project answers unavailable, not interrupted, before admission", async () => {
+  let presentations = 0;
+  const created = await createQuestionServer({ project: projectAt(projectRoot), runtimeDir, handler: async () => { presentations++; return answer("choice"); }, serves: () => false });
+  servers.push(created);
+  expect(await ask(round(), created.endpoint)).toEqual(unavailableQuestions());
+  expect(presentations).toBe(0);
+});
+
 test("coordinator messages reach every live same-project window without invoking question handlers", async () => {
   const received: string[] = [];
   let presentations = 0;
   await server(async () => { presentations++; return answer("choice"); }, { onCoordinatorMessage: (message) => received.push(String(message.event)) });
   await server(async () => { presentations++; return answer("choice"); }, { onCoordinatorMessage: (message) => received.push(String(message.event)) });
 
-  expect(await sendCoordinatorMessage(projectAt(projectRoot), { event: "run-started", runId: "run-1" }, { runtimeDir })).toEqual({ delivered: 2 });
+  expect(await sendCoordinatorMessage(projectAt(projectRoot), { event: "run-started", runId: "run-1" }, { runtimeDir })).toEqual({ delivered: 2, live: 2 });
   expect(received).toEqual(["run-started", "run-started"]);
   expect(presentations).toBe(0);
+});
+
+test("a live window that does not acknowledge in time leaves the coordinator message unverified", async () => {
+  await server(async () => answer("choice"), { onCoordinatorMessage: () => undefined });
+  await server(async () => answer("choice"), { onCoordinatorMessage: () => new Promise<never>(() => {}) });
+
+  expect(await sendCoordinatorMessage(projectAt(projectRoot), { type: "jobs-query" }, { runtimeDir, timeoutMs: 100 })).toEqual({ delivered: 1, live: 2 });
 });
 
 test("coordinator requests return read-only responses from live editors", async () => {
@@ -116,7 +131,7 @@ test("coordinator messages report no receiver when discovery contains only stale
   const stale = process.platform === "win32" ? "\\\\.\\pipe\\trama-question-00000000-0000-0000-0000-000000000000" : join(runtimeDir, "gone.sock");
   writeFileSync(join(runtimeDir, "stale.json"), JSON.stringify({ projectId: questionProjectId(projectAt(projectRoot)), windowId: "stale", endpoint: stale, focusedAt: 1 }), { mode: 0o600 });
 
-  expect(await sendCoordinatorMessage(projectAt(projectRoot), { event: "run-ended" }, { runtimeDir })).toEqual({ delivered: 0, error: "no-live-receiver" });
+  expect(await sendCoordinatorMessage(projectAt(projectRoot), { event: "run-ended" }, { runtimeDir })).toEqual({ delivered: 0, live: 0, error: "no-live-receiver" });
 });
 
 test("coordinator messages never cross canonical project identities", async () => {
@@ -126,7 +141,7 @@ test("coordinator messages never cross canonical project identities", async () =
   await server(async () => answer("choice"), { onCoordinatorMessage: (message) => received.push(String(message.project)) });
   await server(async () => answer("choice"), { projectRoot: otherRoot, onCoordinatorMessage: (message) => received.push(String(message.project)) });
 
-  expect(await sendCoordinatorMessage(projectAt(projectRoot), { project: "target" }, { runtimeDir })).toEqual({ delivered: 1 });
+  expect(await sendCoordinatorMessage(projectAt(projectRoot), { project: "target" }, { runtimeDir })).toEqual({ delivered: 1, live: 1 });
   expect(received).toEqual(["target"]);
 });
 

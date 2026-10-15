@@ -9,8 +9,7 @@ mock.module("node:os", () => ({ ...os, homedir: () => home }));
 afterAll(() => rmSync(home, { recursive: true, force: true }));
 import { announce, listAnnouncements, withdrawAll } from "../src/core/announcements";
 import type { CursorHook } from "../src/core/cursor-chat";
-import { approveProposal, editInProposal, newProposal } from "../src/core/proposals";
-import { handOver } from "./handover";
+import { newProposal } from "../src/core/proposals";
 import { projectAt } from "../src/core/store";
 import { getTask, moveTask, newTask } from "../src/core/work";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
@@ -20,7 +19,7 @@ import type { Project } from "../src/core/store";
 // A minimal editor: just the terminal events and the calls launchAgent makes.
 type Listener<T> = (event: T) => void;
 interface FakeTerminal {
-  exitStatus: undefined;
+  exitStatus: number | undefined;
   shellIntegration: object;
   /** The last command line typed into it. */
   line: string;
@@ -82,8 +81,6 @@ const requirementEvents = { create: [] as Listener<FileUri>[], change: [] as Lis
 const errorMessages: string[] = [];
 /** The answers to the offer to initialize a project, in the order the offers were shown. */
 const answerOffer: Array<(choice: string | undefined) => void> = [];
-const informationMessages: string[][] = [];
-let clipboardWriteWaiter: (() => void) | undefined;
 let panelsCreated = 0;
 let reveals = 0;
 let questionEndpoint: () => Promise<string> = async () => "endpoint";
@@ -120,8 +117,7 @@ mock.module("vscode", () => ({
     showQuickPick: async (items: { label: string; description?: string }[], options: { title?: string }) => pick(items, options),
     showInputBox: async () => typeIn(),
     showWarningMessage: () => undefined,
-    showInformationMessage: (...args: string[]) => {
-      informationMessages.push(args);
+    showInformationMessage: () => {
       const offer = Promise.withResolvers<string | undefined>();
       answerOffer.push(offer.resolve);
       return offer.promise;
@@ -169,7 +165,7 @@ mock.module("vscode", () => ({
   env: {
     get appName() { return editor.appName; },
     shell: "/bin/bash",
-    clipboard: { writeText: async (text: string) => { clipboard.push(text); clipboardWriteWaiter?.(); } },
+    clipboard: { writeText: async (text: string) => { clipboard.push(text); } },
     openExternal: async (uri: { toString(): string }) => (editorCalls.push(uri.toString()), true),
   },
   Disposable: class {
@@ -286,6 +282,39 @@ describe("taken Tasks and the agent terminals", () => {
     }
   });
 
+  test("a whole-System scan from the Scan command remembers its launch instant as the button does; a Feature scan does not", async () => {
+    // Dynamic: Controller must load after mock.module replaced "vscode".
+    const { Controller } = await import("../extension/src/host/controller");
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    const root = mkdtempSync(join(tmpdir(), "trama-scan-command-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    const p = projectAt(root);
+    const previousAgent = settingValues["agent"];
+    settingValues["agent"] = "omp";
+    const controller = new Controller({ scheme: "file" } as never);
+    const launch = controller as unknown as { launchAction(project: Project, action: AgentAction): Promise<void> };
+    const remembered = join(root, ".trama/last-scan/system");
+    try {
+      const before = Date.now();
+      await launch.launchAction(p, { kind: "scan" });
+      const after = Date.now();
+      const instant = Date.parse(readFileSync(remembered, "utf8").trim());
+      expect(instant).toBeGreaterThanOrEqual(before);
+      expect(instant).toBeLessThanOrEqual(after);
+
+      rmSync(join(root, ".trama/last-scan"), { recursive: true, force: true });
+      await launch.launchAction(p, { kind: "scan", feature: "checkout" });
+      expect(existsSync(remembered)).toBe(false);
+    } finally {
+      watching.dispose();
+      controller.dispose();
+      if (previousAgent === undefined) delete settingValues["agent"];
+      else settingValues["agent"] = previousAgent;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("the end of a turn of a Trama conversation in Cursor's chat, however it ends, sends every taken Task back to To do", async () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
     const { watchAgentTerminal } = await import("../extension/src/host/agent");
@@ -356,7 +385,7 @@ describe("the identity of an agent terminal", () => {
     watchAgentTerminal();
     const sent: number[] = [];
     const before = Date.now();
-    await launchAgent(dir, "Scan of the System", "Scan", undefined, false, () => true, "scan", (startedAt) => sent.push(startedAt));
+    await launchAgent(dir, "Scan of the System", "Scan", undefined, () => true, "scan", (startedAt) => sent.push(startedAt));
     expect(sent).toHaveLength(1);
     expect(sent[0]).toBeGreaterThanOrEqual(before);
     expect(sent[0]).toBeLessThanOrEqual(Date.now());
@@ -435,7 +464,7 @@ describe("automatic terminal exit", () => {
     const p = projectAt(dir);
     const watching = watchAgentTerminal();
     try {
-      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, false, () => true, "run");
+      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
       const idleTerminal = terminals.at(-1) as FakeTerminal;
       const idleId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
       announce(p, { kind: "task", title: "Idle ghost", terminal: idleId });
@@ -454,7 +483,7 @@ describe("automatic terminal exit", () => {
       receiveAgentIdle(idleId, dir);
       expect(idleTerminal.disposals).toBe(1);
 
-      await launchAgent(dir, "Use the trama-implement skill on Task efgh5678.", "T4", undefined, false, () => true, "run");
+      await launchAgent(dir, "Use the trama-implement skill on Task efgh5678.", "T4", undefined, () => true, "run");
       const endedTerminal = terminals.at(-1) as FakeTerminal;
       const endedId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
       announce(p, { kind: "task", title: "Ended ghost", terminal: endedId });
@@ -472,14 +501,14 @@ describe("automatic terminal exit", () => {
     }
   });
 
-  test("autoExit off leaves an idle terminal open but no longer follows or reuses it", async () => {
+  test("autoExit off leaves an idle terminal open, no longer follows it, and closing it releases what it took", async () => {
     settingValues.autoExit = false;
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const { driftResolution, receiveAgentIdle } = await import("../extension/src/host/drift-resolution");
     const p = projectAt(dir);
     const watching = watchAgentTerminal();
     try {
-      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, false, () => true, "run");
+      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
       const terminal = terminals.at(-1) as FakeTerminal;
       const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
       announce(p, { kind: "task", title: "Idle ghost", terminal: id });
@@ -488,7 +517,7 @@ describe("automatic terminal exit", () => {
       expect(driftResolution()).toBe("free");
       expect(listAnnouncements(p)).toEqual([]);
       const count = terminals.length;
-      await launchAgent(dir, "Use the trama-implement skill on Task efgh5678.", "T3", undefined, false, () => true, "run");
+      await launchAgent(dir, "Use the trama-implement skill on Task efgh5678.", "T3", undefined, () => true, "run");
       expect(terminals).toHaveLength(count + 1);
       const nextTerminal = terminals.at(-1) as FakeTerminal;
       const nextId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
@@ -497,12 +526,15 @@ describe("automatic terminal exit", () => {
       expect(nextTerminal.disposals).toBe(0);
       expect(driftResolution()).toBe("free");
       announce(p, { kind: "task", title: "Resumed ghost", terminal: id });
+      const resumedTask = moveTask(p, newTask(p, { title: "Resumed", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: id }).id;
       receiveAgentIdle(id, dir);
       listeners.end.forEach((listener) => listener(shell(terminal)));
+      expect(getTask(p, resumedTask).data.column).toBe("doing");
       listeners.close.forEach((listener) => listener(terminal));
       expect(terminal.disposals).toBe(0);
       expect(driftResolution()).toBe("free");
-      expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Resumed ghost"]);
+      expect(getTask(p, resumedTask).data.column).toBe("todo");
+      expect(listAnnouncements(p)).toEqual([]);
       withdrawAll(p);
     } finally {
       watching.dispose();
@@ -569,7 +601,7 @@ describe("automatic terminal exit", () => {
       commandHandler = (id) => {
         if (id === "workbench.action.chat.newChat") canDeliver = false;
       };
-      expect(await launchAgent(dir, () => `Resolve ${scope}.`, "Resolve Drifts", undefined, false, () => canDeliver)).toBe("not-sent");
+      expect(await launchAgent(dir, () => `Resolve ${scope}.`, "Resolve Drifts", undefined, () => canDeliver)).toBe("not-sent");
       expect(editorCalls).toEqual(["workbench.action.chat.newChat"]);
       expect(query).toBe("");
     } finally {
@@ -614,9 +646,10 @@ describe("the agent terminal as an editor tab", () => {
 
       tabGroups.columns = [1, 2];
       const free = terminals.at(-1) as FakeTerminal;
-      listeners.end.forEach((fn) => fn(shell(free)));
+      free.exitStatus = 0; // its process ended but its tab is still open: the next tab still joins its group
       const count = created.length;
       await launchAgent(dir, instruction, "Scan");
+      expect(created.at(-1)?.location).toEqual({ viewColumn: 2, preserveFocus: true });
       expect(created).toHaveLength(count + 1);
       expect(terminals.at(-1)).not.toBe(free);
       expect(free.shown).toEqual([true]);
@@ -809,7 +842,7 @@ describe("the selected chat in Cursor", () => {
       commandHandler = () => undefined;
       expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan")).toBe("sent");
       expect(editorCalls).toEqual(["composer.createNew"]);
-      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", "Scan", undefined, true)).toBe("sent");
+      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", "Scan")).toBe("sent");
 
       editorCalls.length = 0;
       commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
@@ -827,9 +860,14 @@ describe("the selected chat in Cursor", () => {
 
       editorCalls.length = 0;
       clipboard.length = 0;
-      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", "Scan", undefined, true)).toBe("not-sent");
+      commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
+      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", "Scan", undefined, () => true, "scan")).toBe("confirm");
+      expect(editorCalls).toHaveLength(2);
+      expect(String(editorCalls[1])).toContain("cursor://anysphere.cursor-deeplink/prompt?");
+      editorCalls.length = 0;
+      expect(await launchAgent(dir, "Use the trama-scan skill. Read .env", "Scan", undefined, () => true, "scan")).toBe("clipboard");
       expect(editorCalls).toEqual(["composer.createNew"]);
-      expect(clipboard).toEqual([]);
+      expect(clipboard).toHaveLength(1);
     } finally {
       settingValues.agent = "omp";
       editor.appName = "Visual Studio Code";
@@ -1246,10 +1284,10 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       await launchAgent(dir, "Scan", "Scan"); // not a Run: the buttons of the Runs and of Resolve Drifts say so
       expect(driftResolution()).toBe("free");
 
-      await launchAgent(dir, "Run one", "One", undefined, false, () => true, "run");
+      await launchAgent(dir, "Run one", "One", undefined, () => true, "run");
       const one = terminals.at(-1) as FakeTerminal;
       listeners.start.forEach((fn) => fn(shell(one)));
-      await launchAgent(dir, "Run two", "Two", undefined, false, () => true, "run");
+      await launchAgent(dir, "Run two", "Two", undefined, () => true, "run");
       const two = terminals.at(-1) as FakeTerminal;
       listeners.start.forEach((fn) => fn(shell(two)));
       expect(driftResolution()).toBe("running-tasks");
@@ -1261,7 +1299,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       listeners.close.forEach((fn) => fn(two));
       expect(driftResolution()).toBe("free");
 
-      await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, false, () => true, "resolve");
+      await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve");
       const resolving = terminals.at(-1) as FakeTerminal;
       expect(driftResolution()).toBe("resolving");
       listeners.close.forEach((fn) => fn(resolving));
@@ -1279,7 +1317,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     const watching = watchAgentTerminal();
     try {
       const startRun = async (name: string) => {
-        await launchAgent(dir, `Run ${name}`, name, undefined, false, () => true, "run");
+        await launchAgent(dir, `Run ${name}`, name, undefined, () => true, "run");
         const terminal = terminals.at(-1) as FakeTerminal;
         listeners.start.forEach((fn) => fn(shell(terminal)));
         const job = activeProjectJobs(dir).at(-1);
@@ -1331,8 +1369,8 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     };
     const resolveOk = () => driftResolution() === "free";
     const runOk = () => driftResolution() !== "resolving";
-    const resolve = () => launchAgent(dir, () => `Resolve ${open.join(",")}`, "Resolve Drifts", undefined, false, resolveOk, "resolve");
-    const run = () => launchAgent(dir, "Run", "Run", undefined, false, runOk, "run");
+    const resolve = () => launchAgent(dir, () => `Resolve ${open.join(",")}`, "Resolve Drifts", undefined, resolveOk, "resolve");
+    const run = () => launchAgent(dir, "Run", "Run", undefined, runOk, "run");
     try {
       // Double click: one agent only, and its instruction names the Drifts open when it is sent.
       const first = resolve();
@@ -1389,12 +1427,12 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     };
     editorCalls.length = 0;
     try {
-      chat = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, false, () => true, "resolve");
+      chat = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, () => true, "resolve");
       await newChatStarted.promise;
       expect(editorCalls).toContain("workbench.action.chat.newChat");
 
       settingValues.agent = "omp";
-      run = launchAgent(dir, "Run", "Run", undefined, false, () => {
+      run = launchAgent(dir, "Run", "Run", undefined, () => {
         terminalChecks++;
         return driftResolution() !== "resolving";
       }, "run");
@@ -1439,12 +1477,12 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     settingValues.agent = "omp";
     editorCalls.length = 0;
     try {
-      run = launchAgent(dir, "Run", "Run", undefined, false, () => driftResolution() !== "resolving", "run");
+      run = launchAgent(dir, "Run", "Run", undefined, () => driftResolution() !== "resolving", "run");
       await waiting.promise;
 
       settingValues.agent = "chat";
       editor.appName = "Visual Studio Code";
-      resolve = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, false, () => driftResolution() === "free", "resolve");
+      resolve = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, () => driftResolution() === "free", "resolve");
       await Promise.resolve();
       expect(editorCalls).not.toContain("workbench.action.chat.newChat");
 
@@ -1479,15 +1517,15 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     settingValues.agent = "chat";
     try {
       commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
-      expect(await launchAgent(dir, "Run", "Run", undefined, false, () => true, "run")).toBe("confirm");
+      expect(await launchAgent(dir, "Run", "Run", undefined, () => true, "run")).toBe("confirm");
       clipboard.length = 0;
-      expect(await launchAgent(dir, "Read .env", "Run", undefined, false, () => true, "run")).toBe("clipboard");
+      expect(await launchAgent(dir, "Read .env", "Run", undefined, () => true, "run")).toBe("clipboard");
       expect(driftResolution()).toBe("free");
 
       commandHandler = () => undefined;
       for (const end of [{ hook: "stop", status: "completed" }, { hook: "stop", status: "error" }, { hook: "sessionEnd", reason: "window_close" }] as const) {
         conversation = `j${loops++}`; // each job's chat is a new conversation
-        expect(await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, false, () => true, "resolve")).toBe("sent");
+        expect(await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve")).toBe("sent");
         hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
         expect(driftResolution()).toBe("resolving");
         hook({ hook: "stop", status: "completed", conversation: "not-trama" });
@@ -1509,8 +1547,8 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     const { driftResolution } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
     const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
-    const run = () => launchAgent(dir, "Run", "Run", undefined, false, () => true, "run");
-    const resolve = () => launchAgent(dir, "Resolve", "Resolve Drifts", undefined, false, () => true, "resolve");
+    const run = () => launchAgent(dir, "Run", "Run", undefined, () => true, "run");
+    const resolve = () => launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve");
     settingValues.agent = "chat";
     editor.appName = "Cursor";
     let startComposer: () => void = () => {};
@@ -1559,8 +1597,8 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     const { driftResolution } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
     const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
-    const run = () => launchAgent(dir, "Run", "Run", undefined, false, () => true, "run");
-    const resolve = () => launchAgent(dir, "Resolve", "Resolve Drifts", undefined, false, () => true, "resolve");
+    const run = () => launchAgent(dir, "Run", "Run", undefined, () => true, "run");
+    const resolve = () => launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve");
     const conversations: string[] = [];
     settingValues.agent = "chat";
     editor.appName = "Cursor";
@@ -1667,7 +1705,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       }
     };
     try {
-      expect(await launchAgent(dir, "Run", "Run", undefined, false, () => true, "run")).toBe("sent");
+      expect(await launchAgent(dir, "Run", "Run", undefined, () => true, "run")).toBe("sent");
       expect(driftResolution()).toBe("running-tasks");
       hook("Stop", preparation);
       expect(driftResolution()).toBe("running-tasks");
@@ -1677,7 +1715,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       preparation = "copilot-preparation-ended";
       owner = "copilot-finished-during-delivery";
       stopOwnerDuringDelivery = true;
-      expect(await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, false, () => true, "resolve")).toBe("sent");
+      expect(await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve")).toBe("sent");
       expect(driftResolution()).toBe("free");
     } finally {
       for (const conversation of [preparation, owner, "copilot-preparation", "copilot-owner"])
@@ -1719,94 +1757,5 @@ test("Copilot chat releases only originless Tasks at each recognized turn end", 
     expect(state(nextTurn)).toEqual(["todo", false]);
   } finally {
     watching.dispose();
-  }
-});
-test("successful automatic terminal scans do not offer Scan now in panel or editor tabs", async () => {
-  // Load after mock.module replaces vscode so the controller uses the terminal test harness.
-  const { Controller } = await import("../extension/src/host/controller");
-  const root = mkdtempSync(join(tmpdir(), "trama-approved-terminal-scan-"));
-  cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
-  const project = projectAt(root);
-  const proposal = newProposal(project, "Terminal scan");
-  const file = editInProposal(project, proposal.id, "checkout/order.md");
-  writeFileSync(file, readFileSync(file, "utf8").replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
-  handOver(project, proposal.id);
-  approveProposal(project, proposal.id);
-  const previousAgent = settingValues.agent;
-  const previousLocation = settingValues.terminalLocation;
-  const previousRoot = workspaceRoot;
-  const controller = new Controller({ scheme: "file" } as never);
-  try {
-    workspaceRoot = root;
-    for (const agent of ["omp", "claude"]) {
-      for (const location of ["panel", "editor"]) {
-        settingValues.agent = agent;
-        settingValues.terminalLocation = location;
-        informationMessages.length = 0;
-        const before = typed.length;
-        await controller.scanApproved(project, proposal.id);
-        expect(typed.length).toBe(before + 1);
-        expect(informationMessages.some((args) => args.includes("Scan now"))).toBe(false);
-      }
-    }
-  } finally {
-    settingValues.agent = previousAgent;
-    settingValues.terminalLocation = previousLocation;
-    workspaceRoot = previousRoot;
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("an approval scan fallback offers Scan now; dismissing does not launch and choosing it reuses the targeted scan", async () => {
-  // Load after mock.module has replaced vscode for this test harness.
-  const { Controller } = await import("../extension/src/host/controller");
-  const root = mkdtempSync(join(tmpdir(), "trama-approved-scan-fallback-"));
-  cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
-  const project = projectAt(root);
-  const proposal = newProposal(project, "Fallback scan");
-  const file = editInProposal(project, proposal.id, "checkout/order.md");
-  writeFileSync(file, readFileSync(file, "utf8").replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
-  handOver(project, proposal.id);
-  approveProposal(project, proposal.id);
-  const previousAgent = settingValues["agent"];
-  const previousApp = editor.appName;
-  const previousCommand = commandHandler;
-  const previousRoot = workspaceRoot;
-  settingValues["agent"] = "chat";
-  editor.appName = "Visual Studio Code";
-  workspaceRoot = root;
-  informationMessages.length = 0;
-  answerOffer.length = 0;
-  editorCalls.length = 0;
-  clipboard.length = 0;
-  commandHandler = () => { throw new Error("Copilot chat unavailable"); };
-  const controller = new Controller({ scheme: "file" } as never);
-  try {
-    await controller.scanApproved(project, proposal.id);
-    const notice = informationMessages.findIndex((args) => args.includes("Scan now"));
-    expect(notice).toBeGreaterThanOrEqual(0);
-    expect(informationMessages[notice]?.[0]).toContain("was approved. Scan the Features it affects?");
-    expect(clipboard).toHaveLength(1);
-
-    answerOffer[notice]?.(undefined);
-    await Promise.resolve();
-    expect(editorCalls.filter((call) => call === "workbench.action.chat.newChat")).toHaveLength(1);
-
-    await controller.scanApproved(project, proposal.id);
-    const nextNotice = informationMessages.findIndex((args, index) => index > notice && args.includes("Scan now"));
-    expect(nextNotice).toBeGreaterThan(notice);
-    const manualScan = Promise.withResolvers<void>();
-    clipboardWriteWaiter = () => { if (clipboard.length === 3) manualScan.resolve(); };
-    answerOffer[nextNotice]?.("Scan now");
-    await manualScan.promise;
-    expect(clipboard).toHaveLength(3);
-    expect(clipboard[1]).toBe(clipboard[2]);
-  } finally {
-    settingValues["agent"] = previousAgent;
-    editor.appName = previousApp;
-    workspaceRoot = previousRoot;
-    commandHandler = previousCommand;
-    clipboardWriteWaiter = undefined;
-    rmSync(root, { recursive: true, force: true });
   }
 });

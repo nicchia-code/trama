@@ -1,5 +1,5 @@
 import { namerOf, noNumbers } from "../../../../src/core/card-names";
-import { runBlocker } from "../../../../src/core/design";
+import { joinReasons, runBlocker } from "../../../../src/core/design";
 import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
 import type { DriftAutopilotStatus } from "../../host/drift-resolution";
 import type { MountView } from "../types";
@@ -199,7 +199,7 @@ export const mountBoard: MountView = (root, context) => {
     }
     dayHeads = nextHeads;
     // Run all To do covers the Tasks inside design cards too, which may stand in another column.
-    const blocker = resolve.runReason ?? runBlocker(snapshot.tasks, "all", namerOf(snapshot.numbers ?? noNumbers));
+    const blocker = joinReasons([resolve.runReason, runBlocker(snapshot.tasks, "all", namerOf(snapshot.numbers ?? noNumbers))]);
     const setReason = (button: HTMLButtonElement, reason: string | null, note: string | null = reason) => {
       button.disabled = reason !== null;
       button.title = note ?? "";

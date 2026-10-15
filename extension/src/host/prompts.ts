@@ -46,15 +46,6 @@ export function buildScanPrompt(features: string[]): string {
 }
 
 /**
- * The automatic scan after an approval: only what the Proposal changed, read from its scan scope. The run
- * stops after the scan; the Tasks it files stay in "todo".
- */
-export function buildApprovalScanPrompt(proposal: string): string {
-  return `Use the trama-scan skill on what Proposal ${proposal} changed: its scan scope is in \`trama proposal show ${proposal}\`. Link every Task you file to it with --proposal ${proposal}.`;
-}
-
-
-/**
  * The name of the agent terminal that receives `action`'s instruction: the name of the Task or Proposal to implement, as
  * `short` gives it in this working copy (short number while live, else permanent identity: a design runs from an approved
  * Proposal, which has no number), or a fixed English word. A free terminal is reused only for the same name.

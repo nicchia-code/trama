@@ -39,7 +39,7 @@ export class DesignRequests implements vscode.Disposable {
     /** The extension's watcher of `.trama/`, on for the extension's whole life, whether or not the panel is open. */
     tramaFiles: vscode.FileSystemWatcher,
     private readonly project: () => Project | undefined = findProject,
-    private readonly launch: (root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement, selfSendingOnly?: boolean, canSend?: () => boolean) => Promise<Launch | undefined> = launchAgent,
+    private readonly launch: (root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement, canSend?: () => boolean) => Promise<Launch | undefined> = launchAgent,
   ) {
     this.subscriptions = [
       vscode.window.onDidChangeActiveTextEditor(() => this.updateContext()),
@@ -135,7 +135,7 @@ export class DesignRequests implements vscode.Disposable {
     const file = requestFile(project, id);
     const canSend = () => file !== undefined && existsSync(file);
     if (!canSend()) return false;
-    const launch = await this.launch(project.root, buildPrompt({ kind: "written-design", request: id }), "Design", requestTitle(text), false, canSend);
+    const launch = await this.launch(project.root, buildPrompt({ kind: "written-design", request: id }), "Design", requestTitle(text), canSend);
     if (!launched(launch) || !canSend()) return false;
     await this.state.update(SENT_KEY, [...this.sentIds(), id]);
     return true;

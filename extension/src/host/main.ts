@@ -1,7 +1,6 @@
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import { delimiter, dirname } from "node:path";
 import * as vscode from "vscode";
-import { takeApprovedNotices } from "../../../src/core/approve-request";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { watchAnnouncements } from "./announcements";
 import { agentName, watchAgentTerminal, configuredSkillsDir } from "./agent";
@@ -44,7 +43,7 @@ function watchAutopilotTicks(): vscode.Disposable {
 
 export function activate(context: vscode.ExtensionContext): void {
   const session = new QuestionSession(() => trama.revealForQuestions(), agentName);
-  const questions = new EditorQuestions(() => findProject(), session.present);
+  const questions = new EditorQuestions(() => findProject(), session);
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
   const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
   const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri, questions);
@@ -69,29 +68,13 @@ export function activate(context: vscode.ExtensionContext): void {
     questions,
     requests,
     watchRequirements(),
-    watchApprovedNotices(),
     watchAutopilotTicks(),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration("trama.driftAutoPilot") || event.affectsConfiguration("trama.submitWhileRunning")) trama.settingsChanged();
+      if (event.affectsConfiguration("trama")) trama.settingsChanged();
     }),
   );
   void guarded(() => installCopilotHooks(context.globalStorageUri))();
   exposeBundledCli(context);
-}
-
-/** An approval the command line made in the open folder leaves a notice: the editor starts the automatic scan. */
-function watchApprovedNotices(): vscode.Disposable {
-  // Notices older than this editor were left while no editor was open: they start nothing.
-  const since = Date.now();
-  const timer = setInterval(() => {
-    if (!controller) return;
-    const project = findProject();
-    if (!project) return;
-    const answer = controller;
-    for (const id of takeApprovedNotices(project, since))
-      void answer.scanApproved(project, id).catch((err: unknown) => void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`));
-  }, 200);
-  return { dispose: () => clearInterval(timer) };
 }
 
 /**

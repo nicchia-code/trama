@@ -2,6 +2,7 @@ import type { AnnouncementView, Snapshot } from "../../src/core/snapshot";
 import type { DriftAutopilotStatus } from "./host/drift-resolution";
 import type { QuestionRoundView } from "./host/question-session";
 import type { QuestionAction } from "./host/question-state";
+import type { SettingSchema, SettingsValues, SettingValue } from "./host/settings-schema";
 
 export type Column = "todo" | "doing" | "done";
 
@@ -37,10 +38,12 @@ export type ToHost =
   | { type: "openCard"; kind: "task" | "drift"; id: string }
   | { type: "approveProposal"; id: string }
   | { type: "rejectProposal"; id: string }
+  /** The developer changed a Trama setting in the Settings tab: the host checks it against the manifest and saves it in the user settings. */
+  | { type: "setSetting"; key: string; value: SettingValue }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
   | { type: "openLink"; url: string };
 
-export type ViewName = "diagram" | "board" | "requirements";
+export type ViewName = "diagram" | "board" | "requirements" | "settings";
 
 export interface NavigateOptions {
   /** Element reference (`checkout`, `order`, `order/Paid`, `user.CANCEL`…): the Diagram shows it. */
@@ -61,4 +64,6 @@ export type ToWebview =
   | { type: "error"; message: string }
   | ({ type: "navigate"; view: ViewName } & NavigateOptions)
   /** The question round being answered, drawn over the tabs; null when none is. */
-  | { type: "questions"; round: QuestionRoundView | null };
+  | { type: "questions"; round: QuestionRoundView | null }
+  /** The Trama settings: the schema from the manifest and, per key, the user value and (for keys not application-scoped) the workspace value. */
+  | { type: "settings"; schema: SettingSchema[]; values: Record<string, SettingsValues> };

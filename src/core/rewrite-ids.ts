@@ -147,7 +147,11 @@ export function rewriteNumberedCards(p: Project): RewrittenCard[] {
   const ids = refuseCollisions(p, cards);
   const rewritten = new Map(cards.map((card) => [card.entry.name, card]));
 
-  for (const proposal of listProposals(p)) {
+  // Read every card before the first write: a card that does not read or parse stops the rewrite with nothing changed.
+  const proposals = listProposals(p);
+  const tasks = listTasks(p);
+  const drifts = listDrifts(p);
+  for (const proposal of proposals) {
     const card = rewritten.get(proposal.name);
     const requires = proposal.data.requires.map((id) => mapped("proposal", id, ids) as string);
     const drifts = proposal.data.drifts.map((entry) => ({ ...entry, drift: mapped("drift", entry.drift, ids) ?? entry.drift }));
@@ -158,7 +162,7 @@ export function rewriteNumberedCards(p: Project): RewrittenCard[] {
     if (card) proposal.data.created = rewrittenInstant(card.number);
     writeProposal(proposal);
   }
-  for (const task of listTasks(p)) {
+  for (const task of tasks) {
     const card = rewritten.get(task.name);
     const proposal = mapped("proposal", task.data.proposal, ids);
     const drift = mapped("drift", task.data.drift, ids);
@@ -169,7 +173,7 @@ export function rewriteNumberedCards(p: Project): RewrittenCard[] {
     if (card) task.data.created = rewrittenInstant(card.number);
     writeTask(task);
   }
-  for (const drift of listDrifts(p)) {
+  for (const drift of drifts) {
     const card = rewritten.get(drift.name);
     const proposal = mapped("proposal", drift.data.proposal, ids);
     const task = mapped("task", drift.data.task, ids);

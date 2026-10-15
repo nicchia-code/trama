@@ -1,20 +1,22 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { withFileLock } from "./file-lock";
 import { type AgentOrigin, type Announcement, bindDraft, removeBoundTo } from "./announcements";
 import { consumeRequest, requestExists } from "./design-requests";
 import { diffFile, type FileChange } from "./diff";
 import { TramaError } from "./errors";
+import { resolveRef } from "./refs";
 import { formatDiagnostic } from "./model";
-import { buildProject, largeFragmentMessage, largeFragments, REQUIREMENT_SKILLS_BUDGET } from "./requirements";
+import { buildProject, largeFragmentMessage, largeFragments, lineageRefs, parseRequirementRef, type ProjectModel, REQUIREMENT_SKILLS_BUDGET, resolveProjectRef } from "./requirements";
 import { requirementSkillMode, syncRequirementSkills } from "./requirement-skills";
-import { boolField, canonicalCardId, createdField, enumField, idField, positiveIntOrNull, type Raw, stringList, stringMap, textOrNull } from "./schema";
+import { boolField, canonicalCardId, compareByCreation, createdField, enumField, idField, positiveIntOrNull, type Raw, stringList, stringMap, textOrNull } from "./schema";
 import {
-  compareByCreation,
   createdNow,
   findCard,
   listCards,
   newCardId,
   type Project,
+  type Document,
   readDocument,
   readTracked,
   readTrackedFiles,
@@ -28,8 +30,8 @@ import {
 import type { Diagnostic, FileMap } from "./types";
 import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
 import { cardName, identityOfShortNumber } from "./short-numbers";
-import { type DriftOutcome, fixCodeRefusal, listDrifts, resolveListedDrifts } from "./work";
-import { SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
+import { attachedDrift, type DriftOutcome, fixCodeRefusal, listDrifts, planApprovalTasks, resolveListedDrifts, writeApprovalTasks } from "./work";
+import { removedElements, type RemovedKind, SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
 
 /**
  * `draft`: the agent is still writing it; only the agent hands it over and only the developer can discard it.
@@ -71,7 +73,7 @@ interface ProposalData {
   request: string | null;
   /** When the Proposal was created, UTC ISO 8601. Absent on numbered Proposals written before the field existed. */
   created: string | null;
-  /** What a targeted scan compares, written once when an ordinary Proposal is approved. */
+  /** History only: the scope an Approved Proposal saved before scope became live. Never written now. */
   scanScope: ScanScopeEntry[] | null;
 }
 
@@ -82,6 +84,22 @@ export interface Proposal {
   data: ProposalData;
   body: string;
   title: string;
+  /** The Tasks this ordinary Proposal holds, one file each under `tasks/`; they are not tracked files, so they never make it stale. */
+  tasks: ProposalTask[];
+}
+
+/**
+ * A Task written inside a Proposal (`tasks/<identity>-<slug>.md`). `problems` are what validation reports for the file:
+ * fields other than `technical` and `refs`, a missing title, unreadable front matter. They do not stop the Proposal from loading.
+ */
+export interface ProposalTask {
+  id: string;
+  name: string;
+  title: string;
+  technical: boolean;
+  refs: string[];
+  body: string;
+  problems: string[];
 }
 
 const proposalsDir = (p: Project) => join(p.dir, "proposals");
@@ -141,12 +159,52 @@ function scanScopeField(raw: Raw, where: string): ScanScopeEntry[] | null {
   return v.map((e) => ({ ref: e.ref, reason: e.reason }));
 }
 
+/** The Task files under a Proposal folder's `tasks/`, by name. A file that cannot be read is kept with its problem, so the Proposal still loads. */
+function loadTasks(dir: string): ProposalTask[] {
+  const folder = join(dir, "tasks");
+  if (!existsSync(folder)) return [];
+  return readdirSync(folder)
+    .filter((name) => name.endsWith(".md"))
+    .sort()
+    .map((name) => parseProposalTask(join(folder, name), name));
+}
+
+function parseProposalTask(file: string, name: string): ProposalTask {
+  const id = /^([a-z0-9]{8})-.+\.md$/.exec(name)?.[1] ?? "";
+  const blank = { id, name, title: "", technical: false, refs: [] as string[], body: "" };
+  if (!id) return { ...blank, problems: ["the file name must be <identity>-<slug>.md"] };
+  let doc: Document;
+  try {
+    doc = readDocument(file);
+  } catch (err) {
+    return { ...blank, problems: [(err as Error).message] };
+  }
+  const problems = Object.keys(doc.data)
+    .filter((key) => key !== "technical" && key !== "refs")
+    .map((key) => `field "${key}" is not allowed in a Task file (only technical and refs)`);
+  const technical = doc.data["technical"] ?? false;
+  if (typeof technical !== "boolean") problems.push(`"technical" must be true or false`);
+  const refs = doc.data["refs"] ?? [];
+  if (!Array.isArray(refs) || refs.some((r) => typeof r !== "string")) problems.push(`"refs" must be a list of references`);
+  const title = /^#\s+(.+)$/m.exec(doc.body)?.[1]?.trim() ?? "";
+  if (title === "") problems.push("the Task has no H1 title");
+  return {
+    id,
+    name,
+    title,
+    technical: technical === true,
+    refs: Array.isArray(refs) ? refs.filter((r): r is string => typeof r === "string") : [],
+    body: doc.body,
+    problems,
+  };
+}
+
 function load(p: Project, entry: { id: string; name: string }): Proposal {
   const dir = join(proposalsDir(p), entry.name);
   const file = join(dir, "proposal.md");
   const doc = readDocument(file);
   const title = /^#\s+(.+)$/m.exec(doc.body)?.[1]?.trim() ?? entry.name;
-  return { id: entry.id, name: entry.name, dir, body: doc.body, title, data: parseData(doc.data, file) };
+  return { id: entry.id, name: entry.name, dir, body: doc.body, title, data: parseData(doc.data, file), tasks: loadTasks(dir) };
 }
 
 /** Writes `proposal.md` from the Proposal's data, leaving defaults out of the file. */
@@ -220,6 +278,7 @@ export function newProposal(
       scanScope: null,
     },
     body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
+    tasks: [],
   };
   save(proposal);
   bindDraft(p, proposal, options.announcement, options.origin);
@@ -316,38 +375,101 @@ export function touch(proposal: Proposal) {
 }
 
 /**
+ * Runs `fn` holding the write lock of the Proposal `id`, so the registrations on one Proposal, from several processes,
+ * run one after the other: each reads what the previous one saved.
+ */
+export function withProposalLock<T>(p: Project, id: string, fn: () => T): T {
+  return withFileLock(join(proposalsDir(p), ".locks"), getProposal(p, id).id, fn);
+}
+
+/**
  * Makes `modelPath` editable inside the Proposal and returns the file to edit.
  * Calling it again for the same file keeps what was recorded for it, but still returns an open Proposal to Draft.
  * A file already in the Proposal but never registered gets its starting version recorded, its content untouched.
  */
 export function editInProposal(p: Project, id: string, modelPath: string): string {
+  return withProposalLock(p, id, () => {
+    if (modelPath.startsWith("tasks/")) return editTaskInProposal(p, id, modelPath);
+    const proposal = getProposal(p, id);
+    requireEditable(p, proposal);
+    const rel = normalizeModelPath(modelPath);
+    const target = trackedLocation(proposal.dir, rel);
+    if (proposal.data.delete.includes(rel)) throw new TramaError(`${rel} is marked for deletion in Proposal ${cardName(p, "proposal", proposal.id)}`);
+    touch(proposal);
+    const exists = existsSync(target);
+    if (!exists || proposal.data.base[rel] === undefined) {
+      const content = baseFiles(p, proposal).get(rel);
+      proposal.data.base[rel] ??= content !== undefined ? sha256(content) : "new";
+      if (!exists) writeFileEnsuringDir(target, content ?? "");
+    }
+    save(proposal);
+    return target;
+  });
+}
+
+export function deleteInProposal(p: Project, id: string, modelPath: string) {
+  return withProposalLock(p, id, () => {
+    if (modelPath.startsWith("tasks/")) return deleteTaskInProposal(p, id, modelPath);
+    const proposal = getProposal(p, id);
+    requireEditable(p, proposal);
+    const rel = normalizeModelPath(modelPath);
+    const content = baseFiles(p, proposal).get(rel);
+    if (content === undefined) throw new TramaError(`${rel} does not exist in the Model or its Requirements`);
+    if (existsSync(trackedLocation(proposal.dir, rel)))
+      throw new TramaError(`${rel} is already edited in Proposal ${cardName(p, "proposal", proposal.id)}; remove that copy first`);
+    touch(proposal);
+    proposal.data.base[rel] ??= sha256(content);
+    if (!proposal.data.delete.includes(rel)) proposal.data.delete.push(rel);
+    save(proposal);
+  });
+}
+
+/** The reason a Proposal that cannot hold Tasks gives, both when a Task file is refused and when validation reports it. */
+const NO_TASKS_REASON = "only an ordinary Proposal, not attached to a Drift, can hold Tasks";
+
+/** Only an ordinary Proposal, not attached to a Drift, holds Tasks. */
+function holdsTasks(p: Project, proposal: Proposal): boolean {
+  return proposal.data.kind === "change" && attachedDrift(p, proposal.id) === null;
+}
+
+/** The file name a `tasks/<name>.md` path gives; anything deeper or not Markdown is refused. */
+function taskFileName(path: string): string {
+  const name = path.slice("tasks/".length);
+  if (!/^[^/]+\.md$/.test(name)) throw new TramaError(`"${path}": a Task of a Proposal is tasks/<name>.md, one file in its tasks folder`);
+  return name;
+}
+
+/**
+ * Writes a Task of the Proposal and returns its file. A name that is already a Task file of the Proposal (the full name printed
+ * before, `<identity>-<slug>.md`) rewrites that Task; any other name creates a new Task file, empty for the agent to fill, under
+ * an identity no Task or Proposal Task has.
+ */
+function editTaskInProposal(p: Project, id: string, path: string): string {
   const proposal = getProposal(p, id);
   requireEditable(p, proposal);
-  const rel = normalizeModelPath(modelPath);
-  const target = trackedLocation(proposal.dir, rel);
-  if (proposal.data.delete.includes(rel)) throw new TramaError(`${rel} is marked for deletion in Proposal ${cardName(p, "proposal", proposal.id)}`);
-  touch(proposal);
-  const exists = existsSync(target);
-  if (!exists || proposal.data.base[rel] === undefined) {
-    const content = baseFiles(p, proposal).get(rel);
-    proposal.data.base[rel] ??= content !== undefined ? sha256(content) : "new";
-    if (!exists) writeFileEnsuringDir(target, content ?? "");
+  if (!holdsTasks(p, proposal)) throw new TramaError(NO_TASKS_REASON);
+  const name = taskFileName(path);
+  const folder = join(proposal.dir, "tasks");
+  let target = join(folder, name);
+  if (!existsSync(target)) {
+    const taskDirs = listCards(proposalsDir(p), "folder").map((e) => join(proposalsDir(p), e.name, "tasks"));
+    const taskId = newCardId([join(p.dir, "tasks"), ...taskDirs], "file", "Task");
+    target = join(folder, `${taskId}-${slugify(name.slice(0, -".md".length))}.md`);
+    writeDocument(target, { refs: [], technical: false }, "");
   }
+  touch(proposal);
   save(proposal);
   return target;
 }
 
-export function deleteInProposal(p: Project, id: string, modelPath: string) {
+/** Takes a Task file out of the Proposal. */
+function deleteTaskInProposal(p: Project, id: string, path: string) {
   const proposal = getProposal(p, id);
   requireEditable(p, proposal);
-  const rel = normalizeModelPath(modelPath);
-  const content = baseFiles(p, proposal).get(rel);
-  if (content === undefined) throw new TramaError(`${rel} does not exist in the Model or its Requirements`);
-  if (existsSync(trackedLocation(proposal.dir, rel)))
-    throw new TramaError(`${rel} is already edited in Proposal ${cardName(p, "proposal", proposal.id)}; remove that copy first`);
+  const target = join(proposal.dir, "tasks", taskFileName(path));
+  if (!existsSync(target)) throw new TramaError(`${path} is not a Task file of Proposal ${cardName(p, "proposal", proposal.id)}`);
   touch(proposal);
-  proposal.data.base[rel] ??= sha256(content);
-  if (!proposal.data.delete.includes(rel)) proposal.data.delete.push(rel);
+  rmSync(target);
   save(proposal);
 }
 
@@ -389,7 +511,9 @@ export function applied(p: Project, proposal: Proposal): FileMap {
 }
 
 export function validateProposal(p: Project, proposal: Proposal): Diagnostic[] {
-  const errors = buildProject(applied(p, proposal)).diagnostics;
+  const taskErrors = proposal.tasks.flatMap((t) => t.problems.map((message) => ({ file: `tasks/${t.name}`, line: 0, message })));
+  const project = buildProject(applied(p, proposal));
+  const errors = [...taskErrors, ...project.diagnostics, ...taskRules(p, proposal, project)];
   if (!proposal.data.automatic) return errors;
   const problems = [
     ...(Object.keys(proposal.data.base).length > 0 || proposal.data.delete.length > 0 || newFiles(proposal).size > 0 ? ["an automatic resolution cannot touch or delete Model or Requirements files"] : []),
@@ -400,6 +524,74 @@ export function validateProposal(p: Project, proposal: Proposal): Diagnostic[] {
     ]),
   ];
   return [...errors, ...problems.map((message) => ({ file: "proposal.md", line: 0, message }))];
+}
+
+/** Whether a Model or Requirement reference resolves in the project. */
+function resolves(project: ProjectModel, ref: string): boolean {
+  try {
+    resolveProjectRef(project, ref);
+    return true;
+  } catch (error) {
+    if (error instanceof TramaError) return false;
+    throw error;
+  }
+}
+
+/** The references of the `- \`<ref>\` — <where>` rows under a body section; other lines are prose. */
+function bodyRows(body: string, heading: string): string[] {
+  const refs: string[] = [];
+  let inside = false;
+  for (const line of body.split(/\r?\n/)) {
+    const title = /^##\s+(.+?)\s*$/.exec(line)?.[1];
+    if (title !== undefined) inside = title === heading;
+    else if (inside) {
+      const ref = /^- `([^`]+)`/.exec(line)?.[1];
+      if (ref !== undefined) refs.push(ref);
+    }
+  }
+  return refs;
+}
+
+/**
+ * What covers a scope entry: the entry and every reference that contains it, lowercase. A Task or an Already present row
+ * covers the entry by naming one of them. Empty when the reference does not resolve.
+ */
+function coverKeys(project: ProjectModel, ref: string): string[] {
+  if (!resolves(project, ref)) return [];
+  const req = parseRequirementRef(ref);
+  if (req !== null) return [ref, ...(req.section === null ? [] : [`${REQUIREMENTS_PREFIX}${req.area}`])].map((key) => key.toLowerCase());
+  const element = resolveRef(project.model, ref);
+  // An Event sits in its Machine, and the Machine in its Feature: lineageRefs stops at the owner.
+  const feature = element.kind === "event" && "feature" in element.owner ? [element.owner.feature] : [];
+  return [...lineageRefs(project.model, element), ...feature].map((key) => key.toLowerCase());
+}
+
+/**
+ * The rules of a Proposal's Tasks and of its `## Already present` rows, with the Proposal applied. Only an ordinary Proposal
+ * not attached to a Drift holds Tasks, and each entry of its scope must be covered. A removed Model element is covered by
+ * the removal Task that approval creates for it, so its removal entries need no Task here.
+ */
+function taskRules(p: Project, proposal: Proposal, project: ProjectModel): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  const at = (file: string, message: string) => {
+    out.push({ file, line: 0, message });
+  };
+  const present = bodyRows(proposal.body, "Already present");
+  for (const ref of present) if (!resolves(project, ref)) at("proposal.md", `"Already present" names ${ref}, which does not exist with the Proposal applied`);
+  if (!holdsTasks(p, proposal)) {
+    if (proposal.tasks.length > 0) at("proposal.md", NO_TASKS_REASON);
+    return out;
+  }
+  for (const task of proposal.tasks) {
+    const file = `tasks/${task.name}`;
+    for (const ref of task.refs) if (!resolves(project, ref)) at(file, `Task "${task.title}" names ${ref}, which does not exist with the Proposal applied`);
+    const modelRefs = task.refs.filter((ref) => parseRequirementRef(ref) === null);
+    if (task.technical && modelRefs.length > 0) at(file, `Technical Task "${task.title}" cannot reference the Model: ${modelRefs.join(", ")}`);
+    if (!task.technical && modelRefs.length === 0) at(file, `Task "${task.title}" must reference a Model element, unless it is technical`);
+  }
+  for (const entry of proposalCoverage(p, proposal).scope)
+    if (entry.coveredBy === "not covered") at("proposal.md", `${entry.ref} (${entry.reason}) is not covered by a Task or an Already present row`);
+  return out;
 }
 
 /**
@@ -468,17 +660,40 @@ export function approvalBlock(p: Project, id: string): ApprovalBlock | null {
   return null;
 }
 
+/** What covers one scope entry: the identity of a Task of the Proposal, `already present`, `removal`, or `not covered`. */
+export interface ScopeCoverage extends ScanScopeEntry {
+  coveredBy: string;
+}
+
+/** A Model element the Proposal removes, with the reference its `Remove code of` Task points at (null when technical). */
+export interface RemovalEntry {
+  ref: string;
+  reason: RemovedKind;
+  coveredBy: string | null;
+}
+
+/** The removals and the scope of an ordinary Proposal, each scope entry with what covers it; computed, never stored. */
+export function proposalCoverage(p: Project, proposal: Proposal): { removals: RemovalEntry[]; scope: ScopeCoverage[] } {
+  const before = buildProject(baseFiles(p, proposal));
+  const after = buildProject(applied(p, proposal));
+  const removals = removedElements(before.model, after.model).map((e) => ({ ref: e.ref, reason: e.kind, coveredBy: e.container }));
+  const present = bodyRows(proposal.body, "Already present").filter((ref) => resolves(after, ref)).map((ref) => ref.toLowerCase());
+  const scope = scanScope(before, after).map((entry) => {
+    const keys = new Set(coverKeys(after, entry.ref));
+    const task = proposal.tasks.find((t) => t.refs.some((ref) => resolves(after, ref) && keys.has(ref.toLowerCase())));
+    const coveredBy = task?.id ?? (present.some((key) => keys.has(key)) ? "already present" : entry.reason === "removed, its container" && parseRequirementRef(entry.ref) === null ? "removal" : "not covered");
+    return { ...entry, coveredBy };
+  });
+  return { removals, scope };
+}
+
 /**
- * Copies the Proposal's files into a `.trama` folder. An ordinary Proposal also gets its scan scope, computed
- * against the open folder before anything is copied, written into its own copy in that folder.
- * Does not change its status and does not regenerate skills.
+ * Copies the Proposal's files into a `.trama` folder. Does not change its status and does not regenerate skills.
  */
 export function writeProposalFiles(p: Project, id: string, tramaDir: string): Proposal {
   const proposal = getProposal(p, id);
-  if (proposal.data.kind === "change") proposal.data.scanScope = scanScope(buildProject(readTrackedFiles(p)), buildProject(applied(p, proposal)));
   for (const path of proposal.data.delete) rmSync(trackedLocation(tramaDir, path));
   for (const [path, content] of newFiles(proposal)) writeFileEnsuringDir(trackedLocation(tramaDir, path), content);
-  if (proposal.data.scanScope !== null) save({ ...proposal, dir: join(tramaDir, "proposals", proposal.name) });
   return proposal;
 }
 
@@ -503,9 +718,15 @@ export function approveProposal(p: Project, id: string, skillsDirs: string[] = [
   if (unfixable.length > 0)
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} cannot be approved, nothing changed:\n${unfixable.map((r) => `- ${r}`).join("\n")}\nHave Resolve Drifts rewrite the resolution.`);
 
+  // An ordinary Proposal not attached to a Drift brings its Tasks: planned, and refused, before any file changes.
+  const bringsTasks = holdsTasks(p, proposal);
+  const tasks = bringsTasks
+    ? planApprovalTasks(p, proposal, removedElements(buildProject(baseFiles(p, proposal)).model, buildProject(applied(p, proposal)).model), createdNow())
+    : [];
   const written = writeProposalFiles(p, id, p.dir);
   written.data.status = "approved";
   save(written);
+  writeApprovalTasks(p, tasks);
   const resolved = written.data.kind === "resolution" ? resolveListedDrifts(p, written) : [];
   syncRequirementSkills(p, skillsDirs);
   return { ...written, resolved };

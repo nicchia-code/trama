@@ -2,7 +2,7 @@ import type { CardNumbers } from "./card-names";
 import { type Announcement, type AnnouncementKind, type CheckPhase, listAnnouncements } from "./announcements";
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
-import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type Proposal, type ProposalKind, unfixableDrifts } from "./proposals";
+import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type Proposal, type ProposalKind, proposalCoverage, type RemovalEntry, unfixableDrifts } from "./proposals";
 import { appliesUnder, type RequiredProposal } from "./required";
 import { type ResolvedDrift, resolvedDrifts } from "./resolution";
 import { type Area, areaIdOf, buildProject, type Fragment, parseRequirementRef, type ProjectModel } from "./requirements";
@@ -11,7 +11,7 @@ import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
 import { readLastScan } from "./last-scan";
-import { attachedDrift, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, followedDrift, listDrifts, listTasks } from "./work";
+import { attachedDrift, closedUnchanged, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, followedDrift, listDrifts, listTasks } from "./work";
 
 export interface ActorChange {
   id: string;
@@ -64,9 +64,20 @@ export interface ModelView {
   areas: AreaView[];
 }
 
+/** A Task an ordinary Proposal holds, as the Diagram details list it: its body is drawn behind a toggle. */
+export interface ProposalTaskView {
+  id: string;
+  title: string;
+  body: string;
+  technical: boolean;
+  refs: string[];
+}
+
 /** An open Proposal with everything the Diagram needs to draw it as a ghost over the current Model. */
 export interface ProposalView {
   id: string;
+  /** When the Proposal was created, UTC ISO 8601; null for a numbered Proposal written before the field existed. */
+  created: string | null;
   title: string;
   body: string;
   kind: ProposalKind;
@@ -88,6 +99,12 @@ export interface ProposalView {
   errors: Diagnostic[];
   /** Why a resolution cannot be approved: each open Drift to be fixed in code that no longer has a Model element; empty otherwise. */
   unfixable: string[];
+  /** Tasks an ordinary Proposal creates on approval: its own Task files plus one `Remove code of` per removal; 0 for any other kind. */
+  creates: number;
+  /** The Tasks an ordinary Proposal holds, in file order; empty for any other kind. */
+  tasks: ProposalTaskView[];
+  /** The `Remove code of` Tasks approval creates, one per removed element; empty for any other kind. */
+  removals: RemovalEntry[];
   /** What this Proposal itself changes, on top of the ones it requires. */
   changes: FileChange[];
   /** Every Machine the Proposal touches, before and after drawn as one. */
@@ -99,11 +116,15 @@ export interface ProposalView {
 
 export interface DriftView {
   id: string;
+  /** When the Drift was created, UTC ISO 8601; null for a numbered Drift written before the field existed. */
+  created: string | null;
   title: string;
   /** True only when a developer decision is urgently needed. */
   critical: boolean;
   /** The Drift this one follows, as its identity and title, when it is recurring. */
   previous: { id: string; title: string } | null;
+  /** The fix Task that dismissed this Drift by closing without changes, with its note while Done; null otherwise. */
+  closedUnchanged: { task: string; note: string | null } | null;
   body: string;
   sides: DriftSides | null;
   options: DriftOption[];
@@ -133,6 +154,8 @@ export interface TaskView {
   agent: boolean;
   /** When the Task arrived in Done, UTC ISO 8601; null outside Done and on Tasks that reached Done before the instant was kept. */
   finished: string | null;
+  /** The note of a fix Task closed without changes; null otherwise. Such a Task is not counted in tasksSinceScan. */
+  unchanged: string | null;
   /** Why the Task is blocked, if it is: the open Drifts, or the Task that fixes the code of its Drift. Empty when it is free. */
   blockedBy: Blocker[];
   /** Path relative to `.trama/`, for opening the file. */
@@ -249,12 +272,17 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     else if (parts.length === 2 && id !== "feature") machineIds.add(id);
   }
   const areaOf = (pm: ProjectModel, id: string) => pm.areas.find((a) => a.id === id);
+  const coverage = proposal.data.kind === "change" ? proposalCoverage(p, proposal) : null;
   return {
     id: proposal.id,
+    created: proposal.data.created,
     title: proposal.title,
     body: stripTitle(proposal.body),
     kind: proposal.data.kind,
     automatic: proposal.data.automatic,
+    tasks: coverage === null ? [] : proposal.tasks.map((t) => ({ id: t.id, title: t.title, body: stripTitle(t.body), technical: t.technical, refs: t.refs })),
+    removals: coverage?.removals ?? [],
+    creates: coverage === null ? 0 : proposal.tasks.length + coverage.removals.length,
     resolves: proposal.data.kind === "resolution" ? resolvedDrifts(p, proposal) : [],
     requires: h.requires,
     base: pending ? modelView(baseProject) : null,
@@ -286,7 +314,7 @@ export function buildSnapshot(p: Project): Snapshot {
 
   const tasks = listTasks(p);
   const scanInstant = Date.parse(readLastScan(p));
-  const tasksSinceScan = tasks.filter((t) => t.data.column === "done" && t.data.finished !== null && Date.parse(t.data.finished) > scanInstant).length;
+  const tasksSinceScan = tasks.filter((t) => t.data.column === "done" && t.data.finished !== null && t.data.unchanged === null && Date.parse(t.data.finished) > scanInstant).length;
   const drifts = listDrifts(p);
   const blocked = computeBlocked(project, tasks, drifts);
 
@@ -301,9 +329,11 @@ export function buildSnapshot(p: Project): Snapshot {
     proposals: openProposals.filter((v) => !attachedDrift(p, v.id)),
     drifts: drifts.filter((d) => d.data.status === "open").map((d) => ({
       id: d.id,
+      created: d.data.created,
       title: d.title,
       critical: d.data.critical,
       previous: followedDrift(p, d),
+      closedUnchanged: closedUnchanged(p, d),
       body: stripTitle(d.body),
       sides: driftSides(d),
       options: driftOptions(d),
@@ -329,6 +359,7 @@ export function buildSnapshot(p: Project): Snapshot {
       proposalTitle: (t.data.proposal !== null && proposalById.get(t.data.proposal)?.title) || null,
       agent: t.data.agent,
       finished: t.data.finished,
+      unchanged: t.data.unchanged,
       blockedBy: blocked.get(t.id) ?? [],
       file: `tasks/${t.name}`,
     })),

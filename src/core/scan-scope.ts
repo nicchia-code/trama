@@ -95,6 +95,67 @@ export function scanScope(before: ProjectModel, after: ProjectModel): ScanScopeE
   return [...closeScope(is, out, changedMachines, changedStates, changedEvents), ...requirementScope(before, after)];
 }
 
+/** The kinds of Model element a Proposal can remove. */
+export type RemovedKind = "feature" | "actor" | "machine" | "state" | "transition" | "event";
+
+/** A Model element a Proposal removes: `ref` as `--ref` names it, `container` its nearest container that still exists, or null for a Feature or an Actor. */
+export interface RemovedElement {
+  ref: string;
+  kind: RemovedKind;
+  container: string | null;
+}
+
+/**
+ * The highest Model elements a Proposal removes, from the Model before and after it. An element whose container is removed
+ * too is left out: that container's removal covers it. Events, Machines and States sit under their owner, their Machine or
+ * their surviving parent State; a Transition is listed on a State that survives, as `<machine>/<state>/<owner>.<EVENT>`.
+ */
+export function removedElements(before: Model, after: Model): RemovedElement[] {
+  const out: RemovedElement[] = [];
+  for (const f of before.features.values()) if (!after.features.has(f.id)) out.push({ ref: f.id, kind: "feature", container: null });
+  for (const a of before.actors.values()) {
+    const now = after.actors.get(a.id);
+    if (now) out.push(...removedEvents(a.id, a.events, now.events));
+    else out.push({ ref: a.id, kind: "actor", container: null });
+  }
+  for (const m of before.machines.values()) {
+    const now = after.machines.get(m.id);
+    if (!now) {
+      if (after.features.has(m.feature)) out.push({ ref: m.id, kind: "machine", container: m.feature });
+      continue;
+    }
+    out.push(...removedEvents(m.id, m.events, now.events), ...removedStates(m, now));
+  }
+  return out;
+}
+
+/** The Events an owner's new version no longer declares; the owner is their container. */
+function removedEvents(owner: string, old: EventDecl[], now: EventDecl[]): RemovedElement[] {
+  return old.filter((e) => !now.some((n) => n.name === e.name)).map((e) => ({ ref: `${owner}.${e.name}`, kind: "event", container: owner }));
+}
+
+/** The States a Machine lost, under their surviving parent or the Machine, and the Transitions it lost on the States it kept. */
+function removedStates(old: Machine, now: Machine): RemovedElement[] {
+  const oldStates = flattenStates(old.states);
+  const newStates = new Map(flattenStates(now.states).map((s) => [s.name.toLowerCase(), s]));
+  const out: RemovedElement[] = [];
+  for (const s of oldStates) {
+    const kept = newStates.get(s.name.toLowerCase());
+    if (kept) {
+      const container = `${now.id}/${kept.name}`;
+      const newGroups = transitionGroups(kept);
+      for (const event of transitionGroups(s).keys()) if (!newGroups.has(event)) out.push({ ref: `${container}/${event}`, kind: "transition", container });
+      continue;
+    }
+    if (s.parent === null) out.push({ ref: `${now.id}/${s.name}`, kind: "state", container: now.id });
+    else {
+      const parent = newStates.get(s.parent.toLowerCase());
+      if (parent) out.push({ ref: `${now.id}/${s.name}`, kind: "state", container: `${now.id}/${parent.name}` });
+    }
+  }
+  return out;
+}
+
 /** A changed State, by its Machine, as the Model holds it after the change. */
 export interface ChangedState {
   machine: Machine;

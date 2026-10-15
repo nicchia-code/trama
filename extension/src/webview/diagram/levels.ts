@@ -64,12 +64,16 @@ export function buildGraph(scene: Scene, level: Level, expanded: Expanded): Grap
   return withDrifts(base, scene);
 }
 
-/** Where a node leads when drilled into; null for nodes with nothing below them. */
-export function drillTarget(graph: GraphSpec, id: string): Level | null {
+/** Where a node leads when drilled into; null for nodes with nothing below them. A Machine of another Feature, drawn at the border, opens that Feature. */
+export function drillTarget(scene: Scene, graph: GraphSpec, id: string): Level | null {
   const n = graph.nodes.find((x) => x.id === id);
   if (!n?.ref) return null;
   if (n.kind === "feature") return { kind: "feature", feature: n.ref };
-  if (n.kind === "machine") return { kind: "machine", machine: n.ref };
+  if (n.kind === "machine") {
+    if (!n.external) return { kind: "machine", machine: n.ref };
+    const feature = scene.machine.get(n.ref)?.feature;
+    return feature ? { kind: "feature", feature } : null;
+  }
   if (n.kind === "state" && n.children > 0 && !n.external && (graph.level.kind === "machine" || graph.level.kind === "state")) {
     return { kind: "state", machine: graph.level.machine, state: n.label };
   }

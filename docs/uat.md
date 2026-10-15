@@ -400,7 +400,7 @@ Needs the real omp agent configured in S2 for row 6; the other rows need none.
 | 14 | `j --json task next` | `"next": null` and a `waiting` list with the same four Tasks, each with its `blockedBy` | ☐ |
 
 ### E12. Ghosts of announced cards
-Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `"trama.autoExit": false` in your **user** settings and `"trama.autoScan": false` in `/tmp/trama-demo/shop/.vscode/settings.json`; ↻ and reload the window. `j` below is the verification shell's.
+Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `"trama.autoExit": false` in your **user** settings; ↻ and reload the window. `j` below is the verification shell's.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Board: **Quick request…**, type `Add refunds after pickup`, Enter. Note the To decide count and the number on the Board tab | Within about a second a dashed, translucent skeleton appears in To decide after the last real Proposal and before the first Drift: kind `Proposal`, title `Add refunds after pickup`, the line `Preparing`, and a shimmer on its text lines | ☐ |
@@ -417,7 +417,7 @@ Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `
 | 12 | Click **Close** on the notice, switch to the Diagram tab and back | The notice is gone; closing the Trama tab and opening it again shows none | ☐ |
 | 13 | `j proposal new "Never finished"`, read the ghost, then `j proposal discard <ID it printed>` | A `Writing` ghost titled `Never finished`; after the discard it disappears and **no** notice is shown | ☐ |
 | 14 | `j announce task "Before reload"`, then Developer: Reload Window and open the Board | The ghost is not there and no notice is shown: leftovers are withdrawn at startup | ☐ |
-| 15 | Set `"trama.agent": "chat"` in your **user** settings and `"trama.autoScan": false` in the workspace settings; reload, **Quick request…** with any text | The prompt goes to Copilot Chat and no terminal ghost appears | ☐ |
+| 15 | Set `"trama.agent": "chat"` in your **user** settings; reload, **Quick request…** with any text | The prompt goes to Copilot Chat and no terminal ghost appears | ☐ |
 | 16 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with chat, the ghost starts with the Draft | ☐ |
 | 17 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
 | 18 | Restore S2. ↻, then `j task move 1 doing` | The card moves to In progress without ever looking busy; no dashed copy of it appears in In progress at any moment | ☐ |
@@ -558,7 +558,7 @@ Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." -
 ### G10. Stale approval is refused
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | ↻. `echo >> $D/model/checkout/order.md`, then try **Approve** on 0001 (it is disabled; use `j proposal approve 1` to see the CLI refusal) | CLI: `error: Proposal 0001 is stale: the Model changed since it touched checkout/order.md. Write a new Proposal.`, exit 1. In the UI the button is disabled, no scan launched | ☐ |
+| 1 | ↻. `echo >> $D/model/checkout/order.md`, then try **Approve** on 0001 (it is disabled; use `j proposal approve 1` to see the CLI refusal) | CLI: `error: Proposal 0001 is stale: the Model changed since it touched checkout/order.md. Write a new Proposal.`, exit 1. In the UI the button is disabled | ☐ |
 
 ---
 
@@ -586,9 +586,9 @@ Each launch starts a new agent terminal named after its work (cwd = the demo fol
 | H16 | After H1 to H15, open the terminal dropdown | Every launch has its own terminal, even when an earlier command with the same name has ended. Terminals are named for their work: `Scan`, `Design`, a Task's short number or `All tasks`; no terminal is reused | ☐ |
 | H17 | Set `"trama.agent": "claude"` in your **user** settings; click **Scan System** | A new terminal named `Scan` runs Claude Code; no choice prompt appears | ☐ |
 | H18 | Set `"trama.agent": "chat"` in your **user** settings; click **Scan System** | Copilot Chat receives the prompt; no terminal is created and no choice prompt appears | ☐ |
-| H19 | Leave `trama.agent` set to `chat`; add the legacy settings `"trama.agentLauncher": "terminal"`, `"trama.terminalAgent": "codex"` and `"trama.agentCommand": "fake {prompt}"` to user settings; approve Proposal 0001 with automatic scanning on | The scan goes to Copilot Chat; legacy values are ignored and remain unchanged | ☐ |
+| H19 | Leave `trama.agent` set to `chat`; add the legacy settings `"trama.agentLauncher": "terminal"`, `"trama.terminalAgent": "codex"` and `"trama.agentCommand": "fake {prompt}"` to user settings; click **Scan System** | The scan goes to Copilot Chat; legacy values are ignored and remain unchanged | ☐ |
 | H20 | Remove the legacy values; restore `"trama.agent": "omp"` | Future launches use omp without prompting | ☐ |
-| H21 | Set `"trama.language": " Italian "` in user settings; click **Scan System** | The instruction includes `Write everything you generate in Italian, except code, which always stays in English.`; the setting applies to scans, Runs, quick/written design, imports and automatic scans | ☐ |
+| H21 | Set `"trama.language": " Italian "` in user settings; click **Scan System** | The instruction includes `Write everything you generate in Italian, except code, which always stays in English.`; the setting applies to scans, Runs, quick/written design and imports | ☐ |
 | H22 | Change `trama.language` to `"   "`; click **Scan System** | The instruction has no language sentence | ☐ |
 | H23 | Restore S2 and remove `trama.language` | The setup is restored | ☐ |
 
@@ -621,7 +621,7 @@ With the real agent from S2, in the verification shell, `ls -A $D/requests` list
 
 ### H71–H77. Agent terminal as an editor tab
 
-Set `trama.agent="omp"` and `trama.terminalLocation="editor"` in **user** settings for S2t, and `"trama.autoScan": false` in the workspace file. For S2u use a real omp agent that remains active; set `trama.autoExit=false` in user settings. Open the Trama panel alone in one editor group before each row.
+Set `trama.agent="omp"` and `trama.terminalLocation="editor"` in **user** settings for S2t. For S2u use a real omp agent that remains active; set `trama.autoExit=false` in user settings. Open the Trama panel alone in one editor group before each row.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
@@ -792,7 +792,6 @@ Run R1–R4 on **every new Cursor version** before declaring it supported (smoke
 | R4 | In the chat's terminal output, check that `trama proposal approve 1` run by the agent would be refused | The agent reports `"trama proposal approve" is the developer's decision … (CURSOR_AGENT is set)` | ☐ |
 | R5 | Interrupt the agent (Stop) while a ghost it announced is on the Board | The ghost disappears and the notice `The agent finished without delivering …` appears. Closing the chat instead removes such a ghost without a notice | ☐ |
 | R5b | Have the agent run `trama task move 1 doing`, then let its turn end | Task 0001 goes back to To do, no longer marked `(agent working)` | ☐ |
-| R7 | Approve a Proposal with `trama.autoScan` on | A new chat starts the scan by itself, with no «Create chat with prompt» confirmation and no **Scan now** notice. Only if Cursor could only fall back, the notice `Trama: Proposal <id> was approved. Scan the Features it affects?` with **Scan now** appears instead, and nothing was put on the clipboard | ☐ |
 | R8 | Set `"trama.agent": "omp"` and `"trama.terminalLocation": "editor"` in user settings, then click **Scan System** | omp starts in a `Scan` terminal tab; legacy launcher and command settings do not change the route | ☐ |
 
 ## U. Short numbers
@@ -830,7 +829,7 @@ Start each block with ↻. `$D` and `j` are the ones of S4.
 | V1 | `j task next --batch --max 2` | Up to two runnable Tasks per line, `<number> <title>`, the first being the one `j task next` names; no two concern the same thing (for example never `order` together with `order/Paid`). Nothing moves. Also try `--max 1` and verify that only the first Task is returned; `--max 0` and `--max x` are usage errors. | ☐ |
 | V2 | `j --json task next --batch --max 2` | `batch`: the same Tasks, each with `id`, `number` and `title` | ☐ |
 | V3 | Move every Task in To do to Done with `j task move <id> done`, then `j task next --batch` and `j task next` | The two outputs are identical: `No Task is runnable.` and the Tasks left | ☐ |
-| V4 | `j proposal show 1` before approving it | No `## Scan scope` section: it is written only on approval | ☐ |
+| V4 | `j proposal show 1` before approving it | A `## Scan scope` section, computed now, with the references of the changes; after approving it, no `## Scan scope` section: nothing is saved at approval | ☐ |
 | V5 | 🪙 With a real agent that has sub-agents, **Run all To do** with at least three Tasks on different Machines | The agent hands each Task of a group to a sub-agent, waits for all, asks `trama task next --batch --max <N>` again, runs tests, lint and build once at the end, then scans only the references returned by `trama task scope` for the Tasks it completed and reports the Tasks and Drifts filed | ☐ |
 
 

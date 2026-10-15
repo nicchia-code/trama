@@ -1,5 +1,6 @@
 import { TramaError } from "./errors";
-import { type DriftDecision, type DriftDecisionKind, getProposal, listProposals, type Proposal, requireEditable, resolutionHolding, save, touch } from "./proposals";
+import { joinReasons } from "./design";
+import { type DriftDecision, type DriftDecisionKind, getProposal, listProposals, type Proposal, requireEditable, resolutionHolding, save, touch, withProposalLock } from "./proposals";
 import { cardName } from "./short-numbers";
 import type { Project } from "./store";
 import { chosenOption, driftOptions, fixCodeRefusal, followedDrift, getDrift, listDrifts } from "./work";
@@ -10,6 +11,16 @@ import { chosenOption, driftOptions, fixCodeRefusal, followedDrift, getDrift, li
  * `returnedToDraft` tells whether the Proposal was open.
  */
 export function resolveDriftInProposal(
+  p: Project,
+  id: string,
+  driftId: string,
+  input: { decision?: DriftDecisionKind; option?: number; note?: string; remove?: boolean },
+): { proposal: Proposal; returnedToDraft: boolean } {
+  return withProposalLock(p, id, () => recordDecision(p, id, driftId, input));
+}
+
+/** The decision of `resolveDriftInProposal`, run while the Proposal is locked, so it reads what the last writer saved. */
+function recordDecision(
   p: Project,
   id: string,
   driftId: string,
@@ -66,11 +77,15 @@ export function resolveDriftsBlocker(p: Project, window: "free" | "running-tasks
   return listDrifts(p).some((d) => d.data.status === "open") ? null : "No open Drifts";
 }
 
-/** Why every Run is disabled now (the first reason that holds), or null: Drifts are being resolved, or a run in progress unless `trama.submitWhileRunning` is `enabled`. `window` is the state of Drift resolution in this window. */
-export function runWindowBlocker(window: "free" | "running-tasks" | "resolving", submitWhileRunning: boolean): string | null {
-  if (window === "resolving") return "Drifts are being resolved";
-  if (window === "running-tasks" && !submitWhileRunning) return "A run is in progress";
-  return null;
+/** What holds in this window: Drift resolution and a run may both be going. */
+export interface WindowWork { resolving: boolean; running: boolean }
+
+/** Why every Run is disabled now: every reason that holds, in order (Drifts are being resolved, then a run in progress unless `trama.submitWhileRunning` is `enabled`), or null. */
+export function runWindowBlocker(work: WindowWork, submitWhileRunning: boolean): string | null {
+  return joinReasons([
+    work.resolving ? "Drifts are being resolved" : null,
+    work.running && !submitWhileRunning ? "A run is in progress" : null,
+  ]);
 }
 
 /** What approving a resolution does to a Drift with this decision, in words; `optionTitle` is the title of the fix option chosen. */

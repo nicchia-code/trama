@@ -129,3 +129,8 @@ description: Use when building the checkout and order screens.
 - Trama generates the `trama-req-*` skills in one of two modes, the same for every Area. The **budget** is the sum, over the fragments with at least one non-empty section, of the characters of `trama-req-<area>-<fragment>` and of the fragment's description. Up to **4,000** characters: one skill per fragment, `trama-req-<area>-<fragment>`, with the fragment's description. Beyond: one **index** skill per Area, `trama-req-<area>`, with the Area's description, its General section in full and a list of its fragments, each in its own file next to the index.
 - `trama validate` also prints **warnings**, which never fail validation or the hand-over: a fragment larger than **12 KB** (12,288 bytes of the file, front matter included), and, with `--proposal`, the switch between the two modes the Proposal would cause.
 - When a Proposal writes into a fragment that is or becomes larger than 12 KB, split it in the same Proposal before handing it over: cut where it suits the project (usually by Feature or by a group of nearby Machines), give every new fragment a name and a description that say when it is needed, and move the sections without changing their text. Mind the budget: prefer a few medium fragments to many tiny ones.
+
+## Tasks of a Proposal and Already present (`proposals/<id>-<slug>/`)
+
+- A Task is `tasks/<identity>-<slug>.md` in the Proposal folder, written with `trama proposal edit <id> tasks/<slug>.md`. Front matter: `technical` (default `false`) and `refs` (a list of element references and Requirement sections). No other field. H1: the title. Body: prose.
+- `## Already present` in `proposal.md`: one line per element already implemented, ``- `<ref>` — <where in the code>``.

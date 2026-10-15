@@ -7,6 +7,7 @@ import { createRequest, isEmptyRequest, requestExists, requestIdAt, requestStamp
 import { cardName } from "../src/core/short-numbers";
 import { editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { type Project, projectAt } from "../src/core/store";
+import { coverWithTask } from "./cover";
 
 let dir: string;
 let p: Project;
@@ -28,6 +29,7 @@ function writeRequest(id: string, text = "# Returns\n\nCustomers send orders bac
 function writeOrder(id: string, transform: (text: string) => string = (t) => t.replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)")) {
   const file = editInProposal(p, id, "checkout/order.md");
   writeFileSync(file, transform(readFileSync(file, "utf8")));
+  coverWithTask(p, id, "checkout");
 }
 
 const ID = "2026-10-04T19-05-12";
@@ -174,5 +176,9 @@ describe("the command line", () => {
     const out = run(["proposal", "submit", prop.id], dir, {}).out;
     expect(out).toContain(`Submitted Proposal ${cardName(p, "proposal", prop.id)} for review`);
     expect(out).toContain(`Deleted design request ${ID}`);
+  });
+
+  test("proposal new refuses --resolution together with --import", () => {
+    expect(() => run(["proposal", "new", "Both", "--resolution", "--import"], dir, {})).toThrow("--import and --resolution cannot go together");
   });
 });

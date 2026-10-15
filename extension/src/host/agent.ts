@@ -65,11 +65,11 @@ async function copilotModelSelector(role: Role): Promise<{ vendor: string; id: s
  * `workbench.action.chat.open` with `{ query, mode }` is how VS Code's own actions do it, but it is not a documented
  * API: if it fails, the prompt goes to the clipboard instead.
  */
-async function openChat(root: string, prompt: () => string, selfSendingOnly: boolean, canSend: () => boolean, onSendStart: () => void, role: Role): Promise<ChatDelivery> {
+async function openChat(root: string, prompt: () => string, canSend: () => boolean, onSendStart: () => void, role: Role): Promise<ChatDelivery> {
   if (!canSend()) return "not-sent";
   if (isCursor()) {
     onSendStart();
-    return openCursorChat(root, withTramaPath(prompt()), selfSendingOnly, canSend, configuredModels()[role]);
+    return openCursorChat(root, withTramaPath(prompt()), canSend, configuredModels()[role]);
   }
   try {
     const modelSelector = await copilotModelSelector(role);
@@ -91,7 +91,7 @@ let lastTab: { terminal: vscode.Terminal; name: string; column: vscode.ViewColum
 
 /** Reuse the prior agent tab's column while it exists; otherwise open beside the active group. */
 function tabColumn(): vscode.ViewColumn {
-  const column = lastTab !== undefined && lastTab.terminal.exitStatus === undefined ? lastTab.column : undefined;
+  const column = lastTab?.column;
   return column !== undefined && vscode.window.tabGroups.all.some((group) => group.viewColumn === column) ? column : vscode.ViewColumn.Beside;
 }
 
@@ -107,6 +107,9 @@ function warnShellReplaced(shell: string): void {
 
 /** Every active agent terminal and the command Trama typed into it. */
 const agentTerminals = new Map<vscode.Terminal, { id: string; jobId?: string; root: string; line: string; since: number }>();
+
+/** Agent terminals left open at rest with `trama.autoExit` off: no longer followed, remembered until they close. */
+const idleTerminals = new Map<vscode.Terminal, { id: string; jobId?: string; root: string; line: string; since: number }>();
 
 function releaseTakenTasks(root: string, origin: AgentOrigin): void {
   try {
@@ -159,6 +162,11 @@ export function watchAgentTerminal(): vscode.Disposable {
         endAgentWork(info, "its terminal was closed");
         agentTerminals.delete(terminal);
       }
+      const idle = idleTerminals.get(terminal);
+      if (idle !== undefined) {
+        endAgentWork(idle, "its terminal was closed");
+        idleTerminals.delete(terminal);
+      }
       if (terminal === lastTab?.terminal) lastTab = undefined;
     }),
     vscode.window.tabGroups.onDidChangeTabs((e) => {
@@ -194,6 +202,8 @@ function finishAgentTerminal(terminal: vscode.Terminal, info: { id: string; jobI
   if (settings().get<boolean>("autoExit", true)) {
     if (terminal === lastTab?.terminal) lastTab = undefined;
     terminal.dispose();
+  } else {
+    idleTerminals.set(terminal, info);
   }
 }
 
@@ -245,12 +255,13 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
 /** The identity a chat job's agent passes to the coordinator-aware commands: a chat has no environment, so the text gives it. */
 const jobIdentity = (jobId: string): string => `This Trama job has ID ${jobId}. Pass \`--job ${jobId}\` to every Trama command that accepts \`--job\`.`;
 
-/** The instruction with its limit, sub-agent and language sentences on one line, for the chat and the terminal alike; a terminal's job comes from its environment. */
-function agentPrompt(instruction: string, role: Role): string {
+/** The instruction with its limit, sub-agent, job and language sentences on one line, for the chat and the terminal alike; a terminal's job comes from its environment. */
+function agentPrompt(instruction: string, role: Role, jobId?: string): string {
   const limit = configuredMaxParallelAgents();
   const withLimit = withAgentLimit(instruction, limit);
   const withSubAgent = canScan(role) ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
-  return withLanguage(withSubAgent, configuredLanguage());
+  const withJob = jobId === undefined ? withSubAgent : `${withSubAgent} ${jobIdentity(jobId)}`;
+  return withLanguage(withJob, configuredLanguage());
 }
 
 /** The model roles, trimmed (`trama.analysis`, `trama.scan`, `trama.execution`). Application scope: only the user's settings count. */
@@ -314,7 +325,6 @@ export async function launchAgent(
   instruction: Instruction,
   name: string,
   announceProposal?: DesignAnnouncement,
-  selfSendingOnly = false,
   canSend: () => boolean = () => true,
   job?: JobKind,
   onSent?: (startedAt: number) => void,
@@ -332,11 +342,8 @@ export async function launchAgent(
     if (agent === "chat") {
       let sentAfter = 0;
       const chat = isCursor() ? "cursor" : "copilot";
-      const prompt = () => {
-        const line = agentPrompt(textOf(instruction), roleOf(name));
-        return jobId === undefined ? line : `${line}\n\n${jobIdentity(jobId)}`;
-      };
-      const delivery = await openChat(root, prompt, selfSendingOnly, canSend, () => {
+      const prompt = () => agentPrompt(textOf(instruction), roleOf(name), jobId);
+      const delivery = await openChat(root, prompt, canSend, () => {
         sentAfter = chatJobSendStarted(root, chat);
       }, roleOf(name));
       if (delivery === "sent" && job !== undefined && jobId !== undefined) {

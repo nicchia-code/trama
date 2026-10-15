@@ -43,6 +43,8 @@ interface ServerOptions {
   project: Project;
   windowId?: string;
   handler: QuestionHandler;
+  /** Whether this window still serves its project; a window that does not refuses before any round is submitted. */
+  serves?: () => boolean;
   runtimeDir?: string;
   focusedAt?: number;
   /** A hook of Cursor's chat, forwarded by `trama cursor-hook`. */
@@ -485,25 +487,47 @@ async function liveEditor(projectId: string, signal: AbortSignal | undefined, so
 
 interface CoordinatorRelayResult {
   delivered: number;
+  /** Live editors the message was addressed to, including those that did not answer in time; every one must acknowledge it. */
+  live: number;
   error?: "no-live-receiver";
   responses: CoordinatorMessage[];
+}
+
+/** Marks a live editor that did not answer its probe in time: it is live, so its jobs are unknown. */
+const UNANSWERED = Symbol("unanswered");
+
+/** Probes one discovery record; with `timeoutMs` an editor that does not answer in time is `UNANSWERED`. */
+async function probeEditor(record: EditorRecord, timeoutMs: number | undefined): Promise<EditorConnection | null | typeof UNANSWERED> {
+  if (timeoutMs === undefined) return connectEditor(record, undefined, new Set());
+  const sockets = new Set<Socket>();
+  let timer: NodeJS.Timeout | undefined;
+  const unanswered = new Promise<typeof UNANSWERED>((resolve) => {
+    timer = setTimeout(() => {
+      for (const socket of sockets) socket.destroy();
+      resolve(UNANSWERED);
+    }, timeoutMs);
+  });
+  const connection = await Promise.race([connectEditor(record, undefined, sockets), unanswered]);
+  clearTimeout(timer);
+  return connection;
 }
 
 async function relayCoordinatorMessage(
   project: Project,
   message: CoordinatorMessage,
-  options: { runtimeDir?: string } = {},
+  options: { runtimeDir?: string; timeoutMs?: number } = {},
 ): Promise<CoordinatorRelayResult> {
   const payload = coordinatorMessage(message);
   if (!payload) throw new UsageError("Coordinator message must be a JSON object");
   const projectId = questionProjectId(project);
   const directory = runtimeDirectory(options.runtimeDir);
   const privateDirectory = runtimeDirectoryReady(directory, false);
-  if (!privateDirectory) return { delivered: 0, error: "no-live-receiver", responses: [] };
+  if (!privateDirectory) return { delivered: 0, live: 0, error: "no-live-receiver", responses: [] };
   const candidates = records(directory, projectId);
-  const probed = await Promise.all(candidates.map((record) => connectEditor(record, undefined, new Set())));
+  const probed = await Promise.all(candidates.map((record) => probeEditor(record, options.timeoutMs)));
+  const unanswered = probed.filter((probe) => probe === UNANSWERED).length;
   const connections = probed.filter((connection): connection is EditorConnection => {
-    if (!connection) return false;
+    if (!connection || connection === UNANSWERED) return false;
     const matched = !connection.socket.destroyed && !connection.socket.readableEnded
       && connection.record.projectId === projectId
       && candidates.some((record) => record.endpoint === connection.record.endpoint
@@ -516,9 +540,11 @@ async function relayCoordinatorMessage(
     const messageId = randomUUID();
     return new Promise<boolean>((resolve) => {
       let done = false;
+      let timer: NodeJS.Timeout | undefined;
       const finish = (ok: boolean, response?: CoordinatorMessage) => {
         if (done) return;
         done = true;
+        clearTimeout(timer);
         stopLines();
         connection.socket.removeListener("error", lost);
         connection.socket.removeListener("end", lost);
@@ -527,6 +553,7 @@ async function relayCoordinatorMessage(
         if (response) responses.push(response);
         resolve(ok);
       };
+      if (options.timeoutMs !== undefined) timer = setTimeout(() => finish(false), options.timeoutMs);
       const lost = () => finish(false);
       const stopLines = lines(connection.socket, (line) => {
         try {
@@ -545,16 +572,16 @@ async function relayCoordinatorMessage(
     });
   }));
   const count = delivered.filter(Boolean).length;
-  return { delivered: count, ...(count === 0 ? { error: "no-live-receiver" as const } : {}), responses };
+  return { delivered: count, live: connections.length + unanswered, ...(count === 0 ? { error: "no-live-receiver" as const } : {}), responses };
 }
 
 export async function sendCoordinatorMessage(
   project: Project,
   message: CoordinatorMessage,
-  options: { runtimeDir?: string } = {},
-): Promise<{ delivered: number; error?: "no-live-receiver" }> {
-  const { delivered, error } = await relayCoordinatorMessage(project, message, options);
-  return { delivered, ...(error ? { error } : {}) };
+  options: { runtimeDir?: string; timeoutMs?: number } = {},
+): Promise<{ delivered: number; live: number; error?: "no-live-receiver" }> {
+  const { delivered, live, error } = await relayCoordinatorMessage(project, message, options);
+  return { delivered, live, ...(error ? { error } : {}) };
 }
 
 const commandMessages = new Set<Promise<unknown>>();
@@ -779,6 +806,7 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         if (phase === "hello" && message.projectId === record.projectId) from = { id: record.projectId, project: options.project };
         if (!from || message.projectId !== from.id) { finish(unavailableQuestions()); return; }
         if (phase === "hello" && message.type === "hello") {
+          if (options.serves && !options.serves()) { finish(unavailableQuestions()); return; }
           phase = "ready";
           connection.send({ type: "ready", projectId: record.projectId, windowId: record.windowId, endpoint: record.endpoint });
           return;

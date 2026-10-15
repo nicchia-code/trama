@@ -1,7 +1,7 @@
 import { flattenStates } from "./model";
 import { applied, getProposal } from "./proposals";
 import { type Area, areaIdOf, buildProject, featuresOfRef, type ProjectModel } from "./requirements";
-import { loadModel, type Project, readTrackedFiles, REQUIREMENTS_PREFIX } from "./store";
+import { type Project, readTrackedFiles, REQUIREMENTS_PREFIX } from "./store";
 import type { Model } from "./types";
 
 /**
@@ -52,7 +52,7 @@ function affectedByRequirements(before: ProjectModel, after: ProjectModel, paths
   return [...features].filter((f) => after.model.features.has(f));
 }
 
-/** The Features to re-scan once this open Proposal is approved, computed from the files it touches. */
+/** The Features an open Proposal affects, computed from the files it touches. */
 export function proposalScope(p: Project, proposalId: string): string[] {
   const proposal = getProposal(p, proposalId);
   const paths = [...Object.keys(proposal.data.base), ...proposal.data.delete];
@@ -62,18 +62,4 @@ export function proposalScope(p: Project, proposalId: string): string[] {
   const after = buildProject(afterFiles);
   const modelPaths = paths.filter((path) => !path.startsWith(REQUIREMENTS_PREFIX) && beforeFiles.get(path) !== afterFiles.get(path));
   return [...new Set([...affectedFeatures(before.model, after.model, modelPaths), ...affectedByRequirements(before, after, paths)])].sort();
-}
-
-/**
- * Approves through `apply` (approving the Proposal, or accepting it through its Drift) and returns the Proposal's
- * stored ID with the Features an automatic scan would look at: those it affects that still exist afterwards, none
- * for an import. Every way a Proposal enters the Model from the open folder goes through here; if `apply` throws, it propagates.
- */
-export function approvedScope(p: Project, proposalId: string, apply: () => void): { id: string; features: string[] } {
-  const proposal = getProposal(p, proposalId);
-  const scope = proposalScope(p, proposal.id);
-  apply();
-  if (proposal.data.kind !== "change") return { id: proposal.id, features: [] };
-  const existing = loadModel(p).features;
-  return { id: proposal.id, features: scope.filter((f) => existing.has(f)) };
 }

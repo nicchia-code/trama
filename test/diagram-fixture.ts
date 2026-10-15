@@ -39,11 +39,11 @@ export function shopWithProposals(): Snapshot {
       "# Return\n\nA package coming back.\n\n## States\n\n### Requested (initial)\n- `user.RETURN` → In transit\n\n### In transit\n- `courier.PICKED_UP` → Received\n\n### Received (final)\n",
     );
 
-    newDrift(p, { options: FIX_OPTIONS, title: "Code refunds after the package is picked up", refs: ["order/Shipped"], happens: "src/refund.ts refunds even when the courier already picked the package up.", should: "A shipped order can no longer be refunded once the courier has picked the package up." });
+    newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Code refunds after the package is picked up", refs: ["order/Shipped"], happens: "src/refund.ts refunds even when the courier already picked the package up.", should: "A shipped order can no longer be refunded once the courier has picked the package up." });
     const forgotten = newProposal(p, "Orders can be lost in transit", "The code handles a lost package; the Model forgot it.");
     const payment = editInProposal(p, forgotten.id, "checkout/payment.md");
     writeFileSync(payment, readFileSync(payment, "utf8").replace("### Declined (final)", "### Declined (final)\n### Written off (final)"));
-    newDrift(p, { options: FIX_OPTIONS, title: "Code has a Written off payment", refs: ["payment"], proposal: forgotten.id, happens: "worker/lost.ts writes the payment off after 30 days.", should: "A payment ends as Declined or Refunded; nothing writes it off." });
+    newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Code has a Written off payment", refs: ["payment"], proposal: forgotten.id, happens: "worker/lost.ts writes the payment off after 30 days.", should: "A payment ends as Declined or Refunded; nothing writes it off." });
 
     handOver(p, returns.id, forgotten.id);
     return buildSnapshot(p);

@@ -21,9 +21,9 @@ Choose where prompts go with the application-scoped `trama.agent` setting, for e
 
 `trama.terminalLocation` applies to `omp` and `claude`: `panel` (the default) creates the terminal in the terminal area without showing it; `editor` opens it as a tab beside the active editor without taking focus. Existing values for removed settings are ignored and never rewritten.
 
-Every instruction uses the current setting, including import, project initialization and automatic scans. No first-launch prompt, custom commands or other terminal agents are supported. Terminals are never reused.
+Every instruction uses the current setting, including import and project initialization. No first-launch prompt, custom commands or other terminal agents are supported. Terminals are never reused.
 
-Agents run the `trama` CLI, so it must be on their `PATH`. `trama.autoScan` scans what a Proposal changed (its scan scope) after it is approved. La scansione si ferma dopo aver archiviato i Task: il developer li avvia dalla Board, per esempio con Run this design. `trama.skillsDir` is where Initialize installs the agent skills (`.claude/skills` for Claude Code).
+Agents run the `trama` CLI, so it must be on their `PATH`. `trama.skillsDir` is where Initialize installs the agent skills (`.claude/skills` for Claude Code).
 
 `trama.driftAutoPilot` is an application-scoped user setting, default `disabled`, with values `enabled` and `yolo`. `enabled` delegates automatic resolution only for non-critical Drifts; `yolo` also delegates critical Drifts. It never skips the host's normal approval checks. The resolution agent submits a restricted Proposal; only the host approves it, then may start a separate Run limited to that resolution's fix Tasks and incomplete origins. The host coordinates Trama scans and Runs across project windows. `trama drift autopilot` reports the mode, the phase, the reason of any wait and whether work is active in another window; the Board has no autopilot status line. A failed or excluded Drift or Task card carries an `autopilot failed` badge whose tooltip gives the reason. Scans started outside Trama are not included. Failed cases stay excluded until a successful developer-started scan, a Drift edit, or an explicit Resolve Drifts request. Automatic cycles have no additional time, cost, or cycle limit, so disable the setting or interrupt work to stop further steps. Manual exceptions remain for developer intervention.
 
@@ -33,12 +33,14 @@ Agents run the `trama` CLI, so it must be on their `PATH`. `trama.autoScan` scan
 
 `trama.maxParallelAgents` is an application-scoped number, default 20 and minimum 1. It tells the agent how many sub-agents to run at once in a scan, design exploration and Task run; agents without sub-agents ignore it. Empty, non-integer or less than 1 values use 20. The same value appears in each instruction and in `trama task next --batch --max <N>` for implementation runs. Workspace settings do not override it.
 
+The Settings tab of the Trama panel lists every `trama.*` setting in groups (Agent, Models, Drift autopilot, Runs, Project), with its title and explanation. Choose a value there and it is saved at once in your user settings, never in the workspace's; a text field saves when it loses focus or on Enter, and an empty text or the default value removes the value from your user settings. Raising the Drift autopilot asks first in a modal question, and cancelling saves nothing. A workspace value that overrides a setting is shown under its control.
+
 ## Terminal agents and model roles
 
 There are two terminal agents: omp (`omp`) and Claude Code (`claude`). Each instruction uses the model role that matches its work; empty roles leave the agent's default model:
 
 - `trama.analysis`: design requests (quick and written), Resolve Drifts and import.
-- `trama.scan`: scans of the System and Features, and the automatic scan after an approval.
+- `trama.scan`: scans of the System and Features.
 - `trama.execution`: implement, implement all and implement a design, including the final selective scan of the run.
 
 For instructions that can scan, both terminal agents receive the `trama-analysis` sub-agent sentence. omp gets `--slow <scan>` when `trama.scan` is set; Claude Code gets `--agents` with the scan model when set.
@@ -51,7 +53,6 @@ Cursor is supported like VS Code (tested on 3.22.12 and 3.23.12), in the editor 
 
 - **Delivery.** The chat launcher tries, in order, and moves on silently when a step is missing or fails: a new chat that sends the prompt by itself (Cursor's internal `composer.createNew`); the prompt deeplink, which opens a chat that waits for your confirmation and Enter (skipped when Cursor would refuse the text: empty, over 10,000 characters encoded, or naming `.env`); the clipboard, with a notice to paste it. No step is tried twice for the same prompt. The new chat counts as sent whenever Cursor raises no error (the command never returns anything), and Trama does not check afterwards that the chat really sent the prompt.
 - **PATH.** Cursor runs its agent's commands without the PATH the extension gives the editor's terminals, so every instruction to Cursor's chat has a second line telling the agent to `export PATH="<folder of the bundled trama>:$PATH"` (absent when the package has no binary for the platform).
-- **Automatic scan.** After an approval it starts by itself only when the new chat sends it by itself. Otherwise nothing is sent and a notice `Trama: Proposal <id> was approved. Scan the Features it affects?` offers **Scan now**, which sends the same scan through the whole chain.
 - **The agent.** Cursor sets `CURSOR_AGENT=1` in its chat agent's shell, and the CLI treats it as `TRAMA_AGENT` (ADR 0010): the developer's decisions are refused, a move to In progress takes the Task, and announcements made there carry `chat: cursor`.
 - **Hooks.** In Cursor, **Initialize Project** and **Update Agent Skills** write Trama's entries for `beforeSubmitPrompt`, `stop` and `sessionEnd` into your own `~/.cursor/hooks.json` (never the project's), each running `"<bundled trama>" cursor-hook`; Update rewrites them for the new version's path. Other entries are kept; a file that is not valid JSON is left alone and you are told. The hook passes the editor only the event, the conversation and the project folder, never the prompt, never blocks Cursor and gives up after one second.
 - **Fine di un turno.** Una conversazione è di Trama dal primo prompt che inizia con `Use the trama-` o `/trama-`, chiunque lo scriva. Quando un turno viene interrotto o fallisce, i ghost annunciati dalla chat di Cursor vengono ritirati con il consueto avviso locale; chiudere la conversazione li ritira senza avviso, mentre una fine normale li lascia alla consegna della scheda o al periodo di inattività. Ogni fine di turno, normale, interrotta o fallita, e la chiusura della conversazione riportano a To do tutti i Task presi dall'agente nel progetto (si presume un agente alla volta); l'agente riprende un Task quando riparte.

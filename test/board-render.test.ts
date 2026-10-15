@@ -10,6 +10,7 @@ class Node {
   attributes: Record<string, string> = {};
   listeners: Record<string, (() => void)[]> = {};
   className = "";
+  classList = { add: () => {} };
   title = "";
   disabled = false;
   type = "";
@@ -38,11 +39,12 @@ const proposal: ProposalCard = {
   kind: "proposal", key: "proposal:live", id: "live", name: { text: "P2", isNumber: true }, heading: "Proposal P2", title: "A proposal",
   badges: [{ label: "requires old", tooltip: "Requires Proposal old", tone: "info", card: { kind: "proposal", id: "old" } }],
   resolution: false, changes: { files: [], more: 0 }, blocker: "Resolve the requirement first", touches: { model: true, requirements: false }, resolves: [],
+  creates: null,
 };
 const task: TaskCard = {
   kind: "task", key: "task:liveTask", id: "liveTask", name: { text: "T3", isNumber: true }, title: "A task", technical: false,
   refs: [], drift: "liveDrift", driftName: "D4", proposal: null, agent: false, blocks: [{ label: "blocked D4", tooltip: "Blocked by Drift D4", target: { kind: "diagram", drift: "liveDrift" } }],
-  blockedBy: [], body: "", file: "task.md", column: "todo", finished: null, autopilotFailed: null,
+  blockedBy: [], body: "", file: "task.md", column: "todo", finished: null, unchanged: null, autopilotFailed: null,
 };
 
 describe("Board card rendering", () => {
@@ -120,6 +122,24 @@ describe("Board card rendering", () => {
       else (globalThis as { document?: unknown }).document = previous;
     }
   });
+  test("a Task closed without changes shows a no changes badge with its note, and its check note first in the details", () => {
+    const previous = Reflect.get(globalThis, "document");
+    Reflect.set(globalThis, "document", {
+      createElement: (tag: string) => new Node(tag),
+      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
+    });
+    try {
+      const closed: TaskCard = { ...task, column: "done", unchanged: "Checked the cart total.", body: "Body text.", blocks: [] };
+      const rendered = renderCard(closed, env() as never) as unknown as Node;
+      const badges = rendered.all.filter((node) => node.className.includes("board-badge info") && node.textContent === "no changes");
+      expect(badges.map((badge) => [badge.title, badge.attributes["aria-label"]])).toEqual([["Closed without changes: Checked the cart total.", "Closed without changes: Checked the cart total."]]);
+      const note = rendered.all.find((node) => node.className.includes("board-check-note"))!;
+      expect(note.textContent).toBe("Check note");
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(globalThis, "document");
+      else Reflect.set(globalThis, "document", previous);
+    }
+  });
   test("marks a resolution card accessibly and retains its resolution rows and controls", () => {
     const previous = (globalThis as { document?: unknown }).document;
     (globalThis as { document?: unknown }).document = {
@@ -158,6 +178,25 @@ describe("Board card rendering", () => {
     } finally {
       if (saved === undefined) Reflect.deleteProperty(globalThis, "document");
       else Reflect.set(globalThis, "document", saved);
+    }
+  });
+});
+
+describe("Run buttons say every reason that holds", () => {
+  test("a Task's Run button is disabled with the resolution reason and the run reason, in tooltip and accessible description", () => {
+    const previous = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      createElement: (tag: string) => new Node(tag),
+      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
+    };
+    try {
+      const reason = "Drifts are being resolved. A run is in progress";
+      const rendered = renderCard({ ...task, column: "todo", drift: null, blocks: [], blockedBy: [] }, { ...env(), resolvingReason: () => reason } as never) as unknown as Node;
+      const run = rendered.all.find((node) => node.dataset["action"] === "run")!;
+      expect([run.disabled, run.title, run.attributes["aria-description"]]).toEqual([true, reason, reason]);
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(globalThis, "document");
+      else Reflect.set(globalThis, "document", previous);
     }
   });
 });

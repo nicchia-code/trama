@@ -40,9 +40,9 @@ On the board, the Proposal lists every file it touches. Approve it, or reject it
 
 ### 4. Watch it get built
 
-Approve, and the agent checks what changed against the code, one sub-agent per Machine, in parallel.
+The agent checks the design against the code, one sub-agent per Machine, in parallel.
 
-![The scan of the approved Proposal, with one sub-agent per Machine](docs/images/scan.png)
+![The scan of a design, with one sub-agent per Machine](docs/images/scan.png)
 
 Tasks appear on the board as the agent prepares them.
 
@@ -158,13 +158,12 @@ For Claude Code, writing in Italian, a typical setup looks like this:
 | `trama.analysis` | *empty* | Model for design requests, Drift resolution and import. |
 | `trama.scan` | *empty* | Model for scans, including the sub-agents that compare each Machine. |
 | `trama.execution` | *empty* | Model for implementing Tasks. |
-| `trama.autoScan` | `true` | After you approve a Proposal, scan what it changed and create the Tasks. |
 | `trama.autoExit` | `true` | Close an agent's terminal as soon as it's done. |
 | `trama.maxParallelAgents` | `20` | How many sub-agents the agent may run at once. |
 | `trama.submitWhileRunning` | `disabled` | `enabled` lets you start a run while another is in progress. |
 | `trama.driftAutoPilot` | `disabled` | Let the agent resolve Drifts on its own: `enabled` for non-critical ones, `yolo` for all of them. |
 
-For the three model settings, write the model name as your agent accepts it, or leave it empty for the agent's default. In the chat they pick the model of the new conversation: in Copilot, a model with that name; in Cursor, the conversation's starting model. Every setting except `trama.autoScan`, `trama.skillsDir`, `trama.language` and `trama.submitWhileRunning` lives in your user settings only, so it can't be overridden per workspace. All the details are in the [extension README](./extension/README.md).
+For the three model settings, write the model name as your agent accepts it, or leave it empty for the agent's default. In the chat they pick the model of the new conversation: in Copilot, a model with that name; in Cursor, the conversation's starting model. Every setting except `trama.skillsDir`, `trama.language` and `trama.submitWhileRunning` lives in your user settings only, so it can't be overridden per workspace. You can change every setting in the Settings tab of the Trama panel, which always saves to your user settings. All the details are in the [extension README](./extension/README.md).
 
 ## How it works
 
@@ -204,7 +203,7 @@ flowchart LR
 
 **Nothing changes without you.** A Proposal holds the full new version of every file it touches and must pass validation against the whole Model before you see it. Nothing changes until you approve it. Decisions such as approving, rejecting or resolving a Drift are yours: agents take them only when you explicitly ask. An open Drift blocks every Task about the same part of the Model until you resolve it.
 
-**Built for parallel agents.** A scan gives each Machine to its own sub-agent. Implementation runs hand out Tasks in groups that touch different parts of the Model. After you approve a Proposal, only what it changed is scanned again.
+**Built for parallel agents.** A scan gives each Machine to its own sub-agent. Implementation runs hand out Tasks in groups that touch different parts of the Model.
 
 **The editor never calls a model.** The extension renders the Diagram, Board and Requirements, shows the agent's questions in its own panel, and sends instructions to the agent you choose. All the reasoning happens in your agent, with your subscription.
 

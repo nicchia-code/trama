@@ -1,0 +1,22 @@
+---
+description: "Usa quando implementi la scelta dell'agente, i ruoli dei modelli e il confronto delle Machine nella scansione."
+---
+# Regole di agenti, modelli e confronto
+
+## agent-launching
+- Ruolo di ogni istruzione: quick design request, written design request, Resolve Drifts e import → `trama.analysis`; scan del System e scan di Feature → `trama.scan`; implement, implement all, implement a design e il Run automatico → `trama.execution`, anche per il pre-flight e per la scansione mirata di fine corsa, con `trama.scan` per i sotto-agenti che confrontano le Machine nel pre-flight.
+- La preparazione della risoluzione automatica usa `trama.analysis`, come Resolve Drifts; il Run separato delle correzioni e delle origini usa `trama.execution`, con `trama.scan` per i sotto-agenti del suo controllo mirato. Restano launcher, lingua e limite dei sotto-agenti già scelti, senza un quarto ruolo.
+- Dentro ogni istruzione che può scansionare, il sotto-agente che confronta una Machine usa `trama.scan`.
+- Un ruolo vuoto, o fatto solo di spazi, non passa nessun modello: l'agente usa il suo predefinito. Trama non controlla mai che un nome di modello esista, tranne la ricerca del nome fra i modelli di Copilot qui sotto; un nome sbagliato lo segnala l'agente nel suo terminale o nella sua conversazione.
+- L'agente si sceglie una volta per tutti i progetti con `trama.agent` (vedi `agent-terminal`): non c'è nessuna scelta al primo avvio e nessun comando personalizzato. I ruoli valgono con `omp`, `claude` e `chat`, sia nella chat di Cursor sia in quella di Copilot. Gli stessi tre ruoli servono ogni agente: il nome si scrive come lo accetta l'agente scelto, e cambiando `trama.agent` il developer riscrive i nomi.
+- Chat di Cursor: il modello del ruolo vale solo per la conversazione che Trama crea, sempre con la modalità Max spenta; il modello scelto dal developer per le altre conversazioni non cambia. Solo il primo passo della consegna (vedi `tech#agent-terminal`) porta il modello: il deeplink e gli appunti partono senza modello, senza un avviso in più oltre a quello che hanno già.
+- Chat di Copilot: il nome del ruolo è quello mostrato nel selettore dei modelli della chat, con o senza il fornitore fra parentesi (`Claude Sonnet 4.5` o `Claude Sonnet 4.5 (copilot)`). Prima di inviare, Trama cerca fra i modelli disponibili quello con quel nome e lo sceglie per la conversazione nuova; il modello resta anche nel selettore della chat, come se l'avesse scelto il developer. Se nessun modello ha quel nome, l'istruzione parte lo stesso senza modello, sul modello del selettore, e compare l'avviso del modello non trovato (vedi `ui`), a ogni istruzione in cui succede. Un fallimento dei comandi della chat porta agli appunti come oggi.
+- Frase dei sotto-agenti, aggiunta sulla stessa riga dopo l'istruzione e la frase del limite e prima della frase della lingua, solo nelle istruzioni che possono scansionare, con ogni agente (`omp`, `claude` e le due chat): "Compare each Machine with the trama-analysis sub-agent."
+- Nelle chat il sotto-agente `trama-analysis` ha il modello di `trama.scan` scritto nella sua definizione utente all'ultima inizializzazione o all'ultimo Update skills fatti dall'editor (vedi `project`); un cambio di `trama.scan` vale per i sotto-agenti della chat solo dal prossimo Update skills. Trama non riscrive la definizione a ogni istruzione né quando cambia l'impostazione. Senza la definizione, o se la chat non usa sotto-agenti personalizzati, l'agente confronta le Machine come può.
+- Non c'è più l'avviso dei ruoli in chat: un'istruzione verso la chat non mostra nulla per i ruoli, tranne l'avviso del modello non trovato in Copilot.
+- Il limite dei sotto-agenti insieme vale per ogni ventaglio: i sotto-agenti di una scansione, quelli dell'esplorazione del design e i Task di un gruppo di una corsa. Un agente senza sotto-agenti lo ignora e lavora un passo alla volta.
+
+## work
+- Ogni Machine dell'ambito della scansione è confrontata direttamente con il codice, una per sotto-agente, senza smistamento: non c'è più un classificatore, una soglia né una Machine «senza conflitto» saltata senza leggerla. Le sezioni General e quelle che non sono di una Machine restano all'agente che guida la scansione, come oggi.
+- Il confronto di una Machine può concludere che non c'è nulla da archiviare; i suoi Task e Drift si archiviano come oggi.
+- Il resoconto della scansione dice quante Machine sono state confrontate e quante hanno prodotto Task o Drift; non c'è più una riga sullo smistamento.

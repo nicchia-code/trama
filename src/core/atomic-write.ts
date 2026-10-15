@@ -7,7 +7,7 @@ const RETRY_MS = 1000;
 const RETRY_STEP_MS = 10;
 
 /** The writers are synchronous, so the wait blocks the thread instead of yielding to an event loop. */
-function pause(ms: number): void {
+export function pause(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 

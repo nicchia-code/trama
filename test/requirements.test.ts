@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
 import { approveProposal, deleteInProposal, editInProposal, getProposal, newProposal, validateProposal } from "../src/core/proposals";
+import { coverWithTask } from "./cover";
 import { handOver } from "./handover";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
 import { loadProject, requirementsFor, resolveProjectRef } from "../src/core/requirements";
@@ -139,6 +140,7 @@ describe("Proposals with Requirements", () => {
     const prop = newProposal(p, "No preparing step");
     const order = editInProposal(p, prop.id, "checkout/order.md");
     writeFileSync(order, removePreparing(readFileSync(order, "utf8")));
+    coverWithTask(p, prop.id, "order", "requirements/ui");
     handOver(p, prop.id);
     expect(validateProposal(p, getProposal(p, prop.id)).map((d) => d.file)).toEqual(["requirements/ui/main.md"]);
     expect(() => approveProposal(p, prop.id)).toThrow(/order\/Preparing/);
@@ -160,6 +162,7 @@ describe("Proposals with Requirements", () => {
     writeFileSync(join(custom, "trama-design/SKILL.md"), "---\nname: trama-design\n---\n");
     const prop = newProposal(p, "Badge colour");
     writeFileSync(editInProposal(p, prop.id, "requirements/ui/main.md"), UI.replace("Show a green badge.", "Show a blue badge."));
+    coverWithTask(p, prop.id, "order", "requirements/ui");
     handOver(p, prop.id);
     approveProposal(p, prop.id, ["tools/agent-skills"]);
 
@@ -238,6 +241,7 @@ describe("Proposals with Requirements", () => {
     writeFileSync(editInProposal(p, prop.id, "requirements/data/money.md"), '---\ndescription: "Use when storing amounts."\n---\n# Money\n\n## order\nCents.\n');
     run(["proposal", "delete", prop.id, "requirements/ui/old.md"], dir, {});
     writeFileSync(editInProposal(p, prop.id, "requirements/ui/badges.md"), "---\ndescription: Badges.\n---\n# Badges\n\n## order/Paid\nA blue badge.\n");
+    coverWithTask(p, prop.id, "order", "requirements/data", "requirements/ui");
     expect(() => run(["proposal", "delete", prop.id, "requirements/ui.md"], dir, {})).toThrow(/Areas are folders/);
 
     const show = run(["proposal", "show", prop.id], dir, {}).out;
@@ -288,18 +292,18 @@ describe("Tasks and generated skills", () => {
   });
 
   test("fixing the code for a Drift against Requirements only creates a technical Task; with a Model element, an ordinary one", () => {
-    const theme = resolveDrift(p, newDrift(p, { options: FIX_OPTIONS, title: "Uses Material 2", refs: ["requirements/ui#General"], happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code", [], { option: 1 });
-    const badge = resolveDrift(p, newDrift(p, { options: FIX_OPTIONS, title: "Red badge", refs: ["order/Paid", "requirements/ui#order/Paid"], happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code", [], { option: 1 });
+    const theme = resolveDrift(p, newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Uses Material 2", refs: ["requirements/ui#General"], happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code", [], { option: 1 });
+    const badge = resolveDrift(p, newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Red badge", refs: ["order/Paid", "requirements/ui#order/Paid"], happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code", [], { option: 1 });
     const show = (id: string | null) => JSON.parse(run(["--json", "task", "show", id ?? ""], dir, {}).out);
     expect(show(theme.data.task)).toMatchObject({ technical: true, refs: ["requirements/ui#General"], drift: theme.id });
     expect(show(badge.data.task)).toMatchObject({ technical: false, refs: ["order/Paid", "requirements/ui#order/Paid"], drift: badge.id });
   });
 
-  test("a technical fix Task belongs to the design of the Task its Drift came from, and a plain Technical Task to none", () => {
+  test("a technical fix Task belongs to the design of the Task its Drift came from, and a technical Task written with a Proposal to that design", () => {
     const design = newProposal(p, "Design");
-    expect(newTask(p, { title: "Theme", refs: ["requirements/ui#General"], technical: true, proposal: design.id }).data.proposal).toBeNull();
+    expect(newTask(p, { title: "Theme", refs: ["requirements/ui#General"], technical: true, proposal: design.id }).data.proposal).toBe(design.id);
     const origin = newTask(p, { title: "Badge", refs: ["order/Paid"], technical: false, proposal: design.id });
-    const fixed = resolveDrift(p, newDrift(p, { options: FIX_OPTIONS, title: "Uses Material 2", refs: ["requirements/ui#General"], origin: origin.id, happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code", [], { option: 1 });
+    const fixed = resolveDrift(p, newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Uses Material 2", refs: ["requirements/ui#General"], origin: origin.id, happens: "The code does it one way.", should: "The Model says another." }).id, "fix-code", [], { option: 1 });
     expect(JSON.parse(run(["--json", "task", "show", fixed.data.task ?? ""], dir, {}).out)).toMatchObject({ technical: true, proposal: design.id });
   });
 
@@ -308,9 +312,9 @@ describe("Tasks and generated skills", () => {
     const other = newProposal(p, "Other");
     const origin = newTask(p, { title: "Badge", refs: ["order/Paid"], technical: false, proposal: design.id });
     const loose = newTask(p, { title: "Loose", refs: ["order/Paid"], technical: false });
-    const fromDesign = newDrift(p, { options: FIX_OPTIONS, title: "Badge differs", refs: ["order/Paid"], origin: origin.id, happens: "The code does it one way.", should: "The Model says another." });
-    const fromLoose = newDrift(p, { options: FIX_OPTIONS, title: "Loose differs", refs: ["order/Paid"], origin: loose.id, happens: "The code does it one way.", should: "The Model says another." });
-    const fromNone = newDrift(p, { options: FIX_OPTIONS, title: "Scan differs", refs: ["order/Paid"], happens: "The code does it one way.", should: "The Model says another." });
+    const fromDesign = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Badge differs", refs: ["order/Paid"], origin: origin.id, happens: "The code does it one way.", should: "The Model says another." });
+    const fromLoose = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Loose differs", refs: ["order/Paid"], origin: loose.id, happens: "The code does it one way.", should: "The Model says another." });
+    const fromNone = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Scan differs", refs: ["order/Paid"], happens: "The code does it one way.", should: "The Model says another." });
     expect(newTask(p, { title: "Fix A", refs: ["order/Paid"], technical: false, drift: fromDesign.id }).data.proposal).toBe(design.id);
     expect(newTask(p, { title: "Fix A2", refs: ["order/Paid"], technical: false, drift: fromDesign.id, proposal: design.id }).data.proposal).toBe(design.id);
     expect(newTask(p, { title: "Fix B", refs: ["order/Paid"], technical: false, drift: fromLoose.id }).data.proposal).toBeNull();

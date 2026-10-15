@@ -23,7 +23,10 @@ description: "Use when the work touches performance, security, privacy, accessib
 - Una corsa che realizza dei task legge Modello e Requisiti di ciascun task una volta, da `trama task show`, e esegue test, lint e build del progetto una volta, alla fine della corsa, dopo l'ultimo gruppo; mai un sotto-agente.
 - Mentre scrive, l'agente o il sotto-agente non rilancia la suite intera al posto dei test di quel task.
 - Prestazioni: quando l'agente ha dei sotto-agenti, una corsa realizza insieme fino a `trama.maxParallelAgents` Task che non riguardano la stessa cosa, la scansione confronta fino a `trama.maxParallelAgents` Machine insieme, e il design esplora con fino a `trama.maxParallelAgents` sotto-agenti; venti per impostazione predefinita. Il limite è il modo con cui il developer tiene sotto controllo il carico della macchina, i limiti del fornitore dell'agente e i conflitti fra file: chi li sente lo abbassa.
-- Prestazioni: la scansione dopo l'approvazione legge solo l'ambito di scansione della Proposal, non le Feature intere.
+- Prestazioni: l'approvazione di una Proposal crea i Task senza avviare un agente e senza leggere il codice.
+- Prestazioni: il pre-flight di un Run legge solo i riferimenti esatti dei Task che partono, con un sotto-agente per Machine in parallelo; l'attesa è pari a quella della Machine più lenta.
+- Prestazioni: lo scan leggero del design legge solo le voci che l'esplorazione non ha visto.
+- Affidabilità: un pre-flight fallito non ferma il Run, che continua; un Drift trovato dal pre-flight blocca solo i Task dello stesso elemento.
 
 ## drift-resolution
 - Affidabilità: due finestre che vedono gli stessi Drift non avviano due raccolte né due Run automatici. Prenotazione, fotografia, approvazione e lancio sono serializzati per progetto; i segnali ripetuti non creano Task doppi. Una finestra non autorizza lavoro finché non conosce gli scan e Run delle altre finestre vive.
@@ -31,3 +34,7 @@ description: "Use when the work touches performance, security, privacy, accessib
 - Accessibilità: criticità, modalità, fase e fallimenti hanno testi e nomi accessibili, non soltanto colore; avvisi e passi automatici non rubano il focus.
 - L'accettazione esercita `disabled` invariato; `enabled` misto e `yolo` con critici; `critical` assente; Drift senza opzioni; due scan concorrenti in finestre diverse; scan iniziato dopo la fotografia; scan fallito o interrotto seguito dalla raccolta senza sospensione; cambio modalità prima di scelta, approvazione e gruppo; correzione fallita con caso indipendente; fix prima delle origini senza Task estranei; un nuovo Drift di fine corsa che avvia il ciclo successivo; segnali duplicati e riavvio senza ripartenza immediata. La verifica osserva anche la Board e i percorsi terminale/chat supportati, non soltanto test del coordinatore.
 - L'accettazione esercita anche i Drift ricorrenti: un Drift archiviato realizzando un Task di correzione automatica prende il precedente da solo e resta manuale in `enabled` e in `yolo`, mentre un Drift indipendente archiviato nella stessa corsa avvia il ciclo successivo; una differenza dismessa non viene riarchiviata da una nuova scansione sugli stessi elementi.
+
+## panel/Settings
+- Sicurezza: la scheda Settings scrive solo nelle impostazioni utente (`ConfigurationTarget.Global`), mai in quelle del workspace, quindi non modifica nessun file del repository. L'host accetta solo chiavi dichiarate nel manifest e valori conformi al loro schema.
+- Sicurezza: la conferma che aumenta `trama.driftAutoPilot` è chiesta dall'host con un dialogo modale dell'editor, non dal webview: un messaggio del webview da solo non concede mai la delega.

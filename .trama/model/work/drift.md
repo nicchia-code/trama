@@ -10,7 +10,9 @@ Un Drift nasce Open quando l'agente o il developer registra una differenza e pun
 
 Un Drift può ricordare un Drift precedente, già risolto, di cui è il seguito: allora è **ricorrente**. Lo è sempre quando la sua origine è il Task di correzione di un altro Drift, e il precedente è quel Drift; altrimenti lo è quando chi lo registra ritrova una differenza già risolta correggendo il codice o adeguando il Model, e la nomina come precedente. Un Drift ricorrente dice che la decisione presa la volta prima non ha chiuso la differenza: la delega non lo risolve mai, in nessuna modalità, e decide il developer, vedendo la catena dei precedenti.
 
-Prima di registrare una differenza, chi la trova guarda i Drift già risolti sugli stessi elementi. Una differenza che il developer ha già chiuso senza cambiare nulla non si registra di nuovo finché il Model o il Requisito in quel punto dicono la stessa cosa.
+Prima di registrare una differenza, chi la trova guarda i Drift già risolti sugli stessi elementi. Una differenza che il developer ha già chiuso senza cambiare nulla non si registra di nuovo finché il Model o il Requisito in quel punto dicono la stessa cosa. Non vale per un Drift dismesso dal suo Task di correzione chiuso senza modifiche: lì la differenza non c'era, e se un giorno il codice diverge davvero si registra come una differenza nuova.
+
+L'agente registra una differenza solo dopo aver riletto il punto del codice che cita e aver confermato che il codice fa davvero ciò che il lato di ciò che succede dice; vale per ogni lavoro che registra Drift: scansione, pre-flight, scansione di fine corsa, realizzazione di un Task e import. Trama non legge il codice e non può verificarlo; pretende soltanto che ogni Drift nuovo dica dove nel codice è stata vista la differenza.
 
 Chi registra il Drift stabilisce se è urgente che il developer prenda posizione: soltanto in quel caso il Drift è critico. La gravità tecnica, una modifica strutturale chiesta dal developer o il semplice lavoro mancante non lo rendono critico da soli. La classificazione esiste anche senza delega; i Drift precedenti non classificati sono considerati non critici.
 
@@ -26,7 +28,7 @@ Keeping what should happen is not one single way: every new Drift also offers th
 
 Ogni modo di correggere il codice raggiunge ciò che dovrebbe succedere senza cambiare il Model né i Requisiti: una correzione che richiede di cambiarli non è un modo di correggere il codice, ma il lato di ciò che succede, e va in una Proposal allegata. Quando nessuna correzione del codice può rispettare insieme il Model e i Requisiti, per esempio perché due Requisiti si contraddicono, il Drift nasce senza modi di correggere il codice e con una Proposal allegata che sistema il Model o i Requisiti: è l'unico Drift nuovo senza i due-cinque modi.
 
-Both sides are written for a developer reading them at a glance: in terms of behaviour, not of the code's inner workings. A Drift may also note where in the code the difference was seen; that note is only a pointer for whoever fixes the code and plays no part in the decision.
+Both sides are written for a developer reading them at a glance: in terms of behaviour, not of the code's inner workings. Ogni Drift nuovo dice anche dove nel codice è stata vista la differenza, da chiunque sia registrato, developer compreso; quella nota è solo un'indicazione per chi rilegge o corregge il codice e non entra nella decisione. I Drift registrati prima che fosse obbligatoria possono non averla.
 
 While it is Open a Drift blocks Tasks, because the work on them would be built on a difference nobody has decided yet. It blocks its origin Task, if any, and every Task not yet Done that concerns the same thing: the same element or one inside the other, counting the Requirements that apply to an element as part of it (a Requirement's General section counts only for the Tasks that name it). A Drift found by a Scan has no origin and blocks only the Tasks that concern the same thing. A Drift that no open Task concerns blocks nothing. A blocked Task cannot be started by the agent; see the Task.
 
@@ -41,14 +43,15 @@ In attesa di una decisione manuale oppure della prima correzione raccomandata au
 - `proposal.APPROVED` → Dismissed: solo se la Proposal approvata è una risoluzione che elenca questo Drift con la decisione di chiuderlo senza cambiare nulla. Né il codice né il Modello cambiano per questo Drift; la Proposal allegata, se c'è, è messa da parte. I Task che bloccava tornano liberi e la sua origine resta dov'è.
 - `proposal.APPROVED` → Code to be fixed: solo se la Proposal approvata è una risoluzione che elenca questo Drift con la decisione di correggere il codice, con l'opzione scelta e, se il developer l'ha scritta, la nota. Crea il Task di correzione come quando il developer tiene ciò che dovrebbe succedere, con la sua origine che torna in To do se non è Done; la Proposal allegata, se c'è, è messa da parte.
 
-### Code to be fixed (final)
+### Code to be fixed
 Il Modello o il Requisito è stato tenuto dal developer o dalla sua delega. Il Task creato porta avanti la correzione; l'origine ancora da completare aspetta quel Task. Soltanto la risoluzione automatica avvia da sé correzione e ripresa dell'origine; una decisione manuale conserva il lancio manuale.
+- `task.CLOSED_UNCHANGED` → Dismissed: il Task di correzione di questo Drift è stato chiuso senza modifiche, perché il codice faceva già ciò che dicono il Model o il Requisito. Il Drift ricorda la scelta fatta prima (l'opzione e la nota) e mostra la nota del Task; l'origine, se c'è, è libera come dopo ogni correzione finita.
 
 ### Proposal accepted (final)
 The developer kept what happens: the Model changed to match the code.
 
 ### Dismissed (final)
-Il developer ha tenuto ciò che succede e né il codice né il Modello sono cambiati: nessuna Proposal era allegata, oppure una Proposal di risoluzione ha deciso di chiudere il Drift senza cambiare nulla.
+Il developer ha tenuto ciò che succede e né il codice né il Modello sono cambiati: nessuna Proposal era allegata, oppure una Proposal di risoluzione ha deciso di chiudere il Drift senza cambiare nulla. Oppure il suo Task di correzione è stato chiuso senza modifiche: la premessa del Drift non era vera nel codice.
 
 ## Events
 

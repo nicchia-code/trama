@@ -14,23 +14,29 @@ interface PendingRound {
   reject(error: unknown): void;
   cancel(): void;
   finished: boolean;
+  present: QuestionPresenter;
 }
 
-/** One in-memory FIFO and presentation lifetime per editor window. */
+/** One in-memory FIFO and presentation lifetime per editor window. `onIdle` runs each time the last round leaves the queue. Each round is presented by the presenter it was asked with, so rounds of several projects share one queue. */
 export class QuestionRoundQueue {
   private pending: PendingRound[] = [];
   private active: PendingRound | undefined;
   private closed = false;
 
-  constructor(private readonly present: QuestionPresenter) {}
+  constructor(private readonly present: QuestionPresenter, private readonly onIdle?: () => void) {}
 
-  ask(request: QuestionRequest, context: QuestionContext): Promise<QuestionResult> {
+  /** True while a round is presented or waiting to be presented. */
+  get busy(): boolean {
+    return this.active !== undefined || this.pending.length > 0;
+  }
+
+  ask(request: QuestionRequest, context: QuestionContext, present: QuestionPresenter = this.present): Promise<QuestionResult> {
     const validated = parseQuestionRequest(request);
     if (context.signal?.aborted) return Promise.reject(questionAborted());
     if (this.closed) return Promise.resolve(unavailableQuestions());
     return new Promise((resolve, reject) => {
       const round: PendingRound = {
-        request: validated, context, controller: new AbortController(), resolve, reject,
+        request: validated, context, controller: new AbortController(), resolve, reject, present,
         finished: false,
         cancel: () => {
           const error = questionAborted();
@@ -61,12 +67,12 @@ export class QuestionRoundQueue {
   private next(): void {
     if (this.closed || this.active) return;
     const round = this.pending.shift();
-    if (!round) return;
+    if (!round) { this.onIdle?.(); return; }
     this.active = round;
     // Start immediately, but also consume synchronous presentation failures.
     let presented: Promise<CompletedQuestionRound>;
     try {
-      presented = this.present(round.request, { ...round.context, signal: round.controller.signal });
+      presented = round.present(round.request, { ...round.context, signal: round.controller.signal });
     } catch (error) {
       this.finish(round, undefined, error);
       return;

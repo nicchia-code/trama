@@ -1,5 +1,5 @@
 ---
-status: draft
+status: discarded
 base:
   agent-launching/feature.md: a0b73e5ade2627763e9391ae981564af2b8e42a386a5efe65b81232f657aa911
   agent-launching/agent-terminal.md: 1f7f95af8488b1e9094ad49d153763b319ba888ed564f5c4bcea73b926bdbc42

@@ -26,7 +26,7 @@ describe("a new card", () => {
   test("is born with its own eight-character identity, a slug name and the creation instant", () => {
     const proposal = newProposal(p, "Lost parcels");
     const task = newTask(p, { title: "Tell the customer", refs: ["order"], technical: false, proposal: proposal.id });
-    const drift = newDrift(p, {
+    const drift = newDrift(p, { where: "src/refund.ts",
       options: FIX_OPTIONS,
       title: "The code keeps the parcel",
       refs: ["order"],

@@ -85,7 +85,7 @@ test("the snapshot carries the Model, open Proposals as ghost overlays, Drifts a
   const order = editInProposal(p, prop.id, "checkout/order.md");
   writeFileSync(order, readFileSync(order, "utf8").replace("### Shipped (final)", "### Shipped\n- `user.CANCEL` → Returned\n\n### Returned (final)"));
   writeFileSync(editInProposal(p, prop.id, "actors/user.md"), readFileSync(join(dir, ".trama/model/actors/user.md"), "utf8") + "\n### RETURN\nAsks to return.\n");
-  const drift = newDrift(p, { options: FIX_OPTIONS, title: "Code refunds late", refs: ["order/Shipped"], happens: "see refund.ts", should: "The Model says another." });
+  const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Code refunds late", refs: ["order/Shipped"], happens: "see refund.ts", should: "The Model says another." });
   const task = newTask(p, { title: "Build cart", refs: ["cart"], technical: false });
   handOver(p, prop.id);
   const done = newProposal(p, "Closed");
@@ -132,7 +132,7 @@ test("the snapshot leaves out a Proposal attached to an open Drift and lists the
   handOver(p, held.id);
   handOver(p, free.id);
   expect(buildSnapshot(p).proposals.map((x) => x.id).sort()).toEqual([held.id, free.id].sort());
-  newDrift(p, { options: FIX_OPTIONS, title: "Holds", refs: ["payment"], proposal: held.id, happens: "Code differs.", should: "Model says so." });
+  newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Holds", refs: ["payment"], proposal: held.id, happens: "Code differs.", should: "Model says so." });
   expect(buildSnapshot(p).proposals.map((x) => x.id)).toEqual([free.id]);
 });
 
@@ -140,8 +140,8 @@ test("an open Drift carries its two sides and why its attached Proposal cannot b
   const prop = newProposal(p, "Lost orders");
   const payment = editInProposal(p, prop.id, "checkout/payment.md");
   writeFileSync(payment, readFileSync(payment, "utf8").replace("### Declined (final)", "### Declined (final)\n### Written off (final)"));
-  const urgent = newDrift(p, { options: FIX_OPTIONS, title: "Lost", refs: ["payment"], proposal: prop.id, happens: "Code writes it off.", should: "Nothing writes it off.", critical: true });
-  const legacy = newDrift(p, { options: FIX_OPTIONS, title: "Theme", refs: ["requirements/ui#General"], happens: "Material 2.", should: "Material 3." });
+  const urgent = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Lost", refs: ["payment"], proposal: prop.id, happens: "Code writes it off.", should: "Nothing writes it off.", critical: true });
+  const legacy = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Theme", refs: ["requirements/ui#General"], happens: "Material 2.", should: "Material 3." });
   writeFileSync(legacy.path, readFileSync(legacy.path, "utf8").replace(/^critical:.*\n/m, ""));
   const drifts = () => buildSnapshot(p).drifts;
 
@@ -157,7 +157,7 @@ test("an open Drift carries its two sides and why its attached Proposal cannot b
 });
 
 test("a Drift's fix options, chosen option and note reach the snapshot in written order; a Drift without them has none", () => {
-  const old = newDrift(p, { options: FIX_OPTIONS, title: "Old", refs: ["payment"], happens: "Code does it.", should: "Model says so." });
+  const old = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Old", refs: ["payment"], happens: "Code does it.", should: "Model says so." });
   writeFileSync(old.path, readFileSync(old.path, "utf8").replace(/^(option|note):.*\n/gm, "").replace(/\n## Fix options[\s\S]*/, "\n"));
   const resolved = newDrift(p, { options: [{ title: "Change the step", text: "Rewrite the **step**.\n\n- keeps data" }, { title: "Remove the step", text: "Drop it." }], title: "New", refs: ["payment"], happens: "Code does it.", should: "Model says so.", where: "`src/x.ts`" });
   writeFileSync(resolved.path, readFileSync(resolved.path, "utf8").replace("option: null", "option: 2").replace("note: null", "note: Mind the refunds."));
@@ -177,7 +177,7 @@ test("a Drift's fix options, chosen option and note reach the snapshot in writte
 test("a Task's blockers travel in the snapshot: the open Drifts that concern it, and none once it is Done", () => {
   const task = newTask(p, { title: "Cart flow", refs: ["cart"], technical: false });
   const other = newTask(p, { title: "Payment flow", refs: ["payment"], technical: false });
-  const drift = newDrift(p, { options: FIX_OPTIONS, title: "Cart differs", refs: ["cart"], happens: "The code does it one way.", should: "The Model says another." });
+  const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Cart differs", refs: ["cart"], happens: "The code does it one way.", should: "The Model says another." });
   const blockers = () => Object.fromEntries(buildSnapshot(p).tasks.map((t) => [t.id, t.blockedBy]));
   expect(blockers()).toEqual({ [task.id]: [{ kind: "drift", drift: drift.id, title: "Cart differs" }], [other.id]: [] });
   moveTask(p, task.id, "done", "developer");

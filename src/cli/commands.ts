@@ -11,8 +11,10 @@ import {
   getProposal,
   newProposal,
   rejectProposal,
+  withProposalLock,
   proposalWarnings,
   driftListProblems,
+  unfixableDrifts,
   submitProposal,
   validateProposal,
   warningsText,
@@ -36,11 +38,9 @@ import {
 } from "../core/store";
 import type { Model } from "../core/types";
 import type { Warning } from "../core/graph";
-import { getDrift, getTask, moveTask, newDrift, newTask, requireNotAttached, resolveDrift, takeBackTask, type Drift, type DriftOutcome } from "../core/work";
-import { taskScope } from "../core/task-scope";
-import { writeApprovedNotice } from "../core/approve-request";
+import { getDrift, getTask, moveTask, newDrift, newTask, requireNotAttached, resolveDrift, takeBackTask } from "../core/work";
+import { preflightScope, taskScope } from "../core/task-scope";
 import { requestExists } from "../core/design-requests";
-import { approvedScope } from "../core/scope";
 import {
   analyzeView,
   eventView,
@@ -211,8 +211,8 @@ export const COMMANDS: Command[] = [
       const project = ctx.project(false);
       const rewritten = rewriteNumberedCards(project);
       if (rewritten.length === 0) return text("No numbered Proposal, Task or Drift to rewrite.");
-      syncShortNumbers(project);
-      const lines = rewritten.map((card) => `- ${card.kind} ${card.from} → ${card.to}`);
+      const numbers = syncShortNumbers(project);
+      const lines = rewritten.map((card) => `- ${card.kind} ${card.from} → ${numbers.name(card.kind, card.to)}`);
       return text(`Rewrote ${rewritten.length} numbered ${rewritten.length === 1 ? "card" : "cards"}.\n${lines.join("\n")}`, { rewritten });
     },
   },
@@ -260,7 +260,7 @@ export const COMMANDS: Command[] = [
       const id = str(o["proposal"]);
       if (id === undefined) return validateView(loadProject(project).diagnostics, "The Model and its Requirements", largeFragments(readTrackedFiles(project)).map((f) => ({ file: f.file, line: 0, message: largeFragmentMessage(f) })));
       const proposal = getProposal(project, id, true);
-      const listProblems = driftListProblems(project, proposal).map((message) => ({ file: "proposal.md", line: 0, message: `Drift list: ${message}` }));
+      const listProblems = [...driftListProblems(project, proposal).map((message) => `Drift list: ${message}`), ...unfixableDrifts(project, proposal)].map((message) => ({ file: "proposal.md", line: 0, message }));
       return validateView([...validateProposal(project, proposal), ...listProblems], `The Model and its Requirements with Proposal ${numbersOf(ctx).name("proposal", proposal.id)} applied`, proposalWarnings(project, proposal));
     },
   },
@@ -319,8 +319,10 @@ export const COMMANDS: Command[] = [
   { name: "proposal edit", args: "<id> <model-path>", summary: "Make a Model file editable inside a Proposal; prints the path to edit", run(ctx, a) {
       const project = ctx.project();
       const id = proposalArg(ctx, a[0] as string);
-      const returnedToDraft = getProposal(project, id).data.status === "open";
-      const path = editInProposal(project, id, a[1] as string);
+      const { path, returnedToDraft } = withProposalLock(project, id, () => {
+        const wasOpen = getProposal(project, id).data.status === "open";
+        return { path: editInProposal(project, id, a[1] as string), returnedToDraft: wasOpen };
+      });
       return text(`${path}${returnedToDraft ? "\nProposal returned to Draft; submit it again when finished." : ""}`, { id, number: numbersOf(ctx).label("proposal", id), path, status: "draft", returnedToDraft });
     } },
   { name: "proposal resolve-drift", args: "<id> <drift>", summary: "Record or replace, in a resolution Proposal, the decision on an open Drift (--decision proposal|dismissed|fix-code; --option <n> and --note <text> only with fix-code); --remove takes the Drift out of the list. Returns an open resolution to Draft", options: { decision: { type: "string" }, option: { type: "string" }, note: { type: "string" }, remove: { type: "boolean" } }, run(ctx, a, o) {
@@ -339,8 +341,11 @@ export const COMMANDS: Command[] = [
   { name: "proposal delete", args: "<id> <model-path>", summary: "Mark a Model file for deletion in a Proposal", run(ctx, a) {
       const project = ctx.project();
       const id = proposalArg(ctx, a[0] as string);
-      const returnedToDraft = getProposal(project, id).data.status === "open";
-      deleteInProposal(project, id, a[1] as string);
+      const returnedToDraft = withProposalLock(project, id, () => {
+        const wasOpen = getProposal(project, id).data.status === "open";
+        deleteInProposal(project, id, a[1] as string);
+        return wasOpen;
+      });
       const n = numbersOf(ctx);
       return text(`Marked ${a[1]} for deletion in Proposal ${n.name("proposal", id)}.${returnedToDraft ? " Proposal returned to Draft; submit it again when finished." : ""}`, { id, number: n.label("proposal", id), status: "draft", returnedToDraft });
     } },
@@ -367,9 +372,7 @@ export const COMMANDS: Command[] = [
       const project = ctx.project();
       const id = proposalArg(ctx, a[0] as string);
       requireNotAttached(project, id);
-      let resolved: DriftOutcome[] = [];
-      const { id: approved, features } = approvedScope(project, id, () => { resolved = approveProposal(project, id, list(o["skills-dir"])).resolved; });
-      if (features.length > 0) writeApprovedNotice(project, approved);
+      const { id: approved, resolved } = approveProposal(project, id, list(o["skills-dir"]));
       const n = numbersOf(ctx);
       const lines = resolved.map((d) => `- Drift ${n.name("drift", d.drift)}: ${d.skipped ? "skipped, already resolved" : d.decision === "fix-code" ? `code to be fixed, Task ${d.task ? n.name("task", d.task) : ""} created` : d.decision === "proposal" ? "Model updated to match the code" : "dismissed"}`);
       return text([`Approved Proposal ${n.name("proposal", approved)}`, ...lines].join("\n"), { id: approved, number: n.label("proposal", approved), status: "approved", resolved });
@@ -398,8 +401,17 @@ export const COMMANDS: Command[] = [
       if (max !== undefined && (!Number.isInteger(max) || max < 1)) throw new UsageError("--max must be a positive integer");
       return taskNextView(ctx.project(), optionalArg(ctx, str(o["proposal"]), proposalArg), o["batch"] === true, max, o["task"] === undefined ? undefined : list(o["task"]));
     } },
-  { name: "task scope", args: "<id> [<id>…]", summary: "The union of Model and Requirement references named by Tasks and Transitions that enter or react to them; moves nothing", run(ctx, args) {
+  { name: "task scope", args: "[<id>…]", summary: "The scan scope of the named Tasks, or with --pre-flight the exact references of the runnable Tasks in To do (filtered by --proposal and repeated --task); moves nothing", options: { "pre-flight": { type: "boolean" }, proposal: { type: "string" }, task: { type: "string", multiple: true } }, run(ctx, args, o) {
       const project = ctx.project();
+      if (o["pre-flight"] === true) {
+        if (args.length > 0) throw new UsageError("--pre-flight takes no Task ID: filter the runnable Tasks with --proposal or --task");
+        const { refs, tasks } = preflightScope(project, optionalArg(ctx, str(o["proposal"]), proposalArg), o["task"] === undefined ? undefined : list(o["task"]));
+        const n = numbersOf(ctx);
+        const body = refs.length ? refs.map((ref) => `- \`${ref}\``).join("\n") : "_Nothing to check._";
+        return text(`## Pre-flight scope\n\n${body}`, { refs: refs.map((ref) => ({ ref })), tasks: tasks.map((t) => ({ id: t.id, number: n.label("task", t.id), title: t.title })) });
+      }
+      if (args.length === 0) throw new UsageError("Name at least one Task ID, or pass --pre-flight");
+      if (o["proposal"] !== undefined || o["task"] !== undefined) throw new UsageError("--proposal and --task apply only with --pre-flight");
       const ids = args.map((id) => {
         try {
           return getTask(project, id, true).id;
@@ -413,10 +425,12 @@ export const COMMANDS: Command[] = [
         ? `## Scan scope\n\n${scope.map(({ ref, reason }) => `- \`${ref}\` (${reason})`).join("\n")}`
         : "## Scan scope\n\n_Nothing to scan._", scope);
     } },
-  { name: "task move", args: "<id> <column>", summary: "Move a Task to todo, doing or done", run(ctx, a) {
-      const t = moveTask(ctx.project(), taskArg(ctx, a[0] as string), a[1] as string, ctx.byAgent ? "agent" : "developer", ctx.origin);
+  { name: "task move", args: "<id> <column>", summary: "Move a Task to todo, doing or done; --unchanged <note> closes a fix Task into done without changes (its Drift in Code to be fixed becomes Dismissed)", options: { unchanged: { type: "string" } }, run(ctx, a, o) {
+      const unchanged = str(o["unchanged"]);
+      const t = moveTask(ctx.project(), taskArg(ctx, a[0] as string), a[1] as string, ctx.byAgent ? "agent" : "developer", ctx.origin, unchanged);
       const n = numbersOf(ctx);
-      return text(`Task ${n.name("task", t.id)} is now ${t.data.column}`, { id: t.id, number: n.label("task", t.id), column: t.data.column });
+      const dismissed = unchanged === undefined || t.data.drift === null ? "" : `; Drift ${n.name("drift", t.data.drift)} dismissed`;
+      return text(`Task ${n.name("task", t.id)} is now ${t.data.column}${dismissed}`, { id: t.id, number: n.label("task", t.id), column: t.data.column, ...(unchanged === undefined ? {} : { unchanged: t.data.unchanged, drift: t.data.drift }) });
     } },
   { name: "task take-back", args: "<id>", summary: "Take a Task back from the agent that has it; it stays in progress", run(ctx, a) {
       const t = takeBackTask(ctx.project(), taskArg(ctx, a[0] as string));
@@ -424,10 +438,10 @@ export const COMMANDS: Command[] = [
       return text(`Task ${n.name("task", t.id)} is yours again (still ${t.data.column})`, { id: t.id, number: n.label("task", t.id), column: t.data.column, agent: t.data.agent });
     } },
 
-  { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; two to five fix options, each --option <title> followed by its --option-text <text>, the first being the one you recommend; --critical marks an urgent developer decision; --where (optional) says where in the code it was seen, the only place for files and code names; --task <id> names the Task you were implementing when you found it; --previous <id> names the resolved Drift this one follows, making it recurring (given by itself when --task names a fix Task); --announcement <id> names the announcement of this Drift", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, option: ref, "option-text": ref, critical: { type: "boolean" }, where: { type: "string" }, previous: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
+  { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; two to five fix options, each --option <title> followed by its --option-text <text>, the first being the one you recommend; --critical marks an urgent developer decision; --where is required and says where in the code the difference was seen (read that code before filing; files and code names go only there); --task <id> names the Task you were implementing when you found it; --previous <id> names the resolved Drift this one follows, making it recurring (given by itself when --task names a fix Task); --announcement <id> names the announcement of this Drift", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, option: ref, "option-text": ref, critical: { type: "boolean" }, where: { type: "string" }, previous: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       const note = announcementNote(project, str(o["announcement"]), "drift");
-      const d = newDrift(project, { title: a[0] as string, refs: list(o["ref"]), proposal: optionalArg(ctx, str(o["proposal"]), proposalArg), origin: optionalArg(ctx, str(o["task"]), taskArg), previous: optionalArg(ctx, str(o["previous"]), driftArg), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", options: fixOptions(list(o["option"]), list(o["option-text"])), critical: o["critical"] === true, announcement: str(o["announcement"]), ...(o["where"] !== undefined ? { where: str(o["where"]) ?? "" } : {}) });
+      const d = newDrift(project, { title: a[0] as string, refs: list(o["ref"]), proposal: optionalArg(ctx, str(o["proposal"]), proposalArg), origin: optionalArg(ctx, str(o["task"]), taskArg), previous: optionalArg(ctx, str(o["previous"]), driftArg), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", options: fixOptions(list(o["option"]), list(o["option-text"])), critical: o["critical"] === true, announcement: str(o["announcement"]), where: str(o["where"]) ?? "" });
       const n = numbersOf(ctx);
       const follows = d.data.previous === null ? "" : `; recurring, it follows Drift ${n.name("drift", d.data.previous)}`;
       return text(`Created Drift ${n.name("drift", d.id)} at ${d.path}${follows}${note ? `\n${note}` : ""}`, { id: d.id, number: n.label("drift", d.id), path: d.path, critical: d.data.critical, previous: d.data.previous, ...(note ? { note } : {}) });
@@ -445,15 +459,9 @@ export const COMMANDS: Command[] = [
         ...(o["note"] !== undefined ? { note: str(o["note"]) ?? "" } : {}),
       });
       const before = getDrift(project, driftId).data.proposal;
-      const attached = how === "accept-proposal" ? before : null;
       const status = how === "fix-code" && before !== null ? getProposal(project, before).data.status : null;
       const setAside = status === "open" ? "rejected" : status === "draft" ? "discarded" : null;
-      let d!: Drift;
-      if (attached === null) d = resolve();
-      else {
-        const scanned = approvedScope(project, attached, () => (d = resolve()));
-        if (scanned.features.length > 0) writeApprovedNotice(project, scanned.id);
-      }
+      const d = resolve();
       const n = numbersOf(ctx);
       return text(`Drift ${n.name("drift", d.id)} resolved (${d.data.resolution})${d.data.task ? `; Task ${n.name("task", d.data.task)} created` : ""}${setAside ? `; attached Proposal ${n.name("proposal", before as string)} ${setAside}` : ""}`, { id: d.id, number: n.label("drift", d.id), resolution: d.data.resolution, task: d.data.task, option: d.data.option, note: d.data.note, ...(setAside ? { proposal: before, proposalSetAside: setAside } : {}) });
     } },

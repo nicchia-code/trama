@@ -3,9 +3,10 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildModel } from "../src/core/model";
-import { approveProposal, editInProposal, getProposal, newProposal } from "../src/core/proposals";
+import { approveProposal, deleteInProposal, editInProposal, getProposal, newProposal, proposalCoverage } from "../src/core/proposals";
 import { run } from "../src/cli/main";
 import { handOver } from "./handover";
+import { coverWithTask } from "./cover";
 import type { ScanScopeEntry } from "../src/core/scan-scope";
 import { affectedFeatures, proposalScope } from "../src/core/scope";
 import { type Project, projectAt, readModelFiles } from "../src/core/store";
@@ -107,7 +108,7 @@ describe("affectedFeatures", () => {
   });
 });
 
-describe("scan scope written at approval", () => {
+describe("scan scope, computed live and not saved at approval", () => {
   test("lists changed States, Transitions, Events and sections, removed elements as their container, and the Transitions leading into them", () => {
     const prop = newProposal(p, "Change");
     const order = editInProposal(p, prop.id, "checkout/order.md");
@@ -122,9 +123,8 @@ describe("scan scope written at approval", () => {
     );
     const ui = editInProposal(p, prop.id, "requirements/ui/main.md");
     writeFileSync(ui, readFileSync(ui, "utf8").replace('A green "Paid" badge', 'A blue "Paid" badge'));
+    coverWithTask(p, prop.id, "checkout", "requirements/ui");
     handOver(p, prop.id);
-    expect(getProposal(p, prop.id).data.scanScope).toBeNull();
-    approveProposal(p, prop.id);
     const expected: ScanScopeEntry[] = [
       { ref: "order/Draft/cart.CONFIRM", reason: "changed" },
       { ref: "order/Paid", reason: "changed" },
@@ -134,11 +134,19 @@ describe("scan scope written at approval", () => {
       { ref: "payment/Paid/order.REFUND_REQUESTED", reason: "leads into a change" },
       { ref: "requirements/ui#order/Paid", reason: "changed" },
     ];
-    expect(getProposal(p, prop.id).data.scanScope).toEqual(expected);
+    const task = getProposal(p, prop.id).tasks[0]?.id ?? "";
+    const covered = expected.map((e) => ({ ...e, coveredBy: task }));
+    expect(proposalCoverage(p, getProposal(p, prop.id)).scope).toEqual(covered);
 
     const shown = run(["--root", dir, "proposal", "show", prop.id], dir, {});
-    expect(shown.out).toContain("## Scan scope\n- `order/Draft/cart.CONFIRM` (changed)\n- `order/Paid` (changed)\n- `order` (removed, its container)");
-    expect(JSON.parse(run(["--root", dir, "proposal", "show", prop.id, "--json"], dir, {}).out).scanScope).toEqual(expected);
+    expect(shown.out).toContain(`## Scope\n- \`order/Draft/cart.CONFIRM\` (changed) — ${task}\n- \`order/Paid\` (changed) — ${task}\n- \`order\` (removed, its container) — ${task}`);
+    expect(shown.out).not.toContain("## Scan scope");
+    expect(JSON.parse(run(["--root", dir, "proposal", "show", prop.id, "--json"], dir, {}).out).scope).toEqual(covered);
+
+    approveProposal(p, prop.id);
+    expect(getProposal(p, prop.id).data.scanScope).toBeNull();
+    expect(run(["--root", dir, "proposal", "show", prop.id], dir, {}).out).not.toContain("## Scan scope");
+    expect(JSON.parse(run(["--root", dir, "proposal", "show", prop.id, "--json"], dir, {}).out)).not.toHaveProperty("scanScope");
   });
 
   test("a new Machine enters whole, and a changed State brings its Transitions and those entering it", () => {
@@ -146,13 +154,16 @@ describe("scan scope written at approval", () => {
     writeFileSync(editInProposal(p, prop.id, "checkout/gift.md"), "# Gift\n\n## States\n\n### Wrapped (initial)\n- `user.CANCEL` → Unwrapped\n\n### Unwrapped (final)\n\n## Events\n\n### OPENED\nThe gift is opened.\n");
     const order = editInProposal(p, prop.id, "checkout/order.md");
     writeFileSync(order, readFileSync(order, "utf8").replace("### Shipped (final)", "### Shipped\n- `gift.OPENED` → Cancelled"));
+    coverWithTask(p, prop.id, "checkout");
     handOver(p, prop.id);
-    approveProposal(p, prop.id);
-    expect(getProposal(p, prop.id).data.scanScope).toEqual([
-      { ref: "gift", reason: "changed" },
-      { ref: "order/Shipped", reason: "changed" },
-      { ref: "order/Ready to ship/courier.PICKED_UP", reason: "leads into a change" },
+    expect(proposalCoverage(p, getProposal(p, prop.id)).scope.map((e) => `${e.ref} (${e.reason})`)).toEqual([
+      "gift (changed)",
+      "order/Shipped (changed)",
+      "order/Ready to ship/courier.PICKED_UP (leads into a change)",
     ]);
+    approveProposal(p, prop.id);
+    expect(getProposal(p, prop.id).data.scanScope).toBeNull();
+    expect(JSON.parse(run(["--root", dir, "proposal", "show", prop.id, "--json"], dir, {}).out)).not.toHaveProperty("scanScope");
   });
 
   test("an import, a Proposal not approved yet, and one approved before the field have no scan scope and no section", () => {
@@ -164,5 +175,23 @@ describe("scan scope written at approval", () => {
     expect(getProposal(p, imported.id).data.scanScope).toBeNull();
     expect(run(["--root", dir, "proposal", "show", imported.id], dir, {}).out).not.toContain("## Scan scope");
     expect(JSON.parse(run(["--root", dir, "proposal", "show", imported.id, "--json"], dir, {}).out)).not.toHaveProperty("scanScope");
+  });
+});
+
+describe("proposal show: removals and scope coverage", () => {
+  test("a removed Machine becomes a Remove code Task pointing at its Feature, and its Feature is covered by the removal", () => {
+    const prop = newProposal(p, "Drop cart");
+    deleteInProposal(p, prop.id, "checkout/cart.md");
+    const shown = run(["--root", dir, "proposal", "show", prop.id], dir, {}).out;
+    expect(shown).toContain("## Created on approval\n- Remove code of `cart` → `checkout`");
+    const json = JSON.parse(run(["--root", dir, "proposal", "show", prop.id, "--json"], dir, {}).out);
+    expect(json.removals).toContainEqual({ ref: "cart", reason: "machine", coveredBy: "checkout" });
+    expect(json.scope).toContainEqual({ ref: "checkout", reason: "removed, its container", coveredBy: "removal" });
+  });
+
+  test("an entry no Task or Already present row names is shown as not covered", () => {
+    const prop = newProposal(p, "Order");
+    writeFileSync(editInProposal(p, prop.id, "checkout/order.md"), readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8").replace("### Paid\n", "### Paid\nMoney received.\n"));
+    expect(run(["--root", dir, "proposal", "show", prop.id], dir, {}).out).toContain("- `order/Paid` (changed) — not covered");
   });
 });

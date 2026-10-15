@@ -145,6 +145,9 @@ export function showsElement(graph: GraphSpec, element: Element): boolean {
   if (element.kind === "transition") return graph.edges.some((e) => e.refs.includes(element.ref));
   const anchor = anchorIn(graph, element);
   if (!anchor || anchor === "self") return false;
-  const shown = graph.nodes.find((n) => n.id === anchor.node)?.ref;
+  const node = graph.nodes.find((n) => n.id === anchor.node);
+  // A Machine of another Feature is drawn here only as a sender; it is shown where its own Feature is drawn.
+  if (node?.external && node.kind === "machine") return false;
+  const shown = node?.ref;
   return shown === (element.kind === "event" ? (element.owner.kind === "actor" ? element.owner.actor.id : element.owner.machine.id) : element.ref);
 }

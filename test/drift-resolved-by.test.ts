@@ -17,7 +17,7 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 test("a Drift resolved outside a resolution Proposal is written without a resolvedBy field", () => {
-  const drift = newDrift(p, { options: FIX_OPTIONS, title: "Dismissed alone", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
+  const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Dismissed alone", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
   resolveDrift(p, drift.id, "dismiss");
   expect(readFileSync(getDrift(p, drift.id).path, "utf8")).not.toContain("resolvedBy");
 });

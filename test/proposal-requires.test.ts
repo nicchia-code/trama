@@ -6,6 +6,7 @@ import { approveProposal, changes, editInProposal, getProposal, health, newPropo
 import { buildSnapshot } from "../src/core/snapshot";
 import { cardName } from "../src/core/short-numbers";
 import { loadModel, type Project, projectAt } from "../src/core/store";
+import { coverWithTask } from "./cover";
 import { handOver } from "./handover";
 
 let dir: string;
@@ -25,9 +26,11 @@ const INVOICE = "# Invoice\n\nA bill.\n\n## States\n\n### Open (initial)\n- `ban
 function chain() {
   const actors = newProposal(p, "Bank");
   writeFileSync(editInProposal(p, actors.id, "actors/bank.md"), BANK);
+  coverWithTask(p, actors.id, "bank");
   const billing = newProposal(p, "Billing", "", { requires: [actors.id] });
   writeFileSync(editInProposal(p, billing.id, "billing/feature.md"), "# Billing\n\nInvoices.\n");
   writeFileSync(editInProposal(p, billing.id, "billing/invoice.md"), INVOICE);
+  coverWithTask(p, billing.id, "billing", "invoice");
   handOver(p, actors.id, billing.id);
   return { actors: actors.id, billing: billing.id };
 }

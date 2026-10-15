@@ -62,6 +62,6 @@ test("settings expose only chat, omp and Claude Code with a panel-default termin
   expect(properties["trama.terminalLocation"].default).toBe("panel");
   expect(properties["trama.terminalLocation"].scope).toBe("application");
   expect(properties["trama.driftAutoPilot"].markdownDescription).toContain("critical Drifts");
-  for (const key of ["agentLauncher", "terminalAgent", "agentCommand", "externalTerminalCommand", "autoImplement"])
+  for (const key of ["agentLauncher", "terminalAgent", "agentCommand", "externalTerminalCommand", "autoImplement", "autoScan"])
     expect(properties[`trama.${key}`]).toBeUndefined();
 });

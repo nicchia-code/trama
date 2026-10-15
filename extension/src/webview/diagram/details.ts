@@ -56,9 +56,26 @@ function detail(init: Partial<Detail> & Pick<Detail, "kind" | "title">): Detail 
 
 const transitionItem = (t: MergedTransition): DetailItem => item(`${t.event.owner}.${t.event.name} → ${t.target}`, { note: t.prose, change: t.change });
 
+/** Element references of the States that receive an Event, at any depth, each once. */
+function receiverRefs(scene: Scene, event: string): string[] {
+  return [...new Set(flows(scene).filter((f) => f.event === event).map((f) => {
+    const machine = scene.machine.get(f.machine);
+    return [f.machine, ...(machine ? pathTo(machine, f.state) : [f.state])].join("/");
+  }))];
+}
+
 function receiversNote(scene: Scene, event: string): string {
-  const who = [...new Set(flows(scene).filter((f) => f.event === event).map((f) => `${f.machine}/${f.state}`))];
+  const who = receiverRefs(scene, event);
   return who.length > 0 ? `received by ${who.join(", ")}` : "nobody receives it";
+}
+
+/** At Machine level: each Event the Machine emits, then a link to each State that receives it. */
+function emittedEventItems(scene: Scene, m: MergedMachine): DetailItem[] {
+  return m.events.flatMap((e) => {
+    const refs = receiverRefs(scene, `${m.id}.${e.name}`);
+    const note = [e.description, refs.length > 0 ? "" : "nobody receives it"].filter(Boolean).join(" — ");
+    return [item(e.name, { note, change: e.change }), ...refs.map((ref) => item(ref, { note: `receives ${e.name}`, ref }))];
+  });
 }
 
 function eventItems(scene: Scene, owner: string, events: { name: string; description: string; change: Change }[]): DetailItem[] {
@@ -120,7 +137,7 @@ export function detailOfElement(scene: Scene, element: Element, node: GNode | nu
           { heading: "Events it emits", items: eventItems(scene, m.id, m.events) },
         ],
         file: scene.files.get(m.id) ?? null,
-        drill: { kind: "machine", machine: m.id },
+        drill: node?.external ? { kind: "feature", feature: m.feature } : { kind: "machine", machine: m.id },
       });
     }
     case "actor":
@@ -229,7 +246,7 @@ export function detailOfLevel(scene: Scene, level: Level): Detail {
     }
     case "machine": {
       const m = scene.machine.get(level.machine);
-      return detail({ kind: "Machine", title: m?.name ?? level.machine, description: m?.description ?? "", file: scene.files.get(level.machine) ?? null, sections: extra, proposal });
+      return detail({ kind: "Machine", title: m?.name ?? level.machine, description: m?.description ?? "", file: scene.files.get(level.machine) ?? null, sections: [...(m ? [{ heading: "Events it emits", items: emittedEventItems(scene, m) }] : []), ...extra], proposal });
     }
     case "state": {
       const m = scene.machine.get(level.machine);

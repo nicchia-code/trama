@@ -6,7 +6,7 @@ import { buildGraph } from "../extension/src/webview/diagram/levels";
 import { machineGraph, visibleState } from "../extension/src/webview/diagram/machine";
 import { featureGraph, flows, shortNames, systemGraph } from "../extension/src/webview/diagram/overview";
 import { buildScene } from "../extension/src/webview/diagram/scene";
-import type { AreaView, FragmentView, SectionView } from "../src/core/snapshot";
+import type { AreaView, DriftView, FragmentView, SectionView } from "../src/core/snapshot";
 import type { FileMap } from "../src/core/types";
 import { shopSnapshot, shopWithProposals, shopWithRemovals, snapshotOf } from "./diagram-fixture";
 
@@ -236,7 +236,7 @@ test("Drifts draw a red ghost joined to the element their first resolvable refer
 });
 
 test("a Drift on a State hidden in a collapsed State outlines the State that hides it", () => {
-  const snap = { ...shopSnapshot(), drifts: [{ id: "0007", title: "Preparing", body: "", critical: false, previous: null, refs: ["order/Preparing"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null }] };
+  const snap = { ...shopSnapshot(), drifts: [{ id: "0007", created: null, title: "Preparing", body: "", critical: false, previous: null, refs: ["order/Preparing"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null, closedUnchanged: null }] };
   const s = buildScene(snap, null);
   const collapsed = buildGraph(s, { kind: "machine", machine: "order" }, new Map());
   expect(nodeOf(collapsed, "s:Paid")).toMatchObject({ drifts: ["0007"], sub: "2 sub-states · ⚠ 1 drift inside" });
@@ -247,7 +247,7 @@ test("a Drift on a State hidden in a collapsed State outlines the State that hid
 });
 
 test("unresolved Drift references are skipped for the ghost and listed in the panel", () => {
-  const snap = { ...shopSnapshot(), drifts: [{ id: "0008", title: "Gone", body: "", critical: false, previous: null, refs: ["order/Gone", "order/Paid"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null }, { id: "0009", title: "All gone", body: "", critical: false, previous: null, refs: ["nope"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null }] };
+  const snap = { ...shopSnapshot(), drifts: [{ id: "0008", created: null, title: "Gone", body: "", critical: false, previous: null, refs: ["order/Gone", "order/Paid"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null, closedUnchanged: null }, { id: "0009", created: null, title: "All gone", body: "", critical: false, previous: null, refs: ["nope"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null, closedUnchanged: null }] };
   const s = buildScene(snap, null);
   const order = withDrifts(machineGraph(s, "order", null, new Set()), s);
   expect(order.edges.find((e) => e.kind === "drift")).toMatchObject({ source: "d:0008", target: "s:Paid" });
@@ -299,4 +299,37 @@ test("the Requirement sections of the Transitions an edge draws are listed in or
   ]);
   expect(items[1]?.note).toBe("- Ask first.\n  - Twice.");
   expect(requirementItems(areas, [])).toEqual([]);
+});
+
+test("Drifts that point only at Requirements or at nothing drawn float on the System level, with their details", () => {
+  const snap = shopWithProposals();
+  const base = snap.drifts[0] as DriftView;
+  const section: SectionView = { ref: "drift", text: "Shown.", change: "same", before: null, movedFrom: null };
+  const fragment: FragmentView = { id: "drift", file: "requirements/ui/drift.md", title: "Drift", description: "", change: "same", sections: [section] };
+  const areas: AreaView[] = [{ id: "ui", file: "requirements/ui/area.md", title: "Interface", description: "", intro: "", change: "same", fragments: [fragment] }];
+  const requirementOnly: DriftView = { ...base, id: "0010", refs: ["requirements/ui#drift"], requirementsOnly: true };
+  const dangling: DriftView = { ...base, id: "0011", refs: ["order/Gone", "nope"], requirementsOnly: false };
+  const s = buildScene({ ...snap, areas, drifts: [requirementOnly, dangling] }, null);
+
+  const system = buildGraph(s, { kind: "system" }, new Map());
+  expect(nodeOf(system, "d:0010")).toMatchObject({ kind: "drift", drift: "0010" });
+  expect(nodeOf(system, "d:0011")).toMatchObject({ kind: "drift", drift: "0011" });
+  expect(system.edges.some((e) => e.source === "d:0010" || e.source === "d:0011")).toBe(false);
+  expect(buildGraph(s, { kind: "feature", feature: "checkout" }, new Map()).nodes.some((n) => n.id.startsWith("d:"))).toBe(false);
+
+  const pointsAt = (id: string) => detailOfSelection(s, system, `d:${id}`).sections.find((x) => x.heading === "Points at")?.items.map((i) => [i.text, i.note, i.ref]);
+  expect(detailOfSelection(s, system, "d:0010").drift?.id).toBe("0010");
+  expect(pointsAt("0010")).toEqual([["requirements/ui#drift", "", "requirements/ui#drift"]]);
+  expect(pointsAt("0011")).toEqual([["order/Gone", "no longer resolves", null], ["nope", "no longer resolves", null]]);
+});
+
+test("Machine level: the panel lists the Events the Machine emits, each receiving State is a link to it", () => {
+  const g = buildGraph(scene, { kind: "machine", machine: "order" }, new Map());
+  const section = detailOfSelection(scene, g, null).sections.find((s) => s.heading === "Events it emits");
+  expect(section?.items.map((i) => [i.text, i.ref])).toEqual([
+    ["CONFIRMED", null],
+    ["payment/Idle", "payment/Idle"],
+    ["REFUND_REQUESTED", null],
+    ["payment/Paid", "payment/Paid"],
+  ]);
 });

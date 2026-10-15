@@ -1,6 +1,7 @@
 // Pure logic of the Board: no DOM. Turns a Snapshot into columns of cards.
 import type { FileChange } from "../../../../src/core/diff";
 import { formatDiagnostic } from "../../../../src/core/model";
+import { compareByCreation } from "../../../../src/core/schema";
 import type { Blocker } from "../../../../src/core/blocking";
 import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
 import type { Column } from "../../protocol";
@@ -104,6 +105,8 @@ export interface ProposalCard {
   touches: { model: boolean; requirements: boolean };
   /** The Drifts a resolution resolves, one row each; empty for any other Proposal. */
   resolves: ResolvedRow[];
+  /** The text of the muted `Creates N Tasks` line; null when the Proposal creates no Task. */
+  creates: string | null;
 }
 
 export interface DriftCard {
@@ -150,6 +153,8 @@ export interface TaskCard {
   column: Column;
   /** When the Task arrived in Done (UTC ISO 8601); null outside Done or when it was not kept. */
   finished: string | null;
+  /** The note of a fix Task closed without changes; null otherwise. */
+  unchanged: string | null;
 }
 
 /** The Tasks of one design (Proposal) shown as a single card; it stands in the column its Tasks add up to. */
@@ -228,7 +233,12 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
 export const resolvedRows = (p: Pick<ProposalView, "resolves">, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null): ResolvedRow[] =>
   p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, critical: r.critical, previous: r.previous, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, autopilotFailed: failed(r.drift) }));
 
-export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null): ProposalCard {
+/** `Creates 1 Task` / `Creates N Tasks`, counting removals too; null for zero. */
+export function createsText(n: number): string | null {
+  return n === 0 ? null : `Creates ${n} ${n === 1 ? "Task" : "Tasks"}`;
+}
+
+ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null): ProposalCard {
   const name = cardNameOf(numbers, "proposal", p.id);
   return {
     kind: "proposal",
@@ -243,6 +253,7 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, 
     blocker: approveBlocker(p, numbers),
     touches: proposalTouches(p),
     resolves: resolvedRows(p, numbers, failed),
+    creates: createsText(p.creates),
   };
 }
 
@@ -282,6 +293,7 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, autopilo
     file: t.file,
     column: t.column,
     finished: t.finished,
+    unchanged: t.unchanged,
     autopilotFailed,
   };
 }
@@ -330,11 +342,13 @@ export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilot
   const numbers = snapshot.numbers ?? noNumbers;
   const failed = failedReasons(failures);
   const resolving = new Set(snapshot.proposals.filter((p) => p.kind === "resolution").flatMap((p) => p.resolves.map((r) => r.drift)));
+  // To decide holds the open Proposals and Drifts together, oldest first, as the Board Requirement says.
+  const decide = [
+    ...snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, (drift) => failed.get(`drift:${drift}`) ?? null) })),
+    ...snapshot.drifts.filter((d) => !resolving.has(d.id)).map((d) => ({ id: d.id, created: d.created, card: driftCard(d, numbers, failed.get(`drift:${d.id}`) ?? null) })),
+  ];
   const cards: Record<ColumnId, Card[]> = {
-    decide: [
-      ...snapshot.proposals.map((p) => proposalCard(p, numbers, (drift) => failed.get(`drift:${drift}`) ?? null)),
-      ...snapshot.drifts.filter((d) => !resolving.has(d.id)).map((d) => driftCard(d, numbers, failed.get(`drift:${d.id}`) ?? null)),
-    ],
+    decide: decide.sort(compareByCreation).map((x) => x.card),
     todo: [],
     doing: [],
     done: [],
@@ -460,23 +474,19 @@ export interface PlacedGhost {
 }
 
 /**
- * The ghosts of the announced cards, by column and in the order announced. To decide takes Proposals and Drifts, To do
- * takes Tasks, In progress takes checks. A ghost stands after the real cards of its kind (Proposals before Drifts),
- * where its real card will take its place, so no other card jumps when it arrives; a check stands after every real card.
- * A Proposal whose Draft is attached to a Drift is not announced to the Board at all (see `buildSnapshot`).
+ * The ghosts of the announced cards, by column and in the order announced, whatever their kind. To decide takes Proposals
+ * and Drifts, To do takes Tasks, In progress takes checks. A ghost stands after the real cards of its column, and a check
+ * after every real card. A Proposal whose Draft is attached to a Drift is not announced to the Board at all (see `buildSnapshot`).
  */
 export function announcedGhosts(columns: BoardColumn[], announcements: AnnouncementView[], asking: boolean): Record<ColumnId, PlacedGhost[]> {
   const real = (id: ColumnId) => columns.find((c) => c.id === id)?.cards ?? [];
-  const proposals = real("decide").filter((c) => c.kind === "proposal").length;
   const out: Record<ColumnId, PlacedGhost[]> = { decide: [], todo: [], doing: [], done: [] };
   for (const a of announcements) {
     const card = announcedCard(a, asking);
     if (a.kind === "task") out.todo.push({ card, index: real("todo").length });
     else if (a.kind === "check") out.doing.push({ card, index: real("doing").length });
-    else out.decide.push({ card, index: a.kind === "proposal" ? proposals : real("decide").length });
+    else out.decide.push({ card, index: real("decide").length });
   }
-  // Proposals stand before Drifts even when they were announced after them, as the real cards do.
-  out.decide = [...out.decide.filter((g) => g.card.kind === "proposal"), ...out.decide.filter((g) => g.card.kind === "drift")];
   return out;
 }
 

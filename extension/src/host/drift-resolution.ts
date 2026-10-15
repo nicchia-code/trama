@@ -30,6 +30,8 @@ export interface Job {
 const jobs = new Set<Job>();
 const remoteJobs = new Map<string, Job>();
 const knownJobs = new Set<string>();
+/** The kind of every job this window knows of, by key: an interrupted pre-flight counts only for a Run, whichever window started it. */
+const jobKinds = new Map<string, JobKind>();
 const knownJobOrigins = new Map<string, JobOrigin>();
 const pendingChecks = new Map<string, Record<string, unknown>>();
 const listeners = new Set<() => void>();
@@ -58,10 +60,16 @@ export function localProjectJobs(root: string): Job[] {
   return [...jobs].filter((job) => projectRootKey(job.root) === key);
 }
 
+/** Which of Drift resolution and a run are going in this window; both may hold at once. Under `disabled` (`shared` false) other windows' jobs are not seen. */
+export function driftWork(root?: string, shared = true): { resolving: boolean; running: boolean } {
+  const all = root === undefined ? [...jobs, ...(shared ? remoteJobs.values() : [])] : activeProjectJobs(root, shared);
+  return { resolving: all.some((j) => j.kind === "resolve"), running: all.some((j) => j.kind === "run") };
+}
+
 /** Resolve Drifts and Runs are exclusive; scans remain visible to the autopilot barrier but do not block manual actions. Under `disabled` (`shared` false) other windows' jobs are not seen. */
 export function driftResolution(root?: string, shared = true): DriftResolution {
-  const all = root === undefined ? [...jobs, ...(shared ? remoteJobs.values() : [])] : activeProjectJobs(root, shared);
-  return all.some((j) => j.kind === "resolve") ? "resolving" : all.some((j) => j.kind === "run") ? "running-tasks" : "free";
+  const work = driftWork(root, shared);
+  return work.resolving ? "resolving" : work.running ? "running-tasks" : "free";
 }
 
 /** The panel and the launches hear of every change of `driftResolution()`. */
@@ -96,6 +104,10 @@ export function receiveCoordinatorMessage(message: Record<string, unknown>): voi
     receiveAutopilotFailure(message);
     return;
   }
+  if (message["type"] === "interrupted-preflight") {
+    receiveInterruptedPreflight(message);
+    return;
+  }
   if (message["type"] === "check") {
     const root = message["root"];
     if (typeof root === "string") setCoordinatorAvailable(root, true);
@@ -108,6 +120,7 @@ export function receiveCoordinatorMessage(message: Record<string, unknown>): voi
   const place = message["place"];
   if ((kind !== "run" && kind !== "resolve" && kind !== "scan") || typeof active !== "boolean") return;
   const key = `${projectRootKey(message["root"])}\n${message["id"]}`;
+  jobKinds.set(key, kind);
   if (!active) {
     const abnormal = message["abnormal"];
     if (typeof abnormal === "string") abnormalEnds.set(key, abnormal);
@@ -190,8 +203,10 @@ function receiveCheck(message: Record<string, unknown>): void {
   const developerScan = knownJobOrigins.get(jobKey) === "manual" && scanActive;
   let failures = scanFailures.get(key);
   if (failures === undefined) scanFailures.set(key, failures = new Map());
-  // A check declared after its scan ended, or a Run's final check, proves neither success nor the end of a scan: it lifts no wait.
-  if (phase === "scanning" && failed) {
+  // A check declared after its scan ended proves neither success nor the end of a scan: it lifts no wait. A failed final check of an automatic Run is recorded as that case's failure; the completed cases stand and the next collections are not held.
+  if (phase === "verifying" && failed && knownJobOrigins.get(jobKey) === "automatic") {
+    recordRunFailure(key, job, title);
+  } else if (phase === "scanning" && failed) {
     setScanFailure(failures, job, title);
     if (developerScan) failedCases.delete(key);
   } else if (phase === "scanning" && scanActive) {
@@ -209,6 +224,13 @@ function receiveCheck(message: Record<string, unknown>): void {
   changed();
 }
 
+/** A failed final check of an automatic Run is shown with its case and reason; it changes no other state. */
+function recordRunFailure(key: string, job: string, title: string): void {
+  let cases = failedCases.get(key);
+  if (cases === undefined) failedCases.set(key, cases = new Map());
+  cases.set(`run:${job}`, { job, title: `${title}: the final check failed`, reason: "the final check of this automatic Run failed; the Tasks already done are not undone" });
+}
+
 /** A scan that ends unsuccessfully is shown in the status but still counts as finished for the barrier. */
 function noteScanFailure(key: string, job: string, title: string): void {
   let failures = scanFailures.get(key);
@@ -216,6 +238,20 @@ function noteScanFailure(key: string, job: string, title: string): void {
   setScanFailure(failures, job, title);
   if (knownJobOrigins.get(`${key}\n${job}`) === "manual") failedCases.delete(key);
   readyProjects.add(key);
+}
+
+/** A pre-flight that its Run ended without declaring is a failed scan, titled as its check, whichever window followed the Run; the Run and the delegation go on. */
+function receiveInterruptedPreflight(message: Record<string, unknown>): void {
+  const root = message["root"];
+  const job = message["job"];
+  const title = message["title"];
+  if (typeof root !== "string" || typeof job !== "string" || typeof title !== "string") return;
+  const key = projectRootKey(root);
+  if (jobKinds.get(`${key}\n${job}`) !== "run") return;
+  let failures = scanFailures.get(key);
+  if (failures === undefined) scanFailures.set(key, failures = new Map());
+  setScanFailure(failures, job, title);
+  changed();
 }
 
 /** The end of a scan lifts the initial wait with any outcome; a scan that ended without a successful check is also shown as failed. */
@@ -326,6 +362,8 @@ export function forgetWindow(root: string, windowId: string): void {
   for (const [jobKey, job] of remoteJobs) {
     if (projectRootKey(job.root) !== key || job.windowId !== windowId) continue;
     remoteJobs.delete(jobKey);
+    // A window that vanished cannot report how its job ended: the job ends abnormally, so an automatic Run fails its unfinished Tasks with this reason.
+    abnormalEnds.set(`${key}\n${job.id}`, "the editor window was lost");
     if (job.kind === "scan") noteScanEnd(key, job.id);
   }
   changed();
@@ -437,14 +475,27 @@ export function driftAutopilotStatus(root: string, mode: DriftAutopilotMode, win
   const status = { mode, failures, ...(remoteWindow ? { remoteWindow: true } : {}) };
   if (mode === "disabled") return { ...status, phase: "manual", reason: null };
   if (coordinatorFailures.has(projectRootKey(root))) return { ...status, phase: "suspended", reason: "The project coordinator is unavailable" };
+  if (unverifiedJobs.has(projectRootKey(root))) return { ...status, phase: "suspended", reason: "Not every live editor window answered the jobs request" };
   if (heldProjects.get(projectRootKey(root)) === mode) return { ...status, phase: "suspended", reason: "An automatic start did not reach the agent; Resolve Drifts or a scan resumes it" };
   if (jobs.some((job) => job.kind === "resolve")) return { ...status, phase: "preparing", reason: "Preparing a Drift resolution" };
-  if (jobs.some((job) => job.kind === "run")) return { ...status, phase: "executing", reason: "Running authorized corrections" };
+  if (jobs.some((job) => job.kind === "run" && job.origin === "automatic")) return { ...status, phase: "executing", reason: "Running authorized corrections" };
+  // A manual Run follows its own rules and grants no authorization.
+  if (jobs.some((job) => job.kind === "run")) return { ...status, phase: "manual", reason: "A manual Run is in progress: it grants no authorized corrections" };
   if (jobs.length > 0) return { ...status, phase: "waiting", reason: "Waiting for Trama scans" };
   return { ...status, phase: "idle", reason: autopilotReady(root) ? "Waiting for eligible Drifts" : "Waiting for an explicit scan or Resolve Drifts request" };
 }
 
 const coordinatorFailures = new Set<string>();
+/** Projects where a live editor window did not answer the last jobs request: its jobs are unknown, so no automatic step is granted. */
+const unverifiedJobs = new Set<string>();
+
+/** Records whether every live editor window answered the last jobs request of the project; an unverified picture withholds automatic steps. */
+export function setJobsVerified(root: string, verified: boolean): void {
+  const key = projectRootKey(root);
+  const didChange = verified ? unverifiedJobs.delete(key) : !unverifiedJobs.has(key);
+  if (!verified) unverifiedJobs.add(key);
+  if (didChange) changed();
+}
 
 /** Hooked terminal jobs end only when the hook reports idle or the terminal closes. */
 const hooked = new Set<string>();
@@ -492,6 +543,7 @@ export function startJob(
   jobs.add(job);
   const key = `${projectRootKey(root)}\n${id}`;
   knownJobs.add(key);
+  jobKinds.set(key, kind);
   knownJobOrigins.set(key, origin);
   const pendingCheck = pendingChecks.get(key);
   if (pendingCheck !== undefined) {

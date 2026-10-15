@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { dirname, join, resolve, sep } from "node:path";
 import { parse, stringify } from "yaml";
 import { TramaError } from "./errors";
-import { asObject, type Raw } from "./schema";
+import { asObject, compareByCreation, type Raw } from "./schema";
 import { buildModel } from "./model";
 import type { FileMap, Model } from "./types";
 
@@ -29,6 +29,9 @@ export function findProject(start: string): Project {
 
 export const modelDir = (p: Project) => join(p.dir, "model");
 
+/** A file's text with LF line endings: the one read that content comparisons (installed skills, `.trama/` files, hashes) go through, so a CRLF checkout compares like Linux. */
+export const readTextLf = (path: string): string => readFileSync(path, "utf8").replace(/\r\n?/g, "\n");
+
 /** Every non-hidden file under `dir`, keyed by `/`-separated relative path, with LF line endings so a CRLF checkout hashes and compares like Linux. */
 export function readTree(dir: string): FileMap {
   const files: FileMap = new Map();
@@ -37,7 +40,7 @@ export function readTree(dir: string): FileMap {
       if (entry.name.startsWith(".")) continue;
       const childRel = rel ? `${rel}/${entry.name}` : entry.name;
       if (entry.isDirectory()) visit(join(abs, entry.name), childRel);
-      else files.set(childRel, readFileSync(join(abs, entry.name), "utf8").replace(/\r\n?/g, "\n"));
+      else files.set(childRel, readTextLf(join(abs, entry.name)));
     }
   };
   if (existsSync(dir)) visit(dir, "");
@@ -92,7 +95,7 @@ export interface Document {
 
 export function readDocument(path: string): Document {
   if (!existsSync(path)) throw new TramaError(`${path}: file not found`);
-  const text = readFileSync(path, "utf8").replace(/\r\n?/g, "\n");
+  const text = readTextLf(path);
   const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
   if (!m) throw new TramaError(`${path}: missing YAML front matter`);
   let data: unknown;
@@ -182,11 +185,12 @@ export function randomCardId(): string {
 }
 
 /**
- * A fresh identity for one card in `dir`, not already used by a card of the same kind.
+ * A fresh identity for one card, not already used by a card of the same kind in any of `dirs`.
  * `draw` is the source of randomness; the default draws eight lowercase letters and digits.
  */
-export function newCardId(dir: string, layout: CardLayout, kind: string, draw: () => string = randomCardId): string {
-  const used = new Set(listCards(dir, layout).map((c) => c.id));
+export function newCardId(dirs: string | readonly string[], layout: CardLayout, kind: string, draw: () => string = randomCardId): string {
+  const folders = typeof dirs === "string" ? [dirs] : dirs;
+  const used = new Set(folders.flatMap((dir) => listCards(dir, layout).map((c) => c.id)));
   for (let attempt = 0; attempt < 64; attempt++) {
     const id = draw();
     if (/^[a-z0-9]{8}$/.test(id) && !used.has(id)) return id;
@@ -207,19 +211,6 @@ export function createdNow(): string {
 /** `items` in creation order. `card` reads the identity and the instant each item remembers. */
 export function byCreation<T>(items: readonly T[], card: (item: T) => { id: string; created: string | null }): T[] {
   return [...items].sort((a, b) => compareByCreation(card(a), card(b)));
-}
-
-/**
- * Oldest first. A numbered card, which has no instant, comes before every card that remembers one; numbered cards
- * are ordered by that number. Cards that remember an instant are ordered by it, and by identity when the instant is the same.
- */
-export function compareByCreation(a: { id: string; created: string | null }, b: { id: string; created: string | null }): number {
-  const group = (c: { id: string; created: string | null }) => (c.created === null && /^\d+$/.test(c.id) ? 0 : c.created === null ? 1 : 2);
-  const byGroup = group(a) - group(b);
-  if (byGroup !== 0) return byGroup;
-  if (a.created === null && b.created === null && /^\d+$/.test(a.id) && /^\d+$/.test(b.id)) return Number(a.id) - Number(b.id);
-  if (a.created !== null && b.created !== null && a.created !== b.created) return a.created.localeCompare(b.created);
-  return a.id.localeCompare(b.id);
 }
 
 function matchingIds(kind: string, query: string, hits: CardEntry[]): never {

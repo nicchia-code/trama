@@ -98,3 +98,16 @@ export function textOrNull(raw: Raw, key: string, where: string): string | null 
   if (typeof v === "string") return v;
   throw new TramaError(`${where}: "${key}" must be text, found ${describe(v)}`);
 }
+
+/**
+ * Oldest first. A numbered card, which has no instant, comes before every card that remembers one; numbered cards
+ * are ordered by that number. Cards that remember an instant are ordered by it, and by identity when the instant is the same.
+ */
+export function compareByCreation(a: { id: string; created: string | null }, b: { id: string; created: string | null }): number {
+  const rankA = a.created !== null ? 2 : /^\d+$/.test(a.id) ? 0 : 1;
+  const rankB = b.created !== null ? 2 : /^\d+$/.test(b.id) ? 0 : 1;
+  if (rankA !== rankB) return rankA - rankB;
+  if (a.created === null && b.created === null && /^\d+$/.test(a.id) && /^\d+$/.test(b.id)) return Number(a.id) - Number(b.id);
+  if (a.created !== null && b.created !== null && a.created !== b.created) return a.created.localeCompare(b.created);
+  return a.id.localeCompare(b.id);
+}

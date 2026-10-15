@@ -18,6 +18,7 @@ import {
 import { cardName } from "../src/core/short-numbers";
 import { loadModel, type Project, projectAt } from "../src/core/store";
 import { newDrift, resolveDrift } from "../src/core/work";
+import { coverWithTask } from "./cover";
 
 let dir: string;
 let p: Project;
@@ -43,7 +44,7 @@ describe("a Proposal the agent is still writing", () => {
     expect(getProposal(p, prop.id).data.status).toBe("draft");
     expect(() => approveProposal(p, prop.id)).toThrow(/still being written/);
     expect(() => rejectProposal(p, prop.id, "no")).toThrow(/still being written/);
-    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Lost", refs: ["order"], proposal: prop.id, happens: "The code does it one way.", should: "The Model says another." });
+    const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Lost", refs: ["order"], proposal: prop.id, happens: "The code does it one way.", should: "The Model says another." });
     expect(() => resolveDrift(p, drift.id, "accept-proposal")).toThrow(/still being written/);
     expect(getProposal(p, prop.id).data.status).toBe("draft");
   });
@@ -60,6 +61,7 @@ describe("handing over", () => {
   test("makes the Draft open, and it can then be approved", () => {
     const prop = newProposal(p, "Lost");
     writeOrder(prop.id);
+    coverWithTask(p, prop.id, "checkout");
     expect(submitProposal(p, prop.id).data.status).toBe("open");
     approveProposal(p, prop.id);
     expect(loadModel(p).machines.get("order")?.states.some((s) => s.name === "Lost")).toBe(true);
@@ -94,6 +96,7 @@ describe("handing over", () => {
     expect(readFileSync(order, "utf8")).toBe(addLost(original));
     expect(health(p, getProposal(p, prop.id)).stale).toEqual([]);
     expect(getProposal(p, prop.id).data.base["checkout/ghost.md"]).toBe("new");
+    coverWithTask(p, prop.id, "checkout");
     expect(submitProposal(p, prop.id).data.status).toBe("open");
   });
 
@@ -134,6 +137,7 @@ describe("changing a Proposal after the hand-over", () => {
   test("registering, rewriting or deleting a file sends an open Proposal back to Draft", () => {
     const prop = newProposal(p, "Lost");
     writeOrder(prop.id);
+    coverWithTask(p, prop.id, "checkout");
     submitProposal(p, prop.id);
     editInProposal(p, prop.id, "checkout/order.md");
     expect(getProposal(p, prop.id).data.status).toBe("draft");
@@ -147,6 +151,7 @@ describe("changing a Proposal after the hand-over", () => {
   test("a refused edit leaves an open Proposal open", () => {
     const prop = newProposal(p, "Lost");
     writeOrder(prop.id);
+    coverWithTask(p, prop.id, "checkout");
     submitProposal(p, prop.id);
     expect(() => editInProposal(p, prop.id, "../../../etc/passwd.md")).toThrow();
     expect(() => deleteInProposal(p, prop.id, "checkout/order.md")).toThrow(/already edited/);
@@ -184,7 +189,7 @@ describe("discarding", () => {
     writeOrder(base.id);
     const top = newProposal(p, "Top", "", { requires: [base.id] });
     submitProposal(p, top.id);
-    const drift = newDrift(p, { options: FIX_OPTIONS, title: "Lost", refs: ["order"], proposal: base.id, happens: "The code does it one way.", should: "The Model says another." });
+    const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Lost", refs: ["order"], proposal: base.id, happens: "The code does it one way.", should: "The Model says another." });
     discardProposal(p, base.id);
 
     expect(health(p, getProposal(p, top.id)).requires).toEqual([{ id: base.id, title: "Base", status: "discarded" }]);

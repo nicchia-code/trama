@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import design from "../../skills/trama-design/SKILL.md" with { type: "text" };
 import designFormat from "../../skills/trama-design/FORMAT.md" with { type: "text" };
@@ -7,7 +7,7 @@ import importSkill from "../../skills/trama-import/SKILL.md" with { type: "text"
 import resolveDrifts from "../../skills/trama-resolve-drifts/SKILL.md" with { type: "text" };
 import scan from "../../skills/trama-scan/SKILL.md" with { type: "text" };
 import { SKILL_DIRS } from "../core/requirement-skills";
-import { writeFileEnsuringDir } from "../core/store";
+import { readTextLf, writeFileEnsuringDir } from "../core/store";
 import { SUB_AGENTS } from "../core/sub-agents";
 
 /** Skill files, embedded in the binary: path relative to the skills directory -> content. */
@@ -44,7 +44,7 @@ export function removeRetiredSkills(root: string, extraDirs: string[] = []): str
 export function skillConflicts(dir: string): string[] {
   return Object.entries(SKILLS)
     .map(([rel, content]) => ({ path: join(dir, rel), content }))
-    .filter(({ path, content }) => existsSync(path) && readFileSync(path, "utf8") !== content)
+    .filter(({ path, content }) => existsSync(path) && readTextLf(path) !== content)
     .map(({ path }) => path);
 }
 
@@ -55,13 +55,15 @@ export function missingSkills(dir: string): string[] {
     .filter((path) => !existsSync(path));
 }
 
-/** Writes the skills under `dir`, replacing any previous copy; returns the written paths. */
+/** Writes `content` to `path` unless the file already holds it, so an install leaves unchanged files alone; returns `path`. */
+function writeIfChanged(path: string, content: string): string {
+  if (!existsSync(path) || readTextLf(path) !== content) writeFileEnsuringDir(path, content);
+  return path;
+}
+
+/** Writes the skills under `dir`, replacing any previous copy whose content differs; returns every skill path. */
 export function installSkills(dir: string): string[] {
-  return Object.entries(SKILLS).map(([rel, content]) => {
-    const path = join(dir, rel);
-    writeFileEnsuringDir(path, content);
-    return path;
-  });
+  return Object.entries(SKILLS).map(([rel, content]) => writeIfChanged(join(dir, rel), content));
 }
 
 /** omp's default role for the Machine-comparison sub-agent; Trama passes `--slow` with the scan model when set. */
@@ -80,14 +82,11 @@ export function ompAgentFiles(root: string): Record<string, string> {
 /** Existing omp sub-agent definitions under `root` whose content differs from ours, i.e. what an install would destroy. */
 export function ompAgentConflicts(root: string): string[] {
   return Object.entries(ompAgentFiles(root))
-    .filter(([path, content]) => existsSync(path) && readFileSync(path, "utf8") !== content)
+    .filter(([path, content]) => existsSync(path) && readTextLf(path) !== content)
     .map(([path]) => path);
 }
 
-/** Writes omp's definitions of the scan's sub-agents into the project's `.omp/agents/`, replacing any previous copy; returns the written paths. */
+/** Writes omp's definitions of the scan's sub-agents into the project's `.omp/agents/`, replacing any previous copy whose content differs; returns every path. */
 export function installOmpAgents(root: string): string[] {
-  return Object.entries(ompAgentFiles(root)).map(([path, content]) => {
-    writeFileEnsuringDir(path, content);
-    return path;
-  });
+  return Object.entries(ompAgentFiles(root)).map(([path, content]) => writeIfChanged(path, content));
 }

@@ -17,6 +17,23 @@ function controlledWindow() {
 }
 
 describe("window question rounds", () => {
+  test("busy and onIdle track the admitted round until its answer is delivered", async () => {
+    let idle = 0;
+    const sessions: { complete: (result: CompletedQuestionRound) => void }[] = [];
+    const queue = new QuestionRoundQueue((_request, _context) => {
+      const { promise, resolve } = Promise.withResolvers<CompletedQuestionRound>();
+      sessions.push({ complete: resolve });
+      return promise;
+    }, () => { idle += 1; });
+    expect(queue.busy).toBe(false);
+    const asked = queue.ask(round("direction"), { });
+    expect(queue.busy).toBe(true);
+    sessions[0]!.complete(answer);
+    expect(await asked).toEqual(answer);
+    expect(queue.busy).toBe(false);
+    expect(idle).toBe(1);
+  });
+
   test("cancelling a queued caller preserves the active round; cancelling the active caller advances FIFO and ignores its late answer", async () => {
     const { queue, sessions } = controlledWindow();
     const first = new AbortController();
@@ -63,5 +80,19 @@ describe("window question rounds", () => {
     expect(await c).toEqual(answer);
     expect(await left.queue.ask(round("D"), {})).toMatchObject({ status: "unavailable" });
     right.queue.dispose();
+  });
+
+  test("rounds of different presenters share one window queue: a round asked with another presenter waits for the one in progress", async () => {
+    const queue = new QuestionRoundQueue(() => new Promise(() => {}));
+    const shown: string[] = [];
+    const firstGate = Promise.withResolvers<CompletedQuestionRound>();
+    const first = queue.ask(round("A"), {}, () => { shown.push("old project"); return firstGate.promise; });
+    const second = queue.ask(round("B"), {}, () => { shown.push("new project"); return Promise.resolve(answer); });
+    expect(shown).toEqual(["old project"]);
+    firstGate.resolve(answer);
+    expect(await first).toEqual(answer);
+    expect(await second).toEqual(answer);
+    expect(shown).toEqual(["old project", "new project"]);
+    queue.dispose();
   });
 });

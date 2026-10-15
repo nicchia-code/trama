@@ -87,7 +87,7 @@ export const mountDiagram: MountView = (root, context) => {
   const canvas = createCanvas(stage, $("div.dg-canvas"), {
     select: (id) => selectId(id),
     drill: (id) => {
-      const target = graph && drillTarget(graph, id);
+      const target = scene && graph && drillTarget(scene, graph, id);
       if (target) setLevel(target);
     },
     toggle: (id) => {
@@ -206,14 +206,19 @@ export const mountDiagram: MountView = (root, context) => {
     draw(true);
   }
 
-  /** Goes to where the open Drift is drawn (the level of its first reference that resolves) and selects it. */
+  /**
+   * Goes to where the open Drift is drawn (the level of its first reference that resolves) and selects it. A Drift that
+   * points at no Model element is drawn floating on the System level, and that is where it is selected.
+   */
   function navigateDrift(id: string) {
     compute();
     const drift = scene?.drifts.find((d) => d.id === id);
     if (!scene || !drift) return draw(false);
     const ref = drift.refs.find((r) => resolveElement(scene as Scene, r) !== null);
-    if (ref) navigateRef(ref, id);
-    else draw(false);
+    if (ref) return navigateRef(ref, id);
+    level = { kind: "system" };
+    selected = `d:${id}`;
+    draw(true);
   }
 
   function apply(options: NavigateOptions) {

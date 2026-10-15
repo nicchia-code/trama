@@ -68,7 +68,7 @@ test("handing an automatic resolution over relays its id to the coordinator", as
   const received: Record<string, unknown>[] = [];
   server = await createQuestionServer({ project: projectAt(projectRoot), runtimeDir, handler: async () => ({ status: "unavailable", reason: "No project coordinator is available." }), onCoordinatorMessage: (message) => { received.push(message); } });
   const project = projectAt(projectRoot);
-  const finding = newDrift(project, { title: "Finding", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: FIX_OPTIONS });
+  const finding = newDrift(project, { where: "src/refund.ts", title: "Finding", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: FIX_OPTIONS });
   const proposal = newProposal(project, "Resolve", "", { kind: "resolution", automatic: true });
   resolveDriftInProposal(project, proposal.id, finding.id, { decision: "fix-code", option: 1 });
 

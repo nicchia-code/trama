@@ -3,7 +3,7 @@ import { TramaError, UsageError } from "../core/errors";
 import { settleCoordinatorMessages } from "../core/question-channel";
 import { questionAborted, questionFailure } from "../core/questions";
 import { completeFixChoice } from "./fix-prompt";
-import { agentEventCommand, agentVariable, asyncCommand, autopilotCommand, helpFor, reportActivity, run, runAgentEvent, runAsk, runAutopilot, runCopilotHook, runCursorHook } from "./main";
+import { agentEventCommand, asyncCommand, autopilotCommand, helpFor, reportActivity, run, runAgentEvent, runAsk, runAutopilot, runCopilotHook, runCursorHook } from "./main";
 
 try {
   const argv = process.argv.slice(2);
@@ -75,8 +75,8 @@ try {
     }
     process.exit(result.exit);
   }
-  // An agent never decides on a Drift, and without a terminal there is nobody to ask: `run` then refuses a fix without an option.
-  const interactive = process.stdin.isTTY && process.stdout.isTTY && !agentVariable(process.env);
+  // Without a terminal there is nobody to ask: `run` then refuses a fix without an option.
+  const interactive = process.stdin.isTTY && process.stdout.isTTY;
   const { out, exit } = run(interactive ? await completeFixChoice(argv, process.cwd(), { input: process.stdin, output: process.stdout }) : argv, process.cwd());
   console.log(out);
   if (exit === 0) await reportActivity(argv, process.cwd());

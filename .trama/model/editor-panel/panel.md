@@ -1,6 +1,6 @@
 # Panel
 
-The editor tab that holds Trama's three views. There is at most one panel; opening it again brings it to the front. While it is open, a hidden tab keeps what the developer was looking at. La scheda porta il nome del Sistema del Modello, non «Trama»: con il Modello vuoto, o senza un nome del Sistema, porta il nome della cartella del progetto; se il nome del Sistema cambia, la scheda lo segue.
+La scheda dell'editor che contiene le quattro viste di Trama: Diagramma, Board, Requisiti e impostazioni. There is at most one panel; opening it again brings it to the front. While it is open, a hidden tab keeps what the developer was looking at. La scheda porta il nome del Sistema del Modello, non «Trama»: con il Modello vuoto, o senza un nome del Sistema, porta il nome della cartella del progetto; se il nome del Sistema cambia, la scheda lo segue.
 
 ## States
 
@@ -19,6 +19,8 @@ Mentre un round di domande dell'agente è aperto, compare in un overlay sopra qu
 - `developer.SHOW_DIAGRAM` → Diagram
 - `developer.SHOW_BOARD` → Board
 - `developer.SHOW_REQUIREMENTS` → Requirements
+- `developer.SHOW_SETTINGS` → Settings
+- `editor.SETTINGS_CHANGED` → Open: la scheda Settings mostra subito i nuovi valori, anche quando è nascosta, e i pulsanti della Board che dipendono dalle impostazioni si aggiornano. Un campo che il developer sta scrivendo e non ha ancora confermato non viene sovrascritto.
 - `workspace.MODEL_CHANGED` → Open: after a short pause, one fresh picture is sent to the three tabs. If the files cannot be read, the error is shown and every tab keeps its last picture. If the files read fine but the Model or its Requirements are invalid, a banner counts the errors and links to each one, and the Diagram may be incomplete.
 
 #### Diagram (initial)
@@ -27,7 +29,7 @@ The Model drawn one level at a time, with a selector to draw an open Proposal ov
 Una Proposal allegata a un Drift aperto non compare nel selettore: il developer non la vede (vedi il Drift).
 
 #### Board
-Quattro colonne: To decide (le Proposal aperte, poi i Drift aperti che non stanno in una risoluzione consegnata), To do, In progress e Done (i Task). Le Proposal ancora in scrittura non sono schede e non contano fra ciò che aspetta una decisione. Una Proposal di risoluzione consegnata e i suoi Drift sono una sola scheda, contata una volta nel numero della colonna e della tab Board. Le schede portano al Diagramma. I pulsanti chiedono all'agente di realizzare tutti i Task in To do, scansionare il Sistema o progettare una modifica; il pulsante dello scan globale porta il numero di Task finiti dall'ultimo scan globale. Resolve Drifts chiede all'agente di risolvere insieme tutti i Drift aperti (vedi Drift resolution).
+Quattro colonne: To decide (le Proposal aperte e i Drift aperti che non stanno in una risoluzione consegnata, insieme in ordine di creazione), To do, In progress e Done (i Task). Le Proposal ancora in scrittura non sono schede e non contano fra ciò che aspetta una decisione. Una Proposal di risoluzione consegnata e i suoi Drift sono una sola scheda, contata una volta nel numero della colonna e della tab Board. Le schede portano al Diagramma. I pulsanti chiedono all'agente di realizzare tutti i Task in To do, scansionare il Sistema o progettare una modifica; il pulsante dello scan globale porta il numero di Task finiti dall'ultimo scan globale. Resolve Drifts chiede all'agente di risolvere insieme tutti i Drift aperti (vedi Drift resolution).
 
 Una Proposal allegata a un Drift aperto non è una scheda di To decide, non conta fra ciò che aspetta una decisione e non compare nemmeno dentro il Drift. La scheda rossa di un Drift mostra il titolo, i riferimenti collegati al Diagramma o ai Requisiti e i due lati, senza Fix options né pulsanti per decidere. Una Proposal di risoluzione consegnata sostituisce le schede rosse dei Drift aperti che elenca con un'unica scheda gialla: in testa la Proposal con il titolo, i file e i controlli di approvazione e rifiuto di sempre; sotto, le righe dei Drift con la decisione e il collegamento ai dettagli nel Diagramma. Non ripete i due lati dei Drift. Una risoluzione in scrittura non unifica le schede. Se torna in scrittura, è rifiutata o scartata, i Drift ancora aperti tornano schede rosse. I Drift restano visibili nel Diagramma e bloccano i Task fino alla decisione, anche mentre sono raccolti nella scheda gialla.
 
@@ -45,3 +47,7 @@ Every Task, on its own card or inside a design card, has a status dot that tells
 
 #### Requirements
 Le Aree dei Requisiti, ciascuna con i suoi frammenti e, dentro ogni frammento, le sue sezioni, and what an open Proposal would change in them (never one the agent is still writing), anche quando sposta una sezione da un frammento a un altro.
+
+#### Settings
+Le impostazioni di Trama, tutte quelle che l'estensione dichiara, in gruppi con titolo: Agent, Models, Drift autopilot, Runs e Project. Ogni impostazione ha un titolo leggibile, con accanto una «i» informativa; la chiave tecnica dell'impostazione non compare, perché la scheda serve proprio a non dover aprire il file delle impostazioni. La spiegazione non è sempre visibile: compare in un fumetto quando il developer passa sulla «i» o le dà il fuoco da tastiera, ed è la stessa delle impostazioni dell'editor; per una scelta fra valori fissi il fumetto spiega anche ogni valore, con quello scelto evidenziato. Il fumetto resta aperto finché il puntatore è sulla «i» o sul fumetto stesso, così i suoi link si possono aprire, e si chiude quando il puntatore li lascia, quando la «i» perde il fuoco o con Esc; un solo fumetto è aperto alla volta. Una scelta fra valori fissi è un menu a tendina; un sì o no è una casella di spunta; un numero è un campo numerico; un testo libero è un campo di testo. La scheda mostra sempre il valore delle impostazioni utente del developer; per le impostazioni che valgono anche nel workspace, quando un valore del workspace prevale, un avviso dice quale valore vale davvero.
+- `developer.CHANGE_SETTING` → Settings: il valore è salvato subito nelle impostazioni utente, mai in quelle del workspace; un campo di testo conferma quando perde il fuoco o con Invio. Scegliere il valore predefinito, o lasciare vuoto un testo libero, toglie il valore dalle impostazioni utente. Un valore non valido non si salva: il campo mostra perché e il valore salvato resta quello di prima. Se la scrittura fallisce, l'errore è mostrato e il controllo torna al valore che vale davvero. Se il cambiamento aumenta la delega dei Drift, prima un dialogo modale dell'editor chiede conferma: annullare non salva nulla e il menu torna al valore di prima; ridurre la delega non chiede conferma. Un cambiamento salvato della delega è il cambio di delega del developer (vedi Drift resolution).

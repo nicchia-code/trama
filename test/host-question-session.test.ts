@@ -121,3 +121,25 @@ test("the panel's question actions are checked as untrusted input", () => {
   expect(parseToHost({ type: "questionAction", round: 3, action: { type: "toggleOption", option: "1" } }).ok).toBe(false);
   expect(parseToHost({ type: "questionAction", round: 3, action: { type: "explode" } }).ok).toBe(false);
 });
+
+test("a round of another project stays out of sight and comes back with its answers", async () => {
+  const { s, reveals } = session();
+  s.setProject("a");
+  const answered = s.presentFor("a")(request(), { signal: new AbortController().signal });
+  expect(reveals()).toBe(1);
+  const id = s.current()?.id as number;
+  s.act(id, { type: "setText", text: "kept" });
+
+  s.setProject("b");
+  expect(s.current()).toBeNull();
+  s.act(id, { type: "skip" }); // nothing reaches the round while it is out of sight
+
+  s.setProject("a");
+  expect(reveals()).toBe(2);
+  expect(s.current()?.state.drafts[0]).toEqual({ selected: [0], text: "kept" });
+  s.act(id, { type: "next" });
+  s.act(id, { type: "skip" });
+  s.act(id, { type: "send" });
+  expect(await answered).toEqual({ status: "answered", answers: { q1: { status: "answered", selected: ["A"], text: "kept" }, q2: { status: "skipped" } } });
+  expect(s.current()).toBeNull();
+});
