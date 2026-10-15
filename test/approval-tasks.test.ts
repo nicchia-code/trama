@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { coverWithTask } from "./cover";
@@ -38,6 +38,7 @@ describe("Tasks created when an ordinary Proposal is approved", () => {
     const file = editInProposal(p, prop.id, "tasks/clash.md");
     writeFileSync(file, "---\ntechnical: false\nrefs: [order]\n---\n\n# Clash\n");
     const taken = basename(file).slice(0, 8);
+    mkdirSync(join(p.dir, "tasks"), { recursive: true });
     writeFileSync(join(p.dir, "tasks", `${taken}-already.md`), "---\ncolumn: todo\nrefs: [order]\n---\n\n# Already\n");
     submitProposal(p, prop.id);
     const before = readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8");
