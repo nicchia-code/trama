@@ -11,10 +11,14 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 
 ## design-request
 
-- Le richieste di design hanno due pulsanti, uno accanto all'altro, in ogni barra che oggi ha «Design…» (Diagram, Board e Requirements): «Quick request…» apre la casella di una riga di oggi, con titolo «Quick Design Request», e «Design…» apre il documento Markdown della richiesta scritta. Il tooltip di «Quick request…» è «Ask an agent to design a change in one line»; quello di «Design…» è «Write a design request in Markdown and send it to an agent».
+- Le richieste di design hanno due pulsanti, uno accanto all'altro, nella barra della Board, l'unica che li ha: il Diagramma e la scheda Requirements non hanno pulsanti per progettare una modifica: «Quick request…» apre la casella di una riga di oggi, con titolo «Quick Design Request», e «Design…» apre il documento Markdown della richiesta scritta. Il tooltip di «Quick request…» è «Ask an agent to design a change in one line»; quello di «Design…» è «Write a design request in Markdown and send it to an agent».
 - Nella palette i comandi sono «Trama: Quick Design Request…» (la casella) e «Trama: Design…» (il documento). Il comando «Trama: Design with Agent…» non esiste più.
 - Il pulsante della scheda si chiama «Send to agent», con l'icona `send` del tema dell'editor, e compare solo sulle schede delle richieste mai inviate. Il suo tooltip è «Send to agent (closing the tab sends it too)».
-- Il documento nuovo è completamente vuoto: nessun testo segnaposto, nessun commento, nessun modello. La scheda mostra il nome del file, cioè data e ora.
+- Il file nuovo è completamente vuoto: nessun testo segnaposto, nessun commento, nessun modello. La scheda mostra il nome del file, cioè data e ora; questo vale anche per la richiesta di setup di Start from Scratch.
+- Testo fantasma, solo visivo e mai nel file, all'inizio della prima riga, grigio (il colore del testo disattivato del tema dell'editor), su una sola riga:
+  - richiesta di Design…: «Describe the change to design: behaviour, edge cases, requirements. Close this tab or press Send to agent when you are done.»
+  - richiesta di setup: «Describe the application to build: what it does and who it is for. Close this tab or press Send to agent when you are done.»
+- Il testo fantasma si vede solo sulle schede delle richieste mai inviate e solo finché il documento non ha nessun carattere (nemmeno uno spazio o un a capo). Sparisce alla prima battuta e torna se il developer cancella tutto; non si vede mai su una richiesta inviata. È in inglese e non segue `trama.language`.
 - Dopo l'invio non compare nessun messaggio di conferma oltre a quelli della consegna; la scheda è chiusa. Chiudere una richiesta vuota non mostra nessun messaggio.
 
 ## agent-terminal

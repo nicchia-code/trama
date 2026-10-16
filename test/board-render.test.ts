@@ -43,7 +43,7 @@ const proposal: ProposalCard = {
 };
 const task: TaskCard = {
   kind: "task", key: "task:liveTask", id: "liveTask", name: { text: "T3", isNumber: true }, title: "A task", technical: false,
-  refs: [], drift: "liveDrift", driftName: "D4", proposal: null, agent: false, blocks: [{ label: "blocked D4", tooltip: "Blocked by Drift D4", target: { kind: "diagram", drift: "liveDrift" } }],
+  refs: [], drift: "liveDrift", driftName: "D4", proposal: null, proposalTitle: null, proposalName: null, agent: false, blocks: [{ label: "blocked D4", tooltip: "Blocked by Drift D4", target: { kind: "diagram", drift: "liveDrift" } }],
   blockedBy: [], body: "", file: "task.md", column: "todo", finished: null, unchanged: null, autopilotFailed: null,
 };
 

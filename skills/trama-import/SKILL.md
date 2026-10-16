@@ -32,12 +32,13 @@ Every live Proposal and Drift has a temporary **short number** (`P3`, `D2`) besi
 
 - Name Proposals and Drifts to the developer by short number and title, for example "Proposal P3 – Import: title" or "Drift D2 – title", also in the final report. A closed card has no number: use its permanent identity.
 - In every command you run and every file you write (`--requires`, the Proposal bodies, the doubts) use **only the permanent identity**, taken from `--json` (field `id`; the number is the field `number`) or from the file or folder name. **Never write a short number in a file**: it changes from one working copy to another.
+- Give every card you create, and its announcement, a **short title**: at most five words, about 40 characters, a name for the card rather than a sentence describing the work (for example "Testo fantasma" instead of "Descrivere Start from Scratch e guidare le richieste scritte con un testo fantasma"). Put the detail in the body, even when the title loses information. No command checks the length of a title. Titles that Trama or a skill composes from another title stay as they are: `Fix code to match the …`, `Import: <Feature>`, the titles of checks.
 
 ## Language
 
-When the instruction asks you to write in a language, only the prose you produce for Trama goes in that language: the bodies, descriptions and introductions of Proposals, Model files, Requirements, Tasks and Drifts, the text of questions and their options, and your replies in the conversation. Without a language in the instruction, nothing here changes.
+When the instruction asks you to write in a language, everything you generate for Trama that the developer reads goes in that language: the bodies, descriptions and introductions of Proposals, Model files, Requirements, Tasks and Drifts; the titles of Proposals, Tasks, Drifts, Areas and Requirement fragments, and of announcements; the names of the System, Features, Machines, Actors and States; new identifiers (IDs of Features, Machines and Actors, Event names), transliterated into the allowed ASCII letters (`città` → `citta`, an Event `PAGAMENTO_RIUSCITO`); the text of questions and their options, and your replies in the conversation. Without a language in the instruction, nothing here changes.
 
-- **Always in English**, whatever the language: code and its comments, commit messages and the project's own documentation; the names and titles of Model elements, Requirements, Proposals, Tasks and Drifts; IDs, Event names, the section titles Trama requires (for example "General", "What happens", "What should happen", "Where in the code") and the `(initial)` and `(final)` markers.
+- **Always in English**, whatever the language: technical terms are never translated: commands and tools (`git pull`, `npm install`), names of products, services, libraries and languages, and Trama's own terms (Proposal, Task, Drift, Board, Run, Scan). Also always English: code and its comments, commit messages, the project's own documentation; the headers Trama reads in files ("States", "Events", "General", "What happens", "What should happen", "Where in the code", "Fix options", "Already present"), the `(initial)` and `(final)` markers, the keys of Specs and the front matter fields. Trama's interface (panel, editor, command line) stays in English.
 - **A language changes nothing already written.** When you edit a file written in another language, keep its existing text and write only the new or rewritten text in the chosen language; never translate the whole file.
 
 ## Steps
@@ -52,6 +53,7 @@ When the instruction asks you to write in a language, only the prose you produce
    - code that looks like a bug, a missing case or dead code, with its location, where the documentation does not say otherwise;
    - behaviour you could not determine.
    Write "None." if there are none. Documentation differences are Drifts, never doubts.
+   Give each Drift a short title (see Naming cards).
 8. **Validate every Proposal.** `trama validate --proposal <id>` must report no errors. When it warns of a fragment larger than 12 KB that the Proposal writes into, split that fragment in the same Proposal before handing it over: cut by Feature or by a group of nearby Machines, give every new fragment a name and a description that say when it is needed, move the sections without changing their text, and prefer a few medium fragments to many tiny ones (every fragment counts against the 4,000-character budget of the Requirement skills). Then `trama proposal show <id>`: the changes must describe the code and nothing else.
 9. **Hand every Proposal over.** After validation and review, run `trama proposal submit <id>` for each. A dependency need not be approved for submission. Correct any refusal, validate and review again, then retry before continuing.
 10. **Report and stop.** After every submission succeeds, list the Proposals in the order to approve them, with how many doubts each has, the Drifts you filed (each named by short number and title), the differences you could not file yet, the folders you skipped, and any contradiction with Machines that were already modelled (suggest a Scan for those Features). Approving an import Proposal starts no Scan: the Model already matches the code.
@@ -90,7 +92,7 @@ If the developer said not to ask, use your recommendations and list them in the 
 
 ## Autopilot boundary
 
-Import describes existing code and only creates import Proposals and the Drifts of "Drifts for documentation differences"; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.driftAutoPilot` is active, the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.
+Import describes existing code and only creates import Proposals and the Drifts of "Drifts for documentation differences"; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.autoFixDrifts` is on (Auto Fix Drifts checked), the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.
 
 ## PowerShell
 

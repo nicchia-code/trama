@@ -185,7 +185,7 @@ describe("a command cites a card", () => {
 });
 
 describe("creation order", () => {
-  test("the board lists a design where its oldest Task stands, and the same instant is broken by identity", () => {
+  test("the board lists the Tasks in creation order, and the same instant is broken by identity", () => {
     const design = newProposal(p, "Returns");
     const tasks = join(p.dir, "tasks");
     mkdirSync(tasks, { recursive: true });
@@ -202,12 +202,6 @@ describe("creation order", () => {
 
     expect(listTasks(p).map((t) => t.id)).toEqual(["mmmmmmmm", "aaaaaaaa", "zzzzzzzz", "bbbbbbbb", "cccccccc"]);
     const board = boardView(p).md;
-    const designAt = board.indexOf(`Proposal ${cardName(p, "proposal", design.id)} "Returns"`);
-    const aloneAt = board.indexOf(`${cardName(p, "task", "zzzzzzzz")} alone`);
-    expect(designAt).toBeGreaterThan(-1);
-    expect(aloneAt).toBeGreaterThan(designAt);
-    const inside = board.slice(designAt, aloneAt);
-    expect(inside.indexOf(`${cardName(p, "task", "mmmmmmmm")} first`)).toBeLessThan(inside.indexOf(`${cardName(p, "task", "aaaaaaaa")} second`));
     expect(board.indexOf(`${cardName(p, "task", "bbbbbbbb")} bee`)).toBeLessThan(board.indexOf(`${cardName(p, "task", "cccccccc")} cee`));
   });
 });

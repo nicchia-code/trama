@@ -5,6 +5,7 @@ import { approveBlocker, recurringLabel, resolvedRows } from "../board/logic";
 import { renderDriftCompare } from "../drift-compare";
 import { idTag } from "../id-tag";
 import { renderInline, renderMarkdown } from "../markdown";
+import { dismissButton } from "../dismiss";
 import { renderResolves } from "../resolves";
 import type { Detail, DetailItem } from "./details";
 import type { Level } from "./graph";
@@ -21,10 +22,13 @@ export interface PanelActions {
   openLink(url: string): void;
   /** A row of a resolution's Resolves Drifts block: select that Drift in the Diagram. */
   showDrift(drift: string): void;
+  /** The developer pressed «Dismiss Drift» on this open Drift; the host asks for the confirmation. */
+  dismiss(drift: string): void;
 }
 
 export interface Panel {
-  render(detail: Detail): void;
+  /** `dismissBlocker`: why «Dismiss Drift» is disabled for the Drift in the detail, or null. */
+  render(detail: Detail, dismissBlocker: string | null): void;
 }
 
 const CHANGE_TEXT = { added: "added by the Proposal", removed: "removed by the Proposal", changed: "changed by the Proposal", same: "" } as const;
@@ -180,7 +184,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
   };
 
   return {
-    render(detail) {
+    render(detail, dismissBlocker) {
       root.replaceChildren();
       const head = el("header", "dg-panel-head");
       const driftName = detail.drift ? cardNameOf(detail.numbers, "drift", detail.drift.id) : null;
@@ -203,7 +207,13 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
       }
       if (detail.change !== "same") head.append(el("div", `dg-badge change-${detail.change}`, CHANGE_TEXT[detail.change]));
       root.append(head);
-      if (detail.drift) root.append(renderDriftCompare(detail.drift, { openLink: actions.openLink }));
+      if (detail.drift) {
+        const drift = detail.drift;
+        root.append(renderDriftCompare(drift, { openLink: actions.openLink }));
+        const decide = el("div", "dg-actions");
+        decide.append(dismissButton({ blocker: dismissBlocker, onDismiss: () => actions.dismiss(drift.id) }));
+        root.append(decide);
+      }
 
       if (detail.description) root.append(body(detail.description));
       if (detail.changes.length > 0) root.append(el("div", "dg-heading", "What changes"), list("dg-change-lines", detail.changes));

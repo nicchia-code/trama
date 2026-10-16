@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { approvalBlock, deleteInProposal, editInProposal, getProposal, health, newProposal, submitProposal, validateProposal } from "../src/core/proposals";
+import { approvalBlock, deleteInProposal, discardProposal, editInProposal, getProposal, health, newProposal, submitProposal, validateProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
-import { newDrift } from "../src/core/work";
+import { dismissDrift, getDrift, newDrift } from "../src/core/work";
 import { FIX_OPTIONS } from "./fix-options";
+import { resolveDriftInProposal } from "../src/core/resolution";
 import { type Project, projectAt } from "../src/core/store";
 
 let dir: string;
@@ -107,6 +108,34 @@ describe("A Proposal's Tasks cover its scope", () => {
     expect(submitProposal(p, prop.id).data.status).toBe("open");
   });
 
+  test("a setup Proposal is written with its kind, covers its scope with Tasks like a change, and holds them", () => {
+    const prop = newProposal(p, "Setup reword", "", { kind: "setup" });
+    expect(readFileSync(join(prop.dir, "proposal.md"), "utf8")).toContain("kind: setup");
+    rewordEvent(prop.id);
+    expect(messages(prop.id)).toEqual(UNCOVERED);
+    writeTaskFile(editInProposal(p, prop.id, "tasks/event.md"), "technical: false\nrefs: [order, payment]");
+    expect(messages(prop.id)).toEqual([]);
+    submitProposal(p, prop.id);
+    expect(buildSnapshot(p).proposals.find((v) => v.id === prop.id)?.tasks.map((t) => t.title)).toEqual(["Confirmation text"]);
+  });
+
+  test("a setup Proposal is approved at hand-over only while the Model is empty", () => {
+    const populated = newProposal(p, "Setup on the shop", "", { kind: "setup" });
+    expect(submitProposal(p, populated.id)).toMatchObject({ approvedAtHandOver: false, openReason: null });
+    expect(getProposal(p, populated.id).data.status).toBe("open");
+
+    const model = join(dir, ".trama/model");
+    for (const entry of readdirSync(model)) if (entry !== "system.md") rmSync(join(model, entry), { recursive: true, force: true });
+    rmSync(join(dir, ".trama/requirements"), { recursive: true, force: true });
+    const scratch = newProposal(p, "Setup from scratch", "", { kind: "setup" });
+    expect(submitProposal(p, scratch.id)).toMatchObject({ approvedAtHandOver: true, openReason: null });
+    expect(getProposal(p, scratch.id).data.status).toBe("approved");
+  });
+
+  test("automatic is refused on a setup Proposal, as on any kind but resolution", () => {
+    expect(() => newProposal(p, "Automatic setup", "", { kind: "setup", automatic: true })).toThrow("--automatic can only be used with --resolution");
+  });
+
   test("an Already present row covers an entry the same way, and every row must resolve", () => {
     const row = newProposal(p, "Already there", "## Already present\n- `order` — checkout/order.md\n- `payment` — checkout/payment.md\n");
     rewordEvent(row.id);
@@ -147,7 +176,7 @@ describe("A Proposal's Tasks cover its scope", () => {
   test("a Proposal attached to an open Drift holds no Tasks: the Task file is refused before it is created", () => {
     const prop = newProposal(p, "Attached design");
     newDrift(p, { where: "src/refund.ts", title: "Attached", refs: ["order"], happens: "The code does it another way.", should: "The Model says otherwise.", options: FIX_OPTIONS, proposal: prop.id });
-    expect(() => editInProposal(p, prop.id, "tasks/attached.md")).toThrow("only an ordinary Proposal, not attached to a Drift, can hold Tasks");
+    expect(() => editInProposal(p, prop.id, "tasks/attached.md")).toThrow("only a change or setup Proposal, not attached to a Drift, can hold Tasks");
     expect(getProposal(p, prop.id).tasks).toEqual([]);
   });
 
@@ -162,4 +191,34 @@ describe("A Proposal's Tasks cover its scope", () => {
     rmSync(file);
     expect(approvalBlock(p, prop.id)?.kind).toBe("invalid");
   });
+});
+
+test("dismissing a Drift from the panel discards its attached Proposal, a Draft or a handed-over one, with no feedback", () => {
+  const draft = newProposal(p, "Draft attached");
+  const onDraft = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "On a draft", refs: ["order"], proposal: draft.id, happens: "The code does it one way.", should: "The Model says another." });
+  dismissDrift(p, onDraft.id);
+  expect(getProposal(p, draft.id).data.status).toBe("discarded");
+  expect(getDrift(p, onDraft.id).data).toMatchObject({ status: "resolved", resolution: "dismissed", proposal: null });
+
+  const handed = submitProposal(p, newProposal(p, "Handed attached").id);
+  const onHanded = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "On a handed-over", refs: ["order"], proposal: handed.id, happens: "The code does it one way.", should: "The Model says another." });
+  dismissDrift(p, onHanded.id);
+  expect(getProposal(p, handed.id).data.status).toBe("discarded");
+  expect(getProposal(p, handed.id).body).not.toContain("## Feedback");
+});
+
+test("a Drift listed in an undecided resolution cannot be dismissed from the panel", () => {
+  const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Listed", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
+  const resolution = newProposal(p, "Resolve listed", "", { kind: "resolution" });
+  resolveDriftInProposal(p, resolution.id, drift.id, { decision: "dismissed" });
+  expect(() => dismissDrift(p, drift.id)).toThrow(/is part of resolution .* decide it there/);
+  expect(getDrift(p, drift.id).data.status).toBe("open");
+});
+
+test("a Draft attached to an open Drift cannot be discarded from the command line; the Drift keeps it", () => {
+  const draft = newProposal(p, "Attached draft");
+  const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Attached", refs: ["order"], proposal: draft.id, happens: "The code does it one way.", should: "The Model says another." });
+  expect(() => discardProposal(p, draft.id)).toThrow(/is attached to Drift/);
+  expect(getProposal(p, draft.id).data.status).toBe("draft");
+  expect(getDrift(p, drift.id).data.proposal).toBe(draft.id);
 });

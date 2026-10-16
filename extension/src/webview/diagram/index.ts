@@ -6,8 +6,9 @@ import { createCanvas } from "./canvas";
 import { type Detail, detailOfSelection, requirementItems, tooltipOf } from "./details";
 import { homeLevel, resolveElement, selectionFor, showsElement } from "./elements";
 import { type GraphSpec, type Level, sameLevel } from "./graph";
-import { breadcrumb, buildGraph, drillTarget, scanFeature, validLevel } from "./levels";
+import { breadcrumb, buildGraph, drillTarget, isEmptyModel, scanFeature, validLevel } from "./levels";
 import { createPanel } from "./panel";
+import { dismissBlocker } from "../dismiss";
 import { type Scene, buildScene, pathTo } from "./scene";
 import { viewOfRef } from "../requirements/logic";
 import css from "./diagram.css" with { type: "text" };
@@ -27,14 +28,18 @@ const TEMPLATE = `
       <button type="button" class="trama-btn" data-zoom-in aria-label="Zoom in" title="Zoom in (+)">+</button>
       <button type="button" class="trama-btn" data-fit aria-label="Fit to view" title="Fit to view (0)">Fit</button>
     </span>
-    <button type="button" class="trama-btn" data-quick-design title="Ask an agent to design a change in one line">Quick request…</button>
-    <button type="button" class="trama-btn" data-design title="Write a design request in Markdown and send it to an agent">Design…</button>
     <button type="button" class="trama-btn" data-scan>Scan</button>
   </div>
   <div class="dg-main">
     <div class="dg-stage" tabindex="0" aria-label="Diagram">
       <div class="dg-canvas"></div>
-      <div class="dg-empty" hidden>The Model is empty. Use Design… to have an agent describe the System.</div>
+      <div class="dg-empty" hidden>
+        <p>The Model is empty. Import the existing code or start from scratch; later, design changes from the <button type="button" class="dg-link" data-board aria-label="Open the Board" title="Open the Board">Board</button>.</p>
+        <div class="dg-actions">
+          <button type="button" class="trama-btn" data-import title="Ask an agent to describe the existing code as Proposals">Import from Code</button>
+          <button type="button" class="trama-btn" data-scratch title="Set up Trama and describe the project you want to build">Start from Scratch</button>
+        </div>
+      </div>
       <details class="dg-legend" open>
         <summary>Legend</summary>
         <ul>
@@ -65,6 +70,8 @@ export const mountDiagram: MountView = (root, context) => {
   const scan = $<HTMLButtonElement>("button[data-scan]");
 
   let snapshot: Snapshot | null = null;
+  /** The reason Resolve Drifts is unavailable now, from the snapshot the Board also reads; null when it is available. */
+  let resolveBlocker: string | null = null;
   let scene: Scene | null = null;
   let graph: GraphSpec | null = null;
   let level: Level = { kind: "system" };
@@ -82,6 +89,7 @@ export const mountDiagram: MountView = (root, context) => {
     reject: (id) => context.post({ type: "rejectProposal", id }),
     openLink: context.openLink,
     showDrift: (id) => navigateDrift(id),
+    dismiss: (id) => context.post({ type: "dismissDrift", id }),
   });
 
   const canvas = createCanvas(stage, $("div.dg-canvas"), {
@@ -142,8 +150,14 @@ export const mountDiagram: MountView = (root, context) => {
       scan.title = label.tooltip || "Ask an agent to scan the code against the whole System";
       scan.setAttribute("aria-label", label.tooltip ? label.ariaLabel : `Scan. ${scan.title}`);
     }
-    $("div.dg-empty").hidden = graph.nodes.length > 0;
-    panel.render(currentDetail());
+    $("div.dg-empty").hidden = !isEmptyModel(scene);
+    renderPanel();
+  }
+
+  /** Draws the panel for the selection; «Dismiss Drift» is decided from the snapshot and the resolve blocker. */
+  function renderPanel() {
+    const detail = currentDetail();
+    panel.render(detail, detail.drift && snapshot ? dismissBlocker(detail.drift.id, snapshot.proposals, resolveBlocker) : null);
   }
 
   /** The detail of the selection, or of the level, with the Requirement sections written for that element. */
@@ -175,7 +189,7 @@ export const mountDiagram: MountView = (root, context) => {
   function selectId(id: string | null) {
     selected = id;
     canvas.select(id);
-    if (scene && graph) panel.render(currentDetail());
+    if (scene && graph) renderPanel();
   }
 
   function toggleState(state: string) {
@@ -235,8 +249,9 @@ export const mountDiagram: MountView = (root, context) => {
   $("button[data-zoom-in]").addEventListener("click", () => canvas.zoomBy(1.25));
   $("button[data-zoom-out]").addEventListener("click", () => canvas.zoomBy(0.8));
   $("button[data-fit]").addEventListener("click", () => canvas.fit());
-  $("button[data-quick-design]").addEventListener("click", () => context.post({ type: "launch", action: { kind: "design" } }));
-  $("button[data-design]").addEventListener("click", () => context.post({ type: "writeDesignRequest" }));
+  $("button[data-import]").addEventListener("click", () => context.post({ type: "launch", action: { kind: "import" } }));
+  $("button[data-scratch]").addEventListener("click", () => context.post({ type: "initialize", choice: "scratch" }));
+  $("button[data-board]").addEventListener("click", () => context.navigate("board"));
   scan.addEventListener("click", () => {
     const feature = scene ? scanFeature(scene, level) : undefined;
     context.post({ type: "launch", action: feature ? { kind: "scan", feature } : { kind: "scan" } });
@@ -255,8 +270,9 @@ export const mountDiagram: MountView = (root, context) => {
   recolour.observe(document.body, { attributes: true, attributeFilter: ["class", "style"] });
 
   const view: View = {
-    update(next) {
+    update(next, _asking?: boolean, resolve?: { blocker: string | null }) {
       snapshot = next;
+      resolveBlocker = resolve?.blocker ?? null;
       if (pending) {
         const options = pending;
         pending = null;

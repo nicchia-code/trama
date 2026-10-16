@@ -5,9 +5,9 @@ import { compareByCreation } from "../../../../src/core/schema";
 import type { Blocker } from "../../../../src/core/blocking";
 import type { AnnouncementView, DriftView, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
 import type { Column } from "../../protocol";
-import { designColumn, placeTasks } from "../../../../src/core/design";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import { proposalTouches } from "../requirements/logic";
+import { dismissBlocker } from "../dismiss";
 import { type CardName, cardNameOf, type CardNumbers, namerOf, noNumbers } from "../../../../src/core/card-names";
 import type { DriftAutopilotFailure, DriftAutopilotMode, DriftAutopilotStatus } from "../../host/drift-resolution";
 
@@ -34,14 +34,13 @@ const cardKey = (kind: "drift" | "task", id: string) => `${kind}:${id}`;
 
 /**
  * The badge of one blocker: "blocked D2" goes to the Drift on the Diagram, "waiting T4" to the card of the fix Task.
- * A Task that is a row of a design card has no card of its own: the badge goes to the design card, opened on that
- * row (`row`, see `buildBoard`). Each card is written by its number while live.
+ * Each card is written by its number while live.
  */
 export interface BlockBadge {
   label: string;
   /** Tooltip and accessible name: why the Task is blocked, and where the badge leads. */
   tooltip: string;
-  target: { kind: "diagram"; drift: string } | { kind: "card"; key: string; row?: string };
+  target: { kind: "diagram"; drift: string } | { kind: "card"; key: string };
 }
 
 export function blockBadge(b: Blocker, numbers: CardNumbers = noNumbers): BlockBadge {
@@ -122,6 +121,8 @@ export interface DriftCard {
   drift: DriftView;
   /** The reason the autopilot failed on or excluded this Drift; null when it did not. */
   autopilotFailed: string | null;
+  /** Why «Dismiss Drift» is disabled on this card, or null when it works. */
+  dismissBlocker: string | null;
 }
 
 export interface TaskCard {
@@ -138,11 +139,15 @@ export interface TaskCard {
   driftName: string | null;
   /** ID of the Proposal (the design) the Task comes from, if any. */
   proposal: string | null;
+  /** Title of that Proposal, for the tag on each of its Tasks; null when the Task has none or the Proposal is gone. */
+  proposalTitle: string | null;
+  /** How the Proposal is written, named by its identity or number; the tag falls back to it. */
+  proposalName: CardName | null;
   /** True while the agent has taken the Task. */
   agent: boolean;
   /** One badge per thing that blocks the Task; empty when it is free. */
   blocks: BlockBadge[];
-  /** What blocks the Task, as the snapshot carries it; Run this design reads it. */
+  /** What blocks the Task, as the snapshot carries it. */
   blockedBy: Blocker[];
   /** The reason the autopilot failed on or excluded this Task; null when it did not. */
   autopilotFailed: string | null;
@@ -157,23 +162,7 @@ export interface TaskCard {
   unchanged: string | null;
 }
 
-/** The Tasks of one design (Proposal) shown as a single card; it stands in the column its Tasks add up to. */
-export interface DesignCard {
-  kind: "design";
-  key: string;
-  /** The Proposal's ID. */
-  id: string;
-  /** How the Proposal is written: its short number, or its identity once it is closed. */
-  name: CardName;
-  heading: string;
-  title: string;
-  /** The design's Tasks in creation order, each with its own column. */
-  tasks: TaskCard[];
-  done: number;
-  column: Column;
-}
-
-export type Card = ProposalCard | DriftCard | TaskCard | DesignCard;
+export type Card = ProposalCard | DriftCard | TaskCard;
 
 export interface BoardColumn {
   id: ColumnId;
@@ -257,7 +246,7 @@ export function createsText(n: number): string | null {
   };
 }
 
-export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers, autopilotFailed: string | null = null): DriftCard {
+export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers, autopilotFailed: string | null = null, dismissBlocker: string | null = null): DriftCard {
   const name = cardNameOf(numbers, "drift", d.id);
   return {
     kind: "drift",
@@ -270,6 +259,7 @@ export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers, autopi
     proposal: d.proposal,
     drift: d,
     autopilotFailed,
+    dismissBlocker,
   };
 }
 
@@ -286,6 +276,8 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, autopilo
     drift: t.drift,
     driftName: t.drift === null ? null : name("drift", t.drift),
     proposal: t.proposal,
+    proposalTitle: t.proposalTitle,
+    proposalName: t.proposal === null ? null : cardNameOf(numbers, "proposal", t.proposal),
     agent: t.agent,
     blocks: t.blockedBy.map((b) => blockBadge(b, numbers)),
     blockedBy: t.blockedBy,
@@ -298,19 +290,11 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, autopilo
   };
 }
 
-export function designCard(proposal: string, title: string | null, tasks: TaskCard[], numbers: CardNumbers = noNumbers): DesignCard {
-  const name = cardNameOf(numbers, "proposal", proposal);
-  return {
-    kind: "design",
-    key: `design:${proposal}`,
-    id: proposal,
-    name,
-    heading: `Proposal ${name.text}`,
-    title: title ?? `Proposal ${name.text}`,
-    tasks,
-    done: tasks.filter((t) => t.column === "done").length,
-    column: designColumn(tasks.map((t) => t.column)),
-  };
+/** A stable hue, 0 to 359, from a Proposal's identity: all its Tasks wear the same tint in every column. */
+export function proposalHue(id: string): number {
+  let hash = 0;
+  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return hash % 360;
 }
 
 /** What each Drift autopilot mode means, for the Resolve Drifts tooltip. */
@@ -323,7 +307,12 @@ const autopilotModes: Record<DriftAutopilotMode, string> = {
 /** The autopilot mode and, when automation waits or is suspended, why. For the Resolve Drifts tooltip; it grants nothing. */
 export function autopilotNote(status: DriftAutopilotStatus): string {
   const mode = autopilotModes[status.mode];
-  return status.reason === null ? mode : `${mode}\n${status.reason}.`;
+  const waiting = status.reason === null ? [mode] : [mode, `${status.reason}.`];
+  // A failed final check of an automatic Run carries no Drift or Task badge, so the tooltip names it.
+  const runFailures = status.failures
+    .filter((failure) => failure.reason !== undefined && failure.drift === undefined && failure.task === undefined)
+    .map((failure) => `Autopilot failed: ${failure.title}`);
+  return [...waiting, ...runFailures].join("\n");
 }
 
 /** The reason each Drift or Task the autopilot failed on or excluded carries, keyed `drift:<id>` or `task:<id>`. Scan failures name no case and are left out. */
@@ -338,14 +327,14 @@ function failedReasons(failures: readonly DriftAutopilotFailure[]): Map<string, 
 }
 
 /** The four columns of the Board; open resolution Drifts are represented only on their Proposal card. */
-export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilotFailure[] = []): BoardColumn[] {
+export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilotFailure[] = [], resolveBlocker: string | null = null): BoardColumn[] {
   const numbers = snapshot.numbers ?? noNumbers;
   const failed = failedReasons(failures);
   const resolving = new Set(snapshot.proposals.filter((p) => p.kind === "resolution").flatMap((p) => p.resolves.map((r) => r.drift)));
   // To decide holds the open Proposals and Drifts together, oldest first, as the Board Requirement says.
   const decide = [
     ...snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, (drift) => failed.get(`drift:${drift}`) ?? null) })),
-    ...snapshot.drifts.filter((d) => !resolving.has(d.id)).map((d) => ({ id: d.id, created: d.created, card: driftCard(d, numbers, failed.get(`drift:${d.id}`) ?? null) })),
+    ...snapshot.drifts.filter((d) => !resolving.has(d.id)).map((d) => ({ id: d.id, created: d.created, card: driftCard(d, numbers, failed.get(`drift:${d.id}`) ?? null, dismissBlocker(d.id, snapshot.proposals, resolveBlocker)) })),
   ];
   const cards: Record<ColumnId, Card[]> = {
     decide: decide.sort(compareByCreation).map((x) => x.card),
@@ -353,22 +342,8 @@ export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilot
     doing: [],
     done: [],
   };
-  // Tasks of one design are shown together once there are enough of them (see `placeTasks`).
-  for (const placed of placeTasks(snapshot.tasks)) {
-    const task = (t: TaskView) => taskCard(t, numbers, failed.get(`task:${t.id}`) ?? null);
-    if (!placed.design) cards[placed.column].push(task(placed.task));
-    else cards[placed.column].push(designCard(placed.proposal, placed.tasks[0]?.proposalTitle ?? null, placed.tasks.map(task), numbers));
-  }
-  // A badge that leads to a Task shown as a row of a design card leads to that design card, opened on the row.
-  const all = Object.values(cards).flat();
-  const rows = new Map(all.flatMap((c) => (c.kind === "design" ? c.tasks.map((t) => [t.key, c.key] as const) : [])));
-  for (const t of all.flatMap((c) => (c.kind === "task" ? [c] : c.kind === "design" ? c.tasks : []))) {
-    t.blocks = t.blocks.map((b): BlockBadge => {
-      if (b.target.kind !== "card") return b;
-      const design = rows.get(b.target.key);
-      return design === undefined ? b : { ...b, target: { kind: "card", key: design, row: b.target.key } };
-    });
-  }
+  // Each Task is a card of its own, in creation order, which is the order of the snapshot.
+  for (const t of snapshot.tasks) cards[t.column].push(taskCard(t, numbers, failed.get(`task:${t.id}`) ?? null));
   return COLUMN_ORDER.map((id) => ({ id, title: COLUMN_TITLES[id], hint: EMPTY_HINTS[id], cards: cards[id] }));
 }
 
@@ -391,11 +366,11 @@ export interface DoneGroup {
   cards: Card[];
 }
 
-/** When a Done card was finished, in ms: a Task's `finished`, the latest among a design's Tasks; null when none is known. */
+/** When a Done card was finished, in ms: a Task's `finished`; null when it is not known. */
 export function finishedAt(card: Card): number | null {
-  const stamps = card.kind === "task" ? [card.finished] : card.kind === "design" ? card.tasks.map((t) => t.finished) : [];
-  const times = stamps.map((s) => (s === null ? NaN : Date.parse(s))).filter((t) => !Number.isNaN(t));
-  return times.length === 0 ? null : Math.max(...times);
+  if (card.kind !== "task" || card.finished === null) return null;
+  const time = Date.parse(card.finished);
+  return Number.isNaN(time) ? null : time;
 }
 
 /** Start of the local day `back` days before `d`. */

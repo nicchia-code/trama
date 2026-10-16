@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
 import { createRequest, isEmptyRequest, requestExists, requestIdAt, requestStamp, requestsDir, requestTitle } from "../src/core/design-requests";
 import { cardName } from "../src/core/short-numbers";
-import { editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
+import { editInProposal, getProposal, listProposals, newProposal, submitProposal } from "../src/core/proposals";
 import { type Project, projectAt } from "../src/core/store";
 import { coverWithTask } from "./cover";
 
@@ -180,5 +180,20 @@ describe("the command line", () => {
 
   test("proposal new refuses --resolution together with --import", () => {
     expect(() => run(["proposal", "new", "Both", "--resolution", "--import"], dir, {})).toThrow("--import and --resolution cannot go together");
+  });
+
+  test("proposal new refuses --setup together with --import or --resolution", () => {
+    expect(() => run(["proposal", "new", "Both", "--setup", "--import"], dir, {})).toThrow("--setup cannot go together with --import or --resolution");
+  });
+
+  test("proposal new --setup refuses a Model that has Features or Actors", () => {
+    expect(() => run(["proposal", "new", "Start", "--setup"], dir, {})).toThrow("--setup needs an empty Model");
+  });
+
+  test("proposal new --setup creates a setup Proposal on an empty Model", () => {
+    const model = join(p.dir, "model");
+    for (const entry of readdirSync(model)) if (entry !== "system.md") rmSync(join(model, entry), { recursive: true });
+    run(["proposal", "new", "Start", "--setup"], dir, {});
+    expect(listProposals(p).map((x) => x.data.kind)).toEqual(["setup"]);
   });
 });

@@ -4,9 +4,10 @@ description: "Usa quando tocchi i dati di richieste di design, risoluzione dei D
 # Dati del lavoro dell'agente
 
 ## design-request
-- Un file `requests/<id>.md` sotto `.trama/`, creato vuoto da Design…, quindi anche in Writing. L'ID è la data e l'ora locali di creazione con i secondi, nella forma `AAAA-MM-GGTHH-MM-SS` (per esempio `2026-10-04T19-05-12`); se quel file esiste già, l'ID prende il suffisso `-2`, `-3`, … fino al primo libero. Il file contiene solo il testo Markdown del developer, senza front matter; può non avere un titolo.
+- Un file `requests/<id>.md` sotto `.trama/`, creato vuoto da Design… o da Start from Scratch, quindi anche in Writing. L'ID è la data e l'ora locali di creazione con i secondi, nella forma `AAAA-MM-GGTHH-MM-SS` (per esempio `2026-10-04T19-05-12`); se quel file esiste già, l'ID prende il suffisso `-2`, `-3`, … fino al primo libero. Il file contiene solo il testo Markdown del developer, senza front matter; può non avere un titolo.
 - La cartella ha un suo `.gitignore` che ignora tutto ciò che contiene, così le richieste non sono mai versionate; Trama lo scrive insieme alla prima richiesta.
 - Quali richieste sono state inviate non sta nel file né sotto `.trama/`: l'estensione tiene l'elenco degli ID inviati nel proprio stato per l'area di lavoro, che sopravvive ai riavvii dell'editor. Un ID il cui file non esiste più è tolto dall'elenco. Un file in `requests/` il cui ID non è nell'elenco è una richiesta in Writing.
+- Quali richieste sono di setup non sta nel file: l'estensione tiene, accanto all'elenco degli inviati, l'elenco degli ID delle richieste aperte da Start from Scratch, nello stesso stato per l'area di lavoro. Un ID esce dall'elenco quando l'estensione vede sparire il suo file. Una richiesta il cui ID non è nell'elenco è una richiesta di design.
 
 ## drift-resolution
 - In `disabled`, i lavori mantengono lo stato per finestra. Con autopilota attivo, un solo host coordina il progetto identificato dal percorso canonico: conserva in memoria tutti i Run, scan e risoluzioni lanciati dalle sue finestre, con identità del lavoro, finestra, terminale o conversazione, origine manuale o automatica e risultato del controllo. Le finestre inoltrano avvio, consegna riuscita e fine al coordinatore; non si scrive questo stato sotto `.trama/` né in `workspaceState`.

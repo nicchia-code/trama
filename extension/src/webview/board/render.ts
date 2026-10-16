@@ -1,21 +1,21 @@
-import { type CardName, cardNameOf, type CardNumbers, ID_NAMES, namerOf } from "../../../../src/core/card-names";
-import { joinReasons, runBlocker } from "../../../../src/core/design";
+import { type CardName, cardNameOf, type CardNumbers, ID_NAMES } from "../../../../src/core/card-names";
 import { idTag } from "../id-tag";
 import type { ViewContext } from "../types";
-import type { AnnouncedCard, Badge, BlockBadge, Card, DesignCard, DriftCard, ProposalCard, TaskCard } from "./logic";
-import { COLUMN_TITLES, recurringLabel } from "./logic";
+import type { AnnouncedCard, Badge, BlockBadge, Card, DriftCard, ProposalCard, TaskCard } from "./logic";
+import { COLUMN_TITLES, proposalHue, recurringLabel } from "./logic";
 import { renderDriftCompare } from "../drift-compare";
+import { dismissButton } from "../dismiss";
 import { renderMarkdown } from "../markdown";
 import { renderResolves } from "../resolves";
 import { viewOfRef } from "../requirements/logic";
 
 export interface CardEnv {
   context: ViewContext;
-  /** Whether a design card was left open; kept for the session, so a refresh does not close it. */
+  /** Whether a Task's details were left open; kept for the session, so a refresh does not close them. */
   isExpanded(key: string): boolean;
   setExpanded(key: string, expanded: boolean): void;
-  /** Scrolls to a card, by its key, and focuses it; with `row`, opens the design card and focuses that Task's row. */
-  showCard(key: string, row?: string): void;
+  /** Scrolls to a card, by its key, and focuses it. */
+  showCard(key: string): void;
   /** The short numbers of the snapshot being drawn. */
   numbers(): CardNumbers;
   /** The reason every Run is disabled while Drifts are being resolved or a run is in progress, otherwise null. It comes before the other reasons. */
@@ -84,7 +84,7 @@ function blockBadgeLink(b: BlockBadge, env: CardEnv): HTMLElement {
   node.title = `${b.tooltip} (${distinction})`;
   node.setAttribute("aria-label", `${b.tooltip} (${distinction})`);
   node.append(document.createTextNode(prefix), idTag(name));
-  node.addEventListener("click", () => (target.kind === "diagram" ? env.context.navigate("diagram", { drift: target.drift }) : env.showCard(target.key, target.row)));
+  node.addEventListener("click", () => (target.kind === "diagram" ? env.context.navigate("diagram", { drift: target.drift }) : env.showCard(target.key)));
   return node;
 }
 
@@ -186,12 +186,15 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
   node.append(head("Drift", card.name, ...(critical ? [critical] : []), ...(recurring ? [recurring] : []), ...failedBadge(card.autopilotFailed, env)), el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
   node.append(renderDriftCompare(card.drift, { openLink: env.context.openLink }));
+  const views: HTMLElement[] = [];
   const firstRef = card.refs[0];
   if (firstRef !== undefined) {
     const view = viewOfRef(firstRef);
     const label = view === "requirements" ? "View requirement" : "View on diagram";
-    node.append(actions(button({ label, aria: `${label} for ${card.heading}`, action: "view", onClick: () => env.context.navigate(view, view === "diagram" ? { drift: card.id } : { ref: firstRef }) })));
+    views.push(button({ label, aria: `${label} for ${card.heading}`, action: "view", onClick: () => env.context.navigate(view, view === "diagram" ? { drift: card.id } : { ref: firstRef }) }));
   }
+  views.push(dismissButton({ blocker: card.dismissBlocker, className: "board-btn", onDismiss: () => env.context.post({ type: "dismissDrift", id: card.id }) }));
+  node.append(actions(...views));
   return node;
 }
 
@@ -233,6 +236,18 @@ function taskDetails(card: TaskCard, env: CardEnv): { body: HTMLElement; toggle:
   return { body, toggle };
 }
 
+/** The Proposal a Task comes from, as a tag: its title on a tint taken from the Proposal's identity. Not a button; it does nothing. */
+function proposalTag(card: TaskCard): HTMLElement | null {
+  if (card.proposal === null) return null;
+  const title = card.proposalTitle ?? `Proposal ${card.proposalName?.text ?? card.proposal}`;
+  const node = el("span", "board-proposal-tag", title);
+  node.style.setProperty("--proposal-hue", String(proposalHue(card.proposal)));
+  node.setAttribute("role", "img");
+  node.setAttribute("aria-label", `Proposal: ${title}`);
+  node.title = `Proposal: ${title}`;
+  return node;
+}
+
 function task(card: TaskCard, env: CardEnv): HTMLElement {
   const node = shell(card, `Task ${card.name.text}: ${card.title}`);
   const badges = [
@@ -241,7 +256,8 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
     ...card.blocks.map((b) => blockBadgeLink(b, env)),
     ...failedBadge(card.autopilotFailed, env),
   ];
-  const top = head(null, card.name, ...badges);
+  const tag = proposalTag(card);
+  const top = head(null, card.name, ...(tag === null ? [] : [tag]), ...badges);
   top.prepend(statusDot(card));
   node.append(top, el("h3", "board-card-title", card.title));
   if (card.refs.length > 0) node.append(chips(card.refs, env));
@@ -279,56 +295,6 @@ function statusDot(task: Pick<TaskCard, "column" | "agent">): HTMLElement {
   return dot;
 }
 
-/** The Tasks of one design as a single card, closed until the developer expands it. */
-function design(card: DesignCard, env: CardEnv): HTMLElement {
-  const node = shell(card, `${card.heading}: ${card.title}, ${card.done} of ${card.tasks.length} tasks done`);
-  node.append(
-    head(
-      "Proposal",
-      card.name,
-      badge({ label: `${card.done}/${card.tasks.length} done`, tooltip: `${card.done} of ${card.tasks.length} Tasks are done`, tone: "info" }, env.numbers()),
-    ),
-    el("h3", "board-card-title", card.title),
-  );
-
-  const list = el("ul", "board-design-tasks");
-  list.id = `board-design-${card.id}`;
-  for (const t of card.tasks) {
-    const item = el("li", "board-design-task");
-    item.dataset["row"] = t.key;
-    item.tabIndex = -1;
-    item.append(statusDot(t), idTag(t.name, "board-card-kind board-card-id"), el("span", "board-design-title", t.title));
-    item.append(...t.blocks.map((b) => blockBadgeLink(b, env)), ...failedBadge(t.autopilotFailed, env), ...(t.unchanged !== null ? [noChangesBadge(t.unchanged)] : []));
-    list.append(item);
-  }
-
-  const label = (open: boolean) => (open ? "Hide tasks" : `Show ${card.tasks.length} tasks`);
-  let isOpen = env.isExpanded(card.key);
-  const toggle = button({ label: "", action: "toggle", onClick: () => {} });
-  const show = () => {
-    list.hidden = !isOpen;
-    toggle.textContent = label(isOpen);
-    toggle.setAttribute("aria-expanded", String(isOpen));
-  };
-  toggle.setAttribute("aria-controls", list.id);
-  toggle.addEventListener("click", () => {
-    isOpen = !isOpen;
-    env.setExpanded(card.key, isOpen);
-    show();
-  });
-  show();
-  const run = button({
-    label: "Run this design",
-    aria: `Run the Tasks of ${card.heading} that are in To do`,
-    action: "run-design",
-    primary: true,
-    disabled: joinReasons([env.resolvingReason(), runBlocker(card.tasks, "design", namerOf(env.numbers()))]) ?? false,
-    onClick: () => env.context.post({ type: "launch", action: { kind: "implement-design", proposal: card.id } }),
-  });
-  node.append(actions(run, toggle), list);
-  return node;
-}
-
 /**
  * The ghost of a card the agent is about to create: a skeleton with the card's kind, its title and what the agent is
  * doing about it. It is not focusable, draggable or clickable and has no buttons or links; its accessible name says
@@ -350,6 +316,5 @@ export function renderAnnounced(card: AnnouncedCard): HTMLElement {
 export function renderCard(card: Card, env: CardEnv): HTMLElement {
   if (card.kind === "proposal") return proposal(card, env);
   if (card.kind === "drift") return drift(card, env);
-  if (card.kind === "design") return design(card, env);
   return task(card, env);
 }

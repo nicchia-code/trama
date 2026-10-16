@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError } from "./errors";
-import { compareByCreation, createdField, idField, type Raw } from "./schema";
+import { compareByCreation, createdField } from "./schema";
 import { listCards, type CardLayout, type Project, readDocument } from "./store";
 
 export type { CardKind };
@@ -21,24 +21,6 @@ const ignoreFile = (p: Project) => join(shortNumbersDir(p), ".gitignore");
 interface LiveCard {
   id: string;
   created: string | null;
-  /** A Done Task of a design still under way: it keeps the number it has but never takes one. */
-  keepOnly?: boolean;
-}
-
-/** A card read from its file: a live one, or a Done Task of a design that may keep its number. */
-interface ReadCard extends LiveCard {
-  /** The design (Proposal) of a Task, or null. */
-  design: string | null;
-  done: boolean;
-}
-
-/** The Proposal a Task's file links it to, or null when there is none or it cannot be read. */
-function designField(raw: Raw, file: string): string | null {
-  try {
-    return idField(raw, "proposal", file);
-  } catch {
-    return null;
-  }
 }
 
 /** Where a kind's cards are and which status or column leaves a card live: a Proposal not yet approved, rejected or discarded, a Drift not yet resolved, a Task in To do or In progress. */
@@ -49,40 +31,24 @@ const KIND_SPEC: Record<CardKind, { folder: string; layout: CardLayout; field: s
 };
 
 /**
- * The live cards of a kind in one `.trama/` folder, and its Done Tasks that belong to a design. A card that cannot be
- * read has no number: reading it is another command's error to report.
+ * The live cards of a kind in one `.trama/` folder. A card that cannot be read has no number: reading it is another
+ * command's error to report.
  */
-function cardsIn(dir: string, kind: CardKind): ReadCard[] {
+function cardsIn(dir: string, kind: CardKind): LiveCard[] {
   const spec = KIND_SPEC[kind];
   const folder = join(dir, spec.folder);
-  const cards: ReadCard[] = [];
+  const cards: LiveCard[] = [];
   for (const entry of listCards(folder, spec.layout)) {
     const file = spec.layout === "folder" ? join(folder, entry.name, "proposal.md") : join(folder, entry.name);
     try {
       const raw = readDocument(file).data;
       const state = raw[spec.field] ?? spec.fallback;
-      const design = kind === "task" ? designField(raw, file) : null;
-      const live = typeof state === "string" && spec.live.includes(state);
-      if (live || (kind === "task" && state === "done" && design !== null))
-        cards.push({ id: entry.id, created: createdField(raw, file), design, done: !live });
+      if (typeof state === "string" && spec.live.includes(state)) cards.push({ id: entry.id, created: createdField(raw, file) });
     } catch {
       // not a readable card: it gets no number
     }
   }
   return cards;
-}
-
-/**
- * The cards of a kind that hold or may take a number, oldest first, read only from this working copy. A Done Task is
- * among them only while a Task of its design is in To do or In progress, and then only to keep the number it has.
- */
-function liveCards(p: Project, kind: CardKind): LiveCard[] {
-  const cards = cardsIn(p.dir, kind);
-  const underWay = new Set(cards.filter((c) => !c.done && c.design !== null).map((c) => c.design));
-  return cards
-    .filter((c) => !c.done || underWay.has(c.design))
-    .map((c): LiveCard => (c.done ? { id: c.id, created: c.created, keepOnly: true } : { id: c.id, created: c.created }))
-    .sort(compareByCreation);
 }
 
 type Numbers = Record<CardKind, Map<string, number>>;
@@ -125,7 +91,6 @@ function assign(live: LiveCard[], previous: Map<string, number> | undefined): Ma
   for (const card of live) {
     let n = kept.get(card.id);
     if (n === undefined) {
-      if (card.keepOnly) continue;
       while (used.has(next)) next++;
       n = next;
       used.add(n);
@@ -187,7 +152,7 @@ export class ShortNumbers {
  * command warns once and goes on with the numbers it rebuilt.
  */
 export function syncShortNumbers(p: Project): ShortNumbers {
-  const live = Object.fromEntries(CARD_KINDS.map((kind) => [kind, liveCards(p, kind)])) as Record<CardKind, LiveCard[]>;
+  const live = Object.fromEntries(CARD_KINDS.map((kind) => [kind, cardsIn(p.dir, kind).sort(compareByCreation)])) as Record<CardKind, LiveCard[]>;
   let current: string | null;
   try {
     current = readFileSync(assignedFile(p), "utf8");

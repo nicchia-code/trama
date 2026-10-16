@@ -9,10 +9,9 @@ import {
   bindCopilotChatJob,
   chatJobSendStarted,
   clearAutopilotFailure,
-  driftAutopilotMode,
   driftAutopilotStatus,
   setJobsVerified,
-  driftResolution,
+  driftWork,
   clearSendReservations,
   forgetWindow,
   projectWindowIds,
@@ -119,12 +118,12 @@ test("Copilot sends bind in order and only their own conversation ends each job"
   startJob("run", project, { chat: "copilot" }, false);
   bindCopilotChatJob(project, "first");
   bindCopilotChatJob(project, "second");
-  expect(driftResolution()).toBe("running-tasks");
+  expect(driftWork()).toEqual({ resolving: false, running: true });
   endCopilotChatJobs(project, "unrelated");
   endCopilotChatJobs(project, "first");
-  expect(driftResolution()).toBe("running-tasks");
+  expect(driftWork()).toEqual({ resolving: false, running: true });
   endCopilotChatJobs(project, "second");
-  expect(driftResolution()).toBe("free");
+  expect(driftWork()).toEqual({ resolving: false, running: false });
 });
 
 test("a resolving Copilot conversation leaves concurrent Runs active until each conversation ends", () => {
@@ -133,23 +132,23 @@ test("a resolving Copilot conversation leaves concurrent Runs active until each 
   startJob("resolve", project, { chat: "copilot" }, false);
   bindCopilotChatJob(project, "first");
   bindCopilotChatJob(project, "second");
-  expect(driftResolution()).toBe("resolving");
+  expect(driftWork().resolving).toBe(true);
   endCopilotChatJobs(project, "second");
-  expect(driftResolution()).toBe("running-tasks");
+  expect(driftWork()).toEqual({ resolving: false, running: true });
   endCopilotChatJobs(project, "first");
-  expect(driftResolution()).toBe("free");
+  expect(driftWork()).toEqual({ resolving: false, running: false });
 });
 
 test("Cursor chat matching stays separate from Copilot conversations", () => {
   const project = root();
   startJob("run", project, { chat: "cursor" }, false);
   bindCopilotChatJob(project, "same-id");
-  expect(driftResolution()).toBe("running-tasks");
+  expect(driftWork()).toEqual({ resolving: false, running: true });
   endCopilotChatJobs(project, "same-id");
-  expect(driftResolution()).toBe("running-tasks");
+  expect(driftWork()).toEqual({ resolving: false, running: true });
   bindChatJob(project, "cursor");
   endChatJobs(project, "cursor");
-  expect(driftResolution()).toBe("free");
+  expect(driftWork()).toEqual({ resolving: false, running: false });
 });
 
 test("prompts during preparation are ignored but prompts and ends during delivery are retained", () => {
@@ -158,27 +157,27 @@ test("prompts during preparation are ignored but prompts and ends during deliver
   endCopilotChatJobs(project, "preparation");
   const sentAfter = chatJobSendStarted(project, "copilot");
   startJob("run", project, { chat: "copilot" }, false, sentAfter);
-  expect(driftResolution()).toBe("running-tasks");
+  expect(driftWork()).toEqual({ resolving: false, running: true });
   endCopilotChatJobs(project, "preparation");
-  expect(driftResolution()).toBe("running-tasks");
+  expect(driftWork()).toEqual({ resolving: false, running: true });
   bindCopilotChatJob(project, "delivery");
   endCopilotChatJobs(project, "delivery");
-  expect(driftResolution()).toBe("free");
+  expect(driftWork()).toEqual({ resolving: false, running: false });
 
   const finishedDuringDelivery = root();
   const finishedAfter = chatJobSendStarted(finishedDuringDelivery, "copilot");
   bindCopilotChatJob(finishedDuringDelivery, "finished");
   endCopilotChatJobs(finishedDuringDelivery, "finished");
   startJob("resolve", finishedDuringDelivery, { chat: "copilot" }, false, finishedAfter);
-  expect(driftResolution()).toBe("free");
+  expect(driftWork()).toEqual({ resolving: false, running: false });
 
   const activeDuringDelivery = root();
   const activeAfter = chatJobSendStarted(activeDuringDelivery, "copilot");
   bindCopilotChatJob(activeDuringDelivery, "active");
   startJob("run", activeDuringDelivery, { chat: "copilot" }, false, activeAfter);
-  expect(driftResolution()).toBe("running-tasks");
+  expect(driftWork()).toEqual({ resolving: false, running: true });
   endCopilotChatJobs(activeDuringDelivery, "active");
-  expect(driftResolution()).toBe("free");
+  expect(driftWork()).toEqual({ resolving: false, running: false });
 });
 
 test("failed or interrupted scans are status information that count as finished for the autopilot", () => {
@@ -273,12 +272,6 @@ test("editing a failed Drift clears its signature-based exclusion", () => {
   expect(autopilotFailedCase(project, "drift-1")).toBe(false);
 });
 
-test("an unrecognized autopilot value is disabled, so Resolve Drifts keeps the manual flow", () => {
-  expect(driftAutopilotMode("enbled")).toBe("disabled");
-  expect(driftAutopilotMode(undefined)).toBe("disabled");
-  expect(driftAutopilotMode("yolo")).toBe("yolo");
-});
-
 test("a Run's check, failed or not, does not make failed cases eligible again", () => {
   const project = root();
   recordAutopilotFailure(project, "run-job", "drift-1", undefined, "could not resolve");
@@ -294,7 +287,7 @@ test("a failed final check of an automatic Run is recorded with its case and hol
   const project = root();
   startJob("run", project, { terminal: "auto-run-terminal" }, false, undefined, "auto-run", "automatic");
   receiveCoordinatorMessage({ type: "check", root: project, job: "auto-run", title: "Final check after all Tasks", phase: "verifying", failed: true });
-  expect(driftAutopilotStatus(project, "enabled").failures).toEqual([expect.objectContaining({ job: "auto-run", title: "Final check after all Tasks: the final check failed" })]);
+  expect(driftAutopilotStatus(project, "enabled").failures).toEqual([expect.objectContaining({ job: "auto-run" })]);
   expect(driftAutopilotStatus(project, "enabled").phase).not.toBe("suspended");
   endTerminalJobs("auto-run-terminal");
 });
@@ -354,7 +347,7 @@ test("a lost editor window takes its reserved send and its jobs with it, and the
   expect(jobAbnormalEnd(project, "run-b")).toBeUndefined();
   expect(sendReserved(project)).toBe(false);
   expect(reserveSend(project, "send-b", "window-b")).toBe(true);
-  expect(driftResolution(project)).toBe("running-tasks");
+  expect(driftWork(project)).toEqual({ resolving: false, running: true });
   forgetWindow(project, "window-b");
 });
 
@@ -373,9 +366,9 @@ test("losing the coordinator role clears the sends this window reserved", () => 
 test("under disabled a window sees only its own jobs; another window's Run blocks it only while the autopilot is on", () => {
   const project = root();
   receiveCoordinatorMessage({ type: "job", id: "other-run", root: project, kind: "run", active: true, place: { terminal: "terminal" }, origin: "manual", windowId: "other-window" });
-  expect(driftResolution(project, false)).toBe("free");
+  expect(driftWork(project, false)).toEqual({ resolving: false, running: false });
   expect(activeProjectJobs(project, false)).toEqual([]);
-  expect(driftResolution(project)).toBe("running-tasks");
+  expect(driftWork(project)).toEqual({ resolving: false, running: true });
   receiveCoordinatorMessage({ type: "job", id: "other-run", root: project, kind: "run", active: false, place: { terminal: "terminal" } });
 });
 

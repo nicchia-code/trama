@@ -1,6 +1,7 @@
 import { flattenStates } from "./model";
 import { AREA_FILE, parseRequirementDoc } from "./requirements";
 import { REQUIREMENTS_PREFIX } from "./store";
+import { EMPTY_SPECS, parseSpecs, SPEC_FIELDS, SPECS_FILE, type SpecEntry, type Specs, sameSpecField } from "./specs";
 import { parseActor, parseDocument, parseMachine } from "./parse";
 import type { Actor, Diagnostic, EventDecl, Machine } from "./types";
 
@@ -104,9 +105,50 @@ function diffArea(path: string, before: string | undefined, after: string | unde
   for (const [key, s] of was) if (!is.has(key)) out.push(`- Requirements for ${s.heading}`);
 }
 
+/** What changed in one entry of a list field: version, note and chosenByAgent, each written with both values. */
+function specEntryChanges(old: SpecEntry, is: SpecEntry): string[] {
+  const shown = (v: string | null) => (v === null ? "none" : `"${v}"`);
+  const out: string[] = [];
+  if (old.version !== is.version) out.push(`version ${shown(old.version)} → ${shown(is.version)}`);
+  if (old.note !== is.note) out.push("note changed");
+  if (old.chosenByAgent !== is.chosenByAgent) out.push("chosenByAgent changed");
+  return out;
+}
+
+/** Specs changed, field by field: entries added, removed or changed by name (names compared without case), and the notes. */
+function diffSpecs(before: string | undefined, after: string | undefined, out: string[]) {
+  const read = (content: string | undefined): Specs => (content === undefined ? EMPTY_SPECS : parseSpecs(SPECS_FILE, content).specs);
+  const a = read(before);
+  const b = read(after);
+  for (const field of SPEC_FIELDS) {
+    if (sameSpecField(a, b, field)) continue;
+    if (field === "notes") {
+      out.push("~ notes changed");
+      continue;
+    }
+    const was = new Map(a.lists[field].map((e) => [e.name.toLowerCase(), e]));
+    const is = new Map(b.lists[field].map((e) => [e.name.toLowerCase(), e]));
+    const start = out.length;
+    for (const [key, e] of is) {
+      const old = was.get(key);
+      if (!old) out.push(`+ ${field}: ${e.name}`);
+      else {
+        const changes = specEntryChanges(old, e);
+        if (changes.length > 0) out.push(`~ ${field}: ${e.name} ${changes.join(", ")}`);
+      }
+    }
+    for (const [key, e] of was) if (!is.has(key)) out.push(`- ${field}: ${e.name}`);
+    if (out.length === start) out.push(`~ ${field}: order changed`);
+  }
+}
+
 export function diffFile(path: string, before: string | undefined, after: string | undefined): FileChange {
   const change = before === undefined ? "added" : after === undefined ? "removed" : "modified";
   const details: string[] = [];
+  if (path === SPECS_FILE) {
+    diffSpecs(before, after, details);
+    return { path, change, details };
+  }
   if (path.startsWith(REQUIREMENTS_PREFIX)) {
     diffArea(path, before, after, details);
     const [area, file] = path.slice(REQUIREMENTS_PREFIX.length).split("/") as [string, string | undefined];

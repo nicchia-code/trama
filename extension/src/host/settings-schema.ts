@@ -52,29 +52,41 @@ export interface SettingsValues {
 export const SETTING_GROUPS: readonly { title: string; keys: readonly string[] }[] = [
   { title: "Agent", keys: ["trama.agent", "trama.terminalLocation", "trama.autoExit", "trama.language"] },
   { title: "Models", keys: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"] },
-  { title: "Drift autopilot", keys: ["trama.driftAutoPilot"] },
+  { title: "Auto Fix Drifts", keys: ["trama.autoFixDrifts", "trama.autoFixCriticalDrifts"] },
   { title: "Runs", keys: ["trama.submitWhileRunning"] },
   { title: "Project", keys: ["trama.skillsDir"] },
 ];
 
-/** The delegation setting: raising it asks the developer first. Lowest to highest. */
-export const DELEGATION_KEY = "trama.driftAutoPilot";
+/** The two checkboxes that give the agent Drift delegation, and the one that depends on the first. */
+export const DRIFT_KEY = "trama.autoFixDrifts";
+export const CRITICAL_DRIFT_KEY = "trama.autoFixCriticalDrifts";
+
+/** The delegation the two checkboxes give, lowest to highest. */
+export type DelegationMode = "disabled" | "enabled" | "yolo";
 export const DELEGATION_ORDER: readonly string[] = ["disabled", "enabled", "yolo"];
 
-/** The modal question that raising the delegation asks, by the value it raises to. */
+/** The modal question that raising the delegation asks, by the mode it raises to. */
 export const DELEGATION_QUESTIONS: Record<string, string> = {
   enabled: "Let the agent approve and fix non-critical Drifts on its own?",
   yolo: "Let the agent approve and fix every Drift on its own, critical ones included?",
 };
 
-/** Whether moving the delegation from `from` to `to` gives the agent more. `from` is already normalised by the caller. */
+/** The delegation from the user values of the two checkboxes: only `true` counts, and critical Drifts alone grant nothing. */
+export function delegationOf(autoFixDrifts: unknown, autoFixCriticalDrifts: unknown): DelegationMode {
+  if (autoFixDrifts !== true) return "disabled";
+  return autoFixCriticalDrifts === true ? "yolo" : "enabled";
+}
+
+/** Whether moving the delegation from `from` to `to` gives the agent more. */
 export function raisesDelegation(from: string, to: string): boolean {
   return DELEGATION_ORDER.indexOf(to) > DELEGATION_ORDER.indexOf(from);
 }
 
-/** `trama.maxParallelAgents` → `Max Parallel Agents`. */
+const TITLES: Record<string, string> = { "trama.autoExit": "Auto Exit Terminal" };
+
+/** `trama.maxParallelAgents` → `Max Parallel Agents`; the few keys whose title does not follow the key come from `TITLES`. */
 export function settingTitle(key: string): string {
-  return key
+  return TITLES[key] ?? key
     .replace(/^trama\./, "")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -133,8 +145,26 @@ export function storedValue(setting: SettingSchema, value: SettingValue): Settin
   return text;
 }
 
-/** The explanation of an enum value (its `enumDescriptions` entry), or undefined for a value that is not one of the enum's. */
-export function explanationOf(setting: SettingSchema, value: unknown): string | undefined {
-  const index = setting.values?.indexOf(String(value)) ?? -1;
-  return index < 0 ? undefined : setting.descriptions?.[index];
+/** What the host does for one Settings change: refused, or the writes to make after the developer confirms a raised delegation (`ask`). */
+export type SettingPlan =
+  | { ok: false; reason: string }
+  | { ok: true; ask?: { question: string; detail: string }; writes: { key: string; value: SettingValue | undefined }[] };
+
+/**
+ * Plans a Settings change from the user values (`user`). Auto Fix Critical Drifts cannot be turned on while Auto Fix Drifts is off.
+ * Raising the delegation asks first; the detail is the explanation of the checkbox that grants it. Turning Auto Fix Drifts off
+ * clears Auto Fix Critical Drifts first, then itself.
+ */
+export function planSettingChange(schema: readonly SettingSchema[], user: (key: string) => unknown, key: string, value: SettingValue): SettingPlan {
+  const setting = schema.find((s) => s.key === key);
+  if (setting === undefined) return { ok: false, reason: `Unknown Trama setting ${key}` };
+  if (key === CRITICAL_DRIFT_KEY && value === true && user(DRIFT_KEY) !== true) return { ok: false, reason: "Auto Fix Drifts is off" };
+  const next = (k: string) => (k === key ? value : user(k));
+  const before = delegationOf(user(DRIFT_KEY), user(CRITICAL_DRIFT_KEY));
+  const after = delegationOf(next(DRIFT_KEY), next(CRITICAL_DRIFT_KEY));
+  const writes = [{ key, value: storedValue(setting, value) }];
+  if (key === DRIFT_KEY && value === false) writes.unshift({ key: CRITICAL_DRIFT_KEY, value: undefined });
+  if (!raisesDelegation(before, after)) return { ok: true, writes };
+  const explained = schema.find((s) => s.key === (after === "enabled" ? DRIFT_KEY : CRITICAL_DRIFT_KEY));
+  return { ok: true, ask: { question: DELEGATION_QUESTIONS[after] ?? "", detail: explained?.markdown ?? "" }, writes };
 }

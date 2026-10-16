@@ -7,6 +7,7 @@ import { agentName, watchAgentTerminal, configuredSkillsDir } from "./agent";
 import { Controller, describeError } from "./controller";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./cursor";
+import { detectLanguageName } from "./language";
 import { findProject, installCopilotHooks } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
@@ -46,19 +47,13 @@ export function activate(context: vscode.ExtensionContext): void {
   const questions = new EditorQuestions(() => findProject(), session);
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
   const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
-  const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri, questions);
+  const requests = new DesignRequests(context.workspaceState, tramaFiles, undefined, undefined, () => trama.launch({ kind: "implement-all" }));
+  const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri, questions, requests);
   controller = trama;
-  const requests = new DesignRequests(context.workspaceState, tramaFiles);
   context.subscriptions.push(
     tramaFiles,
     statusBarItem(),
     vscode.commands.registerCommand("trama.open", guarded(() => trama.open())),
-    vscode.commands.registerCommand(
-      "trama.init",
-      guarded(() => trama.init()),
-    ),
-    vscode.commands.registerCommand("trama.quickDesign", guarded(() => trama.launch({ kind: "design" }))),
-    vscode.commands.registerCommand("trama.design", guarded(() => requests.write())),
     vscode.commands.registerCommand("trama.sendDesignRequest", guarded((uri?: vscode.Uri) => requests.send(uri))),
     vscode.commands.registerCommand("trama.scan", guarded(() => trama.pickAndScan())),
     vscode.commands.registerCommand("trama.import", guarded(() => trama.launch({ kind: "import" }))),
@@ -74,15 +69,45 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
   void guarded(() => installCopilotHooks(context.globalStorageUri))();
-  exposeBundledCli(context);
+  void detectFirstStartLanguage(context);
+}
+
+/** `trama.languageDetected` in global state: the agent language was chosen on the first start, once per editor. */
+const LANGUAGE_DETECTED_KEY = "trama.languageDetected";
+
+/**
+ * On the first start, saves the agent language in the user settings when they have none: the operating system's
+ * language, else the editor's, else English. Silent: a failed write is retried at the next start. A value the user
+ * already has is never touched, and the flag is set without writing.
+ */
+async function detectFirstStartLanguage(context: vscode.ExtensionContext): Promise<void> {
+  if (context.globalState.get<boolean>(LANGUAGE_DETECTED_KEY)) return;
+  const user = vscode.workspace.getConfiguration("trama").inspect<string>("language")?.globalValue;
+  if (user !== undefined && user !== null && !(typeof user === "string" && user.trim() === "")) {
+    await context.globalState.update(LANGUAGE_DETECTED_KEY, true);
+    return;
+  }
+  let intlLocale: string | undefined;
+  try {
+    intlLocale = Intl.DateTimeFormat().resolvedOptions().locale;
+  } catch {
+    intlLocale = undefined;
+  }
+  const name = detectLanguageName({ env: process.env, intlLocale, editorLanguage: vscode.env.language });
+  try {
+    await vscode.workspace.getConfiguration("trama").update("language", name, vscode.ConfigurationTarget.Global);
+  } catch {
+    return;
+  }
+  await context.globalState.update(LANGUAGE_DETECTED_KEY, true);
 }
 
 /**
- * The developer edits Requirement files directly, so the generated `trama-req-*` skills are regenerated on every
- * change under `.trama/requirements/`, inside the Area folders too, also when the Trama panel is closed.
+ * The developer edits Requirement files and Specs directly, so the generated `trama-req-*` and `trama-specs` skills are
+ * regenerated on every change under `.trama/requirements/` or to `.trama/specs.yaml`, inside the Area folders too, also when the Trama panel is closed.
  */
 export function watchRequirements(): vscode.Disposable {
-  const watcher = vscode.workspace.createFileSystemWatcher("**/.trama/requirements/**");
+  const watcher = vscode.workspace.createFileSystemWatcher("**/.trama/{requirements/**,specs.yaml}");
   const timers = new Map<string, NodeJS.Timeout>();
   const sync = (uri: vscode.Uri) => {
     const project = findProject(uri);
@@ -91,7 +116,8 @@ export function watchRequirements(): vscode.Disposable {
     timers.set(project.root, setTimeout(() => {
       timers.delete(project.root);
       try {
-        syncRequirementSkills(project, [configuredSkillsDir()]);
+        const result = syncRequirementSkills(project, [configuredSkillsDir()]);
+        if (result.specsSkill.state === "kept") void vscode.window.showWarningMessage(`Trama: the trama-specs skill was not updated: ${result.specsSkill.problem}`);
       } catch (err) {
         void vscode.window.showErrorMessage(`Trama: could not regenerate the Requirement skills: ${describeError(err)}`);
       }

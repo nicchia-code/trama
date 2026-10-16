@@ -1,8 +1,9 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { stringify } from "yaml";
-import { type Area, type Fragment, hasContent, loadProject, REQUIREMENT_SKILLS_BUDGET, type RequirementSection } from "./requirements";
+import { type Area, type Fragment, hasContent, loadProject, type ProjectModel, REQUIREMENT_SKILLS_BUDGET, type RequirementSection } from "./requirements";
 import { type Project, readTextLf, writeFileEnsuringDir } from "./store";
+import { SPEC_FIELD_TITLES, SPEC_LIST_FIELDS, SPECS_FILE, type Specs } from "./specs";
 
 /** Folders, relative to the project root, where agents look for skills and Trama may have installed its own. */
 export const SKILL_DIRS = [".agents/skills", ".claude/skills", ".github/skills"];
@@ -34,19 +35,23 @@ export const fragmentSkillName = (area: Area, fragment: Fragment) => `${PREFIX}$
 /** The skill name of an Area in index mode. */
 export const indexSkillName = (area: Area) => `${PREFIX}${area.id}`;
 
+/** The Specs skill's name and the description it always has: both count in the budget while Specs is valid. */
+export const SPECS_SKILL = "trama-specs";
+const SPECS_SKILL_DESCRIPTION = "Use when choosing, adding or using the project's languages, frameworks, libraries, data stores, tests, CI, repository, deployment, cloud resources or infrastructure as code.";
+
 /** Fragments that have something for an agent to read. */
 export const fragmentsWithContent = (area: Area) => area.fragments.filter((f) => filled(f.sections).length > 0);
 
-/** Characters the fragment skills would take in the agents' skill list: each name plus its description. */
-export function requirementSkillsBudget(areas: Area[]): number {
-  let used = 0;
-  for (const area of areas) for (const f of fragmentsWithContent(area)) used += fragmentSkillName(area, f).length + f.description.length;
+/** Characters the Requirement skills and the Specs skill would take in the agents' skill list: each name plus its description. */
+export function requirementSkillsBudget(project: ProjectModel): number {
+  let used = project.specsSkill ? SPECS_SKILL.length + SPECS_SKILL_DESCRIPTION.length : 0;
+  for (const area of project.areas) for (const f of fragmentsWithContent(area)) used += fragmentSkillName(area, f).length + f.description.length;
   return used;
 }
 
 /** The mode the Requirement skills of these Areas are generated in, and the budget they use. */
-export function requirementSkillMode(areas: Area[]): { mode: RequirementSkillMode; budget: number } {
-  const budget = requirementSkillsBudget(areas);
+export function requirementSkillMode(project: ProjectModel): { mode: RequirementSkillMode; budget: number } {
+  const budget = requirementSkillsBudget(project);
   return { mode: budget <= REQUIREMENT_SKILLS_BUDGET ? "fragment" : "index", budget };
 }
 
@@ -55,9 +60,9 @@ export function requirementSkillMode(areas: Area[]): { mode: RequirementSkillMod
  * mode of `areas` generates them: fragment skills in fragment mode, the Area's index skill in index mode. Empty when
  * nothing of it is generated (an empty section, or an Area with nothing to read).
  */
-export function requirementSkillNames(areas: Area[], area: Area, section: RequirementSection | null = null): string[] {
+export function requirementSkillNames(project: ProjectModel, area: Area, section: RequirementSection | null = null): string[] {
   if (section !== null && section.text === "") return [];
-  if (requirementSkillMode(areas).mode === "index") return hasContent(area) ? [indexSkillName(area)] : [];
+  if (requirementSkillMode(project).mode === "index") return hasContent(area) ? [indexSkillName(area)] : [];
   return fragmentsWithContent(area)
     .filter((f) => section === null || f.file === section.file)
     .map((f) => fragmentSkillName(area, f));
@@ -147,7 +152,12 @@ export interface RequirementSkillSync {
   switchedFrom: RequirementSkillMode | null;
   /** Files written and skill folders or files removed. */
   changed: string[];
+  /** What became of the `trama-specs` skill. */
+  specsSkill: SpecsSkillSync;
 }
+
+/** What the sync did with the Specs skill: generated from a valid Specs, kept as it was because Specs is not valid (with its first problem), or no Specs at all. */
+export type SpecsSkillSync = { state: "generated" } | { state: "kept"; problem: string } | { state: "absent" };
 
 /**
  * Brings the generated `trama-req-*` skills in line with the project's Requirements, in every skill folder where
@@ -155,11 +165,14 @@ export interface RequirementSkillSync {
  * file inside one, that the current mode does not produce.
  */
 export function syncRequirementSkills(p: Project, extraDirs: string[] = []): RequirementSkillSync {
-  const areas = loadProject(p).areas;
-  const { mode, budget } = requirementSkillMode(areas);
+  const loaded = loadProject(p);
   const dirs = tramaSkillDirs(p.root, extraDirs);
+  // An invalid Specs keeps the skill already on disk, and that skill still takes budget.
+  const specsKept = !loaded.specsSkill && existsSync(join(p.dir, SPECS_FILE)) && dirs.some((d) => existsSync(join(d, SPECS_SKILL, "SKILL.md")));
+  const project = { ...loaded, specsSkill: loaded.specsSkill || specsKept };
+  const { mode, budget } = requirementSkillMode(project);
   const before = modeOnDisk(dirs);
-  const wanted = wantedFiles(areas, mode);
+  const wanted = wantedFiles(project.areas, mode);
   const skills = new Set([...wanted.keys()].map((k) => k.split("/")[0] as string));
   const changed: string[] = [];
   for (const dir of dirs) {
@@ -184,7 +197,48 @@ export function syncRequirementSkills(p: Project, extraDirs: string[] = []): Req
         }
     }
   }
-  return { mode, budget, switchedFrom: before !== null && before !== mode ? before : null, changed };
+  const specsSkill = syncSpecsSkill(p, project, dirs, changed);
+  return { mode, budget, switchedFrom: before !== null && before !== mode ? before : null, changed, specsSkill };
+}
+
+/** The `SKILL.md` of the Specs skill: every field that has entries, in the fixed order, then the notes. */
+export function renderSpecsSkill(specs: Specs): string {
+  const body = [
+    "# Project specs",
+    "",
+    "The technologies this project is built, tested and released with, from the developer's Specs. An entry marked as chosen by the agent was picked by the agent itself, not named by the developer.",
+  ];
+  for (const field of SPEC_LIST_FIELDS) {
+    const entries = specs.lists[field];
+    if (entries.length === 0) continue;
+    body.push("", `## ${SPEC_FIELD_TITLES[field]}`, "");
+    for (const e of entries) body.push(`- ${e.name}${e.version ? ` ${e.version}` : ""}${e.note ? `: ${e.note}` : ""}${e.chosenByAgent ? ` (chosen by the agent: ${e.chosenByAgent})` : ""}`);
+  }
+  if (specs.notes !== "") body.push("", "## Notes", "", specs.notes);
+  return skillFile(SPECS_SKILL, SPECS_SKILL_DESCRIPTION, body);
+}
+
+/** Writes the Specs skill in every skill folder, or removes it when there is no Specs; an invalid Specs keeps the skill as it is. */
+function syncSpecsSkill(p: Project, project: ProjectModel, dirs: string[], changed: string[]): SpecsSkillSync {
+  if (!existsSync(join(p.dir, SPECS_FILE))) {
+    for (const dir of dirs) {
+      const folder = join(dir, SPECS_SKILL);
+      if (!existsSync(folder)) continue;
+      rmSync(folder, { recursive: true, force: true });
+      changed.push(folder);
+    }
+    return { state: "absent" };
+  }
+  const problem = project.diagnostics.find((d) => d.file === SPECS_FILE);
+  if (problem) return { state: "kept", problem: problem.message };
+  const content = renderSpecsSkill(project.specs);
+  for (const dir of dirs) {
+    const file = join(dir, SPECS_SKILL, "SKILL.md");
+    if (existsSync(file) && readTextLf(file) === content) continue;
+    writeFileEnsuringDir(file, content);
+    changed.push(file);
+  }
+  return { state: "generated" };
 }
 
 /** The lines that report a regeneration: the mode, the budget used and, when it happened, the switch. */
@@ -192,6 +246,7 @@ export function describeRequirementSkillSync(sync: RequirementSkillSync): string
   const modeName = (m: RequirementSkillMode) => (m === "fragment" ? "one skill per fragment" : "one index skill per Area");
   const lines = [`Requirement skills: ${modeName(sync.mode)} (budget ${sync.budget}/${REQUIREMENT_SKILLS_BUDGET} characters).`];
   if (sync.switchedFrom) lines.push(`Switched from ${modeName(sync.switchedFrom)} to ${modeName(sync.mode)}.`);
+  if (sync.specsSkill.state === "kept") lines.push(`The ${SPECS_SKILL} skill was not updated, because Specs is not valid: ${sync.specsSkill.problem}`);
   if (sync.changed.length > 0) lines.push(`Regenerated ${sync.changed.length} Requirement skill file(s):\n${sync.changed.map((c) => `- ${c}`).join("\n")}`);
   return lines.join("\n");
 }

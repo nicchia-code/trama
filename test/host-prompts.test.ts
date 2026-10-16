@@ -6,14 +6,14 @@ test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
     "Use the trama-design skill on the design request in `.trama/requests/2026-10-04T19-05-12.md`. Bind the first Proposal you open to it with `--request 2026-10-04T19-05-12`.",
   );
+  expect(buildPrompt({ kind: "setup-request", request: "2026-10-04T19-05-12" })).toBe(
+    "Use the trama-setup skill on the project request in `.trama/requests/2026-10-04T19-05-12.md`. Bind the setup Proposal you open to it with `--request 2026-10-04T19-05-12`.",
+  );
   expect(buildPrompt({ kind: "scan" })).toBe("Use the trama-scan skill on the whole System.");
   expect(buildPrompt({ kind: "scan", feature: "checkout" })).toBe("Use the trama-scan skill on the Feature `checkout`.");
   expect(buildPrompt({ kind: "implement", task: "0012" })).toBe("Use the trama-implement skill on Task 0012.");
   expect(buildPrompt({ kind: "implement-all" })).toBe(
     'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, one group at a time, until it says there is none.',
-  );
-  expect(buildPrompt({ kind: "implement-design", proposal: "0007" })).toBe(
-    'Use the trama-implement skill on every Task of Proposal 0007 that is in the "todo" column. Take them from `trama task next --batch --proposal 0007 --max {maxParallelAgents}`, one group at a time, until it says there is none.',
   );
   expect(buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34", "ef56gh78"] })).toBe(
     "Use the trama-resolve-drifts skill on the open Drifts ab12cd34, ef56gh78: ask the developer what should happen for each one, then write one resolution Proposal.",
@@ -39,9 +39,9 @@ test("several Features are listed in backticks, comma separated", () => {
 test("the agent terminal is named after the work: the card's short number, or a fixed word", () => {
   const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
   expect(terminalName({ kind: "implement", task: "abc" }, short)).toBe("T3");
-  expect(terminalName({ kind: "implement-design", proposal: "ab" }, short)).toBe("P2");
   expect(terminalName({ kind: "design", prompt: "x" }, short)).toBe("Design");
   expect(terminalName({ kind: "written-design", request: "r" }, short)).toBe("Design");
+  expect(terminalName({ kind: "setup-request", request: "r" }, short)).toBe("Setup");
   expect(terminalName({ kind: "resolve-drifts", drifts: [] }, short)).toBe("Drifts");
   expect(terminalName({ kind: "scan", feature: "checkout" }, short)).toBe("Scan");
   expect(terminalName({ kind: "implement-all" }, short)).toBe("All tasks");
@@ -59,7 +59,5 @@ test("a chosen language ends the instruction on the same line, trimmed; blank as
 });
 test("implementation batch commands receive the configured limit at send time", () => {
   const all = buildPrompt({ kind: "implement-all" }).replaceAll("{maxParallelAgents}", "7");
-  const design = buildPrompt({ kind: "implement-design", proposal: "0007" }).replaceAll("{maxParallelAgents}", "7");
   expect(all).toContain("trama task next --batch --max 7");
-  expect(design).toContain("trama task next --batch --proposal 0007 --max 7");
 });

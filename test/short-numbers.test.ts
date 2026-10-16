@@ -127,7 +127,7 @@ describe("release", () => {
     expect(numberOf("task", c.id)).toBe(1);
   });
 
-  test("the Done Tasks of a design keep their numbers until the whole design is Done, and never take one back", () => {
+  test("a Done Task of a design loses its number at once, like any other, and a reopened one takes the lowest free", () => {
     const design = newProposal(p, "Design").id;
     const linked = (title: string) => newTask(p, { title, refs: ["order"], technical: false, proposal: design });
     const a = linked("A");
@@ -136,25 +136,15 @@ describe("release", () => {
     syncShortNumbers(p);
 
     moveTask(p, a.id, "done", "developer");
-    moveTask(p, loose.id, "done", "developer");
     const halfway = syncShortNumbers(p);
-    expect([halfway.of("task", a.id), halfway.of("task", b.id), halfway.of("task", loose.id)]).toEqual([1, 2, null]);
-    expect(run(["--root", dir, "task", "show", "T1"], dir, {}).out).toContain("# A");
+    expect([halfway.of("task", a.id), halfway.of("task", b.id), halfway.of("task", loose.id)]).toEqual([null, 2, 3]);
+    expect(run(["--root", dir, "task", "show", b.id], dir, {}).out).toContain("# B");
 
     moveTask(p, b.id, "done", "developer");
-    const finished = syncShortNumbers(p);
-    expect([finished.of("task", a.id), finished.of("task", b.id)]).toEqual([null, null]);
+    expect(syncShortNumbers(p).of("task", b.id)).toBeNull();
 
-    // The design reopens: only the Task back in To do takes a number; the Done one stays without.
     moveTask(p, b.id, "todo", "developer");
-    const reopened = syncShortNumbers(p);
-    expect([reopened.of("task", a.id), reopened.of("task", b.id)]).toEqual([null, 1]);
-
-    // A design of a single Task behaves as before: Done frees its number.
-    const single = newTask(p, { title: "Single", refs: ["order"], technical: false, proposal: newProposal(p, "One").id });
-    syncShortNumbers(p);
-    moveTask(p, single.id, "done", "developer");
-    expect(numberOf("task", single.id)).toBeNull();
+    expect(syncShortNumbers(p).of("task", b.id)).toBe(1);
   });
 
   test("a line for a card that no longer exists is removed", () => {

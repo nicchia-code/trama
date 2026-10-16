@@ -1,3 +1,4 @@
+import { EMPTY_SPECS } from "../src/core/specs";
 import { FIX_OPTIONS } from "./fix-options";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -87,5 +88,7 @@ export function snapshotOf(files: FileMap): Snapshot {
     announcements: [],
     tasksSinceScan: 0,
     numbers: { proposal: {}, task: {}, drift: {} },
+    specs: EMPTY_SPECS,
+    specsPresent: false,
   };
 }

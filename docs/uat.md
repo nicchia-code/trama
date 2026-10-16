@@ -74,9 +74,9 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Initialize Project**, **Trama: Quick Design Request…**, **Trama: Design…**, **Trama: Scan System**. **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
+| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Scan System**, **Trama: Import from Code**. No initialize command (no **Trama: Initialize Project**), no design command (no **Quick Design Request…**, no **Design…**). **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
 | 2 | Run **Trama: Open** | One new editor tab titled `Trama`, in the editor area | ☐ |
-| 3 | Look at the tab header inside the panel | Two tabs: **Diagram** (selected, underlined) and **Board** with a grey badge `4` | ☐ |
+| 3 | Look at the tab header inside the panel | Four tabs, in this order: **Board** (grey badge `4`), **Diagram** (selected, underlined), **Requirements**, **Settings** | ☐ |
 | 4 | Look under the tabs | No red banner | ☐ |
 | 5 | Look at the Diagram breadcrumb | Only `System` | ☐ |
 | 6 | Run **Developer: Open Webview Developer Tools** (palette) and open its Console tab | No red errors. A yellow `custom wheel sensitivity` warning from Cytoscape is expected and harmless. No `Content Security Policy` violation | ☐ |
@@ -114,7 +114,7 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 | 2 | Look at the box on the right | `Checkout` with the text `3 machines · ⚠ 2 drifts inside`, a **red** outline, and a small ↗ icon at its right edge | ☐ |
 | 3 | Look at the edges | Four grey edges Actor → Checkout, labelled `1` (Courier), `3` (Stripe), `3` (User), `1` (Warehouse) | ☐ |
 | 4 | Look under Checkout | Two red dashed pill nodes `Drift 0001` and `Drift 0002`, each with a dashed red edge going up to Checkout | ☐ |
-| 5 | Look at the toolbar | Left: `System`. Right: `Proposal` selector, buttons `−`, `+`, `Fit`, `Quick request…`, `Design…`, `Scan`. Hovering `Quick request…` shows `Ask an agent to design a change in one line`, hovering `Design…` shows `Write a design request in Markdown and send it to an agent` | ☐ |
+| 5 | Look at the toolbar | Left: `System`. Right: `Proposal` selector, buttons `−`, `+`, `Fit`, `Scan`. No **Quick request…** and no **Design…** here: they are on the Board only | ☐ |
 | 6 | Look at the panel | `SYSTEM`, `Shop`, `An online shop selling printed books to private customers.`, then `FEATURES` with the link `Checkout` and `3 machines` under it | ☐ |
 | 7 | Look at the bottom-left legend | `Legend` (collapsible, open) with six entries: Proposal adds it, Proposal removes it, Proposal changes it, Drift, Initial State, Final State | ☐ |
 | 8 | Click the `Legend` header | It collapses to its title; click again to expand | ☐ |
@@ -329,7 +329,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 1 | Read `0001` in To do | Title `Implement refunds for prepared orders`, chips `order/Refunding` and `order/Paid/user.CANCEL`, no excerpt, buttons **Show details**, **Run** (blue) and **Open**, and no move arrows | ☐ |
 | 1b | Click **Show details** on `0001` | The body shows as Markdown in the card: `When a paid order is cancelled after preparation has started:`, a two-item list with **refunded** in bold, and `order/Refunding` in a code span; the button reads **Hide details** and its accessible name is `Hide details of task 0001` | ☐ |
 | 1c | With the details open, make the Board refresh (`j task move 2 doing`) | `0001` stays open. Closing the panel and reopening it shows every card closed again | ☐ |
-| 1d | Read `0002` in To do | No **Show details** button (the Task has no body). Task rows inside a design card have no details toggle either | ☐ |
+| 1d | Read `0002` in To do | No **Show details** button (the Task has no body) | ☐ |
 | 2 | Read `0004` in Done | Badge `technical`, no chips, only **Open**, no move buttons | ☐ |
 | 3 | Read `0003` in In progress | Chip `cart/Has items/user.CHECKOUT`, no move buttons | ☐ |
 
@@ -346,9 +346,9 @@ j proposal submit <id>           # exit code 1; stays Draft
 Needs the real omp agent configured in S2 for row 6; the other rows need none.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | ↻. Look at every Task card, every Task row of a design card and every design card | No ← → buttons, no **Take back** button and no button that removes a card; no card has the `draggable` attribute | ☐ |
+| 1 | ↻. Look at every Task card and the Proposal tag on each | No ← → buttons, no **Take back** button and no button that removes a card; no card has the `draggable` attribute | ☐ |
 | 2 | Try to drag Task 0001 over In progress, over To decide and over its own column | Nothing is dragged: no outline appears on any column and `grep column $D/tasks/0001-*.md` still says `column: todo` | ☐ |
-| 3 | Press Tab through the Board | Focus reaches only **Show details**, **Run**, **Open**, **Run this design**, the design card's toggle, the links and badges, and the buttons of Proposals and Drifts; none of them moves a Task | ☐ |
+| 3 | Press Tab through the Board | Focus reaches only **Show details**, **Run**, **Open**, the links and badges, and the buttons of Proposals and Drifts; none of them moves a Task | ☐ |
 | 4 | `j task move 1 doing` | Within about a second the card is in In progress. At no moment is it dimmed or marked busy, and no error appears | ☐ |
 | 5 | `TRAMA_AGENT=1 j task move 2 doing` | The dot of Task 0002 pulses in the accent colour and its label is `Agent working`; there is no badge and no **Take back** button. **Run all To do** is disabled with the tooltip `An agent is working on Task 0002` | ☐ |
 | 6 | `j task move 2 done` (as the developer), then `j task take-back 2` | The first is refused: the message says the agent is working on Task 0002 and points to `trama task take-back 2` only. The second clears the mark: the dot stops pulsing, Task 0002 stays In progress and **Run all To do** is enabled again | ☐ |
@@ -364,24 +364,23 @@ Needs the real omp agent configured in S2 for row 6; the other rows need none.
 |---|---|---|---|
 | 1 | Do F4 (stale) and look at the Proposal 0001 card | Orange badge `stale`; **Approve** disabled; hover shows a tooltip naming `checkout/order.md` | ☐ |
 
-### E10. A design's Tasks as one card
+### E10. Proposal tag on Task cards
 ↻ first. Then seed it from the verification shell (the Proposal only has to exist): `trama --root $D task new "Return request" --ref order --proposal 1`, then the same with `"Refund on return"` and `"Return label"`. Checked in the browser harness with a hand-made snapshot; not yet run inside VS Code.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Look at the Board after the three commands | The three Tasks are **one** card in To do: `Proposal 0001`, a badge `0/3 done`, the title `Returns after shipping`, buttons **Run this design** (blue) and **Show 3 tasks**; no separate cards for the three Tasks | ☐ |
-| 2 | Click **Show 3 tasks** | The button reads **Hide tasks**; three rows in creation order, each with a status dot, its ID and its title, and no buttons. Hovering a dot shows `To do` | ☐ |
-| 3 | `j task move <id of the first row> doing` | Within about a second the row's dot changes to `In progress`; the card moves to the In progress column, stays open, and its badge still says `0/3 done` | ☐ |
-| 4 | `j task move <id of the first row> done` | Badge `1/3 done`, the row's dot is `Done`; the card stays in In progress (a mix of To do and Done) | ☐ |
-| 5 | Edit any file under `$D/tasks/` from outside (see F1) | The card stays open and in place after the refresh | ☐ |
-| 6 | Try to drag the card onto another column | It cannot be dragged; nothing moves | ☐ |
-| 7 | **Run this design** | The launch prints ``Use the trama-implement skill on every Task of Proposal 0001 that is in the "todo" column. Take them from `trama task next --batch --proposal 0001`, one group at a time, until it says there is none.`` | ☐ |
-| 8 | `j task move <id> done` for the other two Tasks | The card moves to Done, badge `3/3 done`, **Run this design** is disabled with the tooltip `No Task of this design is in To do` | ☐ |
-| 9 | Close the panel and open it again | The card is closed again | ☐ |
-| 10 | `trama --root $D board` and `trama --root $D task list` | `board` lists `Proposal 0001 "Returns after shipping" (3/3 done)` once, in Done, with the three Tasks under it and their columns; `task list` lists the three Tasks flat, each with `(Proposal 0001)` | ☐ |
-| 11 | Create a fourth Task with `--proposal 2` only (a second Proposal) | A design of one Task stays a plain card | ☐ |
+| 1 | Look at the Board after the three commands | Three separate cards in To do, one per Task, each with the tag of Proposal 0001 and its title `Returns after shipping`; no design card, no `0/3 done` counter and no **Show 3 tasks** button | ☐ |
+| 2 | Read the tag on one card | It shows the Proposal's short number, or `0001` when it has none, with the title `Returns after shipping`. The number and the ID are never both shown | ☐ |
+| 3 | Look at the buttons of each card | **Run** (blue) and **Open** (and **Show details** where the Task has a body); no **Run this design** anywhere on the Board | ☐ |
+| 4 | `j task move <id of the first> doing` | Within about a second that card is In progress; the other two stay in To do with their tags | ☐ |
+| 5 | `j task move <id of the first> done` | That card moves to Done with its tag; the other two stay in To do | ☐ |
+| 6 | Edit any file under `$D/tasks/` from outside (see F1) | The cards stay in place after the refresh | ☐ |
+| 7 | Try to drag a card onto another column | It cannot be dragged; nothing moves | ☐ |
+| 8 | **Run** on one of the three cards | The terminal prints `Use the trama-implement skill on Task <id>.` for that Task only | ☐ |
+| 9 | `trama --root $D board` and `trama --root $D task list` | `board` lists each of the three Tasks on its own line, in its column, with the tag of Proposal 0001 and its title, and no `design` entry; `task list` lists the three Tasks flat, each with `(Proposal 0001)` | ☐ |
+| 10 | Create a fourth Task with `--proposal 2` only (a second Proposal) | It carries the tag of Proposal 0002 and its title, like the others; a Task with no `--proposal` has no tag | ☐ |
 
 ### E11. Blocked Tasks
-↻ first. Seed it from the verification shell: `j drift new "Refund amount differs" --ref order/Refunding --task 1 --happens "The code refunds late." --should "The Model refunds at once." --option "Refund at once" --option-text "Refund when the order is cancelled." --option "Queue the refund" --option-text "Keep the queue but refund within a minute."`, then `j drift new "Cancel differs" --ref order/Paid --happens "The code cancels twice." --should "The Model cancels once." --option "Cancel once" --option-text "Ignore a second cancel." --option "Reject the second cancel" --option-text "Answer it with an error."`. The harness seed already has blocked Tasks too (Tasks inside the design card, Task `0008` waiting for the fix Task `0009`); the new Drifts are 0006 and 0007. Task `0005`, taken by the agent, also gets the badge `blocked 0006`: blocking does not release it.
+↻ first. Seed it from the verification shell: `j drift new "Refund amount differs" --ref order/Refunding --task 1 --happens "The code refunds late." --should "The Model refunds at once." --option "Refund at once" --option-text "Refund when the order is cancelled." --option "Queue the refund" --option-text "Keep the queue but refund within a minute."`, then `j drift new "Cancel differs" --ref order/Paid --happens "The code cancels twice." --should "The Model cancels once." --option "Cancel once" --option-text "Ignore a second cancel." --option "Reject the second cancel" --option-text "Answer it with an error."`. The harness seed already has blocked Tasks too (Tasks tagged with a Proposal, Task `0008` waiting for the fix Task `0009`); the new Drifts are 0006 and 0007. Task `0005`, taken by the agent, also gets the badge `blocked 0006`: blocking does not release it.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Look at Task `0001` on the Board | Red badges `blocked 0006` (the Drift filed with `--task 1`) and `blocked 0007` (it refs `order/Paid/user.CANCEL`, inside `order/Paid`); **Run** stays enabled | ☐ |
@@ -564,7 +563,7 @@ Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." -
 
 ## H. Launching the agent (S2)
 
-Each launch starts a new agent terminal named after its work (cwd = the demo folder): `Scan` for scans, `Design` for design requests, the Task's short number (for example `T1`) for **Run**, `All tasks` for **Run all To do**. Inspect the command in the terminal list; Trama does not reuse terminals or show the terminal area automatically. The panel, cursor and keyboard stay where they were.
+Each launch starts a new agent terminal named after its work (cwd = the demo folder): `Scan` for scans, `Design` for design requests, `Setup` for the request that starts a project from scratch, the Task's short number (for example `T1`) for **Run**, `All tasks` for **Run all To do**. Inspect the command in the terminal list; Trama does not reuse terminals or show the terminal area automatically. The panel, cursor and keyboard stay where they were.
 
 | # | Action | Expected in the terminal | ✓ |
 |---|---|---|---|
@@ -576,13 +575,13 @@ Each launch starts a new agent terminal named after its work (cwd = the demo fol
 | H6 | In H5 press Enter with the box empty | `Describe what to design` | ☐ |
 | H7 | In H5 type `Add refunds with $HOME and 'quotes'`, Enter | The printed line is exactly `Use the trama-design skill. Add refunds with $HOME and 'quotes'` (the `$HOME` is **not** expanded, the quotes survive) | ☐ |
 | H8 | Click **Quick request…** and press Esc | Nothing is printed | ☐ |
-| H9 | Diagram toolbar **Quick request…**, then the Requirements toolbar **Quick request…** | Same input box and result as H5–H7 | ☐ |
+| H9 | Diagram toolbar and Requirements toolbar | Neither has **Quick request…** nor **Design…**; the Requirements toolbar shows only the Proposal selector and the filter. The buttons are in the Board toolbar only (H5–H8) | ☐ |
 | H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
 | H11 | Board: **Run all To do** | ``Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch`, one group at a time, until it says there is none.`` | ☐ |
-| H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task take-back 5` and `j task take-back 7`, then look at **Run all To do** and at the **Run this design** button of `Proposal 0003` | **Run all To do** is **disabled** with the tooltip and accessible description `All the Tasks in To do are blocked: Task 0001 is blocked by Drift 0006`; **Run this design** is disabled with `All the Tasks of this design in To do are blocked: Task 0006 is blocked by Drift 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run all To do** | ☐ |
+| H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task take-back 5` and `j task take-back 7`, then look at **Run all To do** and at the Task card `0006`, tagged `Proposal 0003` | **Run all To do** is **disabled** with the tooltip and accessible description `All the Tasks in To do are blocked: Task 0001 is blocked by Drift 0006`; Task `0006` shows its tag `Proposal 0003` and the badge `blocked 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run all To do** | ☐ |
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
-| H15 | Palette: **Trama: Quick Design Request…** | Same input box as H5 | ☐ |
+| H15 | Palette: type `Trama`, look at the list | No **Quick Design Request…** and no **Design…**: design requests start only from the Board buttons (and, with an empty Model, the Diagram's **Import from Code** and **Start from Scratch**) | ☐ |
 | H16 | After H1 to H15, open the terminal dropdown | Every launch has its own terminal, even when an earlier command with the same name has ended. Terminals are named for their work: `Scan`, `Design`, a Task's short number or `All tasks`; no terminal is reused | ☐ |
 | H17 | Set `"trama.agent": "claude"` in your **user** settings; click **Scan System** | A new terminal named `Scan` runs Claude Code; no choice prompt appears | ☐ |
 | H18 | Set `"trama.agent": "chat"` in your **user** settings; click **Scan System** | Copilot Chat receives the prompt; no terminal is created and no choice prompt appears | ☐ |
@@ -591,6 +590,7 @@ Each launch starts a new agent terminal named after its work (cwd = the demo fol
 | H21 | Set `"trama.language": " Italian "` in user settings; click **Scan System** | The instruction includes `Write everything you generate in Italian, except code, which always stays in English.`; the setting applies to scans, Runs, quick/written design and imports | ☐ |
 | H22 | Change `trama.language` to `"   "`; click **Scan System** | The instruction has no language sentence | ☐ |
 | H23 | Restore S2 and remove `trama.language` | The setup is restored | ☐ |
+| H23a | Remove `trama.language` from user settings (keeping the rest), reload the window; then open a fresh profile with no `trama.language` and `LANG=it_IT.UTF-8`, start the extension | The user setting is saved as `Italian`; the instruction then carries the language sentence. Reloading again changes nothing, and clearing the setting stays cleared | ☐ |
 
 ### H32–H50. Written design requests
 
@@ -599,13 +599,16 @@ With the real agent from S2, in the verification shell, `ls -A $D/requests` list
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | H32 | Board: **Design…** | A new tab `<id>.md`, language Markdown, not in preview (title not italic), completely empty. Its editor title has a **Send to agent** button with the send icon and the tooltip `Send to agent (closing the tab sends it too)` | ☐ |
+| H32a | On the empty tab from **Design…**, look at the start of the first line | The grey text `Describe the change to design: behaviour, edge cases, requirements. Close this tab or press Send to agent when you are done.` is shown on one line; the file stays empty | ☐ |
+| H32b | Type one letter, then delete it; type a space on the empty tab and delete it again | The grey text disappears at the first letter and comes back when everything is deleted; with only a space it stays away | ☐ |
 | H33 | `ls -A $D/requests` and `cat $D/requests/.gitignore` | `.gitignore` and the empty `<id>.md` already exist; the `.gitignore` prints `*`. `git status` in the demo shows nothing under `.trama/requests/` | ☐ |
 | H34 | Switch to any other file tab, then back | **Send to agent** is shown only on the request's tab | ☐ |
 | H35 | On the empty tab, type only spaces and blank lines, then **Send to agent** | Warning `Trama: write the design request before sending it.`; nothing is printed in the terminal and the tab stays open | ☐ |
 | H36 | With `files.autoSave` set to `off`, type five lines: a code fence (three backticks), `# Not a title`, a closing code fence, `# Returns after shipping`, `Customers may send an order back.`; wait a second | The tab never stays marked as unsaved for more than a moment; `cat $D/requests/<id>.md` prints exactly the text typed | ☐ |
 | H37 | **Send to agent** | The tab closes without asking to save. The terminal prints ``Use the trama-design skill on the design request in `.trama/requests/<id>.md`. Bind the first Proposal you open to it with `--request <id>`.`` A ghost titled `Returns after shipping` appears in To decide. No other message | ☐ |
 | H38 | Reopen `<id>.md` from the Explorer, add a line, wait, then close the tab. Reopen it, delete all its text, wait and close it again | No **Send to agent** button; the line is saved by itself. Closing prints nothing, even when empty, and the file stays | ☐ |
-| H39 | Palette: **Trama: Design…**, type `Cancel orders`, wait, close the tab | Closing sends it: the same instruction for the new ID is printed and a ghost `Cancel orders` appears. Reopened from the Explorer, the file has no **Send to agent** | ☐ |
+| H38a | Reopen the H37 request from the Explorer, delete all its text, wait | No grey ghost text on the tab; the file stays empty and is not sent again | ☐ |
+| H39 | Board: **Design…**, type `Cancel orders`, wait, close the tab | Closing sends it: the same instruction for the new ID is printed and a ghost `Cancel orders` appears. Reopened from the Explorer, the file has no **Send to agent** | ☐ |
 | H40 | **Design…**, then close the empty tab at once | No message, nothing printed; the new file is gone from `$D/requests` | ☐ |
 | H41 | Set `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (no agent command), ↻. **Design…**, type `Refunds`, **Send to agent**, and press Esc in the `Trama: agent command` box | Nothing is printed; the tab stays open with **Send to agent** | ☐ |
 | H42 | Close the tab and press Esc again in the box | The tab is closed and nothing is printed; the file stays. Reopened from the Explorer it has **Send to agent**. Restore S2 | ☐ |
@@ -662,16 +665,19 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| J1 | **Trama: Open** | An information message `This workspace has no Trama project yet.` with a button **Initialize Project** | ☐ |
-| J2 | Dismiss the message | No panel opens | ☐ |
-| J3 | Run it again, click **Initialize Project** | `.trama/model/system.md` and `.agents/skills/trama-{design,scan,implement}/SKILL.md` appear; the panel opens | ☐ |
-| J4 | Look at the Diagram 🔍 | Breadcrumb `System`. The code has the hint `The Model is empty. Use Design… to have an agent describe the System.` but it was not seen with a project that only has `system.md`: note what is shown. Board shows 0 in all columns and no badge | ☐ |
+| J1 | **Trama: Open** in a folder without `.trama/` | The panel opens on Get Started, with the choices **Import from Code** and **Start from Scratch** | ☐ |
+| J2 | Click **Start from Scratch** in several-folder workspace and cancel the folder picker, or cancel a modal | Nothing is created; no agent starts | ☐ |
+| J3 | Click **Start from Scratch** in the empty folder | `.trama/model/system.md` and `.agents/skills/trama-{design,scan,implement}/SKILL.md` appear; the panel opens and an empty design request opens in a tab | ☐ |
+| J3a | On the tab that Start from Scratch opened, look at the start of the first line | The grey text `Describe the application to build: what it does and who it is for. Close this tab or press Send to agent when you are done.` is shown on one line; typing a letter removes it | ☐ |
+| J4 | Look at the Diagram 🔍 | Breadcrumb `System`. Under the tabs, the empty-Model text `The Model is empty. Import the existing code or start from scratch; later, design changes from the Board.`, with **Board** as a link, and below it two buttons side by side, **Import from Code** and **Start from Scratch**, in the style of the panel's buttons. Tooltips: `Ask an agent to describe the existing code as Proposals` and `Set up Trama and describe the project you want to build`. Board shows 0 in all columns and no badge | ☐ |
+| J4a | Click **Board** in the empty-Model text, then back on the Diagram click **Import from Code** | The Board tab opens. The agent gets the same import request as **Trama: Import from Code**. Once a Feature or Actor exists, the text and both buttons disappear | ☐ |
+| J4b | In the folder of J3 (it has `.trama/` and an empty Model), put a visible file in it, open the Diagram and click **Start from Scratch** | No warning about the visible file and nothing is initialized: the setup request opens in a tab at once, and `.trama/` is unchanged | ☐ |
 | J5 | `cat /tmp/trama-empty/.trama/model/system.md` | `# Trama empty` heading and `Describe what this System is and who it is for.` | ☐ |
-| J6 | Remove `.trama` (`rm -r /tmp/trama-empty/.trama`), put the text `custom` into `.agents/skills/trama-scan/SKILL.md`, run **Trama: Initialize Project** | A **modal** warning `Trama did not initialize this project.` whose detail lists `…/trama-scan/SKILL.md`, with one button **Overwrite Skills and Initialize** | ☐ |
+| J6 | Remove `.trama` (`rm -r /tmp/trama-empty/.trama`), put the text `custom` into `.agents/skills/trama-scan/SKILL.md`, put a visible file in the folder, then in Get Started click **Start from Scratch** | A **modal** warning `This folder already contains files. Start from Scratch ignores them unless your request mentions them; Import from Code describes them instead.` with **Start from Scratch** and **Import from Code**; then, on Start from Scratch, a **modal** warning `Trama did not initialize this project.` whose detail lists `…/trama-scan/SKILL.md`, with one button **Overwrite and Initialize** | ☐ |
 | J7 | Press Esc/Cancel | Nothing is created; `custom` is still in the file | ☐ |
 | J8 | Repeat J6 and click the button | `.trama/` is created and the skill file is overwritten | ☐ |
-| J9 | In the demo window run **Trama: Initialize Project** (it already has `.trama/`) | Error `Trama: …/.trama already exists` | ☐ |
-| J10 | `mkdir -p /tmp/trama-empty2/.vscode && printf '{"trama.skillsDir": ".claude/skills"}\n' > /tmp/trama-empty2/.vscode/settings.json`, open that folder in a new window with the extension, **Trama: Open** → **Initialize Project** | Skills land in `.claude/skills/trama-*/SKILL.md` and `.agents/` is not created | ☐ |
+| J9 | In the demo window open Get Started (it already has `.trama/`) | The panel shows the project, not Get Started | ☐ |
+| J10 | `mkdir -p /tmp/trama-empty2/.vscode && printf '{"trama.skillsDir": ".claude/skills"}\n' > /tmp/trama-empty2/.vscode/settings.json`, open that folder in a new window with the extension, **Trama: Open** → **Start from Scratch** | Skills land in `.claude/skills/trama-*/SKILL.md` and `.agents/` is not created | ☐ |
 
 ---
 
@@ -683,7 +689,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | K2 | Switch back to a dark theme | Same | ☐ |
 | K3 | Narrow the editor group to about 700 px | Board scrolls horizontally (columns keep a minimum width); the Diagram canvas is not hidden by the panel | ☐ |
 | K4 | Use only the keyboard on the Board (Tab, Shift+Tab, Enter) | Every button is reachable and shows a visible focus ring | ☐ |
-| K5 | Hover disabled buttons | Disabled **Approve** shows its reason; so does a disabled **Run all To do** or **Run this design** | ☐ |
+| K5 | Hover disabled buttons | Disabled **Approve** shows its reason; so does a disabled **Run all To do** | ☐ |
 
 ---
 
@@ -856,18 +862,18 @@ These are acceptance scenarios for the coordinated automatic flow. Use a disposa
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| Y1 | Set user setting `"trama.driftAutoPilot": "disabled"`; start Resolve Drifts | Existing manual question and developer-review flow; no automatic delegation | ☐ |
-| Y2 | Set `"trama.driftAutoPilot": "enabled"` with open ordinary and critical Drifts; allow the tracked scan/Run barrier to clear | Only eligible non-critical Drifts can be delegated; critical and exceptional cases remain manual. No new automatic collection starts while any tracked scan or Run in either project window is active | ☐ |
-| Y3 | Set `"trama.driftAutoPilot": "yolo"`; test an eligible Drift with Fix options and another with no applicable first Fix option | Only the authorized eligible Drift is prepared with `fix-code`, option 1, no note; the other stays out. The agent submits but neither approves nor implements the resolution | ☐ |
+| Y1 | Leave Auto Fix Drifts unchecked (`"trama.autoFixDrifts": false`); start Resolve Drifts | Existing manual question and developer-review flow; no automatic delegation | ☐ |
+| Y2 | Check `"trama.autoFixDrifts": true` (Auto Fix Critical Drifts unchecked) with open ordinary and critical Drifts; allow the tracked scan/Run barrier to clear | Only eligible non-critical Drifts can be delegated; critical and exceptional cases remain manual. No new automatic collection starts while any tracked scan or Run in either project window is active | ☐ |
+| Y3 | Check both `"trama.autoFixDrifts": true` and `"trama.autoFixCriticalDrifts": true`; test an eligible Drift with Fix options and another with no applicable first Fix option | Only the authorized eligible Drift is prepared with `fix-code`, option 1, no note; the other stays out. The agent submits but neither approves nor implements the resolution | ☐ |
 | Y4 | Query autopilot with the active job ID, then query without it or with an unknown ID; inspect status from a second editor window | The known job reports only its own current authorized permanent IDs; an unknown/missing job grants no usable delegation. The Board shows no autopilot status line, and `trama drift autopilot` reports work active in another window | ☐ |
 | Y5 | Submit an automatic resolution and inspect host actions while its agent is still running | Host does not start the separate implementation Run before normal resolution-agent completion; after approval it filters Run Tasks to that collection's fix Tasks and incomplete origins, excluding unrelated Tasks | ☐ |
-| Y6 | Change setting to `disabled`, or change `yolo` to `enabled`, while automatic work is running | No new steps start; already-started work is not killed. Critical residual work is no longer authorized in `enabled` | ☐ |
+| Y6 | Uncheck Auto Fix Drifts, or uncheck Auto Fix Critical Drifts while Auto Fix Drifts stays on, while automatic work is running | No new steps start; already-started work is not killed. Critical residual work is no longer authorized once Auto Fix Critical Drifts is unchecked | ☐ |
 | Y7 | Force a resolution choice or fix Task to fail; then let an unrelated eligible case proceed, edit the failed Drift, and run a successful developer scan | Failure is reported against its permanent Drift/Task ID and reason; failed work is not retried by the next automatic cycle, while independent work may continue. A changed Drift or successful developer scan makes failed cases eligible for evaluation again | ☐ |
 | Y8 | Make a Trama scan fail after it has filed a Drift; then, with no other scan or Run in progress, let the autopilot run. Separately, end a scan without a successful check (close its agent early) | A failed or interrupted scan does not suspend new automatic collections: once no other scan or Run is active, collection starts on the eligible open Drifts. A finished scan or explicit Resolve Drifts lifts the wait after the editor opens | ☐ |
 | Y9 | Start a scan with an external agent not launched by Trama | It does not appear in Trama's coordination barrier; the developer coordinates that work manually | ☐ |
 | Y10 | Allow a successful Run and its selective scan to produce another eligible Drift | The existing Run check represents its selective scan once; a later cycle may run without an extra built-in cycle/time/spending limit. The developer can stop further cycles by withdrawing delegation or interrupting work | ☐ |
 | Y11 | Trigger a failed resolution or Task case, then find its card in the Board | The card of the failed Drift or Task shows an `autopilot failed` badge; its tooltip and accessible name `Autopilot failed: <reason>` give the reason. Focus does not move and the panel does not open by itself; selecting the card opens the permanent Drift or Task card, and keyboard focus survives status refresh | ☐ |
-| Y12 | Set `"trama.submitWhileRunning": "disabled"` (default); start a Run, then look at Run all To do, a design's Run this design button and a Task's Run button while the Run is in progress; set the setting to `enabled` and look again | With `disabled`, those Run buttons are disabled while the Run is in progress, and a launch is refused with `A run cannot start: A run is in progress.`; with `enabled` they are available. Scan System, Quick request… and Resolve Drifts are not affected by the setting | ☐ |
+| Y12 | Leave `"trama.submitWhileRunning"` unset or `false` (default); start a Run, then look at Run all To do and a Task's Run button while the Run is in progress; tick the setting (`true`) and look again | With `false`, those Run buttons are disabled while the Run is in progress, and a launch is refused with `A run cannot start: A run is in progress.`; with `true` they are available. Scan System, Quick request… and Resolve Drifts are not affected by the setting | ☐ |
 
 ---
 

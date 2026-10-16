@@ -24,6 +24,11 @@ export function breadcrumb(scene: Scene, level: Level): Crumb[] {
   return trail;
 }
 
+/** The System has nothing to draw: no Feature and no Actor, the drawn Proposal included. Open Drifts alone do not count. */
+export function isEmptyModel(scene: Scene): boolean {
+  return scene.features.length === 0 && scene.actors.length === 0;
+}
+
 /** The level itself when the Scene still has what it shows; otherwise the closest level that exists. */
 export function validLevel(scene: Scene, level: Level): Level {
   switch (level.kind) {

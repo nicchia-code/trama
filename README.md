@@ -48,11 +48,11 @@ Tasks appear on the board as the agent prepares them.
 
 ![Tasks appearing on the Board while the agent prepares them](docs/images/tasks-preparing.png)
 
-The returns design became nine Tasks, grouped under it.
+The returns design became nine Tasks, each tagged with the Proposal it comes from.
 
-![Nine Tasks grouped under the returns design](docs/images/tasks-ready.png)
+![Nine Tasks tagged with the returns Proposal](docs/images/tasks-ready.png)
 
-Click **Run this design**, and the agent works through them while you follow along.
+Click **Run all To do**, and the agent works through them while you follow along.
 
 ### 5. Know when code and map disagree
 
@@ -129,8 +129,8 @@ Trama runs in VS Code and Cursor, on Linux (x64), macOS (Apple silicon) and Wind
 
    Terminal agents must already be installed and on your `PATH`.
 3. **Open your project** and run **Trama: Open**.
-4. Choose **Initialize Project** for a fresh start, or **Import from Code** for an existing app.
-5. Click **Design…** and describe your first feature.
+4. In **Get Started** (the panel shows it in any folder without a Trama project), choose **Import from Code** for an existing app, or **Start from Scratch** for an empty folder: it creates the project and opens an empty design request for your first feature, which the agent answers with the `trama-setup` skill.
+5. In the Board, click **Design…** and describe your first feature (with an empty Model, the Diagram offers **Import from Code** and **Start from Scratch** too).
 
 > **Windows is in preview.** The `win32-x64` build is not yet verified end to end on Windows 11 (VS Code and Cursor, omp and Claude Code, Windows PowerShell 5.1, PowerShell 7 and Git Bash); the manual check in [`docs/uat.md`](docs/uat.md) decides when the preview ends.
 >
@@ -152,16 +152,17 @@ For Claude Code, writing in Italian, a typical setup looks like this:
 | Setting | Default | What it does |
 |---|---|---|
 | `trama.agent` | `chat` | Where Trama sends its instructions: `chat`, `claude` or `omp`. |
-| `trama.skillsDir` | `.agents/skills` | Where **Initialize Project** installs the agent skills. Use `.claude/skills` for Claude Code. |
-| `trama.language` | *empty* | Language for the prose the agent writes (descriptions, Proposals, Tasks, Drifts), e.g. `Italian`. Code, names, titles and IDs stay in English. |
-| `trama.terminalLocation` | `panel` | Where terminal agents open: `panel` (terminal area, in the background) or `editor` (a tab beside your code). |
+| `trama.skillsDir` | `.agents/skills` | Where Get Started installs the agent skills. Use `.claude/skills` for Claude Code. |
+| `trama.language` | *detected* | Language for the prose the agent writes (descriptions, Proposals, Tasks, Drifts), e.g. `Italian`. On first start Trama saves the language of your system (else the editor's, else `English`) here, once. Code, names, titles and IDs stay in English. |
+| `trama.terminalLocation` | `editor` | Where terminal agents open: `editor` (a tab beside your code) or `panel` (terminal area, in the background). |
 | `trama.analysis` | *empty* | Model for design requests, Drift resolution and import. |
 | `trama.scan` | *empty* | Model for scans, including the sub-agents that compare each Machine. |
 | `trama.execution` | *empty* | Model for implementing Tasks. |
 | `trama.autoExit` | `true` | Close an agent's terminal as soon as it's done. |
 | `trama.maxParallelAgents` | `20` | How many sub-agents the agent may run at once. |
-| `trama.submitWhileRunning` | `disabled` | `enabled` lets you start a run while another is in progress. |
-| `trama.driftAutoPilot` | `disabled` | Let the agent resolve Drifts on its own: `enabled` for non-critical ones, `yolo` for all of them. |
+| `trama.submitWhileRunning` | `false` | `true` lets you start a run while another is in progress; `false` keeps Run buttons unavailable until it finishes. |
+| `trama.autoFixDrifts` | `false` | Auto Fix Drifts: the agent recommends, approves and fixes non-critical Drifts on its own. |
+| `trama.autoFixCriticalDrifts` | `false` | Auto Fix Critical Drifts: also critical Drifts. It applies only while Auto Fix Drifts is on. |
 
 For the three model settings, write the model name as your agent accepts it, or leave it empty for the agent's default. In the chat they pick the model of the new conversation: in Copilot, a model with that name; in Cursor, the conversation's starting model. Every setting except `trama.skillsDir`, `trama.language` and `trama.submitWhileRunning` lives in your user settings only, so it can't be overridden per workspace. You can change every setting in the Settings tab of the Trama panel, which always saves to your user settings. All the details are in the [extension README](./extension/README.md).
 

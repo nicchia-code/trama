@@ -2,8 +2,10 @@ import type { Snapshot } from "../../../src/core/snapshot";
 import type { NavigateOptions, ToHost, ToWebview, ViewName } from "../protocol";
 import { mountBoard } from "./board";
 import { mountDiagram } from "./diagram";
+import { mountGetStarted } from "./getstarted";
 import { mountQuestions } from "./questions";
 import { mountRequirements } from "./requirements";
+import { mountSpecs } from "./specs";
 import { mountSettings } from "./settings";
 import css from "./shell.css" with { type: "text" };
 import type { View, ViewContext } from "./types";
@@ -21,9 +23,11 @@ document.head.append(style);
 const app = document.getElementById("app") as HTMLElement;
 app.innerHTML = `
   <div class="shell-header">
-    <button class="shell-tab" data-view="diagram" role="tab">Diagram</button>
+    <button class="shell-tab" data-view="getstarted" role="tab">Get Started</button>
     <button class="shell-tab" data-view="board" role="tab">Board<span class="shell-badge" data-badge hidden></span></button>
+    <button class="shell-tab" data-view="diagram" role="tab">Diagram</button>
     <button class="shell-tab" data-view="requirements" role="tab">Requirements</button>
+    <button class="shell-tab" data-view="specs" role="tab">Specs</button>
     <button class="shell-tab" data-view="settings" role="tab">Settings</button>
     <span class="shell-spacer"></span>
   </div>
@@ -32,7 +36,7 @@ app.innerHTML = `
   <div class="shell-views"></div>`;
 
 const views = app.querySelector(".shell-views") as HTMLElement;
-const roots: Record<ViewName, HTMLElement> = { diagram: document.createElement("div"), board: document.createElement("div"), requirements: document.createElement("div"), settings: document.createElement("div") };
+const roots: Record<ViewName, HTMLElement> = { getstarted: document.createElement("div"), diagram: document.createElement("div"), board: document.createElement("div"), requirements: document.createElement("div"), specs: document.createElement("div"), settings: document.createElement("div") };
 for (const root of Object.values(roots)) {
   root.className = "shell-view";
   views.append(root);
@@ -40,6 +44,8 @@ for (const root of Object.values(roots)) {
 
 let current: ViewName = "diagram";
 let snapshot: Snapshot | null = null;
+/** Whether the folder has a Trama project; null until the host says. */
+let hasProject: boolean | null = null;
 
 function navigate(view: ViewName, options: NavigateOptions = {}) {
   current = view;
@@ -48,12 +54,29 @@ function navigate(view: ViewName, options: NavigateOptions = {}) {
   mounted[view].show(options);
 }
 
+/**
+ * Without a project the tabs are Get Started and Settings; with one, every tab except Get Started. The panel moves to
+ * Get Started when the project is missing and to the Diagram when it appears.
+ */
+function setProject(present: boolean) {
+  if (present === hasProject) return;
+  hasProject = present;
+  for (const tab of app.querySelectorAll<HTMLElement>(".shell-tab")) {
+    const view = tab.dataset["view"];
+    tab.hidden = view === "getstarted" ? present : !present && view !== "settings";
+  }
+  navigate(present ? "diagram" : "getstarted");
+}
+
 const context: ViewContext = { post, navigate, openLink: (url) => post({ type: "openLink", url }) };
 const settings = mountSettings(roots.settings, context);
+const getStarted = mountGetStarted(roots.getstarted, context);
 const mounted: Record<ViewName, View> = {
+  getstarted: getStarted,
   diagram: mountDiagram(roots.diagram, context),
   board: mountBoard(roots.board, context),
   requirements: mountRequirements(roots.requirements, context),
+  specs: mountSpecs(roots.specs, context),
   settings,
 };
 
@@ -91,12 +114,15 @@ for (const tab of app.querySelectorAll<HTMLElement>(".shell-tab")) tab.addEventL
 
 window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   const message = event.data;
-  if (message.type === "snapshot") {
+  if (message.type === "project") setProject(message.present);
+  else if (message.type === "setup") getStarted.receive(message);
+  else if (message.type === "snapshot") {
     snapshot = message.snapshot;
     showError(null);
-    mounted.diagram.update(snapshot);
+    mounted.diagram.update(snapshot, message.asking, message.resolve);
     mounted.board.update(snapshot, message.asking, message.resolve);
     mounted.requirements.update(snapshot);
+    mounted.specs.update(snapshot);
     showModelErrors(snapshot.diagnostics);
     const decide = buildBoard(snapshot)[0]?.cards.length ?? 0;
     const badge = app.querySelector("[data-badge]") as HTMLElement;

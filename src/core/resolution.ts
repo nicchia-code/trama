@@ -68,13 +68,15 @@ export function awaitingResolution(p: Project): Proposal | null {
   return listProposals(p).find((r) => r.data.kind === "resolution" && (r.data.status === "draft" || r.data.status === "open")) ?? null;
 }
 
-/** Why Resolve Drifts cannot be launched now (the first reason that holds), or null. `window` is the state of Drift resolution in this window. */
-export function resolveDriftsBlocker(p: Project, window: "free" | "running-tasks" | "resolving"): string | null {
-  if (window === "resolving") return "Drifts are being resolved";
-  if (window === "running-tasks") return "A run is in progress";
+/** Why Resolve Drifts cannot be launched now: every reason that holds, in order (Drifts are being resolved, a run in progress, the resolution Proposal awaiting a decision, no open Drifts), or null. `work` is what holds in this window. */
+export function resolveDriftsBlocker(p: Project, work: WindowWork): string | null {
   const awaiting = awaitingResolution(p);
-  if (awaiting) return `Proposal ${cardName(p, "proposal", awaiting.id)} resolving Drifts awaits a decision`;
-  return listDrifts(p).some((d) => d.data.status === "open") ? null : "No open Drifts";
+  return joinReasons([
+    work.resolving ? "Drifts are being resolved" : null,
+    work.running ? "A run is in progress" : null,
+    awaiting ? `Proposal ${cardName(p, "proposal", awaiting.id)} resolving Drifts awaits a decision` : null,
+    listDrifts(p).some((d) => d.data.status === "open") ? null : "No open Drifts",
+  ]);
 }
 
 /** What holds in this window: Drift resolution and a run may both be going. */

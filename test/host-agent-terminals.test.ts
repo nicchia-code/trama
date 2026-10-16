@@ -151,7 +151,7 @@ mock.module("vscode", () => ({
       inspect: (key: string) => inspected[key] ?? (key in settingValues ? { globalValue: settingValues[key] } : undefined),
       update: async (key: string, value: unknown) => void updates.push({ key, value }),
     }),
-    createFileSystemWatcher: (pattern: string) => pattern === "**/.trama/requirements/**"
+    createFileSystemWatcher: (pattern: string) => pattern === "**/.trama/{requirements/**,specs.yaml}"
       ? { onDidCreate: subscribe(requirementEvents.create), onDidChange: subscribe(requirementEvents.change), onDidDelete: subscribe(requirementEvents.delete), dispose() { for (const list of Object.values(requirementEvents)) list.length = 0; } }
       : { onDidCreate() {}, onDidChange() {}, onDidDelete() {}, dispose() {} },
   },
@@ -246,32 +246,6 @@ describe("taken Tasks and the agent terminals", () => {
       await expect(allRun).rejects.toThrow(/Run all To do is unavailable: An agent is working on Task/);
       expect(created).toHaveLength(beforeAll);
       moveTask(p, allTask, "todo", "agent");
-
-      const proposal = newProposal(p, "Pending design");
-      newTask(p, { title: "Design scope", refs: ["order"], technical: false, proposal: proposal.id });
-      const takenDesignTask = newTask(p, { title: "Taken in design", refs: ["order"], technical: false, proposal: proposal.id }).id;
-      const designDelivery = pauseDelivery();
-      const beforeDesign = created.length;
-      const designRun = launch.launchAction(p, { kind: "implement-design", proposal: proposal.id });
-      await designDelivery.waiting;
-      moveTask(p, takenDesignTask, "doing", "agent", { terminal: "design-agent" });
-      designDelivery.delivery.resolve("endpoint");
-      await expect(designRun).rejects.toThrow(/Run this design is unavailable: An agent is working on Task/);
-      expect(created).toHaveLength(beforeDesign);
-      moveTask(p, takenDesignTask, "todo", "agent");
-
-      const otherProposal = newProposal(p, "Other design");
-      const otherTask = newTask(p, { title: "Outside design", refs: ["order"], technical: false, proposal: otherProposal.id }).id;
-      const outsideDelivery = pauseDelivery();
-      const beforeOutside = created.length;
-      const outsideRun = launch.launchAction(p, { kind: "implement-design", proposal: proposal.id });
-      await outsideDelivery.waiting;
-      moveTask(p, otherTask, "doing", "agent", { terminal: "other-agent" });
-      outsideDelivery.delivery.resolve("endpoint");
-      await outsideRun;
-      expect(created).toHaveLength(beforeOutside + 1);
-      const outsideTerminal = terminals.at(-1);
-      if (outsideTerminal !== undefined) listeners.end.forEach((fn) => fn(shell(outsideTerminal)));
     } finally {
       watching.dispose();
       controller.dispose();
@@ -460,7 +434,7 @@ describe("automatic terminal exit", () => {
   test("the first idle or typed-command end finalizes only its tracked terminal once", async () => {
     delete settingValues.autoExit;
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { driftResolution, receiveAgentIdle } = await import("../extension/src/host/drift-resolution");
+    const { driftWork, receiveAgentIdle } = await import("../extension/src/host/drift-resolution");
     const p = projectAt(dir);
     const watching = watchAgentTerminal();
     try {
@@ -468,15 +442,15 @@ describe("automatic terminal exit", () => {
       const idleTerminal = terminals.at(-1) as FakeTerminal;
       const idleId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
       announce(p, { kind: "task", title: "Idle ghost", terminal: idleId });
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
       listeners.end.forEach((listener) => listener(shell(idleTerminal, "unrelated command")));
       const foreignTerminal = { ...idleTerminal };
       listeners.end.forEach((listener) => listener(shell(foreignTerminal)));
       expect(idleTerminal.disposals).toBe(0);
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
       receiveAgentIdle(idleId, dir);
       expect(idleTerminal.disposals).toBe(1);
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
       expect(listAnnouncements(p)).toEqual([]);
       listeners.end.forEach((listener) => listener(shell(idleTerminal)));
       listeners.close.forEach((listener) => listener(idleTerminal));
@@ -489,7 +463,7 @@ describe("automatic terminal exit", () => {
       announce(p, { kind: "task", title: "Ended ghost", terminal: endedId });
       listeners.end.forEach((listener) => listener(shell(endedTerminal)));
       expect(endedTerminal.disposals).toBe(1);
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
       expect(listAnnouncements(p)).toEqual([]);
       listeners.end.forEach((listener) => listener(shell(endedTerminal)));
       listeners.close.forEach((listener) => listener(endedTerminal));
@@ -504,7 +478,7 @@ describe("automatic terminal exit", () => {
   test("autoExit off leaves an idle terminal open, no longer follows it, and closing it releases what it took", async () => {
     settingValues.autoExit = false;
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { driftResolution, receiveAgentIdle } = await import("../extension/src/host/drift-resolution");
+    const { driftWork, receiveAgentIdle } = await import("../extension/src/host/drift-resolution");
     const p = projectAt(dir);
     const watching = watchAgentTerminal();
     try {
@@ -514,7 +488,7 @@ describe("automatic terminal exit", () => {
       announce(p, { kind: "task", title: "Idle ghost", terminal: id });
       receiveAgentIdle(id, dir);
       expect(terminal.disposals).toBe(0);
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
       expect(listAnnouncements(p)).toEqual([]);
       const count = terminals.length;
       await launchAgent(dir, "Use the trama-implement skill on Task efgh5678.", "T3", undefined, () => true, "run");
@@ -524,7 +498,7 @@ describe("automatic terminal exit", () => {
       expect(nextId).not.toBe(id);
       listeners.end.forEach((listener) => listener(shell(nextTerminal)));
       expect(nextTerminal.disposals).toBe(0);
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
       announce(p, { kind: "task", title: "Resumed ghost", terminal: id });
       const resumedTask = moveTask(p, newTask(p, { title: "Resumed", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: id }).id;
       receiveAgentIdle(id, dir);
@@ -532,7 +506,7 @@ describe("automatic terminal exit", () => {
       expect(getTask(p, resumedTask).data.column).toBe("doing");
       listeners.close.forEach((listener) => listener(terminal));
       expect(terminal.disposals).toBe(0);
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
       expect(getTask(p, resumedTask).data.column).toBe("todo");
       expect(listAnnouncements(p)).toEqual([]);
       withdrawAll(p);
@@ -660,9 +634,9 @@ describe("the agent terminal as an editor tab", () => {
 
       delete settingValues["terminalLocation"];
       closeAll();
-      await launchAgent(dir, instruction, "Scan"); // the plain terminal stays in the terminal area and is never shown
-      expect(created.at(-1)?.location).toBeUndefined();
-      expect(terminals.at(-1)?.shown).toEqual([]);
+      await launchAgent(dir, instruction, "Scan"); // unset means the editor tab, the default
+      expect(created.at(-1)?.location).toEqual({ viewColumn: -2, preserveFocus: true });
+      expect(terminals.at(-1)?.shown).toEqual([true]);
     } finally {
       delete settingValues["terminalLocation"];
       tabGroups.columns = [1];
@@ -746,6 +720,10 @@ describe("agent instruction settings", () => {
       await launchAgent(dir, instruction, "Scan");
       expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. Write everything you generate in Italian, except code, which always stays in English.'`);
       expect(typed.at(-1)?.split("\\n")).toHaveLength(1);
+
+      settingValues["language"] = "English";
+      await launchAgent(dir, instruction, "Scan");
+      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. Write everything you generate in English, except code, which always stays in English.'`);
 
       settingValues["language"] = "   ";
       await launchAgent(dir, instruction, "Scan");
@@ -1164,27 +1142,20 @@ describe("the ghosts of Cursor's chat agent", () => {
 
 
 describe("opening the panel", () => {
-  test("a second open while the offer to initialize waits brings the one panel forward instead of making another", async () => {
+  test("a second open of a workspace without a project brings the one panel forward instead of making another, and initializes nothing", async () => {
     // Dynamic, as above: the module must load after mock.module replaced "vscode".
     const { Controller } = await import("../extension/src/host/controller");
     const empty = mkdtempSync(join(tmpdir(), "trama-panel-"));
     workspaceRoot = empty;
-    answerOffer.length = 0;
     const panelsBefore = panelsCreated;
     const revealsBefore = reveals;
+    const offersBefore = answerOffer.length;
     try {
       const controller = new Controller({ scheme: "file" } as never);
-      const first = controller.open();
-      const second = controller.open();
-      expect(answerOffer).toHaveLength(2);
-      answerOffer[0]?.("Initialize Project");
-      await first;
-      expect(existsSync(join(empty, ".trama"))).toBe(true);
-      expect(panelsCreated - panelsBefore).toBe(1);
-
-      // The developer accepts the second offer too: the project already exists and the panel is open.
-      answerOffer[1]?.("Initialize Project");
-      await second;
+      await controller.open();
+      await controller.open();
+      expect(existsSync(join(empty, ".trama"))).toBe(false);
+      expect(answerOffer.length - offersBefore).toBe(0);
       expect(panelsCreated - panelsBefore).toBe(1);
       expect(reveals - revealsBefore).toBe(1);
     } finally {
@@ -1277,12 +1248,12 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
   test("a Run in a terminal lasts until the command Trama typed ends or the terminal closes, and Drift resolution is Free only when the last Run is over", async () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { driftResolution, endTerminalJobs } = await import("../extension/src/host/drift-resolution");
+    const { driftWork, endTerminalJobs } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
     try {
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
       await launchAgent(dir, "Scan", "Scan"); // not a Run: the buttons of the Runs and of Resolve Drifts say so
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
 
       await launchAgent(dir, "Run one", "One", undefined, () => true, "run");
       const one = terminals.at(-1) as FakeTerminal;
@@ -1290,20 +1261,20 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       await launchAgent(dir, "Run two", "Two", undefined, () => true, "run");
       const two = terminals.at(-1) as FakeTerminal;
       listeners.start.forEach((fn) => fn(shell(two)));
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
 
       listeners.end.forEach((fn) => fn(shell(one, "another command"))); // the end of another command counts for nothing
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
       listeners.end.forEach((fn) => fn(shell(one)));
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
       listeners.close.forEach((fn) => fn(two));
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
 
       await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve");
       const resolving = terminals.at(-1) as FakeTerminal;
-      expect(driftResolution()).toBe("resolving");
+      expect(driftWork().resolving).toBe(true);
       listeners.close.forEach((fn) => fn(resolving));
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
       endTerminalJobs("none"); // ending what is not followed changes nothing
     } finally {
       watching.dispose();
@@ -1348,7 +1319,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
   test("Resolve Drifts and the Runs are checked again when the instruction is sent: a double click or a Run started meanwhile sends nothing, and the Drifts are those open at that moment", async () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { driftResolution } = await import("../extension/src/host/drift-resolution");
+    const { driftWork } = await import("../extension/src/host/drift-resolution");
     const { receiveCursorHook } = await import("../extension/src/host/cursor");
     const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
     const watching = watchAgentTerminal();
@@ -1367,10 +1338,8 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
         return { composerId: "c" };
       }
     };
-    const resolveOk = () => driftResolution() === "free";
-    const runOk = () => driftResolution() !== "resolving";
-    const resolve = () => launchAgent(dir, () => `Resolve ${open.join(",")}`, "Resolve Drifts", undefined, resolveOk, "resolve");
-    const run = () => launchAgent(dir, "Run", "Run", undefined, runOk, "run");
+    const resolve = () => launchAgent(dir, () => `Resolve ${open.join(",")}`, "Resolve Drifts", undefined, () => !driftWork().resolving && !driftWork().running, "resolve");
+    const run = () => launchAgent(dir, "Run", "Run", undefined, () => !driftWork().resolving, "run");
     try {
       // Double click: one agent only, and its instruction names the Drifts open when it is sent.
       const first = resolve();
@@ -1379,13 +1348,13 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       expect(await Promise.all([first, second])).toEqual(["sent", "not-sent"]);
       expect(queries).toHaveLength(1);
       expect(queries[0]).toContain("Resolve d1,d2");
-      expect(driftResolution()).toBe("resolving");
+      expect(driftWork().resolving).toBe(true);
       turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "c1"); // the chat starts the conversation of the job
 
       // A Run asked while Resolve Drifts works sends nothing.
       expect(await run()).toBeUndefined();
       turn({ hook: "stop", status: "completed" }, "c1");
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
 
       // A Run and Resolve Drifts asked together: the first to send wins, the other sends nothing.
       queries.length = 0;
@@ -1393,7 +1362,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       const resolveSecond = resolve();
       expect(await Promise.all([runFirst, resolveSecond])).toEqual(["sent", "not-sent"]);
       turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "c2");
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
       expect(queries).toHaveLength(1);
     } finally {
       turn({ hook: "stop", status: "completed" }, "c1");
@@ -1406,7 +1375,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
   });
   test("a terminal Run waits for a pending chat Resolve Drifts delivery before checking its conditions", async () => {
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { bindCopilotChatJob, driftResolution, endCopilotChatJobs } = await import("../extension/src/host/drift-resolution");
+    const { bindCopilotChatJob, driftWork, endCopilotChatJobs } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
@@ -1434,14 +1403,14 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       settingValues.agent = "omp";
       run = launchAgent(dir, "Run", "Run", undefined, () => {
         terminalChecks++;
-        return driftResolution() !== "resolving";
+        return !driftWork().resolving;
       }, "run");
       await Promise.resolve();
       expect(terminalChecks).toBe(0);
 
       releaseNewChat();
       expect(await chat).toBe("sent");
-      expect(driftResolution()).toBe("resolving");
+      expect(driftWork().resolving).toBe(true);
       expect(await run).toBeUndefined();
       expect(terminalChecks).toBe(1);
       expect(terminals).toHaveLength(terminalCount);
@@ -1460,7 +1429,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
   });
   test("a chat Resolve Drifts waits for a pending terminal Run delivery before checking its conditions", async () => {
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { driftResolution } = await import("../extension/src/host/drift-resolution");
+    const { driftWork } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
     const previousApp = editor.appName;
     const previousHandler = commandHandler;
@@ -1477,18 +1446,18 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     settingValues.agent = "omp";
     editorCalls.length = 0;
     try {
-      run = launchAgent(dir, "Run", "Run", undefined, () => driftResolution() !== "resolving", "run");
+      run = launchAgent(dir, "Run", "Run", undefined, () => !driftWork().resolving, "run");
       await waiting.promise;
 
       settingValues.agent = "chat";
       editor.appName = "Visual Studio Code";
-      resolve = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, () => driftResolution() === "free", "resolve");
+      resolve = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, () => !driftWork().resolving && !driftWork().running, "resolve");
       await Promise.resolve();
       expect(editorCalls).not.toContain("workbench.action.chat.newChat");
 
       delivery.resolve("endpoint");
       expect(await run).toBe("terminal");
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
       expect(await resolve).toBe("not-sent");
       expect(editorCalls).not.toContain("workbench.action.chat.newChat");
     } finally {
@@ -1508,7 +1477,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const { driftResolution } = await import("../extension/src/host/drift-resolution");
+    const { driftWork } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
     let conversation = "";
     let loops = 0;
@@ -1520,18 +1489,18 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       expect(await launchAgent(dir, "Run", "Run", undefined, () => true, "run")).toBe("confirm");
       clipboard.length = 0;
       expect(await launchAgent(dir, "Read .env", "Run", undefined, () => true, "run")).toBe("clipboard");
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
 
       commandHandler = () => undefined;
       for (const end of [{ hook: "stop", status: "completed" }, { hook: "stop", status: "error" }, { hook: "sessionEnd", reason: "window_close" }] as const) {
         conversation = `j${loops++}`; // each job's chat is a new conversation
         expect(await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve")).toBe("sent");
         hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
-        expect(driftResolution()).toBe("resolving");
+        expect(driftWork().resolving).toBe(true);
         hook({ hook: "stop", status: "completed", conversation: "not-trama" });
-        expect(driftResolution()).toBe("resolving");
+        expect(driftWork().resolving).toBe(true);
         hook(end);
-        expect(driftResolution()).toBe("free");
+        expect(driftWork()).toEqual({ resolving: false, running: false });
       }
     } finally {
       editor.appName = "Visual Studio Code";
@@ -1544,7 +1513,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const { driftResolution } = await import("../extension/src/host/drift-resolution");
+    const { driftWork } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
     const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
     const run = () => launchAgent(dir, "Run", "Run", undefined, () => true, "run");
@@ -1569,7 +1538,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       finishComposer();
       expect(await sending).toBe("sent");
       turn({ hook: "stop", status: "completed" }, "early");
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
 
       // A later prompt of a conversation already seen takes no job: the next new conversation does.
       expect(await resolve()).toBe("sent");
@@ -1577,10 +1546,10 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       expect(await run()).toBe("sent");
       turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "p");
       turn({ hook: "stop", status: "completed" }, "p");
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
       turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "q");
       turn({ hook: "stop", status: "completed" }, "q");
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
     } finally {
       for (const c of ["early", "p", "q"]) turn({ hook: "sessionEnd", reason: "window_close" }, c);
       settingValues.agent = "omp";
@@ -1594,7 +1563,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const { driftResolution } = await import("../extension/src/host/drift-resolution");
+    const { driftWork } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
     const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
     const run = () => launchAgent(dir, "Run", "Run", undefined, () => true, "run");
@@ -1613,12 +1582,12 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
         turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, first);
         expect(await run()).toBe("sent");
         turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, second);
-        expect(driftResolution()).toBe("running-tasks");
+        expect(driftWork()).toEqual({ resolving: false, running: true });
         turn({ hook: "stop", status: "completed" }, "not-trama");
         turn(end, first);
-        expect(driftResolution()).toBe("running-tasks");
+        expect(driftWork()).toEqual({ resolving: false, running: true });
         turn(end, second);
-        expect(driftResolution()).toBe("free");
+        expect(driftWork()).toEqual({ resolving: false, running: false });
       }
 
       // Resolve Drifts keeps working when a Run's conversation ends, and ends only with its own.
@@ -1627,11 +1596,11 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "r");
       expect(await run()).toBe("sent");
       turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "u");
-      expect(driftResolution()).toBe("resolving");
+      expect(driftWork().resolving).toBe(true);
       turn({ hook: "stop", status: "completed" }, "u");
-      expect(driftResolution()).toBe("resolving");
+      expect(driftWork().resolving).toBe(true);
       turn({ hook: "stop", status: "error" }, "r");
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
     } finally {
       for (const c of conversations) turn({ hook: "sessionEnd", reason: "window_close" }, c);
       settingValues.agent = "omp";
@@ -1642,50 +1611,50 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
   });
 
   test("a chat job ignores prompts from chat preparation and binds only the first prompt after delivery starts", async () => {
-    const { bindChatJob, chatJobSendStarted, driftResolution, endChatJobs, startJob } = await import("../extension/src/host/drift-resolution");
+    const { bindChatJob, chatJobSendStarted, driftWork, endChatJobs, startJob } = await import("../extension/src/host/drift-resolution");
     try {
       bindChatJob(dir, "scan-before-send");
       const sentAfter = chatJobSendStarted(dir, "cursor");
       startJob("run", dir, { chat: "cursor" }, true, sentAfter);
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
       bindChatJob(dir, "run-own");
       endChatJobs(dir, "scan-before-send");
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
       endChatJobs(dir, "run-own");
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
     } finally {
       endChatJobs(dir, "scan-before-send");
       endChatJobs(dir, "run-own");
     }
   });
   test("chat jobs without an observable conversation stay active until an end event", async () => {
-    const { bindChatJob, driftResolution, endChatJobs, startJob } = await import("../extension/src/host/drift-resolution");
+    const { bindChatJob, driftWork, endChatJobs, startJob } = await import("../extension/src/host/drift-resolution");
     const project = join(dir, crypto.randomUUID());
     startJob("run", project, { chat: "cursor" }, true);
-    expect(driftResolution()).toBe("running-tasks");
+    expect(driftWork()).toEqual({ resolving: false, running: true });
     bindChatJob(project, "bound-conversation");
-    expect(driftResolution()).toBe("running-tasks");
+    expect(driftWork()).toEqual({ resolving: false, running: true });
     endChatJobs(project, "bound-conversation");
-    expect(driftResolution()).toBe("free");
+    expect(driftWork()).toEqual({ resolving: false, running: false });
   });
 
   test("terminal jobs without an observable end stay active until the terminal closes", async () => {
-    const { driftResolution, endTerminalJobs, setHooked, startJob } = await import("../extension/src/host/drift-resolution");
+    const { driftWork, endTerminalJobs, setHooked, startJob } = await import("../extension/src/host/drift-resolution");
     startJob("run", dir, { terminal: "aaaaaa" }, false);
     startJob("resolve", dir, { terminal: "bbbbbb" }, true);
     setHooked("bbbbbb", true);
-    expect(driftResolution()).toBe("resolving");
+    expect(driftWork().resolving).toBe(true);
     endTerminalJobs("aaaaaa");
-    expect(driftResolution()).toBe("resolving");
+    expect(driftWork().resolving).toBe(true);
     endTerminalJobs("bbbbbb");
     setHooked("bbbbbb", false);
-    expect(driftResolution()).toBe("free");
+    expect(driftWork()).toEqual({ resolving: false, running: false });
   });
 });
   test("Copilot jobs bind after new-chat preparation and retain their own end before send returns", async () => {
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const { receiveCopilotHook } = await import("../extension/src/host/copilot-chat");
-    const { driftResolution } = await import("../extension/src/host/drift-resolution");
+    const { driftWork } = await import("../extension/src/host/drift-resolution");
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
     let preparation = "copilot-preparation";
@@ -1706,17 +1675,17 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     };
     try {
       expect(await launchAgent(dir, "Run", "Run", undefined, () => true, "run")).toBe("sent");
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
       hook("Stop", preparation);
-      expect(driftResolution()).toBe("running-tasks");
+      expect(driftWork()).toEqual({ resolving: false, running: true });
       hook("Stop", owner);
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
 
       preparation = "copilot-preparation-ended";
       owner = "copilot-finished-during-delivery";
       stopOwnerDuringDelivery = true;
       expect(await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve")).toBe("sent");
-      expect(driftResolution()).toBe("free");
+      expect(driftWork()).toEqual({ resolving: false, running: false });
     } finally {
       for (const conversation of [preparation, owner, "copilot-preparation", "copilot-owner"])
         hook("Stop", conversation);

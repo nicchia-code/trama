@@ -1,0 +1,15 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "trama",
+      "devDependencies": {
+        "simple-icons": "16.35.0",
+      },
+    },
+  },
+  "packages": {
+    "simple-icons": ["simple-icons@16.35.0", "", {}, "sha512-TCfl/2+GTrx0nCo4pEWGvxhOb8c6NsqOU1OpwjtF4lwJAthB8IYVD0fuIMjLMg6JFuG1YBO0t1iETQqJLqkoJA=="],
+  }
+}

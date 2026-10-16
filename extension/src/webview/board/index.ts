@@ -64,7 +64,7 @@ export const mountBoard: MountView = (root, context) => {
   /** What the developer was told about announced cards the agent never delivered; kept until closed, or until the panel closes. */
   const notices: { id: number; text: string }[] = [];
   let nextNotice = 0;
-  /** Design cards the developer left open. Kept while the panel lives, so a refresh does not close them. */
+  /** Task details the developer left open. Kept while the panel lives, so a refresh does not close them. */
   const expanded = new Set<string>();
   /** The period of the Done column. Kept while the panel lives, so a refresh does not reset it. */
   let period: DonePeriod = "week";
@@ -80,13 +80,10 @@ export const mountBoard: MountView = (root, context) => {
       if (open) expanded.add(key);
       else expanded.delete(key);
     },
-    showCard: (key, row) => {
+    showCard: (key) => {
       const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === key);
-      const toggle = row === undefined ? null : card?.querySelector<HTMLButtonElement>('[data-action="toggle"][aria-expanded="false"]');
-      toggle?.click();
-      const target = (row === undefined ? null : [...(card?.querySelectorAll<HTMLElement>("[data-row]") ?? [])].find((n) => n.dataset["row"] === row)) ?? card;
-      target?.scrollIntoView({ block: "nearest" });
-      target?.focus();
+      card?.scrollIntoView({ block: "nearest" });
+      card?.focus();
     },
   };
 
@@ -151,7 +148,7 @@ export const mountBoard: MountView = (root, context) => {
     const focused = active instanceof HTMLElement && board.contains(active) ? { key: active.closest<HTMLElement>("[data-key]")?.dataset["key"], action: active.dataset["action"] } : null;
 
     const live = new Set<string>();
-    const columns = buildBoard(snapshot, resolve.autopilot.failures);
+    const columns = buildBoard(snapshot, resolve.autopilot.failures, resolve.blocker);
     const placedGhosts = announcedGhosts(columns, snapshot.announcements, asking);
     const liveAnnounced = new Set<string>();
     const nextHeads = new Map<string, HTMLElement>();
@@ -198,8 +195,7 @@ export const mountBoard: MountView = (root, context) => {
       reconcile(part.body, shown.length > 0 ? shown : [part.hint]);
     }
     dayHeads = nextHeads;
-    // Run all To do covers the Tasks inside design cards too, which may stand in another column.
-    const blocker = joinReasons([resolve.runReason, runBlocker(snapshot.tasks, "all", namerOf(snapshot.numbers ?? noNumbers))]);
+    const blocker = joinReasons([resolve.runReason, runBlocker(snapshot.tasks, namerOf(snapshot.numbers ?? noNumbers))]);
     const setReason = (button: HTMLButtonElement, reason: string | null, note: string | null = reason) => {
       button.disabled = reason !== null;
       button.title = note ?? "";

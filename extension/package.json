@@ -16,6 +16,7 @@
   "main": "./dist/host.js",
   "icon": "media/icon.png",
   "activationEvents": [
+    "onStartupFinished",
     "workspaceContains:.trama/model/system.md"
   ],
   "contributes": {
@@ -28,21 +29,6 @@
           "light": "media/trama-icon-dark.svg",
           "dark": "media/trama-icon-light.svg"
         }
-      },
-      {
-        "command": "trama.init",
-        "title": "Initialize Project",
-        "category": "Trama"
-      },
-      {
-        "command": "trama.quickDesign",
-        "title": "Quick Design Request…",
-        "category": "Trama"
-      },
-      {
-        "command": "trama.design",
-        "title": "Design…",
-        "category": "Trama"
       },
       {
         "command": "trama.sendDesignRequest",
@@ -84,7 +70,7 @@
       "commandPalette": [
         {
           "command": "trama.sendDesignRequest",
-          "when": "trama.designRequest"
+          "when": "false"
         }
       ]
     },
@@ -110,45 +96,33 @@
         "trama.terminalLocation": {
           "type": "string",
           "enum": [
-            "panel",
-            "editor"
+            "editor",
+            "panel"
           ],
           "enumDescriptions": [
-            "The terminal area.",
-            "A terminal tab beside the active editor."
+            "A terminal tab beside the active editor.",
+            "The terminal area."
           ],
-          "default": "panel",
+          "default": "editor",
           "scope": "application",
-          "markdownDescription": "Where `omp` and Claude Code terminals open: `panel` (the terminal area; the default) or `editor` (a terminal tab beside the active editor). It applies only in your user settings."
+          "markdownDescription": "Where `omp` and Claude Code terminals open: `editor` (a terminal tab beside the active editor; the default) or `panel` (the terminal area). It applies only in your user settings."
         },
-        "trama.driftAutoPilot": {
-          "type": "string",
-          "enum": [
-            "disabled",
-            "enabled",
-            "yolo"
-          ],
-          "enumDescriptions": [
-            "Manual: you decide on every Drift (the default).",
-            "The agent recommends, approves and fixes non-critical Drifts on its own.",
-            "Like enabled, critical Drifts included: the ones where your decision is urgently needed."
-          ],
-          "default": "disabled",
+        "trama.autoFixDrifts": {
+          "type": "boolean",
+          "default": false,
           "scope": "application",
-          "markdownDescription": "Automatically resolve Drift recommendations: `disabled` (manual, the default), `enabled` (recommends, approves and fixes non-critical Drifts) or `yolo` (also critical Drifts, the ones where your decision is urgently needed). It applies only in your user settings. After opening the editor, an explicit Resolve Drifts request or a finished scan is required before automatic collection resumes. A Task whose origin Drift is being fixed runs only after its fix Tasks are Done. A scan that failed or was interrupted counts as finished and does not suspend the delegation. It can run repeated cycles without an additional limit. Disabling stops new automatic steps but does not interrupt a Task already started."
+          "markdownDescription": "When on, the agent recommends, approves and fixes non-critical Drifts on its own; off (the default) you decide on every Drift. It applies only in your user settings. After opening the editor, a finished scan or an explicit Resolve Drifts request is required before automatic collection resumes. A Task whose origin Drift is being fixed runs only after its fix Tasks are Done. A scan that failed or was interrupted counts as finished and does not suspend the delegation. Repeated automatic cycles have no additional limit. Turning it off stops new automatic steps but does not interrupt a Task already started, and it also turns off Auto Fix Critical Drifts."
+        },
+        "trama.autoFixCriticalDrifts": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Also critical Drifts, the ones where your decision is urgently needed. It only applies while Auto Fix Drifts is on (default off). It applies only in your user settings."
         },
         "trama.submitWhileRunning": {
-          "type": "string",
-          "enum": [
-            "disabled",
-            "enabled"
-          ],
-          "enumDescriptions": [
-            "Run, Run this design and Run all To do wait until the run started by Trama has finished (the default).",
-            "A run can start while another one is in progress."
-          ],
-          "default": "disabled",
-          "markdownDescription": "`disabled` (the default: Run, Run this design and Run all To do are unavailable while a run started by Trama is in progress) and `enabled` (a run can start while another one is in progress)."
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Let a run start while another run started by Trama is in progress. Off (the default): Run and Run all To do are unavailable while a run started by Trama is in progress. On: a run can start while another one is in progress."
         },
         "trama.analysis": {
           "type": "string",
@@ -166,7 +140,7 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for implementing Tasks: implement, implement all and implement a design, including the selective final scan of the run. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. It only applies in your user settings."
+          "markdownDescription": "Model for implementing Tasks: implement and implement all, including the selective final scan of the run. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. It only applies in your user settings."
         },
         "trama.autoExit": {
           "type": "boolean",
@@ -184,14 +158,17 @@
         "trama.skillsDir": {
           "type": "string",
           "default": ".agents/skills",
-          "markdownDescription": "Folder, relative to the project root, where **Trama: Initialize Project** installs the agent skills. Use `.claude/skills` for Claude Code."
+          "markdownDescription": "Folder, relative to the project root, where Get Started and **Trama: Update Agent Skills** install the agent skills. Use `.claude/skills` for Claude Code."
         },
         "trama.language": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Language the agent writes in, for example `Italian` or `Deutsch`. When set, every instruction Trama sends to the agent asks it to write everything it generates in that language, except code, which always stays in English. Empty (the default) asks nothing about language. It only reaches agents that Trama starts, changes nothing already written, and the Trama interface stays in English."
+          "markdownDescription": "Language the agent writes in, for example `Italian` or `Deutsch`. Trama fills it in on first start with your system language (or the editor's, otherwise `English`); you can change it or empty it. When set, every instruction Trama sends to the agent asks it to write everything it generates in that language, except code, which always stays in English. Empty asks nothing about language. It only reaches agents that Trama starts, changes nothing already written, and the Trama interface stays in English."
         }
       }
     }
+  },
+  "devDependencies": {
+    "simple-icons": "16.35.0"
   }
 }

@@ -1,12 +1,12 @@
-import { approvalBlock, changes, getProposal, health, listProposals, proposalCoverage, type Proposal, resolutionHolding, unfixableDrifts, validateProposal } from "../core/proposals";
+import { approvalBlock, changes, coversScope, getProposal, health, listProposals, proposalCoverage, type Proposal, resolutionHolding, unfixableDrifts, validateProposal } from "../core/proposals";
 import { decisionText } from "../core/resolution";
 import { requiredReasons } from "../core/required";
 import { hasContent, loadProject, parseRequirementRef, type Area, type ProjectModel, requirementsFor, resolveProjectRef } from "../core/requirements";
 import { requirementSkillNames } from "../core/requirement-skills";
+import { SPEC_FIELDS, type SpecEntry, type SpecField } from "../core/specs";
 import type { Project } from "../core/store";
 import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
 import { formatDiagnostic } from "../core/model";
-import { placeTasks } from "../core/design";
 import { type Blocker, concernSameThing } from "../core/blocking";
 import { UsageError } from "../core/errors";
 import { attachedDrift, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftOptions, driftSides, listDrifts, listTasks, nextTask, type Task } from "../core/work";
@@ -53,8 +53,8 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
   const attached = attachedDrift(p, proposal.id);
   const resolvedDrifts = proposal.data.kind === "resolution" ? resolvedDriftsOf(p, proposal) : [];
   const h = live ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
-  // An ordinary Proposal's removals and scope are computed now while it is live; once approved, only the scope it saved before is history.
-  const coverage = live && proposal.data.kind === "change" ? proposalCoverage(p, proposal) : null;
+  // A change or setup Proposal's removals and scope are computed now while it is live; once approved, only the scope it saved before is history.
+  const coverage = live && coversScope(proposal.data.kind) ? proposalCoverage(p, proposal) : null;
   const history = live ? null : proposal.data.scanScope ?? null;
   const fileChanges = changes(p, proposal);
   const errors = live ? [...validateProposal(p, proposal), ...unfixableDrifts(p, proposal).map((message) => ({ file: "proposal.md", line: 0, message }))] : [];
@@ -194,9 +194,14 @@ export function describeRef(project: ProjectModel, ref: string, full = false): s
     case "requirement": {
       if (el.section) return `${el.area.title}, ${el.section.ref ?? "General"}:\n${el.section.text || "_empty_"}`;
       if (full) return areaText(el.area);
-      const skills = requirementSkillNames(project.areas, el.area);
+      const skills = requirementSkillNames(project, el.area);
       const pointer = skills.length === 0 ? "" : ` Load ${skills.map((s) => `the ${s}`).join(", ")} skill${skills.length > 1 ? "s" : ""} for the full text.`;
       return `${el.area.title}: ${el.area.sections.filter((s) => s.text !== "").map((s) => s.ref ?? "General").join(", ") || "_empty_"}.${pointer}`;
+    }
+    case "specs": {
+      const entry = (e: SpecEntry) => `${e.name}${e.version ? ` ${e.version}` : ""}${e.chosenByAgent ? " (chosen by agent)" : ""}`;
+      const fields: readonly SpecField[] = el.field === null ? SPEC_FIELDS : [el.field];
+      return fields.map((f) => (f === "notes" ? `Notes: ${project.specs.notes || "_empty_"}` : `${f}: ${project.specs.lists[f].map(entry).join("; ") || "_empty_"}`)).join("\n");
     }
   }
 }
@@ -241,7 +246,7 @@ export function requirementsBlock(project: ProjectModel, refs: string[], general
     const areas = project.areas.filter((a) => a.sections.some((s) => s.ref === null && s.text !== "") || a.intro !== "");
     const named = (a: Area) => {
       const general = a.sections.find((s) => s.ref === null && s.text !== "") ?? null;
-      const skills = requirementSkillNames(project.areas, a, general).concat(general ? [] : requirementSkillNames(project.areas, a));
+      const skills = requirementSkillNames(project, a, general).concat(general ? [] : requirementSkillNames(project, a));
       return skills.length === 0 ? a.title : `${a.title} (skill${skills.length > 1 ? "s" : ""} ${skills.map((s) => `\`${s}\``).join(", ")})`;
     };
     if (areas.length > 0) lines.push(`- General Requirements apply too: ${areas.map(named).join(", ")}.`);
@@ -396,7 +401,6 @@ export function boardView(p: Project): Result {
   const summaries = allProposals.map((x) => proposalSummary(p, x, numbers)).filter((x) => !x.attachedTo);
   const proposals = summaries.filter((x) => x.status === "open");
   const drafts = summaries.filter((x) => x.status === "draft");
-  const titles = new Map(allProposals.map((x) => [x.id, x.title]));
   const open = listDrifts(p).filter((d) => d.data.status === "open");
   // The open Drifts an open resolution lists are shown inside its row, not as rows of their own.
   const inResolution = new Set(allProposals.filter((x) => x.data.kind === "resolution" && x.data.status === "open").flatMap((x) => x.data.drifts.map((d) => d.drift)));
@@ -416,20 +420,12 @@ export function boardView(p: Project): Result {
       .join("");
   };
   const blocked = blockedTasks(p);
-  const placed = placeTasks(listTasks(p).map((task) => taskSummary(task, blocked, numbers)));
+  const tasks = listTasks(p).map((task) => taskSummary(task, blocked, numbers));
   const line = (t: TaskSummary) => `${t.number ?? t.id} ${t.title}${t.technical ? " (technical)" : ""}${t.agent ? WORKING : ""}${t.unchanged !== null ? NO_CHANGES : ""}${blockedMarks(t.blockedBy, numbers)}`;
   const entries = (column: string) =>
-    placed
+    tasks
       .filter((x) => x.column === column)
-      .map((x) => {
-        if (!x.design) return { md: `- ${line(x.task)}`, json: { kind: "task" as const, ...x.task } };
-        const done = x.tasks.filter((t) => t.column === "done").length;
-        const title = titles.get(x.proposal) ?? `Proposal ${numbers.name("proposal", x.proposal)}`;
-        return {
-          md: [`- Proposal ${numbers.name("proposal", x.proposal)} "${title}" (${done}/${x.tasks.length} done)`, ...x.tasks.map((t) => `  - ${line(t)} [${t.column}]`)].join("\n"),
-          json: { kind: "design" as const, proposal: x.proposal, number: numbers.label("proposal", x.proposal), title, done, total: x.tasks.length, tasks: x.tasks },
-        };
-      });
+      .map((x) => ({ md: `- ${line(x)}`, json: { kind: "task" as const, ...x } }));
   const md = [
     "# Board",
     "",

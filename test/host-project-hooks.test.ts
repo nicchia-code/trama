@@ -119,3 +119,10 @@ test("updating skills reports retired omp definition in editor notification", as
   expect(errors.at(-1)).toContain("trama-triage.md");
   expect(JSON.parse(readFileSync(file, "utf8")).hooks.UserPromptSubmit[0].command).toBe(`"${join(extensionPath, "bin", "trama")}" copilot-hook`);
 });
+
+test("updating skills reports why the trama-specs skill was kept", async () => {
+  setup();
+  updateOutput = "Updated skills\nRequirement skills: one skill per fragment (budget 100/4000 characters).\nThe trama-specs skill was not updated, because Specs is not valid: line 3: unknown key `colour`";
+  await updateSkills({ root: "/project" } as never, { fsPath: storage } as never);
+  expect(errors.at(-1)).toContain("The trama-specs skill was not updated, because Specs is not valid: line 3: unknown key `colour`");
+});

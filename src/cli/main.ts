@@ -195,6 +195,7 @@ export async function runAutopilot(argv: string[], cwd: string, options: { runti
       ...(response.proposal === undefined ? {} : { proposal: response.proposal }),
       ...(response.remoteWindow === true ? { remoteWindow: true } : {}),
       ...(typeof response.lastFailedScan === "string" ? { lastFailedScan: response.lastFailedScan } : {}),
+      ...(Array.isArray(response.failures) ? { failures: response.failures.filter((item): item is string => typeof item === "string") } : {}),
     } : { reason: "No project coordinator is available." }),
     drifts,
     tasks,
@@ -210,6 +211,7 @@ export async function runAutopilot(argv: string[], cwd: string, options: { runti
     ...(drifts.length ? [`Drifts: ${drifts.map(String).join(", ")}`] : []),
     ...(tasks.length ? [`Tasks: ${tasks.map(String).join(", ")}`] : []),
     ...(status.lastFailedScan === undefined ? [] : [`Last failed scan: ${String(status.lastFailedScan)}`]),
+    ...(status.failures ?? []).map((failure) => `Autopilot failed: ${failure}`),
   ].join("\n");
   return { out, exit: 0 };
 }

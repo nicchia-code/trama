@@ -214,18 +214,21 @@ describe("approving a resolution", () => {
 });
 
 describe("resolveDriftsBlocker", () => {
-  test("gives the first reason that holds, in order, and nothing when Resolve Drifts can start", () => {
-    expect(resolveDriftsBlocker(p, "free")).toBe("No open Drifts");
+  test("gives every reason that holds, in order, and nothing when Resolve Drifts can start", () => {
+    const free = { resolving: false, running: false };
+    const busy = { resolving: true, running: true };
+    expect(resolveDriftsBlocker(p, free)).toBe("No open Drifts");
     const a = drift("A");
-    expect(resolveDriftsBlocker(p, "free")).toBeNull();
-    expect(resolveDriftsBlocker(p, "running-tasks")).toBe("A run is in progress");
-    expect(resolveDriftsBlocker(p, "resolving")).toBe("Drifts are being resolved");
+    expect(resolveDriftsBlocker(p, free)).toBeNull();
+    expect(resolveDriftsBlocker(p, { resolving: false, running: true })).toBe("A run is in progress");
+    expect(resolveDriftsBlocker(p, { resolving: true, running: false })).toBe("Drifts are being resolved");
+    expect(resolveDriftsBlocker(p, busy)).toBe("Drifts are being resolved. A run is in progress");
     const r = resolution(); // a Draft already waits, even before it lists anything
-    expect(resolveDriftsBlocker(p, "free")).toMatch(/^Proposal .* resolving Drifts awaits a decision$/);
-    expect(resolveDriftsBlocker(p, "running-tasks")).toBe("A run is in progress");
+    expect(resolveDriftsBlocker(p, free)).toMatch(/^Proposal .* resolving Drifts awaits a decision$/);
+    expect(resolveDriftsBlocker(p, busy)).toMatch(/^Drifts are being resolved\. A run is in progress\. Proposal .* resolving Drifts awaits a decision$/);
     resolveDriftInProposal(p, r.id, a.id, { decision: "dismissed" });
     submitProposal(p, r.id);
-    expect(resolveDriftsBlocker(p, "free")).toMatch(/awaits a decision/);
+    expect(resolveDriftsBlocker(p, free)).toMatch(/awaits a decision/);
     expect(awaitingResolution(p)?.id).toBe(r.id);
   });
 });

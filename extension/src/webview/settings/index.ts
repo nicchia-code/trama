@@ -1,8 +1,8 @@
-import { settingValueError, type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
+import { CRITICAL_DRIFT_KEY, DRIFT_KEY, settingValueError, type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
 import type { ToWebview } from "../../protocol";
 import { renderInline, renderMarkdown } from "../markdown";
 import type { View, ViewContext } from "../types";
-import { effectiveValue, groupSettings, numberFromText, workspaceOverride } from "./logic";
+import { disabledBy, effectiveValue, groupSettings, numberFromText, workspaceOverride } from "./logic";
 import css from "./settings.css" with { type: "text" };
 type SettingsMessage = Extract<ToWebview, { type: "settings" }>;
 
@@ -125,7 +125,14 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     const box = el("input");
     box.type = "checkbox";
     box.id = field.id;
-    box.addEventListener("change", () => send(field.setting.key, box.checked));
+    box.addEventListener("change", () => {
+      // Turning Auto Fix Drifts off turns Auto Fix Critical Drifts off at once; the host clears it too and sends the real values.
+      if (field.setting.key === DRIFT_KEY && !box.checked) {
+        const critical = fields.get(CRITICAL_DRIFT_KEY);
+        if (critical !== undefined) (critical.control as HTMLInputElement).checked = false;
+      }
+      send(field.setting.key, box.checked);
+    });
     return box;
   }
 
@@ -288,6 +295,7 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
       for (const field of fields.values()) {
         const values = message.values[field.setting.key];
         if (!field.dirty) apply(field, values);
+        field.control.disabled = disabledBy(field.setting, message.values);
         const override = workspaceOverride(field.setting, values);
         field.workspace.hidden = override === null;
         field.workspace.replaceChildren();

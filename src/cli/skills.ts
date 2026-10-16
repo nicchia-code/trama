@@ -2,6 +2,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import design from "../../skills/trama-design/SKILL.md" with { type: "text" };
 import designFormat from "../../skills/trama-design/FORMAT.md" with { type: "text" };
+import setup from "../../skills/trama-setup/SKILL.md" with { type: "text" };
 import implement from "../../skills/trama-implement/SKILL.md" with { type: "text" };
 import importSkill from "../../skills/trama-import/SKILL.md" with { type: "text" };
 import resolveDrifts from "../../skills/trama-resolve-drifts/SKILL.md" with { type: "text" };
@@ -14,6 +15,7 @@ import { SUB_AGENTS } from "../core/sub-agents";
 export const SKILLS: Record<string, string> = {
   "trama-design/SKILL.md": design,
   "trama-design/FORMAT.md": designFormat,
+  "trama-setup/SKILL.md": setup,
   "trama-scan/SKILL.md": scan,
   "trama-implement/SKILL.md": implement,
   "trama-import/SKILL.md": importSkill,

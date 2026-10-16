@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { requestsDir } from "../src/core/design-requests";
 import { type Project, projectAt } from "../src/core/store";
+import { listProposals, newProposal, save } from "../src/core/proposals";
 
 // A minimal editor: documents, tabs and the events DesignRequests listens to.
 type Listener<T> = (event: T) => void;
@@ -27,7 +28,40 @@ const listeners = {
   change: [] as Listener<{ document: FakeDocument; contentChanges: unknown[] }>[],
   tabs: [] as Listener<{ opened: unknown[]; closed: unknown[] }>[],
   deleted: [] as Listener<FakeUri>[],
+  visible: [] as Listener<unknown>[],
 };
+
+class FakeThemeColor {
+  constructor(readonly id: string) {}
+}
+class FakeRange {
+  constructor(readonly startLine: number, readonly startCharacter: number, readonly endLine: number, readonly endCharacter: number) {}
+}
+interface FakeDecorationType {
+  options: { after: { contentText: string; color: FakeThemeColor } };
+  dispose(): void;
+}
+interface FakeEditor {
+  document: FakeDocument;
+  decorations: Map<FakeDecorationType, unknown[]>;
+  setDecorations(type: FakeDecorationType, ranges: unknown[]): void;
+}
+const editors = new Map<string, FakeEditor>();
+/** The editor showing the file at `fsPath`, made once and kept, so its decorations last as in a real editor. */
+function editorOf(document: FakeDocument): FakeEditor {
+  let editor = editors.get(document.uri.fsPath);
+  if (!editor) {
+    const decorations = new Map<FakeDecorationType, unknown[]>();
+    editor = { document, decorations, setDecorations: (type, ranges) => void decorations.set(type, ranges) };
+    editors.set(document.uri.fsPath, editor);
+  }
+  return editor;
+}
+/** One visible editor per file with a tab. */
+function visibleEditors(): FakeEditor[] {
+  const paths = [...new Set(tabs.map((tab) => tab.input.uri.fsPath))];
+  return paths.map((path) => editorOf(documents.find((d) => d.uri.fsPath === path) as FakeDocument));
+}
 const subscribe = <T>(list: Listener<T>[]) => (fn: Listener<T>) => {
   list.push(fn);
   return { dispose: () => void list.splice(list.indexOf(fn), 1) };
@@ -116,8 +150,15 @@ const tabOf = (document: FakeDocument): FakeTab => ({
 });
 
 mock.module("vscode", () => ({
+  Range: FakeRange,
+  ThemeColor: FakeThemeColor,
   window: {
     onDidChangeActiveTextEditor: subscribe(listeners.active),
+    onDidChangeVisibleTextEditors: subscribe(listeners.visible),
+    get visibleTextEditors() {
+      return visibleEditors();
+    },
+    createTextEditorDecorationType: (options: FakeDecorationType["options"]): FakeDecorationType => ({ options, dispose() {} }),
     get activeTextEditor() {
       return active ? { document: active } : undefined;
     },
@@ -160,7 +201,7 @@ mock.module("vscode", () => ({
   env: { appName: "Visual Studio Code" },
 }));
 
-const { DesignRequests, SAVE_DELAY_MS, SENT_KEY } = await import("../extension/src/host/design-requests");
+const { DesignRequests, SAVE_DELAY_MS, SENT_KEY, SETUP_KEY } = await import("../extension/src/host/design-requests");
 const { NO_PROJECT_WARNING } = await import("../extension/src/host/project");
 type Launch = Awaited<ReturnType<typeof import("../extension/src/host/agent").launchAgent>>;
 
@@ -202,6 +243,7 @@ afterEach(() => {
   rmSync(requestsDir(p), { recursive: true, force: true });
   documents.length = 0;
   tabs.length = 0;
+  editors.clear();
   closed.length = 0;
   shown.length = 0;
   warnings.length = 0;
@@ -682,5 +724,159 @@ describe("closing the tab of a request", () => {
     expect(lastContext()).toBe(true);
     await requests.send();
     expect(launches).toHaveLength(1);
+  });
+});
+
+describe("Start from Scratch: the setup request", () => {
+  test("is opened as Design… does and joins the setup list", async () => {
+    await requests.writeSetup();
+    const document = active as FakeDocument;
+    expect(shown.at(-1)?.preview).toBe(false);
+    expect(state.get<string[]>(SETUP_KEY, [])).toEqual([idOf(document)]);
+  });
+
+  test("sending it starts the trama-setup skill in the Setup terminal and marks it sent", async () => {
+    await requests.writeSetup();
+    const document = active as FakeDocument;
+    type(document, "# Un gestore di ordini\n");
+    await requests.send();
+    expect(launches).toHaveLength(1);
+    expect(launches[0]?.instruction).toContain("trama-setup");
+    expect(launches[0]?.instruction).toContain(idOf(document));
+    expect(launches[0]?.name).toBe("Setup");
+    expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
+  });
+
+  test("a setup request whose file is gone leaves the setup list and, when its setup Proposal is approved, starts Run all To do", async () => {
+    const runs: number[] = [];
+    requests.dispose();
+    requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch, async () => void runs.push(1));
+    await requests.writeSetup();
+    const document = active as FakeDocument;
+    type(document, "# Un gestore di ordini\n");
+    await requests.send();
+    const proposal = newProposal(p, "Set up the shop", "", { kind: "setup", request: idOf(document) });
+    proposal.data.status = "approved";
+    save(proposal);
+    try {
+      deleteFile(document);
+      await sleep(10);
+      expect(runs).toHaveLength(1);
+      expect(state.get<string[]>(SETUP_KEY, [])).toEqual([]);
+    } finally {
+      rmSync(proposal.dir, { recursive: true, force: true });
+      requests.dispose();
+      requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
+    }
+  });
+
+  test("an open setup Proposal is reported, and a setup request without one leaves the list and starts nothing", async () => {
+    const runs: number[] = [];
+    requests.dispose();
+    requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch, async () => void runs.push(1));
+    await requests.writeSetup();
+    const document = active as FakeDocument;
+    type(document, "# Un gestore di ordini\n");
+    await requests.send();
+    const proposal = newProposal(p, "Set up the shop", "", { kind: "setup", request: idOf(document) });
+    proposal.data.status = "open";
+    save(proposal);
+    try {
+      deleteFile(document);
+      await sleep(10);
+      expect(runs).toHaveLength(0);
+      expect(warnings.some((w) => w.startsWith("Trama: the setup Proposal could not be approved on its own: "))).toBe(true);
+      expect(state.get<string[]>(SETUP_KEY, [])).toEqual([]);
+      expect(listProposals(p).some((x) => x.data.request === idOf(document))).toBe(true);
+    } finally {
+      rmSync(proposal.dir, { recursive: true, force: true });
+      requests.dispose();
+      requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
+    }
+  });
+});
+
+/** The developer's editor shows `fsPath` again: a restored tab or one reopened from the file explorer. */
+function reopen(fsPath: string): FakeDocument {
+  const document = openDocument(fsPath);
+  tabs.push(tabOf(document));
+  for (const fn of listeners.visible) fn(undefined);
+  return document;
+}
+/** The developer deletes everything in `document`. */
+function erase(document: FakeDocument) {
+  document.text = "";
+  document.isDirty = true;
+  for (const fn of listeners.change) fn({ document, contentChanges: [{ text: "" }] });
+}
+/** The ghost text shown on the editor of `fsPath`, with its colour; undefined when none is shown. */
+function ghostOf(fsPath: string): { text: string; color: string } | undefined {
+  const decorations = editors.get(fsPath)?.decorations ?? new Map<FakeDecorationType, unknown[]>();
+  for (const [type, ranges] of decorations) {
+    if (ranges.length > 0) return { text: type.options.after.contentText, color: type.options.after.color.id };
+  }
+  return undefined;
+}
+
+const DESIGN_GHOST = "Describe the change to design: behaviour, edge cases, requirements. Close this tab or press Send to agent when you are done.";
+const SETUP_GHOST = "Describe the application to build: what it does and who it is for. Close this tab or press Send to agent when you are done.";
+
+describe("the ghost text of a request never sent", () => {
+  test("Design… shows the design text in the disabled colour, at the start, and the file stays empty and unsaved", async () => {
+    await requests.write();
+    const document = active as FakeDocument;
+    expect(ghostOf(document.uri.fsPath)).toEqual({ text: DESIGN_GHOST, color: "disabledForeground" });
+    expect(readFileSync(document.uri.fsPath, "utf8")).toBe("");
+    expect(document.saves).toBe(0);
+  });
+
+  test("Start from Scratch shows the setup text", async () => {
+    await requests.writeSetup();
+    const document = active as FakeDocument;
+    expect(ghostOf(document.uri.fsPath)).toEqual({ text: SETUP_GHOST, color: "disabledForeground" });
+  });
+
+  test("the first keystroke removes it, and deleting everything brings it back", async () => {
+    await requests.write();
+    const document = active as FakeDocument;
+    type(document, "A");
+    expect(ghostOf(document.uri.fsPath)).toBeUndefined();
+    erase(document);
+    expect(ghostOf(document.uri.fsPath)).toEqual({ text: DESIGN_GHOST, color: "disabledForeground" });
+  });
+
+  test("a text of only spaces or line breaks counts as written: no ghost", async () => {
+    await requests.write();
+    const document = active as FakeDocument;
+    type(document, " \n");
+    expect(ghostOf(document.uri.fsPath)).toBeUndefined();
+  });
+
+  test("a request restored after a restart, or reopened from the file explorer, shows its ghost again", async () => {
+    await requests.write();
+    const design = (active as FakeDocument).uri.fsPath;
+    await requests.writeSetup();
+    const setup = (active as FakeDocument).uri.fsPath;
+    tabs.length = 0;
+    reopen(design);
+    reopen(setup);
+    expect(ghostOf(design)).toEqual({ text: DESIGN_GHOST, color: "disabledForeground" });
+    expect(ghostOf(setup)).toEqual({ text: SETUP_GHOST, color: "disabledForeground" });
+  });
+
+  test("a request already sent shows no ghost, even when the developer empties it", async () => {
+    await requests.write();
+    const document = active as FakeDocument;
+    type(document, "# Returns\n");
+    await requests.send();
+    reopen(document.uri.fsPath);
+    erase(document);
+    expect(ghostOf(document.uri.fsPath)).toBeUndefined();
+  });
+
+  test("a document that is not a request shows no ghost", async () => {
+    const other = join(dir, "notes.md");
+    reopen(other);
+    expect(ghostOf(other)).toBeUndefined();
   });
 });

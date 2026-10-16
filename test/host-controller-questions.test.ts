@@ -159,3 +159,22 @@ test("panel title follows the System heading and falls back when the Model becom
   controller.dispose();
 });
 
+test("the panel goes back to Get Started when the Trama folder is removed while it is open", async () => {
+  const project = mkdtempSync(join(tmpdir(), "trama-controller-removed-"));
+  cpSync(join(import.meta.dir, "../examples/shop"), project, { recursive: true });
+  workspaceFolders = [{ uri: { fsPath: project, scheme: "file" } }];
+  const controller = new Controller({ fsPath: project } as never);
+  await controller.open();
+  const panel = panels.at(-1);
+  panel?.receive?.({ type: "ready" });
+  expect(panel?.messages).toContainEqual({ type: "project", present: true });
+
+  rmSync(join(project, ".trama"), { recursive: true, force: true });
+  // refresh is private: the test drives it directly, as the test above does.
+  const internals = controller as unknown as { refresh(): void };
+  internals.refresh();
+  expect(panel?.messages).toContainEqual({ type: "project", present: false });
+  controller.dispose();
+  rmSync(project, { recursive: true, force: true });
+});
+

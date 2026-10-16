@@ -9,13 +9,18 @@ import { QUESTION_ENDPOINT_ENV, requestCoordinatorMessage, sendCoordinatorMessag
 import { bundledOmpHook, bundledTrama, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, toClipboard, withTramaPath } from "./cursor";
 import { onCopilotChatEvent } from "./copilot-chat";
 import { withdrawWaiting } from "./announcements";
-import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, driftAutopilotMode, endChatJobs, endCopilotChatJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, setHooked, startJob } from "./drift-resolution";
+import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint, questionWindowId } from "./questions";
 import { withLanguage } from "./prompts";
 import { agentTemplate, canScan, type Models, type Role, roleOf, type TerminalAgent } from "./terminal-agent";
+import { delegationOf } from "./settings-schema";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
+
+/** The delegation the user's two Auto Fix Drifts checkboxes give: the only reader of them, and only the user values count. */
+export const userDelegation = (): DriftAutopilotMode =>
+  delegationOf(settings().inspect<unknown>("autoFixDrifts")?.globalValue, settings().inspect<unknown>("autoFixCriticalDrifts")?.globalValue);
 
 const configuredAgent = (): "chat" | TerminalAgent => {
   const agent = settings().inspect<string>("agent")?.globalValue;
@@ -335,7 +340,7 @@ export async function launchAgent(
   const windowId = job === undefined ? "" : await questionWindowId(root) ?? "";
   const agent = configuredAgent();
   // Under `disabled` the window reserves no send and announces no job start to the other windows: it knows only its own work.
-  const shared = driftAutopilotMode(settings().inspect<unknown>("driftAutoPilot")?.globalValue) !== "disabled";
+  const shared = userDelegation() !== "disabled";
   if ((agent === "chat" || job === undefined) && !canSend()) return undefined;
   const launch = async (): Promise<Launch | undefined> => {
     if (!canSend()) return agent === "chat" ? "not-sent" : undefined;
@@ -359,7 +364,7 @@ export async function launchAgent(
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
-    const asTab = settings().inspect<string>("terminalLocation")?.globalValue === "editor";
+    const asTab = settings().inspect<string>("terminalLocation")?.globalValue !== "panel";
     const terminalId = newTerminalId();
     const defaultShell = vscode.env.shell;
     // On Windows a default shell other than Windows PowerShell 5.1, PowerShell 7 or Git Bash is replaced for this terminal only.

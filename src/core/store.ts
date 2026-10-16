@@ -5,6 +5,7 @@ import { parse, stringify } from "yaml";
 import { TramaError } from "./errors";
 import { asObject, compareByCreation, type Raw } from "./schema";
 import { buildModel } from "./model";
+import { SPECS_FILE } from "./specs";
 import type { FileMap, Model } from "./types";
 
 export const TRAMA_DIR = ".trama";
@@ -60,14 +61,16 @@ export const REQUIREMENTS_PREFIX = "requirements/";
 
 export const requirementsDir = (p: Project) => join(p.dir, "requirements");
 
-/** Where a tracked path lives under a `.trama/` folder or a Proposal folder (both have `model/` and `requirements/`). */
+/** Where a tracked path lives under a `.trama/` folder or a Proposal folder (both have `model/`, `requirements/` and maybe `specs.yaml`). */
 export const trackedLocation = (root: string, path: string): string =>
-  safeJoin(root, path.startsWith(REQUIREMENTS_PREFIX) ? path : `model/${path}`);
+  safeJoin(root, path === SPECS_FILE || path.startsWith(REQUIREMENTS_PREFIX) ? path : `model/${path}`);
 
-/** Model and Requirement files under `root` (a `.trama/` or a Proposal folder), keyed as tracked paths. */
+/** Model, Requirement and Specs files under `root` (a `.trama/` or a Proposal folder), keyed as tracked paths. */
 export function readTracked(root: string): FileMap {
   const files = readTree(join(root, "model"));
   for (const [path, content] of readTree(join(root, "requirements"))) files.set(`${REQUIREMENTS_PREFIX}${path}`, content);
+  const specs = join(root, SPECS_FILE);
+  if (existsSync(specs)) files.set(SPECS_FILE, readTextLf(specs));
   return files;
 }
 
@@ -116,6 +119,7 @@ export function slugify(title: string): string {
   const slug = title
     .toLowerCase()
     .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40)

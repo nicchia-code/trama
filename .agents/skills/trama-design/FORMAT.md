@@ -130,6 +130,33 @@ description: Use when building the checkout and order screens.
 - `trama validate` also prints **warnings**, which never fail validation or the hand-over: a fragment larger than **12 KB** (12,288 bytes of the file, front matter included), and, with `--proposal`, the switch between the two modes the Proposal would cause.
 - When a Proposal writes into a fragment that is or becomes larger than 12 KB, split it in the same Proposal before handing it over: cut where it suits the project (usually by Feature or by a group of nearby Machines), give every new fragment a name and a description that say when it is needed, and move the sections without changing their text. Mind the budget: prefer a few medium fragments to many tiny ones.
 
+## Specs (`specs.yaml`)
+
+The Specs are the project's technologies and their constraints, in one file beside `model/` and `requirements/`: `.trama/specs.yaml` in the project, and `specs.yaml` in a Proposal folder. Write it with `trama proposal edit <id> specs.yaml`, which prints the path, filled with the current Specs (empty when there are none). Remove it with `trama proposal delete <id> specs.yaml`. `trama proposal show` lists its changes field by field.
+
+Every field is optional and is a list of entries, except `notes`, which is Markdown text. Fields, in this order: `languages`, `frameworks`, `data`, `testing`, `ci`, `repository`, `deployment`, `cloud`, `infrastructure`, `notes`.
+
+```yaml
+languages:
+  - name: TypeScript
+    version: "5.6"
+frameworks:
+  - name: React
+    chosenByAgent: fits the existing screens and the team's experience
+data:
+  - name: PostgreSQL
+    version: "16"
+    note: holds orders and payments
+notes: |
+  Free Markdown: constraints that do not fit an entry.
+```
+
+- An entry has `name` (required), and optionally `version`, `note` and `chosenByAgent`. Names are compared without case; two entries of one field cannot share a name.
+- `chosenByAgent`: the reason when the agent picked the technology itself, not the developer. Leave it out for what the developer named or confirmed.
+- Write Specs only when the change alters the project's technologies (a language, framework, datastore, service, tool, or a version of them). Behaviour and screens stay in the Model and Requirements.
+- A change to a field is in the scope as `specs#<field>` (or `specs` for the whole Specs). A Requirement or Task refers to it the same way: `specs#frameworks`. A Task that covers a changed field names it in `refs`; a Task whose only references are Specs must be `technical: true`, because a non-technical Task must name a Model element.
+- `trama validate` reports each error with its field and entry; fix them in the Proposal before handing it over.
+
 ## Tasks of a Proposal and Already present (`proposals/<id>-<slug>/`)
 
 - A Task is `tasks/<identity>-<slug>.md` in the Proposal folder, written with `trama proposal edit <id> tasks/<slug>.md`. Front matter: `technical` (default `false`) and `refs` (a list of element references and Requirement sections). No other field. H1: the title. Body: prose.

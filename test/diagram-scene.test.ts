@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import type { MergedMachine } from "../src/core/merge";
 import { buildScene, featureChange, flattenMerged, machineChange, pathTo, toMerged } from "../extension/src/webview/diagram/scene";
-import { shopSnapshot, shopWithProposals, shopWithRemovals } from "./diagram-fixture";
+import { isEmptyModel } from "../extension/src/webview/diagram/levels";
+import { shopSnapshot, shopWithProposals, shopWithRemovals, snapshotOf } from "./diagram-fixture";
 
 const shop = shopSnapshot();
 const proposed = shopWithProposals();
@@ -77,4 +78,9 @@ test("pathTo lists the States from the top level down", () => {
   expect(pathTo(order, "Ready to ship")).toEqual(["Paid", "Ready to ship"]);
   expect(pathTo(order, "draft")).toEqual(["Draft"]);
   expect(pathTo(order, "Nope")).toEqual([]);
+});
+
+test("the System is empty only when it has no Feature and no Actor to draw", () => {
+  expect(isEmptyModel(buildScene(snapshotOf(new Map([["system.md", "# Shop\n\nNothing yet.\n"]])), null))).toBe(true);
+  expect(isEmptyModel(buildScene(shop, null))).toBe(false);
 });

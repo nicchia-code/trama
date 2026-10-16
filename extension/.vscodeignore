@@ -2,6 +2,7 @@
 !package.json
 !README.md
 !LICENSE
+!THIRD-PARTY-NOTICES.md
 !dist/host.js
 !dist/webview.js
 !dist/omp-hook.js

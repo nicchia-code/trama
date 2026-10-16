@@ -177,15 +177,13 @@ test("the five skills name cards by short number and title but write only the pe
   }
 });
 
-test("the five skills say which texts follow the chosen language and which stay in English, without naming a language", () => {
-  for (const name of ["trama-design", "trama-scan", "trama-implement", "trama-import", "trama-resolve-drifts"]) {
+test("the six skills that create cards give them a short title, and no command checks its length", () => {
+  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-implement", "trama-import", "trama-resolve-drifts"]) {
     const skill = SKILLS[`${name}/SKILL.md`] as string;
-    const section = skill.slice(skill.indexOf("## Language"), skill.indexOf("## Steps"));
-    expect(section).toContain("only the prose you produce for Trama goes in that language");
-    expect(section).toContain("the names and titles of Model elements, Requirements, Proposals, Tasks and Drifts");
-    expect(section).toContain("the `(initial)` and `(final)` markers");
-    expect(section).toContain("never translate the whole file");
-    expect(section).not.toMatch(/Italian|French|German|Spanish/);
+    expect(skill).toContain("a **short title**: at most five words, about 40 characters");
+    expect(skill).toContain("\"Testo fantasma\" instead of");
+    expect(skill).toContain("Titles that Trama or a skill composes from another title stay as they are");
+    expect(skill).toContain(name === "trama-setup" ? "(see Hard rules)" : "(see Naming cards)");
   }
 });
 

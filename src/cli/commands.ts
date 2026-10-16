@@ -300,14 +300,19 @@ export const COMMANDS: Command[] = [
       const outcome = finished ? (failed ? "failed" : "done") : "missing";
       return text(finished ? `Check ${id} is ${outcome}` : `No check "${id}" was found (unknown, already finished or withdrawn, or not a check); nothing changed.`, { id, found: finished !== null, ...(finished ? { outcome } : {}) });
     } },
-  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code; --resolution for a resolution of Drifts; --automatic only with --resolution; --job <id> binds an automatic resolution Draft to its autopilot job; --announcement <id> names the announcement of this Proposal; --request <id> binds it to the written design request it comes from); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" }, resolution: { type: "boolean" }, automatic: { type: "boolean" }, job: { type: "string" }, announcement: { type: "string" }, request: { type: "string" } }, run(ctx, a, o) {
+  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--requires <id> for dependencies; --import for existing code; --resolution for a resolution of Drifts; --setup for the first Proposal of an empty Model; --automatic only with --resolution; --job <id> binds an automatic resolution Draft to its autopilot job; --announcement <id> names the announcement of this Proposal; --request <id> binds it to the written design request it comes from); submit when finished", options: { body: { type: "string" }, requires: ref, import: { type: "boolean" }, resolution: { type: "boolean" }, setup: { type: "boolean" }, automatic: { type: "boolean" }, job: { type: "string" }, announcement: { type: "string" }, request: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       if (o["import"] === true && o["resolution"] === true) throw new UsageError("--import and --resolution cannot go together: a Proposal is one or the other");
       if (o["job"] !== undefined && (o["automatic"] !== true || o["resolution"] !== true)) throw new UsageError("--job can only be used with --automatic --resolution");
+      if (o["setup"] === true && (o["import"] === true || o["resolution"] === true)) throw new UsageError("--setup cannot go together with --import or --resolution");
+      if (o["setup"] === true) {
+        const model = loadModel(project);
+        if (model.features.size > 0 || model.actors.size > 0) throw new TramaError("--setup needs an empty Model: the Model is not empty (it has Features or Actors)");
+      }
       const note = announcementNote(project, str(o["announcement"]), "proposal");
       const request = str(o["request"]);
       const job = str(o["job"]) ?? (o["automatic"] === true && o["resolution"] === true ? ctx.job : undefined);
-      const p = newProposal(project, a[0] as string, str(o["body"]), { requires: list(o["requires"]).map((id) => proposalArg(ctx, id)), kind: o["import"] === true ? "import" : o["resolution"] === true ? "resolution" : "change", automatic: o["automatic"] === true, announcement: str(o["announcement"]), origin: ctx.origin, request });
+      const p = newProposal(project, a[0] as string, str(o["body"]), { requires: list(o["requires"]).map((id) => proposalArg(ctx, id)), kind: o["import"] === true ? "import" : o["resolution"] === true ? "resolution" : o["setup"] === true ? "setup" : "change", automatic: o["automatic"] === true, announcement: str(o["announcement"]), origin: ctx.origin, request });
       if (job !== undefined) sendCoordinatorMessageSoon(project, { type: "proposal-draft", proposal: p.id, job }, (reason) => {
         process.stderr.write(`Could not bind automatic resolution Draft ${p.id} to autopilot job ${job}: ${reason}\n`);
       });
@@ -316,7 +321,7 @@ export const COMMANDS: Command[] = [
       const n = numbersOf(ctx);
       return text(`Created Draft Proposal ${n.name("proposal", p.id)} at ${p.dir}. Submit it when finished.${notes ? `\n${notes}` : ""}`, { id: p.id, number: n.label("proposal", p.id), path: p.dir, status: p.data.status, request: p.data.request, ...(note ? { note } : {}), ...(requestNote ? { requestNote } : {}) });
     } },
-  { name: "proposal edit", args: "<id> <model-path>", summary: "Make a Model file editable inside a Proposal; prints the path to edit", run(ctx, a) {
+  { name: "proposal edit", args: "<id> <model-path>", summary: "Make a Model file, or specs.yaml, editable inside a Proposal; prints the path to edit", run(ctx, a) {
       const project = ctx.project();
       const id = proposalArg(ctx, a[0] as string);
       const { path, returnedToDraft } = withProposalLock(project, id, () => {
@@ -338,7 +343,7 @@ export const COMMANDS: Command[] = [
       const n = numbersOf(ctx);
       return text(`${remove ? "Removed" : "Recorded"} Drift ${n.name("drift", drift)} ${remove ? "from" : `as ${decision} in`} Proposal ${n.name("proposal", proposal.id)}.${returnedToDraft ? " Proposal returned to Draft; submit it again when finished." : ""}`, { id: proposal.id, number: n.label("proposal", proposal.id), drift, status: proposal.data.status, returnedToDraft, drifts: proposal.data.drifts });
     } },
-  { name: "proposal delete", args: "<id> <model-path>", summary: "Mark a Model file for deletion in a Proposal", run(ctx, a) {
+  { name: "proposal delete", args: "<id> <model-path>", summary: "Mark a Model file, or specs.yaml, for deletion in a Proposal", run(ctx, a) {
       const project = ctx.project();
       const id = proposalArg(ctx, a[0] as string);
       const returnedToDraft = withProposalLock(project, id, () => {
@@ -349,15 +354,17 @@ export const COMMANDS: Command[] = [
       const n = numbersOf(ctx);
       return text(`Marked ${a[1]} for deletion in Proposal ${n.name("proposal", id)}.${returnedToDraft ? " Proposal returned to Draft; submit it again when finished." : ""}`, { id, number: n.label("proposal", id), status: "draft", returnedToDraft });
     } },
-  { name: "proposal submit", args: "<id>", summary: "Hand a valid Draft over to the developer", run(ctx, a) {
+  { name: "proposal submit", args: "<id>", summary: "Hand a valid Draft over to the developer; a setup Proposal on an empty Model is approved at once (--skills-dir adds the configured skills folder)", options: { "skills-dir": ref }, run(ctx, a, o) {
       const project = ctx.project();
-      const p = submitProposal(project, proposalArg(ctx, a[0] as string));
+      const p = submitProposal(project, proposalArg(ctx, a[0] as string), list(o["skills-dir"]));
       if (p.data.automatic) sendCoordinatorMessageSoon(project, { type: "proposal-submitted", proposal: p.id }, (reason) => {
         process.stderr.write(`Could not hand over automatic resolution Proposal ${p.id} to the autopilot: ${reason}\n`);
       });
       const consumed = p.requestConsumed ? `\nDeleted design request ${p.data.request}: it is now consumed.` : "";
       const n = numbersOf(ctx);
-      return text(`Submitted Proposal ${n.name("proposal", p.id)} for review${consumed}${warningsText(p.warnings)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status, request: p.data.request, requestConsumed: p.requestConsumed, warnings: p.warnings });
+      const head = p.approvedAtHandOver ? `Submitted and approved Proposal ${n.name("proposal", p.id)}` : `Submitted Proposal ${n.name("proposal", p.id)} for review`;
+      const kept = p.openReason === null ? "" : `\nKept open for the developer: ${p.openReason}`;
+      return text(`${head}${consumed}${kept}${warningsText(p.warnings)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status, request: p.data.request, requestConsumed: p.requestConsumed, warnings: p.warnings, approvedAtHandOver: p.approvedAtHandOver, openReason: p.openReason });
     } },
   { name: "proposal discard", args: "<id>", summary: "Discard a Draft the agent never finished", run(ctx, a) {
       const project = ctx.project();

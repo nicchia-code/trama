@@ -2,11 +2,12 @@ import { join } from "node:path";
 import { type AgentOrigin, deliverCard } from "./announcements";
 import { type Blocker, computeBlocked, concernSameThing, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
-import { approveProposal, discardProposal, type DriftDecisionKind, getProposal, type Proposal, rejectProposal } from "./proposals";
+import { approveProposal, discardAttachedProposal, type DriftDecisionKind, getProposal, type Proposal, rejectProposal, resolutionHolding } from "./proposals";
 import type { RemovedElement } from "./scan-scope";
 import { loadProject, parseRequirementRef, type ProjectModel, resolveProjectRef } from "./requirements";
 import { boolField, compareByCreation, createdField, enumField, enumOrNull, idField, instantField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
 import { cardName, identityOfShortNumber, syncShortNumbers } from "./short-numbers";
+import { isSpecsRef } from "./specs";
 import {
   createdNow,
   findCard,
@@ -196,7 +197,7 @@ function liveRefs(p: Project, refs: string[], project: ProjectModel = loadProjec
 
 /** A Technical Task changes no behaviour, so it references no Model element, only Requirements if any; any other Task references at least one Model element. */
 function checkTaskRefs(technical: boolean, refs: string[], where = "") {
-  const modelRefs = refs.filter((r) => parseRequirementRef(r) === null);
+  const modelRefs = refs.filter((r) => parseRequirementRef(r) === null && !isSpecsRef(r));
   if (technical && modelRefs.length > 0) throw new TramaError(`${where}a Technical Task cannot reference the Model (only Requirements): ${modelRefs.join(", ")}`);
   if (!technical && modelRefs.length === 0)
     throw new TramaError(`${where}a Task must reference at least one Model element in "refs", unless it is technical`);
@@ -643,6 +644,23 @@ export function chosenOption(p: Project, drift: Drift, option: number | undefine
 }
 
 /**
+ * The developer closes an open Drift from the panel with no change: the code is right and nothing changes. An attached Proposal,
+ * a Draft or already handed over, is discarded with it, with no feedback. Like `resolveDrift` with `dismiss`, but the attached Proposal is not refused.
+ */
+export function dismissDrift(p: Project, id: string): Drift {
+  const drift = getDrift(p, id);
+  if (drift.data.status !== "open") throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is already resolved`);
+  const holding = resolutionHolding(p, drift.id);
+  if (holding) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is part of resolution ${cardName(p, "proposal", holding.id)}: decide it there`);
+  if (drift.data.proposal) discardAttachedProposal(p, drift.data.proposal);
+  drift.data.resolution = "dismissed";
+  drift.data.proposal = null;
+  drift.data.status = "resolved";
+  saveItem(drift.path, drift.data, drift.body);
+  return drift;
+}
+
+/**
  * The developer's decision on an open Drift. Fixing the code needs the number of a fix option when the Drift has
  * options, and takes an optional note; keeping what happens (accepting the Proposal, dismissing) takes neither.
  * Anything refused leaves the Drift open and changes nothing.
@@ -722,7 +740,7 @@ function fixCode(p: Project, drift: Drift, optionNumber: number | undefined, not
 function setAsideAttached(p: Project, drift: Drift, why: string): void {
   const attached = drift.data.proposal ? getProposal(p, drift.data.proposal) : null;
   if (attached?.data.status === "open") rejectProposal(p, attached.id, `Drift ${drift.id} ${why}`);
-  else if (attached?.data.status === "draft") discardProposal(p, attached.id);
+  else if (attached?.data.status === "draft") discardAttachedProposal(p, attached.id);
 }
 
 /** What approving a resolution did to its listed Drifts: the decision applied, the fix Task created, or `skipped` when already resolved. */

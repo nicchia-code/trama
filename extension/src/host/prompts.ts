@@ -6,6 +6,8 @@ export type ResolvedAction =
   | { kind: "design"; prompt: string }
   /** A written design request, saved as `.trama/requests/<request>.md`. */
   | { kind: "written-design"; request: string }
+  /** A written design request that starts a project from scratch: the `trama-setup` skill, named `Setup`. */
+  | { kind: "setup-request"; request: string }
   /** `automaticCollection` names the authorized snapshot; absent means the ordinary developer-question workflow. */
   | { kind: "resolve-drifts"; drifts: string[]; automaticCollection?: string };
 
@@ -14,6 +16,8 @@ export function buildPrompt(action: ResolvedAction): string {
   switch (action.kind) {
     case "design":
       return `Use the trama-design skill. ${action.prompt.trim()}`;
+    case "setup-request":
+      return `Use the trama-setup skill on the project request in \`.trama/requests/${action.request}.md\`. Bind the setup Proposal you open to it with \`--request ${action.request}\`.`;
     case "written-design":
       return `Use the trama-design skill on the design request in \`.trama/requests/${action.request}.md\`. Bind the first Proposal you open to it with \`--request ${action.request}\`.`;
     case "resolve-drifts":
@@ -26,8 +30,6 @@ export function buildPrompt(action: ResolvedAction): string {
       return `Use the trama-implement skill on Task ${action.task}.`;
     case "implement-all":
       return 'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, one group at a time, until it says there is none.';
-    case "implement-design":
-      return `Use the trama-implement skill on every Task of Proposal ${action.proposal} that is in the "todo" column. Take them from \`trama task next --batch --proposal ${action.proposal} --max {maxParallelAgents}\`, one group at a time, until it says there is none.`;
     case "import":
       return "Use the trama-import skill on this repository.";
   }
@@ -54,8 +56,6 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
   switch (action.kind) {
     case "implement":
       return short("task", action.task);
-    case "implement-design":
-      return short("proposal", action.proposal);
     case "implement-all":
       return "All tasks";
     case "import":
@@ -65,6 +65,8 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
     case "design":
     case "written-design":
       return "Design";
+    case "setup-request":
+      return "Setup";
     case "resolve-drifts":
       return "Drifts";
   }

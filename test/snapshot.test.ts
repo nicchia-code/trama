@@ -183,3 +183,25 @@ test("a Task's blockers travel in the snapshot: the open Drifts that concern it,
   moveTask(p, task.id, "done", "developer");
   expect(blockers()[task.id]).toEqual([]);
 });
+
+test("the snapshot carries the Specs and the Specs each open Proposal would write", () => {
+  writeFileSync(join(dir, ".trama/specs.yaml"), "languages:\n  - name: TypeScript\n    version: \"5\"\n");
+  const prop = newProposal(p, "Stack");
+  writeFileSync(join(prop.dir, "specs.yaml"), "languages:\n  - name: TypeScript\n    version: \"5\"\nframeworks:\n  - name: Hono\n");
+  handOver(p, prop.id);
+
+  const snap = buildSnapshot(p);
+  expect(snap.specs.lists.languages.map((e) => [e.name, e.version])).toEqual([["TypeScript", "5"]]);
+  expect(snap.specs.lists.frameworks).toEqual([]);
+  const view = snap.proposals.find((x) => x.id === prop.id);
+  expect(view?.specs.lists.frameworks.map((e) => e.name)).toEqual(["Hono"]);
+  expect(view?.specs.lists.languages.map((e) => e.name)).toEqual(["TypeScript"]);
+});
+
+test("a Specs file that is not valid reports its errors and the rest of the snapshot still reads", () => {
+  writeFileSync(join(dir, ".trama/specs.yaml"), "languages: nope\n");
+  const snap = buildSnapshot(p);
+  expect(snap.diagnostics).toEqual([{ file: "specs.yaml", line: 0, message: "languages must be a list of entries" }]);
+  expect(snap.machines.map((m) => m.id).sort()).toEqual(["cart", "order", "payment"]);
+  expect(snap.specs.lists.languages).toEqual([]);
+});

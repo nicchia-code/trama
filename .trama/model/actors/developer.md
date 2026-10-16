@@ -19,13 +19,13 @@ The developer discards a Proposal the agent is still writing, with the command l
 Il developer registra direttamente un nuovo Drift dalla riga di comando. Il Drift nasce Open e attende una decisione, con le stesse regole di un Drift registrato dall'agente.
 
 ### FIX_DRIFT_CODE
-The developer keeps the side of an open Drift that says what should happen: the Model or the Requirement is right and the code must change. La Proposal allegata, se c'è, è messa da parte con il Drift. Solo dalla riga di comando: il pannello non decide su un singolo Drift.
+The developer keeps the side of an open Drift that says what should happen: the Model or the Requirement is right and the code must change. La Proposal allegata, se c'è, è messa da parte con il Drift. Solo dalla riga di comando: dal pannello un singolo Drift si può solo chiudere senza cambiare nulla.
 
 ### ACCEPT_DRIFT_PROPOSAL
 The developer keeps the side of an open Drift that says what happens, when a Proposal is attached: the code is right and the Proposal is accepted. Solo dalla riga di comando.
 
 ### DISMISS_DRIFT
-The developer keeps the side of an open Drift that says what happens, when no Proposal is attached: the code is right and nothing changes. Solo dalla riga di comando.
+Il developer tiene il lato di un Drift aperto che dice ciò che succede: il codice è giusto e nulla cambia. Dalla riga di comando, solo quando nessuna Proposal è allegata; dal pannello, con Dismiss Drift nella scheda della Board o nei dettagli del Diagramma e dopo una conferma, anche quando una Proposal è allegata, che è scartata con il Drift.
 
 ### MOVE_TASK_TO_TODO
 The developer moves a Task to the To do column, with the command line. The Board offers no way to do it.
@@ -54,7 +54,7 @@ Il developer cambia la propria delega per i Drift: nessuna, soltanto i non criti
 Il developer chiude la scheda di una richiesta di design scritta che non ha mai inviato, quando nessun'altra scheda mostra più quella richiesta. Chiudere la finestra dell'editor con la scheda aperta non è questo Event, né lo è chiudere la scheda di una richiesta già inviata.
 
 ### INITIALIZE_PROJECT
-The developer asks to set up Trama in a workspace folder.
+The developer asks to set up Trama in a workspace folder. Dall'editor lo chiede scegliendo Import from Code o Start from Scratch in Get Started, la scheda che il pannello mostra in una cartella senza progetto; dalla riga di comando con l'inizializzazione.
 
 ### UPDATE_SKILLS
 The developer asks to refresh the agent skills of the project with the ones shipped with this version of Trama.
@@ -65,9 +65,9 @@ Il developer riscrive, dalla riga di comando, l'identità di ogni Proposal, Task
 ### OPEN_PANEL
 The developer opens the Trama panel, or brings it to the front.
 
-Anche il pulsante Reopen della notifica di domande in attesa chiede questa apertura ordinaria: se il round esiste ancora, l'overlay si ripristina; altrimenti si apre soltanto il pannello. Senza un progetto vale la stessa offerta di inizializzazione.
+Anche il pulsante Reopen della notifica di domande in attesa chiede questa apertura ordinaria: se il round esiste ancora, l'overlay si ripristina; altrimenti si apre soltanto il pannello. Senza un progetto il pannello si apre su Get Started.
 
-Il developer lo chiede con il comando, con l'icona di Trama in alto, nella barra dell'editor, oppure con il pulsante «Trama» nella barra di stato in basso. L'icona si trova in ogni finestra con almeno una cartella aperta, anche dove non c'è ancora un progetto: lì l'icona porta alla stessa offerta di inizializzazione. Con il pannello già aperto l'icona e il pulsante, come il comando, lo portano in primo piano tenendo la sua scheda.
+Il developer lo chiede con il comando, con l'icona di Trama in alto, nella barra dell'editor, oppure con il pulsante «Trama» nella barra di stato in basso. L'icona si trova in ogni finestra con almeno una cartella aperta, anche dove non c'è ancora un progetto: lì porta a Get Started. Con il pannello già aperto l'icona e il pulsante, come il comando, lo portano in primo piano tenendo la sua scheda.
 
 ### CLOSE_PANEL
 The developer closes the Trama panel.
@@ -80,6 +80,9 @@ The developer switches to the Board tab.
 
 ### SHOW_REQUIREMENTS
 The developer switches to the Requirements tab, or follows a link to a Requirement.
+
+### SHOW_SPECS
+Il developer passa alla scheda Specs del pannello.
 
 ### SHOW_SETTINGS
 Il developer passa alla scheda Settings del pannello.

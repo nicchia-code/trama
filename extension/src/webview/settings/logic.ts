@@ -1,4 +1,8 @@
-import type { SettingSchema, SettingsValues } from "../../host/settings-schema";
+import { CRITICAL_DRIFT_KEY, DRIFT_KEY, type SettingSchema, type SettingsValues } from "../../host/settings-schema";
+
+/** Whether another setting disables this control: Auto Fix Critical Drifts stays disabled while Auto Fix Drifts is not on. */
+export const disabledBy = (setting: SettingSchema, values: Record<string, SettingsValues | undefined>): boolean =>
+  setting.key === CRITICAL_DRIFT_KEY && values[DRIFT_KEY]?.user !== true;
 
 /** The settings grouped under their titles, in schema order. */
 export function groupSettings(schema: readonly SettingSchema[]): { title: string; settings: SettingSchema[] }[] {

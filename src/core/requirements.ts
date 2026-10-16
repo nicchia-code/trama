@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { EMPTY_SPECS, isSpecField, isSpecsRef, parseSpecs, SPECS_FILE, type SpecField, type Specs } from "./specs";
 import { parse } from "yaml";
 import { TramaError } from "./errors";
 import { buildModel, findState, flattenStates } from "./model";
@@ -58,7 +59,13 @@ export const FRAGMENT_MAX_BYTES = 12288;
 export interface ProjectModel {
   model: Model;
   areas: Area[];
-  /** Model diagnostics followed by Requirement diagnostics. */
+  /** The Specs as read; every field empty when the file is absent. */
+  specs: Specs;
+  /** Whether a valid Specs makes the `trama-specs` skill exist, so that it takes budget. */
+  specsSkill: boolean;
+  /** Whether the `specs.yaml` file exists, valid or not: the Specs tab says there are no Specs only when it does not. */
+  specsPresent: boolean;
+  /** Model diagnostics, then Requirement diagnostics, then Specs diagnostics. */
   diagnostics: Diagnostic[];
 }
 
@@ -255,7 +262,10 @@ function buildAreas(requirements: FileMap, model: Model, diagnostics: Diagnostic
 export function splitTracked(files: FileMap): { model: FileMap; requirements: FileMap } {
   const model: FileMap = new Map();
   const requirements: FileMap = new Map();
-  for (const [path, content] of files) (path.startsWith(REQUIREMENTS_PREFIX) ? requirements : model).set(path, content);
+  for (const [path, content] of files) {
+    if (path === SPECS_FILE) continue;
+    (path.startsWith(REQUIREMENTS_PREFIX) ? requirements : model).set(path, content);
+  }
   return { model, requirements };
 }
 
@@ -265,7 +275,9 @@ export function buildProject(files: FileMap): ProjectModel {
   const model = buildModel(modelFiles);
   const diagnostics: Diagnostic[] = [];
   const areas = buildAreas(requirements, model, diagnostics);
-  return { model, areas, diagnostics: [...model.diagnostics, ...diagnostics] };
+  const text = files.get(SPECS_FILE);
+  const specs = text === undefined ? { specs: EMPTY_SPECS, diagnostics: [] } : parseSpecs(SPECS_FILE, text);
+  return { model, areas, specs: specs.specs, specsSkill: text !== undefined && specs.diagnostics.length === 0, specsPresent: text !== undefined, diagnostics: [...model.diagnostics, ...diagnostics, ...specs.diagnostics] };
 }
 
 /** Fragments of a tracked file map larger than `FRAGMENT_MAX_BYTES` (the whole file, front matter included), by path. */
@@ -293,10 +305,19 @@ export function parseRequirementRef(ref: string): { area: string; section: strin
   return hash < 0 ? { area: rest, section: null } : { area: rest.slice(0, hash), section: rest.slice(hash + 1) };
 }
 
-export type ProjectElement = Element | { kind: "requirement"; ref: string; area: Area; section: RequirementSection | null };
+export type ProjectElement =
+  | Element
+  | { kind: "requirement"; ref: string; area: Area; section: RequirementSection | null }
+  | { kind: "specs"; ref: string; field: SpecField | null };
 
-/** Resolves a Model reference, or a Requirement reference (`requirements/ui`, `requirements/ui#order/Paid`). */
+/** Resolves a Model reference, a Requirement reference (`requirements/ui`, `requirements/ui#order/Paid`) or a Specs reference (`specs`, `specs#frameworks`). */
 export function resolveProjectRef(project: ProjectModel, ref: string): ProjectElement {
+  if (isSpecsRef(ref)) {
+    if (ref === "specs") return { kind: "specs", ref, field: null };
+    const field = ref.slice("specs#".length);
+    if (!isSpecField(field)) throw new TramaError(`Cannot resolve "${ref}": Specs has no field "${field}"`);
+    return { kind: "specs", ref, field };
+  }
   const req = parseRequirementRef(ref);
   if (!req) return resolveRef(project.model, ref);
   const area = project.areas.find((a) => a.id === req.area);

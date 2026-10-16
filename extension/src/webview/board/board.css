@@ -89,13 +89,6 @@
 .board-card-proposal { border-left-color: var(--board-blue); }
 .board-card-resolution { border-left-color: var(--board-warning); }
 .board-card-drift { border-left-color: var(--board-error); }
-.board-card-design { border-left-color: var(--board-muted); }
-
-/* A design card: its Tasks as a list, told apart by a dot (colour plus an accessible name). */
-.board-design-tasks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
-.board-design-tasks[hidden] { display: none; }
-.board-design-task { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 4px; border-top: 1px solid var(--board-border); }
-.board-design-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .board-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; border: 1px solid transparent; }
 .board-dot.is-todo { background: transparent; border-color: var(--board-muted); }
 .board-dot.is-doing { background: var(--board-warning); border-color: var(--board-warning); }
@@ -105,6 +98,8 @@
 /* The short number or the identity of a card: one place, one monospaced font; the tooltip and the accessible name tell them apart. */
 .board-card-id { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; font-weight: 600; color: var(--board-muted); font-variant-numeric: tabular-nums; }
 .board-card-title { margin: 0; font-size: 1em; font-weight: 600; overflow-wrap: anywhere; }
+/* The tag of a Task that comes from a Proposal: its title on a tint from the Proposal's identity; one line, cut with dots. */
+.board-proposal-tag { --proposal-hue: 210; flex: 0 1 auto; min-width: 0; max-width: 100%; padding: 0 6px; border-radius: 3px; font-size: 11px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: hsl(var(--proposal-hue) 70% 85%); color: hsl(var(--proposal-hue) 45% 15%); }
 
 .board-badge {
   font-size: 11px;

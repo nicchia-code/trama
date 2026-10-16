@@ -30,7 +30,8 @@ import {
 import type { Diagnostic, FileMap } from "./types";
 import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
 import { cardName, identityOfShortNumber } from "./short-numbers";
-import { attachedDrift, type DriftOutcome, fixCodeRefusal, listDrifts, planApprovalTasks, resolveListedDrifts, writeApprovalTasks } from "./work";
+import { isSpecsRef, SPECS_FILE } from "./specs";
+import { attachedDrift, type DriftOutcome, fixCodeRefusal, listDrifts, planApprovalTasks, requireNotAttached, resolveListedDrifts, writeApprovalTasks } from "./work";
 import { removedElements, type RemovedKind, SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
 
 /**
@@ -42,8 +43,9 @@ export type ProposalStatus = "draft" | "open" | "approved" | "rejected" | "disca
 /**
  * `import`: written by the trama-import skill to describe existing code; approving it starts no Scan.
  * `resolution`: written by the agent run by Resolve Drifts; lists the open Drifts it resolves, each with the developer's decision. Like an import it starts no Scan.
+ * `setup`: the first Proposal of a project whose Model is empty, written from a design request by the `trama-setup` skill; it is approved on hand-over when it is valid, not blocked and the Model is still empty.
  */
-export type ProposalKind = "change" | "import" | "resolution";
+export type ProposalKind = "change" | "import" | "resolution" | "setup";
 
 export type DriftDecisionKind = "proposal" | "dismissed" | "fix-code";
 
@@ -105,7 +107,7 @@ export interface ProposalTask {
 const proposalsDir = (p: Project) => join(p.dir, "proposals");
 
 const STATUSES: readonly ProposalStatus[] = ["draft", "open", "approved", "rejected", "discarded"];
-const KINDS: readonly ProposalKind[] = ["change", "import", "resolution"];
+const KINDS: readonly ProposalKind[] = ["change", "import", "resolution", "setup"];
 
 function parseData(raw: Raw, where: string): ProposalData {
   const data: ProposalData = {
@@ -338,12 +340,13 @@ export function baseFiles(p: Project, proposal: Proposal): FileMap {
 }
 
 /**
- * A tracked path: `checkout/order.md` for the Model, `requirements/ui/area.md` or `requirements/ui/<fragment>.md` for
+ * A tracked path: `specs.yaml` for the Specs, `checkout/order.md` for the Model, `requirements/ui/area.md` or `requirements/ui/<fragment>.md` for
  * Requirements. `areaFolders` is false for paths a Proposal already recorded: those written before Areas became
  * folders (`requirements/ui.md`) stay readable as history; only a new registration must use the folder layout.
  */
 function normalizeModelPath(path: string, areaFolders = true): string {
   const clean = path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\.trama\/model\//, "").replace(/^\.trama\/requirements\//, REQUIREMENTS_PREFIX);
+  if (clean === SPECS_FILE) return clean;
   const expected = "requirements/<area>/area.md or requirements/<area>/<fragment>.md";
   if (!clean.endsWith(".md")) throw new TramaError(`"${path}" is not a Model or Requirement file (expected a .md path under .trama/model/, or ${expected})`);
   if (clean.split("/").includes("..") || clean.startsWith("/")) throw new TramaError(`"${path}" must be relative to .trama/model/, or be ${expected}`);
@@ -414,7 +417,7 @@ export function deleteInProposal(p: Project, id: string, modelPath: string) {
     requireEditable(p, proposal);
     const rel = normalizeModelPath(modelPath);
     const content = baseFiles(p, proposal).get(rel);
-    if (content === undefined) throw new TramaError(`${rel} does not exist in the Model or its Requirements`);
+    if (content === undefined) throw new TramaError(`${rel} does not exist in the Model, its Requirements or the Specs`);
     if (existsSync(trackedLocation(proposal.dir, rel)))
       throw new TramaError(`${rel} is already edited in Proposal ${cardName(p, "proposal", proposal.id)}; remove that copy first`);
     touch(proposal);
@@ -424,12 +427,15 @@ export function deleteInProposal(p: Project, id: string, modelPath: string) {
   });
 }
 
-/** The reason a Proposal that cannot hold Tasks gives, both when a Task file is refused and when validation reports it. */
-const NO_TASKS_REASON = "only an ordinary Proposal, not attached to a Drift, can hold Tasks";
+/** Whether a Proposal of this kind has a scope: its Tasks, its removal Tasks and its Scan scope are computed. */
+export const coversScope = (kind: ProposalKind): boolean => kind === "change" || kind === "setup";
 
-/** Only an ordinary Proposal, not attached to a Drift, holds Tasks. */
+/** The reason a Proposal that cannot hold Tasks gives, both when a Task file is refused and when validation reports it. */
+const NO_TASKS_REASON = "only a change or setup Proposal, not attached to a Drift, can hold Tasks";
+
+/** Only a change or setup Proposal, not attached to a Drift, holds Tasks. */
 function holdsTasks(p: Project, proposal: Proposal): boolean {
-  return proposal.data.kind === "change" && attachedDrift(p, proposal.id) === null;
+  return coversScope(proposal.data.kind) && attachedDrift(p, proposal.id) === null;
 }
 
 /** The file name a `tasks/<name>.md` path gives; anything deeper or not Markdown is refused. */
@@ -559,6 +565,7 @@ function bodyRows(body: string, heading: string): string[] {
 function coverKeys(project: ProjectModel, ref: string): string[] {
   if (!resolves(project, ref)) return [];
   const req = parseRequirementRef(ref);
+  if (isSpecsRef(ref)) return ref === "specs" ? ["specs"] : [ref, "specs"].map((key) => key.toLowerCase());
   if (req !== null) return [ref, ...(req.section === null ? [] : [`${REQUIREMENTS_PREFIX}${req.area}`])].map((key) => key.toLowerCase());
   const element = resolveRef(project.model, ref);
   // An Event sits in its Machine, and the Machine in its Feature: lineageRefs stops at the owner.
@@ -585,7 +592,7 @@ function taskRules(p: Project, proposal: Proposal, project: ProjectModel): Diagn
   for (const task of proposal.tasks) {
     const file = `tasks/${task.name}`;
     for (const ref of task.refs) if (!resolves(project, ref)) at(file, `Task "${task.title}" names ${ref}, which does not exist with the Proposal applied`);
-    const modelRefs = task.refs.filter((ref) => parseRequirementRef(ref) === null);
+    const modelRefs = task.refs.filter((ref) => parseRequirementRef(ref) === null && !isSpecsRef(ref));
     if (task.technical && modelRefs.length > 0) at(file, `Technical Task "${task.title}" cannot reference the Model: ${modelRefs.join(", ")}`);
     if (!task.technical && modelRefs.length === 0) at(file, `Task "${task.title}" must reference a Model element, unless it is technical`);
   }
@@ -601,8 +608,8 @@ function taskRules(p: Project, proposal: Proposal, project: ProjectModel): Diagn
 export function proposalWarnings(p: Project, proposal: Proposal): Diagnostic[] {
   const after = applied(p, proposal);
   const warnings: Diagnostic[] = largeFragments(after).map((f) => ({ file: f.file, line: 0, message: largeFragmentMessage(f) }));
-  const was = requirementSkillMode(buildProject(baseFiles(p, proposal)).areas);
-  const is = requirementSkillMode(buildProject(after).areas);
+  const was = requirementSkillMode(buildProject(baseFiles(p, proposal)));
+  const is = requirementSkillMode(buildProject(after));
   if (was.mode !== is.mode) {
     const how = is.mode === "index" ? "from one skill per fragment to one index skill per Area" : "from index skills back to one skill per fragment";
     warnings.push({ file: "requirements/", line: 0, message: `once applied, the Requirement skills switch ${how} (budget ${was.budget} → ${is.budget} of ${REQUIREMENT_SKILLS_BUDGET} characters)` });
@@ -748,8 +755,10 @@ export function rejectProposal(p: Project, id: string, feedback = ""): Proposal 
  * with it applied would have errors or when a file it holds was never registered. Being stale or requiring
  * Proposals that are not approved yet does not refuse it: writing cannot fix those; nor do the warnings, which are returned.
  * A successful hand-over consumes the design request the Proposal is bound to: `requestConsumed` is true when its file was deleted.
+ * A setup Proposal handed over to an empty Model is approved at once, as the developer's approval would; when that refuses it,
+ * it stays Open and `openReason` says why.
  */
-export function submitProposal(p: Project, id: string): Proposal & { requestConsumed: boolean; warnings: Diagnostic[] } {
+export function submitProposal(p: Project, id: string, skillsDirs: string[] = []): Proposal & { requestConsumed: boolean; warnings: Diagnostic[]; approvedAtHandOver: boolean; openReason: string | null } {
   const proposal = getProposal(p, id);
   requireStatus(p, proposal, "draft", "handed over");
   const problems: string[] = [];
@@ -765,13 +774,37 @@ export function submitProposal(p: Project, id: string): Proposal & { requestCons
   save(proposal);
   removeBoundTo(p, proposal.id, true);
   const requestConsumed = proposal.data.request !== null && consumeRequest(p, proposal.data.request);
-  return { ...proposal, requestConsumed, warnings };
+  const handedOver = { ...proposal, requestConsumed, warnings, approvedAtHandOver: false, openReason: null };
+  const model = buildProject(baseFiles(p, proposal)).model;
+  if (proposal.data.kind !== "setup" || model.features.size > 0 || model.actors.size > 0) return handedOver;
+  try {
+    approveProposal(p, proposal.id, skillsDirs);
+  } catch (err) {
+    if (!(err instanceof TramaError)) throw err;
+    return { ...handedOver, openReason: err.message };
+  }
+  return { ...getProposal(p, proposal.id), requestConsumed, warnings, approvedAtHandOver: true, openReason: null };
 }
 
 /** The developer gives up a Draft the agent never finished. Nothing is asked of the agent and nothing is appended. */
 export function discardProposal(p: Project, id: string): Proposal {
   const proposal = getProposal(p, id);
+  requireNotAttached(p, proposal.id);
   requireStatus(p, proposal, "draft", "discarded");
+  return giveUp(p, proposal);
+}
+
+/**
+ * Gives up the Proposal attached to a Drift that the developer closes from the panel: a Draft or a handed-over one, with no feedback.
+ * A Proposal already decided is left as it is.
+ */
+export function discardAttachedProposal(p: Project, id: string): Proposal {
+  const proposal = getProposal(p, id);
+  if (proposal.data.status !== "draft" && proposal.data.status !== "open") return proposal;
+  return giveUp(p, proposal);
+}
+
+function giveUp(p: Project, proposal: Proposal): Proposal {
   proposal.data.status = "discarded";
   save(proposal);
   removeBoundTo(p, proposal.id);

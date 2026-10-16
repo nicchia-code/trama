@@ -152,18 +152,11 @@ describe("Tasks and Drifts", () => {
     expect(getTask(p, plain.id).data.proposal).toBeNull();
   });
 
-  test("a Technical Task written with a Proposal belongs to its design, like the other Tasks", () => {
+  test("a Technical Task keeps the Proposal it is written with", () => {
     const prop = newProposal(p, "Returns");
     expect(() => newTask(p, { title: "x", refs: [], technical: true, proposal: "42" })).toThrow(/No Proposal/);
     const tech = newTask(p, { title: "Upgrade", refs: [], technical: true, proposal: prop.id });
-    const a = newTask(p, { title: "A", refs: ["order"], technical: false, proposal: prop.id });
-    const b = newTask(p, { title: "B", refs: ["order"], technical: false, proposal: prop.id });
     expect(getTask(p, tech.id).data.proposal).toBe(prop.id);
-    const board = run(["--root", dir, "board"], process.cwd()).out;
-    expect(board).toContain(`Proposal ${named("proposal", prop.id)} "Returns" (0/3 done)`);
-    expect(board).toContain(`  - ${named("task", tech.id)} Upgrade`);
-    expect(board).toContain(`  - ${named("task", a.id)} A [todo]`);
-    expect(board).toContain(`  - ${named("task", b.id)} B [todo]`);
   });
 
   test("the agent takes a Task by moving it to In progress; the developer cannot move it until it is released", () => {
@@ -333,7 +326,6 @@ describe("Tasks and Drifts", () => {
 
     const board = cli("board");
     expect(board).toContain(`- ${named("task", taken)} Taken (agent working)\n`);
-    expect(board).toContain(`  - ${named("task", a)} In design (agent working) [doing]`);
     expect(board).toContain(`- ${named("task", free)} Free\n`);
     expect(board).not.toContain(`${named("task", b)} Other in design (agent working)`);
     expect(cli("task", "list")).toContain(`- ${named("task", taken)} Taken (agent working)`);
@@ -471,27 +463,27 @@ describe("Tasks and Drifts", () => {
     expect(() => run2({}, a, "done")).toThrow(/agent is working on Task/);
   });
 
-  test("the textual board shows a design once with its Tasks, while task list stays flat", () => {
+  test("the textual board lists every Task on its own line in its column, with no design entry", () => {
     const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
     const prop = newProposal(p, "Returns");
     const mk = (title: string, proposal?: string) => newTask(p, { title, refs: ["order"], technical: false, proposal }).id;
     const [a, b, c] = [mk("Return request", prop.id), mk("Refund on return", prop.id), mk("Return label", prop.id)];
-    mk("Alone");
+    const alone = mk("Alone");
     const single = newProposal(p, "Lonely");
-    mk("Only one", single.id);
+    const one = mk("Only one", single.id);
     cli("task", "move", a as string, "done");
     cli("task", "move", b as string, "doing");
 
     const board = cli("board").out;
-    expect(board).toContain(`## In progress\n- Proposal ${named("proposal", prop.id)} "Returns" (1/3 done)\n  - ${named("task", a as string)} Return request [done]\n  - ${named("task", b as string)} Refund on return [doing]\n  - ${named("task", c as string)} Return label [todo]`);
-    expect(board.match(new RegExp(`Proposal ${named("proposal", prop.id)} "Returns"`, "g"))).toHaveLength(1);
-    expect(board).toMatch(/## To do\n- T\d+ Alone\n- T\d+ Only one\n/);
+    expect(board).toContain(`## In progress\n- ${named("task", b as string)} Refund on return\n`);
+    expect(board).toContain(`## Done\n- ${named("task", a as string)} Return request`);
+    expect(board).toMatch(new RegExp(`## To do\\n- ${named("task", c as string)} Return label\\n- ${named("task", alone)} Alone\\n- ${named("task", one)} Only one\\n`));
+    expect(board).not.toContain("(1/3 done)");
+    expect(board).not.toMatch(/^  - /m);
 
-    const list = cli("task", "list", "--column", "todo").out;
-    expect(list).toContain(`- ${named("task", c as string)} Return label (Proposal ${named("proposal", prop.id)})`);
-    expect(list).not.toContain("Refund on return");
-    const json = JSON.parse(cli("--json", "board").out) as { doing: { kind: string; total?: number }[] };
-    expect(json.doing[0]).toMatchObject({ kind: "design", total: 3 });
+    const json = JSON.parse(cli("--json", "board").out) as { doing: { kind: string; id: string }[] };
+    expect(json.doing).toHaveLength(1);
+    expect(json.doing[0]).toMatchObject({ kind: "task", id: b });
   });
 
   test("resolving a Drift with fix-code creates a linked Task with the same references", () => {
@@ -904,11 +896,11 @@ describe("Tasks and Drifts", () => {
     expect(() => run(["--root", dir, "proposal", "reject", left.id], process.cwd())).toThrow(/is rejected/);
   });
 
-  test("discarding a Draft attached to an open Drift from the command line works and leaves the Drift as it is; the Drift can still be fixed afterwards", () => {
+  test("discarding a Draft attached to an open Drift from the command line is refused and changes nothing; the Drift can still be fixed afterwards", () => {
     const draft = newProposal(p, "Half written");
     const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Half done", refs: ["order"], proposal: draft.id, happens: "Code does it.", should: "Model says so." });
-    expect(run(["--root", dir, "proposal", "discard", draft.id], process.cwd(), {}).out).toContain("Discarded Proposal");
-    expect(getProposal(p, draft.id).data.status).toBe("discarded");
+    expect(() => run(["--root", dir, "proposal", "discard", draft.id], process.cwd(), {})).toThrow(/is attached to Drift/);
+    expect(getProposal(p, draft.id).data.status).toBe("draft");
     expect(getDrift(p, drift.id).data).toMatchObject({ status: "open", proposal: draft.id });
 
     resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
@@ -923,7 +915,9 @@ describe("Tasks and Drifts", () => {
     const first = attach(draft.id);
     expect(() => attach(draft.id)).toThrow(new RegExp(`already attached to Drift ${named("drift", first.id)}`));
     release(first);
-    expect(attach(draft.id).data.proposal).toBe(draft.id);
+    const second = attach(draft.id);
+    expect(second.data.proposal).toBe(draft.id);
+    release(second);
     discardProposal(p, draft.id);
     expect(() => attach(draft.id)).toThrow(/was discarded/);
 

@@ -250,7 +250,7 @@ What to do, in prose.
 - `proposal` is set when the agent files the Task after that Proposal was approved (the Scan is told which Proposal). It must name an existing Proposal, in any status. Tasks written before the field existed, Tasks of a Scan started by hand, Technical Tasks and Tasks that fix a Drift carry none.
 - `agent` is `false` when free, `true` when taken without a recognized holder, or a terminal ID / `cursor` when taken by a Trama-started terminal (`TRAMA_AGENT` set) or Cursor's chat (`CURSOR_AGENT=1`). `trama task take-back` clears the mark and leaves the Task in `doing`. When a terminal command ends, only Tasks held by that terminal are released; when a Cursor turn ends or its conversation closes, only Cursor-held Tasks are released. Ownerless Tasks are released by either event. Other origins are ownerless, and legacy `agent: editor` values are read as ownerless.
 - `finished` is the UTC instant (ISO 8601) the Task arrived in Done from another column. A move from Done to Done keeps it; a move out of Done removes it, and arriving in Done again writes a new one. Tasks that reached Done before the field existed have none.
-- The Tasks linked to one Proposal form a **design**. The Board shows a design of two or more Tasks as one card, closed at first, standing in the column its Tasks add up to: To do while all are in To do, Done when all are done, In progress in every other case. A design of one Task, and Tasks with no `proposal`, are plain cards.
+- The Tasks linked to one Proposal are not grouped: the Board shows each Task as its own card, in the column it is in, with the Proposal's tag (its short number or ID, and its title). A Task with no `proposal` has no tag.
 
 ## Drift
 

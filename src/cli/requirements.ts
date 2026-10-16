@@ -7,7 +7,7 @@ const sectionTitle = (ref: string | null) => ref ?? "General";
 
 /** The skill or skills to load for an Area or one of its sections, as the current mode generates them; "" when none is. */
 function skillsNote(project: ProjectModel, area: Area, section: RequirementSection | null = null): string {
-  const skills = requirementSkillNames(project.areas, area, section);
+  const skills = requirementSkillNames(project, area, section);
   return skills.length === 0 ? "" : `skill${skills.length > 1 ? "s" : ""} ${skills.map((s) => `\`${s}\``).join(", ")}`;
 }
 

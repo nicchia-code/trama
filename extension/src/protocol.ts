@@ -1,5 +1,6 @@
 import type { AnnouncementView, Snapshot } from "../../src/core/snapshot";
 import type { DriftAutopilotStatus } from "./host/drift-resolution";
+import type { InitChoice } from "./host/project";
 import type { QuestionRoundView } from "./host/question-session";
 import type { QuestionAction } from "./host/question-state";
 import type { SettingSchema, SettingsValues, SettingValue } from "./host/settings-schema";
@@ -15,8 +16,6 @@ export type AgentAction =
   | { kind: "implement"; task: string }
   /** Every Task in "todo", in order; the agent stops at the first Drift it files. */
   | { kind: "implement-all" }
-  /** The Tasks of one design (Proposal) still in "todo", in order; the agent stops at the first Drift it files. */
-  | { kind: "implement-design"; proposal: string }
   /** Describe the existing code as Proposals for the Model; the agent asks its own questions. */
   | { kind: "import" }
   /** One agent resolves every Drift open when the instruction is sent. The host refuses it while a Run or a resolution is going on, or one resolution Proposal is still to be decided. */
@@ -38,12 +37,16 @@ export type ToHost =
   | { type: "openCard"; kind: "task" | "drift"; id: string }
   | { type: "approveProposal"; id: string }
   | { type: "rejectProposal"; id: string }
+  /** The developer pressed «Dismiss Drift»: the host asks for confirmation in a modal dialog, then closes the Drift without changes, discarding its attached Proposal. */
+  | { type: "dismissDrift"; id: string }
   /** The developer changed a Trama setting in the Settings tab: the host checks it against the manifest and saves it in the user settings. */
   | { type: "setSetting"; key: string; value: SettingValue }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
-  | { type: "openLink"; url: string };
+  | { type: "openLink"; url: string }
+  /** Get Started: the developer chose how to set up the folder; the host initializes it and starts what that choice starts. */
+  | { type: "initialize"; choice: InitChoice };
 
-export type ViewName = "diagram" | "board" | "requirements" | "settings";
+export type ViewName = "getstarted" | "diagram" | "board" | "requirements" | "specs" | "settings";
 
 export interface NavigateOptions {
   /** Element reference (`checkout`, `order`, `order/Paid`, `user.CANCEL`…): the Diagram shows it. */
@@ -62,6 +65,10 @@ export type ToWebview =
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */
   | { type: "error"; message: string }
+  /** Whether the folder has a Trama project: without one only Get Started and Settings are shown. */
+  | { type: "project"; present: boolean }
+  /** Get Started: an initialization is running (buttons disabled), or it failed with `error`, shown under the buttons. */
+  | { type: "setup"; busy: boolean; error: string | null }
   | ({ type: "navigate"; view: ViewName } & NavigateOptions)
   /** The question round being answered, drawn over the tabs; null when none is. */
   | { type: "questions"; round: QuestionRoundView | null }

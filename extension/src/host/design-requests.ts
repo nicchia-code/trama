@@ -2,6 +2,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { isAbsolute, relative, sep } from "node:path";
 import * as vscode from "vscode";
 import { createRequest, isEmptyRequest, requestFile, requestIdAt, requestsDir, requestTitle } from "../../../src/core/design-requests";
+import { approvalBlock, listProposals } from "../../../src/core/proposals";
 import type { Project } from "../../../src/core/store";
 import { type DesignAnnouncement, type Launch, launchAgent, launched } from "./agent";
 import { findProject, NO_PROJECT_WARNING } from "./project";
@@ -13,9 +14,15 @@ const CONTEXT_KEY = "trama.designRequest";
 const RESOURCE_CONTEXT_KEY = "trama.designRequestResources";
 /** The workspace state key of the IDs of the requests already sent. */
 export const SENT_KEY = "trama.sentDesignRequests";
+/** The workspace state key of the IDs of the requests that start a project from scratch (the setup requests). */
+export const SETUP_KEY = "trama.setupDesignRequests";
 const EMPTY_WARNING = "Trama: write the design request before sending it.";
 /** How long after the last change Trama saves a request by itself. */
 export const SAVE_DELAY_MS = 300;
+
+/** The ghost texts of an empty request never sent: one for a design request, one for a setup request. */
+const DESIGN_GHOST = "Describe the change to design: behaviour, edge cases, requirements. Close this tab or press Send to agent when you are done.";
+const SETUP_GHOST = "Describe the application to build: what it does and who it is for. Close this tab or press Send to agent when you are done.";
 
 /**
  * Written design requests in the editor. A request is a file in `.trama/requests/` from the moment Design… creates
@@ -24,6 +31,7 @@ export const SAVE_DELAY_MS = 300;
  * Which requests were sent is kept in the workspace state, so it survives restarts; a request file not in that list is
  * being written. Closing the last tab of a request being written sends it, like Send to agent; a request is sent at
  * most once. A request consumed or abandoned is remembered in memory only, while its tab is open.
+ * An empty request never sent shows a ghost text in its tab: a decoration, never part of the file.
  */
 export class DesignRequests implements vscode.Disposable {
   /** Pending saves, by document URI. */
@@ -32,6 +40,11 @@ export class DesignRequests implements vscode.Disposable {
   private readonly sending = new Set<string>();
   /** Requests consumed or abandoned in this session, kept while their tab is open; not kept across restarts. */
   private readonly finished = new Set<string>();
+  /** The ghost texts of an empty request never sent, shown in its tab; freed with the host. */
+  private readonly ghosts = {
+    design: vscode.window.createTextEditorDecorationType({ after: { contentText: DESIGN_GHOST, color: new vscode.ThemeColor("disabledForeground") } }),
+    setup: vscode.window.createTextEditorDecorationType({ after: { contentText: SETUP_GHOST, color: new vscode.ThemeColor("disabledForeground") } }),
+  };
   private readonly subscriptions: vscode.Disposable[];
 
   constructor(
@@ -40,13 +53,17 @@ export class DesignRequests implements vscode.Disposable {
     tramaFiles: vscode.FileSystemWatcher,
     private readonly project: () => Project | undefined = findProject,
     private readonly launch: (root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement, canSend?: () => boolean) => Promise<Launch | undefined> = launchAgent,
+    /** Run all To do, started when a setup Proposal is approved on its own; the host always passes it. */
+    private readonly runAll?: () => Promise<void>,
   ) {
     this.subscriptions = [
       vscode.window.onDidChangeActiveTextEditor(() => this.updateContext()),
       vscode.workspace.onDidChangeTextDocument((event) => {
         const id = this.requestId(event.document);
+        if (id !== undefined) this.refreshGhosts();
         if (event.contentChanges.length > 0 && id !== undefined && !this.finished.has(id)) this.scheduleSave(event.document);
       }),
+      vscode.window.onDidChangeVisibleTextEditors(() => this.refreshGhosts()),
       vscode.window.tabGroups.onDidChangeTabs((event) => {
         this.finishMissing(event.opened);
         for (const tab of event.closed) void this.closed(tab);
@@ -61,6 +78,15 @@ export class DesignRequests implements vscode.Disposable {
 
   /** Design…: the empty file of a new request, in a tab that is not a preview. */
   async write(): Promise<void> {
+    await this.open(false);
+  }
+
+  /** Start from Scratch: the empty file of a request that starts the setup, opened as Design… does; its ID joins the setup list. */
+  async writeSetup(): Promise<void> {
+    await this.open(true);
+  }
+
+  private async open(setup: boolean): Promise<void> {
     const project = this.project();
     if (!project) {
       void vscode.window.showWarningMessage(NO_PROJECT_WARNING);
@@ -68,7 +94,9 @@ export class DesignRequests implements vscode.Disposable {
     }
     const { id, file } = createRequest(project);
     this.finished.delete(id); // A new request may reuse the ID of one deleted earlier in the session.
+    if (setup) await this.state.update(SETUP_KEY, [...this.setupIds(), id]);
     await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
+    this.refreshGhosts();
     this.updateContext();
   }
 
@@ -117,6 +145,7 @@ export class DesignRequests implements vscode.Disposable {
     for (const timer of this.saves.values()) clearTimeout(timer);
     this.saves.clear();
     for (const subscription of this.subscriptions) subscription.dispose();
+    for (const type of Object.values(this.ghosts)) type.dispose();
   }
 
   /** Runs `work` for request `id` while no other gesture may send it. */
@@ -135,14 +164,49 @@ export class DesignRequests implements vscode.Disposable {
     const file = requestFile(project, id);
     const canSend = () => file !== undefined && existsSync(file);
     if (!canSend()) return false;
-    const launch = await this.launch(project.root, buildPrompt({ kind: "written-design", request: id }), "Design", requestTitle(text), canSend);
+    const setup = this.setupIds().includes(id);
+    const instruction = buildPrompt(setup ? { kind: "setup-request", request: id } : { kind: "written-design", request: id });
+    const launch = await this.launch(project.root, instruction, setup ? "Setup" : "Design", requestTitle(text), canSend);
     if (!launched(launch) || !canSend()) return false;
     await this.state.update(SENT_KEY, [...this.sentIds(), id]);
+    this.refreshGhosts();
     return true;
   }
 
   private sentIds(): string[] {
     return this.state.get<string[]>(SENT_KEY, []);
+  }
+
+  private setupIds(): string[] {
+    return this.state.get<string[]>(SETUP_KEY, []);
+  }
+
+  /**
+   * A setup request whose file is gone leaves the setup list at once. Its setup Proposal, if it has one: approved, it
+   * starts Run all To do as the Board's button does (a refusal is shown); still open, the developer is told why it was
+   * not approved on its own. Nothing else is done.
+   */
+  private async settleSetup(project: Project): Promise<void> {
+    const setup = this.setupIds();
+    const gone = setup.filter((id) => {
+      const file = requestFile(project, id);
+      return file !== undefined && !existsSync(file);
+    });
+    if (gone.length === 0) return;
+    await this.state.update(SETUP_KEY, setup.filter((id) => !gone.includes(id)));
+    for (const id of gone) {
+      const proposal = listProposals(project).find((p) => p.data.kind === "setup" && p.data.request === id);
+      if (proposal?.data.status === "approved") {
+        try {
+          await this.runAll?.();
+        } catch (err) {
+          void vscode.window.showWarningMessage(`Trama: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } else if (proposal?.data.status === "open") {
+        const reason = approvalBlock(project, proposal.id)?.reason.replace(/\.$/, "") ?? "it is still open";
+        void vscode.window.showWarningMessage(`Trama: the setup Proposal could not be approved on its own: ${reason}. Review it on the Board.`);
+      }
+    }
   }
 
   private isSent(id: string): boolean {
@@ -224,6 +288,7 @@ export class DesignRequests implements vscode.Disposable {
     if (!project) return;
     const gone = (fsPath: string) => within(uri.fsPath, fsPath) && requestIdAt(project, fsPath) !== undefined;
     if (!gone(uri.fsPath) && !within(uri.fsPath, requestsDir(project))) return;
+    void this.settleSetup(project);
     const allTabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs);
     const open = [...vscode.workspace.textDocuments.map((document) => document.uri), ...allTabs.flatMap((tab) => (tab.input instanceof vscode.TabInputText ? [tab.input.uri] : []))];
     for (const { scheme, fsPath } of open) {
@@ -257,6 +322,17 @@ export class DesignRequests implements vscode.Disposable {
     const project = this.project();
     if (!document || !project || document.uri.scheme !== "file") return undefined;
     return requestIdAt(project, document.uri.fsPath);
+  }
+
+  /** Shows the ghost text in each visible editor of a request never sent whose document is empty, and clears it elsewhere. */
+  private refreshGhosts(): void {
+    const start = new vscode.Range(0, 0, 0, 0);
+    for (const editor of vscode.window.visibleTextEditors) {
+      const id = this.requestId(editor.document);
+      const kind = id !== undefined && !this.isDone(id) && editor.document.getText() === "" ? (this.setupIds().includes(id) ? "setup" : "design") : undefined;
+      editor.setDecorations(this.ghosts.design, kind === "design" ? [start] : []);
+      editor.setDecorations(this.ghosts.setup, kind === "setup" ? [start] : []);
+    }
   }
 
   private updateContext(): void {

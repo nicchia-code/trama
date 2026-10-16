@@ -17,7 +17,7 @@ import {
 } from "../src/core/proposals";
 import { cardName } from "../src/core/short-numbers";
 import { loadModel, type Project, projectAt } from "../src/core/store";
-import { newDrift, resolveDrift } from "../src/core/work";
+import { dismissDrift, newDrift, resolveDrift } from "../src/core/work";
 import { coverWithTask } from "./cover";
 
 let dir: string;
@@ -190,13 +190,13 @@ describe("discarding", () => {
     const top = newProposal(p, "Top", "", { requires: [base.id] });
     submitProposal(p, top.id);
     const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Lost", refs: ["order"], proposal: base.id, happens: "The code does it one way.", should: "The Model says another." });
-    discardProposal(p, base.id);
+    dismissDrift(p, drift.id);
 
     expect(health(p, getProposal(p, top.id)).requires).toEqual([{ id: base.id, title: "Base", status: "discarded" }]);
     expect(() => approveProposal(p, top.id)).toThrow(new RegExp(`Proposal ${cardName(p, "proposal", base.id)} "Base" was discarded`));
     expect(approvalBlock(p, top.id)?.reason).toBe(`Proposal ${cardName(p, "proposal", top.id)} requires other Proposals first: Proposal ${cardName(p, "proposal", base.id)} "Base" was discarded.`);
     expect(getProposal(p, top.id).data.status).toBe("open");
-    expect(() => resolveDrift(p, drift.id, "accept-proposal")).toThrow(/discarded/);
+    expect(() => resolveDrift(p, drift.id, "accept-proposal")).toThrow(/already resolved/);
     expect(() => newProposal(p, "Later", "", { requires: [base.id] })).toThrow(/was discarded/);
   });
 });

@@ -28,8 +28,8 @@ function parseAction(value: unknown): AgentAction | string {
       return { kind: "implement-all" };
     case "resolve-drifts":
       return { kind: "resolve-drifts" };
-    case "implement-design":
-      return typeof raw["proposal"] === "string" && ID.test(raw["proposal"]) ? { kind: "implement-design", proposal: raw["proposal"] } : "implement-design needs a valid Proposal ID";
+    case "import":
+      return { kind: "import" };
     default:
       return `unknown action "${String(raw["kind"])}"`;
   }
@@ -83,6 +83,8 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
     case "approveProposal":
     case "rejectProposal":
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };
+    case "dismissDrift":
+      return id === undefined ? bad("dismissDrift needs a valid Drift ID") : { ok: true, message: { type, id } };
     case "questionAction": {
       if (!Number.isInteger(raw["round"])) return bad("questionAction needs a round");
       const action = parseQuestionAction(raw["action"]);
@@ -92,6 +94,8 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       const url = typeof raw["url"] === "string" ? safeLink(raw["url"]) : null;
       return url === null ? bad("openLink needs an http or https address") : { ok: true, message: { type, url } };
     }
+    case "initialize":
+      return raw["choice"] === "import" || raw["choice"] === "scratch" ? { ok: true, message: { type, choice: raw["choice"] } } : bad("initialize needs a choice: import or scratch");
     case "setSetting": {
       const setting = settings.find((s) => s.key === raw["key"]);
       if (setting === undefined) return bad("setSetting needs a key of the Trama settings");

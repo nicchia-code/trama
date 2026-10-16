@@ -2,6 +2,7 @@ import { flattenStates } from "./model";
 import { receivers } from "./refs";
 import type { ProjectModel } from "./requirements";
 import type { EventDecl, Machine, Model, State } from "./types";
+import { SPEC_FIELDS, sameSpecField } from "./specs";
 
 export type ScanReason = "changed" | "removed, its container" | "leads into a change";
 
@@ -92,7 +93,8 @@ export function scanScope(before: ProjectModel, after: ProjectModel): ScanScopeE
   }
   for (const o of was.machines.values()) if (!is.machines.has(o.id) && is.features.has(o.feature)) add(o.feature, "removed, its container");
 
-  return [...closeScope(is, out, changedMachines, changedStates, changedEvents), ...requirementScope(before, after)];
+  const specs = SPEC_FIELDS.filter((field) => !sameSpecField(before.specs, after.specs, field)).map((field): ScanScopeEntry => ({ ref: `specs#${field}`, reason: "changed" }));
+  return [...closeScope(is, out, changedMachines, changedStates, changedEvents), ...requirementScope(before, after), ...specs];
 }
 
 /** The kinds of Model element a Proposal can remove. */

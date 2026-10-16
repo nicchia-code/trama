@@ -1,18 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import type { DelegationMode } from "./settings-schema";
 
 /** Trama-launched jobs, retained only in memory for their live editor windows. */
 export type JobKind = "run" | "resolve" | "scan";
 
 export type JobPlace = { terminal: string } | { chat: "cursor" | "copilot" | "other" };
 
-/** State tracked by the current window; cross-window coordination is maintained separately. */
-export type DriftResolution = "free" | "running-tasks" | "resolving";
-
-
 export type JobOrigin = "manual" | "automatic";
-export type DriftAutopilotMode = "disabled" | "enabled" | "yolo";
+export type DriftAutopilotMode = DelegationMode;
 export type DriftAutopilotPhase = "manual" | "suspended" | "preparing" | "executing" | "waiting" | "idle";
 
 export interface Job {
@@ -60,19 +57,13 @@ export function localProjectJobs(root: string): Job[] {
   return [...jobs].filter((job) => projectRootKey(job.root) === key);
 }
 
-/** Which of Drift resolution and a run are going in this window; both may hold at once. Under `disabled` (`shared` false) other windows' jobs are not seen. */
+/** Which of Drift resolution and a run are going in this window; both may hold at once. Resolve Drifts and Runs are exclusive; scans remain visible to the autopilot barrier but do not block manual actions. Under `disabled` (`shared` false) other windows' jobs are not seen. */
 export function driftWork(root?: string, shared = true): { resolving: boolean; running: boolean } {
   const all = root === undefined ? [...jobs, ...(shared ? remoteJobs.values() : [])] : activeProjectJobs(root, shared);
   return { resolving: all.some((j) => j.kind === "resolve"), running: all.some((j) => j.kind === "run") };
 }
 
-/** Resolve Drifts and Runs are exclusive; scans remain visible to the autopilot barrier but do not block manual actions. Under `disabled` (`shared` false) other windows' jobs are not seen. */
-export function driftResolution(root?: string, shared = true): DriftResolution {
-  const work = driftWork(root, shared);
-  return work.resolving ? "resolving" : work.running ? "running-tasks" : "free";
-}
-
-/** The panel and the launches hear of every change of `driftResolution()`. */
+/** The panel and the launches hear of every change of `driftWork()`. */
 export function onDriftResolutionChange(listener: () => void): { dispose(): void } {
   listeners.add(listener);
   return { dispose: () => void listeners.delete(listener) };
@@ -180,10 +171,6 @@ const checkSucceeded = new Set<string>();
 const heldProjects = new Map<string, DriftAutopilotMode>();
 
 
-export function driftAutopilotMode(value: unknown): DriftAutopilotMode {
-  return value === "enabled" || value === "yolo" ? value : "disabled";
-}
-
 /** Records a completed check associated with a known Trama job. */
 function receiveCheck(message: Record<string, unknown>): void {
   const root = message["root"];
@@ -228,7 +215,12 @@ function receiveCheck(message: Record<string, unknown>): void {
 function recordRunFailure(key: string, job: string, title: string): void {
   let cases = failedCases.get(key);
   if (cases === undefined) failedCases.set(key, cases = new Map());
-  cases.set(`run:${job}`, { job, title: `${title}: the final check failed`, reason: "the final check of this automatic Run failed; the Tasks already done are not undone" });
+  cases.set(`run:${job}`, { job, title: `Automatic Run, ${title}: the final check failed; the Tasks already done are not undone`, reason: "the final check of this automatic Run failed; the Tasks already done are not undone" });
+}
+
+/** Whether the final check of this automatic Run failed: from then on the Run authorizes no further Task. */
+export function runCheckFailed(root: string, job: string): boolean {
+  return failedCases.get(projectRootKey(root))?.has(`run:${job}`) === true;
 }
 
 /** A scan that ends unsuccessfully is shown in the status but still counts as finished for the barrier. */

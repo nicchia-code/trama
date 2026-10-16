@@ -16,14 +16,23 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "launch", action: { kind: "scan" } })).toEqual({ type: "launch", action: { kind: "scan" } });
   expect(ok({ type: "launch", action: { kind: "implement", task: "0003" } })).toEqual({ type: "launch", action: { kind: "implement", task: "0003" } });
   expect(ok({ type: "launch", action: { kind: "implement-all" } })).toEqual({ type: "launch", action: { kind: "implement-all" } });
-  expect(ok({ type: "launch", action: { kind: "implement-design", proposal: "0007" } })).toEqual({ type: "launch", action: { kind: "implement-design", proposal: "0007" } });
   expect(ok({ type: "launch", action: { kind: "resolve-drifts" } })).toEqual({ type: "launch", action: { kind: "resolve-drifts" } });
+  expect(ok({ type: "launch", action: { kind: "import" } })).toEqual({ type: "launch", action: { kind: "import" } });
   expect(ok({ type: "openModelFile", path: "checkout/order.md" })).toEqual({ type: "openModelFile", path: "checkout/order.md" });
   expect(ok({ type: "openFile", path: "tasks/0003-x.md" })).toEqual({ type: "openFile", path: "tasks/0003-x.md" });
   expect(ok({ type: "openCard", kind: "drift", id: "drift-1" })).toEqual({ type: "openCard", kind: "drift", id: "drift-1" });
   expect(ok({ type: "openCard", kind: "task", id: "task-1" })).toEqual({ type: "openCard", kind: "task", id: "task-1" });
   expect(ok({ type: "approveProposal", id: "0001" })).toEqual({ type: "approveProposal", id: "0001" });
   expect(ok({ type: "rejectProposal", id: "0001" })).toEqual({ type: "rejectProposal", id: "0001" });
+  expect(ok({ type: "dismissDrift", id: "0001" })).toEqual({ type: "dismissDrift", id: "0001" });
+});
+
+test("the command palette offers no design command, only import", async () => {
+  const { contributes } = await Bun.file(new URL("../extension/package.json", import.meta.url)).json();
+  const commands = (contributes.commands as { command: string }[]).map((c) => c.command);
+  expect(commands).not.toContain("trama.quickDesign");
+  expect(commands).not.toContain("trama.design");
+  expect(commands).toContain("trama.import");
 });
 
 test("drops fields that are not part of the contract", () => {
@@ -50,8 +59,6 @@ test("rejects unknown types, wrong shapes and IDs that are not plain IDs; move a
     { type: "launch", action: { kind: "fix", prompt: "The cart total ignores the coupon" } },
     { type: "launch", action: { kind: "scan", feature: "a`; rm -rf /; `" } },
     { type: "launch", action: { kind: "implement", task: 3 } },
-    { type: "launch", action: { kind: "implement-design" } },
-    { type: "launch", action: { kind: "implement-design", proposal: "0007`; rm -rf /; `" } },
     { type: "openFile" },
     { type: "openFile", path: "" },
     { type: "openModelFile", path: 7 },
@@ -66,8 +73,18 @@ test("rejects unknown types, wrong shapes and IDs that are not plain IDs; move a
   for (const message of rejected) expect(parseToHost(message).ok).toBe(false);
 });
 
+test("dismissDrift needs a Drift identity", () => {
+  for (const id of [undefined, "", "../secret", 3]) expect(parseToHost({ type: "dismissDrift", id }).ok).toBe(false);
+});
+
 test("openLink accepts only http and https addresses", () => {
   expect(ok({ type: "openLink", url: "https://example.com/a" })).toEqual({ type: "openLink", url: "https://example.com/a" });
   for (const url of ["javascript:alert(1)", "file:///etc/passwd", "docs/x.md", "", 3]) expect(parseToHost({ type: "openLink", url }).ok).toBe(false);
   expect(parseToHost({ type: "openLink" }).ok).toBe(false);
+});
+
+test("initialize accepts only the two Get Started choices", () => {
+  expect(ok({ type: "initialize", choice: "import" })).toEqual({ type: "initialize", choice: "import" });
+  expect(ok({ type: "initialize", choice: "scratch" })).toEqual({ type: "initialize", choice: "scratch" });
+  for (const choice of ["", "both", undefined, 1]) expect(parseToHost({ type: "initialize", choice }).ok).toBe(false);
 });

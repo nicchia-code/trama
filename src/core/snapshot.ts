@@ -2,7 +2,7 @@ import type { CardNumbers } from "./card-names";
 import { type Announcement, type AnnouncementKind, type CheckPhase, listAnnouncements } from "./announcements";
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
-import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, health, listProposals, type Proposal, type ProposalKind, proposalCoverage, type RemovalEntry, unfixableDrifts } from "./proposals";
+import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, coversScope, health, listProposals, type Proposal, type ProposalKind, proposalCoverage, type RemovalEntry, unfixableDrifts } from "./proposals";
 import { appliesUnder, type RequiredProposal } from "./required";
 import { type ResolvedDrift, resolvedDrifts } from "./resolution";
 import { type Area, areaIdOf, buildProject, type Fragment, parseRequirementRef, type ProjectModel } from "./requirements";
@@ -12,6 +12,7 @@ import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
 import { readLastScan } from "./last-scan";
 import { attachedDrift, closedUnchanged, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, followedDrift, listDrifts, listTasks } from "./work";
+import { type Specs, type SpecsChange, specsChange } from "./specs";
 
 export interface ActorChange {
   id: string;
@@ -99,9 +100,9 @@ export interface ProposalView {
   errors: Diagnostic[];
   /** Why a resolution cannot be approved: each open Drift to be fixed in code that no longer has a Model element; empty otherwise. */
   unfixable: string[];
-  /** Tasks an ordinary Proposal creates on approval: its own Task files plus one `Remove code of` per removal; 0 for any other kind. */
+  /** Tasks a change or setup Proposal creates on approval: its own Task files plus one `Remove code of` per removal; 0 for any other kind. */
   creates: number;
-  /** The Tasks an ordinary Proposal holds, in file order; empty for any other kind. */
+  /** The Tasks a change or setup Proposal holds, in file order; empty for any other kind. */
   tasks: ProposalTaskView[];
   /** The `Remove code of` Tasks approval creates, one per removed element; empty for any other kind. */
   removals: RemovalEntry[];
@@ -112,6 +113,10 @@ export interface ProposalView {
   actors: ActorChange[];
   /** Every Area the Proposal touches, before and after drawn as one. */
   areas: AreaView[];
+  /** The Specs this Proposal would write: the project's Specs with the Proposal applied (and the open ones it requires). */
+  specs: Specs;
+  /** What the Proposal changes in the Specs against the Specs it builds on: drawn in the Specs tab. */
+  specsChange: SpecsChange;
 }
 
 export interface DriftView {
@@ -148,7 +153,7 @@ export interface TaskView {
   drift: string | null;
   /** ID of the Proposal (the design) the Task comes from, if any. */
   proposal: string | null;
-  /** Title of that Proposal, for the card that groups its Tasks; null when the Task has none or the Proposal is gone. */
+  /** Title of that Proposal, the tag the Board shows on the Task; null when the Task has none or the Proposal is gone. */
   proposalTitle: string | null;
   /** True while the agent has taken the Task: the developer cannot move it. */
   agent: boolean;
@@ -184,6 +189,10 @@ export interface Snapshot extends ModelView {
   announcements: AnnouncementView[];
   /** The short numbers of this working copy's live cards: the panel writes `T3` where a card is live and its identity where it is closed. */
   numbers: CardNumbers;
+  /** The project's Specs as read; every field empty when the file is absent. Its errors are in `diagnostics`. */
+  specs: Specs;
+  /** Whether the `specs.yaml` file exists, valid or not. */
+  specsPresent: boolean;
 }
 
 function actorChange(id: string, before: Actor | undefined, after: Actor | undefined): ActorChange {
@@ -272,7 +281,7 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     else if (parts.length === 2 && id !== "feature") machineIds.add(id);
   }
   const areaOf = (pm: ProjectModel, id: string) => pm.areas.find((a) => a.id === id);
-  const coverage = proposal.data.kind === "change" ? proposalCoverage(p, proposal) : null;
+  const coverage = coversScope(proposal.data.kind) ? proposalCoverage(p, proposal) : null;
   return {
     id: proposal.id,
     created: proposal.data.created,
@@ -304,6 +313,8 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
       const shown = is ?? was;
       return shown ? [areaView(shown, was, is)] : [];
     }),
+    specs: afterProject.specs,
+    specsChange: specsChange(baseProject.specs, afterProject.specs),
   };
 }
 
@@ -325,6 +336,8 @@ export function buildSnapshot(p: Project): Snapshot {
   const announcements = listAnnouncements(p).filter((a) => !(a.kind === "proposal" && a.proposal !== null && attachedDrift(p, a.proposal)));
   return {
     ...modelView(project),
+    specs: project.specs,
+    specsPresent: project.specsPresent,
     diagnostics: project.diagnostics,
     proposals: openProposals.filter((v) => !attachedDrift(p, v.id)),
     drifts: drifts.filter((d) => d.data.status === "open").map((d) => ({
