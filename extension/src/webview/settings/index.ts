@@ -1,4 +1,4 @@
-import { CRITICAL_DRIFT_KEY, DRIFT_KEY, delegationOf, MODEL_ROLE_KEYS, settingValueError, type DelegationMode, type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
+import { DRIFT_KEY, delegationOf, MODEL_ROLE_KEYS, settingValueError, type DelegationMode, type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
 import type { ToWebview } from "../../protocol";
 import { renderInline, renderMarkdown } from "../markdown";
@@ -44,6 +44,8 @@ interface Field {
   /** Model roles only: the list of names the agent offers, and those names, to tell a chosen suggestion from typing. */
   models: HTMLDataListElement | null;
   suggestions: string[];
+  /** Model roles only: why omp gives no names, shown under the field; null for the other settings. */
+  note: HTMLElement | null;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -70,6 +72,8 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
   let closeTimer: number | undefined;
   /** The model names the agent offers, from the newest list the host sent. */
   let models: ModelSuggestion[] = [];
+  /** Why omp gives no names, from the newest list; null when there is nothing to show. */
+  let listError: string | null = null;
 
   const send = (key: string, value: SettingValue) => context.post({ type: "setSetting", key, value });
 
@@ -109,6 +113,7 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     const entry = field.entries.find((candidate) => candidate.value === chosen);
     if (entry !== undefined) ids.push(entry.item.id);
     ids.push(`${field.id}-error`);
+    if (field.note !== null && !field.note.hidden) ids.push(field.note.id);
     field.control.setAttribute("aria-describedby", ids.join(" "));
   }
 
@@ -135,6 +140,14 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     field.suggestions = models.map((model) => model.value);
     if (field.suggestions.length === 0) field.control.removeAttribute("list");
     else field.control.setAttribute("list", field.models.id);
+  }
+
+  /** Under a model field: the reason omp gives no names, while the agent is omp and the list has one. */
+  function showNote(field: Field) {
+    if (field.note === null) return;
+    field.note.hidden = listError === null;
+    field.note.textContent = listError ?? "";
+    describe(field, undefined);
   }
 
   function enumControl(field: Field): HTMLSelectElement {
@@ -179,7 +192,7 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     input.addEventListener("change", () => {
       if (setting.control !== "integer") {
         field.dirty = false;
-        send(setting.key, input.value);
+        send(setting.key, input.value.trim());
         return;
       }
       const value = numberFromText(input.value);
@@ -231,9 +244,15 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     const workspace = el("p", "st-workspace");
     workspace.hidden = true;
 
-    const datalist = setting.control === "text" && MODEL_ROLE_KEYS.includes(setting.key) ? el("datalist") : null;
+    const modelRole = setting.control === "text" && MODEL_ROLE_KEYS.includes(setting.key);
+    const datalist = modelRole ? el("datalist") : null;
     if (datalist !== null) datalist.id = `${id}-models`;
-    const field: Field = { id, setting, control: el("input"), info, bubble, entries, error, workspace, dirty: false, models: datalist, suggestions: [] };
+    const note = modelRole ? el("p", "st-note") : null;
+    if (note !== null) {
+      note.id = `${id}-note`;
+      note.hidden = true;
+    }
+    const field: Field = { id, setting, control: el("input"), info, bubble, entries, error, workspace, dirty: false, models: datalist, suggestions: [], note };
     field.control = setting.control === "enum"
       ? enumControl(field)
       : setting.control === "boolean"
@@ -242,6 +261,7 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     field.control.classList.add("st-control");
     describe(field, undefined);
     offerModels(field);
+    showNote(field);
 
     // The «i» and the bubble form one hover and focus area: the bubble opens on entry, closes after a short pause on leave,
     // closes when focus leaves the area, and Esc closes it and keeps the focus on the «i».
@@ -272,6 +292,7 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
 
     const node = el("div", "st-setting");
     node.append(head, field.control, error, workspace);
+    if (note !== null) node.append(note);
     if (field.models !== null) node.append(field.models);
     return node;
   }
@@ -285,9 +306,7 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
         const section = el("section", "st-group");
         const settings = el("div", "st-settings");
         settings.append(
-          ...group.settings
-            .filter((setting) => setting.key !== CRITICAL_DRIFT_KEY)
-            .map((setting) => settingNode(setting.key === DRIFT_KEY ? delegationSetting(setting) : setting)),
+          ...group.settings.map((setting) => settingNode(setting.key === DRIFT_KEY ? delegationSetting(setting) : setting)),
         );
         section.append(el("h2", "st-group-title", group.title), settings);
         return section;
@@ -329,10 +348,8 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
         built = schema;
       }
       for (const field of fields.values()) {
-        // The Drift autopilot menu shows the level that the two Auto Fix settings give.
-        const values = field.setting.key === DRIFT_KEY
-          ? { user: delegationOf(message.values[DRIFT_KEY]?.user, message.values[CRITICAL_DRIFT_KEY]?.user) }
-          : message.values[field.setting.key];
+        // The Drift autopilot menu shows the level of its setting, as the user settings give it.
+        const values = field.setting.key === DRIFT_KEY ? { user: delegationOf(message.values[DRIFT_KEY]?.user) } : message.values[field.setting.key];
         if (!field.dirty) apply(field, values);
         const override = workspaceOverride(field.setting, values);
         field.workspace.hidden = override === null;
@@ -342,7 +359,11 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     },
     receiveModels(message) {
       models = message.models;
-      for (const field of fields.values()) offerModels(field);
+      listError = message.error ?? null;
+      for (const field of fields.values()) {
+        offerModels(field);
+        showNote(field);
+      }
     },
   };
 };

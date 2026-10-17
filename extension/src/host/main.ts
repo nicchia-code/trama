@@ -64,7 +64,7 @@ export function activate(context: vscode.ExtensionContext): void {
     watchRequirements(),
     watchAutopilotTicks(),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration("trama")) trama.settingsChanged();
+      if (event.affectsConfiguration("trama")) trama.settingsChanged(event.affectsConfiguration("trama.ompPath"));
     }),
     ...(vscode.lm === undefined ? [] : [vscode.lm.onDidChangeChatModels(() => void trama.postModelSuggestions())]),
   );

@@ -21,8 +21,8 @@ import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { activeProjectJobs, autopilotFailedCase, autopilotReady, clearAutopilotFailure, driftAutopilotStatus, driftWork, excludeAutopilotDrift, forgetDeveloperScanCases, forgetWindow, holdAutopilot, jobAbnormalEnd, lastFailedScan, observeAutopilotMode, onDriftResolutionChange, projectWindowIds, recordAutopilotFailure, releaseSend, reserveSend, resumeAutopilot, runCauseTask, runContinuationHeld, runFinalCheckFailed, sendReserved, setCoordinatorAvailable, shownAutopilotFailures, type DriftAutopilotMode } from "./drift-resolution";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
-import { copilotSuggestions, cursorModels, ompModels, type ModelSuggestion } from "./model-lists";
-import { planDelegationChange, planSettingChange, settingsSchema, settingTitle, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
+import { copilotSuggestions, cursorModels, ompModels, type ModelList } from "./model-lists";
+import { DRIFT_KEY, planDelegationChange, planSettingChange, settingsSchema, settingTitle, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
 import { resolveMarkdownFile } from "./paths";
 import { findProject, initializeProject, type InitChoice, NO_PROJECT_WARNING, updateSkills } from "./project";
 import type { QuestionSession } from "./question-session";
@@ -33,7 +33,7 @@ import { buildAutomaticRunPrompt, buildPrompt, terminalName, type ResolvedAction
 
 const DEBOUNCE_MS = 150;
 
-/** The key under the `trama` section for a manifest key: `trama.autoFixDrifts` is read and written as `autoFixDrifts`. */
+/** The key under the `trama` section for a manifest key: `trama.driftAutoPilot` is read and written as `driftAutoPilot`. */
 const sectionKey = (key: string): string => key.slice("trama.".length);
 
 export const describeError = (err: unknown): string =>
@@ -186,10 +186,10 @@ export class Controller implements vscode.Disposable {
     return project;
   }
 
-  settingsChanged(): void {
+  settingsChanged(ompPathChanged = false): void {
     this.refresh();
     this.postSettings();
-    if (configuredAgent() !== this.suggestedAgent) void this.postModelSuggestions();
+    if (configuredAgent() !== this.suggestedAgent || (ompPathChanged && this.suggestedAgent === "omp")) void this.postModelSuggestions();
     void this.autopilotTick();
   }
 
@@ -213,24 +213,25 @@ export class Controller implements vscode.Disposable {
   }
 
   /**
-   * Sends the Settings tab the model names of the agent of `trama.agent`, for the three model roles. Only the newest request
-   * is sent: an answer that arrives after a newer request is dropped.
+   * Sends the Settings tab the model names of the agent of `trama.agent`, for the three model roles, and the reason when omp gives
+   * none. Only the newest request is sent: an answer that arrives after a newer request is dropped.
    */
   async postModelSuggestions(): Promise<void> {
     const request = ++this.suggestionsRequest;
     this.suggestedAgent = configuredAgent();
-    const models = await this.modelList(this.suggestedAgent);
-    if (request === this.suggestionsRequest) this.post({ type: "modelSuggestions", models });
+    const list = await this.modelList(this.suggestedAgent);
+    if (request === this.suggestionsRequest) this.post({ type: "modelSuggestions", ...list });
   }
 
-  private async modelList(agent: string): Promise<ModelSuggestion[]> {
-    if (agent === "omp") return ompModels();
-    if (agent === "claude") return [];
-    if (isCursor()) return this.globalStorageUri === undefined ? [] : cursorModels(this.globalStorageUri.fsPath);
+  private async modelList(agent: string): Promise<ModelList> {
+    // `trama.ompPath` is application-scoped: only the user value counts; empty means `omp` from the editor's PATH.
+    if (agent === "omp") return ompModels((settings().inspect<string>("ompPath")?.globalValue ?? "").trim());
+    if (agent === "claude") return { models: [] };
+    if (isCursor()) return { models: this.globalStorageUri === undefined ? [] : await cursorModels(this.globalStorageUri.fsPath) };
     try {
-      return copilotSuggestions(await vscode.lm.selectChatModels());
+      return { models: copilotSuggestions(await vscode.lm.selectChatModels()) };
     } catch {
-      return [];
+      return { models: [] };
     }
   }
 
@@ -930,7 +931,7 @@ export class Controller implements vscode.Disposable {
       return;
     }
     if (message.type === "setDelegation") {
-      await this.applyPlan(planDelegationChange((key) => settings().inspect<unknown>(sectionKey(key))?.globalValue, message.mode));
+      await this.applyPlan(planDelegationChange(settings().inspect<unknown>(sectionKey(DRIFT_KEY))?.globalValue, message.mode));
       return;
     }
     if (message.type === "writeDesignRequest") {

@@ -2,7 +2,7 @@
 .st-group { margin: 0 0 20px; }
 .st-group-title { margin: 0 0 8px; padding-bottom: 4px; font-size: 1.1em; font-weight: 600; border-bottom: 1px solid var(--vscode-panel-border, #444); }
 .st-settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 16px; }
-.st-setting { grid-row: span 4; display: grid; grid-template-rows: subgrid; row-gap: 4px; min-width: 0; }
+.st-setting { grid-row: span 5; display: grid; grid-template-rows: subgrid; row-gap: 4px; min-width: 0; }
 .st-head { display: flex; align-items: center; gap: 6px; min-width: 0; position: relative; grid-row: 1; }
 .st-title { font-weight: 600; }
 .st-tipwrap { display: inline-flex; }
@@ -26,4 +26,5 @@
 .st-setting [aria-invalid="true"] { border-color: var(--vscode-inputValidation-errorBorder, #be1100); }
 .st-error { grid-row: 3; margin: 0; color: var(--vscode-errorForeground, #f48771); }
 .st-workspace { grid-row: 4; margin: 0; opacity: .85; }
+.st-note { grid-row: 5; margin: 0; color: var(--vscode-descriptionForeground, inherit); }
 .st-code { font-family: var(--vscode-editor-font-family, monospace); font-size: .95em; }

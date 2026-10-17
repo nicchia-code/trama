@@ -93,6 +93,12 @@
           "scope": "application",
           "markdownDescription": "Agent used for every project and instruction: `chat` (the editor's chat: Copilot in VS Code, Cursor in Cursor; the default), `omp` (omp in the editor's integrated terminal) or `claude` (Claude Code in the editor's integrated terminal). It applies only in your user settings."
         },
+        "trama.ompPath": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Path of the `omp` program the Settings tab runs (`omp models --json`) to suggest model names. Empty uses `omp` from the editor's PATH. It applies only in your user settings."
+        },
         "trama.terminalLocation": {
           "type": "string",
           "enum": [
@@ -100,24 +106,28 @@
             "panel"
           ],
           "enumDescriptions": [
-            "A terminal tab beside the active editor.",
+            "A terminal tab in the active editor group.",
             "The terminal area."
           ],
           "default": "panel",
           "scope": "application",
-          "markdownDescription": "Where `omp` and Claude Code terminals open: `panel` (the terminal area; the default) or `editor` (a terminal tab beside the active editor). It applies only in your user settings."
+          "markdownDescription": "Where `omp` and Claude Code terminals open: `panel` (the terminal area; the default) or `editor` (a terminal tab in the active editor group). It applies only in your user settings."
         },
-        "trama.autoFixDrifts": {
-          "type": "boolean",
-          "default": false,
+        "trama.driftAutoPilot": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "enabled",
+            "yolo"
+          ],
+          "enumDescriptions": [
+            "Manual: you decide on every Drift (the default).",
+            "The agent recommends, approves and fixes non-critical Drifts on its own.",
+            "Like enabled, critical Drifts included: the ones where your decision is urgently needed."
+          ],
+          "default": "disabled",
           "scope": "application",
-          "markdownDescription": "When on, the agent recommends, approves and fixes non-critical Drifts on its own; off (the default) you decide on every Drift. It applies only in your user settings. After opening the editor, a finished scan or an explicit Resolve Drifts request is required before automatic collection resumes. A Task whose origin Drift is being fixed runs only after its fix Tasks are Done. A scan that failed or was interrupted counts as finished and does not suspend the delegation. Repeated automatic cycles have no additional limit. Turning it off stops new automatic steps but does not interrupt a Task already started, and it also turns off Auto Fix Critical Drifts."
-        },
-        "trama.autoFixCriticalDrifts": {
-          "type": "boolean",
-          "default": false,
-          "scope": "application",
-          "markdownDescription": "Also critical Drifts, the ones where your decision is urgently needed. It only applies while Auto Fix Drifts is on (default off). It applies only in your user settings."
+          "markdownDescription": "How much the agent does with Drifts on its own: `disabled` (the default; you decide on every Drift), `enabled` (the agent recommends, approves and fixes non-critical Drifts on its own) or `yolo` (like `enabled`, critical Drifts included, the ones where your decision is urgently needed). It applies only in your user settings. After opening the editor, a finished scan or an explicit Resolve Drifts request is required before automatic collection resumes. A Task whose origin Drift is being fixed runs only after its fix Tasks are Done. A scan that failed or was interrupted counts as finished and does not suspend the delegation. Repeated automatic cycles have no additional limit. Lowering it stops new automatic steps but does not interrupt a Task already started."
         },
         "trama.submitWhileRunning": {
           "type": "boolean",

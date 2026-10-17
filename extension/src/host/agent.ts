@@ -18,9 +18,8 @@ import { delegationOf } from "./settings-schema";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
 
-/** The delegation the user's two Auto Fix Drifts checkboxes give: the only reader of them, and only the user values count. */
-export const userDelegation = (): DriftAutopilotMode =>
-  delegationOf(settings().inspect<unknown>("autoFixDrifts")?.globalValue, settings().inspect<unknown>("autoFixCriticalDrifts")?.globalValue);
+/** The delegation the user's Drift autopilot setting gives: the only reader of it, and only the user value counts. */
+export const userDelegation = (): DriftAutopilotMode => delegationOf(settings().inspect<unknown>("driftAutoPilot")?.globalValue);
 
 export const configuredAgent = (): "chat" | TerminalAgent => {
   const agent = settings().inspect<string>("agent")?.globalValue;
@@ -89,15 +88,6 @@ async function openChat(root: string, prompt: () => string, canSend: () => boole
     // Chat missing or disabled in this editor: the developer must paste the prompt from the clipboard.
     return toClipboard(prompt());
   }
-}
-
-/** The last agent terminal Trama opened as an editor tab and its group's column. */
-let lastTab: { terminal: vscode.Terminal; name: string; column: vscode.ViewColumn | undefined } | undefined;
-
-/** Reuse the prior agent tab's column while it exists; otherwise open beside the active group. */
-function tabColumn(): vscode.ViewColumn {
-  const column = lastTab?.column;
-  return column !== undefined && vscode.window.tabGroups.all.some((group) => group.viewColumn === column) ? column : vscode.ViewColumn.Beside;
 }
 
 /** Whether this window has already been told its default shell is replaced; the flag lives as long as the window's extension host. */
@@ -172,13 +162,6 @@ export function watchAgentTerminal(): vscode.Disposable {
         endAgentWork(idle, "its terminal was closed");
         idleTerminals.delete(terminal);
       }
-      if (terminal === lastTab?.terminal) lastTab = undefined;
-    }),
-    vscode.window.tabGroups.onDidChangeTabs((e) => {
-      if (lastTab === undefined || lastTab.column !== undefined) return;
-      const name = lastTab.name;
-      const tab = e.opened.find((t) => t.input instanceof vscode.TabInputTerminal && t.label === name);
-      if (tab !== undefined) lastTab.column = tab.group.viewColumn;
     }),
   );
 }
@@ -205,7 +188,6 @@ function finishAgentTerminal(terminal: vscode.Terminal, info: { id: string; jobI
   agentTerminals.delete(terminal);
   endAgentWork(info, abnormal);
   if (settings().get<boolean>("autoExit", true)) {
-    if (terminal === lastTab?.terminal) lastTab = undefined;
     terminal.dispose();
   } else {
     idleTerminals.set(terminal, info);
@@ -375,14 +357,13 @@ export async function launchAgent(
       cwd: root,
       shellPath,
       env: { TRAMA_AGENT: "1", [QUESTION_ENDPOINT_ENV]: endpoint, [TERMINAL_ENV]: terminalId, ...(jobId === undefined ? {} : { TRAMA_JOB: jobId }) },
-      ...(asTab ? { location: { viewColumn: tabColumn(), preserveFocus: true } } : {}),
+      ...(asTab ? { location: { viewColumn: vscode.ViewColumn.Active, preserveFocus: true } } : {}),
     });
     if (replaced) warnShellReplaced(defaultShell);
     const family = shellFamily(shellPath ?? defaultShell);
     const line = agentCommandLine(run.template(family), run.prompt(), family);
     agentTerminals.set(terminal, { id: terminalId, ...(jobId === undefined ? {} : { jobId }), root, line, since: Date.now() });
     setHooked(terminalId, run.hooked);
-    if (asTab) lastTab = { terminal, name, column: undefined };
     if (asTab) terminal.show(true);
     const startedAt = Date.now();
     terminal.sendText(line);

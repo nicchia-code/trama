@@ -9,7 +9,7 @@ import { join } from "node:path";
 let delegation: string | undefined;
 mock.module("vscode", () => ({
   window: { createWebviewPanel: () => { throw new Error("no panel in this test"); }, showWarningMessage: () => undefined, showErrorMessage: () => undefined, showInformationMessage: async () => undefined },
-  workspace: { workspaceFolders: [], getWorkspaceFolder: () => undefined, getConfiguration: () => ({ get: () => undefined, inspect: (key: string) => (key === "autoFixDrifts" ? { globalValue: delegation === "enabled" || delegation === "yolo" } : key === "autoFixCriticalDrifts" ? { globalValue: delegation === "yolo" } : undefined) }) },
+  workspace: { workspaceFolders: [], getWorkspaceFolder: () => undefined, getConfiguration: () => ({ get: () => undefined, inspect: (key: string) => (key === "driftAutoPilot" ? { globalValue: delegation } : undefined) }) },
   Uri: { joinPath: () => ({ fsPath: "" }), file: (path: string) => ({ fsPath: path, toString: () => path }), parse: (value: string) => ({ toString: () => value }) },
   ViewColumn: { Active: 1, Beside: -2 },
   commands: { executeCommand: async () => undefined },

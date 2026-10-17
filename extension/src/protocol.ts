@@ -46,7 +46,7 @@ export type ToHost =
   | { type: "modelSuggestionsWanted" }
   /** The developer changed a Trama setting in the Settings tab: the host checks it against the manifest and saves it in the user settings. */
   | { type: "setSetting"; key: string; value: SettingValue }
-  /** The developer chose a level in the Drift autopilot menu: the host saves both delegation settings, asking first when it raises them. */
+  /** The developer chose a level in the Drift autopilot menu: the host saves the Drift autopilot setting, asking first when it raises it. */
   | { type: "setDelegation"; mode: DelegationMode }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
   | { type: "openLink"; url: string }
@@ -81,5 +81,5 @@ export type ToWebview =
   | { type: "questions"; round: QuestionRoundView | null }
   /** The Trama settings: the schema from the manifest and, per key, the user value and (for keys not application-scoped) the workspace value. */
   | { type: "settings"; schema: SettingSchema[]; values: Record<string, SettingsValues> }
-  /** Model names the Settings tab suggests for the three model roles, from the agent of `trama.agent`; an empty list means plain text. */
-  | { type: "modelSuggestions"; models: ModelSuggestion[] };
+  /** Model names the Settings tab suggests for the three model roles, from the agent of `trama.agent`; an empty list means plain text, and `error` says why omp gives none. */
+  | { type: "modelSuggestions"; models: ModelSuggestion[]; error?: string };

@@ -50,9 +50,9 @@ test("settings expose only chat, omp and Claude Code with a panel-default termin
   expect(properties["trama.agent"].enum).toEqual(["chat", "omp", "claude"]);
   expect(properties["trama.agent"].default).toBe("chat");
   expect(properties["trama.agent"].scope).toBe("application");
-  expect(properties["trama.autoFixDrifts"]).toMatchObject({ type: "boolean", default: false, scope: "application" });
-  expect(properties["trama.autoFixCriticalDrifts"]).toMatchObject({ type: "boolean", default: false, scope: "application" });
-  expect(properties["trama.driftAutoPilot"]).toBeUndefined();
+  expect(properties["trama.driftAutoPilot"]).toMatchObject({ type: "string", enum: ["disabled", "enabled", "yolo"], default: "disabled", scope: "application" });
+  expect(properties["trama.autoFixDrifts"]).toBeUndefined();
+  expect(properties["trama.autoFixCriticalDrifts"]).toBeUndefined();
   expect(properties["trama.analysis"].markdownDescription).toContain("Resolve Drifts and import");
   expect(properties["trama.analysis"].markdownDescription).not.toContain("analysis of Machines");
   expect(properties["trama.scan"].markdownDescription).toContain("sub-agents that compare Machines");

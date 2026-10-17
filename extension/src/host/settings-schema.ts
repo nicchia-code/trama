@@ -50,21 +50,20 @@ export interface SettingsValues {
 
 /** The five groups, in order; each lists its keys in order. Every key in the manifest must appear once. */
 export const SETTING_GROUPS: readonly { title: string; keys: readonly string[] }[] = [
-  { title: "Agent", keys: ["trama.agent", "trama.terminalLocation", "trama.autoExit", "trama.language"] },
+  { title: "Agent", keys: ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.autoExit", "trama.language"] },
   { title: "Models", keys: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"] },
-  { title: "Drift autopilot", keys: ["trama.autoFixDrifts", "trama.autoFixCriticalDrifts"] },
+  { title: "Drift autopilot", keys: ["trama.driftAutoPilot"] },
   { title: "Runs", keys: ["trama.submitWhileRunning"] },
   { title: "Project", keys: ["trama.skillsDir"] },
 ];
 
-/** The two settings the Drift autopilot menu writes: the delegation of non-critical Drifts, and the one of critical Drifts. */
-export const DRIFT_KEY = "trama.autoFixDrifts";
-export const CRITICAL_DRIFT_KEY = "trama.autoFixCriticalDrifts";
+/** The Drift autopilot setting: how much the agent does with Drifts on its own, one choice over three levels. */
+export const DRIFT_KEY = "trama.driftAutoPilot";
 
 /** The three model roles: the Settings tab suggests the agent's model names for them. */
 export const MODEL_ROLE_KEYS: readonly string[] = ["trama.analysis", "trama.scan", "trama.execution"];
 
-/** The delegation the two checkboxes give, lowest to highest. */
+/** The delegation the Drift autopilot setting gives, lowest to highest. */
 export type DelegationMode = "disabled" | "enabled" | "yolo";
 export const DELEGATION_ORDER: readonly string[] = ["disabled", "enabled", "yolo"];
 
@@ -76,15 +75,14 @@ export const DELEGATION_QUESTIONS: Record<string, string> = {
 
 /** What each level of the Drift autopilot menu grants: its explanation, and the detail of the confirmation when it is raised. */
 export const DELEGATION_DESCRIPTIONS: Record<string, string> = {
-  disabled: "Off: you decide on every Drift.",
-  enabled: "The agent approves and fixes non-critical Drifts on its own; critical ones stay with you.",
-  yolo: "The agent approves and fixes every Drift on its own, critical ones included.",
+  disabled: "Manual: you decide on every Drift (the default).",
+  enabled: "The agent recommends, approves and fixes non-critical Drifts on its own.",
+  yolo: "Like enabled, critical Drifts included: the ones where your decision is urgently needed.",
 };
 
-/** The delegation from the user values of the two checkboxes: only `true` counts, and critical Drifts alone grant nothing. */
-export function delegationOf(autoFixDrifts: unknown, autoFixCriticalDrifts: unknown): DelegationMode {
-  if (autoFixDrifts !== true) return "disabled";
-  return autoFixCriticalDrifts === true ? "yolo" : "enabled";
+/** The delegation of the user's Drift autopilot value: an unset or unknown value counts as `disabled`. */
+export function delegationOf(value: unknown): DelegationMode {
+  return typeof value === "string" && DELEGATION_ORDER.includes(value) ? (value as DelegationMode) : "disabled";
 }
 
 /** Whether moving the delegation from `from` to `to` gives the agent more. */
@@ -158,28 +156,20 @@ export type SettingPlan =
   | { ok: false; reason: string }
   | { ok: true; ask?: { question: string; detail: string }; writes: { key: string; value: SettingValue | undefined }[] };
 
-/** The keys the Drift autopilot menu writes together: no other change may set them, so every raise goes through the menu's confirmation. */
-const DELEGATION_KEYS: readonly string[] = [DRIFT_KEY, CRITICAL_DRIFT_KEY];
-
 /** Plans a change to one setting. The delegation keys are refused: only the Drift autopilot menu changes them. */
 export function planSettingChange(schema: readonly SettingSchema[], key: string, value: SettingValue): SettingPlan {
   const setting = schema.find((s) => s.key === key);
   if (setting === undefined) return { ok: false, reason: `Unknown Trama setting ${key}` };
-  if (DELEGATION_KEYS.includes(key)) return { ok: false, reason: "Drift delegation is set with the Drift autopilot menu" };
+  if (key === DRIFT_KEY) return { ok: false, reason: "Drift delegation is set with the Drift autopilot menu" };
   return { ok: true, writes: [{ key, value: storedValue(setting, value) }] };
 }
 
 /**
- * Plans the Drift autopilot menu's level from the user values (`user`). `enabled` sets Auto Fix Drifts alone, `yolo` sets both,
- * `disabled` clears both. Only the keys that change are written, in an order where the delegation never exceeds the level chosen.
- * Raising the delegation asks first; the detail is the explanation of the level chosen.
+ * Plans the Drift autopilot menu's level from the user value (`current`). Only a change is written, and `disabled` removes the
+ * value. Raising the delegation asks first; the detail is the explanation of the level chosen.
  */
-export function planDelegationChange(user: (key: string) => unknown, mode: DelegationMode): SettingPlan {
-  const drift = { key: DRIFT_KEY, value: mode === "disabled" ? undefined : true };
-  const critical = { key: CRITICAL_DRIFT_KEY, value: mode === "yolo" ? true : undefined };
-  const ordered = mode === "yolo" ? [drift, critical] : [critical, drift];
-  const writes = ordered.filter((write) => (write.value === true) !== (user(write.key) === true));
-  const before = delegationOf(user(DRIFT_KEY), user(CRITICAL_DRIFT_KEY));
-  if (!raisesDelegation(before, mode)) return { ok: true, writes };
+export function planDelegationChange(current: unknown, mode: DelegationMode): SettingPlan {
+  const writes = delegationOf(current) === mode ? [] : [{ key: DRIFT_KEY, value: mode === "disabled" ? undefined : mode }];
+  if (!raisesDelegation(delegationOf(current), mode)) return { ok: true, writes };
   return { ok: true, ask: { question: DELEGATION_QUESTIONS[mode] ?? "", detail: DELEGATION_DESCRIPTIONS[mode] ?? "" }, writes };
 }

@@ -587,7 +587,7 @@ describe("automatic terminal exit", () => {
 });
 
 describe("the agent terminal as an editor tab", () => {
-  test("terminal tabs open beside the active group or the previous tab's group while it remains open", async () => {
+  test("terminal tabs always open in the active group, without remembering the previous tab's group", async () => {
     // Dynamic: the module must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     watchAgentTerminal();
@@ -601,36 +601,24 @@ describe("the agent terminal as an editor tab", () => {
     tabGroups.columns = [1, 2, 3];
     try {
       await launchAgent(dir, instruction, "Scan");
-      expect(created.at(-1)).toMatchObject({ name: "Scan", cwd: dir, env: { TRAMA_AGENT: "1", TRAMA_QUESTION_ENDPOINT: "endpoint", TRAMA_TERMINAL: expect.stringMatching(/^[a-z0-9]{6}$/) }, location: { viewColumn: -2, preserveFocus: true } });
-      expect(terminals.at(-1)?.shown).toEqual([true]);
-      // Not the agent's tab: another label, or not a terminal. Then the agent's tab, then a later one with its label.
-      opened("Scan", 3, {});
-      opened("Other", 3);
-      opened("Scan", 2);
+      const first = terminals.at(-1) as FakeTerminal;
+      expect(created.at(-1)).toMatchObject({ name: "Scan", cwd: dir, env: { TRAMA_AGENT: "1", TRAMA_QUESTION_ENDPOINT: "endpoint", TRAMA_TERMINAL: expect.stringMatching(/^[a-z0-9]{6}$/) }, location: { viewColumn: 1, preserveFocus: true } });
+      expect(first.shown).toEqual([true]);
+      // The editor reports the agent's tab in another group: the next tab still opens in the active group.
       opened("Scan", 3);
-
-      await launchAgent(dir, instruction, "Scan"); // the first is busy: a new tab in its group
-      expect(created.at(-1)?.location).toEqual({ viewColumn: 2, preserveFocus: true });
       opened("Scan", 2);
+      await launchAgent(dir, instruction, "Scan"); // the first is busy: a new tab, again in the active group
+      expect(created.at(-1)?.location).toEqual({ viewColumn: 1, preserveFocus: true });
+      expect(terminals.at(-1)).not.toBe(first);
+      expect(first.shown).toEqual([true]);
 
-      tabGroups.columns = [1]; // that group is gone
+      tabGroups.columns = [1]; // the other groups are gone: the active one is still used
       await launchAgent(dir, instruction, "Scan");
-      expect(created.at(-1)?.location).toEqual({ viewColumn: -2, preserveFocus: true });
-      opened("Scan", 2);
+      expect(created.at(-1)?.location).toEqual({ viewColumn: 1, preserveFocus: true });
 
-      tabGroups.columns = [1, 2];
-      const free = terminals.at(-1) as FakeTerminal;
-      free.exitStatus = 0; // its process ended but its tab is still open: the next tab still joins its group
-      const count = created.length;
+      closeAll(); // the previous tabs are closed
       await launchAgent(dir, instruction, "Scan");
-      expect(created.at(-1)?.location).toEqual({ viewColumn: 2, preserveFocus: true });
-      expect(created).toHaveLength(count + 1);
-      expect(terminals.at(-1)).not.toBe(free);
-      expect(free.shown).toEqual([true]);
-
-      closeAll(); // the previous tab is closed
-      await launchAgent(dir, instruction, "Scan");
-      expect(created.at(-1)?.location).toEqual({ viewColumn: -2, preserveFocus: true });
+      expect(created.at(-1)?.location).toEqual({ viewColumn: 1, preserveFocus: true });
 
     } finally {
       delete settingValues["terminalLocation"];
@@ -654,7 +642,7 @@ describe("the agent terminal as an editor tab", () => {
       await launchAgent(dir, instruction, "Scan");
       const tab = terminals.at(-1) as FakeTerminal;
       expect(tab).not.toBe(area);
-      expect(created.at(-1)?.location).toEqual({ viewColumn: -2, preserveFocus: true });
+      expect(created.at(-1)?.location).toEqual({ viewColumn: 1, preserveFocus: true });
       expect(area.shown).toEqual([]);
       expect(tab.shown).toEqual([true]);
       listeners.tabs.forEach((fn) => fn({ opened: [{ input: new TabInputTerminal(), label: "Scan", group: { viewColumn: 2 } }] }));
@@ -682,7 +670,7 @@ describe("the agent terminal as an editor tab", () => {
       listeners.end.forEach((fn) => fn(shell(nextTerminal)));
       settingValues["terminalLocation"] = "editor";
       await launchAgent(dir, instruction, "Scan");
-      expect(created.at(-1)?.location).toEqual({ viewColumn: -2, preserveFocus: true });
+      expect(created.at(-1)?.location).toEqual({ viewColumn: 1, preserveFocus: true });
 
     } finally {
       delete settingValues["terminalLocation"];

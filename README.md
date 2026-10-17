@@ -154,15 +154,14 @@ For Claude Code, writing in Italian, a typical setup looks like this:
 | `trama.agent` | `chat` | Where Trama sends its instructions: `chat`, `claude` or `omp`. |
 | `trama.skillsDir` | `.agents/skills` | Where Get Started installs the agent skills. Use `.claude/skills` for Claude Code. |
 | `trama.language` | *empty* | Language for the prose the agent writes (descriptions, Proposals, Tasks, Drifts), e.g. `Italian`. Trama never fills it in: empty asks the agent nothing about language. Code, names, titles and IDs stay in English. |
-| `trama.terminalLocation` | `editor` | Where terminal agents open: `editor` (a tab beside your code) or `panel` (terminal area, in the background). |
+| `trama.terminalLocation` | `editor` | Where terminal agents open: `editor` (a tab in the active editor group, beside your code) or `panel` (terminal area, in the background). |
 | `trama.analysis` | *empty* | Model for design requests, Drift resolution and import. |
 | `trama.scan` | *empty* | Model for scans, including the sub-agents that compare each Machine. |
 | `trama.execution` | *empty* | Model for implementing Tasks. |
 | `trama.autoExit` | `true` | Close an agent's terminal as soon as it's done. |
 | `trama.maxParallelAgents` | `20` | How many sub-agents the agent may run at once. |
 | `trama.submitWhileRunning` | `false` | `true` lets you start a run while another is in progress; `false` keeps Run buttons unavailable until it finishes. |
-| `trama.autoFixDrifts` | `false` | Auto Fix Drifts: the agent recommends, approves and fixes non-critical Drifts on its own. |
-| `trama.autoFixCriticalDrifts` | `false` | Auto Fix Critical Drifts: also critical Drifts. It applies only while Auto Fix Drifts is on. |
+| `trama.driftAutoPilot` | `disabled` | Drift autopilot: `disabled` (you decide on every Drift), `enabled` (the agent recommends, approves and fixes non-critical Drifts on its own) or `yolo` (also critical Drifts). |
 
 For the three model settings, write the model name as your agent accepts it, or leave it empty for the agent's default. In the chat they pick the model of the new conversation: in Copilot, a model with that name; in Cursor, the conversation's starting model. Every setting except `trama.skillsDir`, `trama.language` and `trama.submitWhileRunning` lives in your user settings only, so it can't be overridden per workspace. You can change every setting in the Settings tab of the Trama panel, which always saves to your user settings. All the details are in the [extension README](./extension/README.md).
 
