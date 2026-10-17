@@ -46,7 +46,7 @@ const proposal: ProposalCard = {
   kind: "proposal", key: "proposal:live", id: "live", name: { text: "P2", isNumber: true }, heading: "Proposal P2", title: "A proposal",
   badges: [{ label: "requires old", tooltip: "Requires Proposal old", tone: "info", card: { kind: "proposal", id: "old" } }],
   resolution: false, changes: { files: [], more: 0 }, blocker: "Resolve the requirement first", touches: { model: true, requirements: false }, resolves: [],
-  creates: null, rejectBlocker: null,
+  creates: null, rejectBlocker: null, choosable: false, model: null,
 };
 const task: TaskCard = {
   kind: "task", key: "task:liveTask", id: "liveTask", name: { text: "T3", isNumber: true }, title: "A task", technical: false,
@@ -103,8 +103,8 @@ describe("Board card rendering", () => {
     };
     try {
       const rows = renderResolves("board", "Resolve", [
-        { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Urgent", critical: true, previous: null, decision: "Fix code", autopilotFailed: null, blocked: [] },
-        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null, blocked: [] },
+        { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Urgent", critical: true, previous: null, decision: "Fix code", autopilotFailed: null, blocked: [], notBlocking: [] },
+        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null, blocked: [], notBlocking: [] },
       ], () => {});
       const badges = rows.flatMap((row) => (row as unknown as Node).all).filter((node) => node.className.includes("critical"));
       expect(badges.map((badge) => [badge.textContent, badge.title, badge.attributes["aria-label"]])).toEqual([["Critical", "Urgent developer decision", "Critical Drift: urgent developer decision"]]);
@@ -122,8 +122,8 @@ describe("Board card rendering", () => {
     };
     try {
       const rows = renderResolves("board", "Resolve", [
-        { drift: "failed", name: { text: "D4", isNumber: true }, title: "Refunds", critical: false, previous: null, decision: "Fix code", autopilotFailed: "Not authorized any more", blocked: [] },
-        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null, blocked: [] },
+        { drift: "failed", name: { text: "D4", isNumber: true }, title: "Refunds", critical: false, previous: null, decision: "Fix code", autopilotFailed: "Not authorized any more", blocked: [], notBlocking: [] },
+        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null, blocked: [], notBlocking: [] },
       ], () => {});
       const badges = rows.flatMap((row) => (row as unknown as Node).all).filter((node) => node.className.includes("board-badge error"));
       expect(badges.map((badge) => [badge.textContent, badge.title, badge.attributes["aria-label"]])).toEqual([["autopilot failed", "Autopilot failed: Not authorized any more", "Autopilot failed: Not authorized any more"]]);
@@ -142,7 +142,7 @@ describe("Board card rendering", () => {
     try {
       const resolution: ProposalCard = {
         ...proposal, heading: "Resolution Proposal P2", resolution: true,
-        resolves: [{ drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", critical: false, previous: null, decision: "Closed, nothing changes", autopilotFailed: null, blocked: [] }],
+        resolves: [{ drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", critical: false, previous: null, decision: "Closed, nothing changes", autopilotFailed: null, blocked: [], notBlocking: [] }],
       };
       const rendered = renderCard(resolution, env() as never) as unknown as Node;
       expect(rendered.className).toContain("board-card-resolution");
@@ -165,8 +165,8 @@ describe("Board card rendering", () => {
     });
     try {
       const rows = renderResolves("board", "Resolve", [
-        { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Again", critical: false, previous: { id: "0001", title: "Earlier" }, decision: "Fix code", autopilotFailed: null, blocked: [] },
-        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null, blocked: [] },
+        { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Again", critical: false, previous: { id: "0001", title: "Earlier" }, decision: "Fix code", autopilotFailed: null, blocked: [], notBlocking: [] },
+        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null, blocked: [], notBlocking: [] },
       ], () => {});
       const badges = rows.flatMap((row) => (row instanceof Node ? row.all : [])).filter((node) => node.className.includes("recurring"));
       expect(badges.map((badge) => [badge.textContent, badge.title, badge.attributes["aria-label"]])).toEqual([["recurring", "Recurring: follows Drift 0001 – Earlier", "Recurring: follows Drift 0001 – Earlier"]]);
@@ -328,4 +328,23 @@ describe("History entry details", () => {
       else scope.document = previous;
     }
   });
+});
+
+test("a row names the Tasks its Drift leaves free by number, each with its reason as tooltip and accessible name", () => {
+  const saved = Reflect.get(globalThis, "document");
+  Reflect.set(globalThis, "document", {
+    createElement: (tag: string) => new Node(tag),
+    createElementNS: (_ns: string, tag: string) => new Node(tag),
+    createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
+  });
+  try {
+    const rows = renderResolves("board", "Resolve", [
+      { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Again", critical: false, previous: null, decision: "Fix code", autopilotFailed: null, blocked: [], notBlocking: [{ name: { text: "T2", isNumber: true }, reason: "Only the wording." }] },
+    ], () => {});
+    const named = rows.flatMap((row) => (row instanceof Node ? row.all : [])).filter((node) => node.className.includes("board-not-blocking-task"));
+    expect(named.map((node) => [node.textContent, node.title, node.attributes["aria-label"]])).toEqual([["T2", "Not blocked by this Drift: Only the wording.", "Not blocked by this Drift: Only the wording."]]);
+  } finally {
+    if (saved === undefined) Reflect.deleteProperty(globalThis, "document");
+    else Reflect.set(globalThis, "document", saved);
+  }
 });

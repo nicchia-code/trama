@@ -2,11 +2,14 @@ import { namerOf, noNumbers } from "../../../../src/core/card-names";
 import { joinReasons, runBlocker } from "../../../../src/core/design";
 import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
 import type { DriftAutopilotStatus } from "../../host/drift-resolution";
-import type { MountView } from "../types";
+import type { BoardModels } from "../../host/proposal-models";
+import type { ModelSuggestion } from "../../host/model-lists";
+import type { View, ViewContext } from "../types";
 import css from "./board.css" with { type: "text" };
-import { announcedGhosts, autopilotNote, type BoardResolve, buildBoard, type Card, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, GHOST_COLUMN, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, withdrawnNotice } from "./logic";
+import { announcedGhosts, autopilotNote, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, GHOST_COLUMN, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, NO_MODELS, type ProposalCard, withdrawnNotice } from "./logic";
 import { type CardEnv, renderAnnounced, renderCard } from "./render";
 import { historyEntryNode, type HistoryEntryNode } from "./history-entry";
+import { modelDialog } from "./model-dialog";
 import { icon, type IconName, setIcon, setIconLabel } from "../icons";
 import { scanButtonLabel } from "../scan-label";
 
@@ -25,7 +28,13 @@ function reconcile(parent: HTMLElement, next: HTMLElement[]) {
   while (parent.children.length > next.length) parent.lastElementChild?.remove();
 }
 
-export const mountBoard: MountView = (root, context) => {
+/** The Board: its view, and the model names the Board's model window offers. */
+export interface BoardView extends View {
+  update(next: Snapshot, isAsking?: boolean, resolveState?: Parameters<View["update"]>[2], models?: BoardModels): void;
+  receiveModels(message: { models: ModelSuggestion[]; error?: string }): void;
+}
+
+export const mountBoard = (root: HTMLElement, context: ViewContext): BoardView => {
   const style = document.createElement("style");
   style.textContent = css;
   root.append(style);
@@ -72,6 +81,18 @@ export const mountBoard: MountView = (root, context) => {
   let historyOpen = false;
   /** Why every Run is disabled, the reasons of Run all; set before the cards are drawn. */
   let runReasonNow: string | null = null;
+  /** The models chosen for the Proposals that carry Tasks, and the agent of `trama.agent`, from the newest picture. */
+  let models: BoardModels = NO_MODELS;
+  /** The columns as the newest picture drew them: the model window finds its Proposal's card here. */
+  let lastColumns: BoardColumn[] = [];
+  /** The window that chooses a Proposal's model; the developer's focus goes back to its gear when it closes. */
+  const modelWindow = modelDialog(context, (proposal) => {
+    board.querySelector<HTMLElement>(`[data-key="proposal:${proposal}"] [data-action="model"]`)?.focus();
+  });
+  root.append(modelWindow.node);
+  /** The Proposal card of the Backlog that can have its model chosen, as the newest picture drew it. */
+  const choosableCard = (proposal: string): ProposalCard | undefined =>
+    lastColumns.find((column) => column.id === "backlog")?.cards.find((card): card is ProposalCard => card.kind === "proposal" && card.id === proposal && card.choosable);
 
   const env: CardEnv = {
     context,
@@ -86,6 +107,10 @@ export const mountBoard: MountView = (root, context) => {
       const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === key);
       card?.scrollIntoView({ block: "nearest" });
       card?.focus();
+    },
+    chooseModel: (proposal) => {
+      const card = choosableCard(proposal);
+      if (card !== undefined) modelWindow.open(card, models.agent);
     },
   };
 
@@ -196,7 +221,8 @@ export const mountBoard: MountView = (root, context) => {
     runReasonNow = joinReasons([resolve.runReason, runBlocker(snapshot.tasks, namerOf(snapshot.numbers ?? noNumbers))]);
     const live = new Set<string>();
     const boardResolve: BoardResolve = { blocker: resolve.blocker, drifts: resolve.drifts, resolving: resolve.resolving, note: autopilotNote(resolve.autopilot) };
-    const columns = buildBoard(snapshot, resolve.autopilot.failures, boardResolve);
+    const columns = buildBoard(snapshot, resolve.autopilot.failures, boardResolve, models);
+    lastColumns = columns;
     const placedGhosts = announcedGhosts(columns, snapshot.announcements, asking);
     const liveAnnounced = new Set<string>();
     const nextHeads = new Map<string, HTMLElement>();
@@ -271,6 +297,9 @@ export const mountBoard: MountView = (root, context) => {
     for (const r of columnResolves) setReason(r, resolve.blocker, resolveNote);
     for (const key of cache.keys()) if (!live.has(key)) cache.delete(key);
     for (const key of announced.keys()) if (!liveAnnounced.has(key)) announced.delete(key);
+    // The model window follows its Proposal: it redraws from the newest card, and closes when the card is gone.
+    const shownProposal = modelWindow.shown();
+    if (shownProposal !== null) modelWindow.update(choosableCard(shownProposal), models.agent);
 
     if (focused?.key !== undefined && (document.activeElement === document.body || document.activeElement === null)) {
       const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === focused.key);
@@ -299,11 +328,15 @@ export const mountBoard: MountView = (root, context) => {
   }
 
   return {
-    update(next, isAsking = false, resolveState: typeof resolve = { blocker: null, runReason: null, autopilot: { mode: "disabled", phase: "manual", reason: null, failures: [] }, drifts: {}, resolving: [] }) {
+    update(next, isAsking = false, resolveState: typeof resolve = { blocker: null, runReason: null, autopilot: { mode: "disabled", phase: "manual", reason: null, failures: [] }, drifts: {}, resolving: [] }, modelsState: BoardModels = NO_MODELS) {
       snapshot = next;
       asking = isAsking;
       resolve = resolveState;
+      models = modelsState;
       render();
+    },
+    receiveModels(message) {
+      modelWindow.receiveModels(message.models, message.error ?? null);
     },
     withdrawn(gone: AnnouncementView[]) {
       for (const a of gone) notices.push({ id: nextNotice++, text: withdrawnNotice(a) });

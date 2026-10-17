@@ -6,7 +6,11 @@ import type { DelegationMode } from "./settings-schema";
 /** Trama-launched jobs, retained only in memory for their live editor windows. */
 export type JobKind = "run" | "resolve" | "scan";
 
-export type JobPlace = { terminal: string } | { chat: "cursor" | "copilot" | "other" };
+/**
+ * Where a job runs: a terminal or a chat. A held job has none: it keeps the project in its state between two steps (a
+ * sequence of Runs between its Runs, or an automatic collection from its start until its Run is created), until `endHeldJob`.
+ */
+export type JobPlace = { terminal: string } | { chat: "cursor" | "copilot" | "other" } | { held: true };
 
 export type JobOrigin = "manual" | "automatic";
 export type DriftAutopilotMode = DelegationMode;
@@ -209,7 +213,7 @@ export function receiveCoordinatorMessage(message: Record<string, unknown>): voi
     ? { terminal: location["terminal"] }
     : location["chat"] === "cursor" || location["chat"] === "copilot" || location["chat"] === "other"
       ? { chat: location["chat"] }
-      : undefined;
+      : location["held"] === true ? { held: true } : undefined;
   if (!jobPlace) return;
   knownJobs.add(key);
   knownJobOrigins.set(key, message["origin"] === "automatic" ? "automatic" : "manual");
@@ -674,6 +678,14 @@ export const jobAbnormalEnd = (root: string, job: string): string | undefined =>
 
 /** The command Trama wrote in terminal `terminal` ended, or that terminal closed; `abnormal` says why that was not a normal end. */
 export const endTerminalJobs = (terminal: string, abnormal?: string): Job[] => endWhere((j) => "terminal" in j.place && j.place.terminal === terminal, abnormal);
+
+/**
+ * The held job `id` in the project at `root` ends: the sequence of Runs it held has ended with its last Run, or stopped
+ * (`abnormal` says why), or the automatic collection it held has passed to its Run or ended. The ends of its own Runs
+ * (`endTerminalJobs`, the chat ends) do not end it. The caller broadcasts the jobs it ended.
+ */
+export const endHeldJob = (root: string, id: string, abnormal?: string): Job[] =>
+  endWhere((j) => j.id === id && j.root === root && "held" in j.place, abnormal);
 
 /** Trama chat conversations already seen in this window, by project, service and conversation. */
 const seenChats = new Set<string>();

@@ -148,6 +148,8 @@ test("trama-implement runs the pre-flight scan before the first group, and its f
   expect(skill).toContain("Pre-flight scan failed: the Run continues without it.");
   expect(skill).toContain("file only Drifts with no origin (no `--task`)");
   expect(skill).toContain("never to file a Task, announce a check or run `trama task next`");
+  expect(skill).toContain("**Proposal filters.**");
+  expect(skill).toContain("`--not-proposal <id>`");
 });
 
 test("trama-implement writes History after the check and before the report, and only for runs that moved Tasks to Done", () => {

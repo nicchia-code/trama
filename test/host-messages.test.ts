@@ -25,6 +25,8 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "approveProposal", id: "0001" })).toEqual({ type: "approveProposal", id: "0001" });
   expect(ok({ type: "rejectProposal", id: "0001" })).toEqual({ type: "rejectProposal", id: "0001" });
   expect(ok({ type: "dismissDrift", id: "0001" })).toEqual({ type: "dismissDrift", id: "0001" });
+  expect(ok({ type: "setProposalModel", proposal: "0001", model: "gpt-5" })).toEqual({ type: "setProposalModel", proposal: "0001", model: "gpt-5" });
+  expect(ok({ type: "setProposalModel", proposal: "0001", model: "" })).toEqual({ type: "setProposalModel", proposal: "0001", model: "" });
 });
 
 test("the command palette offers no design command, only import", async () => {
@@ -70,6 +72,11 @@ test("rejects unknown types, wrong shapes and IDs that are not plain IDs; move a
     { type: "rejectProposal", id: { toString: "x" } },
   ];
   for (const message of rejected) expect(parseToHost(message).ok).toBe(false);
+});
+
+test("setProposalModel needs a Proposal identity and a model text", () => {
+  for (const proposal of [undefined, "", "../secret", 3]) expect(parseToHost({ type: "setProposalModel", proposal, model: "gpt-5" }).ok).toBe(false);
+  for (const model of [undefined, 3]) expect(parseToHost({ type: "setProposalModel", proposal: "0001", model }).ok).toBe(false);
 });
 
 test("dismissDrift needs a Drift identity", () => {

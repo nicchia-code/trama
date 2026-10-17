@@ -213,6 +213,7 @@ export function detailOfDrift(scene: Scene, drift: DriftView): Detail {
           return item(ref, { note: ok ? "" : "no longer resolves", ref: ok ? ref : null });
         }),
       },
+      ...(drift.notBlocking.length === 0 ? [] : [{ heading: "Not blocking", items: drift.notBlocking.map((f) => item(`${cardLabel(scene.numbers, "task", f.task)} ${f.title ?? "(no longer exists)"}`, { note: f.reason })) }]),
     ],
     drift,
   });

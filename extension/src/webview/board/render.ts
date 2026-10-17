@@ -3,14 +3,15 @@ import { idTag } from "../id-tag";
 import type { ViewContext } from "../types";
 import type { Column } from "../../protocol";
 import type { AnnouncedCard, Badge, BlockBadge, Card, DriftCard, ProposalCard, TaskCard, WaitingCard } from "./logic";
-import { recurringLabel, tagColour } from "./logic";
+import { AGENT_NAMES, recurringLabel, tagColour } from "./logic";
 import { renderDriftCompare } from "../drift-compare";
 import { dismissButton } from "../dismiss";
 import { renderMarkdown } from "../markdown";
 import { renderResolves } from "../resolves";
+import { notBlockingLine } from "../not-blocking";
 import { viewOfRef } from "../requirements/logic";
 import { joinReasons } from "../../../../src/core/design";
-import { type IconName, icon, setIconLabel } from "../icons";
+import { type IconName, icon, setIcon, setIconLabel } from "../icons";
 
 export interface CardEnv {
   context: ViewContext;
@@ -23,6 +24,8 @@ export interface CardEnv {
   numbers(): CardNumbers;
   /** Why a single Task's Run is disabled beyond its own waiting: a Run in progress or Drift resolution. Run all has its own reasons. Null when none holds. */
   runReason(): string | null;
+  /** Opens the model window of a Proposal that carries Tasks. */
+  chooseModel(proposal: string): void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -143,10 +146,39 @@ function head(kind: string | null, name: CardName | null, ...extra: HTMLElement[
   return row;
 }
 
+/**
+ * The model controls of a Proposal that carries Tasks, at the end of its head row: the chosen model as a badge (struck and
+ * muted when it was chosen for another agent), then the gear that opens the model window. The gear is never disabled.
+ */
+function modelControls(card: ProposalCard, env: CardEnv): HTMLElement[] {
+  const gear = el("button", "board-model-gear");
+  gear.type = "button";
+  gear.dataset["action"] = "model";
+  setIcon(gear, "settings-gear");
+  const choose = `Choose the model for ${card.name.text}`;
+  gear.title = choose;
+  gear.setAttribute("aria-label", choose);
+  gear.addEventListener("click", () => env.chooseModel(card.id));
+  const chosen = card.model;
+  if (chosen === null) return [gear];
+  const model = el("span", "board-badge info board-model", chosen.name);
+  if (chosen.applies) {
+    model.title = `Model for this Proposal's work: ${chosen.name}`;
+    model.setAttribute("aria-label", model.title);
+  } else {
+    model.classList.add("is-stale");
+    const text = `Chosen for ${AGENT_NAMES[chosen.agent]}: the Settings roles apply`;
+    model.title = text;
+    model.setAttribute("aria-label", text);
+  }
+  return [model, gear];
+}
+
 function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}`);
   if (card.resolution) node.className = "board-card board-card-resolution";
-  node.append(head(card.resolution ? "Resolution Proposal" : "Proposal", card.name, ...card.badges.map((b) => badge(b, env.numbers()))), el("h3", "board-card-title", card.title));
+  const controls = card.choosable ? modelControls(card, env) : [];
+  node.append(head(card.resolution ? "Resolution Proposal" : "Proposal", card.name, ...card.badges.map((b) => badge(b, env.numbers())), ...controls), el("h3", "board-card-title", card.title));
   if (card.creates !== null) {
     const creates = el("p", "board-muted board-card-creates", card.creates);
     creates.title = card.creates;
@@ -214,6 +246,8 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
   views.push(resolve);
   views.push(dismissButton({ blocker: card.dismissBlocker, className: "board-btn", onDismiss: () => env.context.post({ type: "dismissDrift", id: card.id }) }));
   node.append(...card.blocked.map((t) => blockedRow(t, env, card.id)));
+  const freed = notBlockingLine(card.notBlocking);
+  if (freed) node.append(freed);
   node.append(actions(...views));
   return node;
 }

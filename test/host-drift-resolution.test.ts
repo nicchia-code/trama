@@ -20,6 +20,7 @@ import {
   endChatJobs,
   endCopilotChatJobs,
   isKnownSuccessfulScan,
+  endHeldJob,
   endTerminalJobs,
   excludeAutopilotDrift,
   forgetDeveloperScanCases,
@@ -383,4 +384,59 @@ test("an interrupted pre-flight of a Run started in another window is a failed s
   receiveCoordinatorMessage({ type: "interrupted-preflight", root: project, job: "remote-run", title: "Pre-flight of Shop" });
   expect(lastFailedScan(project)).toBe("Pre-flight of Shop");
   receiveCoordinatorMessage({ type: "job", id: "remote-run", root: project, kind: "run", active: false, place: { terminal: "remote-terminal" } });
+});
+
+test("a sequence of Runs stays one active Run between two of its Runs and ends with its last one", () => {
+  const project = root();
+  startJob("run", project, { held: true }, false, undefined, "sequence-job");
+  startJob("run", project, { terminal: "group-1" }, false, undefined, "group-1-run");
+  endTerminalJobs("group-1");
+  // Between two Runs of the sequence nothing has ended for the project: no barrier, no collection.
+  expect(activeProjectJobs(project).map((job) => job.id)).toEqual(["sequence-job"]);
+  expect(driftWork(project)).toEqual({ resolving: false, running: true });
+  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "manual" });
+  startJob("run", project, { terminal: "group-2" }, false, undefined, "group-2-run");
+  endTerminalJobs("group-2");
+  expect(driftWork(project)).toEqual({ resolving: false, running: true });
+  endHeldJob(project, "sequence-job");
+  expect(driftWork(project)).toEqual({ resolving: false, running: false });
+  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "idle" });
+});
+
+test("a stopped sequence ends with its reason, and an automatic sequence is reported as executing", () => {
+  const project = root();
+  startJob("run", project, { held: true }, false, undefined, "auto-sequence", "automatic");
+  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "executing" });
+  endHeldJob(project, "auto-sequence", "its command exited with code 1");
+  expect(jobAbnormalEnd(project, "auto-sequence")).toBe("its command exited with code 1");
+  expect(driftWork(project).running).toBe(false);
+});
+
+test("another window keeps a held job active until its received end", () => {
+  const project = root();
+  receiveCoordinatorMessage({ type: "job", id: "remote-held", root: project, kind: "run", active: true, origin: "manual", windowId: "window-a", place: { held: true } });
+  expect(driftWork(project)).toEqual({ resolving: false, running: true });
+  receiveCoordinatorMessage({ type: "job", id: "remote-held", root: project, kind: "run", active: false, place: { held: true } });
+  expect(driftWork(project)).toEqual({ resolving: false, running: false });
+});
+
+test("an automatic collection holds the project as Resolving until its hand-over, then as Running until its Run is created", () => {
+  const project = root();
+  startJob("resolve", project, { held: true }, false, undefined, "collection-hold", "automatic");
+  startJob("resolve", project, { terminal: "resolution" }, false, undefined, "resolution-job", "automatic");
+  // The resolution agent ends: the hold keeps the project as Resolving while the collection prepares its Run.
+  endTerminalJobs("resolution");
+  expect(driftWork(project)).toEqual({ resolving: true, running: false });
+  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "preparing" });
+  // The hand-over starts the held Run before the resolution hold ends, so the project is never free in between.
+  startJob("run", project, { held: true }, false, undefined, "collection-run-hold", "automatic");
+  endHeldJob(project, "collection-hold");
+  expect(driftWork(project)).toEqual({ resolving: false, running: true });
+  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "executing" });
+  // The Run is created: its own job takes over and the hold ends.
+  startJob("run", project, { terminal: "fix-run" }, false, undefined, "fix-run-job", "automatic");
+  endHeldJob(project, "collection-run-hold");
+  expect(driftWork(project)).toEqual({ resolving: false, running: true });
+  endTerminalJobs("fix-run");
+  expect(driftWork(project)).toEqual({ resolving: false, running: false });
 });

@@ -58,6 +58,7 @@ import { requirementsView, withRequirements } from "./requirements";
 import type { Result } from "./result";
 import {
   boardView,
+  driftCandidatesView,
   driftListView,
   driftShowView,
   proposalListView,
@@ -111,10 +112,23 @@ const proposalArg = (ctx: Context, id: string) => getProposal(ctx.project(), id,
 const taskArg = (ctx: Context, id: string) => getTask(ctx.project(), id, true).id;
 const driftArg = (ctx: Context, id: string) => getDrift(ctx.project(), id, true).id;
 const optionalArg = (ctx: Context, id: string | undefined, resolve: (ctx: Context, id: string) => string) => (id === undefined ? undefined : resolve(ctx, id));
+/** The `--proposal` and `--not-proposal` filters of a command: repeated Proposal IDs or short numbers, never both. */
+const proposalFilter = (ctx: Context, o: Values): { include: string[]; exclude: string[] } => {
+  const include = list(o["proposal"]);
+  const exclude = list(o["not-proposal"]);
+  if (include.length > 0 && exclude.length > 0) throw new UsageError("--proposal and --not-proposal cannot be used together");
+  return { include: include.map((id) => proposalArg(ctx, id)), exclude: exclude.map((id) => proposalArg(ctx, id)) };
+};
 /** The short numbers of this working copy as they are now, read after a command has acted so a card it closed is already written by its identity. */
 const numbersOf = (ctx: Context) => syncShortNumbers(ctx.project());
 /** Each `--option <title>` is followed by its `--option-text <text>`: the n-th title goes with the n-th text. A title without text, or text without a title, is left empty for the Drift to refuse. */
 const fixOptions = (titles: string[], texts: string[]) => Array.from({ length: Math.max(titles.length, texts.length) }, (_, i) => ({ title: titles[i] ?? "", text: texts[i] ?? "" }));
+/** Each `--not-blocking <task>` is followed by its `--not-blocking-reason <text>`: the n-th Task goes with the n-th reason. A missing one is left empty for the Drift to refuse. */
+const notBlockingPairs = (ctx: Context, tasks: string[], reasons: string[]) =>
+  Array.from({ length: Math.max(tasks.length, reasons.length) }, (_, i) => {
+    const id = tasks[i];
+    return { task: id === undefined ? "" : taskArg(ctx, id), reason: reasons[i] ?? "" };
+  });
 
 function text(md: string, json: unknown = { message: md }): Result {
   return { md, json };
@@ -355,10 +369,11 @@ export const COMMANDS: Command[] = [
       const outcome = finished ? (failed ? "failed" : "done") : "missing";
       return text(finished ? `Check ${id} is ${outcome}` : `No check "${id}" was found (unknown, already finished or withdrawn, or not a check); nothing changed.`, { id, found: finished !== null, ...(finished ? { outcome } : {}) });
     } },
-  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--label <text> gives its short label, required before a Proposal with Tasks is handed over; --requires <id> for dependencies; --import for existing code; --resolution for a resolution of Drifts; --setup for the first Proposal of an empty Model; --automatic only with --resolution; --job <id> binds an automatic resolution Draft to its autopilot job; --announcement <id> names the announcement of this Proposal; --request <id> binds it to the written design request it comes from); submit when finished", options: { body: { type: "string" }, label: { type: "string" }, requires: ref, import: { type: "boolean" }, resolution: { type: "boolean" }, setup: { type: "boolean" }, automatic: { type: "boolean" }, job: { type: "string" }, announcement: { type: "string" }, request: { type: "string" } }, run(ctx, a, o) {
+  { name: "proposal new", args: "<title>", summary: "Create a Draft Proposal (--label <text> gives its short label, required before a Proposal with Tasks is handed over; --requires <id> for dependencies; --import for existing code; --resolution for a resolution of Drifts; --non-blocking only with --resolution, for a resolution whose Drifts block no Task; --setup for the first Proposal of an empty Model; --automatic only with --resolution; --job <id> binds an automatic resolution Draft to its autopilot job; --announcement <id> names the announcement of this Proposal; --request <id> binds it to the written design request it comes from); submit when finished", options: { body: { type: "string" }, label: { type: "string" }, requires: ref, import: { type: "boolean" }, resolution: { type: "boolean" }, setup: { type: "boolean" }, automatic: { type: "boolean" }, "non-blocking": { type: "boolean" }, job: { type: "string" }, announcement: { type: "string" }, request: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       if (o["import"] === true && o["resolution"] === true) throw new UsageError("--import and --resolution cannot go together: a Proposal is one or the other");
       if (o["job"] !== undefined && (o["automatic"] !== true || o["resolution"] !== true)) throw new UsageError("--job can only be used with --automatic --resolution");
+      if (o["non-blocking"] === true && (o["resolution"] !== true || o["automatic"] === true)) throw new UsageError("--non-blocking can only be used with --resolution, and not with --automatic");
       if (o["setup"] === true && (o["import"] === true || o["resolution"] === true)) throw new UsageError("--setup cannot go together with --import or --resolution");
       if (o["setup"] === true) {
         const model = loadModel(project);
@@ -367,7 +382,7 @@ export const COMMANDS: Command[] = [
       const note = announcementNote(project, str(o["announcement"]), "proposal");
       const request = str(o["request"]);
       const job = str(o["job"]) ?? (o["automatic"] === true && o["resolution"] === true ? ctx.job : undefined);
-      const p = newProposal(project, a[0] as string, str(o["body"]), { requires: list(o["requires"]).map((id) => proposalArg(ctx, id)), kind: o["import"] === true ? "import" : o["resolution"] === true ? "resolution" : o["setup"] === true ? "setup" : "change", automatic: o["automatic"] === true, announcement: str(o["announcement"]), origin: ctx.origin, request, ...(str(o["label"]) === undefined ? {} : { label: str(o["label"]) }) });
+      const p = newProposal(project, a[0] as string, str(o["body"]), { requires: list(o["requires"]).map((id) => proposalArg(ctx, id)), kind: o["import"] === true ? "import" : o["resolution"] === true ? "resolution" : o["setup"] === true ? "setup" : "change", automatic: o["automatic"] === true, nonBlocking: o["non-blocking"] === true, announcement: str(o["announcement"]), origin: ctx.origin, request, ...(str(o["label"]) === undefined ? {} : { label: str(o["label"]) }) });
       if (job !== undefined) sendCoordinatorMessageSoon(project, { type: "proposal-draft", proposal: p.id, job }, (reason) => {
         process.stderr.write(`Could not bind automatic resolution Draft ${p.id} to autopilot job ${job}: ${reason}\n`);
       });
@@ -474,23 +489,23 @@ export const COMMANDS: Command[] = [
     } },
   { name: "task show", args: "<id>", summary: "A Task with its references and the Requirements to implement", run: (ctx, a) => taskShowView(ctx.project(), getTask(ctx.project(), a[0] as string, true)) },
   { name: "task list", args: "", summary: "Tasks grouped by column", options: { column: { type: "string" } }, run: (ctx, _a, o) => taskListView(ctx.project(), str(o["column"])) },
-  { name: "task next", args: "", summary: "The next runnable Task(s), optionally filtered by repeated --task <id> or --proposal <id>; moves nothing", options: { task: { type: "string", multiple: true }, proposal: { type: "string" }, batch: { type: "boolean" }, max: { type: "string" } }, run: (ctx, _a, o) => {
+  { name: "task next", args: "", summary: "The next runnable Task(s), optionally filtered by repeated --task <id>, --proposal <id> or --not-proposal <id>; moves nothing", options: { task: { type: "string", multiple: true }, proposal: { type: "string", multiple: true }, "not-proposal": { type: "string", multiple: true }, batch: { type: "boolean" }, max: { type: "string" } }, run: (ctx, _a, o) => {
       const raw = str(o["max"]);
       const max = raw === undefined ? undefined : Number(raw);
       if (max !== undefined && (!Number.isInteger(max) || max < 1)) throw new UsageError("--max must be a positive integer");
-      return taskNextView(ctx.project(), optionalArg(ctx, str(o["proposal"]), proposalArg), o["batch"] === true, max, o["task"] === undefined ? undefined : list(o["task"]));
+      return taskNextView(ctx.project(), proposalFilter(ctx, o), o["batch"] === true, max, o["task"] === undefined ? undefined : list(o["task"]));
     } },
-  { name: "task scope", args: "[<id>…]", summary: "The scan scope of the named Tasks, or with --pre-flight the exact references of the runnable Tasks in To do (filtered by --proposal and repeated --task); moves nothing", options: { "pre-flight": { type: "boolean" }, proposal: { type: "string" }, task: { type: "string", multiple: true } }, run(ctx, args, o) {
+  { name: "task scope", args: "[<id>…]", summary: "The scan scope of the named Tasks, or with --pre-flight the exact references of the runnable Tasks in To do (filtered by repeated --proposal, --not-proposal and --task); moves nothing", options: { "pre-flight": { type: "boolean" }, proposal: { type: "string", multiple: true }, "not-proposal": { type: "string", multiple: true }, task: { type: "string", multiple: true } }, run(ctx, args, o) {
       const project = ctx.project();
       if (o["pre-flight"] === true) {
-        if (args.length > 0) throw new UsageError("--pre-flight takes no Task ID: filter the runnable Tasks with --proposal or --task");
-        const { refs, tasks } = preflightScope(project, optionalArg(ctx, str(o["proposal"]), proposalArg), o["task"] === undefined ? undefined : list(o["task"]));
+        if (args.length > 0) throw new UsageError("--pre-flight takes no Task ID: filter the runnable Tasks with --proposal, --not-proposal or --task");
+        const { refs, tasks } = preflightScope(project, proposalFilter(ctx, o), o["task"] === undefined ? undefined : list(o["task"]));
         const n = numbersOf(ctx);
         const body = refs.length ? refs.map((ref) => `- \`${ref}\``).join("\n") : "_Nothing to check._";
         return text(`## Pre-flight scope\n\n${body}`, { refs: refs.map((ref) => ({ ref })), tasks: tasks.map((t) => ({ id: t.id, number: n.label("task", t.id), title: t.title })) });
       }
       if (args.length === 0) throw new UsageError("Name at least one Task ID, or pass --pre-flight");
-      if (o["proposal"] !== undefined || o["task"] !== undefined) throw new UsageError("--proposal and --task apply only with --pre-flight");
+      if (o["proposal"] !== undefined || o["not-proposal"] !== undefined || o["task"] !== undefined) throw new UsageError("--proposal, --not-proposal and --task apply only with --pre-flight");
       const ids = args.map((id) => {
         try {
           return getTask(project, id, true).id;
@@ -517,10 +532,10 @@ export const COMMANDS: Command[] = [
       return text(`Task ${n.name("task", t.id)} is yours again (still ${t.data.column})`, { id: t.id, number: n.label("task", t.id), column: t.data.column, agent: t.data.agent });
     } },
 
-  { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; two to five fix options, each --option <title> followed by its --option-text <text>, the first being the one you recommend; --critical marks an urgent developer decision; --where is required and says where in the code the difference was seen (read that code before filing; files and code names go only there); --task <id> names the Task you were implementing when you found it; --previous <id> names the resolved Drift this one follows, making it recurring (given by itself when --task names a fix Task); --announcement <id> names the announcement of this Drift", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, option: ref, "option-text": ref, critical: { type: "boolean" }, where: { type: "string" }, previous: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
+  { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; two to five fix options, each --option <title> followed by its --option-text <text>, the first being the one you recommend; --critical marks an urgent developer decision; --where is required and says where in the code the difference was seen (read that code before filing; files and code names go only there); --task <id> names the Task you were implementing when you found it; --not-blocking <id> (repeatable) with its --not-blocking-reason <text> names a Task that this Drift would block and leaves free, because the difference does not touch it (see drift candidates); --previous <id> names the resolved Drift this one follows, making it recurring (given by itself when --task names a fix Task); --announcement <id> names the announcement of this Drift", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, option: ref, "option-text": ref, "not-blocking": ref, "not-blocking-reason": ref, critical: { type: "boolean" }, where: { type: "string" }, previous: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       const note = announcementNote(project, str(o["announcement"]), "drift");
-      const d = newDrift(project, { title: a[0] as string, refs: list(o["ref"]), proposal: optionalArg(ctx, str(o["proposal"]), proposalArg), origin: optionalArg(ctx, str(o["task"]), taskArg), previous: optionalArg(ctx, str(o["previous"]), driftArg), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", options: fixOptions(list(o["option"]), list(o["option-text"])), critical: o["critical"] === true, announcement: str(o["announcement"]), where: str(o["where"]) ?? "" });
+      const d = newDrift(project, { title: a[0] as string, refs: list(o["ref"]), proposal: optionalArg(ctx, str(o["proposal"]), proposalArg), origin: optionalArg(ctx, str(o["task"]), taskArg), previous: optionalArg(ctx, str(o["previous"]), driftArg), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", options: fixOptions(list(o["option"]), list(o["option-text"])), critical: o["critical"] === true, announcement: str(o["announcement"]), where: str(o["where"]) ?? "", notBlocking: notBlockingPairs(ctx, list(o["not-blocking"]), list(o["not-blocking-reason"])) });
       // The agent that files a Drift keeps «Dismiss Drift» from it until its turn ends: the editor learns who holds it here. Copilot chat gives its agent no identity, so its filings arrive as the editor's chat holder and only the window with an open Copilot turn holds them.
       const holder = ctx.origin.terminal ?? ctx.origin.chat;
       if (holder !== undefined) sendCoordinatorMessageSoon(project, { type: "drift-filed", root: project.root, drift: d.id, holder }, (reason) => {
@@ -531,6 +546,7 @@ export const COMMANDS: Command[] = [
       return text(`Created Drift ${n.name("drift", d.id)} at ${d.path}${follows}${note ? `\n${note}` : ""}`, { id: d.id, number: n.label("drift", d.id), path: d.path, critical: d.data.critical, previous: d.data.previous, ...(note ? { note } : {}) });
     } },
   { name: "drift list", args: "", summary: "Open Drifts (--all for every one); --ref <ref>, repeatable, keeps only the Drifts that concern the same thing as one of the given references, as the Task blocks do", options: { all: { type: "boolean" }, ref }, run: (ctx, _a, o) => driftListView(ctx.project(), o["all"] === true, list(o["ref"])) },
+  { name: "drift candidates", args: "", summary: "The Tasks a new Drift with --ref <ref> (repeatable) and --task <origin> would block, by number or identity and title, from which --not-blocking names the ones it leaves free; writes nothing", options: { ref, task: { type: "string" } }, run: (ctx, _a, o) => driftCandidatesView(ctx.project(), list(o["ref"]), str(o["task"])) },
   { name: "drift show", args: "<id>", summary: "A Drift with its references and attached Proposal", run: (ctx, a) => driftShowView(ctx.project(), getDrift(ctx.project(), a[0] as string, true)) },
   { name: "drift resolve", args: "<id>", summary: "Resolve with --fix-code, --accept-proposal or --dismiss. --fix-code takes --option <n> (the number of the chosen fix option, from 1) and the optional --note <text>; the other two take neither. --skills-dir adds the configured skills folder for the approval of --accept-proposal", options: { "fix-code": { type: "boolean" }, "accept-proposal": { type: "boolean" }, dismiss: { type: "boolean" }, option: { type: "string" }, note: { type: "string" }, "skills-dir": ref }, run(ctx, a, o) {
       const chosen = (["fix-code", "accept-proposal", "dismiss"] as const).filter((k) => o[k] === true);

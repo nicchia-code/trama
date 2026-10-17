@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, sep } from "node:path";
 import * as vscode from "vscode";
-import { createRequest, isEmptyRequest, requestFile, requestIdAt, requestsDir, requestTitle } from "../../../src/core/design-requests";
+import { consumeRequest, createRequest, isEmptyRequest, requestFile, requestIdAt, requestsDir, requestTitle, sweepRequestImages } from "../../../src/core/design-requests";
 import { approvalBlock, listProposals } from "../../../src/core/proposals";
 import type { Project } from "../../../src/core/store";
 import { type DesignAnnouncement, type Launch, launchAgent, launched } from "./agent";
@@ -21,8 +21,8 @@ const EMPTY_WARNING = "Trama: write the design request before sending it.";
 export const SAVE_DELAY_MS = 300;
 
 /** The ghost texts of an empty request never sent: one for a design request, one for a setup request. */
-const DESIGN_GHOST = "Describe the change to design: behaviour, edge cases, requirements. Close this tab or press Send to agent when you are done.";
-const SETUP_GHOST = "Describe the application to build: what it does and who it is for. Close this tab or press Send to agent when you are done.";
+const DESIGN_GHOST = "Describe the change to design: behaviour, edge cases, requirements. Paste or drop images for context. Close this tab or press Send to agent when you are done.";
+const SETUP_GHOST = "Describe the application to build: what it does and who it is for. Paste or drop images for context. Close this tab or press Send to agent when you are done.";
 
 /**
  * Written design requests in the editor. A request is a file in `.trama/requests/` from the moment + Add Work Item creates
@@ -73,6 +73,8 @@ export class DesignRequests implements vscode.Disposable {
     ];
     this.finishMissing(vscode.window.tabGroups.all.flatMap((group) => group.tabs));
     this.forget();
+    const current = this.project();
+    if (current) sweepRequestImages(current);
     void this.clearGoneSetup();
     this.updateContext();
   }
@@ -138,7 +140,7 @@ export class DesignRequests implements vscode.Disposable {
     } catch {
       return; // Already deleted: `deleted` deals with it.
     }
-    if (isEmptyRequest(text)) rmSync(uri.fsPath, { force: true });
+    if (isEmptyRequest(text)) consumeRequest(project, id);
     else await this.once(id, () => this.deliver(project, id, text));
   }
 
@@ -167,7 +169,7 @@ export class DesignRequests implements vscode.Disposable {
     if (!canSend()) return false;
     const setup = this.setupIds().includes(id);
     const instruction = buildPrompt(setup ? { kind: "setup-request", request: id } : { kind: "written-design", request: id });
-    const launch = await this.launch(project.root, instruction, setup ? "Setup" : "Design", requestTitle(text), canSend);
+    const launch = await this.launch(project.root, instruction, setup ? "Setup" : "Design", requestTitle(text) || id, canSend);
     if (!launched(launch) || !canSend()) return false;
     await this.state.update(SENT_KEY, [...this.sentIds(), id]);
     this.refreshGhosts();
@@ -302,6 +304,7 @@ export class DesignRequests implements vscode.Disposable {
     if (!project) return;
     const gone = (fsPath: string) => within(uri.fsPath, fsPath) && requestIdAt(project, fsPath) !== undefined;
     if (!gone(uri.fsPath) && !within(uri.fsPath, requestsDir(project))) return;
+    sweepRequestImages(project);
     void this.settleSetup(project);
     const allTabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs);
     const open = [...vscode.workspace.textDocuments.map((document) => document.uri), ...allTabs.flatMap((tab) => (tab.input instanceof vscode.TabInputText ? [tab.input.uri] : []))];

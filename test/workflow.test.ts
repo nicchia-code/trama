@@ -440,6 +440,27 @@ describe("Tasks and Drifts", () => {
     expect(() => cli("task", "next", "--task", "not-a-task")).toThrow(/No Task with ID/);
     expect(listTasks(p).every((t) => t.data.column === "todo" && !t.data.agent)).toBe(true);
   });
+  test("task next and task scope --pre-flight take several Proposals, or leave them out, and refuse both at once", () => {
+    const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
+    const one = newProposal(p, "One");
+    const two = newProposal(p, "Two");
+    const inOne = newTask(p, { title: "In one", refs: ["order"], technical: false, proposal: one.id }).id;
+    const inTwo = newTask(p, { title: "In two", refs: ["payment"], technical: false, proposal: two.id }).id;
+    const loose = newTask(p, { title: "Loose", refs: ["cart"], technical: false }).id;
+    const sorted = (out: string) => out.split("\n").sort();
+    const line = (id: string, title: string) => `${named("task", id)} ${title}`;
+
+    expect(sorted(cli("task", "next", "--batch", "--proposal", one.id, "--proposal", two.id).out)).toEqual([line(inOne, "In one"), line(inTwo, "In two")].sort());
+    expect(sorted(cli("task", "next", "--batch", "--not-proposal", one.id).out)).toEqual([line(inTwo, "In two"), line(loose, "Loose")].sort());
+    expect(cli("task", "next", "--proposal", one.id, "--proposal", two.id).out.startsWith(`Next Task in Proposals ${named("proposal", one.id)}, ${named("proposal", two.id)}: `)).toBe(true);
+    expect(cli("task", "next", "--not-proposal", one.id, "--not-proposal", two.id).out).toBe(`Next Task outside Proposals ${named("proposal", one.id)}, ${named("proposal", two.id)}: ${line(loose, "Loose")}`);
+    expect(() => cli("task", "next", "--proposal", one.id, "--not-proposal", two.id)).toThrow(/cannot be used together/);
+    expect(() => cli("task", "next", "--not-proposal", "9999")).toThrow(/No Proposal/);
+    const preflight = JSON.parse(cli("--json", "task", "scope", "--pre-flight", "--not-proposal", one.id).out) as { tasks: { id: string }[] };
+    expect(preflight.tasks.map((t) => t.id).sort()).toEqual([inTwo, loose].sort());
+    expect(() => cli("task", "scope", "--pre-flight", "--proposal", one.id, "--not-proposal", two.id)).toThrow(/cannot be used together/);
+    expect(() => cli("task", "scope", inOne, "--not-proposal", one.id)).toThrow(/apply only with --pre-flight/);
+  });
 
   test("the command line takes the Task only inside the terminal Trama started or Cursor's chat", async () => {
     const run2 = (env: Record<string, string>, ...args: string[]) => run(["--root", dir, "task", "move", ...args], process.cwd(), env);

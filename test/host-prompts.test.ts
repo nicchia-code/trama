@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildAutomaticRunPrompt, buildPrompt, buildScanPrompt, terminalName, withLanguage } from "../extension/src/host/prompts";
+import { buildAutomaticRunPrompt, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
@@ -38,6 +38,11 @@ test("several Features are listed in backticks, comma separated", () => {
   expect(buildScanPrompt([])).toBe("Use the trama-scan skill on the whole System.");
 });
 
+test("an automatic Run of one model group names the Tasks it takes, and only then", () => {
+  expect(buildAutomaticRunPrompt("collection", ["aaaa1111", "bbbb2222"])).toContain("This Run takes only the Tasks `aaaa1111`, `bbbb2222` among the authorized ones;");
+  expect(buildAutomaticRunPrompt("collection")).not.toContain("This Run takes only");
+});
+
 test("the agent terminal is named after the work: the card's short number, or a fixed word", () => {
   const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
   expect(terminalName({ kind: "implement", task: "abc" }, short)).toBe("T3");
@@ -61,4 +66,31 @@ test("a chosen language ends the instruction on the same line, trimmed; blank as
 test("implementation batch commands receive the configured limit at send time", () => {
   const all = buildPrompt({ kind: "implement-all" }).replaceAll("{maxParallelAgents}", "7");
   expect(all).toContain("trama task next --batch --max 7");
+});
+test("a Run all group cut by Proposal names its Proposals and the filter, and its terminal names its model", () => {
+  const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
+  expect(buildPrompt({ kind: "implement-all", group: { include: ["aaaa1111", "bbbb2222"] } })).toBe(
+    'Use the trama-implement skill on every Task in the "todo" column that belongs to the Proposals `aaaa1111`, `bbbb2222`. Take them from `trama task next --batch --proposal aaaa1111 --proposal bbbb2222 --max {maxParallelAgents}`, one group at a time, until it says there is none.',
+  );
+  expect(buildPrompt({ kind: "implement-all", group: { exclude: ["aaaa1111"] } })).toBe(
+    'Use the trama-implement skill on every Task in the "todo" column except those of the Proposal `aaaa1111`. Take them from `trama task next --batch --not-proposal aaaa1111 --max {maxParallelAgents}`, one group at a time, until it says there is none.',
+  );
+  expect(buildPrompt({ kind: "implement-all", group: { include: [], exclude: [] } })).toBe(buildPrompt({ kind: "implement-all" }));
+  expect(terminalName({ kind: "implement-all", group: { include: ["aaaa1111"], model: "  gpt-5  " } }, short)).toBe("All tasks · gpt-5");
+  expect(terminalName({ kind: "implement-all", group: { exclude: ["aaaa1111"] } }, short)).toBe("All tasks");
+  expect(terminalName({ kind: "implement-all", group: { model: "  " } }, short)).toBe("All tasks");
+});
+test("the Drift blocker's sentence is added on the same line only when on, and only the instructions that may file Drifts take it", () => {
+  const sentence = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+  expect(mayFileDrifts({ kind: "scan" })).toBe(true);
+  expect(mayFileDrifts({ kind: "scan", feature: "checkout" })).toBe(true);
+  expect(mayFileDrifts({ kind: "implement", task: "abc" })).toBe(true);
+  expect(mayFileDrifts({ kind: "implement-all" })).toBe(true);
+  expect(mayFileDrifts({ kind: "import" })).toBe(true);
+  expect(mayFileDrifts({ kind: "written-design", request: "r" })).toBe(false);
+  expect(mayFileDrifts({ kind: "setup-request", request: "r" })).toBe(false);
+  expect(mayFileDrifts({ kind: "resolve-drifts", drifts: [] })).toBe(false);
+  expect(withDriftBlocker("Use the trama-scan skill on the whole System.", false)).toBe("Use the trama-scan skill on the whole System.");
+  expect(withDriftBlocker("Use the trama-scan skill on the whole System.", true)).toBe(`Use the trama-scan skill on the whole System. ${sentence}`);
+  expect(DRIFT_BLOCKER_SENTENCE).toBe(sentence);
 });

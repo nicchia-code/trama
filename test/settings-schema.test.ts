@@ -15,6 +15,7 @@ const fixture: ManifestPackage = {
       properties: {
         "trama.autoExit": { type: "boolean", default: true, scope: "application", markdownDescription: "Close the terminal." },
         "trama.language": { type: "string", default: "", markdownDescription: "Language." },
+        "trama.experimentalDriftBlocker": { type: "boolean", default: false, scope: "application", markdownDescription: "Experimental." },
         "trama.maxParallelAgents": { type: "integer", default: 20, minimum: 1, scope: "application", markdownDescription: "Agents at once." },
         "trama.driftAutoPilot": { type: "string", enum: ["disabled", "enabled", "yolo"], default: "disabled", scope: "application", markdownDescription: "Drift autopilot." },
         "trama.submitWhileRunning": { type: "boolean", default: false, markdownDescription: "Runs overlap." },
@@ -44,6 +45,7 @@ test("the groups and their keys keep the order of the Settings tab", () => {
     ["Drift autopilot", ["trama.driftAutoPilot"]],
     ["Runs", ["trama.submitWhileRunning"]],
     ["Project", ["trama.skillsDir"]],
+    ["Experimental", ["trama.experimentalDriftBlocker"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["Agent", ["trama.autoExit", "trama.language"]],
@@ -51,7 +53,20 @@ test("the groups and their keys keep the order of the Settings tab", () => {
     ["Drift autopilot", [DRIFT]],
     ["Runs", ["trama.submitWhileRunning"]],
     ["Project", ["trama.skillsDir"]],
+    ["Experimental", ["trama.experimentalDriftBlocker"]],
   ]);
+});
+
+test("the Experimental Drift Blocker is the one checkbox of the last group, off by default and application-scoped", () => {
+  const blocker = properties["trama.experimentalDriftBlocker"];
+  expect(blocker?.type).toBe("boolean");
+  expect(blocker?.default).toBe(false);
+  expect(blocker?.scope).toBe("application");
+  expect(settingTitle("trama.experimentalDriftBlocker")).toBe("Experimental Drift Blocker");
+  const last = SETTING_GROUPS[SETTING_GROUPS.length - 1];
+  expect(last?.title).toBe("Experimental");
+  expect(last?.keys).toEqual(["trama.experimentalDriftBlocker"]);
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalDriftBlocker")?.control).toBe("boolean");
 });
 
 test("controls follow the manifest type; maxParallelAgents is a whole number of at least 1", () => {

@@ -11,6 +11,17 @@ import { proposalTouches } from "../requirements/logic";
 import { dismissBlocker } from "../dismiss";
 import { type CardName, cardNameOf, type CardNumbers, namerOf, noNumbers } from "../../../../src/core/card-names";
 import type { DriftAutopilotFailure, DriftAutopilotMode, DriftAutopilotStatus } from "../../host/drift-resolution";
+import type { BoardModels, BoardProposalModel, ProposalAgent } from "../../host/proposal-models";
+
+/** How each agent of `trama.agent` is named in the texts of the model window and of its badge. */
+export const AGENT_NAMES: Record<ProposalAgent, string> = {
+  chat: "the editor chat",
+  omp: "omp",
+  claude: "Claude Code",
+};
+
+/** The models of no Proposal: the Board draws them as none chosen and none choosable. */
+export const NO_MODELS: BoardModels = { agent: "chat", proposals: {} };
 
 /** The columns that hold cards. */
 export type CardColumnId = "backlog" | "active" | "blocked";
@@ -78,6 +89,16 @@ export interface ChangeSummary {
   more: number;
 }
 
+/** A Task a Drift leaves free, as the Board names it: its short number or identity, and the reason it gives. */
+export interface NotBlockingItem {
+  name: CardName;
+  reason: string;
+}
+
+/** The Tasks a Drift leaves free that still exist, named as the Board names Tasks; a Task that no longer exists is left out. */
+export const notBlockingItems = (freed: DriftView["notBlocking"], numbers: CardNumbers): NotBlockingItem[] =>
+  freed.flatMap((f) => (f.title === null ? [] : [{ name: cardNameOf(numbers, "task", f.task), reason: f.reason }]));
+
 export interface ResolvedRow {
   drift: string;
   name: CardName;
@@ -90,6 +111,8 @@ export interface ResolvedRow {
   autopilotFailed: string | null;
   /** The Tasks this Drift blocks, shown under its row. */
   blocked: TaskCard[];
+  /** The Tasks this Drift leaves free, with the reason, shown under the Tasks it blocks. */
+  notBlocking: NotBlockingItem[];
 }
 
 /** The text of a recurring Drift's badge, its tooltip and accessible name: the identity and title of the Drift it follows. */
@@ -116,6 +139,10 @@ export interface ProposalCard {
   resolves: ResolvedRow[];
   /** The text of the muted `Creates N Tasks` line; null when the Proposal creates no Task. */
   creates: string | null;
+  /** Whether the Proposal carries Tasks, so its model can be chosen: only then the card has the model gear. */
+  choosable: boolean;
+  /** The model chosen for the Proposal, as the host carries it; null when none is chosen or it cannot be chosen. */
+  model: BoardProposalModel | null;
 }
 
 export interface DriftCard {
@@ -141,6 +168,8 @@ export interface DriftCard {
   resolveBlocker: string | null;
   /** The Tasks this open Drift blocks, shown under its card. */
   blocked: TaskCard[];
+  /** The Tasks this open Drift leaves free, with the reason, shown under the Tasks it blocks. */
+  notBlocking: NotBlockingItem[];
 }
 
 export interface TaskCard {
@@ -236,10 +265,11 @@ export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "erro
   return null;
 }
 
-export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires" | "kind" | "automatic">, numbers: CardNumbers = noNumbers): Badge[] {
+export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires" | "kind" | "automatic" | "nonBlocking">, numbers: CardNumbers = noNumbers): Badge[] {
   const badges: Badge[] = [];
   if (p.kind === "import") badges.push({ label: "import", tone: "info", tooltip: "Describes existing code; approving it starts no Scan" });
   if (p.automatic) badges.push({ label: "delegated", tone: "info", tooltip: "Marked for automatic resolution under your delegation. The marker grants no approval: Approve and Reject stay available." });
+  if (p.nonBlocking) badges.push({ label: "blocks nothing", tone: "info", tooltip: "Filed by the experimental Drift blocker: these Drifts block no Task. Approve or reject it like any resolution." });
   for (const r of p.requires)
     badges.push({ label: `requires ${namerOf(numbers)("proposal", r.id)}`, tone: appliesUnder(r.status) ? "info" : "error", tooltip: requiredReasons([r], (id) => namerOf(numbers)("proposal", id)).join(""), card: { kind: "proposal", id: r.id } });
   if (p.stale.length > 0) badges.push({ label: "stale", tone: "warning", tooltip: `The Model changed since the Proposal touched:\n${listed(p.stale)}` });
@@ -251,16 +281,17 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
 
 /** The rows of a resolution's `Resolves Drifts` block, in the order the snapshot carries them; none for any other Proposal. */
 export const resolvedRows = (p: Pick<ProposalView, "resolves">, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null, blocked: Map<string, TaskCard[]> = new Map()): ResolvedRow[] =>
-  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, critical: r.critical, previous: r.previous, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, autopilotFailed: failed(r.drift), blocked: blocked.get(r.drift) ?? [] }));
+  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, critical: r.critical, previous: r.previous, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, autopilotFailed: failed(r.drift), blocked: blocked.get(r.drift) ?? [], notBlocking: notBlockingItems(r.notBlocking, numbers) }));
 
 /** `Creates 1 Task` / `Creates N Tasks`, counting removals too; null for zero. */
 export function createsText(n: number): string | null {
   return n === 0 ? null : `Creates ${n} ${n === 1 ? "Task" : "Tasks"}`;
 }
 
-export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null, blocked: Map<string, TaskCard[]> = new Map(), finishing: readonly string[] = []): ProposalCard {
+export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null, blocked: Map<string, TaskCard[]> = new Map(), finishing: readonly string[] = [], models: BoardModels = NO_MODELS): ProposalCard {
   const wait = finishingBlocker(p.id, finishing);
   const name = cardNameOf(numbers, "proposal", p.id);
+  const choosable = Object.hasOwn(models.proposals, p.id);
   return {
     kind: "proposal",
     key: `proposal:${p.id}`,
@@ -276,6 +307,8 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, 
     touches: proposalTouches(p),
     resolves: resolvedRows(p, numbers, failed, blocked),
     creates: createsText(p.creates),
+    choosable,
+    model: models.proposals[p.id] ?? null,
   };
 }
 
@@ -305,6 +338,7 @@ export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers, autopi
     resolveNote: resolve.note,
     resolveBlocker: resolve.blocker,
     blocked,
+    notBlocking: notBlockingItems(d.notBlocking, numbers),
   };
 }
 
@@ -402,7 +436,7 @@ const byCreation = <T extends { id: string; created: string | null }>(items: T[]
  * Blocked the open Drifts outside a delivered resolution, each with the Tasks it blocks, and a waiting card for each fix Task
  * that Tasks wait for. Done Tasks have no card, and the History column lists them apart. A blocked Task the agent has not taken sits under what blocks it, not in a column.
  */
-export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilotFailure[] = [], resolve: BoardResolve = NO_RESOLVE): BoardColumn[] {
+export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilotFailure[] = [], resolve: BoardResolve = NO_RESOLVE, models: BoardModels = NO_MODELS): BoardColumn[] {
   const numbers = snapshot.numbers ?? noNumbers;
   const failed = failedReasons(failures);
   // A Drift a delivered resolution lists is decided on that Proposal's card, so it has no card of its own in Blocked.
@@ -424,7 +458,7 @@ export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilot
       list.set(id, [...(list.get(id) ?? []), card]);
     }
   }
-  const backlog = byCreation(snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, (drift) => failed.get(`drift:${drift}`) ?? null, underDrift, snapshot.finishingProposals) })));
+  const backlog = byCreation(snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, (drift) => failed.get(`drift:${drift}`) ?? null, underDrift, snapshot.finishingProposals, models) })));
   const blocked = byCreation([
     ...snapshot.drifts
       .filter((d) => !delivered.has(d.id))

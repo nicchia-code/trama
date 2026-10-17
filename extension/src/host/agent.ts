@@ -9,11 +9,11 @@ import { QUESTION_ENDPOINT_ENV, requestCoordinatorMessage, sendCoordinatorMessag
 import { bundledOmpHook, bundledTrama, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, toClipboard, withTramaPath } from "./cursor";
 import { onCopilotChatEvent } from "./copilot-chat";
 import { withdrawWaiting } from "./announcements";
-import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
+import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint, questionWindowId } from "./questions";
-import { withLanguage } from "./prompts";
-import { agentTemplate, canScan, type Models, type Role, roleOf, type TerminalAgent } from "./terminal-agent";
+import { withDriftBlocker, withLanguage } from "./prompts";
+import { agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent } from "./terminal-agent";
 import { delegationOf } from "./settings-schema";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
@@ -32,6 +32,8 @@ export const configuredSkillsDir = (): string => settings().get<string>("skillsD
 
 /** The language the agent writes in (`trama.language`), as typed; empty when none is chosen. Read at every launch. */
 export const configuredLanguage = (): string => settings().get<string>("language", "").trim();
+/** Whether `trama.experimentalDriftBlocker` is on, from user settings only: a workspace value does not turn it on. Read at every launch. */
+export const configuredDriftBlocker = (): boolean => settings().inspect<unknown>("experimentalDriftBlocker")?.globalValue === true;
 /** The configured concurrent sub-agent limit, from user settings only; invalid values use the default. */
 export const configuredMaxParallelAgents = (): number => {
   const value: unknown = settings().inspect<number>("maxParallelAgents")?.globalValue ?? 20;
@@ -52,15 +54,16 @@ export function agentName(context: { fromTramaTerminal?: boolean; fromCursorChat
 }
 
 /**
- * The Copilot model that the role's name picks, as `workbench.action.chat.open` takes it: the first model named
- * `<name> (<vendor>)`, or `<name>` for Copilot's own models. Not found: the warning says so and the chat keeps its model.
+ * The Copilot model that the run's model names, as `workbench.action.chat.open` takes it: the first model named
+ * `<name> (<vendor>)`, or `<name>` for Copilot's own models. Not found: the warning names where the model comes from
+ * (`trama.<role>` or the Proposal), and the chat keeps its model.
  */
-async function copilotModelSelector(role: Role): Promise<{ vendor: string; id: string } | undefined> {
-  const name = configuredModels()[role];
+async function copilotModelSelector(run: RunModel): Promise<{ vendor: string; id: string } | undefined> {
+  const name = run.model;
   if (name === "") return undefined;
   const found = (await vscode.lm.selectChatModels()).find((model) => name === `${model.name} (${model.vendor})` || (model.vendor === "copilot" && name === model.name));
   if (found) return { vendor: found.vendor, id: found.id };
-  void vscode.window.showWarningMessage(`Trama: no Copilot model is named "${name}" (trama.${role}). The instruction was sent with the model chosen in the chat.`);
+  void vscode.window.showWarningMessage(`Trama: no Copilot model is named "${name}" (${run.from}). The instruction was sent with the model chosen in the chat.`);
   return undefined;
 }
 
@@ -69,14 +72,14 @@ async function copilotModelSelector(role: Role): Promise<{ vendor: string; id: s
  * `workbench.action.chat.open` with `{ query, mode }` is how VS Code's own actions do it, but it is not a documented
  * API: if it fails, the prompt goes to the clipboard instead.
  */
-async function openChat(root: string, prompt: () => string, canSend: () => boolean, onSendStart: () => void, role: Role): Promise<ChatDelivery> {
+async function openChat(root: string, prompt: () => string, canSend: () => boolean, onSendStart: () => void, run: RunModel): Promise<ChatDelivery> {
   if (!canSend()) return "not-sent";
   if (isCursor()) {
     onSendStart();
-    return openCursorChat(root, withTramaPath(prompt()), canSend, configuredModels()[role]);
+    return openCursorChat(root, withTramaPath(prompt()), canSend, run.model);
   }
   try {
-    const modelSelector = await copilotModelSelector(role);
+    const modelSelector = await copilotModelSelector(run);
     await vscode.commands.executeCommand("workbench.action.chat.newChat");
     if (!canSend()) return "not-sent";
     const query = prompt();
@@ -267,13 +270,14 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
 /** The identity a chat job's agent passes to the coordinator-aware commands: a chat has no environment, so the text gives it. */
 const jobIdentity = (jobId: string): string => `This Trama job has ID ${jobId}. Pass \`--job ${jobId}\` to every Trama command that accepts \`--job\`.`;
 
-/** The instruction with its limit, sub-agent, job and language sentences on one line, for the chat and the terminal alike; a terminal's job comes from its environment. */
-function agentPrompt(instruction: string, role: Role, jobId?: string): string {
+/** The instruction with its limit, sub-agent, job, Drift blocker and language sentences on one line, for the chat and the terminal alike; a terminal's job comes from its environment. */
+function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, jobId?: string): string {
   const limit = configuredMaxParallelAgents();
   const withLimit = withAgentLimit(instruction, limit);
   const withSubAgent = canScan(role) ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
   const withJob = jobId === undefined ? withSubAgent : `${withSubAgent} ${jobIdentity(jobId)}`;
-  return withLanguage(withJob, configuredLanguage());
+  const withBlocker = withDriftBlocker(withJob, filesDrifts && configuredDriftBlocker());
+  return withLanguage(withBlocker, configuredLanguage());
 }
 
 /** The model roles, trimmed (`trama.analysis`, `trama.scan`, `trama.execution`). Application scope: only the user's settings count. */
@@ -283,14 +287,14 @@ export const configuredModels = (): Models => ({
   execution: settings().get<string>("execution", "").trim(),
 });
 
-function terminalRun(agent: TerminalAgent, instruction: Instruction, name: string): TerminalRun {
+function terminalRun(agent: TerminalAgent, instruction: Instruction, name: string, filesDrifts: boolean, run: RunModel): TerminalRun {
   const role = roleOf(name);
-  const models = configuredModels();
   const hook = agent === "omp" ? bundledOmpHook() : undefined;
   const tramaPath = agent === "claude" ? bundledTrama() : undefined;
+  const models = { model: run.model, scan: configuredModels().scan };
   return {
-    template: (family) => agentTemplate(agent, role, models, family, hook, tramaPath),
-    prompt: () => agentPrompt(textOf(instruction), role),
+    template: (family) => agentTemplate(agent, canScan(role), models, family, hook, tramaPath),
+    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts),
     hooked: hook !== undefined || tramaPath !== undefined,
   };
 }
@@ -310,8 +314,17 @@ async function releaseSendWithCoordinator(root: string, id: string): Promise<voi
   await requestCoordinatorMessage(projectAt(root), { type: "release-send", root, id }).catch(() => undefined);
 }
 
+/** What a Run of a sequence does once its job ends locally: the next Run starts, or the held job ends (see `runSequence`). */
+const runEnds = new Map<string, (abnormal?: string) => void>();
+
 async function broadcastJob(root: string, job: Job, active: boolean): Promise<void> {
   const abnormal = active ? undefined : jobAbnormalEnd(root, job.id);
+  // The end is handed to the step that follows it at once, not after the coordinator has heard of it: a sequence never waits on another window.
+  if (!active) {
+    const next = runEnds.get(job.id);
+    runEnds.delete(job.id);
+    next?.(abnormal);
+  }
   const message: CoordinatorMessage = {
     type: "job",
     id: job.id,
@@ -320,16 +333,36 @@ async function broadcastJob(root: string, job: Job, active: boolean): Promise<vo
     active,
     origin: job.origin,
     windowId: job.windowId,
-    place: "terminal" in job.place ? { terminal: job.place.terminal } : { chat: job.place.chat },
+    place: job.place,
     ...(abnormal !== undefined ? { abnormal } : {}),
   };
   try { await sendCoordinatorMessage(projectAt(root), message); }
   catch { /* An unavailable coordinator suspends automation; it never changes the local job's outcome. */ }
 }
 
+/**
+ * Holds the project from now until `endHeldJob` with a job of `kind` that has no terminal or chat: `resolve` while an
+ * automatic collection is prepared and its agent works, `run` from its hand-over to its Run. The other windows hear of it.
+ */
+export function startHeldJob(root: string, kind: JobKind, origin: JobOrigin, windowId: string, id: string): void {
+  const started = startJob(kind, root, { held: true }, false, undefined, id, origin, windowId);
+  if (started !== undefined && userDelegation() !== "disabled") void broadcastJob(root, { id, kind, root, place: { held: true }, origin, windowId }, true);
+}
+
+/** Ends the held job `id`: its steps are over, or it was released with `abnormal`. The other windows hear of it. */
+export function endHeldJob(root: string, id: string, abnormal?: string): void {
+  for (const job of endHeldJobs(root, id, abnormal)) void broadcastJob(root, job, false);
+}
+
 export interface LaunchJobOptions {
   id?: string;
   origin?: JobOrigin;
+  /** Whether the instruction lets the agent file Drifts: the experimental Drift blocker's sentence then goes to it. */
+  filesDrifts?: boolean;
+  /** The model the instruction runs on when a Proposal's model applies (`proposalRunModel`); absent, the model of the role in Settings. */
+  model?: RunModel;
+  /** Called once the Run's job ends: with why it ended abnormally, or with nothing for a normal end. A Run that did not start ends with a reason too. */
+  onEnd?: (abnormal?: string) => void;
 }
 
 export async function launchAgent(
@@ -344,6 +377,9 @@ export async function launchAgent(
 ): Promise<Launch | undefined> {
   const jobId = job === undefined ? undefined : jobOptions.id ?? randomUUID();
   const jobOrigin = jobOptions.origin ?? "manual";
+  const filesDrifts = jobOptions.filesDrifts === true;
+  const role = roleOf(name);
+  const runModel = jobOptions.model ?? { model: configuredModels()[role], from: `trama.${role}` };
   const windowId = job === undefined ? "" : await questionWindowId(root) ?? "";
   const agent = configuredAgent();
   // Under `disabled` the window reserves no send and announces no job start to the other windows: it knows only its own work.
@@ -354,13 +390,17 @@ export async function launchAgent(
     if (agent === "chat") {
       let sentAfter = 0;
       const chat = isCursor() ? "cursor" : "copilot";
-      const prompt = () => agentPrompt(textOf(instruction), roleOf(name), jobId);
+      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, jobId);
       const delivery = await openChat(root, prompt, canSend, () => {
         sentAfter = chatJobSendStarted(root, chat);
-      }, roleOf(name));
+      }, runModel);
       if (delivery === "sent" && announceProposal !== undefined) announceLaunch(root, announceProposal, { chat: isCursor() ? "cursor" : "editor" });
       if (delivery === "sent" && job !== undefined && jobId !== undefined) {
         const started = startJob(job, root, { chat }, false, sentAfter, jobId, jobOrigin, windowId);
+        if (jobOptions.onEnd !== undefined) {
+          if (started === undefined) jobOptions.onEnd("its conversation ended before its instruction began");
+          else runEnds.set(started, jobOptions.onEnd);
+        }
         if (started !== undefined && shared) await broadcastJob(root, {
           id: started, kind: job, root, place: { chat }, origin: jobOrigin, windowId,
         }, true);
@@ -368,7 +408,7 @@ export async function launchAgent(
       if (delivery !== "not-sent") onSent?.(Date.now());
       return delivery;
     }
-    const run = terminalRun(agent, instruction, name);
+    const run = terminalRun(agent, instruction, name, filesDrifts, runModel);
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
@@ -397,6 +437,7 @@ export async function launchAgent(
     onSent?.(startedAt);
     if (job !== undefined && jobId !== undefined) {
       const started = startJob(job, root, { terminal: terminalId }, run.hooked, undefined, jobId, jobOrigin, windowId);
+      if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
       if (started !== undefined && shared) await broadcastJob(root, {
         id: started, kind: job, root, place: { terminal: terminalId }, origin: jobOrigin, windowId,
       }, true);

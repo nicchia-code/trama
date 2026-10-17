@@ -229,3 +229,20 @@ button.board-btn { padding: 2px 8px; }
 .board-notices:empty { display: none; }
 .board-notice { display: flex; align-items: center; gap: 8px; justify-content: space-between; margin-top: 6px; padding: 4px 8px; border: 1px solid var(--board-warning); border-radius: 3px; background: color-mix(in srgb, var(--board-warning) 18%, transparent); }
 .board-notice-text { overflow-wrap: anywhere; }
+
+/* The model of a Proposal that carries Tasks: the badge with the model's name, then the gear that opens its window at the end of the head row. */
+.board-model-gear { flex: none; display: inline-flex; align-items: center; justify-content: center; margin-left: auto; padding: 2px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; }
+.board-model-gear:hover { border-color: var(--board-muted); }
+.board-model-gear:focus-visible { outline: 1px solid var(--vscode-focusBorder, currentColor); outline-offset: 1px; }
+.board-model { max-width: 100%; overflow-wrap: anywhere; }
+.board-model.is-stale { border-color: var(--board-muted); background: transparent; color: var(--board-muted); text-decoration: line-through; }
+
+.board-model-dialog { width: min(480px, 90vw); max-height: 85vh; padding: 0; border: 1px solid var(--board-border); border-radius: 4px; background: var(--vscode-editor-background, #1e1e1e); color: inherit; }
+.board-model-dialog::backdrop { background: rgb(0 0 0 / 40%); }
+.board-model-body { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; box-sizing: border-box; max-height: 85vh; overflow: auto; }
+.board-model-head { display: flex; align-items: baseline; gap: 12px; }
+.board-model-title { flex: 1; min-width: 0; margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.board-model-label { font-weight: 600; }
+.board-model-body .st-input { width: 100%; box-sizing: border-box; }
+.board-model-body .st-note, .board-model-hint { margin: 0; }
+.board-model-chosen { margin: 0; color: var(--vscode-editorWarning-foreground, inherit); }

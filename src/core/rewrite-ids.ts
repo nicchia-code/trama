@@ -131,8 +131,10 @@ function writeTask(task: Task): void {
 }
 
 function writeDrift(drift: Drift): void {
-  const data: { created?: string | null } = { ...drift.data };
+  const { notBlocking, ...rest } = drift.data;
+  const data: { created?: string | null; notBlocking?: { task: string; reason: string }[] } = { ...rest };
   if (data.created == null) delete data.created;
+  if (notBlocking.length > 0) data.notBlocking = notBlocking;
   writeDocument(drift.path, data, drift.body);
 }
 
@@ -182,13 +184,15 @@ export function rewriteNumberedCards(p: Project): RewrittenCard[] {
     const origin = mapped("task", drift.data.origin, ids);
     const resolvedBy = mapped("proposal", drift.data.resolvedBy, ids);
     const previous = mapped("drift", drift.data.previous, ids);
-    const changed = proposal !== drift.data.proposal || task !== drift.data.task || origin !== drift.data.origin || resolvedBy !== drift.data.resolvedBy || previous !== drift.data.previous;
+    const notBlocking = drift.data.notBlocking.map((n) => ({ ...n, task: mapped("task", n.task, ids) ?? n.task }));
+    const changed = proposal !== drift.data.proposal || task !== drift.data.task || origin !== drift.data.origin || resolvedBy !== drift.data.resolvedBy || previous !== drift.data.previous || notBlocking.some((n, i) => n.task !== drift.data.notBlocking[i]?.task);
     if (!card && !changed) continue;
     drift.data.proposal = proposal;
     drift.data.task = task;
     drift.data.origin = origin;
     drift.data.previous = previous;
     drift.data.resolvedBy = resolvedBy;
+    drift.data.notBlocking = notBlocking;
     if (card) drift.data.created = rewrittenInstant(card.number);
     writeDrift(drift);
   }

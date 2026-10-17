@@ -9,7 +9,7 @@ import { join } from "node:path";
 let delegation: string | undefined;
 mock.module("vscode", () => ({
   window: { createWebviewPanel: () => { throw new Error("no panel in this test"); }, showWarningMessage: () => undefined, showErrorMessage: () => undefined, showInformationMessage: async () => undefined },
-  workspace: { workspaceFolders: [], getWorkspaceFolder: () => undefined, getConfiguration: () => ({ get: () => undefined, inspect: (key: string) => (key === "driftAutoPilot" ? { globalValue: delegation } : undefined) }) },
+  workspace: { workspaceFolders: [], getWorkspaceFolder: () => undefined, getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: (key: string) => (key === "driftAutoPilot" ? { globalValue: delegation } : undefined) }) },
   Uri: { joinPath: () => ({ fsPath: "" }), file: (path: string) => ({ fsPath: path, toString: () => path }), parse: (value: string) => ({ toString: () => value }) },
   ViewColumn: { Active: 1, Beside: -2 },
   commands: { executeCommand: async () => undefined },
@@ -155,6 +155,48 @@ test("a failed final check of an automatic Run holds its continuation: no Task i
   expect(internals.collection).toBeUndefined();
   expect(autopilotFailedCase(root, fix)).toBe(true);
   expect(autopilotFailedCase(root, origin.id)).toBe(true);
+  controller.dispose();
+  delegation = undefined;
+});
+
+test("an origin whose fix Task is Done joins a new Run of the same collection, and the planned Runs do not change", async () => {
+  delegation = "enabled";
+  const root = mkdtempSync(join(tmpdir(), "trama-later-run-"));
+  cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+  const project = projectAt(root);
+  const origin = newTask(project, { title: "Refund prepared orders", refs: ["order"], technical: false });
+  const drift = newDrift(project, { options: FIX_OPTIONS, title: "Refund differs", refs: ["order"], origin: origin.id, happens: "The code does it one way.", should: "The Model says another.", where: "order.md" });
+  resolveDrift(project, drift.id, "fix-code", [], { option: 1 });
+  const fix = getDrift(project, drift.id).data.task as string;
+  const controller = new Controller({ fsPath: root } as never);
+  const internals = controller as unknown as {
+    collection: unknown;
+    advanceCollection(project: unknown, collection: unknown): Promise<void>;
+  };
+  const plannedFirst = { run: {}, group: {}, tasks: [fix] };
+  const collection = {
+    root,
+    id: "collection",
+    drifts: [drift.id],
+    resolutionJob: "resolution-job",
+    proposals: [],
+    approvedDrifts: new Set([drift.id]),
+    handovers: new Set(),
+    stage: "running",
+    runJob: "run-job",
+    run: 0,
+    runs: [plannedFirst],
+    fixTasks: new Map([[fix, drift.id]]),
+    origins: new Map([[origin.id, drift.id]]),
+  };
+  internals.collection = collection;
+  moveTask(project, fix, "done", "developer", {}, "Checked: the code already does what the Model says.");
+  await internals.advanceCollection(project, collection);
+  expect(internals.collection).toBe(collection);
+  expect(collection.runs).toEqual([plannedFirst, expect.objectContaining({ tasks: [origin.id] })]);
+  expect(collection.run).toBe(1);
+  expect(collection.runs[0]).toBe(plannedFirst);
+  expect(autopilotFailures(root)).toEqual([]);
   controller.dispose();
   delegation = undefined;
 });

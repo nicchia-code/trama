@@ -849,8 +849,8 @@ function ghostOf(fsPath: string): { text: string; color: string } | undefined {
   return undefined;
 }
 
-const DESIGN_GHOST = "Describe the change to design: behaviour, edge cases, requirements. Close this tab or press Send to agent when you are done.";
-const SETUP_GHOST = "Describe the application to build: what it does and who it is for. Close this tab or press Send to agent when you are done.";
+const DESIGN_GHOST = "Describe the change to design: behaviour, edge cases, requirements. Paste or drop images for context. Close this tab or press Send to agent when you are done.";
+const SETUP_GHOST = "Describe the application to build: what it does and who it is for. Paste or drop images for context. Close this tab or press Send to agent when you are done.";
 
 describe("the ghost text of a request never sent", () => {
   test("Add Work Item… shows the design text in the disabled colour, at the start, and the file stays empty and unsaved", async () => {

@@ -596,7 +596,7 @@ With the real agent from S2, in the verification shell, `ls -A $D/requests` list
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | H32 | Board: **Add Work Item…** | A new tab `<id>.md`, language Markdown, not in preview (title not italic), completely empty. Its editor title has a **Send to agent** button with the send icon and the tooltip `Send to agent (closing the tab sends it too)` | ☐ |
-| H32a | On the empty tab from **Add Work Item…**, look at the start of the first line | The grey text `Describe the change to design: behaviour, edge cases, requirements. Close this tab or press Send to agent when you are done.` is shown on one line; the file stays empty | ☐ |
+| H32a | On the empty tab from **Add Work Item…**, look at the start of the first line | The grey text `Describe the change to design: behaviour, edge cases, requirements. Paste or drop images for context. Close this tab or press Send to agent when you are done.` is shown on one line; the file stays empty | ☐ |
 | H32b | Type one letter, then delete it; type a space on the empty tab and delete it again | The grey text disappears at the first letter and comes back when everything is deleted; with only a space it stays away | ☐ |
 | H33 | `ls -A $D/requests` and `cat $D/requests/.gitignore` | `.gitignore` and the empty `<id>.md` already exist; the `.gitignore` prints `*`. `git status` in the demo shows nothing under `.trama/requests/` | ☐ |
 | H34 | Switch to any other file tab, then back | **Send to agent** is shown only on the request's tab | ☐ |
@@ -639,12 +639,11 @@ After H71–H77, restore S2.
 
 ## I. Real agent: omp 🪙
 
-Switch modes with the script, from the repo (it works from any shell, fish included, and keeps the other keys of `settings.json`): `cd /home/luca/Developer/Trama && bun run scripts/demo-agent.ts <echo|path|omp>`. Stop an agent at any time with Ctrl+C. Quit omp between launches (I7).
+Print the setting with the script, from the repo (it works from any shell, fish included): `cd /home/luca/Developer/Trama && bun run scripts/demo-agent.ts`. Put the printed line in your user settings, with the other keys left as they are. Stop an agent at any time with Ctrl+C. Quit omp between launches (I7).
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| I0 | No omp, no tokens. Run `bun run scripts/demo-agent.ts path`, then ↻ and Board: **Scan System** | The terminal shows, on two lines, `/home/luca/Developer/Trama/dist/trama` and `Use the trama-scan skill on the whole System.`. This checks the PATH prefix and the quoting in your own shell. Verified by script in fish | ☐ |
-| I1 | `bun run scripts/demo-agent.ts omp`, ↻, then Board: **Scan System** | The terminal shows `PATH=/home/luca/Developer/Trama/dist:$PATH omp 'Use the trama-scan skill on the whole System.'` and omp starts and starts working on the prompt. Reproduced by script in a real terminal in fish (banner, then `Working…`). If it fails for you, copy the exact text the terminal shows | ☐ |
+| I1 | `bun run scripts/demo-agent.ts`, put the line in user settings, reload, ↻, then Board: **Scan System** | The terminal shows `omp 'Use the trama-scan skill on the whole System.'` and omp starts and starts working on the prompt. `dist/` of this repo must be on the PATH the editor gives its terminals, or omp cannot run `trama`. If it fails for you, copy the exact text the terminal shows | ☐ |
 | I2 | In omp type `/skill:trama-scan` (or ask which skills are loaded) | The skill `trama-scan` is known. If not, omp does not read `.agents/skills/` of the project: report it | ☐ |
 | I3 | Interrupt omp and ask it to run `command -v trama` | `/home/luca/Developer/Trama/dist/trama` | ☐ |
 | I4 | Ask it to run `trama board` | The same board as S5 | ☐ |
@@ -665,7 +664,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | J1 | **Trama: Open** in a folder without `.trama/` | The panel opens on Get Started, with the choices **Import from Code** and **Start from Scratch** | ☐ |
 | J2 | Click **Start from Scratch** in several-folder workspace and cancel the folder picker, or cancel a modal | Nothing is created; no agent starts | ☐ |
 | J3 | Click **Start from Scratch** in the empty folder | `.trama/model/system.md` and `.agents/skills/trama-{design,scan,implement}/SKILL.md` appear; the panel opens and an empty design request opens in a tab | ☐ |
-| J3a | On the tab that Start from Scratch opened, look at the start of the first line | The grey text `Describe the application to build: what it does and who it is for. Close this tab or press Send to agent when you are done.` is shown on one line; typing a letter removes it | ☐ |
+| J3a | On the tab that Start from Scratch opened, look at the start of the first line | The grey text `Describe the application to build: what it does and who it is for. Paste or drop images for context. Close this tab or press Send to agent when you are done.` is shown on one line; typing a letter removes it | ☐ |
 | J4 | Look at the Diagram 🔍 | Breadcrumb `System`. Under the tabs, the empty-Model text `The Model is empty. Import the existing code or start from scratch; later, design changes from the Board.`, with **Board** as a link, and below it two buttons side by side, **Import from Code** and **Start from Scratch**, in the style of the panel's buttons. Tooltips: `Ask an agent to describe the existing code as Proposals` and `Set up Trama and describe the project you want to build`. Board shows 0 in all columns and no badge | ☐ |
 | J4a | Click **Board** in the empty-Model text, then back on the Diagram click **Import from Code** | The Board tab opens. The agent gets the same import request as **Trama: Import from Code**. Once a Feature or Actor exists, the text and both buttons disappear | ☐ |
 | J4b | In the folder of J3 (it has `.trama/` and an empty Model), put a visible file in it, open the Diagram and click **Start from Scratch** | No warning about the visible file and nothing is initialized: the setup request opens in a tab at once, and `.trama/` is unchanged | ☐ |

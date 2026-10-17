@@ -1,5 +1,6 @@
 import { type ResolvedRow, recurringLabel } from "./board/logic";
 import { idTag } from "./id-tag";
+import { notBlockingLine } from "./not-blocking";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -46,6 +47,8 @@ export function renderResolves(prefix: "board" | "dg", title: string, rows: Reso
       item.append(failed);
     }
     item.append(...blockedRows(row.drift));
+    const freed = notBlockingLine(row.notBlocking);
+    if (freed) item.append(freed);
     list.append(item);
   }
   return [el("div", `${prefix}-resolves-head`, "Resolves Drifts"), list];

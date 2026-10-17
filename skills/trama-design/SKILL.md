@@ -93,6 +93,7 @@ When the instruction names a file `.trama/requests/<id>.md`, the developer wrote
 
 - Read the **whole** file before exploring the Model. If it no longer exists, tell the developer that the request is gone and stop, without opening any Proposal.
 - The request is the starting point of the interview, never its answers. The interview stays complete: every decision the request makes still becomes a question with its options, and the option the request indicates is your recommendation. Whatever it leaves open you ask about as usual.
+- Look at every image the request links: local files, relative to the request file or to the project, and web addresses, when you can open them. An image you cannot see (missing file, unreachable address, a model that does not read images) you ignore silently, without telling the developer. Put in words what matters in the images you can see, and never copy, link or cite the request's images, or their paths, in the Proposal body, the Model, the Requirements, the Specs or the Tasks.
 - Bind the first Proposal of the design to it: `trama proposal new "<title>" --body "<why>" --request <id>`. The Proposals that follow it with `--requires` get no `--request`. Handing the bound Proposal over deletes the request file, as intended.
 
 ## When a Proposal comes back

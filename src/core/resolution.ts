@@ -3,7 +3,7 @@ import { joinReasons } from "./design";
 import { type DriftDecision, type DriftDecisionKind, getProposal, listProposals, type Proposal, requireEditable, resolutionHolding, save, touch, withProposalLock } from "./proposals";
 import { cardName } from "./short-numbers";
 import type { Project } from "./store";
-import { chosenOption, driftOptions, fixCodeRefusal, followedDrift, getDrift, listDrifts } from "./work";
+import { chosenOption, driftOptions, fixCodeRefusal, followedDrift, type FreedTask, freedTasks, getDrift, listDrifts, listTasks } from "./work";
 
 /**
  * Records, replaces or (`remove`) removes the decision on `driftId` in a resolution Proposal, a Draft or an open one;
@@ -119,15 +119,18 @@ export interface ResolvedDrift {
   previous: { id: string; title: string } | null;
   decision: string;
   note: string | null;
+  /** The Tasks the Drift leaves free, each with its reason: the card shows them under the row. */
+  notBlocking: FreedTask[];
 }
 
 /** The Drifts a resolution lists, in creation order, read from the files at each call. Empty for any other Proposal. */
 export function resolvedDrifts(p: Project, proposal: Proposal): ResolvedDrift[] {
+  const tasks = listTasks(p);
   return listDrifts(p).flatMap((drift) => {
     const d = proposal.data.drifts.find((x) => x.drift === drift.id);
     if (!d) return [];
     const already = drift.data.status === "resolved" && drift.data.resolvedBy !== proposal.id;
     const option = d.option === undefined ? undefined : driftOptions(drift)[d.option - 1]?.title;
-    return [{ drift: drift.id, title: drift.title, critical: drift.data.critical, previous: followedDrift(p, drift), decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
+    return [{ drift: drift.id, title: drift.title, critical: drift.data.critical, previous: followedDrift(p, drift), decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null), notBlocking: freedTasks(drift, tasks) }];
   });
 }

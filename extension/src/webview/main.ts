@@ -71,10 +71,11 @@ function setProject(present: boolean) {
 const context: ViewContext = { post, navigate, openLink: (url) => post({ type: "openLink", url }) };
 const settings = mountSettings(roots.settings, context);
 const getStarted = mountGetStarted(roots.getstarted, context);
+const board = mountBoard(roots.board, context);
 const mounted: Record<ViewName, View> = {
   getstarted: getStarted,
   diagram: mountDiagram(roots.diagram, context),
-  board: mountBoard(roots.board, context),
+  board,
   requirements: mountRequirements(roots.requirements, context),
   specs: mountSpecs(roots.specs, context),
   settings,
@@ -120,7 +121,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     snapshot = message.snapshot;
     showError(null);
     mounted.diagram.update(snapshot, message.asking, message.resolve);
-    mounted.board.update(snapshot, message.asking, message.resolve);
+    board.update(snapshot, message.asking, message.resolve, message.models);
     mounted.requirements.update(snapshot);
     mounted.specs.update(snapshot);
     showModelErrors(snapshot.diagnostics);
@@ -129,13 +130,16 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     badge.hidden = decide === 0;
     badge.textContent = String(decide);
   } else if (message.type === "withdrawn") {
-    mounted.board.withdrawn?.(message.announcements);
+    board.withdrawn?.(message.announcements);
   } else if (message.type === "error") {
     showError(message.message);
   } else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal });
   else if (message.type === "questions") questions.update(message.round);
   else if (message.type === "settings") settings.receive(message);
-  else if (message.type === "modelSuggestions") settings.receiveModels(message);
+  else if (message.type === "modelSuggestions") {
+    settings.receiveModels(message);
+    board.receiveModels(message);
+  }
 });
 
 navigate(current);

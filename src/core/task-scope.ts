@@ -1,7 +1,7 @@
 import { loadProject, resolveProjectRef, type ProjectElement } from "./requirements";
 import type { Project } from "./store";
 import { closeScope, type ChangedEvent, type ChangedState, type ScanReason, type ScanScopeEntry } from "./scan-scope";
-import { getTask, runnableTasks, type Task } from "./work";
+import { getTask, type ProposalFilter, runnableTasks, type Task } from "./work";
 import { TramaError } from "./errors";
 
 /**
@@ -37,9 +37,9 @@ export function taskScope(p: Project, ids: string[]): ScanScopeEntry[] {
  * Requirement section as the element it is about, no General section, Area, or Transition added. A reference that no
  * longer resolves is skipped. Chooses the Tasks as `trama task next` does, and returns them too.
  */
-export function preflightScope(p: Project, proposal?: string, taskIds?: string[]): { refs: string[]; tasks: Task[] } {
+export function preflightScope(p: Project, filter: ProposalFilter = {}, taskIds?: string[]): { refs: string[]; tasks: Task[] } {
   const project = loadProject(p);
-  const tasks = runnableTasks(p, proposal, taskIds);
+  const tasks = runnableTasks(p, filter, taskIds);
   const refs = new Set<string>();
   const resolve = (ref: string) => {
     try {

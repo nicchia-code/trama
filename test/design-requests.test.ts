@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
-import { createRequest, isEmptyRequest, requestExists, requestIdAt, requestStamp, requestsDir, requestTitle } from "../src/core/design-requests";
+import { consumeRequest, createRequest, isEmptyRequest, requestExists, requestIdAt, requestStamp, requestsDir, requestTitle, sweepRequestImages } from "../src/core/design-requests";
 import { cardName } from "../src/core/short-numbers";
 import { editInProposal, getProposal, listProposals, newProposal, submitProposal } from "../src/core/proposals";
 import { type Project, projectAt } from "../src/core/store";
@@ -74,6 +74,38 @@ describe("storing a written design request", () => {
     expect(requestIdAt(p, join(p.dir, "requests", "nested", `${ID}.md`))).toBeUndefined();
     expect(requestIdAt(p, join(p.dir, "proposals", `${ID}.md`))).toBeUndefined();
     expect(requestExists(p, "../proposals/x")).toBe(false);
+  });
+});
+
+describe("the images of a written design request", () => {
+  test("a line of images is never the title, and a request of images only is not empty", () => {
+    expect(requestTitle("![shot](x.images/shot.png)\n\n# Real title\n")).toBe("Real title");
+    expect(requestTitle("![a](a.png) ![b](b.png)\nLet customers send orders back\n")).toBe("Let customers send orders back");
+    expect(requestTitle("![only](only.png)\n")).toBe("");
+    expect(isEmptyRequest("![only](only.png)\n")).toBe(false);
+  });
+
+  test("consuming a request deletes its images with it", () => {
+    const file = writeRequest(ID, `![shot](${ID}.images/shot.png)\n`);
+    const images = join(requestsDir(p), `${ID}.images`);
+    mkdirSync(images);
+    writeFileSync(join(images, "shot.png"), "png");
+    expect(consumeRequest(p, ID)).toBe(true);
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(images)).toBe(false);
+    expect(consumeRequest(p, ID)).toBe(false);
+  });
+
+  test("the sweep deletes the images of a request whose file is gone, and nothing else", () => {
+    writeRequest(ID);
+    const kept = join(requestsDir(p), `${ID}.images`);
+    const orphan = join(requestsDir(p), `${ID}-2.images`);
+    const other = join(requestsDir(p), "notes.images");
+    for (const folder of [kept, orphan, other]) mkdirSync(folder);
+    sweepRequestImages(p);
+    expect(existsSync(kept)).toBe(true);
+    expect(existsSync(orphan)).toBe(false);
+    expect(existsSync(other)).toBe(true);
   });
 });
 

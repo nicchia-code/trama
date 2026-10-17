@@ -23,6 +23,8 @@ The instruction names a file `.trama/requests/<id>.md`. Read the **whole** file 
 
 The request is the starting point of the interview, never its answers. Every decision it makes still becomes a question with its options, the option the request indicates being your recommendation.
 
+Look at every image the request links, with the same rules as `trama-design`: local files and web addresses you can open, images you cannot see ignored silently, what matters written in words, and no copy, link or citation of the request's images, or their paths, in the Proposal, the Model, the Requirements, the Specs or the Tasks.
+
 ## Step 2: check the Model is empty
 
 Run `trama system --json` and `trama search <word>` only as needed. If the Model already has a Feature or an Actor, stop and tell the developer that `trama-design` is the skill for it: `trama proposal new --setup` would be refused.

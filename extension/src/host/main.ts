@@ -47,7 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
   const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
   const requests = new DesignRequests(context.workspaceState, tramaFiles, undefined, undefined, () => trama.launch({ kind: "implement-all" }));
-  const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri, questions, requests);
+  const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri, questions, requests, context.workspaceState);
   controller = trama;
   context.subscriptions.push(
     tramaFiles,

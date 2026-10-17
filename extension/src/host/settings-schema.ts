@@ -48,13 +48,14 @@ export interface SettingsValues {
   workspace?: unknown;
 }
 
-/** The five groups, in order; each lists its keys in order. Every key in the manifest must appear once. */
+/** The six groups, in order; each lists its keys in order. Every key in the manifest must appear once. */
 export const SETTING_GROUPS: readonly { title: string; keys: readonly string[] }[] = [
   { title: "Agent", keys: ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.autoExit", "trama.language"] },
   { title: "Models", keys: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"] },
   { title: "Drift autopilot", keys: ["trama.driftAutoPilot"] },
   { title: "Runs", keys: ["trama.submitWhileRunning"] },
   { title: "Project", keys: ["trama.skillsDir"] },
+  { title: "Experimental", keys: ["trama.experimentalDriftBlocker"] },
 ];
 
 /** The Drift autopilot setting: how much the agent does with Drifts on its own, one choice over three levels. */

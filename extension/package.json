@@ -74,6 +74,11 @@
         }
       ]
     },
+    "configurationDefaults": {
+      "markdown.copyFiles.destination": {
+        "**/.trama/requests/*.md": "${documentBaseName}.images/${fileName}"
+      }
+    },
     "configuration": {
       "title": "Trama",
       "properties": {
@@ -174,6 +179,12 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Language the agent writes in, for example `Italian` or `Deutsch`. Empty by default: Trama never fills it in. When set, every instruction Trama sends to the agent asks it to write everything it generates in that language, except code, which always stays in English. Empty asks nothing about language. It only reaches agents that Trama starts, changes nothing already written, and the Trama interface stays in English."
+        },
+        "trama.experimentalDriftBlocker": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Experimental. On: the agent that files a Drift checks which of the Tasks it would block are really affected, blocks only those and says why it leaves each other one free; a Drift that blocks no Task is filed inside a resolution Proposal for you to approve. Off (the default): a Drift blocks every Task that concerns the same thing. Only agents started by Trama follow it."
         }
       }
     }

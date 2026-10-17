@@ -223,7 +223,7 @@ export class EditorQuestions implements vscode.Disposable {
               const active: CoordinatorMessage = {
                 type: "job", id: job.id, root: project.root, kind: job.kind, active: true,
                 origin: job.origin, windowId: job.windowId,
-                place: "terminal" in job.place ? { terminal: job.place.terminal } : { chat: job.place.chat },
+                place: job.place,
               };
               await sendCoordinatorMessage(project, active).catch(() => ({ delivered: 0 }));
             }

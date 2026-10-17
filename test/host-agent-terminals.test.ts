@@ -463,6 +463,69 @@ describe("Claude Code run hooks", () => {
     }
   });
 });
+
+describe("the model a launch runs on", () => {
+  test("the model given at the launch replaces the role's model in the command, and the scan model stays for Machine comparison", async () => {
+    // Dynamic import is intentional, as above: the fake vscode extension registry must be in place before agent.ts loads.
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const dir = mkdtempSync(join(tmpdir(), "trama-run-model-"));
+    projectAt(dir);
+    settingValues.agent = "omp";
+    settingValues.execution = "haiku";
+    settingValues.scan = "sonnet";
+    watchAgentTerminal();
+    try {
+      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, undefined, undefined, { model: { model: "gpt-5", from: "Proposal P3" } });
+      const proposal = terminals.at(-1) as FakeTerminal;
+      expect(proposal.line).toContain("--model 'gpt-5'");
+      expect(proposal.line).toContain("--slow 'sonnet'");
+      expect(proposal.line).not.toContain("haiku");
+      listeners.end.forEach((fn) => fn(shell(proposal)));
+
+      await launchAgent(dir, "Use the trama-implement skill on Task efgh5678.", "T4");
+      const role = terminals.at(-1) as FakeTerminal;
+      expect(role.line).toContain("--model 'haiku'");
+      expect(role.line).not.toContain("gpt-5");
+      listeners.end.forEach((fn) => fn(shell(role)));
+    } finally {
+      delete settingValues.execution;
+      delete settingValues.scan;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the end of a Run reaches the step that follows it", () => {
+  test("a normal end calls onEnd with nothing; a failed command or a closed terminal calls it with its reason", async () => {
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const dir = mkdtempSync(join(tmpdir(), "trama-run-end-"));
+    projectAt(dir);
+    settingValues.agent = "omp";
+    watchAgentTerminal();
+    const ends: string[] = [];
+    const record = (abnormal?: string) => void ends.push(abnormal ?? "normal");
+    try {
+      expect(await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run", undefined, { onEnd: record })).toBe("terminal");
+      const failed = terminals.at(-1) as FakeTerminal;
+      listeners.end.forEach((fn) => fn(shell(failed, failed.line, 1)));
+      expect(ends).toEqual(["its command exited with code 1"]);
+
+      await launchAgent(dir, "Use the trama-implement skill on Task efgh5678.", "T4", undefined, () => true, "run", undefined, { onEnd: record });
+      const done = terminals.at(-1) as FakeTerminal;
+      listeners.end.forEach((fn) => fn(shell(done, done.line, 0)));
+      expect(ends).toEqual(["its command exited with code 1", "normal"]);
+
+      await launchAgent(dir, "Use the trama-implement skill on Task ijkl9012.", "T5", undefined, () => true, "run", undefined, { onEnd: record });
+      const closed = terminals.at(-1) as FakeTerminal;
+      listeners.close.forEach((fn) => fn(closed));
+      expect(ends).toEqual(["its command exited with code 1", "normal", "its terminal was closed"]);
+    } finally {
+      settingValues.agent = "omp";
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("automatic terminal exit", () => {
   test("the first idle or typed-command end finalizes only its tracked terminal once", async () => {
     delete settingValues.autoExit;
@@ -584,6 +647,35 @@ describe("automatic terminal exit", () => {
       settingValues.agent = "omp";
       delete settingValues.maxParallelAgents;
       delete inspected.maxParallelAgents;
+    }
+  });
+  test("chat instructions carry the Drift blocker's sentence only for the instructions that may file Drifts, and only from the user setting", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const previousHandler = commandHandler;
+    const previousApp = editor.appName;
+    const sentence = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+    const scan = "Use the trama-scan skill on the whole System.";
+    let query = "";
+    settingValues.agent = "chat";
+    editor.appName = "Visual Studio Code";
+    inspected.experimentalDriftBlocker = { globalValue: true };
+    commandHandler = (id, ...args) => {
+      const options = args[0];
+      if (id === "workbench.action.chat.open" && typeof options === "object" && options !== null && "query" in options && typeof options.query === "string") query = options.query;
+    };
+    try {
+      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
+      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence}`);
+      expect(await launchAgent(dir, "Use the trama-design skill. Add refunds.", "Design", undefined, undefined, undefined, undefined, { filesDrifts: false })).toBe("sent");
+      expect(query).not.toContain(sentence);
+      inspected.experimentalDriftBlocker = { workspaceValue: true };
+      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
+      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.`);
+    } finally {
+      commandHandler = previousHandler;
+      editor.appName = previousApp;
+      settingValues.agent = "omp";
+      delete inspected.experimentalDriftBlocker;
     }
   });
   test("chat instructions are built after newChat and not sent if delivery conditions change", async () => {
@@ -747,6 +839,42 @@ describe("agent instruction settings", () => {
     } finally {
       delete settingValues["language"];
       delete settingValues["maxParallelAgents"];
+    }
+  });
+  test("the Drift blocker's sentence reaches only the instructions that may file Drifts, and only from the user setting", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const { buildAutomaticRunPrompt } = await import("../extension/src/host/prompts");
+    const sentence = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+    const scan = "Use the trama-scan skill on the whole System.";
+    const send = async (instruction: string, name: string, filesDrifts: boolean) => {
+      await launchAgent(dir, instruction, name, undefined, undefined, undefined, undefined, { filesDrifts });
+      return typed.at(-1) ?? "";
+    };
+    inspected["experimentalDriftBlocker"] = { globalValue: true };
+    try {
+      expect(await send(scan, "Scan", true)).toBe(`omp '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence}'`);
+      expect(await send("Use the trama-implement skill on Task abc.", "T3", true)).toBe(`omp 'Use the trama-implement skill on Task abc. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence}'`);
+      expect(await send("Use the trama-import skill on this repository.", "Import", true)).toBe(`omp 'Use the trama-import skill on this repository. Run at most 20 sub-agents at once. ${sentence}'`);
+      expect((await send(buildAutomaticRunPrompt("collection"), "All tasks", true)).endsWith(` ${sentence}'`)).toBe(true);
+      expect(await send("Use the trama-design skill. Add refunds.", "Design", false)).not.toContain(sentence);
+      expect(await send("Use the trama-resolve-drifts skill on the open Drifts ab12cd34.", "Drifts", false)).not.toContain(sentence);
+      expect(await send(scan, "Scan", false)).not.toContain(sentence);
+
+      inspected["experimentalDriftBlocker"] = { globalValue: false };
+      expect(await send(scan, "Scan", true)).not.toContain(sentence);
+      inspected["experimentalDriftBlocker"] = { globalValue: "true" };
+      expect(await send(scan, "Scan", true)).not.toContain(sentence);
+      inspected["experimentalDriftBlocker"] = { workspaceValue: true };
+      expect(await send(scan, "Scan", true)).not.toContain(sentence);
+      delete inspected["experimentalDriftBlocker"];
+      expect(await send(scan, "Scan", true)).not.toContain(sentence);
+
+      inspected["experimentalDriftBlocker"] = { globalValue: true };
+      settingValues["language"] = "Italian";
+      expect(await send(scan, "Scan", true)).toBe(`omp '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} Write everything you generate in Italian, except code, which always stays in English.'`);
+    } finally {
+      delete inspected["experimentalDriftBlocker"];
+      delete settingValues["language"];
     }
   });
 });

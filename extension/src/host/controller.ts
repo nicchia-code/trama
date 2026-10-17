@@ -15,12 +15,15 @@ import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { blockedTasks, dismissDrift, driftOptions, fixCodeRefusal, getDrift, getTask, listDrifts, listTasks, requireNotAttached, type Drift, type DriftOutcome } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAgent, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type Launch, launchAgent, launched, settings, userDelegation } from "./agent";
+import { configuredAgent, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type Launch, endHeldJob, launchAgent, launched, settings, startHeldJob, userDelegation } from "./agent";
 import { isCursor } from "./cursor";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
-import { activeProjectJobs, autopilotFailedCase, autopilotReady, clearAutopilotFailure, driftAutopilotStatus, driftWork, driftsFinishing, excludeAutopilotDrift, forgetDeveloperScanCases, forgetWindow, holdAutopilot, jobAbnormalEnd, lastFailedScan, observeAutopilotMode, onDriftResolutionChange, projectWindowIds, proposalsFinishing, recordAutopilotFailure, releaseSend, reserveSend, resumeAutopilot, runCauseTask, runContinuationHeld, runFinalCheckFailed, sendReserved, setCoordinatorAvailable, shownAutopilotFailures, tasksFinishing, type DriftAutopilotMode } from "./drift-resolution";
+import { activeProjectJobs, autopilotFailedCase, autopilotReady, clearAutopilotFailure, driftAutopilotStatus, driftWork, driftsFinishing, excludeAutopilotDrift, forgetDeveloperScanCases, forgetWindow, holdAutopilot, jobAbnormalEnd, lastFailedScan, observeAutopilotMode, onDriftResolutionChange, projectWindowIds, proposalsFinishing, recordAutopilotFailure, releaseSend, reserveSend, resumeAutopilot, runCauseTask, runContinuationHeld, runFinalCheckFailed, sendReserved, setCoordinatorAvailable, shownAutopilotFailures, tasksFinishing, type DriftAutopilotMode, type JobKind } from "./drift-resolution";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
+import { appliedProposalModels, boardModels, chooseProposalModel, forgetProposalModels, proposalRunModel, type BoardModels, type ModelMemory } from "./proposal-models";
+import type { RunModel } from "./terminal-agent";
+import { planRuns, runSequence, type AppliedModel, type PlannedRun } from "./run-groups";
 import { copilotSuggestions, cursorModels, ompModels, type ModelList } from "./model-lists";
 import { DRIFT_KEY, planDelegationChange, planSettingChange, settingsSchema, settingTitle, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
 import { resolveMarkdownFile } from "./paths";
@@ -29,7 +32,7 @@ import type { QuestionSession } from "./question-session";
 import type { DesignRequests } from "./design-requests";
 import type { EditorQuestions } from "./questions";
 import { writeLastScan } from "../../../src/core/last-scan";
-import { buildAutomaticRunPrompt, buildPrompt, terminalName, type ResolvedAction } from "./prompts";
+import { buildAutomaticRunPrompt, buildPrompt, mayFileDrifts, runTerminalName, terminalName, type ResolvedAction } from "./prompts";
 
 const DEBOUNCE_MS = 150;
 
@@ -75,6 +78,12 @@ interface AutopilotCollection {
   fixTasks: Map<string, string>;
   origins: Map<string, string>;
   runJob?: string;
+  /** The index in `runs` of the Run that runs now, or that starts next. */
+  run: number;
+  /** The Runs the authorized Tasks are cut into by model: the first plan at the first start; later authorized Tasks append Runs, the planned ones never change. */
+  runs?: PlannedRun[];
+  /** The held job that keeps the project in its state from this collection's start until its Run is created or it ends. */
+  hold?: string;
 }
 
 /** Owns the single Trama panel, feeds it snapshots and carries out what the developer asks of it. */
@@ -86,7 +95,7 @@ export class Controller implements vscode.Disposable {
   private collection: AutopilotCollection | undefined;
   /** The open Drifts the resolution launched from this window was asked to resolve; cleared once no resolution runs. */
   private readonly namedByResolution = new Set<string>();
-  /** The one Drift a Resolve Drifts on a single Drift asked the automatic collection to take: kept until that start really happens, so a refused start never widens to other Drifts. */
+  /** The one Drift a Resolve Drifts on a single Drift asked the automatic collection to take: consumed by the next start attempt, launched or refused, so a refused start never keeps the other Drifts out. */
   private namedAutomatic: { root: string; drift: string } | undefined;
   private coordinatorSubscription: vscode.Disposable | undefined;
   private ownedCoordinatorRoot: string | undefined;
@@ -104,6 +113,8 @@ export class Controller implements vscode.Disposable {
     private readonly globalStorageUri?: vscode.Uri,
     private readonly coordinator?: EditorQuestions,
     private readonly designRequests?: DesignRequests,
+    /** The workspace state, where the models chosen for Proposals are kept. */
+    private readonly modelMemory?: ModelMemory,
   ) {
     this.coordinatorSubscription = coordinator?.onCoordinatorRequest((message) => this.coordinatorMessage(message));
   }
@@ -280,14 +291,15 @@ export class Controller implements vscode.Disposable {
     }
   }
 
-  /** Resumes the delegation in the window that coordinates the project; any other window asks that one over the local channel. */
-  private async resumeCoordinator(project: Project): Promise<void> {
+  /** Resumes the delegation in the window that coordinates the project; any other window asks that one over the local channel. A named Drift is the only one the collection it starts may take. */
+  private async resumeCoordinator(project: Project, drift?: string): Promise<void> {
     if (await this.coordinator?.isCoordinator(project.root) ?? false) {
+      if (drift !== undefined) this.namedAutomatic = { root: project.root, drift };
       resumeAutopilot(project.root);
       await this.autopilotTick();
       return;
     }
-    await sendCoordinatorMessage(project, { type: "resolve-drifts", root: project.root }).catch(() => undefined);
+    await sendCoordinatorMessage(project, { type: "resolve-drifts", root: project.root, ...(drift === undefined ? {} : { drift }) }).catch(() => undefined);
   }
 
   dispose(): void {
@@ -296,7 +308,7 @@ export class Controller implements vscode.Disposable {
     this.panel?.dispose();
     if (this.collection) {
       try { this.abandonCollection(projectAt(this.collection.root), "The coordinator window closed during the Run"); }
-      catch { this.collection = undefined; }
+      catch { this.setCollection(undefined); }
     }
     clearTimeout(this.timer);
   }
@@ -386,9 +398,11 @@ export class Controller implements vscode.Disposable {
     }
     if (this.panel) this.panel.title = this.projectTitle(project);
     try {
+      if (this.modelMemory) forgetProposalModels(this.modelMemory, project).catch((err: unknown) => this.post({ type: "error", message: describeError(err) }));
       const work = driftWork(project.root, this.mode() !== "disabled");
       synchronizeAnnouncementTitles(project);
       const snapshot = buildSnapshot(project, driftsFinishing(project.root), proposalsFinishing(project.root), tasksFinishing(project.root));
+      const models: BoardModels = this.modelMemory ? boardModels(this.modelMemory, snapshot.proposals, configuredAgent()) : { agent: configuredAgent(), proposals: {} };
       if (this.panel) this.panel.title = snapshot.system.name.trim() || this.projectTitle(project);
       const status = driftAutopilotStatus(project.root, this.mode(), this.coordinator?.currentWindowId(project.root));
       const failures = shownAutopilotFailures(status.failures, status.mode, (id) => {
@@ -405,7 +419,7 @@ export class Controller implements vscode.Disposable {
       // The open Drifts the running resolution is working on: those an agent was asked to resolve, and those the automatic collection named.
       const collected = this.collection?.stage === "resolving" ? this.collection.drifts : [];
       const resolving = work.resolving ? Object.keys(drifts).filter((id) => this.namedByResolution.has(id) || collected.includes(id)) : [];
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker(work, settings().get<boolean>("submitWhileRunning", false) === true), autopilot, drifts, resolving } });
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker(work, settings().get<boolean>("submitWhileRunning", false) === true), autopilot, drifts, resolving }, models });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -465,6 +479,9 @@ export class Controller implements vscode.Disposable {
     if (message["type"] === "resolve-drifts") {
       if (!await this.coordinator?.isCoordinator(root)) return { coordinator: false, reason: "Project coordinator unavailable" };
       setCoordinatorAvailable(root, true);
+      // A window that named one Drift asks for the collection of that Drift alone; it starts only if the Drift is still eligible.
+      const named = message["drift"];
+      if (typeof named === "string") this.namedAutomatic = { root, drift: named };
       resumeAutopilot(root);
       void this.autopilotTick();
       return { coordinator: true, received: true };
@@ -520,14 +537,20 @@ export class Controller implements vscode.Disposable {
       clearAutopilotFailure(project.root, drift.id, JSON.stringify({ data: drift.data, body: drift.body }));
     if (mode === "disabled" || listProposals(project).some((proposal) =>
       proposal.data.kind === "resolution" && (proposal.data.status === "draft" || proposal.data.status === "open"))) return [];
-    const named = this.namedAutomatic?.root === project.root ? this.namedAutomatic.drift : undefined;
-    return drifts
+    const eligible = drifts
       .filter((drift) => drift.data.status === "open"
         && (!drift.data.critical || mode === "yolo")
         && automaticallyFixable(project, drift)
-        && !autopilotFailedCase(project.root, drift.id)
-        && (named === undefined || drift.id === named))
+        && !autopilotFailedCase(project.root, drift.id))
       .map((drift) => drift.id);
+    const named = this.namedAutomatic?.root === project.root ? this.namedAutomatic.drift : undefined;
+    if (named === undefined) return eligible;
+    // A named Drift that is no longer eligible ends its request: nothing starts for it and it does not hold the other Drifts.
+    if (!eligible.includes(named)) {
+      this.namedAutomatic = undefined;
+      return [];
+    }
+    return [named];
   }
 
   private authorizedCollectionDrifts(project: Project, collection: AutopilotCollection, mode: DriftAutopilotMode): string[] {
@@ -614,7 +637,7 @@ export class Controller implements vscode.Disposable {
     this.ownedCoordinatorRoot = root;
     // Jobs other windows started while the autopilot was disabled reach this coordinator only when it asks: import them before the barrier is judged.
     if (!this.importedRoots.has(root) && await this.coordinator?.importJobs(root)) this.importedRoots.add(root);
-    if (this.collection && this.collection.root !== root) this.collection = undefined;
+    if (this.collection && this.collection.root !== root) this.setCollection(undefined);
     if (this.collection) {
       await this.advanceCollection(project, this.collection);
       return;
@@ -637,14 +660,16 @@ export class Controller implements vscode.Disposable {
       approvedDrifts: new Set(),
       handovers: new Set(),
       stage: "resolving",
+      run: 0,
       fixTasks: new Map(),
       origins: new Map(),
     };
-    this.collection = collection;
+    this.setCollection(collection);
+    this.holdCollection(collection, "resolve");
     const currentDrifts = () => this.authorizedCollectionDrifts(project, collection, this.mode());
     const canSend = () => this.ownedCoordinatorRoot === project.root
       && this.mode() !== "disabled"
-      && activeProjectJobs(project.root).length === 0
+      && activeProjectJobs(project.root).every((job) => job.id === collection.hold)
       && currentDrifts().length > 0;
     // The instruction is built only when it is really sent: the collection then keeps exactly the Drifts it names, so a Drift no longer eligible then is left out without failing.
     const instruction = () => {
@@ -654,7 +679,9 @@ export class Controller implements vscode.Disposable {
     };
     const launchedNow = await this.deliverAutomatic(project.root, canSend, (guarded) => launchAgent(project.root, instruction, "Drifts", { kind: "resolve", drifts: () => collection.drifts }, guarded, "resolve", undefined, { id, origin: "automatic" }));
     // Not delivered: nothing ran, so the reservation is released. A refused start is taken again by the next check; a held one waits for the developer.
-    if (!launchedNow && this.collection === collection) this.collection = undefined;
+    if (!launchedNow && this.collection === collection) this.setCollection(undefined);
+    // The named Drift has had its one start attempt, launched or refused: the next checks judge the Drifts as usual.
+    if (this.namedAutomatic?.root === project.root) this.namedAutomatic = undefined;
     return launchedNow;
   }
 
@@ -714,14 +741,24 @@ export class Controller implements vscode.Disposable {
           this.failCase(project, collection.resolutionJob, id, undefined, "No authorized automatic fix decision was submitted for this Drift");
       }
       collection.stage = "authorized";
+      this.holdCollection(collection, "run");
+    }
+    if (collection.stage === "running" && collection.runJob && !activeProjectJobs(project.root).some((job) => job.id === collection.runJob)) {
+      const abnormal = jobAbnormalEnd(project.root, collection.runJob);
+      const held = runContinuationHeld(project.root, collection.runJob);
+      if (abnormal !== undefined) this.failUnfinishedTasks(project, collection, `The Run ended abnormally (${abnormal})`);
+      else if (held) this.failUnfinishedTasks(project, collection, "The final check of the Run failed, so automatic continuation stopped");
+      // A Run that ended normally hands over to the next one: the planned Runs left, then the authorized Tasks not planned yet (an origin whose fix Task has just become Done).
+      // Any other end stops the sequence.
+      if (abnormal !== undefined || held) {
+        this.setCollection(undefined);
+        return;
+      }
+      collection.run++;
+      collection.runJob = undefined;
+      collection.stage = "authorized";
     }
     if (collection.stage === "authorized") await this.startAuthorizedRun(project, collection);
-    else if (collection.stage === "running" && collection.runJob && !activeProjectJobs(project.root).some((job) => job.id === collection.runJob)) {
-      const abnormal = jobAbnormalEnd(project.root, collection.runJob);
-      if (abnormal !== undefined) this.failUnfinishedTasks(project, collection, `The Run ended abnormally (${abnormal})`);
-      else if (runContinuationHeld(project.root, collection.runJob)) this.failUnfinishedTasks(project, collection, "The final check of the Run failed, so automatic continuation stopped");
-      this.collection = undefined;
-    }
   }
 
   /**
@@ -818,45 +855,125 @@ export class Controller implements vscode.Disposable {
     const mode = this.mode();
     if (mode === "disabled") { this.withdrawCollection(project); return; }
     // Only Runs and resolutions block the automatic Run: a scan started after the collection goes to the next cycle.
-    if (activeProjectJobs(project.root).some((job) => job.kind !== "scan") || driftAutopilotStatus(project.root, mode).phase === "suspended") return;
-    const tasks = this.authorizedCollectionTasks(project, collection, mode);
-    if (tasks.length === 0) { this.collection = undefined; return; }
-    const states = runTasks(project);
-    const runnable = new Set(states.filter((task) => tasks.includes(task.id) && task.column === "todo" && task.blockedBy.length === 0).map((task) => task.id));
-    if (runnable.size === 0) {
-      for (const id of tasks) {
-        const state = states.find((task) => task.id === id);
-        const reason = state?.blockedBy.length
-          ? `Authorized Task is blocked by ${state.blockedBy.join(", ")}`
-          : `Authorized Task is not runnable in the ${state?.column ?? "missing"} column`;
-        this.failCase(project, collection.resolutionJob, undefined, id, reason);
+    if (activeProjectJobs(project.root).some((job) => job.kind !== "scan" && job.id !== collection.hold) || driftAutopilotStatus(project.root, mode).phase === "suspended") return;
+    const authorized = this.authorizedCollectionTasks(project, collection, mode);
+    if (authorized.length === 0) { this.setCollection(undefined); return; }
+    // The Runs are cut by model at the first start, from the authorized Tasks runnable then. Later authorized Tasks join new Runs at the end, and the planned Runs do not change.
+    if (collection.runs === undefined) {
+      collection.runs = this.plannedRuns(project, authorized);
+      if (collection.runs.length === 0) {
+        this.failNotRunnable(project, collection, authorized);
+        this.setCollection(undefined);
+        return;
       }
-      this.collection = undefined;
-      return;
+    } else {
+      this.planLaterRuns(project, collection, authorized);
     }
+    const next = this.nextAuthorizedRun(project, collection, authorized);
+    if (next === undefined) { this.setCollection(undefined); return; }
     if (!await this.coordinator?.importJobs(project.root)) return;
     const job = randomUUID();
     const canSend = () => this.ownedCoordinatorRoot === project.root
       && this.mode() !== "disabled"
-      && !activeProjectJobs(project.root).some((job) => job.kind !== "scan")
+      && !activeProjectJobs(project.root).some((job) => job.kind !== "scan" && job.id !== collection.hold)
       && driftAutopilotStatus(project.root, this.mode()).phase !== "suspended"
-      && tasks.every((task) => this.authorizedCollectionTasks(project, collection, this.mode()).includes(task));
+      && next.tasks.every((task) => this.authorizedCollectionTasks(project, collection, this.mode()).includes(task));
     collection.runJob = job;
     collection.stage = "running";
     const delivered = await this.deliverAutomatic(project.root, canSend, (guarded) => launchAgent(
       project.root,
-      buildAutomaticRunPrompt(collection.id),
-      "All tasks",
+      buildAutomaticRunPrompt(collection.id, next.tasks),
+      runTerminalName(next.planned.group.model),
       undefined,
       guarded,
       "run",
       undefined,
-      { id: job, origin: "automatic" },
+      { id: job, origin: "automatic", filesDrifts: true, model: next.planned.run },
     ));
-    if (delivered) return;
+    if (delivered) {
+      // The hold keeps the project between the Runs of the sequence; the creation of its last Run releases it, as before.
+      if (next.last) this.releaseHold(collection);
+      return;
+    }
     // Not delivered: nothing ran, so no Task records a failure. A refused start stays authorized for the next check; a held one waits for the developer.
     collection.runJob = undefined;
     collection.stage = "authorized";
+  }
+
+  /**
+   * Appends the Runs of the authorized Tasks that no planned Run holds yet, cut by model as the first plan was. The planned
+   * Runs do not change; an authorized Task that is not runnable now is left in its column, with its reason on the Board.
+   */
+  private planLaterRuns(project: Project, collection: AutopilotCollection, authorized: string[]): void {
+    const planned = new Set((collection.runs ?? []).flatMap((run) => run.tasks));
+    const fresh = authorized.filter((id) => !planned.has(id));
+    if (fresh.length === 0) return;
+    const runs = this.plannedRuns(project, fresh);
+    if (runs.length === 0) return;
+    collection.runs = [...(collection.runs ?? []), ...runs];
+    if (collection.hold === undefined) this.holdCollection(collection, "run");
+  }
+
+  /** The Run the collection starts next: the first Run of its plan, from `collection.run`, with a runnable authorized Task. The Runs before it are passed over, their authorized Tasks failing as not runnable. */
+  private nextAuthorizedRun(project: Project, collection: AutopilotCollection, authorized: string[]): { planned: PlannedRun; tasks: string[]; last: boolean } | undefined {
+    const runs = collection.runs ?? [];
+    const runnable = new Set(runTasks(project).filter((task) => task.column === "todo" && task.blockedBy.length === 0).map((task) => task.id));
+    for (; collection.run < runs.length; collection.run++) {
+      const planned = runs[collection.run];
+      if (planned === undefined) break;
+      const named = planned.tasks.filter((id) => authorized.includes(id));
+      const tasks = named.filter((id) => runnable.has(id));
+      if (tasks.length > 0) return { planned, tasks, last: collection.run + 1 >= runs.length };
+      this.failNotRunnable(project, collection, named);
+    }
+    return undefined;
+  }
+
+  /** Records each of `ids` as failed because it is not runnable: blocked, or not in To do. */
+  private failNotRunnable(project: Project, collection: AutopilotCollection, ids: string[]): void {
+    const states = runTasks(project);
+    for (const id of ids) {
+      const state = states.find((task) => task.id === id);
+      const reason = state?.blockedBy.length
+        ? `Authorized Task is blocked by ${state.blockedBy.join(", ")}`
+        : `Authorized Task is not runnable in the ${state?.column ?? "missing"} column`;
+      this.failCase(project, collection.resolutionJob, undefined, id, reason);
+    }
+  }
+
+  /** The Runs the Tasks cut into by their effective model, among `only` when given: the runnable ones, in creation order. */
+  private plannedRuns(project: Project, only?: readonly string[]): PlannedRun[] {
+    const runnable = runTasks(project).filter((task) => task.column === "todo" && task.blockedBy.length === 0 && !task.agent && (only === undefined || only.includes(task.id)));
+    return planRuns(runnable.map((task) => ({ id: task.id, proposal: task.proposal })), this.appliedModels(project), configuredModels().execution);
+  }
+
+  /** The Proposals whose model applies to the agent of `trama.agent` now, read at the launch. */
+  private appliedModels(project: Project): AppliedModel[] {
+    return this.modelMemory ? appliedProposalModels(this.modelMemory, project, configuredAgent()) : [];
+  }
+
+  /**
+   * Starts one Run of a manual sequence, `Run all` cut by model. Its `onEnd` hears how the Run ends. The Run is not refused
+   * here for the held sequence it belongs to, so the window and the Run-all checks are not applied to it again.
+   */
+  private async launchSequenceRun(project: Project, planned: PlannedRun, onEnd: (abnormal?: string) => void): Promise<boolean> {
+    const action: Extract<AgentAction, { kind: "implement-all" }> = { kind: "implement-all", group: planned.group };
+    try {
+      const result = await launchAgent(
+        project.root,
+        buildPrompt(action),
+        terminalName(action, (kind, id) => cardName(project, kind, id)),
+        undefined,
+        () => true,
+        "run",
+        undefined,
+        { filesDrifts: true, model: planned.run, onEnd },
+      );
+      return launched(result);
+    } catch (error) {
+      this.post({ type: "error", message: describeError(error) });
+      return false;
+    }
   }
 
   /** Tasks of the collection that are not Done when its Run ends abnormally: each is excluded with the reason, the done ones stay done. */
@@ -872,12 +989,39 @@ export class Controller implements vscode.Disposable {
     const collection = this.collection;
     if (!collection || collection.root !== project.root) return;
     this.failUnfinishedTasks(project, collection, reason);
-    this.collection = undefined;
+    this.setCollection(undefined);
   }
 
   /** Withdrawing the delegation stops only new automatic steps: unstarted Tasks stay in their column without a failure, and a started one ends normally. */
   private withdrawCollection(project: Project): void {
-    if (this.collection?.root === project.root) this.collection = undefined;
+    if (this.collection?.root === project.root) this.setCollection(undefined);
+  }
+
+  /** Replaces the collection of this window; the hold of the one it replaces is released. */
+  private setCollection(next: AutopilotCollection | undefined): void {
+    const previous = this.collection;
+    this.collection = next;
+    if (previous !== undefined && previous !== next) this.releaseHold(previous);
+  }
+
+  /**
+   * Holds the project for the collection from its start until its Run is created or it ends: a held job of `kind`, `resolve`
+   * while the resolution is prepared and its agent works, `run` from its hand-over. The new hold starts before the old one
+   * ends, so the project is never free in between. The other windows see the hold.
+   */
+  private holdCollection(collection: AutopilotCollection, kind: JobKind): void {
+    const previous = collection.hold;
+    const id = randomUUID();
+    collection.hold = id;
+    startHeldJob(collection.root, kind, "automatic", this.coordinator?.currentWindowId(collection.root) ?? "", id);
+    if (previous !== undefined) endHeldJob(collection.root, previous);
+  }
+
+  /** Lets go of the hold of the collection, if it has one. */
+  private releaseHold(collection: AutopilotCollection): void {
+    if (collection.hold === undefined) return;
+    endHeldJob(collection.root, collection.hold);
+    collection.hold = undefined;
   }
 
   private failCollection(project: Project, collection: AutopilotCollection, reason: string): void {
@@ -885,7 +1029,7 @@ export class Controller implements vscode.Disposable {
     for (const drift of collection.drifts)
       if (!collection.approvedDrifts.has(drift) && !autopilotFailedCase(project.root, drift))
         this.failCase(project, collection.resolutionJob, drift, undefined, reason);
-    if (this.collection === collection) this.collection = undefined;
+    if (this.collection === collection) this.setCollection(undefined);
   }
 
   private failCase(project: Project, job: string, drift: string | undefined, task: string | undefined, reason: string): void {
@@ -978,6 +1122,12 @@ export class Controller implements vscode.Disposable {
         if (this.refuseWhileFinishing(project, message.id, "Approve")) return;
         this.approving(() => approveProposal(project, message.id, [configuredSkillsDir()]));
         return;
+      case "setProposalModel": {
+        if (!this.modelMemory) throw new TramaError("Trama cannot keep the model of a Proposal: the workspace state is not available.");
+        await chooseProposalModel(this.modelMemory, project, message.proposal, message.model, configuredAgent());
+        this.refresh();
+        return;
+      }
       case "rejectProposal": {
         requireNotAttached(project, message.id);
         if (this.refuseWhileFinishing(project, message.id, "Reject")) return;
@@ -1044,6 +1194,12 @@ export class Controller implements vscode.Disposable {
     this.refresh();
   }
 
+  /** The model a run takes from the Proposal of Task `task` (null: none) in place of its role, read at the launch: none unless that model was chosen for `trama.agent` now. */
+  private runModelOfTask(project: Project, task: string | null): RunModel | undefined {
+    if (!this.modelMemory || task === null) return undefined;
+    return proposalRunModel(this.modelMemory, project, getTask(project, task).data.proposal, configuredAgent());
+  }
+
   private async launchAction(project: Project, action: AgentAction): Promise<void> {
     // Resolve Drifts and Runs are checked from current state at the request and at each delivery checkpoint.
     const refusal = (): string | null => {
@@ -1069,13 +1225,13 @@ export class Controller implements vscode.Disposable {
       }
       return null;
     };
-    const send = async (resolved: ResolvedAction, announceProposal?: DesignAnnouncement | LaunchAnnouncement, instruction: Instruction = buildPrompt(resolved), checkSend: () => string | null = () => null) => {
+    const send = async (resolved: ResolvedAction, announceProposal?: DesignAnnouncement | LaunchAnnouncement, instruction: Instruction = buildPrompt(resolved), checkSend: () => string | null = () => null, model?: RunModel) => {
       let refused: string | null = null;
       const canSend = () => (refused = refusal() ?? checkSend()) === null;
       const rememberScan = resolved.kind === "scan" && resolved.feature === undefined
         ? (startedAt: number) => rememberDeliveredScan(project, startedAt)
         : undefined;
-      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan);
+      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), model });
       if (refused !== null) throw new TramaError(refused);
       return result;
     };
@@ -1089,18 +1245,19 @@ export class Controller implements vscode.Disposable {
           const drift = action.drift;
           const eligible = mode !== "disabled" && (mode === "yolo" || !getDrift(project, drift).data.critical) && automaticallyFixable(project, getDrift(project, drift)) && !autopilotFailedCase(project.root, drift);
           if (eligible) {
-            if (this.ownedCoordinatorRoot !== project.root) throw new TramaError("Automatic resolution waits for the project coordinator to resume");
-            this.namedByResolution.add(drift);
-            this.namedAutomatic = { root: project.root, drift };
-            const launchedNow = await this.startAutomaticResolution(project, [drift]);
-            if (launchedNow) {
-              this.namedAutomatic = undefined;
-              await this.resumeCoordinator(project);
+            // Only the coordinator starts an automatic collection: a window that does not coordinate forwards this one Drift, and the collection it starts names only that Drift.
+            if (this.ownedCoordinatorRoot !== project.root) {
+              await this.resumeCoordinator(project, drift);
+              this.refresh();
+              return;
             }
+            this.namedByResolution.add(drift);
+            // Like every automatic step, the named Drift starts only when the coordinator's checks pass: other windows' jobs, a lost coordinator and reserved sends hold it, and the status shows why.
+            await this.resumeCoordinator(project, drift);
             this.refresh();
             return;
           }
-          const result = await send({ kind: "resolve-drifts", drifts: [] }, { kind: "resolve", drifts: () => [drift] }, () => buildPrompt({ kind: "resolve-drifts", drifts: [drift], scoped: true }));
+          const result = await send({ kind: "resolve-drifts", drifts: [] }, { kind: "resolve", drifts: () => [drift] }, () => buildPrompt({ kind: "resolve-drifts", drifts: [drift], scoped: true }), undefined, this.runModelOfTask(project, getDrift(project, drift).data.origin));
           if (launched(result)) {
             this.namedByResolution.add(drift);
             await this.resumeCoordinator(project);
@@ -1156,11 +1313,22 @@ export class Controller implements vscode.Disposable {
         }
         return;
       }
-      case "implement":
-        await send({ kind: "implement", task: getTask(project, action.task).id });
+      case "implement": {
+        const task = getTask(project, action.task).id;
+        await send({ kind: "implement", task }, undefined, undefined, undefined, this.runModelOfTask(project, task));
         return;
+      }
       case "implement-all": {
-        await send(action);
+        const runs = this.plannedRuns(project);
+        const only = runs[0];
+        // One group is one Run. Several groups are a sequence of Runs, one per model: it holds the project from its first Run to its last.
+        if (runs.length <= 1) {
+          await send({ kind: "implement-all", group: only?.group }, undefined, undefined, undefined, only?.run);
+          return;
+        }
+        const held = randomUUID();
+        startHeldJob(project.root, "run", "manual", this.coordinator?.currentWindowId(project.root) ?? "", held);
+        runSequence(runs, (planned, onEnd) => this.launchSequenceRun(project, planned, onEnd), (abnormal) => endHeldJob(project.root, held, abnormal));
         return;
       }
       case "import":

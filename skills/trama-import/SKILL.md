@@ -90,9 +90,35 @@ Run **`trama ask --root <project>`** with the JSON request on stdin, for every r
 
 If the developer said not to ask, use your recommendations and list them in the report.
 
+## Experimental Drift blocker
+
+This section applies only when the instruction says "The experimental Drift blocker is on". Without that sentence, never name a Task in `--not-blocking`, and skip this section.
+
+When it applies, do this before each `trama drift new`:
+
+1. Ask for the candidates with the references and origin you will file with: `trama drift candidates --ref <ref>… [--task <origin>]`. It lists the Tasks that Drift would block, the origin included, and writes nothing. If it lists none, file the Drift as usual.
+2. Judge each candidate: does the difference you found touch that Task, its references or what it changes? Leave free only the Tasks the difference does not touch, with a one-line reason for each, in Italian. Judging only removes blocks: never leave free a Task the difference touches, and never name a Task the command did not list.
+3. Pass each Task you leave free as `--not-blocking <permanent ID>` followed by `--not-blocking-reason "<reason>"`, in the same order: they pair the way `--option` and `--option-text` do. Pass none when the difference touches every candidate.
+
+The judgement is made once, at filing: a Drift keeps the Tasks it leaves free and blocks every other one, including the Tasks created later about the same thing.
+
+When you start sub-agents, pass them the sentence "The experimental Drift blocker is on" together with this section, and ask each one to report the permanent IDs of the Drifts it registered and, for each, whether it blocks any Task.
+
+### Final resolution of the Drifts that block nothing
+
+Keep the permanent ID of each Drift you file that blocks no Task: it blocks none when every candidate was left free, or when there was no candidate. Sub-agents report the same, as above.
+
+When the import is over, gather those Drifts into one resolution, unless none is left:
+
+1. Leave out a Drift that is critical or recurring (it follows an earlier Drift). Read the delegation with `trama drift autopilot --json`: if its `status` is `unavailable`, its `mode` is `disabled`, or it cannot be read, the delegation is off; otherwise leave out each non-critical, non-recurring Drift that has a Fix option, because the delegation resolves it on its own. A Drift left out stays open.
+2. For each remaining Drift, record the recommended decision: when it has an attached Proposal, `proposal`, and the resolution carries that Proposal's changes as the trama-resolve-drifts skill describes; otherwise `fix-code` with option 1.
+3. Announce it with `trama announce proposal "<title>"`, write it with `trama proposal new "<title>" --resolution --non-blocking --announcement <id> --body "<what is resolved and why>"`, and record each decision with `trama proposal resolve-drift <proposal id> <drift id> --decision <decision> [--option 1]`. Validate it with `trama validate --proposal <id>`, read it with `trama proposal show <id>`, and hand it over with `trama proposal submit <id>`.
+
+Never approve or reject this resolution, and never start a Run because of it: the developer decides it, as any manual resolution.
+
 ## Autopilot boundary
 
-Import describes existing code and only creates import Proposals and the Drifts of "Drifts for documentation differences"; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.autoFixDrifts` is on (Auto Fix Drifts checked), the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.
+Import describes existing code and only creates import Proposals and the Drifts of "Drifts for documentation differences"; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.driftAutoPilot` is `enabled` or `yolo` (read it with `trama drift autopilot --json`), the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.
 
 ## PowerShell
 

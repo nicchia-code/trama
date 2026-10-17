@@ -1,5 +1,6 @@
 import type { AnnouncementView, Snapshot } from "../../src/core/snapshot";
 import type { DriftAutopilotStatus } from "./host/drift-resolution";
+import type { BoardModels } from "./host/proposal-models";
 import type { ModelSuggestion } from "./host/model-lists";
 import type { InitChoice } from "./host/project";
 import type { QuestionRoundView } from "./host/question-session";
@@ -8,13 +9,20 @@ import type { DelegationMode, SettingSchema, SettingsValues, SettingValue } from
 
 export type Column = "todo" | "doing" | "done";
 
+/** One group of a Run all that a sequence cuts by model: the Tasks of the Proposals in `include`, or every Task but those of the Proposals in `exclude`. `model` is the group's model; absent for the Settings group. */
+export interface RunGroup {
+  include?: string[];
+  exclude?: string[];
+  model?: string;
+}
+
 /** What the buttons can ask an external agent to do. The host turns each into a prompt for one skill. */
 export type AgentAction =
   /** `feature` absent: the whole System. */
   | { kind: "scan"; feature?: string }
   | { kind: "implement"; task: string }
-  /** Every Task in "todo", in order; the agent stops at the first Drift it files. */
-  | { kind: "implement-all" }
+  /** Every Task in "todo", in order; the agent stops at the first Drift it files. `group` cuts it to one Run of a sequence. */
+  | { kind: "implement-all"; group?: RunGroup }
   /** Describe the existing code as Proposals for the Model; the agent asks its own questions. */
   | { kind: "import" }
   /** One agent resolves every Drift open when the instruction is sent, or only `drift` when it is given (Resolve on one Drift card). The host refuses it while a Run or a resolution is going on, or one resolution Proposal is still to be decided. */
@@ -36,6 +44,8 @@ export type ToHost =
   | { type: "openCard"; kind: "task" | "drift"; id: string }
   | { type: "approveProposal"; id: string }
   | { type: "rejectProposal"; id: string }
+  /** The developer confirmed the model field of a Proposal's model window: the host saves `model` for that Proposal (an empty text forgets it). */
+  | { type: "setProposalModel"; proposal: string; model: string }
   /** The developer pressed «Dismiss Drift»: the host asks for confirmation in a modal dialog, then closes the Drift without changes, discarding its attached Proposal. */
   | { type: "dismissDrift"; id: string }
   /** The Settings tab was opened: the host answers with the model names of the agent (`modelSuggestions`). */
@@ -62,8 +72,8 @@ export interface NavigateOptions {
 
 /** Host -> webview. */
 export type ToWebview =
-  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, the accessible autopilot status, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). */
-  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; autopilot: DriftAutopilotStatus; drifts: Record<string, string | null>; resolving: string[] } }
+  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, the accessible autopilot status, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `models` carries the models chosen for the Proposals that carry Tasks. */
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; autopilot: DriftAutopilotStatus; drifts: Record<string, string | null>; resolving: string[] }; models: BoardModels }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */

@@ -1,10 +1,11 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { type Project, writeFileEnsuringDir } from "./store";
 
 /**
  * A written design request: the developer's Markdown in `requests/<id>.md` under `.trama/`, created empty by
- * Design… and deleted when the Proposal bound to it is handed over. It is never versioned.
+ * + Add Work Item and deleted when the Proposal bound to it is handed over, or when it is closed empty. Its images
+ * live in `requests/<id>.images/`, deleted with it. It is never versioned.
  */
 export const requestsDir = (p: Project) => join(p.dir, "requests");
 
@@ -21,6 +22,11 @@ export function requestStamp(date: Date): string {
 /** The file of request `id`, or undefined when `id` is not a request ID. */
 export function requestFile(p: Project, id: string): string | undefined {
   return REQUEST_ID_PATTERN.test(id) ? join(requestsDir(p), `${id}.md`) : undefined;
+}
+
+/** The folder of the images of request `id`, beside its file, or undefined when `id` is not a request ID. */
+export function requestImagesDir(p: Project, id: string): string | undefined {
+  return REQUEST_ID_PATTERN.test(id) ? join(requestsDir(p), `${id}.images`) : undefined;
 }
 
 export function requestExists(p: Project, id: string): boolean {
@@ -54,12 +60,33 @@ export function createRequest(p: Project, now: Date = new Date()): { id: string;
   }
 }
 
-/** Deletes the file of request `id`; true when there was one to delete. A file already gone is not an error. */
+/**
+ * Deletes request `id`: its file and the folder of its images, with everything in it. Used when the Proposal bound to
+ * it is handed over, and when an empty request is closed unsent. A file or folder already gone is not an error; true
+ * when the file was there.
+ */
 export function consumeRequest(p: Project, id: string): boolean {
   const file = requestFile(p, id);
-  if (file === undefined || !existsSync(file)) return false;
-  rmSync(file, { force: true });
-  return true;
+  const images = requestImagesDir(p, id);
+  const had = file !== undefined && existsSync(file);
+  if (file !== undefined) rmSync(file, { force: true });
+  if (images !== undefined) rmSync(images, { recursive: true, force: true });
+  return had;
+}
+
+/**
+ * Deletes the folders of images whose request file is gone: a request consumed, abandoned or deleted from outside
+ * takes its images with it. Called at start-up and whenever a request file is seen gone. A folder whose name is not
+ * a request ID is never touched.
+ */
+export function sweepRequestImages(p: Project): void {
+  const dir = requestsDir(p);
+  if (!existsSync(dir)) return;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.endsWith(".images")) continue;
+    const id = entry.name.slice(0, -".images".length);
+    if (REQUEST_ID_PATTERN.test(id) && !requestExists(p, id)) rmSync(join(dir, entry.name), { recursive: true, force: true });
+  }
 }
 
 /** Nothing is left once spaces and line breaks are removed. */
@@ -67,9 +94,12 @@ export function isEmptyRequest(text: string): boolean {
   return text.trim() === "";
 }
 
+/** A line made only of image links, with no other text: it is never a title. */
+const IMAGE_LINE = /^(?:!\[[^\]]*\]\([^)]*\)\s*)+$/;
+
 /**
  * The first level-one `#` heading outside code blocks, without the `#`s and the spaces around it; without one, the
- * first non-empty line, trimmed. Empty for an empty text.
+ * first non-empty line that is not a line of images, trimmed. Empty when there is none.
  */
 export function requestTitle(text: string): string {
   const lines = text.split(/\r?\n/);
@@ -113,5 +143,5 @@ export function requestTitle(text: string): string {
       if (title) return title;
     }
   }
-  return lines.find((l) => l.trim() !== "")?.trim() ?? "";
+  return lines.find((l) => l.trim() !== "" && !IMAGE_LINE.test(l.trim()))?.trim() ?? "";
 }

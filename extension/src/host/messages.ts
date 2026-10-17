@@ -83,6 +83,11 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };
     case "dismissDrift":
       return id === undefined ? bad("dismissDrift needs a valid Drift ID") : { ok: true, message: { type, id } };
+    case "setProposalModel": {
+      const proposal = typeof raw["proposal"] === "string" && ID.test(raw["proposal"]) ? raw["proposal"] : undefined;
+      if (proposal === undefined) return bad("setProposalModel needs a valid Proposal ID");
+      return typeof raw["model"] === "string" ? { ok: true, message: { type, proposal, model: raw["model"] } } : bad("setProposalModel needs a model text");
+    }
     case "questionAction": {
       if (!Number.isInteger(raw["round"])) return bad("questionAction needs a round");
       const action = parseQuestionAction(raw["action"]);

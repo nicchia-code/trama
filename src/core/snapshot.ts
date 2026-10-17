@@ -11,7 +11,7 @@ import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
 import { readLastScan } from "./last-scan";
-import { attachedDrift, closedUnchanged, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, followedDrift, listDrifts, listTasks } from "./work";
+import { attachedDrift, closedUnchanged, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, followedDrift, freedTasks, type FreedTask, listDrifts, listTasks } from "./work";
 import { type Specs, type SpecsChange, specsChange } from "./specs";
 import { type HistoryFault, readHistory } from "./history";
 
@@ -85,6 +85,8 @@ export interface ProposalView {
   kind: ProposalKind;
   /** Marked for automatic resolution under the developer's delegation; the marker grants no approval. */
   automatic: boolean;
+  /** A resolution the experimental Drift blocker filed: its Drifts block no Task. Approving it changes nothing else. */
+  nonBlocking: boolean;
   /** The Drifts a resolution resolves, in creation order, each with what approving does to it; empty for any other Proposal. */
   resolves: ResolvedDrift[];
   /** Required Proposals not approved yet; Approve stays disabled while any is listed. */
@@ -131,6 +133,8 @@ export interface DriftView {
   previous: { id: string; title: string } | null;
   /** The fix Task that dismissed this Drift by closing without changes, with its note while Done; null otherwise. */
   closedUnchanged: { task: string; note: string | null } | null;
+  /** The Tasks this Drift leaves free, in the order named, each with its reason; the title is null for a Task that no longer exists. */
+  notBlocking: FreedTask[];
   body: string;
   sides: DriftSides | null;
   options: DriftOption[];
@@ -334,6 +338,7 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     body: stripTitle(proposal.body),
     kind: proposal.data.kind,
     automatic: proposal.data.automatic,
+    nonBlocking: proposal.data.nonBlocking,
     tasks: coverage === null ? [] : proposal.tasks.map((t) => ({ id: t.id, title: t.title, body: stripTitle(t.body), technical: t.technical, refs: t.refs })),
     removals: coverage?.removals ?? [],
     creates: coverage === null ? 0 : proposal.tasks.length + coverage.removals.length,
@@ -399,6 +404,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
       critical: d.data.critical,
       previous: followedDrift(p, d),
       closedUnchanged: closedUnchanged(p, d),
+      notBlocking: freedTasks(d, tasks),
       body: stripTitle(d.body),
       sides: driftSides(d),
       options: driftOptions(d),

@@ -2,6 +2,7 @@ import { DRIFT_KEY, delegationOf, MODEL_ROLE_KEYS, settingValueError, type Deleg
 import type { ModelSuggestion } from "../../host/model-lists";
 import type { ToWebview } from "../../protocol";
 import { renderInline, renderMarkdown } from "../markdown";
+import { type ModelField, modelField } from "../model-field";
 import type { View, ViewContext } from "../types";
 import { delegationSetting, effectiveValue, groupSettings, numberFromText, workspaceOverride } from "./logic";
 import css from "./settings.css" with { type: "text" };
@@ -16,9 +17,6 @@ export interface SettingsView extends View {
 
 /** How long the bubble stays open after the pointer leaves the «i» or the bubble, so the pointer can cross the gap. */
 const CLOSE_DELAY_MS = 150;
-
-/** The input types of typing: a name typed out in full waits like any text, while a suggestion chosen from the list is sent at once. */
-const TYPED_INPUT: readonly string[] = ["insertText", "insertCompositionText", "insertFromPaste", "deleteContentBackward", "deleteContentForward"];
 
 /** One entry of an enum's bubble: the value, its entry, and the mark that shows it is the chosen one. */
 interface EnumEntry {
@@ -41,10 +39,9 @@ interface Field {
   workspace: HTMLElement;
   /** Typed but not yet sent: a message from the host does not overwrite it. */
   dirty: boolean;
-  /** Model roles only: the list of names the agent offers, and those names, to tell a chosen suggestion from typing. */
-  models: HTMLDataListElement | null;
-  suggestions: string[];
-  /** Model roles only: why omp gives no names, shown under the field; null for the other settings. */
+  /** Model roles only: the shared model field, with its list of names and the note why omp gives none. */
+  model: ModelField | null;
+  /** Model roles only: the note under the field; null for the other settings. */
   note: HTMLElement | null;
 }
 
@@ -126,30 +123,6 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     describe(field, value);
   }
 
-  /** Fills the field's list with the newest names; with none, the field is plain text again and has no list. */
-  function offerModels(field: Field) {
-    if (field.models === null) return;
-    field.models.replaceChildren(
-      ...models.map((model) => {
-        const option = el("option");
-        option.value = model.value;
-        if (model.label !== undefined) option.label = model.label;
-        return option;
-      }),
-    );
-    field.suggestions = models.map((model) => model.value);
-    if (field.suggestions.length === 0) field.control.removeAttribute("list");
-    else field.control.setAttribute("list", field.models.id);
-  }
-
-  /** Under a model field: the reason omp gives no names, while the agent is omp and the list has one. */
-  function showNote(field: Field) {
-    if (field.note === null) return;
-    field.note.hidden = listError === null;
-    field.note.textContent = listError ?? "";
-    describe(field, undefined);
-  }
-
   function enumControl(field: Field): HTMLSelectElement {
     const select = el("select", "st-select");
     select.id = field.id;
@@ -180,14 +153,8 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
       if (setting.minimum !== undefined) input.min = String(setting.minimum);
       input.step = "1";
     }
-    input.addEventListener("input", (event) => {
+    input.addEventListener("input", () => {
       field.dirty = true;
-      // A suggestion chosen from the list is sent at once; a name typed out in full waits for the field to be left, like any text.
-      const typed = event instanceof InputEvent && TYPED_INPUT.includes(event.inputType);
-      if (!typed && field.suggestions.includes(input.value)) {
-        field.dirty = false;
-        send(setting.key, input.value);
-      }
     });
     input.addEventListener("change", () => {
       if (setting.control !== "integer") {
@@ -245,23 +212,18 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     workspace.hidden = true;
 
     const modelRole = setting.control === "text" && MODEL_ROLE_KEYS.includes(setting.key);
-    const datalist = modelRole ? el("datalist") : null;
-    if (datalist !== null) datalist.id = `${id}-models`;
-    const note = modelRole ? el("p", "st-note") : null;
-    if (note !== null) {
-      note.id = `${id}-note`;
-      note.hidden = true;
-    }
-    const field: Field = { id, setting, control: el("input"), info, bubble, entries, error, workspace, dirty: false, models: datalist, suggestions: [], note };
-    field.control = setting.control === "enum"
-      ? enumControl(field)
-      : setting.control === "boolean"
-        ? booleanControl(field)
-        : inputControl(field);
+    const model = modelRole ? modelField(id, (value) => send(setting.key, value)) : null;
+    const field: Field = { id, setting, control: el("input"), info, bubble, entries, error, workspace, dirty: false, model, note: model?.note ?? null };
+    field.control = model !== null
+      ? model.input
+      : setting.control === "enum"
+        ? enumControl(field)
+        : setting.control === "boolean"
+          ? booleanControl(field)
+          : inputControl(field);
     field.control.classList.add("st-control");
+    if (model !== null) model.setModels(models, listError);
     describe(field, undefined);
-    offerModels(field);
-    showNote(field);
 
     // The «i» and the bubble form one hover and focus area: the bubble opens on entry, closes after a short pause on leave,
     // closes when focus leaves the area, and Esc closes it and keeps the focus on the «i».
@@ -292,8 +254,7 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
 
     const node = el("div", "st-setting");
     node.append(head, field.control, error, workspace);
-    if (note !== null) node.append(note);
-    if (field.models !== null) node.append(field.models);
+    if (model !== null) node.append(model.note, model.datalist);
     return node;
   }
 
@@ -317,7 +278,10 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
   /** Shows the developer's value (the default when none is set); an invalid number the developer typed is left as typed. */
   function apply(field: Field, values: SettingsValues | undefined) {
     const { setting, control } = field;
-    if (setting.control === "text") {
+    if (field.model !== null) {
+      field.model.setValue(typeof values?.user === "string" ? values.user : "");
+      field.model.input.placeholder = typeof setting.default === "string" ? setting.default : "";
+    } else if (setting.control === "text") {
       const input = control as HTMLInputElement;
       input.value = typeof values?.user === "string" ? values.user : "";
       input.placeholder = typeof setting.default === "string" ? setting.default : "";
@@ -361,8 +325,9 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
       models = message.models;
       listError = message.error ?? null;
       for (const field of fields.values()) {
-        offerModels(field);
-        showNote(field);
+        if (field.model === null) continue;
+        field.model.setModels(models, listError);
+        describe(field, undefined);
       }
     },
   };
