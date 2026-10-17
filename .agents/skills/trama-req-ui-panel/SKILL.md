@@ -11,7 +11,7 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 
 ## General
 
-- Dove il pannello o la riga di comando nominano una Proposal, un Task o un Drift con il suo ID (schede della Board e righe dentro una scheda di design, badge `blocked` e `waiting`, dettagli nel Diagramma, `trama board`, i comandi `list`, `show` e `next`, i messaggi dei comandi e i testi dei pulsanti, per esempio «Proposal P3 resolving Drifts awaits a decision»), mostrano il numero breve (`P3`, `T3`, `D3`) se la scheda ne ha uno e, solo se non ne ha (scheda chiusa, o Task Done senza numero, vedi `rules`), la sua identità permanente di otto caratteri. Mai tutti e due insieme. Il titolo resta accanto, come prima.
+- Dove il pannello o la riga di comando nominano una Proposal, un Task o un Drift con il suo ID (schede della Board e righe dei Task dentro le altre schede, badge `blocked` e `waiting`, dettagli nel Diagramma, `trama board`, i comandi `list`, `show` e `next`, i messaggi dei comandi e i testi dei pulsanti, per esempio «Proposal P3 resolving Drifts awaits a decision»), mostrano il numero breve (`P3`, `T3`, `D3`) se la scheda ne ha uno e, solo se non ne ha (scheda chiusa, o Task Done senza numero, vedi `rules`), la sua identità permanente di otto caratteri. Mai tutti e due insieme. Il titolo resta accanto, come prima.
 - Nel pannello il numero breve e l'identità permanente stanno nello stesso punto, con lo stesso carattere a spaziatura fissa; li distinguono il tooltip e il nome accessibile, «Short number (temporary)» o «Permanent ID», così il modo in cui sono scritti non è l'unico segnale.
 
 ## panel
@@ -30,25 +30,25 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 - Rendered text never makes the panel scroll sideways: long words wrap and a long line of a code block scrolls inside its own block. Text stays selectable.
 - Malformed Markdown never prevents a text from showing: it is shown as written, as far as it cannot be read as Markdown.
 - L'overlay delle domande segue le stesse regole: il testo della domanda, il contesto, la descrizione e i dettagli di ogni opzione sono resi come Markdown; le etichette delle opzioni, i pulsanti e la risposta libera mostrata nel riepilogo restano testo semplice.
-- Ogni pulsante con testo della Board ha, oltre al testo, un'icona a sinistra del testo: i pulsanti della barra, quelli in fondo alle colonne, quelli delle schede (anche dentro una scheda di design o di risoluzione) e `Close` degli avvisi. I chip dei riferimenti, i badge `blocked` e `waiting`, le righe dei Drift di una scheda di risoluzione e il menu del periodo di Done restano senza icona.
+- Ogni pulsante con testo della Board ha, oltre al testo, un'icona a sinistra del testo: il pulsante della barra, quelli in fondo alle colonne, quelli delle schede (anche dentro una scheda di risoluzione) e `Close` degli avvisi. I chip dei riferimenti, i tag dei Task, i badge `blocked`, `waiting` e `Resolving`, le righe dei Drift di una scheda di risoluzione, le righe dei Task dentro le altre schede e il menu del periodo di Done restano senza icona, salvo l'icona `link` dei Task bloccati da più Drift (vedi `panel/Board`).
 - Le stesse azioni hanno la stessa icona anche nel Diagramma: `Scan` nella sua barra, `Approve`, `Reject` e `Dismiss Drift` nei dettagli. Gli altri controlli del Diagramma e le altre schede del pannello non cambiano.
 - Le icone sono glifi codicon, una per azione:
-  - `Run Ready Tasks`, `Run all`, `Run` di un Task e `Run this design`: `play`.
-  - `Add Work Item…` e `+ Work Item`: `add`.
-  - `Quick request…`: `comment`.
-  - `Resolve Drifts`: `wand`.
+  - `Run all` e `Run` di un Task: `play`.
+  - `+ Add Work Item`: `add`.
+  - `Resolve all` e `Resolve` di un Drift: `wand`.
   - `Scan System` nella Board e `Scan` nel Diagramma: `search`.
   - `View on diagram`: `type-hierarchy`.
   - `View requirements` e `View requirement`: `checklist`.
   - `Approve`: `check`. `Reject`: `close`.
   - `Dismiss Drift`: `circle-slash`.
   - `Open` di un Task: `go-to-file`.
-  - `Show details` e `Show tasks`: `chevron-down`; `Hide details` e `Hide tasks`: `chevron-up`.
-  - `Close` di un avviso: `close`.
+  - `Show details`: `chevron-down`; `Hide details`: `chevron-up`.
+  - `Close` di un avviso e della modale di una voce di History: `close`.
+  - La «i» di una voce di History: `info`, a sola icona.
 - L'icona è grande 16 px, come quelle in fondo alle colonne, e resta a sinistra del testo anche quando lo spazio è poco: il testo non sparisce mai e il pulsante va a capo o si stringe come senza icona. Quando l'etichetta cambia (`Scan System · N`, `Show details` che diventa `Hide details`) l'icona resta, e cambia solo dove la mappa dà un'icona diversa.
 - L'icona ha il colore del testo del pulsante, anche nei pulsanti primari e in quelli disabilitati; nessuna icona ha un colore proprio.
 - L'icona è decorativa: testo, tooltip, nome accessibile e motivi di disabilitazione di ogni pulsante restano quelli di prima.
-- La chevron della colonna Done è il glifo codicon `chevron-right` quando la colonna è aperta e `chevron-left` quando è collassata, a 16 px come le altre icone, al posto dei caratteri `›` e `‹`. Resta un pulsante a sola icona, con gli stessi tooltip e nome accessibile.
+- La chevron della colonna History è il glifo codicon `chevron-right` quando la colonna è aperta e `chevron-left` quando è collassata, a 16 px come le altre icone, al posto dei caratteri `›` e `‹`. Resta un pulsante a sola icona, con gli stessi tooltip e nome accessibile.
 
 ## panel/Requirements
 

@@ -1,0 +1,19 @@
+# Voce di History
+
+Una voce della colonna History della Board: il racconto breve di una macro-funzionalità che il lavoro fatto ha realizzato, con la data. Non è il riflesso di una Proposal o di un Task finiti, ma una rielaborazione: l'agente legge ciò che i Task realizzati da una corsa hanno fatto e lo racconta per funzionalità, come lo direbbe a chi vuole sapere che cosa è cambiato. Una voce può riassumere i Task di più Proposal, e i Task di una Proposal possono finire in più voci, una per funzionalità e una per le varie.
+
+Una voce ha un titolo, un riassunto di una o due frasi, un testo più lungo e l'elenco dei Task finiti che racconta. La sua data è l'ultima volta che è stata scritta o aggiornata. Non è una scheda da decidere: non si approva, non si avvia, non si sposta e non conta fra ciò che aspetta una decisione. La Board non mostra più i Task finiti nelle colonne: si vedono, dentro la voce che li racconta, aprendone i dettagli.
+
+Trama non scrive mai una voce da sola: le scrive l'agente, con la skill di implementazione, alla fine di ogni corsa che ha realizzato almeno un Task (un Task singolo, tutti i Task in To do o il Run automatico delle correzioni), anche quando la verifica finale fallisce: dopo la verifica e la scansione mirata, e prima di dire che il controllo della corsa è finito, così il ghost del controllo in Active dice che sta aggiornando la History. Decide l'agente come raggruppare: quando una funzionalità ha già una voce, la aggiorna invece di scriverne un'altra. Un Task chiuso senza modifiche non conta come realizzato e non entra in nessuna voce. Un Task portato in Done a mano dalla riga di comando non ha voce finché una corsa non lo racconta. Le voci sono scritte nella lingua che l'istruzione chiede all'agente.
+
+History parte vuota: il lavoro finito prima che esistesse non ha voci, e i suoi Task restano leggibili dalla riga di comando. Le voci sono file del progetto, versionati come i Task, così ogni copia di lavoro vede la stessa History.
+
+## States
+
+### Assente (initial)
+La funzionalità non ha ancora una voce.
+- `agent.VOCE_HISTORY_SCRITTA` → Registrata: l'agente scrive la voce con titolo, riassunto, testo e i Task che racconta, tutti finiti e realizzati; la sua data è l'istante della scrittura. Rifiutata, senza scrivere nulla, quando un Task citato non esiste, non è Done o è stato chiuso senza modifiche, quando non cita nessun Task o quando il titolo o il riassunto mancano; il rifiuto dice perché.
+
+### Registrata
+La voce sta nella colonna History, con la sua data. Un Task che cita e che poi lascia Done resta citato e si vede con la sua colonna di adesso.
+- `agent.VOCE_HISTORY_AGGIORNATA` → Registrata: l'agente aggiorna la voce, alla fine di una corsa che ha realizzato Task della stessa funzionalità: può riscrivere titolo, riassunto e testo e aggiunge i nuovi Task che racconta, senza togliere quelli che citava. La data diventa l'istante dell'aggiornamento, così la voce sale in cima alla colonna. Rifiutato, lasciando la voce com'era, alle stesse condizioni della scrittura per i Task aggiunti.

@@ -6,7 +6,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approvalBlock, approveProposal, deleteInProposal, driftListProblems, getProposal, newProposal, rejectProposal, save, submitProposal } from "../src/core/proposals";
-import { awaitingResolution, resolveDriftInProposal, resolveDriftsBlocker, runWindowBlocker } from "../src/core/resolution";
+import { awaitingResolution, resolveDriftBlocker, resolveDriftInProposal, resolveDriftsBlocker, runWindowBlocker } from "../src/core/resolution";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
 import { getDrift, getTask, moveTask, newDrift, newTask, resolveDrift } from "../src/core/work";
@@ -230,6 +230,21 @@ describe("resolveDriftsBlocker", () => {
     submitProposal(p, r.id);
     expect(resolveDriftsBlocker(p, free)).toMatch(/awaits a decision/);
     expect(awaitingResolution(p)?.id).toBe(r.id);
+  });
+});
+
+describe("resolveDriftBlocker", () => {
+  test("gives the reasons that hold for one Drift, without «No open Drifts», and names the agent working on it", () => {
+    const free = { resolving: false, running: false };
+    const a = drift("A");
+    expect(resolveDriftBlocker(p, free, false)).toBeNull();
+    expect(resolveDriftBlocker(p, { resolving: true, running: false }, false)).toBe("Drifts are being resolved");
+    expect(resolveDriftBlocker(p, { resolving: true, running: false }, true)).toBe("An agent is resolving this Drift");
+    expect(resolveDriftBlocker(p, { resolving: false, running: true }, false)).toBe("A run is in progress");
+    expect(resolveDriftBlocker(p, { resolving: true, running: true }, true)).toBe("An agent is resolving this Drift. A run is in progress");
+    resolution();
+    expect(resolveDriftBlocker(p, free, false)).toMatch(/^Proposal .* resolving Drifts awaits a decision$/);
+    expect(a.id).toBeTruthy();
   });
 });
 

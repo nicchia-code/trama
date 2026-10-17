@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { CopilotHook } from "../../../src/core/copilot-chat";
+import { copilotTurnEnded, copilotTurnStarted } from "./drift-resolution";
 
 export type CopilotChatEventName = "PROMPT_SUBMITTED" | "AGENT_STOPPED";
 
@@ -24,6 +25,8 @@ export function receiveCopilotHook(hook: CopilotHook): void {
   const id = key(hook.root, hook.conversation);
   if (hook.hook === "UserPromptSubmit" && hook.tramaPrompt) conversations.add(id);
   if (!conversations.has(id)) return;
+  if (hook.hook === "UserPromptSubmit") copilotTurnStarted(hook.root, hook.conversation);
+  else copilotTurnEnded(hook.root, hook.conversation);
   const event: CopilotChatEvent = {
     root: hook.root,
     conversation: hook.conversation,

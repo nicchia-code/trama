@@ -9,7 +9,7 @@ The **Model** in `.trama/model/` is the source of truth for how the System behav
 
 ## Hand-over
 
-A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>`. If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` again: it returns an open Proposal to Draft, so submit again when finished.
+A new Proposal starts as a **Draft**, not approvable. Give it a short label with `--label "<text>"` (1 to 30 characters, one line) when you open it, or with `trama proposal label <id> "<text>"` before submitting: a Draft with Tasks is refused without one. Finish every file, validate and read the changes before `trama proposal submit <id>`. If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` again: it returns an open Proposal to Draft, so submit again when finished.
 
 ## Announcing cards
 

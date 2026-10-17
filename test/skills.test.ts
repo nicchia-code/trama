@@ -150,6 +150,21 @@ test("trama-implement runs the pre-flight scan before the first group, and its f
   expect(skill).toContain("never to file a Task, announce a check or run `trama task next`");
 });
 
+test("trama-implement writes History after the check and before the report, and only for runs that moved Tasks to Done", () => {
+  const skill = SKILLS["trama-implement/SKILL.md"] as string;
+  const steps = skill.slice(skill.indexOf("## Steps"));
+  const history = steps.indexOf("8. **Write History.**");
+  expect(history).toBeGreaterThan(steps.indexOf("7. **Scan the completed Tasks' scope.**"));
+  expect(history).toBeLessThan(steps.indexOf("9. **Report.**"));
+  expect(skill).toContain("`trama announce phase <id> history`");
+  expect(skill).toContain("`trama history list --json`");
+  expect(skill).toContain("`trama history show <id> --json`");
+  expect(skill).toContain("`trama history update <id> --task <id>`");
+  expect(skill).toContain("`trama history add \"<title>\" --summary \"<text>\" --body \"<text>\" --task <id>`");
+  expect(skill).toContain("a sub-agent never writes them");
+  expect(skill).toContain("step 9 of the steps above");
+});
+
 test("trama-scan reports how many Machines were compared and how many produced cards, with no triage line", () => {
   const skill = SKILLS["trama-scan/SKILL.md"] as string;
   expect(skill).toContain("count of Machines compared");

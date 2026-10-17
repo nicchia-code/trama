@@ -11,7 +11,7 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 
 ## agent-launching
 
-- Ruolo di ogni istruzione: quick design request, written design request, Resolve Drifts e import → `trama.analysis`; scan del System e scan di Feature → `trama.scan`; implement, implement all, implement a design e il Run automatico → `trama.execution`, anche per il pre-flight e per la scansione mirata di fine corsa, con `trama.scan` per i sotto-agenti che confrontano le Machine nel pre-flight.
+- Ruolo di ogni istruzione: written design request, Resolve Drifts (con `Resolve all` o con `Resolve`) e import → `trama.analysis`; scan del System e scan di Feature → `trama.scan`; implement, implement all e il Run automatico → `trama.execution`, anche per il pre-flight e per la scansione mirata di fine corsa, con `trama.scan` per i sotto-agenti che confrontano le Machine nel pre-flight.
 - La preparazione della risoluzione automatica usa `trama.analysis`, come Resolve Drifts; il Run separato delle correzioni e delle origini usa `trama.execution`, con `trama.scan` per i sotto-agenti del suo controllo mirato. Restano launcher, lingua e limite dei sotto-agenti già scelti, senza un quarto ruolo.
 - Dentro ogni istruzione che può scansionare, il sotto-agente che confronta una Machine usa `trama.scan`.
 - Un ruolo vuoto, o fatto solo di spazi, non passa nessun modello: l'agente usa il suo predefinito. Trama non controlla mai che un nome di modello esista, tranne la ricerca del nome fra i modelli di Copilot qui sotto; un nome sbagliato lo segnala l'agente nel suo terminale o nella sua conversazione.

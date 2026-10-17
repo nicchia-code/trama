@@ -18,7 +18,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("Tasks created when an ordinary Proposal is approved", () => {
   test("its Task files become Tasks in To do, sharing the approval instant and its identity", () => {
-    const prop = newProposal(p, "Checkout total");
+    const prop = newProposal(p, "Checkout total", "", { label: "Checkout" });
     const file = editInProposal(p, prop.id, "tasks/checkout-total.md");
     writeFileSync(file, "---\ntechnical: false\nrefs: [order]\n---\n\n# Checkout total\n\nSum the cart.\n");
     const taskId = basename(file).slice(0, 8);
@@ -34,7 +34,7 @@ describe("Tasks created when an ordinary Proposal is approved", () => {
   });
 
   test("a Task whose identity the project already has refuses the approval before any file changes", () => {
-    const prop = newProposal(p, "Clash");
+    const prop = newProposal(p, "Clash", "", { label: "Clash" });
     const file = editInProposal(p, prop.id, "tasks/clash.md");
     writeFileSync(file, "---\ntechnical: false\nrefs: [order]\n---\n\n# Clash\n");
     const taken = basename(file).slice(0, 8);
@@ -49,7 +49,7 @@ describe("Tasks created when an ordinary Proposal is approved", () => {
   });
 
   test("removing a State creates a Remove code Task for it, pointing at its Machine", () => {
-    const prop = newProposal(p, "Drop shipped");
+    const prop = newProposal(p, "Drop shipped", "", { label: "Drop shipped" });
     const file = editInProposal(p, prop.id, "checkout/order.md");
     const text = readFileSync(file, "utf8").replace("- `courier.PICKED_UP` → Shipped\n", "").replace("### Shipped (final)\n\n", "");
     writeFileSync(file, text);
@@ -64,7 +64,7 @@ describe("Tasks created when an ordinary Proposal is approved", () => {
   });
 
   test("an ordinary Proposal's approval applies it and starts no scan", () => {
-    const prop = newProposal(p, "Scan-free");
+    const prop = newProposal(p, "Scan-free", "", { label: "Scan-free" });
     const file = editInProposal(p, prop.id, "checkout/order.md");
     writeFileSync(file, `${readFileSync(file, "utf8")}\n`);
     coverWithTask(p, prop.id, "order");

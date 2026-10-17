@@ -11,7 +11,7 @@ import { arity, COMMANDS, type Command, jobFromEnv, makeContext, type Values } f
 import type { Result } from "./result";
 
 /** Command groups; `announce` is also a command of its own (`announce <kind> <title>`) besides `announce phase` and `announce done`. */
-const GROUPS = ["proposal", "task", "drift", "skills", "ids", "announce"];
+const GROUPS = ["proposal", "task", "drift", "history", "skills", "ids", "announce"];
 
 function help(): string {
   const width = Math.max(...COMMANDS.map((c) => `${c.name} ${c.args}`.length));
@@ -133,7 +133,7 @@ export function run(argv: string[], cwd: string, env: Record<string, string | un
 
 const ACTIVITY_COMMANDS: Record<string, true> = {
   announce: true, "announce phase": true, "announce done": true,
-  "proposal new": true, "proposal edit": true, "proposal delete": true, "proposal resolve-drift": true, "proposal submit": true,
+  "proposal new": true, "proposal edit": true, "proposal label": true, "proposal delete": true, "proposal resolve-drift": true, "proposal submit": true,
   "task new": true, "task move": true, "drift new": true,
 };
 

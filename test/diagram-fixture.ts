@@ -91,5 +91,10 @@ export function snapshotOf(files: FileMap): Snapshot {
     numbers: { proposal: {}, task: {}, drift: {} },
     specs: EMPTY_SPECS,
     specsPresent: false,
+    history: [],
+    historyFaults: [],
+    finishingDrifts: [],
+    finishingProposals: [],
+    finishingTasks: [],
   };
 }

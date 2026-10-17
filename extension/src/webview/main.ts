@@ -9,7 +9,7 @@ import { mountSpecs } from "./specs";
 import { mountSettings } from "./settings";
 import css from "./shell.css" with { type: "text" };
 import type { View, ViewContext } from "./types";
-import { buildBoard } from "./board/logic";
+import { boardDecisionCount, buildBoard } from "./board/logic";
 
 declare function acquireVsCodeApi(): { postMessage(message: ToHost): void };
 
@@ -124,7 +124,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     mounted.requirements.update(snapshot);
     mounted.specs.update(snapshot);
     showModelErrors(snapshot.diagnostics);
-    const decide = buildBoard(snapshot)[0]?.cards.length ?? 0;
+    const decide = boardDecisionCount(buildBoard(snapshot));
     const badge = app.querySelector("[data-badge]") as HTMLElement;
     badge.hidden = decide === 0;
     badge.textContent = String(decide);

@@ -747,7 +747,7 @@ describe("Start from Scratch: the setup request", () => {
     expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
   });
 
-  test("a setup request whose file is gone leaves the setup list and, when its setup Proposal is approved, starts Run Ready Tasks", async () => {
+  test("a setup request whose file is gone leaves the setup list and, when its setup Proposal is approved, starts Run all", async () => {
     const runs: number[] = [];
     requests.dispose();
     requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch, async () => void runs.push(1));
@@ -788,6 +788,37 @@ describe("Start from Scratch: the setup request", () => {
       expect(warnings.some((w) => w.startsWith("Trama: the setup Proposal could not be approved on its own: "))).toBe(true);
       expect(state.get<string[]>(SETUP_KEY, [])).toEqual([]);
       expect(listProposals(p).some((x) => x.data.request === idOf(document))).toBe(true);
+    } finally {
+      rmSync(proposal.dir, { recursive: true, force: true });
+      requests.dispose();
+      requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
+    }
+  });
+
+  test("at start-up a setup request whose file vanished with no editor open leaves the setup list, and a later deletion starts nothing", async () => {
+    const runs: number[] = [];
+    requests.dispose();
+    requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch, async () => void runs.push(1));
+    await requests.writeSetup();
+    const setup = active as FakeDocument;
+    type(setup, "# Un gestore di ordini\n");
+    await requests.send();
+    const proposal = newProposal(p, "Set up the shop", "", { kind: "setup", request: idOf(setup) });
+    proposal.data.status = "approved";
+    save(proposal);
+    await requests.write();
+    const other = active as FakeDocument;
+    type(other, "# Un'altra richiesta\n");
+    try {
+      rmSync(setup.uri.fsPath); // gone while no editor had the project open: no deletion event reaches the extension
+      requests.dispose();
+      requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch, async () => void runs.push(1));
+      await sleep(10);
+      expect(state.get<string[]>(SETUP_KEY, [])).toEqual([]);
+      expect(runs).toHaveLength(0);
+      deleteFile(other);
+      await sleep(10);
+      expect(runs).toHaveLength(0);
     } finally {
       rmSync(proposal.dir, { recursive: true, force: true });
       requests.dispose();

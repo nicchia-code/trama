@@ -1,15 +1,16 @@
-import { type CardName, cardNameOf, type CardNumbers, ID_NAMES, namerOf } from "../../../../src/core/card-names";
-import { joinReasons, runBlocker } from "../../../../src/core/design";
+import { type CardName, cardNameOf, type CardNumbers, ID_NAMES } from "../../../../src/core/card-names";
 import { idTag } from "../id-tag";
 import type { ViewContext } from "../types";
-import type { AnnouncedCard, Badge, BlockBadge, Card, DesignCard, DriftCard, ProposalCard, TaskCard } from "./logic";
-import { COLUMN_TITLES, proposalHue, recurringLabel } from "./logic";
+import type { Column } from "../../protocol";
+import type { AnnouncedCard, Badge, BlockBadge, Card, DriftCard, ProposalCard, TaskCard, WaitingCard } from "./logic";
+import { recurringLabel, tagColour } from "./logic";
 import { renderDriftCompare } from "../drift-compare";
 import { dismissButton } from "../dismiss";
 import { renderMarkdown } from "../markdown";
 import { renderResolves } from "../resolves";
 import { viewOfRef } from "../requirements/logic";
-import { type IconName, setIconLabel } from "../icons";
+import { joinReasons } from "../../../../src/core/design";
+import { type IconName, icon, setIconLabel } from "../icons";
 
 export interface CardEnv {
   context: ViewContext;
@@ -20,8 +21,8 @@ export interface CardEnv {
   showCard(key: string): void;
   /** The short numbers of the snapshot being drawn. */
   numbers(): CardNumbers;
-  /** The reason every Run is disabled while Drifts are being resolved or a run is in progress, otherwise null. It comes before the other reasons. */
-  resolvingReason(): string | null;
+  /** Why a single Task's Run is disabled beyond its own waiting: a Run in progress or Drift resolution. Run all has its own reasons. Null when none holds. */
+  runReason(): string | null;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -38,6 +39,8 @@ interface ButtonOptions {
   action: string;
   onClick: () => void;
   primary?: boolean;
+  /** The tooltip of an enabled button; a disabled one shows its reason instead. */
+  title?: string;
   /** A reason: disables the button, shows as its tooltip and is its accessible description. */
   disabled?: string | boolean;
   className?: string;
@@ -51,6 +54,7 @@ function button(o: ButtonOptions): HTMLButtonElement {
   else node.textContent = o.label;
   node.type = "button";
   node.dataset["action"] = o.action;
+  if (o.title !== undefined) node.title = o.title;
   if (o.aria) node.setAttribute("aria-label", o.aria);
   if (o.disabled) {
     node.disabled = true;
@@ -102,7 +106,7 @@ function failedBadge(reason: string | null, env: CardEnv): HTMLElement[] {
   return [node];
 }
 
-function chips(refs: string[], env: CardEnv): HTMLElement {
+export function chips(refs: string[], context: ViewContext): HTMLElement {
   const list = el("div", "board-chips");
   for (const ref of refs) {
     const chip = el("button", "board-chip", ref);
@@ -110,7 +114,7 @@ function chips(refs: string[], env: CardEnv): HTMLElement {
     chip.type = "button";
     chip.dataset["action"] = `ref:${ref}`;
     chip.title = view === "requirements" ? `Show ${ref} in Requirements` : `Show ${ref} on the diagram`;
-    chip.addEventListener("click", () => env.context.navigate(view, { ref }));
+    chip.addEventListener("click", () => context.navigate(view, { ref }));
     list.append(chip);
   }
   return list;
@@ -141,7 +145,7 @@ function head(kind: string | null, name: CardName | null, ...extra: HTMLElement[
 
 function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}`);
-  if (card.resolution) node.className += " board-card-resolution";
+  if (card.resolution) node.className = "board-card board-card-resolution";
   node.append(head(card.resolution ? "Resolution Proposal" : "Proposal", card.name, ...card.badges.map((b) => badge(b, env.numbers()))), el("h3", "board-card-title", card.title));
   if (card.creates !== null) {
     const creates = el("p", "board-muted board-card-creates", card.creates);
@@ -159,7 +163,7 @@ function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
     if (card.changes.more > 0) list.append(el("li", "board-change board-muted", `and ${card.changes.more} more ${card.changes.more === 1 ? "file" : "files"}`));
     node.append(list);
   }
-  if (card.resolves.length > 0) node.append(...renderResolves("board", card.title, card.resolves, (drift) => env.context.navigate("diagram", { drift })));
+  if (card.resolves.length > 0) node.append(...renderResolves("board", card.title, card.resolves, (drift) => env.context.navigate("diagram", { drift }), (drift) => (card.resolves.find((r) => r.drift === drift)?.blocked ?? []).map((t) => blockedRow(t, env, drift))));
   const touches = card.touches;
   const views: HTMLElement[] = [];
   if (touches.model || !touches.requirements)
@@ -170,9 +174,17 @@ function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
     actions(
       ...views,
       button({ label: "Approve", icon: "check", aria: `Approve ${card.heading}`, action: "approve", primary: true, disabled: card.blocker ?? false, onClick: () => env.context.post({ type: "approveProposal", id: card.id }) }),
-      button({ label: "Reject", icon: "close", aria: `Reject ${card.heading}`, action: "reject", onClick: () => env.context.post({ type: "rejectProposal", id: card.id }) }),
+      button({ label: "Reject", icon: "close", aria: `Reject ${card.heading}`, action: "reject", disabled: card.rejectBlocker ?? false, onClick: () => env.context.post({ type: "rejectProposal", id: card.id }) }),
     ),
   );
+  return node;
+}
+
+/** "Resolving": an agent is working on this Drift now; the card stays in Blocked until the resolution is delivered. */
+function resolvingBadge(): HTMLElement {
+  const node = el("span", "board-badge info board-resolving", "Resolving");
+  node.title = "An agent is resolving this Drift";
+  node.setAttribute("aria-label", "An agent is resolving this Drift");
   return node;
 }
 
@@ -189,26 +201,20 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
     recurring.title = recurringLabel(previous);
     recurring.setAttribute("aria-label", recurringLabel(previous));
   }
-  node.append(head("Drift", card.name, ...(critical ? [critical] : []), ...(recurring ? [recurring] : []), ...failedBadge(card.autopilotFailed, env)), el("h3", "board-card-title", card.title));
-  if (card.refs.length > 0) node.append(chips(card.refs, env));
+  node.append(head("Drift", card.name, ...(critical ? [critical] : []), ...(recurring ? [recurring] : []), ...(card.resolving ? [resolvingBadge()] : []), ...failedBadge(card.autopilotFailed, env)), el("h3", "board-card-title", card.title));
+  if (card.refs.length > 0) node.append(chips(card.refs, env.context));
   node.append(renderDriftCompare(card.drift, { openLink: env.context.openLink }));
   const views: HTMLElement[] = [];
-  const firstRef = card.refs[0];
-  if (firstRef !== undefined) {
-    const view = viewOfRef(firstRef);
-    const label = view === "requirements" ? "View requirement" : "View on diagram";
-    views.push(button({ label, icon: view === "requirements" ? "checklist" : "type-hierarchy", aria: `${label} for ${card.heading}`, action: "view", onClick: () => env.context.navigate(view, view === "diagram" ? { drift: card.id } : { ref: firstRef }) }));
+  const resolve = button({ label: "Resolve", icon: "wand", aria: `Resolve ${card.heading}`, title: `Ask an agent to resolve this Drift\n${card.resolveNote}`, action: "resolve", disabled: card.resolveBlocker ?? false, onClick: () => env.context.post({ type: "launch", action: { kind: "resolve-drifts", drift: card.id } }) });
+  // A disabled Resolve shows its reason first, then the mode; the reason is also its accessible description.
+  if (card.resolveBlocker !== null) {
+    resolve.title = `${card.resolveBlocker}\n${card.resolveNote}`;
+    resolve.setAttribute("aria-description", card.resolveBlocker);
   }
+  views.push(resolve);
   views.push(dismissButton({ blocker: card.dismissBlocker, className: "board-btn", onDismiss: () => env.context.post({ type: "dismissDrift", id: card.id }) }));
+  node.append(...card.blocked.map((t) => blockedRow(t, env, card.id)));
   node.append(actions(...views));
-  return node;
-}
-
-/** "no changes" on a Task closed without changes; its tooltip and accessible name carry the note, and no colour is needed. */
-function noChangesBadge(note: string): HTMLElement {
-  const node = el("span", "board-badge info", "no changes");
-  node.title = `Closed without changes: ${note}`;
-  node.setAttribute("aria-label", `Closed without changes: ${note}`);
   return node;
 }
 
@@ -218,10 +224,7 @@ function noChangesBadge(note: string): HTMLElement {
  */
 function taskDetails(card: TaskCard, env: CardEnv): { body: HTMLElement; toggle: HTMLButtonElement } {
   const key = `${card.key}:details`;
-  const markdown = renderMarkdown(card.body, env.context.openLink);
-  // A Task closed without changes shows its check note first, as Markdown, then its body.
-  const body = card.unchanged === null ? markdown : el("div", "board-check-details");
-  if (card.unchanged !== null) body.append(el("h4", "board-check-note", "Check note"), renderMarkdown(card.unchanged, env.context.openLink), markdown);
+  const body = renderMarkdown(card.body, env.context.openLink);
   body.classList.add("board-details");
   body.id = `board-details-${card.id}`;
   const toggle = button({ label: "", action: "details", onClick: () => {} });
@@ -243,23 +246,28 @@ function taskDetails(card: TaskCard, env: CardEnv): { body: HTMLElement; toggle:
   return { body, toggle };
 }
 
-/** The Proposal a Task comes from, as a tag: its title on a tint taken from the Proposal's identity. Not a button; it does nothing. */
-function proposalTag(card: TaskCard): HTMLElement | null {
-  if (card.proposal === null) return null;
-  const title = card.proposalTitle ?? `Proposal ${card.proposalName?.text ?? card.proposal}`;
+/** A Proposal's tag: its title in a colour taken from the hash of the title. Not a button; it does nothing. */
+export function proposalTagNode(title: string): HTMLElement {
   const node = el("span", "board-proposal-tag", title);
-  node.style.setProperty("--proposal-hue", String(proposalHue(card.proposal)));
+  node.style.setProperty("--tag-colour", tagColour(title));
   node.setAttribute("role", "img");
   node.setAttribute("aria-label", `Proposal: ${title}`);
   node.title = `Proposal: ${title}`;
   return node;
 }
 
+/** The Proposal a Task comes from, as a tag; null when the Task has none. */
+function proposalTag(card: TaskCard): HTMLElement | null {
+  if (card.proposal === null) return null;
+  return proposalTagNode(card.proposalTag ?? `Proposal ${card.proposalName?.text ?? card.proposal}`);
+}
+
 function task(card: TaskCard, env: CardEnv): HTMLElement {
   const node = shell(card, `Task ${card.name.text}: ${card.title}`);
+  // The card the agent has taken wears the animated border; the rest have none.
+  if (card.agent) node.classList.add("is-working");
   const badges = [
     ...(card.technical && card.refs.length === 0 ? [badge({ label: "technical", tooltip: "Technical Task", tone: "info" }, env.numbers())] : []),
-    ...(card.unchanged !== null ? [noChangesBadge(card.unchanged)] : []),
     ...card.blocks.map((b) => blockBadgeLink(b, env)),
     ...failedBadge(card.autopilotFailed, env),
   ];
@@ -267,13 +275,13 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
   const top = head(null, card.name, ...(tag === null ? [] : [tag]), ...badges);
   top.prepend(statusDot(card));
   node.append(top, el("h3", "board-card-title", card.title));
-  if (card.refs.length > 0) node.append(chips(card.refs, env));
+  if (card.refs.length > 0) node.append(chips(card.refs, env.context));
   if (card.drift !== null) {
     const origin = el("p", "board-muted board-origin", "from Drift ");
     origin.append(idTag(cardNameOf(env.numbers(), "drift", card.drift)));
     node.append(origin);
   }
-  const details = card.body || card.unchanged !== null ? taskDetails(card, env) : null;
+  const details = card.body ? taskDetails(card, env) : null;
   if (details) node.append(details.body);
   const open = button({
     label: "Open",
@@ -282,74 +290,54 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
     action: "open",
     onClick: () => env.context.post({ type: "openFile", path: card.file }),
   });
-  const runnable = card.column === "todo";
+  const runnable = card.column !== "done" && !card.agent;
   node.append(
     actions(
       ...(details ? [details.toggle] : []),
-      ...(runnable ? [button({ label: "Run", icon: "play", aria: `Run task ${card.name.text}`, action: "run", primary: true, disabled: env.resolvingReason() ?? false, onClick: () => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } }) })] : []),
+      ...(runnable ? [button({ label: "Run", icon: "play", aria: `Run task ${card.name.text}`, action: "run", primary: true, disabled: joinReasons([card.finishing, env.runReason()]) ?? false, onClick: () => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } }) })] : []),
       open,
     ),
   );
   return node;
 }
 
-/** A Task inside a design card: its status dot, its ID and title, and its blocked, waiting or closed-without-changes marks. No move, no details. */
-function designRow(card: TaskCard, env: CardEnv): HTMLElement {
-  const row = el("li", "board-design-task");
+/** The other open Drifts that also block a Task, as a link icon whose tooltip and name list their short numbers; null when none. */
+function alsoBlocked(card: TaskCard, containing: string | null, env: CardEnv): HTMLElement | null {
+  const others = card.blockedBy.flatMap((b) => (b.kind === "drift" && b.drift !== containing ? [cardNameOf(env.numbers(), "drift", b.drift).text] : []));
+  if (others.length === 0) return null;
+  const text = `Also blocked by ${others.join(", ")}`;
+  const node = el("span", "board-also-blocked");
+  node.append(icon("link"));
+  node.title = text;
+  node.setAttribute("role", "img");
+  node.setAttribute("aria-label", text);
+  return node;
+}
+
+/**
+ * A Task inside a Drift, a resolution Proposal or a waiting card: its status dot, its ID and title, its Proposal tag and
+ * the link that says which other open Drifts also block it. No toggle, body, buttons or blocked badges. `containing` is
+ * the Drift the row sits under, if any; it is left out of the link.
+ */
+function blockedRow(card: TaskCard, env: CardEnv, containing: string | null): HTMLElement {
+  const row = el("div", "board-blocked-task");
   row.dataset["key"] = card.key;
   row.tabIndex = -1;
-  const top = head(null, card.name, ...card.blocks.map((b) => blockBadgeLink(b, env)), ...failedBadge(card.autopilotFailed, env), ...(card.unchanged === null ? [] : [noChangesBadge(card.unchanged)]));
+  const tag = proposalTag(card);
+  const also = alsoBlocked(card, containing, env);
+  const top = head(null, card.name, ...(tag === null ? [] : [tag]), ...(also === null ? [] : [also]));
   top.prepend(statusDot(card));
   row.append(top, el("span", "board-row-title", card.title));
   return row;
 }
 
-/**
- * The Tasks of one design as one card: the Proposal's title, how many of its Tasks are done, the Tasks behind a toggle that
- * is closed when the Board first shows, and Run this design, disabled with the reasons of Run Ready Tasks for its Tasks.
- */
-function design(card: DesignCard, env: CardEnv): HTMLElement {
-  const node = shell(card, `Design: ${card.title}`);
-  const count = el("span", "board-badge info board-design-count", `${card.done}/${card.tasks.length} done`);
-  node.append(head("Design", null, count), el("h3", "board-card-title", card.title));
-  const list = el("ul", "board-design-tasks");
-  list.id = `board-design-${card.id}`;
-  list.append(...card.tasks.map((t) => designRow(t, env)));
-  // The developer's choice is kept for the session in `env`, so a refresh does not close the card.
-  let isOpen = env.isExpanded(card.key);
-  const toggle = button({ label: "", action: "design-toggle", className: "board-design-toggle", onClick: () => {} });
-  const show = () => {
-    list.hidden = !isOpen;
-    const text = isOpen ? "Hide tasks" : "Show tasks";
-    setIconLabel(toggle, isOpen ? "chevron-up" : "chevron-down", text);
-    toggle.setAttribute("aria-label", `${text} of design ${card.title}`);
-    toggle.setAttribute("aria-expanded", String(isOpen));
-  };
-  toggle.setAttribute("aria-controls", list.id);
-  toggle.addEventListener("click", () => {
-    isOpen = !isOpen;
-    env.setExpanded(card.key, isOpen);
-    show();
-  });
-  show();
-  const reason = joinReasons([env.resolvingReason(), runBlocker(card.tasks, namerOf(env.numbers()))]);
-  const run = button({
-    label: "Run this design",
-    icon: "play",
-    aria: `Run this design: ${card.title}`,
-    action: "run-design",
-    primary: true,
-    disabled: reason ?? false,
-    onClick: () => env.context.post({ type: "launch", action: { kind: "implement-design", proposal: card.id } }),
-  });
-  node.append(list, actions(toggle, run));
-  return node;
-}
+/** The name of a Task's column, as the status dot says it. */
+const TASK_STATE: Record<Column, string> = { todo: "To do", doing: "In progress", done: "Done" };
 
-/** A dot for a Task: its column's colour, or the pulsing accent dot while the agent has taken it. Named for screen readers and tooltips. */
-function statusDot(task: Pick<TaskCard, "column" | "agent">): HTMLElement {
-  const name = task.agent ? "Agent working" : COLUMN_TITLES[task.column];
-  const dot = el("span", `board-dot ${task.agent ? "is-agent" : `is-${task.column}`}`);
+/** A dot for a Task: its column's colour, static. The label is its column's, or "Agent working" while the agent has taken it. */
+export function statusDot(task: { column: Column; agent: boolean }): HTMLElement {
+  const name = task.agent ? "Agent working" : TASK_STATE[task.column];
+  const dot = el("span", `board-dot is-${task.column}`);
   dot.setAttribute("role", "img");
   dot.setAttribute("aria-label", name);
   dot.title = name;
@@ -370,13 +358,30 @@ export function renderAnnounced(card: AnnouncedCard): HTMLElement {
   top.append(el("span", "board-card-kind", card.kindLabel));
   const lines = el("div", "board-skeleton");
   lines.append(el("span", "board-skeleton-line"), el("span", "board-skeleton-line is-short"));
-  node.append(top, el("div", "board-card-title", card.title), lines, el("div", "board-announced-phase", card.phase));
+  const phase = card.phase === "" ? [] : [el("div", "board-announced-phase", card.phase)];
+  node.append(top, el("div", "board-card-title", card.title), lines, ...phase);
+  return node;
+}
+
+/** A fix Task other Tasks wait for, in Blocked: the fix Task stays in Active, and this card lists the Tasks it holds up, with no buttons. */
+function waitingCard(card: WaitingCard, env: CardEnv): HTMLElement {
+  const node = shell(card, `Waiting for ${card.task.name.text} ${card.task.title}`);
+  const top = head("Waiting for", card.task.name);
+  top.prepend(statusDot(card.task));
+  const heading = el("h3", "board-card-title");
+  const link = el("button", "board-waiting-link", card.task.title);
+  link.type = "button";
+  link.title = "Go to the card of this Task in Active";
+  link.setAttribute("aria-label", "Go to the card of this Task in Active");
+  link.addEventListener("click", () => env.showCard(card.task.key));
+  heading.append(link);
+  node.append(top, heading, ...card.waiting.map((t) => blockedRow(t, env, null)));
   return node;
 }
 
 export function renderCard(card: Card, env: CardEnv): HTMLElement {
   if (card.kind === "proposal") return proposal(card, env);
-  if (card.kind === "design") return design(card, env);
   if (card.kind === "drift") return drift(card, env);
+  if (card.kind === "waiting") return waitingCard(card, env);
   return task(card, env);
 }

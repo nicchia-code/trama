@@ -5,6 +5,7 @@ import { announcementsDir, listAnnouncements, withdrawAll } from "../../../src/c
 import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { getProposal, listProposals } from "../../../src/core/proposals";
+import { releaseAbandonedTasks } from "../../../src/core/work";
 import { sendCoordinatorMessage } from "../../../src/core/question-channel";
 import { announcementView } from "../../../src/core/snapshot";
 import type { AnnouncementView } from "../../../src/core/snapshot";
@@ -26,14 +27,14 @@ export function onAnnouncementsWithdrawn(listener: Listener): { dispose(): void 
 
 function describe(p: Project, withdrawn: Announcement[]): AnnouncementView[] {
   const titles = new Map(listProposals(p).map((proposal) => [proposal.id, proposal.title]));
-  return withdrawn.map((a) => announcementView(a, a.proposal === null ? undefined : titles.get(a.proposal)));
+  return withdrawn.map((a) => announcementView(p, a, a.proposal === null ? undefined : titles.get(a.proposal)));
 }
 
-function guarded(action: () => void): void {
+function guarded(action: () => void, failure = "announcements could not be withdrawn"): void {
   try {
     action();
   } catch (err) {
-    if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: announcements could not be withdrawn: ${err.message}`);
+    if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: ${failure}: ${err.message}`);
     else throw err;
   }
 }
@@ -53,7 +54,8 @@ export function withdrawWaiting(root: string, which?: (a: Announcement) => boole
       // The coordinator counts it only if it knows this job as a Run, so a window that followed another window's Run forwards it too.
       sendCoordinatorMessage(p, { type: "interrupted-preflight", root, job: a.job, title: a.title }).catch(() => undefined);
     }
-    const views = describe(p, withdrawn);
+    // An import ends with its agent and gives no notice: only a card the agent did not deliver, or a check it did not finish, is reported.
+    const views = describe(p, withdrawn.filter((a) => a.kind !== "work"));
     if (views.length === 0 || !notify) return;
     for (const listener of [...listeners]) listener(views);
   });
@@ -76,7 +78,8 @@ function onCopilotChat(event: CopilotChatEvent): void {
 export function synchronizeAnnouncementTitles(p: Project): void {
   const waiting = listAnnouncements(p);
   for (const a of waiting) {
-    if (a.kind !== "proposal" || a.proposal === null) continue;
+    // A Resolve Drifts announcement keeps its title: it is named by its Drifts, not by a Draft.
+    if (a.kind !== "proposal" || a.proposal === null || a.drifts.length > 0) continue;
     let title: string;
     try {
       const draft = getProposal(p, a.proposal);
@@ -111,14 +114,20 @@ export function synchronizeAnnouncementTitles(p: Project): void {
 
 /**
  * Starting up, announcements left on disk in the open folder belong to an agent run that can no longer be told: they
- * are withdrawn with no notice. Draft title synchronization runs from the panel's existing snapshot refresh path.
+ * are withdrawn with no notice, and the Tasks an agent had taken are released the same way, since no agent is followed
+ * yet. Draft title synchronization runs from the panel's existing snapshot refresh path.
  */
 export function watchAnnouncements(root: () => string | undefined): vscode.Disposable {
   const startup = root();
-  if (startup !== undefined) guarded(() => {
-    const p = projectAt(startup);
-    withdrawAll(p);
-  });
+  if (startup !== undefined) {
+    guarded(() => {
+      const p = projectAt(startup);
+      withdrawAll(p);
+    });
+    guarded(() => {
+      releaseAbandonedTasks(projectAt(startup));
+    }, "the Tasks an agent had taken could not be released");
+  }
   const cursor = onCursorChatEvent(onCursorChat);
   const copilot = onCopilotChatEvent(onCopilotChat);
   return new vscode.Disposable(() => (cursor.dispose(), copilot.dispose()));

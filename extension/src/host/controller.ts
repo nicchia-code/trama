@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { editorWindowLost, sendCoordinatorMessage, type CoordinatorJson } from "../../../src/core/question-channel";
 import { approveProposal, getProposal, listProposals, rejectProposal, type Proposal } from "../../../src/core/proposals";
-import { resolveDriftsBlocker, runWindowBlocker } from "../../../src/core/resolution";
+import { resolveDriftBlocker, resolveDriftsBlocker, runWindowBlocker } from "../../../src/core/resolution";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, projectAt, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { namerOf } from "../../../src/core/card-names";
@@ -15,10 +15,10 @@ import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { blockedTasks, dismissDrift, driftOptions, fixCodeRefusal, getDrift, getTask, listDrifts, listTasks, requireNotAttached, type Drift, type DriftOutcome } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAgent, configuredSkillsDir, type DesignAnnouncement, type Instruction, type Launch, launchAgent, launched, settings, userDelegation } from "./agent";
+import { configuredAgent, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type Launch, launchAgent, launched, settings, userDelegation } from "./agent";
 import { isCursor } from "./cursor";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
-import { activeProjectJobs, autopilotFailedCase, autopilotReady, clearAutopilotFailure, driftAutopilotStatus, driftWork, excludeAutopilotDrift, forgetDeveloperScanCases, forgetWindow, holdAutopilot, jobAbnormalEnd, lastFailedScan, observeAutopilotMode, onDriftResolutionChange, projectWindowIds, recordAutopilotFailure, releaseSend, reserveSend, resumeAutopilot, runCauseTask, runContinuationHeld, runFinalCheckFailed, sendReserved, setCoordinatorAvailable, shownAutopilotFailures, type DriftAutopilotMode } from "./drift-resolution";
+import { activeProjectJobs, autopilotFailedCase, autopilotReady, clearAutopilotFailure, driftAutopilotStatus, driftWork, driftsFinishing, excludeAutopilotDrift, forgetDeveloperScanCases, forgetWindow, holdAutopilot, jobAbnormalEnd, lastFailedScan, observeAutopilotMode, onDriftResolutionChange, projectWindowIds, proposalsFinishing, recordAutopilotFailure, releaseSend, reserveSend, resumeAutopilot, runCauseTask, runContinuationHeld, runFinalCheckFailed, sendReserved, setCoordinatorAvailable, shownAutopilotFailures, tasksFinishing, type DriftAutopilotMode } from "./drift-resolution";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { copilotSuggestions, cursorModels, ompModels, type ModelList } from "./model-lists";
@@ -84,6 +84,10 @@ export class Controller implements vscode.Disposable {
   private disposed = false;
   private autoTicking = false;
   private collection: AutopilotCollection | undefined;
+  /** The open Drifts the resolution launched from this window was asked to resolve; cleared once no resolution runs. */
+  private readonly namedByResolution = new Set<string>();
+  /** The one Drift a Resolve Drifts on a single Drift asked the automatic collection to take: kept until that start really happens, so a refused start never widens to other Drifts. */
+  private namedAutomatic: { root: string; drift: string } | undefined;
   private coordinatorSubscription: vscode.Disposable | undefined;
   private ownedCoordinatorRoot: string | undefined;
   /** Projects whose other windows' jobs were imported since the autopilot last left `disabled`. */
@@ -384,7 +388,7 @@ export class Controller implements vscode.Disposable {
     try {
       const work = driftWork(project.root, this.mode() !== "disabled");
       synchronizeAnnouncementTitles(project);
-      const snapshot = buildSnapshot(project);
+      const snapshot = buildSnapshot(project, driftsFinishing(project.root), proposalsFinishing(project.root), tasksFinishing(project.root));
       if (this.panel) this.panel.title = snapshot.system.name.trim() || this.projectTitle(project);
       const status = driftAutopilotStatus(project.root, this.mode(), this.coordinator?.currentWindowId(project.root));
       const failures = shownAutopilotFailures(status.failures, status.mode, (id) => {
@@ -395,7 +399,13 @@ export class Controller implements vscode.Disposable {
       const autopilot = shown.mode !== "disabled" && this.ownedCoordinatorRoot !== project.root && shown.phase === "idle"
         ? { ...shown, reason: "Automatic resolution waits for the project coordinator to resume" }
         : shown;
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker(work, settings().get<boolean>("submitWhileRunning", false) === true), autopilot } });
+      // The Drifts an agent was asked to resolve are forgotten once no resolution runs, so a later Resolve is not held by them.
+      if (!work.resolving) this.namedByResolution.clear();
+      const drifts = Object.fromEntries(listDrifts(project).filter((d) => d.data.status === "open").map((d) => [d.id, resolveDriftBlocker(project, work, this.namedByResolution.has(d.id))]));
+      // The open Drifts the running resolution is working on: those an agent was asked to resolve, and those the automatic collection named.
+      const collected = this.collection?.stage === "resolving" ? this.collection.drifts : [];
+      const resolving = work.resolving ? Object.keys(drifts).filter((id) => this.namedByResolution.has(id) || collected.includes(id)) : [];
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker(work, settings().get<boolean>("submitWhileRunning", false) === true), autopilot, drifts, resolving } });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -510,11 +520,13 @@ export class Controller implements vscode.Disposable {
       clearAutopilotFailure(project.root, drift.id, JSON.stringify({ data: drift.data, body: drift.body }));
     if (mode === "disabled" || listProposals(project).some((proposal) =>
       proposal.data.kind === "resolution" && (proposal.data.status === "draft" || proposal.data.status === "open"))) return [];
+    const named = this.namedAutomatic?.root === project.root ? this.namedAutomatic.drift : undefined;
     return drifts
       .filter((drift) => drift.data.status === "open"
         && (!drift.data.critical || mode === "yolo")
         && automaticallyFixable(project, drift)
-        && !autopilotFailedCase(project.root, drift.id))
+        && !autopilotFailedCase(project.root, drift.id)
+        && (named === undefined || drift.id === named))
       .map((drift) => drift.id);
   }
 
@@ -614,7 +626,7 @@ export class Controller implements vscode.Disposable {
     if (drifts.length > 0 && await this.coordinator?.importJobs(root)) await this.startAutomaticResolution(project, drifts);
   }
 
-  private async startAutomaticResolution(project: Project, drifts: string[]): Promise<void> {
+  private async startAutomaticResolution(project: Project, drifts: string[]): Promise<boolean> {
     const id = randomUUID();
     const collection: AutopilotCollection = {
       root: project.root,
@@ -640,9 +652,10 @@ export class Controller implements vscode.Disposable {
       collection.drifts = named;
       return buildPrompt({ kind: "resolve-drifts", drifts: named, automaticCollection: collection.id });
     };
-    const launchedNow = await this.deliverAutomatic(project.root, canSend, (guarded) => launchAgent(project.root, instruction, "Drifts", "Resolve Drifts", guarded, "resolve", undefined, { id, origin: "automatic" }));
+    const launchedNow = await this.deliverAutomatic(project.root, canSend, (guarded) => launchAgent(project.root, instruction, "Drifts", { kind: "resolve", drifts: () => collection.drifts }, guarded, "resolve", undefined, { id, origin: "automatic" }));
     // Not delivered: nothing ran, so the reservation is released. A refused start is taken again by the next check; a held one waits for the developer.
     if (!launchedNow && this.collection === collection) this.collection = undefined;
+    return launchedNow;
   }
 
   /**
@@ -962,10 +975,12 @@ export class Controller implements vscode.Disposable {
         return;
       case "approveProposal":
         requireNotAttached(project, message.id);
+        if (this.refuseWhileFinishing(project, message.id, "Approve")) return;
         this.approving(() => approveProposal(project, message.id, [configuredSkillsDir()]));
         return;
       case "rejectProposal": {
         requireNotAttached(project, message.id);
+        if (this.refuseWhileFinishing(project, message.id, "Reject")) return;
         const feedback = await vscode.window.showInputBox({
           title: `Reject Proposal ${cardName(project, "proposal", message.id)}`,
           prompt: "Feedback for the agent (optional): what should the next Proposal do differently? Press Enter to reject without feedback, Esc to cancel.",
@@ -973,6 +988,7 @@ export class Controller implements vscode.Disposable {
         });
         if (feedback === undefined) return;
         requireNotAttached(project, message.id);
+        if (this.refuseWhileFinishing(project, message.id, "Reject")) return;
         rejectProposal(project, message.id, feedback);
         this.refresh();
         return;
@@ -983,16 +999,32 @@ export class Controller implements vscode.Disposable {
     }
   }
 
+  /** Approve and Reject wait for the end of the turn of the agent that delivered the Proposal: while that turn is held the action is refused, and a message says why. Returns true when refused. */
+  private refuseWhileFinishing(project: Project, id: string, action: "Approve" | "Reject"): boolean {
+    if (!proposalsFinishing(project.root).includes(id)) return false;
+    void vscode.window.showErrorMessage(`Trama: ${action} Proposal is unavailable: the agent is still finishing.`);
+    return true;
+  }
+
   /** «Dismiss Drift»: the host asks for the developer's confirmation in a modal dialog; cancelling changes nothing. Closing the Drift is `dismissDrift` in `src/core`, which rechecks its conditions and refuses without changing anything. */
   private async dismissDriftAfterConfirm(project: Project, id: string): Promise<void> {
     if (driftWork(project.root, this.mode() !== "disabled").resolving) {
       void vscode.window.showErrorMessage("Trama: Dismiss Drift is unavailable: Drifts are being resolved.");
       return;
     }
+    if (driftsFinishing(project.root).includes(id)) {
+      void vscode.window.showErrorMessage("Trama: Dismiss Drift is unavailable: the agent is still finishing.");
+      return;
+    }
     const drift = getDrift(project, id);
     const detail = `It is closed without changes and the same difference will not be filed again until the Model or the Requirements change.${drift.data.proposal ? " Its attached Proposal is discarded too." : ""}`;
     const choice = await vscode.window.showWarningMessage(`Dismiss Drift "${drift.title}"?`, { modal: true, detail }, "Dismiss");
     if (choice !== "Dismiss") return;
+    // The agent may have started or finished its turn while the dialog was open: the Drift is refused only while it is still held.
+    if (driftsFinishing(project.root).includes(id)) {
+      void vscode.window.showErrorMessage("Trama: Dismiss Drift is unavailable: the agent is still finishing.");
+      return;
+    }
     try {
       dismissDrift(project, id);
     } catch (err) {
@@ -1015,31 +1047,35 @@ export class Controller implements vscode.Disposable {
   private async launchAction(project: Project, action: AgentAction): Promise<void> {
     // Resolve Drifts and Runs are checked from current state at the request and at each delivery checkpoint.
     const refusal = (): string | null => {
+      if (action.kind === "resolve-drifts" && action.drift !== undefined && driftsFinishing(project.root).includes(action.drift)) return "Resolve this Drift is unavailable: the agent is still finishing.";
+      if (action.kind === "implement" && tasksFinishing(project.root).includes(action.task)) return "Run this Task is unavailable: the agent is still finishing.";
+      if (action.kind === "resolve-drifts" && action.drift !== undefined) {
+        const drift = getDrift(project, action.drift);
+        if (drift.data.status !== "open") return `Resolve this Drift is unavailable: Drift ${cardName(project, "drift", drift.id)} is ${drift.data.status}`;
+        const blocker = resolveDriftBlocker(project, driftWork(project.root, this.mode() !== "disabled"), this.namedByResolution.has(action.drift));
+        return blocker === null ? null : `Resolve this Drift is unavailable: ${blocker}.`;
+      }
       if (action.kind === "resolve-drifts") {
         const blocker = resolveDriftsBlocker(project, driftWork(project.root, this.mode() !== "disabled"));
         return blocker === null ? null : `Resolve Drifts is unavailable: ${blocker}.`;
       }
-      const isRun = action.kind === "implement" || action.kind === "implement-all" || action.kind === "implement-design";
+      const isRun = action.kind === "implement" || action.kind === "implement-all";
       const submitWhileRunning = settings().get<boolean>("submitWhileRunning", false) === true;
       const runBlock = isRun ? runWindowBlocker(driftWork(project.root, this.mode() !== "disabled"), submitWhileRunning) : null;
       if (runBlock !== null) return `A run cannot start: ${runBlock}.`;
       if (action.kind === "implement-all") {
         const blocker = runBlocker(runTasks(project), namerOf(syncShortNumbers(project).all()));
-        return blocker === null ? null : `Run Ready Tasks is unavailable: ${blocker}.`;
-      }
-      if (action.kind === "implement-design") {
-        const blocker = runBlocker(runTasks(project).filter((t) => t.proposal === action.proposal), namerOf(syncShortNumbers(project).all()));
-        return blocker === null ? null : `Run this design is unavailable: ${blocker}.`;
+        return blocker === null ? null : `Run all is unavailable: ${blocker}.`;
       }
       return null;
     };
-    const send = async (resolved: ResolvedAction, announceProposal?: DesignAnnouncement, instruction: Instruction = buildPrompt(resolved), checkSend: () => string | null = () => null) => {
+    const send = async (resolved: ResolvedAction, announceProposal?: DesignAnnouncement | LaunchAnnouncement, instruction: Instruction = buildPrompt(resolved), checkSend: () => string | null = () => null) => {
       let refused: string | null = null;
       const canSend = () => (refused = refusal() ?? checkSend()) === null;
       const rememberScan = resolved.kind === "scan" && resolved.feature === undefined
         ? (startedAt: number) => rememberDeliveredScan(project, startedAt)
         : undefined;
-      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" || resolved.kind === "implement-design" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan);
+      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan);
       if (refused !== null) throw new TramaError(refused);
       return result;
     };
@@ -1048,9 +1084,35 @@ export class Controller implements vscode.Disposable {
     switch (action.kind) {
       case "resolve-drifts": {
         const mode = this.mode();
+        if (action.drift !== undefined) {
+          // Under delegation an automatic-eligible Drift goes through the automatic collection, which names only this Drift.
+          const drift = action.drift;
+          const eligible = mode !== "disabled" && (mode === "yolo" || !getDrift(project, drift).data.critical) && automaticallyFixable(project, getDrift(project, drift)) && !autopilotFailedCase(project.root, drift);
+          if (eligible) {
+            if (this.ownedCoordinatorRoot !== project.root) throw new TramaError("Automatic resolution waits for the project coordinator to resume");
+            this.namedByResolution.add(drift);
+            this.namedAutomatic = { root: project.root, drift };
+            const launchedNow = await this.startAutomaticResolution(project, [drift]);
+            if (launchedNow) {
+              this.namedAutomatic = undefined;
+              await this.resumeCoordinator(project);
+            }
+            this.refresh();
+            return;
+          }
+          const result = await send({ kind: "resolve-drifts", drifts: [] }, { kind: "resolve", drifts: () => [drift] }, () => buildPrompt({ kind: "resolve-drifts", drifts: [drift], scoped: true }));
+          if (launched(result)) {
+            this.namedByResolution.add(drift);
+            await this.resumeCoordinator(project);
+          }
+          return;
+        }
+        this.namedAutomatic = undefined;
         if (mode === "disabled") {
           const open = () => listDrifts(project).filter((d) => d.data.status === "open").map((d) => d.id);
-          await send({ kind: "resolve-drifts", drifts: [] }, "Resolve Drifts", () => buildPrompt({ kind: "resolve-drifts", drifts: open() }));
+          const ids = open();
+          const result = await send({ kind: "resolve-drifts", drifts: [] }, { kind: "resolve", drifts: () => ids }, () => buildPrompt({ kind: "resolve-drifts", drifts: ids }));
+          if (launched(result)) for (const id of ids) this.namedByResolution.add(id);
           return;
         }
         const split = () => {
@@ -1062,10 +1124,14 @@ export class Controller implements vscode.Disposable {
         const initial = split();
         if (initial.manual.length) {
           const manual = () => split().manual.map((drift) => drift.id);
+          let named: string[] = [];
           const result = await send(
             { kind: "resolve-drifts", drifts: [] },
-            "Resolve Drifts",
-            () => buildPrompt({ kind: "resolve-drifts", drifts: manual() }),
+            { kind: "resolve", drifts: () => named },
+            () => {
+              named = manual();
+              return buildPrompt({ kind: "resolve-drifts", drifts: named });
+            },
             () => manual().length ? null : "No manual Drifts remain; automatic resolution is waiting for the project coordinator.",
           );
           // The automatic part waits until the manual instruction really started, so it cannot run ahead of the manual decisions.
@@ -1080,25 +1146,11 @@ export class Controller implements vscode.Disposable {
         void vscode.window.showInformationMessage("Trama: No open Drifts are eligible for automatic resolution.");
         return;
       }
-      case "design": {
-        const request =
-          action.prompt?.trim() ||
-          (await vscode.window.showInputBox({
-            title: "Quick Design Request",
-            prompt: "What should the agent design or change in the Model?",
-            placeHolder: "Add a cancelled state to orders…",
-            ignoreFocusOut: true,
-            validateInput: notBlank("Describe what to design"),
-          }));
-        if (request === undefined || request.trim() === "") return;
-        await send({ kind: "design", prompt: request }, request.trim());
-        return;
-      }
       case "scan": {
         if (action.feature !== undefined && !loadModel(project).features.has(action.feature))
           throw new TramaError(`No Feature "${action.feature}" in the Model`);
         // Failed and skipped cases become judgeable again only once the scan really started; a refused Feature or a fallback changes nothing.
-        if (launched(await send(action))) {
+        if (launched(await send(action, { kind: "check", title: action.feature === undefined ? "Scanning System" : `Scanning Feature ${action.feature}` }))) {
           forgetDeveloperScanCases(project.root);
           void sendCoordinatorMessage(project, { type: "developer-scan-started", root: project.root }).catch(() => undefined);
         }
@@ -1111,11 +1163,8 @@ export class Controller implements vscode.Disposable {
         await send(action);
         return;
       }
-      case "implement-design":
-        await send(action);
-        return;
       case "import":
-        await send(action);
+        await send(action, { kind: "work", title: "Importing from code" });
         return;
     }
   }

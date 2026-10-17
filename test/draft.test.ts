@@ -59,7 +59,7 @@ describe("a Proposal the agent is still writing", () => {
 
 describe("handing over", () => {
   test("makes the Draft open, and it can then be approved", () => {
-    const prop = newProposal(p, "Lost");
+    const prop = newProposal(p, "Lost", "", { label: "Lost" });
     writeOrder(prop.id);
     coverWithTask(p, prop.id, "checkout");
     expect(submitProposal(p, prop.id).data.status).toBe("open");
@@ -83,7 +83,7 @@ describe("handing over", () => {
   });
 
   test("succeeds once the agent registers the files it wrote before registering them, keeping their content", () => {
-    const prop = newProposal(p, "Late");
+    const prop = newProposal(p, "Late", "", { label: "Late" });
     const order = join(prop.dir, "model", "checkout", "order.md");
     const ghost = join(prop.dir, "model", "checkout", "ghost.md");
     const original = readFileSync(join(dir, ".trama", "model", "checkout", "order.md"), "utf8");
@@ -135,7 +135,7 @@ describe("line endings", () => {
 
 describe("changing a Proposal after the hand-over", () => {
   test("registering, rewriting or deleting a file sends an open Proposal back to Draft", () => {
-    const prop = newProposal(p, "Lost");
+    const prop = newProposal(p, "Lost", "", { label: "Lost" });
     writeOrder(prop.id);
     coverWithTask(p, prop.id, "checkout");
     submitProposal(p, prop.id);
@@ -149,7 +149,7 @@ describe("changing a Proposal after the hand-over", () => {
   });
 
   test("a refused edit leaves an open Proposal open", () => {
-    const prop = newProposal(p, "Lost");
+    const prop = newProposal(p, "Lost", "", { label: "Lost" });
     writeOrder(prop.id);
     coverWithTask(p, prop.id, "checkout");
     submitProposal(p, prop.id);

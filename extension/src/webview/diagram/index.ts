@@ -9,6 +9,7 @@ import { type GraphSpec, type Level, sameLevel } from "./graph";
 import { breadcrumb, buildGraph, drillTarget, isEmptyModel, scanFeature, validLevel } from "./levels";
 import { createPanel } from "./panel";
 import { dismissBlocker } from "../dismiss";
+import { finishingBlocker } from "../board/logic";
 import { type Scene, buildScene, pathTo } from "./scene";
 import { viewOfRef } from "../requirements/logic";
 import css from "./diagram.css" with { type: "text" };
@@ -158,7 +159,7 @@ export const mountDiagram: MountView = (root, context) => {
   /** Draws the panel for the selection; «Dismiss Drift» is decided from the snapshot and the resolve blocker. */
   function renderPanel() {
     const detail = currentDetail();
-    panel.render(detail, detail.drift && snapshot ? dismissBlocker(detail.drift.id, snapshot.resolutionDrifts, resolveBlocker) : null);
+    panel.render(detail, detail.drift && snapshot ? dismissBlocker(detail.drift.id, snapshot.resolutionDrifts, resolveBlocker, snapshot.finishingDrifts) : null, detail.proposal && snapshot ? finishingBlocker(detail.proposal.id, snapshot.finishingProposals) : null);
   }
 
   /** The detail of the selection, or of the level, with the Requirement sections written for that element. */

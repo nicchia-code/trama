@@ -1,8 +1,10 @@
 import { renderResolves } from "../extension/src/webview/resolves";
 import { describe, expect, test } from "bun:test";
 import type { CardNumbers } from "../src/core/card-names";
-import { renderCard } from "../extension/src/webview/board/render";
-import type { DesignCard, ProposalCard, TaskCard } from "../extension/src/webview/board/logic";
+import { announcedCard, type ProposalCard, type TaskCard, type WaitingCard } from "../extension/src/webview/board/logic";
+import { renderAnnounced, renderCard } from "../extension/src/webview/board/render";
+import { historyEntryNode } from "../extension/src/webview/board/history-entry";
+import type { HistoryTaskView, HistoryView } from "../src/core/snapshot";
 
 class Node {
   children: Node[] = [];
@@ -16,6 +18,7 @@ class Node {
   type = "";
   tabIndex = 0;
   hidden = false;
+  open = false;
   private text = "";
   get textContent(): string { return this.text || this.children.map((child) => child.textContent).join(""); }
   set textContent(value: string) { this.text = value; this.children = []; }
@@ -25,6 +28,9 @@ class Node {
   prepend(...nodes: Node[]) { this.children.unshift(...nodes); }
   setAttribute(key: string, value: string) { this.attributes[key] = value; }
   addEventListener(type: string, listener: () => void) { (this.listeners[type] ??= []).push(listener); }
+  showModal() { this.open = true; }
+  close() { this.open = false; for (const listener of this.listeners["close"] ?? []) listener(); }
+  focus() {}
   click() { for (const listener of this.listeners["click"] ?? []) listener(); }
   get all(): Node[] { return [this, ...this.children.flatMap((child) => child.all)]; }
   get renderedText(): string { return this.text + this.children.map((child) => child.renderedText).join(""); }
@@ -34,18 +40,18 @@ const numbers: CardNumbers = { proposal: { live: "P2" }, task: { liveTask: "T3" 
 const env = (overrides: Partial<{ post: (value: unknown) => void; navigate: (...args: unknown[]) => void; showCard: (...args: unknown[]) => void }> = {}) => ({
   context: { post: overrides.post ?? (() => {}), navigate: overrides.navigate ?? (() => {}), openLink: () => {} } as never,
   isExpanded: () => false, setExpanded: () => {}, showCard: overrides.showCard ?? (() => {}),
-  numbers: () => numbers, resolvingReason: () => null,
+  numbers: () => numbers, runReason: () => null,
 });
 const proposal: ProposalCard = {
   kind: "proposal", key: "proposal:live", id: "live", name: { text: "P2", isNumber: true }, heading: "Proposal P2", title: "A proposal",
   badges: [{ label: "requires old", tooltip: "Requires Proposal old", tone: "info", card: { kind: "proposal", id: "old" } }],
   resolution: false, changes: { files: [], more: 0 }, blocker: "Resolve the requirement first", touches: { model: true, requirements: false }, resolves: [],
-  creates: null,
+  creates: null, rejectBlocker: null,
 };
 const task: TaskCard = {
   kind: "task", key: "task:liveTask", id: "liveTask", name: { text: "T3", isNumber: true }, title: "A task", technical: false,
-  refs: [], drift: "liveDrift", driftName: "D4", proposal: null, proposalTitle: null, proposalName: null, agent: false, blocks: [{ label: "blocked D4", tooltip: "Blocked by Drift D4", target: { kind: "diagram", drift: "liveDrift" } }],
-  blockedBy: [], body: "", file: "task.md", column: "todo", finished: null, unchanged: null, autopilotFailed: null,
+  refs: [], drift: "liveDrift", driftName: "D4", proposal: null, proposalTag: null, proposalName: null, agent: false, blocks: [{ label: "blocked D4", tooltip: "Blocked by Drift D4", target: { kind: "diagram", drift: "liveDrift" } }],
+  blockedBy: [], body: "", file: "task.md", column: "todo", autopilotFailed: null, finishing: null,
 };
 
 describe("Board card rendering", () => {
@@ -97,8 +103,8 @@ describe("Board card rendering", () => {
     };
     try {
       const rows = renderResolves("board", "Resolve", [
-        { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Urgent", critical: true, previous: null, decision: "Fix code", autopilotFailed: null },
-        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null },
+        { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Urgent", critical: true, previous: null, decision: "Fix code", autopilotFailed: null, blocked: [] },
+        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null, blocked: [] },
       ], () => {});
       const badges = rows.flatMap((row) => (row as unknown as Node).all).filter((node) => node.className.includes("critical"));
       expect(badges.map((badge) => [badge.textContent, badge.title, badge.attributes["aria-label"]])).toEqual([["Critical", "Urgent developer decision", "Critical Drift: urgent developer decision"]]);
@@ -116,33 +122,14 @@ describe("Board card rendering", () => {
     };
     try {
       const rows = renderResolves("board", "Resolve", [
-        { drift: "failed", name: { text: "D4", isNumber: true }, title: "Refunds", critical: false, previous: null, decision: "Fix code", autopilotFailed: "Not authorized any more" },
-        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null },
+        { drift: "failed", name: { text: "D4", isNumber: true }, title: "Refunds", critical: false, previous: null, decision: "Fix code", autopilotFailed: "Not authorized any more", blocked: [] },
+        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null, blocked: [] },
       ], () => {});
       const badges = rows.flatMap((row) => (row as unknown as Node).all).filter((node) => node.className.includes("board-badge error"));
       expect(badges.map((badge) => [badge.textContent, badge.title, badge.attributes["aria-label"]])).toEqual([["autopilot failed", "Autopilot failed: Not authorized any more", "Autopilot failed: Not authorized any more"]]);
     } finally {
       if (previous === undefined) delete (globalThis as { document?: unknown }).document;
       else (globalThis as { document?: unknown }).document = previous;
-    }
-  });
-  test("a Task closed without changes shows a no changes badge with its note, and its check note first in the details", () => {
-    const previous = Reflect.get(globalThis, "document");
-    Reflect.set(globalThis, "document", {
-      createElement: (tag: string) => new Node(tag),
-      createElementNS: (_ns: string, tag: string) => new Node(tag),
-      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
-    });
-    try {
-      const closed: TaskCard = { ...task, column: "done", unchanged: "Checked the cart total.", body: "Body text.", blocks: [] };
-      const rendered = renderCard(closed, env() as never) as unknown as Node;
-      const badges = rendered.all.filter((node) => node.className.includes("board-badge info") && node.textContent === "no changes");
-      expect(badges.map((badge) => [badge.title, badge.attributes["aria-label"]])).toEqual([["Closed without changes: Checked the cart total.", "Closed without changes: Checked the cart total."]]);
-      const note = rendered.all.find((node) => node.className.includes("board-check-note"))!;
-      expect(note.textContent).toBe("Check note");
-    } finally {
-      if (previous === undefined) Reflect.deleteProperty(globalThis, "document");
-      else Reflect.set(globalThis, "document", previous);
     }
   });
   test("marks a resolution card accessibly and retains its resolution rows and controls", () => {
@@ -155,10 +142,11 @@ describe("Board card rendering", () => {
     try {
       const resolution: ProposalCard = {
         ...proposal, heading: "Resolution Proposal P2", resolution: true,
-        resolves: [{ drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", critical: false, previous: null, decision: "Closed, nothing changes", autopilotFailed: null }],
+        resolves: [{ drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", critical: false, previous: null, decision: "Closed, nothing changes", autopilotFailed: null, blocked: [] }],
       };
       const rendered = renderCard(resolution, env() as never) as unknown as Node;
       expect(rendered.className).toContain("board-card-resolution");
+      expect(rendered.className).not.toContain("board-card-proposal");
       expect(rendered.attributes["aria-label"]).toBe("Resolution Proposal P2: A proposal");
       expect(rendered.all.some((node) => node.dataset["action"] === "approve")).toBe(true);
       expect(rendered.renderedText).toContain("Code refunds late");
@@ -177,8 +165,8 @@ describe("Board card rendering", () => {
     });
     try {
       const rows = renderResolves("board", "Resolve", [
-        { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Again", critical: false, previous: { id: "0001", title: "Earlier" }, decision: "Fix code", autopilotFailed: null },
-        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null },
+        { drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Again", critical: false, previous: { id: "0001", title: "Earlier" }, decision: "Fix code", autopilotFailed: null, blocked: [] },
+        { drift: "ordinary", name: { text: "D5", isNumber: true }, title: "Ordinary", critical: false, previous: null, decision: "Dismissed", autopilotFailed: null, blocked: [] },
       ], () => {});
       const badges = rows.flatMap((row) => (row instanceof Node ? row.all : [])).filter((node) => node.className.includes("recurring"));
       expect(badges.map((badge) => [badge.textContent, badge.title, badge.attributes["aria-label"]])).toEqual([["recurring", "Recurring: follows Drift 0001 – Earlier", "Recurring: follows Drift 0001 – Earlier"]]);
@@ -199,7 +187,7 @@ describe("Run buttons say every reason that holds", () => {
     };
     try {
       const reason = "Drifts are being resolved. A run is in progress";
-      const rendered = renderCard({ ...task, column: "todo", drift: null, blocks: [], blockedBy: [] }, { ...env(), resolvingReason: () => reason } as never) as unknown as Node;
+      const rendered = renderCard({ ...task, column: "todo", drift: null, blocks: [], blockedBy: [] }, { ...env(), runReason: () => reason } as never) as unknown as Node;
       const run = rendered.all.find((node) => node.dataset["action"] === "run")!;
       expect([run.disabled, run.title, run.attributes["aria-description"]]).toEqual([true, reason, reason]);
     } finally {
@@ -207,9 +195,28 @@ describe("Run buttons say every reason that holds", () => {
       else Reflect.set(globalThis, "document", previous);
     }
   });
+
+  test("a Task whose agent is still finishing its turn has a Run that is disabled with that reason first", () => {
+    const previous = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
+    };
+    try {
+      const runOf = (card: TaskCard, runReason: string | null) => (renderCard(card, { ...env(), runReason: () => runReason } as never) as unknown as Node).all.find((node) => node.dataset["action"] === "run")!;
+      const waiting = runOf({ ...task, column: "todo", blocks: [], blockedBy: [], finishing: "The agent is still finishing" }, "A run is in progress");
+      expect([waiting.disabled, waiting.title, waiting.attributes["aria-description"]]).toEqual([true, "The agent is still finishing. A run is in progress", "The agent is still finishing. A run is in progress"]);
+      const free = runOf({ ...task, column: "todo", blocks: [], blockedBy: [], finishing: null }, null);
+      expect(free.disabled).toBe(false);
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(globalThis, "document");
+      else Reflect.set(globalThis, "document", previous);
+    }
+  });
 });
 
-describe("A design card", () => {
+describe("A Task the agent has taken", () => {
   const withDom = <T>(run: () => T): T => {
     const previous = (globalThis as { document?: unknown }).document;
     (globalThis as { document?: unknown }).document = {
@@ -224,49 +231,101 @@ describe("A design card", () => {
       else Reflect.set(globalThis, "document", previous);
     }
   };
-  const member = (over: Partial<TaskCard>): TaskCard => ({ ...task, drift: null, blocks: [], blockedBy: [], ...over });
-  const design = (over: Partial<DesignCard> = {}): DesignCard => ({
-    kind: "design",
-    key: "design:live",
-    id: "live",
-    title: "Refunds",
-    column: "todo",
-    done: 1,
-    tasks: [
-      member({ key: "task:liveTask", id: "liveTask", title: "First", column: "todo" }),
-      member({ key: "task:second", id: "second", name: { text: "second", isNumber: false }, title: "Second", column: "done", finished: "2026-10-06T10:00:00.000Z" }),
-    ],
-    ...over,
-  });
 
-  test("is closed until expanded, counts its finished Tasks, and lists each Task with its status dot", () => {
+  test("its dot is static and says Agent working, and its card has no Run button", () => {
     withDom(() => {
-      let expanded = false;
-      const rendered = renderCard(design(), { ...env(), isExpanded: () => expanded, setExpanded: (_key: string, open: boolean) => { expanded = open; } } as never) as unknown as Node;
-      const list = rendered.all.find((n) => n.className === "board-design-tasks")!;
-      const toggle = rendered.all.find((n) => n.className.includes("board-design-toggle"))!;
-      expect([list.hidden, toggle.renderedText, toggle.attributes["aria-expanded"]]).toEqual([true, "Show tasks", "false"]);
-      expect(rendered.all.find((n) => n.className.includes("board-design-count"))?.renderedText).toBe("1/2 done");
-      toggle.click();
-      expect([list.hidden, toggle.renderedText, toggle.attributes["aria-expanded"], expanded]).toEqual([false, "Hide tasks", "true", true]);
-      expect(rendered.all.filter((n) => n.className === "board-design-task").map((n) => n.dataset["key"])).toEqual(["task:liveTask", "task:second"]);
-      expect(rendered.all.filter((n) => n.className.startsWith("board-dot")).map((n) => n.attributes["aria-label"])).toEqual(["Ready", "Done"]);
+      const rendered = renderCard({ ...task, column: "doing", agent: true, drift: null, blocks: [], blockedBy: [] }, env() as never) as unknown as Node;
+      expect(rendered.all.filter((n) => n.className.startsWith("board-dot")).map((n) => [n.className, n.attributes["aria-label"]])).toEqual([["board-dot is-doing", "Agent working"]]);
+      expect(rendered.all.some((n) => n.dataset["action"] === "run")).toBe(false);
     });
   });
+});
 
-  test("Run this design asks the agent for the design, and says why it is disabled when every Ready Task of the design is blocked", () => {
-    withDom(() => {
-      let posted: unknown;
-      const free = renderCard(design(), env({ post: (value) => { posted = value; } }) as never) as unknown as Node;
-      const run = free.all.find((n) => n.dataset["action"] === "run-design")!;
-      expect([run.renderedText, run.disabled]).toEqual(["Run this design", false]);
-      run.click();
-      expect(posted).toEqual({ type: "launch", action: { kind: "implement-design", proposal: "live" } });
-
-      const stuck = design({ tasks: [member({ key: "task:liveTask", id: "liveTask", title: "First", column: "todo", blockedBy: [{ kind: "drift", drift: "liveDrift", title: "Refunds differ" }] })] });
-      const blocked = renderCard(stuck, env() as never) as unknown as Node;
-      const blockedRun = blocked.all.find((n) => n.dataset["action"] === "run-design")!;
-      expect([blockedRun.disabled, blockedRun.title]).toEqual([true, "All the Ready Tasks are blocked: Task T3 is blocked by Drift D4"]);
+describe("Tasks waiting in the Board", () => {
+  const withDom = <T>(run: () => T): T => {
+    const previous = Reflect.get(globalThis, "document");
+    Reflect.set(globalThis, "document", {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
     });
+    try {
+      return run();
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(globalThis, "document");
+      else Reflect.set(globalThis, "document", previous);
+    }
+  };
+
+  test("a waiting card lists the Tasks waiting for its fix Task, each as a row of its own, with no Run button", () => {
+    withDom(() => {
+      const waiter: TaskCard = { ...task, key: "task:waiter", id: "waiter", name: { text: "T9", isNumber: true }, blockedBy: [{ kind: "fix", task: "liveTask", title: "Fix refunds", drift: "liveDrift" }] };
+      const waiting: WaitingCard = { kind: "waiting", key: "waiting:liveTask", task, waiting: [waiter] };
+      const rendered = renderCard(waiting, env() as never) as unknown as Node;
+      expect(rendered.className).toContain("board-card-waiting");
+      expect(rendered.all.filter((n) => n.className === "board-blocked-task").map((n) => n.dataset["key"])).toEqual(["task:waiter"]);
+      expect(rendered.all.some((n) => n.dataset["action"] === "run")).toBe(false);
+    });
+  });
+});
+
+describe("Announced ghost rendering", () => {
+  test("a check in History shows the Updating History row and its accessible name", () => {
+    const previous = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
+    };
+    try {
+      const card = announcedCard({ id: "c00001", kind: "check", title: "Final check after all Tasks", phase: "history" }, true);
+      const node = renderAnnounced(card) as unknown as Node;
+      expect(node.attributes["aria-label"]).toBe("Agent checking the code: Final check after all Tasks, Updating History");
+      expect(node.attributes["role"]).toBe("img");
+      expect(node.all.filter((n) => n.className === "board-announced-phase").map((n) => n.textContent)).toEqual(["Updating History"]);
+    } finally {
+      if (previous === undefined) delete (globalThis as { document?: unknown }).document;
+      else (globalThis as { document?: unknown }).document = previous;
+    }
+  });
+});
+
+describe("History entry details", () => {
+  test("the «i» of an entry lists its Tasks by creation, and a Task that is gone says so", () => {
+    const scope = globalThis as { document?: unknown };
+    const previous = scope.document;
+    scope.document = {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
+    };
+    try {
+      const task = (over: Partial<HistoryTaskView>): HistoryTaskView => ({ id: "task0000", exists: true, title: "A task", column: "done", unchanged: null, finished: null, refs: [], proposalTag: null, created: null, ...over });
+      const entry: HistoryView = {
+        id: "hist0001", title: "Returns refunded", summary: "Refunds now **arrive** on time.", body: "", created: "2026-10-01T00:00:00.000Z", updated: "2026-10-16T08:30:00.000Z", file: "history/hist0001-returns.md",
+        tasks: [
+          task({ id: "late0003", title: "Third", created: "2026-10-03T00:00:00.000Z" }),
+          task({ id: "gone0009", exists: false, title: null, column: null }),
+          task({ id: "early001", title: "First", created: "2026-10-01T00:00:00.000Z" }),
+        ],
+      };
+      const view = historyEntryNode({ post: () => {}, navigate: () => {}, openLink: () => {} } as never);
+      view.update(entry, numbers, new Date("2026-10-17T12:00:00Z"));
+      const rendered = view.node as unknown as Node;
+      const info = rendered.all.find((n) => n.className === "board-history-info");
+      expect(info?.attributes["aria-label"]).toBe("Show the Tasks of Returns refunded");
+      expect(rendered.all.find((n) => n.className === "board-history-summary")?.renderedText).toBe("Refunds now arrive on time.");
+      info?.click();
+      const dialog = rendered.all.find((n) => n.tagName === "dialog");
+      expect(dialog?.open).toBe(true);
+      const rows = dialog?.all.filter((n) => n.className === "board-history-task") ?? [];
+      expect(rows.length).toBe(3);
+      expect(rows[0]?.renderedText).toContain("First");
+      expect(rows[1]?.renderedText).toContain("Third");
+      expect(rows[2]?.renderedText).toContain("no longer exists");
+    } finally {
+      if (previous === undefined) delete scope.document;
+      else scope.document = previous;
+    }
   });
 });

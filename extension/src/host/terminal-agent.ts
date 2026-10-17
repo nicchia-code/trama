@@ -13,8 +13,8 @@ export type Role = keyof Models;
 
 
 /**
- * The role of an instruction, from the name of its terminal: `Design`, `Setup` and `Import` are analysis, `Scan` is scan, the
- * implement runs (a Task's short number, `All tasks`) are execution.
+ * The role of an instruction, from the name of its terminal: `Design`, `Setup`, `Import` and `Drifts` are analysis, `Scan` is
+ * scan, the implement runs (a Task's short number, `All tasks`, which the automatic Run uses too) are execution.
  */
 // ponytail: the role follows the terminal name, which the Requirements tie one-to-one to the kind of instruction; pass the role explicitly if a name ever serves two roles.
 export const roleOf = (name: string): Role => (name === "Design" || name === "Setup" || name === "Import" || name === "Drifts" ? "analysis" : name === "Scan" ? "scan" : "execution");

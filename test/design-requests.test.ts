@@ -102,7 +102,7 @@ describe("the title and emptiness of a request", () => {
 describe("a Proposal bound to a written design request", () => {
   test("records the request, and keeps it after the hand-over consumed the file", () => {
     const file = writeRequest(ID);
-    const prop = newProposal(p, "Lost", "", { request: ID });
+    const prop = newProposal(p, "Lost", "", { request: ID, label: "Lost" });
     expect(getProposal(p, prop.id).data.request).toBe(ID);
     expect(readFileSync(join(prop.dir, "proposal.md"), "utf8")).toContain(`request: ${ID}`);
     writeOrder(prop.id);
@@ -128,8 +128,8 @@ describe("a Proposal bound to a written design request", () => {
 
   test("only the first Proposal opened for a request is bound to it; a later one is created unbound and hands over normally", () => {
     const file = writeRequest(ID);
-    const first = newProposal(p, "Lost", "", { request: ID });
-    const second = newProposal(p, "Lost again", "", { request: ID });
+    const first = newProposal(p, "Lost", "", { request: ID, label: "Lost" });
+    const second = newProposal(p, "Lost again", "", { request: ID, label: "Lost again" });
     expect(getProposal(p, first.id).data.request).toBe(ID);
     expect(getProposal(p, second.id).data.request).toBeNull();
     writeOrder(second.id);
@@ -171,7 +171,7 @@ describe("the command line", () => {
 
   test("proposal submit says it deleted the request", () => {
     writeRequest(ID);
-    const prop = newProposal(p, "Lost", "", { request: ID });
+    const prop = newProposal(p, "Lost", "", { request: ID, label: "Lost" });
     writeOrder(prop.id);
     const out = run(["proposal", "submit", prop.id], dir, {}).out;
     expect(out).toContain(`Submitted Proposal ${cardName(p, "proposal", prop.id)} for review`);

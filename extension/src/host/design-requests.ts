@@ -25,9 +25,9 @@ const DESIGN_GHOST = "Describe the change to design: behaviour, edge cases, requ
 const SETUP_GHOST = "Describe the application to build: what it does and who it is for. Close this tab or press Send to agent when you are done.";
 
 /**
- * Written design requests in the editor. A request is a file in `.trama/requests/` from the moment Design… creates
+ * Written design requests in the editor. A request is a file in `.trama/requests/` from the moment + Add Work Item creates
  * it, and Trama saves it by itself while the developer writes, whatever the editor's auto save setting says. Since
- * everything hangs on the file, a tab the editor restores or the developer reopens behaves like the one Design… opened.
+ * everything hangs on the file, a tab the editor restores or the developer reopens behaves like the one + Add Work Item opened.
  * Which requests were sent is kept in the workspace state, so it survives restarts; a request file not in that list is
  * being written. Closing the last tab of a request being written sends it, like Send to agent; a request is sent at
  * most once. A request consumed or abandoned is remembered in memory only, while its tab is open.
@@ -53,7 +53,7 @@ export class DesignRequests implements vscode.Disposable {
     tramaFiles: vscode.FileSystemWatcher,
     private readonly project: () => Project | undefined = findProject,
     private readonly launch: (root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement, canSend?: () => boolean) => Promise<Launch | undefined> = launchAgent,
-    /** Run Ready Tasks, started when a setup Proposal is approved on its own; the host always passes it. */
+    /** Run all, started when a setup Proposal is approved on its own; the host always passes it. */
     private readonly runAll?: () => Promise<void>,
   ) {
     this.subscriptions = [
@@ -73,15 +73,16 @@ export class DesignRequests implements vscode.Disposable {
     ];
     this.finishMissing(vscode.window.tabGroups.all.flatMap((group) => group.tabs));
     this.forget();
+    void this.clearGoneSetup();
     this.updateContext();
   }
 
-  /** Design…: the empty file of a new request, in a tab that is not a preview. */
+  /** + Add Work Item: the empty file of a new request, in a tab that is not a preview. */
   async write(): Promise<void> {
     await this.open(false);
   }
 
-  /** Start from Scratch: the empty file of a request that starts the setup, opened as Design… does; its ID joins the setup list. */
+  /** Start from Scratch: the empty file of a request that starts the setup, opened as + Add Work Item does; its ID joins the setup list. */
   async writeSetup(): Promise<void> {
     await this.open(true);
   }
@@ -181,20 +182,24 @@ export class DesignRequests implements vscode.Disposable {
     return this.state.get<string[]>(SETUP_KEY, []);
   }
 
-  /**
-   * A setup request whose file is gone leaves the setup list at once. Its setup Proposal, if it has one: approved, it
-   * starts Run Ready Tasks as the Board's button does (a refusal is shown); still open, the developer is told why it was
-   * not approved on its own. Nothing else is done.
-   */
-  private async settleSetup(project: Project): Promise<void> {
+  /** Takes out of the setup list the IDs whose file is gone, and returns them. */
+  private async takeGoneSetup(project: Project): Promise<string[]> {
     const setup = this.setupIds();
     const gone = setup.filter((id) => {
       const file = requestFile(project, id);
       return file !== undefined && !existsSync(file);
     });
-    if (gone.length === 0) return;
-    await this.state.update(SETUP_KEY, setup.filter((id) => !gone.includes(id)));
-    for (const id of gone) {
+    if (gone.length > 0) await this.state.update(SETUP_KEY, setup.filter((id) => !gone.includes(id)));
+    return gone;
+  }
+
+  /**
+   * A setup request whose file is gone leaves the setup list at once. Its setup Proposal, if it has one: approved, it
+   * starts Run all as the Board's button does (a refusal is shown); still open, the developer is told why it was
+   * not approved on its own. Nothing else is done.
+   */
+  private async settleSetup(project: Project): Promise<void> {
+    for (const id of await this.takeGoneSetup(project)) {
       const proposal = listProposals(project).find((p) => p.data.kind === "setup" && p.data.request === id);
       if (proposal?.data.status === "approved") {
         try {
@@ -207,6 +212,15 @@ export class DesignRequests implements vscode.Disposable {
         void vscode.window.showWarningMessage(`Trama: the setup Proposal could not be approved on its own: ${reason}. Review it on the Board.`);
       }
     }
+  }
+
+  /**
+   * At start-up, the setup IDs whose file vanished while no editor had the project open leave the setup list. Nothing
+   * is started: those Tasks stay in To do, to be started from the Board.
+   */
+  private async clearGoneSetup(): Promise<void> {
+    const project = this.project();
+    if (project) await this.takeGoneSetup(project);
   }
 
   private isSent(id: string): boolean {

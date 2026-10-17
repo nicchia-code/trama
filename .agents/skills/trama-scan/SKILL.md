@@ -17,7 +17,7 @@ As soon as you know you will file a Task or a Drift, announce it: `trama announc
 
 ## Announcing the check
 
-A scan that is not part of a `trama-implement` run (after an approval, or asked by hand) is a **check**: announce it before you read the code, with `trama announce check "<title>" --phase scanning`, which prints its ID. The title says the work, in English: `Scan of <Proposal title>` after an approval, `Scan of held Proposals` for a scan of what several Proposals changed (one check for the whole scan, not one per Proposal), otherwise `Scan of the System`, `Scan of Feature <a>` or `Scan of Features <a>, <b>`. Run `trama announce done <id>` when the comparison is over, before the report. Inside a `trama-implement` run, use that run's check and announce none. A sub-agent never announces a check. Never wait for the ghost to show; an unknown ID is only noted in the output.
+A scan that is not part of a `trama-implement` run (after an approval, or asked by hand) is a **check**: announce it before you read the code, with `trama announce check "<title>" --phase scanning`, which prints its ID. The title says the work, in English: `Scanning System`, `Scanning Feature <a>` or `Scanning Features <a>, <b>`. Run `trama announce done <id>` when the comparison is over, before the report. Inside a `trama-implement` run, use that run's check and announce none. A sub-agent never announces a check. Never wait for the ghost to show; an unknown ID is only noted in the output.
 
 ## Hard rules
 

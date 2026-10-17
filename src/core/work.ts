@@ -430,7 +430,20 @@ export function takeBackTask(p: Project, id: string): Task {
  */
 export function releaseTasks(p: Project, origin: AgentOrigin): Task[] {
   const holder = holderOf(origin);
-  const released = listTasks(p).filter((t) => t.data.agent && (t.data.holder === null || t.data.holder === holder));
+  return releaseTaken(p, (task) => task.data.holder === null || task.data.holder === holder);
+}
+
+/**
+ * The editor starts up with no agent followed by its window: every Task still marked as taken belongs to an agent that is
+ * no longer followed, so all of them go back to To do, as the end of their turn would release them.
+ */
+export function releaseAbandonedTasks(p: Project): Task[] {
+  return releaseTaken(p, () => true);
+}
+
+/** Sends back to To do the Tasks marked as taken that `matches` selects, and returns them. */
+function releaseTaken(p: Project, matches: (task: Task) => boolean): Task[] {
+  const released = listTasks(p).filter((task) => task.data.agent && matches(task));
   for (const task of released) {
     task.data.agent = false;
     task.data.holder = null;

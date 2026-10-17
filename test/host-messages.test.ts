@@ -10,14 +10,13 @@ const ok = (message: unknown) => {
 test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "ready" })).toEqual({ type: "ready" });
   expect(ok({ type: "writeDesignRequest" })).toEqual({ type: "writeDesignRequest" });
-  expect(ok({ type: "launch", action: { kind: "design" } })).toEqual({ type: "launch", action: { kind: "design" } });
-  expect(ok({ type: "launch", action: { kind: "design", prompt: "x" } })).toEqual({ type: "launch", action: { kind: "design", prompt: "x" } });
   expect(ok({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ type: "launch", action: { kind: "scan", feature: "checkout" } });
   expect(ok({ type: "launch", action: { kind: "scan" } })).toEqual({ type: "launch", action: { kind: "scan" } });
   expect(ok({ type: "launch", action: { kind: "implement", task: "0003" } })).toEqual({ type: "launch", action: { kind: "implement", task: "0003" } });
   expect(ok({ type: "launch", action: { kind: "implement-all" } })).toEqual({ type: "launch", action: { kind: "implement-all" } });
-  expect(ok({ type: "launch", action: { kind: "implement-design", proposal: "8ga7dqpb" } })).toEqual({ type: "launch", action: { kind: "implement-design", proposal: "8ga7dqpb" } });
   expect(ok({ type: "launch", action: { kind: "resolve-drifts" } })).toEqual({ type: "launch", action: { kind: "resolve-drifts" } });
+  expect(ok({ type: "launch", action: { kind: "resolve-drifts", drift: "ab12cd34" } })).toEqual({ type: "launch", action: { kind: "resolve-drifts", drift: "ab12cd34" } });
+  expect(parseToHost({ type: "launch", action: { kind: "resolve-drifts", drift: "../x" } })).toEqual({ ok: false, reason: "resolve-drifts needs a valid Drift ID" });
   expect(ok({ type: "launch", action: { kind: "import" } })).toEqual({ type: "launch", action: { kind: "import" } });
   expect(ok({ type: "openModelFile", path: "checkout/order.md" })).toEqual({ type: "openModelFile", path: "checkout/order.md" });
   expect(ok({ type: "openFile", path: "tasks/0003-x.md" })).toEqual({ type: "openFile", path: "tasks/0003-x.md" });
@@ -31,7 +30,6 @@ test("accepts every well-formed message of the contract", () => {
 test("the command palette offers no design command, only import", async () => {
   const { contributes } = await Bun.file(new URL("../extension/package.json", import.meta.url)).json();
   const commands = (contributes.commands as { command: string }[]).map((c) => c.command);
-  expect(commands).not.toContain("trama.quickDesign");
   expect(commands).not.toContain("trama.design");
   expect(commands).toContain("trama.import");
 });
@@ -60,8 +58,6 @@ test("rejects unknown types, wrong shapes and IDs that are not plain IDs; move a
     { type: "launch", action: { kind: "fix", prompt: "The cart total ignores the coupon" } },
     { type: "launch", action: { kind: "scan", feature: "a`; rm -rf /; `" } },
     { type: "launch", action: { kind: "implement", task: 3 } },
-    { type: "launch", action: { kind: "implement-design", proposal: "../secret" } },
-    { type: "launch", action: { kind: "implement-design" } },
     { type: "openFile" },
     { type: "openFile", path: "" },
     { type: "openModelFile", path: 7 },

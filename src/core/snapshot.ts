@@ -1,5 +1,5 @@
 import type { CardNumbers } from "./card-names";
-import { type Announcement, type AnnouncementKind, type CheckPhase, listAnnouncements } from "./announcements";
+import { type Announcement, type AnnouncementKind, type CheckPhase, listAnnouncements, resolutionTitle } from "./announcements";
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
 import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, coversScope, health, listProposals, type Proposal, type ProposalKind, proposalCoverage, type RemovalEntry, unfixableDrifts } from "./proposals";
@@ -13,6 +13,7 @@ import { syncShortNumbers } from "./short-numbers";
 import { readLastScan } from "./last-scan";
 import { attachedDrift, closedUnchanged, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, followedDrift, listDrifts, listTasks } from "./work";
 import { type Specs, type SpecsChange, specsChange } from "./specs";
+import { type HistoryFault, readHistory } from "./history";
 
 export interface ActorChange {
   id: string;
@@ -153,12 +154,14 @@ export interface TaskView {
   drift: string | null;
   /** ID of the Proposal (the design) the Task comes from, if any. */
   proposal: string | null;
-  /** Title of that Proposal, the tag the Board shows on the Task; null when the Task has none or the Proposal is gone. */
-  proposalTitle: string | null;
+  /** The tag the Board shows on the Task: the Proposal's label, or its title when it has none; null when the Task has no Proposal or the Proposal is gone. */
+  proposalTag: string | null;
   /** True while the agent has taken the Task: the developer cannot move it. */
   agent: boolean;
   /** When the Task arrived in Done, UTC ISO 8601; null outside Done and on Tasks that reached Done before the instant was kept. */
   finished: string | null;
+  /** When the Task was created, UTC ISO 8601; null on numbered Tasks written before the field existed. */
+  created: string | null;
   /** The note of a fix Task closed without changes; null otherwise. Such a Task is not counted in tasksSinceScan. */
   unchanged: string | null;
   /** Why the Task is blocked, if it is: the open Drifts, or the Task that fixes the code of its Drift. Empty when it is free. */
@@ -170,11 +173,41 @@ export interface TaskView {
 /** A card the agent is about to create, drawn as a ghost in the column it will land in, or a check drawn in In progress. */
 export interface AnnouncementView {
   id: string;
-  kind: AnnouncementKind;
+  /** A manual scan is a check announced by Trama, shown as Scan. */
+  kind: AnnouncementKind | "scan" | "resolve";
   /** The Draft's own title once a Draft is bound to it, the announced title before. */
   title: string;
-  /** A card: Preparing until a Draft exists, then Writing (a Proposal) or Writing the Proposal (a Drift's Draft). A check: its own phase. */
-  phase: "preparing" | "writing" | "writing-proposal" | CheckPhase;
+  /** A card: Preparing until a Draft exists, then Writing (a Proposal) or Writing the Proposal (a Drift's Draft). A check: its own phase. An import has none. */
+  phase: "preparing" | "writing" | "writing-proposal" | CheckPhase | null;
+}
+
+/** A Task cited by a History entry, as it is now; `exists` is false when the Task is gone. */
+export interface HistoryTaskView {
+  id: string;
+  exists: boolean;
+  title: string | null;
+  column: Column | null;
+  unchanged: string | null;
+  finished: string | null;
+  refs: string[];
+  /** The tag the Board shows on the Task: the Proposal's label, or its title; null when the Task has no Proposal or the Proposal is gone. */
+  proposalTag: string | null;
+  /** When the Task was created; null when it is gone. The panel lists the Tasks of an entry in this order. */
+  created: string | null;
+}
+
+/** A History entry as the panel shows it. */
+export interface HistoryView {
+  id: string;
+  title: string;
+  summary: string;
+  body: string;
+  created: string;
+  updated: string;
+  /** Path relative to `.trama/`, for opening the file. */
+  file: string;
+  /** The Tasks cited, in the order they were added. */
+  tasks: HistoryTaskView[];
 }
 
 export interface Snapshot extends ModelView {
@@ -183,6 +216,12 @@ export interface Snapshot extends ModelView {
   proposals: ProposalView[];
   /** The open Drifts listed in a resolution Proposal still being written or open: they are decided there, not from the panel. */
   resolutionDrifts: string[];
+  /** The open Drifts an agent filed in a turn it has not finished: «Dismiss Drift» waits for that turn's end. The editor knows them in memory and passes them in; other callers pass none. */
+  finishingDrifts: string[];
+  /** The Proposals an agent delivered in a turn it has not finished: Approve and Reject wait for that turn's end. The editor knows them in memory and passes them in; other callers pass none. */
+  finishingProposals: string[];
+  /** The Tasks an agent filed in a turn it has not finished: their Run waits for that turn's end. The editor knows them in memory and passes them in; other callers pass none. */
+  finishingTasks: string[];
   drifts: DriftView[];
   tasks: TaskView[];
   /** Done Tasks finished after this working copy's remembered global Scan launch. */
@@ -195,6 +234,10 @@ export interface Snapshot extends ModelView {
   specs: Specs;
   /** Whether the `specs.yaml` file exists, valid or not. */
   specsPresent: boolean;
+  /** The History entries that read, newest first; a Task cited that no longer exists is marked `exists: false`. */
+  history: HistoryView[];
+  /** History files that do not read; the other entries are still listed. */
+  historyFaults: HistoryFault[];
 }
 
 function actorChange(id: string, before: Actor | undefined, after: Actor | undefined): ActorChange {
@@ -321,11 +364,13 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
 }
 
 /** Everything the extension shows, as plain JSON. Malformed Task or Drift files throw, naming the file. */
-export function buildSnapshot(p: Project): Snapshot {
+export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [], finishingProposals: readonly string[] = [], finishingTasks: readonly string[] = []): Snapshot {
   const numbers = syncShortNumbers(p).all();
   const project = buildProject(readTrackedFiles(p));
 
   const tasks = listTasks(p);
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const history = readHistory(p);
   const scanInstant = Date.parse(readLastScan(p));
   const tasksSinceScan = tasks.filter((t) => t.data.column === "done" && t.data.finished !== null && t.data.unchanged === null && Date.parse(t.data.finished) > scanInstant).length;
   const drifts = listDrifts(p);
@@ -340,9 +385,13 @@ export function buildSnapshot(p: Project): Snapshot {
     ...modelView(project),
     specs: project.specs,
     specsPresent: project.specsPresent,
-    diagnostics: project.diagnostics,
+    // A History file that does not read is an error of the Snapshot, shown with the Model's errors; it is not a Model error, so approval does not see it.
+    diagnostics: [...project.diagnostics, ...history.faults.map((fault) => ({ file: fault.file, line: 0, message: fault.message }))],
     proposals: openProposals.filter((v) => !attachedDrift(p, v.id)),
     resolutionDrifts: allProposals.filter((x) => x.data.kind === "resolution" && (x.data.status === "draft" || x.data.status === "open")).flatMap((x) => x.data.drifts.map((d) => d.drift)),
+    finishingDrifts: [...finishingDrifts],
+    finishingProposals: [...finishingProposals],
+    finishingTasks: [...finishingTasks],
     drifts: drifts.filter((d) => d.data.status === "open").map((d) => ({
       id: d.id,
       created: d.data.created,
@@ -372,21 +421,52 @@ export function buildSnapshot(p: Project): Snapshot {
       refs: t.data.refs,
       drift: t.data.drift,
       proposal: t.data.proposal,
-      proposalTitle: (t.data.proposal !== null && proposalById.get(t.data.proposal)?.title) || null,
+      proposalTag: (t.data.proposal !== null && (proposalById.get(t.data.proposal)?.data.label || proposalById.get(t.data.proposal)?.title)) || null,
       agent: t.data.agent,
       finished: t.data.finished,
+      created: t.data.created,
       unchanged: t.data.unchanged,
       blockedBy: blocked.get(t.id) ?? [],
       file: `tasks/${t.name}`,
     })),
-    announcements: announcements.map((a) => announcementView(a, a.proposal === null ? undefined : proposalById.get(a.proposal)?.title)),
+    announcements: announcements.map((a) => announcementView(p, a, a.proposal === null ? undefined : proposalById.get(a.proposal)?.title)),
     numbers,
+    history: history.entries.map((e) => ({
+      id: e.id,
+      title: e.title,
+      summary: e.summary,
+      body: e.body,
+      created: e.created,
+      updated: e.updated,
+      file: `history/${e.name}`,
+      tasks: e.tasks.map((id): HistoryTaskView => {
+        const t = taskById.get(id);
+        if (!t) return { id, exists: false, title: null, column: null, unchanged: null, finished: null, refs: [], proposalTag: null, created: null };
+        return {
+          id,
+          exists: true,
+          title: t.title,
+          created: t.data.created,
+          column: t.data.column,
+          unchanged: t.data.unchanged,
+          finished: t.data.finished,
+          refs: t.data.refs,
+          proposalTag: (t.data.proposal !== null && (proposalById.get(t.data.proposal)?.data.label || proposalById.get(t.data.proposal)?.title)) || null,
+        };
+      }),
+    })),
+    historyFaults: history.faults,
   };
 }
 
-/** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. Only a Proposal's ghost takes its Draft's title: a Drift keeps its own. */
-export function announcementView(a: Announcement, proposalTitle: string | undefined): AnnouncementView {
-  return { id: a.id, kind: a.kind, title: (a.kind === "proposal" && a.proposal !== null && proposalTitle) || a.title, phase: a.phase ?? (a.proposal === null ? "preparing" : a.kind === "drift" ? "writing-proposal" : "writing") };
+/** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. Only a Proposal's ghost takes its Draft's title: a Drift and a Resolve Drifts keep their own. */
+export function announcementView(p: Project, a: Announcement, proposalTitle: string | undefined): AnnouncementView {
+  // A Proposal that names Drifts is the Resolve Drifts ghost: its title comes from the Drifts it names, never from the Draft.
+  const resolving = a.kind === "proposal" && a.drifts.length > 0;
+  const kind = resolving ? "resolve" : a.kind === "check" && a.source === "request" ? "scan" : a.kind;
+  const phase = a.kind === "work" ? null : a.phase ?? (a.proposal === null ? "preparing" : a.kind === "drift" ? "writing-proposal" : "writing");
+  const title = resolving ? resolutionTitle(p, a.drifts) ?? a.title : (a.kind === "proposal" && a.proposal !== null && proposalTitle) || a.title;
+  return { id: a.id, kind, title, phase };
 }
 
 /** The title is shown separately, so the body drops its leading H1. */

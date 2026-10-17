@@ -1,6 +1,7 @@
 import { existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { TramaError } from "./errors";
+import { listHistory, saveHistory } from "./history";
 import { listProposals, save as writeProposal } from "./proposals";
 import { canonicalCardId } from "./schema";
 import { type CardEntry, type CardLayout, listCards, type Project, readDocument, sha256, writeDocument } from "./store";
@@ -151,6 +152,7 @@ export function rewriteNumberedCards(p: Project): RewrittenCard[] {
   const proposals = listProposals(p);
   const tasks = listTasks(p);
   const drifts = listDrifts(p);
+  const history = listHistory(p);
   for (const proposal of proposals) {
     const card = rewritten.get(proposal.name);
     const requires = proposal.data.requires.map((id) => mapped("proposal", id, ids) as string);
@@ -189,6 +191,11 @@ export function rewriteNumberedCards(p: Project): RewrittenCard[] {
     drift.data.resolvedBy = resolvedBy;
     if (card) drift.data.created = rewrittenInstant(card.number);
     writeDrift(drift);
+  }
+  for (const entry of history) {
+    const cited = entry.tasks.map((id) => mapped("task", id, ids) as string);
+    if (cited.every((id, i) => id === entry.tasks[i])) continue;
+    saveHistory({ ...entry, tasks: cited });
   }
 
   const done: RewrittenCard[] = [];

@@ -9,7 +9,7 @@ import { QUESTION_ENDPOINT_ENV, requestCoordinatorMessage, sendCoordinatorMessag
 import { bundledOmpHook, bundledTrama, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, toClipboard, withTramaPath } from "./cursor";
 import { onCopilotChatEvent } from "./copilot-chat";
 import { withdrawWaiting } from "./announcements";
-import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, setHooked, startJob } from "./drift-resolution";
+import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint, questionWindowId } from "./questions";
 import { withLanguage } from "./prompts";
@@ -115,6 +115,12 @@ function releaseTakenTasks(root: string, origin: AgentOrigin): void {
   }
 }
 
+/** The turn of `holder` ended: the Drifts it filed and the Proposals it delivered are released here and in every other window that hears of it. */
+function endFiledWork(root: string, holder: string): void {
+  releaseFiledWork(root, holder);
+  void sendCoordinatorMessage(projectAt(root), { type: "turn-ended", root, holder }).catch(() => undefined);
+}
+
 /**
  * Follows terminal command lifecycles and Trama conversations in Cursor and Copilot chat. A matching conversation stop
  * releases only the Tasks taken by that chat agent.
@@ -132,6 +138,7 @@ export function watchAgentTerminal(): vscode.Disposable {
         return;
       }
       releaseTakenTasks(e.root, { chat: "cursor" });
+      endFiledWork(e.root, "cursor");
       // Only a completed turn is a normal end: an interrupted or closed conversation never starts the Run that follows it.
       const abnormal = e.event === "AGENT_STOPPED" ? undefined : e.event === "AGENT_INTERRUPTED" ? "its conversation was interrupted" : "its conversation was closed";
       for (const job of endChatJobs(e.root, e.conversation, abnormal)) void broadcastJob(e.root, job, false);
@@ -142,6 +149,7 @@ export function watchAgentTerminal(): vscode.Disposable {
         return;
       }
       releaseTakenTasks(e.root, { chat: "editor" });
+      endFiledWork(e.root, "editor");
       for (const job of endCopilotChatJobs(e.root, e.conversation)) void broadcastJob(e.root, job, false);
     }),
     onAgentIdle((terminal) => {
@@ -172,6 +180,7 @@ export function watchAgentTerminal(): vscode.Disposable {
 function endAgentWork(info: { id: string; jobId?: string; root: string; line: string; since: number }, abnormal?: string): void {
   setHooked(info.id, false);
   releaseTakenTasks(info.root, { terminal: info.id });
+  endFiledWork(info.root, info.id);
   for (const job of endTerminalJobs(info.id, abnormal)) void broadcastJob(info.root, job, false);
   withdrawWaiting(info.root, (announcement) => announcement.terminal === info.id);
 }
@@ -202,12 +211,28 @@ function isTypedCommand(terminal: vscode.Terminal, commandLine: string | undefin
 
 /** What a design request announces: its title. */
 export type DesignAnnouncement = string;
+/** A card a launch announces: a Resolve Drifts, which names the Drifts it resolves (read once the instruction is sent, when they are known), a manual scan, or an import (`work`). */
+export type LaunchAnnouncement =
+  | { kind: "resolve"; drifts: () => readonly string[] }
+  | { kind: "work" | "check"; title: string };
 
-function announceDesignRequest(root: string, title: DesignAnnouncement, terminal: string): void {
+function announceLaunch(root: string, announcement: DesignAnnouncement | LaunchAnnouncement, origin: AgentOrigin): void {
   try {
-    announce(projectAt(root), { kind: "proposal", title, source: "request", terminal });
+    if (typeof announcement === "string") {
+      announce(projectAt(root), { kind: "proposal", title: announcement, source: "request", ...origin });
+      return;
+    }
+    if (announcement.kind === "resolve") {
+      // Resolve Drifts is a Proposal named "Resolve Drifts" that names its Drifts; the panel titles it from them.
+      const drifts = [...announcement.drifts()];
+      if (drifts.length === 0) return;
+      announce(projectAt(root), { kind: "proposal", title: "Resolve Drifts", drifts, source: "request", ...origin });
+      return;
+    }
+    const phase = announcement.kind === "check" ? { kind: "check" as const, phase: "scanning" as const } : { kind: "work" as const };
+    announce(projectAt(root), { ...phase, title: announcement.title, source: "request", ...origin });
   } catch (err) {
-    if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: could not announce the Proposal: ${err.message}`);
+    if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: could not announce the card: ${err.message}`);
     else throw err;
   }
 }
@@ -311,7 +336,7 @@ export async function launchAgent(
   root: string,
   instruction: Instruction,
   name: string,
-  announceProposal?: DesignAnnouncement,
+  announceProposal?: DesignAnnouncement | LaunchAnnouncement,
   canSend: () => boolean = () => true,
   job?: JobKind,
   onSent?: (startedAt: number) => void,
@@ -333,6 +358,7 @@ export async function launchAgent(
       const delivery = await openChat(root, prompt, canSend, () => {
         sentAfter = chatJobSendStarted(root, chat);
       }, roleOf(name));
+      if (delivery === "sent" && announceProposal !== undefined) announceLaunch(root, announceProposal, { chat: isCursor() ? "cursor" : "editor" });
       if (delivery === "sent" && job !== undefined && jobId !== undefined) {
         const started = startJob(job, root, { chat }, false, sentAfter, jobId, jobOrigin, windowId);
         if (started !== undefined && shared) await broadcastJob(root, {
@@ -367,6 +393,7 @@ export async function launchAgent(
     if (asTab) terminal.show(true);
     const startedAt = Date.now();
     terminal.sendText(line);
+    if (announceProposal !== undefined) announceLaunch(root, announceProposal, { terminal: terminalId });
     onSent?.(startedAt);
     if (job !== undefined && jobId !== undefined) {
       const started = startJob(job, root, { terminal: terminalId }, run.hooked, undefined, jobId, jobOrigin, windowId);
@@ -374,7 +401,6 @@ export async function launchAgent(
         id: started, kind: job, root, place: { terminal: terminalId }, origin: jobOrigin, windowId,
       }, true);
     }
-    if (announceProposal !== undefined) announceDesignRequest(root, announceProposal, terminalId);
     return "terminal";
   };
   // Under an active autopilot a Run, scan or resolution is reserved with the project's coordinator before its check and send; the reservation goes

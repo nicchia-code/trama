@@ -59,7 +59,8 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
   const fileChanges = changes(p, proposal);
   const errors = live ? [...validateProposal(p, proposal), ...unfixableDrifts(p, proposal).map((message) => ({ file: "proposal.md", line: 0, message }))] : [];
   const md = [
-    proposal.body.trim(),
+    // The label goes under the title, the first line of the body.
+    proposal.data.label ? proposal.body.trim().replace(/^#.*$/m, (title) => `${title}\n\nLabel: ${proposal.data.label}`) : proposal.body.trim(),
     "",
     `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}${proposal.data.kind === "change" ? "" : ` · ${proposal.data.kind}`}${proposal.data.automatic ? " · automatic" : ""}`,
     attached ? `Attached to Drift ${numbers.name("drift", attached.id)} ${attached.title}. It brings no Tasks and is decided on the Drift.` : "",
@@ -92,6 +93,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
       id: proposal.id,
       number: numbers.label("proposal", proposal.id),
       title: proposal.title,
+      label: proposal.data.label,
       status: proposal.data.status,
       kind: proposal.data.kind,
       automatic: proposal.data.automatic,

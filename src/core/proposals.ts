@@ -77,6 +77,27 @@ interface ProposalData {
   created: string | null;
   /** History only: the scope an Approved Proposal saved before scope became live. Never written now. */
   scanScope: ScanScopeEntry[] | null;
+  /** Short name shown on the Board and in `proposal show`; required before a Proposal with Tasks is handed over. Absent on Proposals written before the field existed. */
+  label: string | null;
+}
+
+/** Longest label a Proposal can carry, in characters. */
+export const LABEL_LIMIT = 30;
+
+/** Why `text` is not a usable label, or null: 1 to LABEL_LIMIT characters after trimming, on one line. */
+export function labelProblem(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed === "") return "the label is empty";
+  if (/[\r\n]/.test(trimmed)) return "the label must be on one line";
+  const length = [...trimmed].length;
+  return length > LABEL_LIMIT ? `the label is ${length} characters long; at most ${LABEL_LIMIT} are allowed` : null;
+}
+
+/** The label as it is stored, after checking it; refuses the text with the reason. */
+export function checkedLabel(text: string): string {
+  const problem = labelProblem(text);
+  if (problem !== null) throw new TramaError(`Refused: ${problem}. A label has 1 to ${LABEL_LIMIT} characters, on one line.`);
+  return text.trim();
 }
 
 export interface Proposal {
@@ -121,6 +142,7 @@ function parseData(raw: Raw, where: string): ProposalData {
     request: textOrNull(raw, "request", where),
     created: createdField(raw, where),
     scanScope: scanScopeField(raw, where),
+    label: textOrNull(raw, "label", where),
   };
   if (data.automatic && data.kind !== "resolution") throw new TramaError(`${where}: "automatic" is only valid for a resolution Proposal`);
   data.drifts = driftsField(raw, data.kind, where);
@@ -211,7 +233,7 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
 
 /** Writes `proposal.md` from the Proposal's data, leaving defaults out of the file. */
 export function save(proposal: Proposal) {
-  const { kind, automatic, drifts, requires, request, created, scanScope, ...rest } = proposal.data;
+  const { kind, automatic, drifts, requires, request, created, scanScope, label, ...rest } = proposal.data;
   // Defaults stay out of the file, so Proposals without dependencies look as they always did.
   // Numbered Proposals have no `created`; writing it would pretend they remember an instant they do not.
   const data = {
@@ -225,6 +247,7 @@ export function save(proposal: Proposal) {
     ...(request === null ? {} : { request }),
     ...(created === null ? {} : { created }),
     ...(scanScope === null ? {} : { scanScope }),
+    ...(label === null ? {} : { label }),
   };
   writeDocument(join(proposal.dir, "proposal.md"), data, proposal.body);
 }
@@ -249,10 +272,11 @@ export function newProposal(
   p: Project,
   title: string,
   body = "",
-  options: { requires?: string[]; kind?: ProposalKind; automatic?: boolean; announcement?: string; origin?: AgentOrigin; request?: string } = {},
+  options: { requires?: string[]; kind?: ProposalKind; automatic?: boolean; announcement?: string; origin?: AgentOrigin; request?: string; label?: string } = {},
 ): Proposal {
   if (options.automatic && (options.kind ?? "change") !== "resolution")
     throw new TramaError("--automatic can only be used with --resolution");
+  const label = options.label === undefined ? null : checkedLabel(options.label);
   const requires = (options.requires ?? []).map((r) => {
     const required = getProposal(p, r);
     if (required.data.status === "rejected" || required.data.status === "discarded")
@@ -278,6 +302,7 @@ export function newProposal(
       request: requestToBind(p, options.request),
       created: createdNow(),
       scanScope: null,
+      label,
     },
     body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
     tasks: [],
@@ -370,6 +395,22 @@ function requireStatus(p: Project, proposal: Proposal, status: "draft" | "open",
 export function requireEditable(p: Project, proposal: Proposal) {
   if (proposal.data.status !== "draft" && proposal.data.status !== "open")
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is ${proposal.data.status}; only drafts and open Proposals can be edited`);
+}
+
+/**
+ * Writes or changes the label of a Proposal. It is an edit: an open Proposal returns to Draft, and the result says so.
+ */
+export function setProposalLabel(p: Project, id: string, text: string): { proposal: Proposal; returnedToDraft: boolean } {
+  const label = checkedLabel(text);
+  return withProposalLock(p, id, () => {
+    const proposal = getProposal(p, id);
+    requireEditable(p, proposal);
+    const returnedToDraft = proposal.data.status === "open";
+    touch(proposal);
+    proposal.data.label = label;
+    save(proposal);
+    return { proposal, returnedToDraft };
+  });
 }
 
 /** An edit takes a handed-over Proposal back from the developer: it is a Draft until the next submit. */
@@ -519,7 +560,7 @@ export function applied(p: Project, proposal: Proposal): FileMap {
 export function validateProposal(p: Project, proposal: Proposal): Diagnostic[] {
   const taskErrors = proposal.tasks.flatMap((t) => t.problems.map((message) => ({ file: `tasks/${t.name}`, line: 0, message })));
   const project = buildProject(applied(p, proposal));
-  const errors = [...taskErrors, ...project.diagnostics, ...taskRules(p, proposal, project)];
+  const errors = [...taskErrors, ...project.diagnostics, ...taskRules(p, proposal, project), ...labelRule(p, proposal)];
   if (!proposal.data.automatic) return errors;
   const problems = [
     ...(Object.keys(proposal.data.base).length > 0 || proposal.data.delete.length > 0 || newFiles(proposal).size > 0 ? ["an automatic resolution cannot touch or delete Model or Requirements files"] : []),
@@ -530,6 +571,17 @@ export function validateProposal(p: Project, proposal: Proposal): Diagnostic[] {
     ]),
   ];
   return [...errors, ...problems.map((message) => ({ file: "proposal.md", line: 0, message }))];
+}
+
+/**
+ * A Proposal with Tasks needs a valid label to be handed over. An open Proposal without a label was handed over before
+ * labels existed, so only a label that is present but invalid blocks it.
+ */
+function labelRule(p: Project, proposal: Proposal): Diagnostic[] {
+  if (proposal.tasks.length === 0 || !coversScope(proposal.data.kind)) return [];
+  const { label, status } = proposal.data;
+  if (label === null ? status !== "draft" : labelProblem(label) === null) return [];
+  return [{ file: "proposal.md", line: 0, message: `Proposal ${cardName(p, "proposal", proposal.id)} needs a label of at most ${LABEL_LIMIT} characters for its Tasks` }];
 }
 
 /** Whether a Model or Requirement reference resolves in the project. */

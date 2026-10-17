@@ -74,7 +74,7 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Scan System**, **Trama: Import from Code**. No initialize command (no **Trama: Initialize Project**) and no design command: design requests start only from the Board buttons (**Quick request…**, **Add Work Item…**). **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
+| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Scan System**, **Trama: Import from Code**. No initialize command (no **Trama: Initialize Project**) and no design command: design requests start only from the Board button (**Add Work Item…**). **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
 | 2 | Run **Trama: Open** | One new editor tab titled `Trama`, in the editor area | ☐ |
 | 3 | Look at the tab header inside the panel | Four tabs, in this order: **Board** (grey badge `4`), **Diagram** (selected, underlined), **Requirements**, **Settings** | ☐ |
 | 4 | Look under the tabs | No red banner | ☐ |
@@ -114,7 +114,7 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 | 2 | Look at the box on the right | `Checkout` with the text `3 machines · ⚠ 2 drifts inside`, a **red** outline, and a small ↗ icon at its right edge | ☐ |
 | 3 | Look at the edges | Four grey edges Actor → Checkout, labelled `1` (Courier), `3` (Stripe), `3` (User), `1` (Warehouse) | ☐ |
 | 4 | Look under Checkout | Two red dashed pill nodes `Drift 0001` and `Drift 0002`, each with a dashed red edge going up to Checkout | ☐ |
-| 5 | Look at the toolbar | Left: `System`. Right: `Proposal` selector, buttons `−`, `+`, `Fit`, `Scan`. No **Quick request…** and no **Add Work Item…** here: they are on the Board only | ☐ |
+| 5 | Look at the toolbar | Left: `System`. Right: `Proposal` selector, buttons `−`, `+`, `Fit`, `Scan`. No **Add Work Item…** here: it is on the Board only | ☐ |
 | 6 | Look at the panel | `SYSTEM`, `Shop`, `An online shop selling printed books to private customers.`, then `FEATURES` with the link `Checkout` and `3 machines` under it | ☐ |
 | 7 | Look at the bottom-left legend | `Legend` (collapsible, open) with six entries: Proposal adds it, Proposal removes it, Proposal changes it, Drift, Initial State, Final State | ☐ |
 | 8 | Click the `Legend` header | It collapses to its title; click again to expand | ☐ |
@@ -312,7 +312,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 ### E1. Layout
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Clic sulla scheda **Board** | Barra: **Run Ready Tasks** (blu), **Scan System**, **Quick request…**, **Add Work Item…**, con gli stessi tooltip di B1.5. In fondo a Work Items c'è solo **+ Work Item**; in fondo a Ready c'è solo **Run all**; In progress e Done non hanno pulsanti in fondo | ☐ |
+| 1 | Clic sulla scheda **Board** | Barra: **Run all** (blu), **Scan System**, **Add Work Item…**, con gli stessi tooltip di B1.5. In fondo a Work Items c'è solo **+ Work Item**; in fondo a Ready c'è solo **Run all**; In progress e Done non hanno pulsanti in fondo | ☐ |
 | 2 | Look at the columns | `WORK ITEMS 4`, `READY 2`, `IN PROGRESS 1`, `DONE 1`, each with a count badge | ☐ |
 
 ### E2. Work Items
@@ -350,8 +350,8 @@ Needs the real omp agent configured in S2 for row 6; the other rows need none.
 | 2 | Try to drag Task 0001 over In progress, over Work Items and over its own column | Nothing is dragged: no outline appears on any column and `grep column $D/tasks/0001-*.md` still says `column: todo` | ☐ |
 | 3 | Press Tab through the Board | Focus reaches only **Show details**, **Run**, **Open**, the links and badges, and the buttons of Proposals and Drifts; none of them moves a Task | ☐ |
 | 4 | `j task move 1 doing` | Within about a second the card is in In progress. At no moment is it dimmed or marked busy, and no error appears | ☐ |
-| 5 | `TRAMA_AGENT=1 j task move 2 doing` | The dot of Task 0002 pulses in the accent colour and its label is `Agent working`; there is no badge and no **Take back** button. **Run Ready Tasks** is disabled with the tooltip `An agent is working on Task 0002` | ☐ |
-| 6 | `j task move 2 done` (as the developer), then `j task take-back 2` | The first is refused: the message says the agent is working on Task 0002 and points to `trama task take-back 2` only. The second clears the mark: the dot stops pulsing, Task 0002 stays In progress and **Run Ready Tasks** is enabled again | ☐ |
+| 5 | `TRAMA_AGENT=1 j task move 2 doing` | The dot of Task 0002 pulses in the accent colour and its label is `Agent working`; there is no badge and no **Take back** button. **Run all** is disabled with the tooltip `An agent is working on Task 0002` | ☐ |
+| 6 | `j task move 2 done` (as the developer), then `j task take-back 2` | The first is refused: the message says the agent is working on Task 0002 and points to `trama task take-back 2` only. The second clears the mark: the dot stops pulsing, Task 0002 stays In progress and **Run all** is enabled again | ☐ |
 | 7 | Start an agent that does not end by itself (E12), `TRAMA_AGENT=1 j task move 2 doing`, then press Ctrl+C in the **Design** terminal | Task 0002 goes back to Ready with its dot no longer pulsing; no Take back is needed | ☐ |
 
 ### E8. Open a Task
@@ -402,7 +402,7 @@ Needs the real omp agent configured in S2 for row 6; the other rows need none.
 Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `"trama.autoExit": false` in your **user** settings; ↻ and reload the window. `j` below is the verification shell's.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Board: **Quick request…**, type `Add refunds after pickup`, Enter. Note the Work Items count and the number on the Board tab | Within about a second a dashed, translucent skeleton appears in Work Items after the last real Proposal and before the first Drift: kind `Proposal`, title `Add refunds after pickup`, the line `Preparing`, and a shimmer on its text lines | ☐ |
+| 1 | Board: **Add Work Item…**, type `Add refunds after pickup`, close the tab (it is sent). Note the Work Items count and the number on the Board tab | Within about a second a dashed, translucent skeleton appears in Work Items after the last real Proposal and before the first Drift: kind `Proposal`, title `Add refunds after pickup`, the line `Preparing`, and a shimmer on its text lines | ☐ |
 | 2 | Look at the Work Items count and the number on the Board tab again | Both are as in row 1: a ghost is not counted | ☐ |
 | 3 | Press Tab through the Board, then click the ghost | Focus never lands on it, the click does nothing, it has no buttons or links and cannot be dragged. Its accessible name is `Proposal the agent is creating, preparing: Add refunds after pickup` | ☐ |
 | 4 | `ls -A $D/announcements` and `cat $D/announcements/*.md`, then `T=$(sed -n 's/^terminal: //p' $D/announcements/*.md)` | `.gitignore` and one `<id>.md` with `kind: proposal`, `source: request`, a `terminal:` line with six lowercase letters and digits (kept in `$T`) and the H1 `Add refunds after pickup`; `cat $D/announcements/.gitignore` prints `*` | ☐ |
@@ -416,7 +416,7 @@ Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `
 | 12 | Click **Close** on the notice, switch to the Diagram tab and back | The notice is gone; closing the Trama tab and opening it again shows none | ☐ |
 | 13 | `j proposal new "Never finished"`, read the ghost, then `j proposal discard <ID it printed>` | A `Writing` ghost titled `Never finished`; after the discard it disappears and **no** notice is shown | ☐ |
 | 14 | `j announce task "Before reload"`, then Developer: Reload Window and open the Board | The ghost is not there and no notice is shown: leftovers are withdrawn at startup | ☐ |
-| 15 | Set `"trama.agent": "chat"` in your **user** settings; reload, **Quick request…** with any text | The prompt goes to Copilot Chat and no terminal ghost appears | ☐ |
+| 15 | Set `"trama.agent": "chat"` in your **user** settings; reload, **Add Work Item…**, type any text and close the tab | The prompt goes to Copilot Chat and no terminal ghost appears | ☐ |
 | 16 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with chat, the ghost starts with the Draft | ☐ |
 | 17 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
 | 18 | Restore S2. ↻, then `j task move 1 doing` | The card moves to In progress without ever looking busy; no dashed copy of it appears in In progress at any moment | ☐ |
@@ -424,11 +424,11 @@ Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `
 | 20 | `j announce phase $C scanning`, poi di nuovo lo stesso comando | Il ghost passa a `Scanning`; il secondo comando dice che il controllo è già in Scanning | ☐ |
 | 21 | `j announce done $C` | Il ghost sparisce e **nessun** avviso compare | ☐ |
 
-### E13. Collapse the Done column
+### E13. Collapse the History column
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Open the Board the first time after opening the panel | The Done column is collapsed: a narrow strip with a `‹` button (accessible name `Expand Done column`, not expanded) and the title `Done` read top to bottom; no cards, no period menu, no count, no `Nothing done in this period`; Work Items, Ready and In progress share the freed space | ☐ |
-| 2 | Activate the button | The column opens with the period menu, count and cards; the button reads `Collapse Done column` and reports expanded; focus stays on the button | ☐ |
+| 1 | Open the Board the first time after opening the panel | The History column is collapsed: a narrow strip with a `chevron-left` icon button (accessible name `Expand History column`, not expanded) and the title `History` read top to bottom; no entries, no period menu, no count; the other columns share the freed space | ☐ |
+| 2 | Activate the button | The column opens with the period menu, count and entries; the button shows a `chevron-right` icon, reads `Collapse History column` and reports expanded; focus stays on the button | ☐ |
 | 3 | Collapse it again, then edit a Task file so the Board refreshes | The column stays collapsed after the refresh | ☐ |
 | 4 | Close the Trama panel and open it again | The column starts collapsed again | ☐ |
 
@@ -563,7 +563,7 @@ Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." -
 
 ## H. Launching the agent (S2)
 
-Each launch starts a new agent terminal named after its work (cwd = the demo folder): `Scan` for scans, `Design` for design requests, `Setup` for the request that starts a project from scratch, the Task's short number (for example `T1`) for **Run**, `All tasks` for **Run all To do**. Inspect the command in the terminal list; Trama does not reuse terminals or show the terminal area automatically. The panel, cursor and keyboard stay where they were.
+Each launch starts a new agent terminal named after its work (cwd = the demo folder): `Scan` for scans, `Design` for design requests, `Setup` for the request that starts a project from scratch, the Task's short number (for example `T1`) for **Run**, `All tasks` for **Run all**. Inspect the command in the terminal list; Trama does not reuse terminals or show the terminal area automatically. The panel, cursor and keyboard stay where they were.
 
 | # | Action | Expected in the terminal | ✓ |
 |---|---|---|---|
@@ -571,23 +571,20 @@ Each launch starts a new agent terminal named after its work (cwd = the demo fol
 | H2 | Diagram, System level: **Scan** | `Use the trama-scan skill on the whole System.` | ☐ |
 | H3 | Diagram, Feature level `checkout`: **Scan** | ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
 | H4 | Diagram, Machine level `order`: **Scan** | Same as H3 (the current Feature) | ☐ |
-| H5 | Board: **Quick request…** | Input box titled `Quick Design Request`, prompt `What should the agent design or change in the Model?`, placeholder `Add a cancelled state to orders…` | ☐ |
-| H6 | In H5 press Enter with the box empty | `Describe what to design` | ☐ |
-| H7 | In H5 type `Add refunds with $HOME and 'quotes'`, Enter | The printed line is exactly `Use the trama-design skill. Add refunds with $HOME and 'quotes'` (the `$HOME` is **not** expanded, the quotes survive) | ☐ |
-| H8 | Click **Quick request…** and press Esc | Nothing is printed | ☐ |
-| H9 | Diagram toolbar and Requirements toolbar | Neither has **Quick request…** nor **Add Work Item…**; the Requirements toolbar shows only the Proposal selector and the filter. The buttons are in the Board toolbar only (H5–H8) | ☐ |
+| H5 | Board toolbar | Only **Scan System** is there, with no **Quick request…**, no **Add Work Item…** and no input box. No line with `Use the trama-design skill.` is ever printed by a Board button | ☐ |
+| H6 | Diagram toolbar and Requirements toolbar | Neither has **Quick request…** nor **+ Add Work Item**; the Requirements toolbar shows only the Proposal selector and the filter. **+ Add Work Item** is in the Board's Work Items column only | ☐ |
 | H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
-| H11 | Board: **Run Ready Tasks** | ``Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch`, one group at a time, until it says there is none.`` | ☐ |
-| H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task take-back 5` and `j task take-back 7`, then look at **Run Ready Tasks** and at the Task card `0006`, tagged `Proposal 0003` | **Run Ready Tasks** is **disabled** with the tooltip and accessible description `All the Ready Tasks are blocked: Task 0001 is blocked by Drift 0006`; Task `0006` shows its tag `Proposal 0003` and the badge `blocked 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run Ready Tasks** | ☐ |
+| H11 | Board: **Run all** | ``Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch`, one group at a time, until it says there is none.`` | ☐ |
+| H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task take-back 5` and `j task take-back 7`, then look at **Run all** and at the Task card `0006`, tagged `Proposal 0003` | **Run all** is **disabled** with the tooltip and accessible description `All the Ready Tasks are blocked: Task 0001 is blocked by Drift 0006`; Task `0006` shows its tag `Proposal 0003` and the badge `blocked 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run all** | ☐ |
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
-| H15 | Palette: type `Trama`, look at the list | No **Quick Design Request…** and no **Add Work Item…** command: design requests start only from the Board buttons (and, with an empty Model, the Diagram's **Import from Code** and **Start from Scratch**) | ☐ |
+| H15 | Palette: type `Trama`, look at the list | No **Quick Design Request…** and no **Add Work Item…** command: design requests start only from the Board's **+ Add Work Item** button (and, with an empty Model, the Diagram's **Import from Code** and **Start from Scratch**) | ☐ |
 | H16 | After H1 to H15, open the terminal dropdown | Every launch has its own terminal, even when an earlier command with the same name has ended. Terminals are named for their work: `Scan`, `Design`, a Task's short number or `All tasks`; no terminal is reused | ☐ |
 | H17 | Set `"trama.agent": "claude"` in your **user** settings; click **Scan System** | A new terminal named `Scan` runs Claude Code; no choice prompt appears | ☐ |
 | H18 | Set `"trama.agent": "chat"` in your **user** settings; click **Scan System** | Copilot Chat receives the prompt; no terminal is created and no choice prompt appears | ☐ |
 | H19 | Leave `trama.agent` set to `chat`; add the legacy settings `"trama.agentLauncher": "terminal"`, `"trama.terminalAgent": "codex"` and `"trama.agentCommand": "fake {prompt}"` to user settings; click **Scan System** | The scan goes to Copilot Chat; legacy values are ignored and remain unchanged | ☐ |
 | H20 | Remove the legacy values; restore `"trama.agent": "omp"` | Future launches use omp without prompting | ☐ |
-| H21 | Set `"trama.language": " Italian "` in user settings; click **Scan System** | The instruction includes `Write everything you generate in Italian, except code, which always stays in English.`; the setting applies to scans, Runs, quick/written design and imports | ☐ |
+| H21 | Set `"trama.language": " Italian "` in user settings; click **Scan System** | The instruction includes `Write everything you generate in Italian, except code, which always stays in English.`; the setting applies to scans, Runs, written design and imports | ☐ |
 | H22 | Change `trama.language` to `"   "`; click **Scan System** | The instruction has no language sentence | ☐ |
 | H23 | Restore S2 and remove `trama.language` | The setup is restored | ☐ |
 | H23a | Remove `trama.language` from user settings (keeping the rest), reload the window; then open a fresh profile with no `trama.language` and `LANG=it_IT.UTF-8`, start the extension | The user setting stays empty (Trama does not save the system language); the instruction carries no language sentence | ☐ |
@@ -630,9 +627,9 @@ Set `trama.agent="omp"` and `trama.terminalLocation="editor"` in **user** settin
 |---|---|---|---|
 | H71 | Set S2t, reload, click in the panel's search box (or any editor), then Board: **Scan System** | A `Scan` terminal tab opens in a new editor group beside the panel; it does **not** take focus, the panel stays visible, and the terminal area gets no `Scan` terminal. `echo $TRAMA_AGENT` in the tab prints `1` | ☐ |
 | H72 | Click on the panel, then **Scan System** again | A new tab titled `Scan` opens in the same group without taking focus | ☐ |
-| H73 | With S2u, repeat **Scan System** while the first command runs | A second `Scan` tab opens in the same group; each terminal's end is followed independently, releasing its Tasks and withdrawing undelivered announcements with local notices. After both end, **Run Ready Tasks** opens an `All tasks` tab in the same group | ☐ |
+| H73 | With S2u, repeat **Scan System** while the first command runs | A second `Scan` tab opens in the same group; each terminal's end is followed independently, releasing its Tasks and withdrawing undelivered announcements with local notices. After both end, **Run all** opens an `All tasks` tab in the same group | ☐ |
 | H74 | With S2u, close every agent tab and the group of H73, click **Scan System**, then close the group of the new tab while it runs and click **Scan System** again | Each time a new group opens beside the active one, since the previous tab's group is gone | ☐ |
-| H75 | With S2u, **Quick request…** `Tabbed request`, then close the tab while the command runs | The `Tabbed request` ghost appears at once and is withdrawn when the tab closes, as when the integrated terminal closes; the next **Scan System** opens a new tab beside the active group | ☐ |
+| H75 | With S2u, **Add Work Item…** `Tabbed request`, sent, then close the tab while the command runs | The `Tabbed request` ghost appears at once and is withdrawn when the tab closes, as when the integrated terminal closes; the next **Scan System** opens a new tab beside the active group | ☐ |
 | H76 | Drag the `Scan` tab of H71 into another group, then click **Scan System** twice with S2u | The second new tab opens in the group where Trama had opened the first one, not where you dragged it: Trama does not follow a moved tab | ☐ |
 | H77 | Set `trama.terminalLocation="panel"` and `trama.agent="omp"` in user settings, reload, close the terminal area, click in the panel's search box, then **Scan System**; then set `trama.agent="chat"` and try again in Cursor | omp: a `Scan` terminal is created in the terminal area but not shown; the area stays closed, focus stays in the search box, and `Scan` appears in the terminal list. Cursor with `chat`: the instruction goes to Cursor's chat | ☐ |
 
@@ -654,7 +651,7 @@ Switch modes with the script, from the repo (it works from any shell, fish inclu
 | I5 | Let the scan finish. In the verification shell: `j board` | Tasks 0005 to 0008 were created (about four, one per Machine or group of States; the demo has no code, so everything not covered by Tasks 0001 to 0004 is missing) and **no Drift**. **Proposals 0001 and 0002 are still open**: the agent must not have run `proposal approve`, `proposal reject` or `drift resolve`. `j validate` is still valid and `.trama/model/` is unchanged. Ran against a real omp: passed | ☐ |
 | I6 | While the scan runs watch the board | The new Tasks appear in To do by themselves while the agent works (seen: 2 to 5 cards after about 27 s, 6 after 33 s). Ran against a real omp: passed | ☐ |
 | I7 | While omp is still running in the terminal, click **Scan System** again | A **new** terminal named `Scan` opens and runs the command there; the running omp receives nothing. (Before this was fixed the command line was typed into omp as a message.) Once every command has finished, the next launch with the same name reuses the last terminal instead of opening another. Reproduced the old bug twice and verified the fix with a slow command; not yet repeated with omp itself | ☐ |
-| I8 | Quit omp. **Quick request…** with `Orders can also be returned` | omp reads the `trama-design` skill and explores the Model. Because Proposal 0001 already covers part of this, it asks you with a menu (options such as replacing or extending 0001) and **waits for your answer**. Pick an option; omp then writes a Proposal that appears in To decide as soon as the file exists, with its changes listed. Ran against a real omp as far as the question; the answer and the new Proposal still need a human | ☐ |
+| I8 | Quit omp. **Add Work Item…** with `Orders can also be returned`, sent | omp reads the `trama-design` skill and explores the Model. Because Proposal 0001 already covers part of this, it asks you with a menu (options such as replacing or extending 0001) and **waits for your answer**. Pick an option; omp then writes a Proposal that appears in To decide as soon as the file exists, with its changes listed. Ran against a real omp as far as the question; the answer and the new Proposal still need a human | ☐ |
 | I9 | ↻ (Task 0002 must be in To do: **Run** only exists on To do cards). Quit omp, then Board: **Run** on Task 0002 | The terminal shows `… omp 'Use the trama-implement skill on Task 0002.'`. omp reads the Task (`trama task show 0002`) and moves it to In progress. The demo has no code and no stack, so it asks you what to build with and, if you do not answer, puts the Task back in To do. Nothing is written in `.trama/model/`. Ran against a real omp: passed up to that point | ☐ |
 
 ---
@@ -689,7 +686,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | K2 | Switch back to a dark theme | Same | ☐ |
 | K3 | Narrow the editor group to about 700 px | Board scrolls horizontally (columns keep a minimum width); the Diagram canvas is not hidden by the panel | ☐ |
 | K4 | Use only the keyboard on the Board (Tab, Shift+Tab, Enter) | Every button is reachable and shows a visible focus ring | ☐ |
-| K5 | Hover disabled buttons | Disabled **Approve** shows its reason; so does a disabled **Run Ready Tasks** | ☐ |
+| K5 | Hover disabled buttons | Disabled **Approve** shows its reason; so does a disabled **Run all** | ☐ |
 
 ---
 
@@ -792,8 +789,8 @@ Run R1–R4 on **every new Cursor version** before declaring it supported (smoke
 |---|---|---|---|
 | R1 | `cat ~/.cursor/hooks.json` | `version: 1` and, under each of `beforeSubmitPrompt`, `stop` and `sessionEnd`, one entry `"<extension folder>/bin/trama" cursor-hook`; entries you had before are still there | ☐ |
 | R1b | `cat ~/.cursor/agents/trama-analysis.md` after **Update Agent Skills**, with `"trama.scan": "sonnet"` | Front matter `name: trama-analysis`, a `description`, and `model: "sonnet"`; the body begins `Compare one Machine following the trama-scan skill`. With `trama.scan` empty, `model: inherit` | ☐ |
-| R2 | Board: **Quick request…** with `Orders can also be returned` | A **new** chat opens and sends `Use the trama-design skill. Orders can also be returned` by itself, with a second line `The trama command may not be on your PATH. Before anything else run: export PATH="…/bin:$PATH"`. No «Create chat with prompt» confirmation and no clipboard notice | ☐ |
-| R2b | With `"trama.analysis": "sonnet"`, **Quick request…** with `Orders can also be returned` | The new chat runs on `sonnet`, shown in the chat, with Max mode off; the chats already open keep their model. If the chat fell back to the deeplink or the clipboard, it starts without a model | ☐ |
+| R2 | Board: **Add Work Item…**, write `Orders can also be returned` in the request and send it | A **new** chat opens and sends `Use the trama-design skill on the design request in \`.trama/requests/<id>.md\`. Bind the first Proposal you open to it with \`--request <id>\`.` by itself, with a second line `The trama command may not be on your PATH. Before anything else run: export PATH="…/bin:$PATH"`. No «Create chat with prompt» confirmation and no clipboard notice | ☐ |
+| R2b | With `"trama.analysis": "sonnet"`, **Add Work Item…** with `Orders can also be returned`, sent | The new chat runs on `sonnet`, shown in the chat, with Max mode off; the chats already open keep their model. If the chat fell back to the deeplink or the clipboard, it starts without a model | ☐ |
 | R3 | Let the agent ask its questions | `trama ask` brings the Trama panel forward in this window with the overlay of P1, the agent named `Cursor`. If the agent first gets `unavailable` inside Cursor's sandbox, it retries once outside it after asking permission; it keeps waiting when Cursor moves the command to the background | ☐ |
 | R4 | In the chat's terminal output, check that `trama proposal approve 1` run by the agent would be refused | The agent reports `"trama proposal approve" is the developer's decision … (CURSOR_AGENT is set)` | ☐ |
 | R5 | Interrupt the agent (Stop) while a ghost it announced is on the Board | The ghost disappears and the notice `The agent finished without delivering …` appears. Closing the chat instead removes such a ghost without a notice | ☐ |
@@ -836,7 +833,7 @@ Start each block with ↻. `$D` and `j` are the ones of S4.
 | V2 | `j --json task next --batch --max 2` | `batch`: the same Tasks, each with `id`, `number` and `title` | ☐ |
 | V3 | Move every Task in To do to Done with `j task move <id> done`, then `j task next --batch` and `j task next` | The two outputs are identical: `No Task is runnable.` and the Tasks left | ☐ |
 | V4 | `j proposal show 1` before approving it | A `## Scan scope` section, computed now, with the references of the changes; after approving it, no `## Scan scope` section: nothing is saved at approval | ☐ |
-| V5 | 🪙 With a real agent that has sub-agents, **Run all To do** with at least three Tasks on different Machines | The agent hands each Task of a group to a sub-agent, waits for all, asks `trama task next --batch --max <N>` again, runs tests, lint and build once at the end, then scans only the references returned by `trama task scope` for the Tasks it completed and reports the Tasks and Drifts filed | ☐ |
+| V5 | 🪙 With a real agent that has sub-agents, **Run all** with at least three Tasks on different Machines | The agent hands each Task of a group to a sub-agent, waits for all, asks `trama task next --batch --max <N>` again, runs tests, lint and build once at the end, then scans only the references returned by `trama task scope` for the Tasks it completed and reports the Tasks and Drifts filed | ☐ |
 
 
 ## X. Terminal agents and model roles
@@ -848,10 +845,10 @@ Written from the Requirements; these settings only count in your **user** settin
 | X1 | Keep `"trama.agent": "omp"` in user settings; put `"trama.agent": "claude"` in the workspace settings, reload, click **Scan System** | omp is used; project settings cannot select the agent | ☐ |
 | X2 | User settings: `"trama.agent": "omp"`, `"trama.scan": "my model"`. Click **Scan System** | The omp command uses `--model 'my model'` and the scan instruction | ☐ |
 | X3 | Remove `trama.scan`, click **Scan System** | omp receives no `--model` or `--slow` option | ☐ |
-| X4 | Set `"trama.analysis": "opus"`; click **Scan System**, then **Quick request…** with `x` | The scan uses `trama.scan`, not `trama.analysis`; the design command uses `--model 'opus'` and has no sub-agent sentence | ☐ |
+| X4 | Set `"trama.analysis": "opus"`; click **Scan System**, then write `x` in an **Add Work Item…** request and send it | The scan uses `trama.scan`, not `trama.analysis`; the design instruction names the request file and uses `--model 'opus'`, with no sub-agent sentence | ☐ |
 | X5 | 🪙 With omp installed: set `"trama.scan": "sonnet"`; click **Scan System** | omp uses `--model 'sonnet' --slow 'sonnet'`, and the prompt ends with `Compare each Machine with the trama-analysis sub-agent.` | ☐ |
 | X6 | 🪙 With Claude Code: set `"trama.agent": "claude"` and `"trama.scan": "sonnet"`; click **Scan System** | Claude Code receives `--model 'sonnet'`, an analysis sub-agent with `"model":"sonnet"`, and the sub-agent sentence | ☐ |
-| X7 | Set `"trama.agent": "chat"` and `"trama.scan": "sonnet"` in user settings; click **Scan System**, then **Quick request…** with `x` | Cursor: the scan's new conversation runs on `sonnet` with Max mode off, and its prompt ends with `Compare each Machine with the trama-analysis sub-agent.`. Copilot: `sonnet` is selected in the chat picker, or the warning `Trama: no Copilot model is named "sonnet" (trama.scan). The instruction was sent with the model chosen in the chat.` appears. The design prompt has no sub-agent sentence and no model notice appears in either editor | ☐ |
+| X7 | Set `"trama.agent": "chat"` and `"trama.scan": "sonnet"` in user settings; click **Scan System**, then write `x` in an **Add Work Item…** request and send it | Cursor: the scan's new conversation runs on `sonnet` with Max mode off, and its prompt ends with `Compare each Machine with the trama-analysis sub-agent.`. Copilot: `sonnet` is selected in the chat picker, or the warning `Trama: no Copilot model is named "sonnet" (trama.scan). The instruction was sent with the model chosen in the chat.` appears. The design instruction has no sub-agent sentence and no model notice appears in either editor | ☐ |
 | X8 | `trama skills update` (or **Trama: Update Agent Skills**), then inspect `/tmp/trama-demo/shop/.omp/agents/trama-analysis.md` and check for `trama-triage.md` | The `trama-analysis` definition has `model: "@slow"` and names `trama-scan`; the obsolete triage file is absent | ☐ |
 
 ---
@@ -873,7 +870,7 @@ These are acceptance scenarios for the coordinated automatic flow. Use a disposa
 | Y9 | Start a scan with an external agent not launched by Trama | It does not appear in Trama's coordination barrier; the developer coordinates that work manually | ☐ |
 | Y10 | Allow a successful Run and its selective scan to produce another eligible Drift | The existing Run check represents its selective scan once; a later cycle may run without an extra built-in cycle/time/spending limit. The developer can stop further cycles by withdrawing delegation or interrupting work | ☐ |
 | Y11 | Trigger a failed resolution or Task case, then find its card in the Board | The card of the failed Drift or Task shows an `autopilot failed` badge; its tooltip and accessible name `Autopilot failed: <reason>` give the reason. Focus does not move and the panel does not open by itself; selecting the card opens the permanent Drift or Task card, and keyboard focus survives status refresh | ☐ |
-| Y12 | Leave `"trama.submitWhileRunning"` unset or `false` (default); start a Run, then look at Run Ready Tasks and a Task's Run button while the Run is in progress; tick the setting (`true`) and look again | With `false`, those Run buttons are disabled while the Run is in progress, and a launch is refused with `A run cannot start: A run is in progress.`; with `true` they are available. Scan System, Quick request… and Resolve Drifts are not affected by the setting | ☐ |
+| Y12 | Leave `"trama.submitWhileRunning"` unset or `false` (default); start a Run, then look at Run all and a Task's Run button while the Run is in progress; tick the setting (`true`) and look again | With `false`, those Run buttons are disabled while the Run is in progress, and a launch is refused with `A run cannot start: A run is in progress.`; with `true` they are available. Scan System and Resolve Drifts are not affected by the setting | ☐ |
 
 ---
 

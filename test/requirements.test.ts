@@ -137,7 +137,7 @@ describe("Proposals with Requirements", () => {
     t.replace("#### Preparing (initial)\n- `warehouse.PACKAGE_READY` → Ready to ship\n\n#### Ready to ship", "#### Ready to ship (initial)");
 
   test("removing a State a Requirement is attached to is invalid until the Requirement is updated in the same Proposal", () => {
-    const prop = newProposal(p, "No preparing step");
+    const prop = newProposal(p, "No preparing step", "", { label: "No preparing step" });
     const order = editInProposal(p, prop.id, "checkout/order.md");
     writeFileSync(order, removePreparing(readFileSync(order, "utf8")));
     coverWithTask(p, prop.id, "order", "requirements/ui");
@@ -236,7 +236,7 @@ describe("Proposals with Requirements", () => {
 
   test("a Proposal writes a new Area and fragment, deletes a fragment, shows changes by Area and fragment, and is validated against the whole Area", () => {
     writeArea("ui", UI_AREA, { main: UI, old: "---\ndescription: Old.\n---\n# Old\n\n## cart\nSticky total.\n" });
-    const prop = newProposal(p, "Data and screens");
+    const prop = newProposal(p, "Data and screens", "", { label: "Data and screens" });
     writeFileSync(editInProposal(p, prop.id, "requirements/data/area.md"), '---\ndescription: "Use when storing data."\n---\n# Data\n');
     writeFileSync(editInProposal(p, prop.id, "requirements/data/money.md"), '---\ndescription: "Use when storing amounts."\n---\n# Money\n\n## order\nCents.\n');
     run(["proposal", "delete", prop.id, "requirements/ui/old.md"], dir, {});

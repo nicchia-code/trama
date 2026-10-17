@@ -35,7 +35,7 @@
   background: var(--vscode-sideBar-background, color-mix(in srgb, currentColor 4%, transparent));
 }
 
-.board-columns:has(> [data-column="done"].is-collapsed) { grid-template-columns: repeat(3, minmax(250px, 1fr)) 40px; }
+.board-columns:has(> [data-column="history"].is-collapsed) { grid-template-columns: repeat(3, minmax(250px, 1fr)) 40px; }
 
 .board-column-head {
   display: flex;
@@ -68,7 +68,7 @@
 .board-column-foot { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 8px; }
 .board-column-foot .trama-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; box-sizing: border-box; }
 .board-column-add { background: transparent; border: 1px dashed var(--board-muted); color: inherit; }
-.board-done-period {
+.board-history-period {
   margin: 8px 8px 0;
   padding: 2px 4px;
   font: inherit;
@@ -77,7 +77,25 @@
   border: 1px solid var(--vscode-dropdown-border, var(--board-border));
   border-radius: 2px;
 }
-.board-done-day { margin: 4px 0 0; font-size: 11px; font-weight: 600; color: var(--board-muted); }
+.board-history-day { margin: 4px 0 0; font-size: 11px; font-weight: 600; color: var(--board-muted); }
+.board-history-entry { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--board-border); border-radius: 3px; background: var(--vscode-editor-background, #1e1e1e); }
+.board-history-title { margin: 0; font-size: 13px; font-weight: 600; }
+.board-history-time { font-size: 11px; color: var(--board-muted); }
+.board-history-summary { margin: 0; font-size: 12px; }
+.board-history-head { display: flex; align-items: flex-start; gap: 6px; }
+.board-history-head .board-history-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.board-history-info { flex: none; display: inline-flex; padding: 2px; border: 0; border-radius: 3px; background: none; color: inherit; cursor: pointer; }
+.board-history-info:focus-visible { outline: 1px solid var(--vscode-focusBorder, currentColor); outline-offset: 1px; }
+.board-history-dialog { width: min(640px, 90vw); max-height: 85vh; padding: 0; border: 1px solid var(--board-border); border-radius: 4px; background: var(--vscode-editor-background, #1e1e1e); color: inherit; }
+.board-history-dialog::backdrop { background: rgb(0 0 0 / 40%); }
+.board-history-dialog-body { display: flex; flex-direction: column; gap: 10px; max-height: 85vh; padding: 14px 16px; box-sizing: border-box; overflow: auto; }
+.board-history-dialog-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.board-history-dialog-title { flex: 1; min-width: 0; margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.board-history-tasks-head { margin: 6px 0 0; font-size: 11px; font-weight: 600; color: var(--board-muted); }
+.board-history-tasks { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.board-history-task { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.board-history-task-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.board-history-task-title { overflow-wrap: anywhere; }
 
 .board-card {
   display: flex;
@@ -101,8 +119,8 @@
 /* The short number or the identity of a card: one place, one monospaced font; the tooltip and the accessible name tell them apart. */
 .board-card-id { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; font-weight: 600; color: var(--board-muted); font-variant-numeric: tabular-nums; }
 .board-card-title { margin: 0; font-size: 1em; font-weight: 600; overflow-wrap: anywhere; }
-/* The tag of a Task that comes from a Proposal: its title on a tint from the Proposal's identity; one line, cut with dots. */
-.board-proposal-tag { --proposal-hue: 210; flex: 0 1 auto; min-width: 0; max-width: 100%; padding: 0 6px; border-radius: 3px; font-size: 11px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: hsl(var(--proposal-hue) 70% 85%); color: hsl(var(--proposal-hue) 45% 15%); }
+/* The tag of a Task that comes from a Proposal: its title in the colour the hash of the title picks; one line, cut with dots. */
+.board-proposal-tag { flex: 0 1 auto; min-width: 0; max-width: 100%; padding: 0 6px; border-radius: 3px; border: 1px solid var(--tag-colour); font-size: 11px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: color-mix(in srgb, var(--tag-colour) 18%, transparent); color: var(--vscode-foreground); }
 
 .board-badge {
   font-size: 11px;
@@ -118,24 +136,40 @@
 .board-badge.info { border-color: var(--board-blue); background: color-mix(in srgb, var(--board-blue) 18%, transparent); }
 .board-critical { color: var(--board-error); }
 
-/* A Task the agent has taken: its dot is the accent colour and pulses, unless the system asks for reduced motion, leaving a still dot. */
-.board-dot.is-agent { background: var(--board-accent); border-color: var(--board-accent); animation: board-working-pulse 1.2s ease-in-out infinite; }
-@keyframes board-working-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .3; transform: scale(.7); } }
-@media (prefers-reduced-motion: reduce) { .board-dot.is-agent { animation: none; } }
+/* A Task the agent has taken: a border that turns round the card, from terminal blue to cyan; reduced motion leaves it still in cyan. */
+@property --board-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+.board-card.is-working {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--vscode-editor-background, #1e1e1e), var(--vscode-editor-background, #1e1e1e)) padding-box,
+    conic-gradient(from var(--board-angle), var(--vscode-terminal-ansiBlue, #2472c8), var(--vscode-terminal-ansiCyan, #11a8cd), var(--vscode-terminal-ansiBlue, #2472c8)) border-box;
+  animation: board-border-turn 3s linear infinite;
+}
+@keyframes board-border-turn { to { --board-angle: 360deg; } }
+@media (prefers-reduced-motion: reduce) {
+  .board-card.is-working {
+    animation: none;
+    background:
+      linear-gradient(var(--vscode-editor-background, #1e1e1e), var(--vscode-editor-background, #1e1e1e)) padding-box,
+      var(--vscode-terminal-ansiCyan, #11a8cd) border-box;
+  }
+}
 
 /* A blocked Task: the badge is a link; its text names the Drift or the fix Task, so colour is never the only signal. */
 button.board-blocked { font: inherit; font-size: 11px; cursor: pointer; border-color: var(--board-error); background: color-mix(in srgb, var(--board-error) 18%, transparent); }
 button.board-blocked:hover { background: color-mix(in srgb, var(--board-error) 32%, transparent); }
 button.board-blocked:focus-visible { outline: 1px solid var(--vscode-focusBorder, currentColor); outline-offset: 1px; }
+/* The title of a waiting card: a link to the fix Task's card; it looks like the title it replaces. */
+button.board-waiting-link { all: unset; cursor: pointer; font: inherit; font-weight: 600; overflow-wrap: anywhere; }
+button.board-waiting-link:focus-visible { outline: 1px solid var(--vscode-focusBorder, currentColor); outline-offset: 1px; }
 
 .board-details { color: var(--board-muted); }
 .board-details[hidden] { display: none; }
 .board-muted { color: var(--board-muted); }
 .board-origin { margin: 0; font-size: 12px; }
-.board-design-tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.board-design-tasks[hidden] { display: none; }
-.board-design-task { display: flex; flex-direction: column; gap: 2px; }
-.board-design-task:focus-visible { outline: 1px solid var(--vscode-focusBorder, currentColor); outline-offset: 1px; }
+.board-blocked-task { display: flex; flex-direction: column; gap: 2px; }
+.board-blocked-task:focus-visible { outline: 1px solid var(--vscode-focusBorder, currentColor); outline-offset: 1px; }
+.board-also-blocked { display: inline-flex; color: var(--board-error); cursor: default; }
 .board-row-title { overflow-wrap: anywhere; }
 
 .board-chips { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -168,6 +202,8 @@ button.board-blocked:focus-visible { outline: 1px solid var(--vscode-focusBorder
 .board-resolves-row:hover .board-resolves-title { text-decoration: underline; }
 .board-resolves-title { overflow-wrap: anywhere; }
 .board-resolves-decision { color: var(--board-muted); overflow-wrap: anywhere; }
+/* The Tasks a resolution's Drift blocks sit indented under that Drift's row, as they do inside a red Drift card. */
+.board-resolves-item > .board-blocked-task { margin-left: 16px; }
 
 .board-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 button.board-btn { padding: 2px 8px; }

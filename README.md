@@ -52,7 +52,7 @@ The returns design became nine Tasks, each tagged with the Proposal it comes fro
 
 ![Nine Tasks tagged with the returns Proposal](docs/images/tasks-ready.png)
 
-Click **Run Ready Tasks**, and the agent works through them while you follow along.
+Click **Run all**, and the agent works through them while you follow along.
 
 ### 5. Know when code and map disagree
 
@@ -155,9 +155,9 @@ For Claude Code, writing in Italian, a typical setup looks like this:
 | `trama.skillsDir` | `.agents/skills` | Where Get Started installs the agent skills. Use `.claude/skills` for Claude Code. |
 | `trama.language` | *empty* | Language for the prose the agent writes (descriptions, Proposals, Tasks, Drifts), e.g. `Italian`. Trama never fills it in: empty asks the agent nothing about language. Code, names, titles and IDs stay in English. |
 | `trama.terminalLocation` | `editor` | Where terminal agents open: `editor` (a tab in the active editor group, beside your code) or `panel` (terminal area, in the background). |
-| `trama.analysis` | *empty* | Model for design requests, Drift resolution and import. |
+| `trama.analysis` | *empty* | Model for design requests, Drift resolution, the preparation of automatic Drift resolution and import. |
 | `trama.scan` | *empty* | Model for scans, including the sub-agents that compare each Machine. |
-| `trama.execution` | *empty* | Model for implementing Tasks. |
+| `trama.execution` | *empty* | Model for implementing Tasks: implement, implement all and the automatic Run, including their pre-flight and the selective final scan. |
 | `trama.autoExit` | `true` | Close an agent's terminal as soon as it's done. |
 | `trama.maxParallelAgents` | `20` | How many sub-agents the agent may run at once. |
 | `trama.submitWhileRunning` | `false` | `true` lets you start a run while another is in progress; `false` keeps Run buttons unavailable until it finishes. |

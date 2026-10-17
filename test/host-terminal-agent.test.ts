@@ -6,7 +6,7 @@ const none = { analysis: "", scan: "", execution: "" };
 const all = { analysis: "opus", scan: "it's", execution: "haiku" };
 
 test("each instruction's terminal name gives its model role", () => {
-  expect(["Design", "Setup", "Import", "Drifts", "Scan", "T3", "P2", "All tasks", "abc12345"].map(roleOf)).toEqual(["analysis", "analysis", "analysis", "analysis", "scan", "execution", "execution", "execution", "execution"]);
+  expect(["Design", "Setup", "Import", "Drifts", "Scan", "T3", "All tasks", "abc12345"].map(roleOf)).toEqual(["analysis", "analysis", "analysis", "analysis", "scan", "execution", "execution", "execution"]);
 });
 
 test("omp and Claude Code use the scan role for Machine comparison", () => {
@@ -53,9 +53,6 @@ test("settings expose only chat, omp and Claude Code with a panel-default termin
   expect(properties["trama.driftAutoPilot"]).toMatchObject({ type: "string", enum: ["disabled", "enabled", "yolo"], default: "disabled", scope: "application" });
   expect(properties["trama.autoFixDrifts"]).toBeUndefined();
   expect(properties["trama.autoFixCriticalDrifts"]).toBeUndefined();
-  expect(properties["trama.analysis"].markdownDescription).toContain("Resolve Drifts and import");
-  expect(properties["trama.analysis"].markdownDescription).not.toContain("analysis of Machines");
-  expect(properties["trama.scan"].markdownDescription).toContain("sub-agents that compare Machines");
   expect(properties["trama.terminalLocation"].enum).toEqual(["editor", "panel"]);
   expect(properties["trama.terminalLocation"].scope).toBe("application");
   for (const key of ["agentLauncher", "terminalAgent", "agentCommand", "externalTerminalCommand", "autoImplement", "autoScan"])

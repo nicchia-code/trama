@@ -37,7 +37,7 @@ describe("Tasks written inside a Proposal", () => {
   });
 
   test("the Diagram view of a Proposal lists its Tasks, with the body behind the toggle", () => {
-    const prop = newProposal(p, "Design");
+    const prop = newProposal(p, "Design", "", { label: "Design" });
     writeTask(editInProposal(p, prop.id, "tasks/checkout-total.md"), "First checkout total");
     submitProposal(p, prop.id);
     const view = buildSnapshot(p).proposals.find((v) => v.id === prop.id);
@@ -55,7 +55,7 @@ describe("Tasks written inside a Proposal", () => {
   });
 
   test("deleting a Task removes its file and returns the Proposal to Draft; a name that is not there is refused", () => {
-    const prop = newProposal(p, "Design");
+    const prop = newProposal(p, "Design", "", { label: "Design" });
     const file = editInProposal(p, prop.id, "tasks/gone.md");
     writeTask(file);
     submitProposal(p, prop.id);
@@ -77,7 +77,7 @@ describe("Tasks written inside a Proposal", () => {
   });
 
   test("a valid Task file validates cleanly", () => {
-    const prop = newProposal(p, "Design");
+    const prop = newProposal(p, "Design", "", { label: "Design" });
     writeTask(editInProposal(p, prop.id, "tasks/ok.md"));
     expect(validateProposal(p, getProposal(p, prop.id))).toEqual([]);
   });
@@ -97,7 +97,7 @@ describe("A Proposal's Tasks cover its scope", () => {
   ];
 
   test("every entry of the scope needs a Task naming it or something that contains it, and a Draft with an uncovered entry is not handed over", () => {
-    const prop = newProposal(p, "Reword");
+    const prop = newProposal(p, "Reword", "", { label: "Reword" });
     rewordEvent(prop.id);
     expect(messages(prop.id)).toEqual(UNCOVERED);
     expect(() => submitProposal(p, prop.id)).toThrow(/order\.CONFIRMED \(changed\) is not covered/);
@@ -109,7 +109,7 @@ describe("A Proposal's Tasks cover its scope", () => {
   });
 
   test("a setup Proposal is written with its kind, covers its scope with Tasks like a change, and holds them", () => {
-    const prop = newProposal(p, "Setup reword", "", { kind: "setup" });
+    const prop = newProposal(p, "Setup reword", "", { kind: "setup", label: "Setup reword" });
     expect(readFileSync(join(prop.dir, "proposal.md"), "utf8")).toContain("kind: setup");
     rewordEvent(prop.id);
     expect(messages(prop.id)).toEqual(UNCOVERED);
@@ -146,7 +146,7 @@ describe("A Proposal's Tasks cover its scope", () => {
   });
 
   test("a Task must name existing elements, a non-technical Task needs a Model element and a technical one may not have one", () => {
-    const prop = newProposal(p, "Bad refs");
+    const prop = newProposal(p, "Bad refs", "", { label: "Bad refs" });
     rewordEvent(prop.id);
     const file = editInProposal(p, prop.id, "tasks/ghost.md");
     writeTaskFile(file, "technical: false\nrefs: [order, payment, order/Nowhere]");
@@ -163,7 +163,7 @@ describe("A Proposal's Tasks cover its scope", () => {
   });
 
   test("a Requirement section is covered by a Task naming it or its Area", () => {
-    const prop = newProposal(p, "Screens");
+    const prop = newProposal(p, "Screens", "", { label: "Screens" });
     const ui = editInProposal(p, prop.id, "requirements/ui/main.md");
     writeFileSync(ui, readFileSync(ui, "utf8").replace("Every checkout screen shows the cart total at the bottom.", "Every checkout screen shows the cart total at the top."));
     expect(messages(prop.id)).toEqual(["requirements/ui#checkout (changed) is not covered by a Task or an Already present row"]);
@@ -174,14 +174,14 @@ describe("A Proposal's Tasks cover its scope", () => {
   });
 
   test("a Proposal attached to an open Drift holds no Tasks: the Task file is refused before it is created", () => {
-    const prop = newProposal(p, "Attached design");
+    const prop = newProposal(p, "Attached design", "", { label: "Attached design" });
     newDrift(p, { where: "src/refund.ts", title: "Attached", refs: ["order"], happens: "The code does it another way.", should: "The Model says otherwise.", options: FIX_OPTIONS, proposal: prop.id });
     expect(() => editInProposal(p, prop.id, "tasks/attached.md")).toThrow("only a change or setup Proposal, not attached to a Drift, can hold Tasks");
     expect(getProposal(p, prop.id).tasks).toEqual([]);
   });
 
   test("an open Proposal whose Task is removed is blocked from approval", () => {
-    const prop = newProposal(p, "Reword and name");
+    const prop = newProposal(p, "Reword and name", "", { label: "Reword and name" });
     rewordEvent(prop.id);
     const file = editInProposal(p, prop.id, "tasks/event.md");
     writeTaskFile(file, "technical: false\nrefs: [order, payment]");

@@ -132,13 +132,13 @@
         "trama.submitWhileRunning": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Let a run start while another run started by Trama is in progress. Off (the default): Run, Run this design and Run Ready Tasks are unavailable while a run started by Trama is in progress. On: a run can start while another one is in progress."
+          "markdownDescription": "Let a run start while another run started by Trama is in progress. Off (the default): Run and Run all are unavailable while a run started by Trama is in progress. On: a run can start while another one is in progress."
         },
         "trama.analysis": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for design work: quick and written design requests, Resolve Drifts and import. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. It only applies in your user settings."
+          "markdownDescription": "Model for design work: written design requests, Resolve Drifts, the preparation of automatic Drift resolution and import. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. It only applies in your user settings."
         },
         "trama.scan": {
           "type": "string",
@@ -150,7 +150,7 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for implementing Tasks: implement and implement all, including the selective final scan of the run. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. It only applies in your user settings."
+          "markdownDescription": "Model for implementing Tasks: implement, implement all and the automatic Run, including the pre-flight of each Run and the selective final scan of the run. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. It only applies in your user settings."
         },
         "trama.autoExit": {
           "type": "boolean",

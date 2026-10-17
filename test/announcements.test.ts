@@ -11,6 +11,7 @@ import {
   deliverCard,
   getAnnouncement,
   listAnnouncements,
+  resolutionTitle,
   newTerminalId,
   terminalFromEnv,
   originFromEnv,
@@ -70,6 +71,28 @@ describe("announcing", () => {
 
   test("an announcement cannot have an empty title", () => {
     expect(() => announce(p, { kind: "task", title: "  " })).toThrow(/title/);
+  });
+
+  test("a Resolve Drifts ghost is a Proposal that names its Drifts and keeps its title when a Draft takes it", () => {
+    expect(resolutionTitle(p, [])).toBeUndefined();
+    expect(resolutionTitle(p, ["a1b2c3d4", "e5f6g7h8"])).toBe("Resolving 2 Drifts");
+    const resolve = announce(p, { kind: "proposal", title: "Resolve Drifts", drifts: ["a1b2c3d4", "e5f6g7h8"], source: "request", terminal: "ab12cd" }, t(1));
+    const prop = newProposal(p, "Draft", "", { origin: { terminal: "ab12cd" } });
+    expect(getAnnouncement(p, resolve.id)).toMatchObject({ kind: "proposal", drifts: ["a1b2c3d4", "e5f6g7h8"], proposal: prop.id, title: "Resolve Drifts" });
+    expect(() => announce(p, { kind: "task", title: "Not a Proposal", drifts: ["a1b2c3d4"] })).toThrow(/Only a Proposal names Drifts/);
+  });
+
+  test("a request is announced in the chat that made it, and a request with no origin in no chat", () => {
+    expect(announce(p, { kind: "proposal", title: "Chat design", source: "request", chat: "cursor" }).chat).toBe("cursor");
+    expect(announce(p, { kind: "check", title: "Scanning System", phase: "scanning", source: "request" }).chat).toBeNull();
+    expect(announce(p, { kind: "work", title: "Importing from code", source: "request", chat: "cursor" }).chat).toBe("cursor");
+  });
+
+  test("an agent's scan takes over the scan Trama announced for its terminal and keeps its title", () => {
+    const launched = announce(p, { kind: "check", title: "Scanning Feature order", phase: "scanning", source: "request", terminal: "ab12cd" }, t(1));
+    const adopted = announce(p, { kind: "check", title: "Scan of Feature order", phase: "scanning", terminal: "ab12cd" }, t(2));
+    expect(adopted).toMatchObject({ id: launched.id, title: "Scanning Feature order", phase: "scanning" });
+    expect(listAnnouncements(p)).toHaveLength(1);
   });
 });
 
@@ -342,8 +365,8 @@ describe("an announcement made by Cursor's chat agent", () => {
 });
 
 describe("a check", () => {
-  test("is announced with its phase, moves only to scanning, and is delivered by done with its file gone", async () => {
-    const id = run(["announce", "check", "Final check of Refunds", "--phase", "verifying"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
+  test("is announced with its phase, moves forward only, and is delivered by done with its file gone", async () => {
+    const id = run(["announce", "check", "Final check after Task T3", "--phase", "verifying"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
     const check = getAnnouncement(p, id);
     expect([check?.kind, check?.phase, check?.source, check?.proposal, check?.terminal]).toEqual(["check", "verifying", "agent", null, "ab12cd"]);
     expect(buildSnapshot(p).announcements.map((a) => [a.kind, a.phase])).toEqual([["check", "verifying"]]);
@@ -351,11 +374,31 @@ describe("a check", () => {
     expect(JSON.parse(run(["--json", "announce", "phase", id, "scanning"], dir, {}).out).outcome).toBe("changed");
     expect(getAnnouncement(p, id)?.phase).toBe("scanning");
     expect(run(["announce", "phase", id, "scanning"], dir, {}).out).toContain("already scanning");
-    expect(() => run(["announce", "phase", id, "verifying"], dir, {})).toThrow(/only move to scanning/);
+    expect(() => run(["announce", "phase", id, "verifying"], dir, {})).toThrow(/cannot move back to verifying/);
+    expect(getAnnouncement(p, id)?.phase).toBe("scanning");
+    expect(() => run(["announce", "phase", id, "bogus"], dir, {})).toThrow(/must be one of verifying, scanning, history/);
 
     expect(run(["announce", "done", id], dir, {}).out).toBe(`Check ${id} is done`);
     await settleCoordinatorMessages();
     expect(existsSync(join(announcementsDir(p), `${id}.md`))).toBe(false);
+  });
+
+  test("moves from verifying or scanning to history, and a History check cannot go back", () => {
+    const fromVerifying = run(["announce", "check", "Final check after Task T3", "--phase", "verifying"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
+    expect(JSON.parse(run(["--json", "announce", "phase", fromVerifying, "history"], dir, {}).out).outcome).toBe("changed");
+    expect(getAnnouncement(p, fromVerifying)?.phase).toBe("history");
+    expect(buildSnapshot(p).announcements.find((a) => a.id === fromVerifying)?.phase).toBe("history");
+    expect(run(["announce", "phase", fromVerifying, "history"], dir, {}).out).toContain("already history; nothing changed");
+    expect(() => run(["announce", "phase", fromVerifying, "scanning"], dir, {})).toThrow(/cannot move back to scanning/);
+    expect(() => run(["announce", "phase", fromVerifying, "verifying"], dir, {})).toThrow(/cannot move back to verifying/);
+    expect(getAnnouncement(p, fromVerifying)?.phase).toBe("history");
+
+    const fromScanning = run(["announce", "check", "Final check after Task T4", "--phase", "scanning"], dir, {}).out;
+    expect(run(["announce", "phase", fromScanning, "history"], dir, {}).out).toContain("is now history");
+    expect(() => run(["announce", "phase", fromScanning, "verifying"], dir, {})).toThrow(/cannot move back to verifying/);
+    expect(getAnnouncement(p, fromScanning)?.phase).toBe("history");
+    expect(() => run(["announce", "check", "Late check", "--phase", "history"], dir, {})).toThrow(/--phase must be one of verifying, scanning/);
+    withdrawAll(p);
   });
   test("a finished check hands its outcome to the caller with its job, and forgetting it leaves nothing to finish", () => {
     const id = run(["announce", "check", "Final check after completed Task", "--phase", "verifying", "--job", "run-7"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;

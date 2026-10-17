@@ -12,12 +12,17 @@ import { type Project, readDocument, writeDocument, writeFileEnsuringDir } from 
  * withdrawn announcement ceases to exist, so there is no ended state to read back. A `check` announces no card but the
  * work the agent still does when no card shows it (the final check of a run, or a scan); it ends when the agent says so.
  */
-export type AnnouncementKind = "proposal" | "task" | "drift" | "check";
-export const ANNOUNCEMENT_KINDS: readonly AnnouncementKind[] = ["proposal", "task", "drift", "check"];
+/** `work` is announced by Trama when it launches an import; the Proposal of Resolve Drifts is a `proposal` that names its `drifts`. */
+export type AnnouncementKind = "proposal" | "task" | "drift" | "check" | "work";
+export const ANNOUNCEMENT_KINDS: readonly AnnouncementKind[] = ["proposal", "task", "drift", "check", "work"];
+/** The kinds the agent may announce with `trama announce`. */
+export const AGENT_ANNOUNCEMENT_KINDS: readonly AnnouncementKind[] = ["proposal", "task", "drift", "check"];
 
-/** The phase of a check: the final verification (tests, lint, build) or the scan. The only change is Verifying → Scanning. */
-export type CheckPhase = "verifying" | "scanning";
-export const CHECK_PHASES: readonly CheckPhase[] = ["verifying", "scanning"];
+/** The phase of a check: the final verification (tests, lint, build), the scan, or the History update at the end of a run. Phases only move forward: Verifying → Scanning → History, or Verifying → History. */
+export type CheckPhase = "verifying" | "scanning" | "history";
+export const CHECK_PHASES: readonly CheckPhase[] = ["verifying", "scanning", "history"];
+/** The phases a check is announced in: a check never starts in History. */
+export const CHECK_START_PHASES: readonly CheckPhase[] = ["verifying", "scanning"];
 
 /** `agent`: announced by the agent. `request`: announced by Trama when a design request or Resolve Drifts was sent. */
 export type AnnouncementSource = "agent" | "request";
@@ -40,6 +45,8 @@ export interface Announcement {
   phase: CheckPhase | null;
   /** The transient coordinator job bound to this check, when present. */
   job: string | null;
+  /** The Drifts a Proposal of Resolve Drifts names, in creation order; empty for every other announcement. */
+  drifts: string[];
   /** The title as announced; the ghost of a bound Draft shows the Draft's own title instead. */
   title: string;
 }
@@ -112,6 +119,7 @@ function parse(raw: Raw, body: string, id: string, where: string): Announcement 
     chat: raw["chat"] === undefined || raw["chat"] === null ? null : enumField(raw, "chat", CHATS, "cursor", where),
     phase: raw["phase"] === undefined || raw["phase"] === null ? null : enumField(raw, "phase", CHECK_PHASES, "verifying", where),
     job: jobField(raw, where),
+    drifts: driftsField(raw, where),
     title: /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? id,
   };
 }
@@ -129,14 +137,25 @@ function jobField(raw: Raw, where: string): string | null {
   throw new TramaError(`${where}: "job" must be a string or none`);
 }
 
+function driftsField(raw: Raw, where: string): string[] {
+  const v = raw["drifts"];
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) throw new TramaError(`${where}: "drifts" must be a list of card IDs or none`);
+  return v.map((item) => {
+    const id = idField({ item }, "item", where);
+    if (id === null) throw new TramaError(`${where}: "drifts" must be a list of card IDs or none`);
+    return id;
+  });
+}
+
 function write(p: Project, a: Announcement) {
   const dir = announcementsDir(p);
   // The folder ignores itself and everything in it, so announcements are never versioned.
   const ignore = join(dir, ".gitignore");
   if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
-  const { id, title, chat, phase, job, ...data } = a;
-  // `chat`, `phase` and `job` are written only when set, so the other announcements look as before.
-  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}), ...(job ? { job } : {}) }, `# ${title}\n`);
+  const { id, title, chat, phase, job, drifts, ...data } = a;
+  // `chat`, `phase`, `job` and `drifts` are written only when set, so the other announcements look as before.
+  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}), ...(job ? { job } : {}), ...(drifts.length > 0 ? { drifts } : {}) }, `# ${title}\n`);
 }
 
 function remove(p: Project, id: string) {
@@ -171,13 +190,23 @@ export const getAnnouncement = (p: Project, id: string): Announcement | null => 
 /** Announces a card as soon as it is known it will be created. */
 export function announce(
   p: Project,
-  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase; job?: string } & AgentOrigin,
+  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase; job?: string; drifts?: string[] } & AgentOrigin,
   now = new Date(),
 ): Announcement {
   const title = input.title.trim().replace(/\s+/g, " ");
   if (!title) throw new TramaError("An announcement needs a title");
   if ((input.kind === "check") !== (input.phase !== undefined)) throw new TramaError(input.kind === "check" ? "A check needs a phase" : "Only a check has a phase");
   if (input.job !== undefined && input.kind !== "check") throw new TramaError("Only a check has a job");
+  if (input.drifts !== undefined && input.drifts.length > 0 && input.kind !== "proposal") throw new TramaError("Only a Proposal names Drifts");
+  // A scan the agent announces is the check of a scan Trama announced at launch, if one still waits in the same terminal or chat: it takes that one over.
+  if (input.kind === "check" && input.phase === "scanning" && input.source === undefined) {
+    const waiting = listAnnouncements(p).find((a) => a.kind === "check" && a.source === "request" && (input.terminal !== undefined ? a.terminal === input.terminal : a.terminal === null && a.chat === (input.chat ?? "editor")));
+    if (waiting) {
+      const taken: Announcement = { ...waiting, phase: "scanning", touched: now.toISOString() };
+      write(p, taken);
+      return taken;
+    }
+  }
   const stamp = now.toISOString();
   const announcement: Announcement = {
     id: newId(announcementsDir(p)),
@@ -186,13 +215,21 @@ export function announce(
     proposal: input.proposal ?? null,
     touched: stamp,
     terminal: input.terminal ?? null,
-    chat: input.terminal ? null : (input.source === "request" ? null : (input.chat ?? "editor")),
+    chat: input.terminal ? null : (input.chat ?? (input.source === "request" ? null : "editor")),
     phase: input.phase ?? null,
     job: input.job ?? null,
+    drifts: input.drifts ?? [],
     title,
   };
   write(p, announcement);
   return announcement;
+}
+
+/** The title of a Resolve Drifts ghost: the Drift it names by its short number, or how many Drifts it names. Undefined when it names none. */
+export function resolutionTitle(p: Project, drifts: readonly string[]): string | undefined {
+  const [only] = drifts;
+  if (drifts.length === 0 || only === undefined) return undefined;
+  return drifts.length === 1 ? `Resolving Drift ${cardName(p, "drift", only)}` : `Resolving ${drifts.length} Drifts`;
 }
 
 /**
@@ -210,8 +247,8 @@ export function announcementNote(p: Project, id: string | undefined, kind: Annou
 }
 
 /**
- * A Draft uses only an announcement from its own origin. Automatic binding is reserved for terminal requests;
- * chat and unknown origins cannot claim a request sent to a terminal.
+ * A Draft takes the oldest request of its own origin (its terminal, or its chat when it has none), or the announcement
+ * named by ID when that one belongs to the same origin. Without an origin, nothing is bound.
  */
 export function bindDraft(p: Project, proposal: { id: string; title: string }, announcementId?: string, origin: AgentOrigin = {}, now = new Date()): Announcement | null {
   const all = listAnnouncements(p);
@@ -223,12 +260,12 @@ export function bindDraft(p: Project, proposal: { id: string; title: string }, a
         && (origin.terminal !== undefined
           ? a.terminal === origin.terminal && a.chat === null
           : origin.chat !== undefined && a.chat === origin.chat && a.terminal === null))
-    : origin.terminal !== undefined
-      ? all.find((a) => a.kind === "proposal" && a.source === "request" && a.proposal === null && a.terminal === origin.terminal)
+    : origin.terminal !== undefined || origin.chat !== undefined
+      ? all.find((a) => a.kind === "proposal" && a.source === "request" && a.proposal === null && (origin.terminal !== undefined ? a.terminal === origin.terminal : a.terminal === null && a.chat === origin.chat))
       : undefined;
   if (target) {
-    // A Drift announcement keeps the Drift's title; the Draft's title is the Proposal's own.
-    const bound = { ...target, title: target.kind === "drift" ? target.title : proposal.title, proposal: proposal.id, touched: now.toISOString() };
+    // A Drift and a Resolve Drifts announcement keep their own title; a Proposal's ghost takes the Draft's title.
+    const bound = { ...target, title: target.kind === "drift" || target.drifts.length > 0 ? target.title : proposal.title, proposal: proposal.id, touched: now.toISOString() };
     write(p, bound);
     return bound;
   }
@@ -258,14 +295,19 @@ const findCheck = (p: Project, id: string) => {
   return a?.kind === "check" ? a : null;
 };
 
+/** The order a check's phases can only move in. */
+const PHASE_RANK: Record<CheckPhase, number> = { verifying: 0, scanning: 1, history: 2 };
+
 /**
- * The agent moves a check to Scanning. Returns `changed`, `unchanged` when it is already Scanning, or `missing` when
- * `id` is no check that still exists: never an error, so the agent goes on.
+ * The agent moves a check forward: Verifying → Scanning, Verifying or Scanning → History. Returns `changed`, `unchanged`
+ * when it is already in `phase`, `refused` for a backward move (nothing changes), or `missing` when `id` is no check that
+ * still exists: never an error, so the agent goes on.
  */
-export function changeCheckPhase(p: Project, id: string, phase: "scanning", now = new Date()): "changed" | "unchanged" | "missing" {
+export function changeCheckPhase(p: Project, id: string, phase: CheckPhase, now = new Date()): "changed" | "unchanged" | "refused" | "missing" {
   const check = findCheck(p, id);
   if (!check) return "missing";
   if (check.phase === phase) return "unchanged";
+  if (check.phase !== null && PHASE_RANK[check.phase] > PHASE_RANK[phase]) return "refused";
   write(p, { ...check, phase, touched: now.toISOString() });
   return "changed";
 }

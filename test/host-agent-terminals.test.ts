@@ -11,7 +11,8 @@ import { announce, listAnnouncements, withdrawAll } from "../src/core/announceme
 import type { CursorHook } from "../src/core/cursor-chat";
 import { newProposal } from "../src/core/proposals";
 import { projectAt } from "../src/core/store";
-import { getTask, moveTask, newTask } from "../src/core/work";
+import { dismissDrift, getTask, moveTask, newDrift, newTask } from "../src/core/work";
+import { FIX_OPTIONS } from "./fix-options";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
 import type { AgentAction } from "../extension/src/protocol";
 import type { Project } from "../src/core/store";
@@ -243,7 +244,7 @@ describe("taken Tasks and the agent terminals", () => {
       await allDelivery.waiting;
       moveTask(p, allTask, "doing", "agent", { terminal: "all-agent" });
       allDelivery.delivery.resolve("endpoint");
-      await expect(allRun).rejects.toThrow(/Run Ready Tasks is unavailable: An agent is working on Task/);
+      await expect(allRun).rejects.toThrow(/Run all is unavailable: An agent is working on Task/);
       expect(created).toHaveLength(beforeAll);
       moveTask(p, allTask, "todo", "agent");
     } finally {
@@ -280,6 +281,38 @@ describe("taken Tasks and the agent terminals", () => {
       rmSync(join(root, ".trama/last-scan"), { recursive: true, force: true });
       await launch.launchAction(p, { kind: "scan", feature: "checkout" });
       expect(existsSync(remembered)).toBe(false);
+    } finally {
+      watching.dispose();
+      controller.dispose();
+      if (previousAgent === undefined) delete settingValues["agent"];
+      else settingValues["agent"] = previousAgent;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("Resolve on one Drift names only that Drift, and is refused once that Drift is no longer open", async () => {
+    // Dynamic, as above: Controller must load after mock.module replaced "vscode".
+    const { Controller } = await import("../extension/src/host/controller");
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    const root = mkdtempSync(join(tmpdir(), "trama-resolve-one-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    const p = projectAt(root);
+    const drift = (title: string) => newDrift(p, { where: "src/refund.ts", title, refs: ["order"], happens: "Code does it.", should: "Model says so.", options: FIX_OPTIONS });
+    const named = drift("Named");
+    const other = drift("Other");
+    const previousAgent = settingValues["agent"];
+    settingValues["agent"] = "omp";
+    const controller = new Controller({ scheme: "file" } as never);
+    const launch = controller as unknown as { launchAction(project: Project, action: AgentAction): Promise<void> };
+    try {
+      await launch.launchAction(p, { kind: "resolve-drifts", drift: named.id });
+      const line = (terminals.at(-1) as FakeTerminal).line;
+      expect(line).toContain(`the open Drifts ${named.id}, and on no other open Drift`);
+      expect(line).not.toContain(other.id);
+
+      dismissDrift(p, other.id);
+      await expect(launch.launchAction(p, { kind: "resolve-drifts", drift: other.id })).rejects.toThrow("Resolve this Drift is unavailable: Drift");
     } finally {
       watching.dispose();
       controller.dispose();
@@ -773,17 +806,78 @@ describe("announcing a design request", () => {
     expect(listAnnouncements(p).map((a) => ({ kind: a.kind, source: a.source, title: a.title, proposal: a.proposal }))).toEqual([{ kind: "proposal", source: "request", title: "Add refunds", proposal: null }]);
   });
 
-  test("the chat launcher announces nothing: the ghost comes with the Draft", async () => {
+  test("a design request sent to a chat announces a Proposal titled with the request, as the terminal does", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const p = projectAt(dir);
     const before = listAnnouncements(p).length;
     settingValues.agent = "chat";
+    editor.appName = "Cursor";
+    commandHandler = (id) => (id === "composer.createNew" ? { composerId: "c" } : undefined);
     try {
-      await launchAgent(dir, "Use the trama-design skill. Another change", "Design", "Another change");
+      expect(await launchAgent(dir, "Use the trama-design skill. Another change", "Design", "Another change")).toBe("sent");
     } finally {
       settingValues.agent = "omp";
+      editor.appName = "Visual Studio Code";
+      commandHandler = () => undefined;
     }
+    expect(listAnnouncements(p).slice(before).map((a) => ({ kind: a.kind, source: a.source, title: a.title, terminal: a.terminal, proposal: a.proposal }))).toEqual([
+      { kind: "proposal", source: "request", title: "Another change", terminal: null, proposal: null },
+    ]);
+  });
+});
+
+describe("announcing every launch as its instruction starts", () => {
+  const announced = (p: Project, from: number) => listAnnouncements(p).slice(from).map((a) => ({ kind: a.kind, title: a.title, phase: a.phase, terminal: a.terminal, chat: a.chat, drifts: a.drifts }));
+
+  test("a terminal scan, import and Resolve Drifts announce their card at once, and a Run announces nothing", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const p = projectAt(dir);
+    let before = listAnnouncements(p).length;
+    await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan");
+    expect(announced(p, before)).toEqual([{ kind: "check", title: "Scanning System", phase: "scanning", terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: [] }]);
+
+    before = listAnnouncements(p).length;
+    await launchAgent(dir, "Use the trama-import skill on this repository.", "Import", { kind: "work", title: "Importing from code" });
+    expect(announced(p, before)).toEqual([{ kind: "work", title: "Importing from code", phase: null, terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: [] }]);
+
+    before = listAnnouncements(p).length;
+    await launchAgent(dir, "Use the trama-resolve-drifts skill on the Drifts.", "Drifts", { kind: "resolve", drifts: () => ["aaaa1111", "bbbb2222"] });
+    expect(announced(p, before)).toEqual([{ kind: "proposal", title: "Resolve Drifts", phase: null, terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: ["aaaa1111", "bbbb2222"] }]);
+
+    before = listAnnouncements(p).length;
+    await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
     expect(listAnnouncements(p)).toHaveLength(before);
+  });
+
+  test("a chat launch announces only when its instruction is really sent: the clipboard and the confirmation step announce nothing", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const p = projectAt(dir);
+    const previousHandler = commandHandler;
+    const previousApp = editor.appName;
+    const before = listAnnouncements(p).length;
+    settingValues.agent = "chat";
+    try {
+      // Copilot's chat refuses the instruction: it goes to the clipboard and nothing is announced.
+      editor.appName = "Visual Studio Code";
+      commandHandler = (id) => { if (id === "workbench.action.chat.open") throw new Error("no chat"); };
+      expect(await launchAgent(dir, "Use the trama-resolve-drifts skill on the Drifts.", "Drifts", { kind: "resolve", drifts: () => ["cccc3333"] })).toBe("clipboard");
+      expect(listAnnouncements(p)).toHaveLength(before);
+
+      // Cursor's self-sending step is missing: the deeplink waits for the developer's Enter, so nothing is announced yet.
+      editor.appName = "Cursor";
+      commandHandler = (id) => { if (id === "composer.createNew") throw new Error("missing"); };
+      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan")).toBe("confirm");
+      expect(listAnnouncements(p)).toHaveLength(before);
+
+      // Sent by itself: the card is announced in the project's chat.
+      commandHandler = () => undefined;
+      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan")).toBe("sent");
+      expect(announced(p, before)).toEqual([{ kind: "check", title: "Scanning System", phase: "scanning", terminal: null, chat: "cursor", drifts: [] }]);
+    } finally {
+      commandHandler = previousHandler;
+      editor.appName = previousApp;
+      settingValues.agent = "omp";
+    }
   });
 });
 
@@ -891,6 +985,27 @@ describe("withdrawing the ghosts", () => {
     listeners.close.forEach((fn) => fn({ ...closeTerminal }));
     listeners.end.forEach((fn) => fn(shell({ ...closeTerminal })));
     expect(listAnnouncements(p)).toHaveLength(1);
+    subscription.dispose();
+    withdrawAll(p);
+  });
+
+  test("an import's work ends silently with its terminal's command: no notice, and a design request on the same terminal still gets one", async () => {
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { onAnnouncementsWithdrawn } = await import("../extension/src/host/announcements");
+    const p = projectAt(dir);
+    watchAgentTerminal();
+    const told: string[][] = [];
+    const subscription = onAnnouncementsWithdrawn((views) => told.push(views.map((v) => `${v.kind}:${v.title}`)));
+    withdrawAll(p);
+
+    await launchAgent(dir, "Use the trama-design skill. Import", "Design", "Import");
+    const terminal = terminals.at(-1) as FakeTerminal;
+    const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+    announce(p, { kind: "work", title: "Importing from code", source: "request", terminal: id });
+    announce(p, { kind: "task", title: "Left behind", terminal: id });
+    listeners.end.forEach((fn) => fn(shell(terminal)));
+    expect(listAnnouncements(p)).toEqual([]);
+    expect(told).toEqual([["proposal:Import", "task:Left behind"]]);
     subscription.dispose();
     withdrawAll(p);
   });
@@ -1123,6 +1238,39 @@ describe("the ghosts of Cursor's chat agent", () => {
   });
 });
 
+
+describe("starting the editor with Tasks an agent had taken", () => {
+  test("opening the editor withdraws the announcements left on disk and sends every Task an agent took back to To do, keeping the developer's", async () => {
+    // Dynamic: the module must load after mock.module replaced "vscode".
+    const { watchAnnouncements } = await import("../extension/src/host/announcements");
+    const root = mkdtempSync(join(tmpdir(), "trama-startup-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    try {
+      const p = projectAt(root);
+      const take = (origin: { terminal?: string; chat?: "cursor" | "editor" }) => moveTask(p, newTask(p, { title: "Taken", refs: ["order/Paid"], technical: false }).id, "doing", "agent", origin).id;
+      const byTerminal = take({ terminal: "aaa111" });
+      const byCursor = take({ chat: "cursor" });
+      const byEditor = take({ chat: "editor" });
+      const byDeveloper = moveTask(p, newTask(p, { title: "Developer", refs: ["order/Paid"], technical: false }).id, "doing", "developer").id;
+      announce(p, { kind: "task", title: "Left on disk", terminal: "aaa111" });
+
+      const watching = watchAnnouncements(() => root);
+      try {
+        expect(listAnnouncements(p)).toEqual([]);
+        expect([byTerminal, byCursor, byEditor, byDeveloper].map((id) => [getTask(p, id).data.column, getTask(p, id).data.agent])).toEqual([
+          ["todo", false],
+          ["todo", false],
+          ["todo", false],
+          ["doing", false],
+        ]);
+      } finally {
+        watching.dispose();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("opening the panel", () => {
   test("a second open of a workspace without a project brings the one panel forward instead of making another, and initializes nothing", async () => {

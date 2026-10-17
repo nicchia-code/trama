@@ -13,7 +13,7 @@ import { trackRound } from "./question-activity";
 import type { QuestionSession } from "./question-session";
 import { receiveCursorHook } from "./cursor";
 import { receiveCopilotHook } from "./copilot-chat";
-import { awaitAutopilotResume, clearAutopilotFailure, clearSendReservations, localProjectJobs, receiveCoordinatorMessage, receiveAgentIdle, recordSkippedDrift, setJobsVerified } from "./drift-resolution";
+import { awaitAutopilotResume, clearAutopilotFailure, clearSendReservations, followsAgent, localProjectJobs, receiveCoordinatorMessage, receiveAgentIdle, recordSkippedDrift, setJobsVerified } from "./drift-resolution";
 import { noteCommandSeen } from "./terminal-activity";
 interface WindowRoundService {
   identity: string;
@@ -56,6 +56,15 @@ function recordDriftAnswers(project: Project, present: QuestionPresenter): Quest
 
 /** A live window that does not acknowledge the jobs request within this time leaves its jobs unknown, so automatic steps wait. */
 const JOBS_QUERY_TIMEOUT_MS = 2000;
+
+/** A filing message is held only by the window that follows its agent: other windows ignore it. */
+function notFollowedFiling(message: Record<string, unknown>): boolean {
+  const type = message["type"];
+  if (type !== "drift-filed" && type !== "proposal-delivered" && type !== "task-filed") return false;
+  const root = message["root"];
+  const holder = message["holder"];
+  return typeof root === "string" && typeof holder === "string" && !followsAgent(root, holder);
+}
 
 let windowQuestions: EditorQuestions | undefined;
 
@@ -221,7 +230,7 @@ export class EditorQuestions implements vscode.Disposable {
             return { received: true };
           }
           const rooted: CoordinatorMessage = { ...message, root: project.root };
-          if (rooted["type"] !== "autopilot-failed") receiveCoordinatorMessage(rooted);
+          if (rooted["type"] !== "autopilot-failed" && !notFollowedFiling(rooted)) receiveCoordinatorMessage(rooted);
           for (const handler of this.coordinatorHandlers) {
             const response = await handler(rooted);
             if (response !== undefined) return response;

@@ -79,6 +79,19 @@ export function resolveDriftsBlocker(p: Project, work: WindowWork): string | nul
   ]);
 }
 
+/**
+ * Why Resolve on one open Drift cannot be launched now, or null: the reasons of `resolveDriftsBlocker` that hold for it,
+ * in the same order, without «No open Drifts». `agentOnIt` tells whether the agent resolving Drifts works on this one.
+ */
+export function resolveDriftBlocker(p: Project, work: WindowWork, agentOnIt: boolean): string | null {
+  const awaiting = awaitingResolution(p);
+  return joinReasons([
+    work.resolving ? (agentOnIt ? "An agent is resolving this Drift" : "Drifts are being resolved") : null,
+    work.running ? "A run is in progress" : null,
+    awaiting ? `Proposal ${cardName(p, "proposal", awaiting.id)} resolving Drifts awaits a decision` : null,
+  ]);
+}
+
 /** What holds in this window: Drift resolution and a run may both be going. */
 export interface WindowWork { resolving: boolean; running: boolean }
 

@@ -11,7 +11,7 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 
 ## design-request
 
-- Add Work Item…, + Work Item e Start from Scratch scrivono subito il file vuoto con l'ID nuovo, creando la cartella e il suo `.gitignore` se mancano, e lo aprono con `vscode.window.showTextDocument` in una scheda non in anteprima. Non si usano documenti senza titolo. Start from Scratch aggiunge l'ID all'elenco delle richieste di setup in `ExtensionContext.workspaceState` (chiave `trama.setupDesignRequests`) prima di aprire la scheda.
+- + Add Work Item e Start from Scratch scrivono subito il file vuoto con l'ID nuovo, creando la cartella e il suo `.gitignore` se mancano, e lo aprono con `vscode.window.showTextDocument` in una scheda non in anteprima. Non si usano documenti senza titolo. Start from Scratch aggiunge l'ID all'elenco delle richieste di setup in `ExtensionContext.workspaceState` (chiave `trama.setupDesignRequests`) prima di aprire la scheda. La casella di una riga della richiesta rapida (`showInputBox` con titolo «Quick Design Request») e il suo prompt sono rimossi.
 - L'host salva da sé ogni documento aperto di un file in `.trama/requests/` del progetto al più 300 ms dopo l'ultima modifica (`workspace.onDidChangeTextDocument` seguito da `TextDocument.save()`), senza dipendere dall'impostazione `files.autoSave` dell'editor.
 - La chiusura della scheda si riconosce con `window.tabGroups.onDidChangeTabs` (schede chiuse), solo quando nessun'altra scheda mostra più lo stesso file; il testo da inviare si legge dal file su disco. La chiusura della finestra non passa da lì e non invia nulla.
 - L'elenco degli ID inviati sta in `ExtensionContext.workspaceState`. Un ID entra nell'elenco solo quando l'istruzione è davvero partita.

@@ -57,7 +57,7 @@ Then `trama proposal show <id>` and read it: it must match what was agreed and n
 
 ## Step 5: validate and hand over
 
-Run `trama validate --proposal <id>` until it reports no errors, as in `trama-design`. Then `trama proposal submit <id>`. If it is refused, fix the reported problems, validate again and retry.
+Give the Proposal a short label, 1 to 30 characters on one line, with `trama proposal label <id> "<text>"` (or `--label` at `proposal new`): a Draft with Tasks is refused without one. Then run `trama validate --proposal <id>` until it reports no errors, as in `trama-design`. Then `trama proposal submit <id>`. If it is refused, fix the reported problems, validate again and retry.
 
 After a successful hand-over, read the result of `trama proposal submit`:
 

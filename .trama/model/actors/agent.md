@@ -34,7 +34,7 @@ The agent files a new Task.
 The agent files a new Drift.
 
 ### CHANGE_CHECK_PHASE
-L'agente dice che un controllo che ha annunciato passa a una nuova fase, per esempio dalla verifica allo scan.
+L'agente dice che un controllo che ha annunciato passa a una nuova fase: dalla verifica allo scan, oppure, alla fine di una corsa, all'aggiornamento della History.
 
 ### FINISH_CHECK
 L'agente dichiara concluso un controllo annunciato e distingue un esito riuscito da un fallimento. Chiudere il controllo con esito fallito elimina il ghost ma non prova che la verifica o lo scan siano riusciti.
@@ -44,3 +44,9 @@ The agent asks the developer a round of related questions and waits for the answ
 
 ### STOP_WAITING
 The agent's wait for a question round ends without an answer because the caller stops waiting: the agent is stopped, its terminal closes, its question call is cancelled or times out, or the caller disconnects. Loss of the editor while the caller is still waiting is reported by `editor.DISCONNECTED` instead.
+
+### VOCE_HISTORY_SCRITTA
+L'agente scrive una nuova voce di History alla fine di una corsa che ha realizzato dei Task: una macro-funzionalità che quei Task hanno realizzato, che nessuna voce raccontava ancora.
+
+### VOCE_HISTORY_AGGIORNATA
+L'agente aggiorna una voce di History esistente, perché i Task realizzati da una corsa fanno parte della stessa macro-funzionalità che la voce racconta.

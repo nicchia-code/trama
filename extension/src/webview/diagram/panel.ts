@@ -10,6 +10,7 @@ import { renderResolves } from "../resolves";
 import type { Detail, DetailItem } from "./details";
 import type { Level } from "./graph";
 import { type IconName, setIconLabel } from "../icons";
+import { joinReasons } from "../../../../src/core/design";
 
 export interface PanelActions {
   /** Jump to an element reference. */
@@ -28,8 +29,8 @@ export interface PanelActions {
 }
 
 export interface Panel {
-  /** `dismissBlocker`: why «Dismiss Drift» is disabled for the Drift in the detail, or null. */
-  render(detail: Detail, dismissBlocker: string | null): void;
+  /** `dismissBlocker`: why «Dismiss Drift» is disabled for the Drift in the detail, or null. `proposalWait`: why Approve and Reject are disabled for the Proposal in the detail, or null. */
+  render(detail: Detail, dismissBlocker: string | null, proposalWait: string | null): void;
 }
 
 const CHANGE_TEXT = { added: "added by the Proposal", removed: "removed by the Proposal", changed: "changed by the Proposal", same: "" } as const;
@@ -132,7 +133,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     return section;
   };
 
-  const renderProposal = (p: ProposalView, numbers: CardNumbers): HTMLElement => {
+  const renderProposal = (p: ProposalView, numbers: CardNumbers, finishing: string | null): HTMLElement => {
     const box = el("section", "dg-proposal");
     const kind = el("div", "dg-kind", "Proposal ");
     kind.append(idTag(cardNameOf(numbers, "proposal", p.id), "dg-id"));
@@ -176,18 +177,18 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     }
     if (p.resolves.length > 0) box.append(...renderResolves("dg", p.title, resolvedRows(p, numbers), actions.showDrift));
     if (p.tasks.length + p.removals.length > 0) box.append(renderTasks(p));
-    const blocker = approveBlocker(p, numbers);
+    const blocker = joinReasons([finishing, approveBlocker(p, numbers)]);
     const row = el("div", "dg-actions");
     row.append(
       button("Approve", () => actions.approve(p.id), { primary: true, icon: "check", disabled: blocker !== null, title: blocker ?? "Apply this Proposal to the Model" }),
-      button("Reject", () => actions.reject(p.id), { icon: "close", title: "Reject this Proposal; feedback for the agent is optional" }),
+      button("Reject", () => actions.reject(p.id), { icon: "close", disabled: finishing !== null, title: finishing ?? "Reject this Proposal; feedback for the agent is optional" }),
     );
     box.append(row);
     return box;
   };
 
   return {
-    render(detail, dismissBlocker) {
+    render(detail, dismissBlocker, proposalWait) {
       root.replaceChildren();
       const head = el("header", "dg-panel-head");
       const driftName = detail.drift ? cardNameOf(detail.numbers, "drift", detail.drift.id) : null;
@@ -234,7 +235,7 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
         for (const i of s.items) ul.append(renderItem(i));
         root.append(el("div", "dg-heading", s.heading), ul);
       }
-      if (detail.proposal) root.append(renderProposal(detail.proposal, detail.numbers));
+      if (detail.proposal) root.append(renderProposal(detail.proposal, detail.numbers, proposalWait));
     },
   };
 }

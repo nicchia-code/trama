@@ -32,6 +32,8 @@ const jobKinds = new Map<string, JobKind>();
 const knownJobOrigins = new Map<string, JobOrigin>();
 const pendingChecks = new Map<string, Record<string, unknown>>();
 const listeners = new Set<() => void>();
+/** The open Drifts an agent filed and the Proposals it delivered in a turn it has not finished, by project and then by `drift:<id>` or `proposal:<id>`, with the holder of that turn: its terminal, or "cursor" or "editor" for chat. Only in memory: a window that opens later forgets them. */
+const filedWork = new Map<string, Map<string, string>>();
 
 const changed = () => {
   for (const listener of [...listeners]) listener();
@@ -68,8 +70,89 @@ export function onDriftResolutionChange(listener: () => void): { dispose(): void
   listeners.add(listener);
   return { dispose: () => void listeners.delete(listener) };
 }
+
+/** The open Drifts an agent filed in a turn it has not finished, in the project at `root`. */
+export function driftsFinishing(root: string): string[] {
+  return finishingOf(root, "drift");
+}
+
+/** The Proposals an agent delivered in a turn it has not finished, in the project at `root`. */
+export function proposalsFinishing(root: string): string[] {
+  return finishingOf(root, "proposal");
+}
+
+/** The Tasks an agent filed in a turn it has not finished, in the project at `root`. */
+export function tasksFinishing(root: string): string[] {
+  return finishingOf(root, "task");
+}
+
+function finishingOf(root: string, kind: "drift" | "proposal" | "task"): string[] {
+  const prefix = `${kind}:`;
+  return [...(filedWork.get(projectRootKey(root))?.keys() ?? [])].filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length));
+}
+
+/** Holds the Drift, Proposal or Task `id` of `kind` until the end of the turn of `holder`, the agent that filed or delivered it. */
+function holdFiledWork(root: string, kind: "drift" | "proposal" | "task", id: string, holder: string): void {
+  const key = projectRootKey(root);
+  const held = filedWork.get(key) ?? new Map<string, string>();
+  held.set(`${kind}:${id}`, holder);
+  filedWork.set(key, held);
+  changed();
+}
+
+/** The turn of `holder` ended in the project at `root`: the Drifts and Proposals it filed or delivered are no longer held. Every window that hears of it applies it. */
+export function releaseFiledWork(root: string, holder: string): void {
+  const held = filedWork.get(projectRootKey(root));
+  if (held === undefined) return;
+  let released = false;
+  for (const [item, owner] of held) {
+    if (owner !== holder) continue;
+    held.delete(item);
+    released = true;
+  }
+  if (released) changed();
+}
+
+/** Copilot Trama conversations with a turn in progress in this window, by project: a prompt opens a turn, its Stop closes it. Only in memory. */
+const copilotTurns = new Map<string, Set<string>>();
+
+/** A Copilot Trama conversation started a turn in the project at `root` in this window. */
+export function copilotTurnStarted(root: string, conversation: string): void {
+  const key = projectRootKey(root);
+  const open = copilotTurns.get(key) ?? new Set<string>();
+  open.add(conversation);
+  copilotTurns.set(key, open);
+}
+
+/** The turn of a Copilot Trama conversation in the project at `root` ended in this window. */
+export function copilotTurnEnded(root: string, conversation: string): void {
+  copilotTurns.get(projectRootKey(root))?.delete(conversation);
+}
+
+/** Whether a filing message's holder is an agent this window follows: a Trama terminal it started with hooks, a chat with a Trama job in progress here, or a Copilot Trama conversation in progress here for "editor". Copilot gives its agent no identity, so an open Copilot turn is what makes a Drift filed from Copilot chat held here. Only such a window holds the Drift, Proposal or Task. */
+export function followsAgent(root: string, holder: string): boolean {
+  if (holder === "editor" && (copilotTurns.get(projectRootKey(root))?.size ?? 0) > 0) return true;
+  if (holder === "cursor" || holder === "editor")
+    return localProjectJobs(root).some((job) => "chat" in job.place && (holder === "cursor") === (job.place.chat === "cursor"));
+  return isHooked(holder);
+}
+
 /** Applies a job lifecycle signal received from another live editor window. */
 export function receiveCoordinatorMessage(message: Record<string, unknown>): void {
+  if (message["type"] === "drift-filed" || message["type"] === "proposal-delivered" || message["type"] === "task-filed") {
+    const kind = message["type"] === "drift-filed" ? "drift" : message["type"] === "task-filed" ? "task" : "proposal";
+    const root = message["root"];
+    const id = message[kind];
+    const holder = message["holder"];
+    if (typeof root === "string" && typeof id === "string" && typeof holder === "string") holdFiledWork(root, kind, id, holder);
+    return;
+  }
+  if (message["type"] === "turn-ended") {
+    const root = message["root"];
+    const holder = message["holder"];
+    if (typeof root === "string" && typeof holder === "string") releaseFiledWork(root, holder);
+    return;
+  }
   if (message["type"] === "drift-question-skipped") {
     const root = message["root"];
     const drift = message["drift"];
