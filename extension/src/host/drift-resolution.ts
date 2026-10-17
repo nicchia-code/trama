@@ -86,7 +86,7 @@ export function receiveCoordinatorMessage(message: Record<string, unknown>): voi
   if (message["type"] === "developer-scan-started") {
     const root = message["root"];
     if (typeof root === "string") {
-      forgetSkippedDrifts(root);
+      forgetDeveloperScanCases(root);
       releaseAutopilotHold(root);
     }
     return;
@@ -187,15 +187,13 @@ function receiveCheck(message: Record<string, unknown>): void {
     return;
   }
   const scanActive = [...jobs, ...remoteJobs.values()].some((candidate) => candidate.id === job && candidate.kind === "scan");
-  const developerScan = knownJobOrigins.get(jobKey) === "manual" && scanActive;
   let failures = scanFailures.get(key);
   if (failures === undefined) scanFailures.set(key, failures = new Map());
   // A check declared after its scan ended proves neither success nor the end of a scan: it lifts no wait. A failed final check of an automatic Run is recorded as that case's failure; the completed cases stand and the next collections are not held.
   if (phase === "verifying" && failed && knownJobOrigins.get(jobKey) === "automatic") {
-    recordRunFailure(key, job, title);
+    recordRunFailure(root, job, title);
   } else if (phase === "scanning" && failed) {
     setScanFailure(failures, job, title);
-    if (developerScan) failedCases.delete(key);
   } else if (phase === "scanning" && scanActive) {
     // The wait lifts when this scan ends (noteScanEnd), not at its check: a declared check alone is no end.
     failures.delete(job);
@@ -205,22 +203,38 @@ function receiveCheck(message: Record<string, unknown>): void {
         .filter((candidate) => candidate.kind === "scan" && projectRootKey(candidate.root) === key)
         .map((candidate) => candidate.id));
       for (const failedJob of failures.keys()) if (!activeScans.has(failedJob)) failures.delete(failedJob);
-      if (developerScan) failedCases.delete(key);
     }
   }
   changed();
 }
 
-/** A failed final check of an automatic Run is shown with its case and reason; it changes no other state. */
-function recordRunFailure(key: string, job: string, title: string): void {
+/** The Task each failed final check was attributed to, keyed `projectRootKey` and `job`: set by the failed report that names it. */
+const runCauses = new Map<string, string>();
+
+/**
+ * A failed final check of an automatic Run is shown with its case and reason. It holds that Run's automatic continuation until
+ * a failed Task report names the Task that broke the check; other collections are not held.
+ */
+export function recordRunFailure(root: string, job: string, title: string): void {
+  const key = projectRootKey(root);
   let cases = failedCases.get(key);
   if (cases === undefined) failedCases.set(key, cases = new Map());
   cases.set(`run:${job}`, { job, title: `Automatic Run, ${title}: the final check failed; the Tasks already done are not undone`, reason: "the final check of this automatic Run failed; the Tasks already done are not undone" });
 }
 
-/** Whether the final check of this automatic Run failed: from then on the Run authorizes no further Task. */
-export function runCheckFailed(root: string, job: string): boolean {
+/** Whether the final check of this automatic Run failed. */
+export function runFinalCheckFailed(root: string, job: string): boolean {
   return failedCases.get(projectRootKey(root))?.has(`run:${job}`) === true;
+}
+
+/** The Task that a failed report named after the failed final check of this automatic Run, if any. */
+export function runCauseTask(root: string, job: string): string | undefined {
+  return runCauses.get(`${projectRootKey(root)}\n${job}`);
+}
+
+/** Whether the failed final check of this automatic Run holds its automatic continuation: until a Task is named as its cause. */
+export function runContinuationHeld(root: string, job: string): boolean {
+  return runFinalCheckFailed(root, job) && runCauseTask(root, job) === undefined;
 }
 
 /** A scan that ends unsuccessfully is shown in the status but still counts as finished for the barrier. */
@@ -228,7 +242,6 @@ function noteScanFailure(key: string, job: string, title: string): void {
   let failures = scanFailures.get(key);
   if (failures === undefined) scanFailures.set(key, failures = new Map());
   setScanFailure(failures, job, title);
-  if (knownJobOrigins.get(`${key}\n${job}`) === "manual") failedCases.delete(key);
   readyProjects.add(key);
 }
 
@@ -291,6 +304,7 @@ export function recordAutopilotFailure(root: string, job: string, drift: string 
   let cases = failedCases.get(key);
   if (cases === undefined) failedCases.set(key, cases = new Map());
   cases.set(drift === undefined ? `task:${task}` : `drift:${drift}`, failure);
+  if (task !== undefined && cases.has(`run:${job}`)) runCauses.set(`${key}\n${job}`, task);
   changed();
 }
 
@@ -434,12 +448,12 @@ export function shownAutopilotFailures(failures: DriftAutopilotFailure[], mode: 
     || (mode !== "disabled" && (mode === "yolo" || failure.drift === undefined || !isCritical(failure.drift))));
 }
 
-/** A developer-started scan makes the skipped Drifts judgeable again. */
-export function forgetSkippedDrifts(root: string): void {
+/** A developer-started scan makes the failed and excluded cases judgeable again, as well as the skipped questions. An automatic Run's failed final check stays. */
+export function forgetDeveloperScanCases(root: string): void {
   const cases = failedCases.get(projectRootKey(root));
   if (!cases) return;
   let removed = false;
-  for (const [key, failure] of cases) if (failure.job === SKIPPED_QUESTION_JOB) removed = cases.delete(key) || removed;
+  for (const key of cases.keys()) if (!key.startsWith("run:")) removed = cases.delete(key) || removed;
   if (removed) changed();
 }
 

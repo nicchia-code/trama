@@ -6,6 +6,7 @@ import type { MountView } from "../types";
 import css from "./board.css" with { type: "text" };
 import { announcedGhosts, autopilotNote, buildBoard, type Card, COLUMN_ORDER, COLUMN_TITLES, type ColumnId, DONE_PERIODS, type DonePeriod, doneGroups, interleave, withdrawnNotice } from "./logic";
 import { type CardEnv, renderAnnounced, renderCard } from "./render";
+import { icon, type IconName, setIcon, setIconLabel } from "../icons";
 import { scanButtonLabel } from "../scan-label";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -38,19 +39,20 @@ export const mountBoard: MountView = (root, context) => {
   board.append(toolbar, noticesEl, columnsEl);
   root.append(board);
 
-  const toolbarButton = (label: string, onClick: () => void, primary = false, title?: string) => {
-    const node = el("button", `trama-btn${primary ? " primary" : ""}`, label);
+  const toolbarButton = (name: IconName, label: string, onClick: () => void, primary = false, title?: string) => {
+    const node = el("button", `trama-btn${primary ? " primary" : ""}`);
+    setIconLabel(node, name, label);
     node.type = "button";
     if (title !== undefined) node.title = title;
     node.addEventListener("click", onClick);
     toolbar.append(node);
     return node;
   };
-  const runAll = toolbarButton("Run all To do", () => context.post({ type: "launch", action: { kind: "implement-all" } }), true);
-  const resolveDrifts = toolbarButton("Resolve Drifts", () => context.post({ type: "launch", action: { kind: "resolve-drifts" } }));
-  const scanSystem = toolbarButton("Scan System", () => context.post({ type: "launch", action: { kind: "scan" } }));
-  toolbarButton("Quick request…", () => context.post({ type: "launch", action: { kind: "design" } }), false, "Ask an agent to design a change in one line");
-  toolbarButton("Design…", () => context.post({ type: "writeDesignRequest" }), false, "Write a design request in Markdown and send it to an agent");
+  const runAll = toolbarButton("play", "Run Ready Tasks", () => context.post({ type: "launch", action: { kind: "implement-all" } }), true);
+  const resolveDrifts = toolbarButton("wand", "Resolve Drifts", () => context.post({ type: "launch", action: { kind: "resolve-drifts" } }));
+  const scanSystem = toolbarButton("search", "Scan System", () => context.post({ type: "launch", action: { kind: "scan" } }));
+  toolbarButton("comment", "Quick request…", () => context.post({ type: "launch", action: { kind: "design" } }), false, "Ask an agent to design a change in one line");
+  toolbarButton("add", "Add Work Item…", () => context.post({ type: "writeDesignRequest" }), false, "Write a work item in Markdown and send it to an agent");
 
   let snapshot: Snapshot | null = null;
   /** Whether a question round is open: the ghosts then say the agent waits for the developer's answers. */
@@ -82,11 +84,45 @@ export const mountBoard: MountView = (root, context) => {
     },
     showCard: (key) => {
       const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === key);
+      // A Task inside a closed design card is hidden: open that card first, then show the Task.
+      const design = card?.closest<HTMLElement>(".board-card-design");
+      const list = design?.querySelector<HTMLElement>(".board-design-tasks");
+      if (design && list?.hidden) design.querySelector<HTMLButtonElement>(".board-design-toggle")?.click();
       card?.scrollIntoView({ block: "nearest" });
       card?.focus();
     },
   };
 
+  /** Work Items ends with Work Item only, and Ready with Run all only; each stays even when its column is empty. */
+  const columnRuns: HTMLButtonElement[] = [];
+  const footButton = (kind: "add" | "run"): HTMLElement => {
+    const foot = el("div", "board-column-foot");
+    if (kind === "add") {
+      const add = el("button", "trama-btn board-column-add");
+      add.type = "button";
+      add.append(icon("add"), el("span", "", "Work Item"));
+      add.title = "Write a work item in Markdown and send it to an agent";
+      add.setAttribute("aria-label", "Add Work Item");
+      add.addEventListener("click", () => context.post({ type: "writeDesignRequest" }));
+      foot.append(add);
+    } else {
+      const run = el("button", "trama-btn primary board-column-run");
+      run.type = "button";
+      run.append(icon("play"), el("span", "", "Run all"));
+      run.setAttribute("aria-label", "Run Ready Tasks");
+      run.addEventListener("click", () => context.post({ type: "launch", action: { kind: "implement-all" } }));
+      columnRuns.push(run);
+      foot.append(run);
+    }
+    return foot;
+  };
+  /** Run Ready Tasks is named by its tooltip when available, and says why it is not otherwise; its accessible name stays. */
+  const setRunReason = (button: HTMLButtonElement, reason: string | null) => {
+    button.disabled = reason !== null;
+    button.title = reason ?? "Run Ready Tasks";
+    if (reason === null) button.removeAttribute("aria-description");
+    else button.setAttribute("aria-description", reason);
+  };
   const parts = {} as Record<ColumnId, { section: HTMLElement; count: HTMLElement; body: HTMLElement; hint: HTMLElement }>;
   for (const id of COLUMN_ORDER) {
     const section = el("section", "board-column");
@@ -106,7 +142,7 @@ export const mountBoard: MountView = (root, context) => {
         toggle.setAttribute("aria-expanded", String(doneOpen));
         toggle.setAttribute("aria-label", doneOpen ? "Collapse Done column" : "Expand Done column");
         toggle.title = doneOpen ? "Collapse Done column" : "Expand Done column";
-        toggle.textContent = doneOpen ? "›" : "‹";
+        setIcon(toggle, doneOpen ? "chevron-right" : "chevron-left");
       };
       toggle.addEventListener("click", () => {
         doneOpen = !doneOpen;
@@ -133,6 +169,8 @@ export const mountBoard: MountView = (root, context) => {
       section.append(select);
     }
     section.append(body);
+    if (id === "decide") section.append(footButton("add"));
+    if (id === "todo") section.append(footButton("run"));
     columnsEl.append(section);
     parts[id] = { section, count, body, hint: el("p", "board-hint") };
   }
@@ -203,8 +241,9 @@ export const mountBoard: MountView = (root, context) => {
       else button.setAttribute("aria-description", note);
     };
     setReason(runAll, blocker);
+    for (const run of columnRuns) setRunReason(run, blocker);
     const scanLabel = scanButtonLabel("Scan System", snapshot.tasksSinceScan);
-    scanSystem.textContent = scanLabel.text;
+    setIconLabel(scanSystem, "search", scanLabel.text);
     if (scanLabel.tooltip) scanSystem.title = scanLabel.tooltip;
     else scanSystem.removeAttribute("title");
     scanSystem.setAttribute("aria-label", scanLabel.ariaLabel);
@@ -226,7 +265,8 @@ export const mountBoard: MountView = (root, context) => {
     noticesEl.replaceChildren(
       ...notices.map((notice) => {
         const row = el("div", "board-notice");
-        const close = el("button", "trama-btn board-btn board-notice-close", "Close");
+        const close = el("button", "trama-btn board-btn board-notice-close");
+        setIconLabel(close, "close", "Close");
         close.type = "button";
         close.setAttribute("aria-label", `Close the notice: ${notice.text}`);
         close.addEventListener("click", () => {

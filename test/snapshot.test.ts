@@ -13,6 +13,7 @@ import { type Project, projectAt } from "../src/core/store";
 import { moveTask, newDrift, newTask } from "../src/core/work";
 import type { FileMap, Machine } from "../src/core/types";
 import { announce, bindDraft, listAnnouncements } from "../src/core/announcements";
+import { resolveDriftInProposal } from "../src/core/resolution";
 
 
 const ACTOR = "# U\n\n## Events\n\n### GO\nx\n\n### STOP\nx\n";
@@ -204,4 +205,12 @@ test("a Specs file that is not valid reports its errors and the rest of the snap
   expect(snap.diagnostics).toEqual([{ file: "specs.yaml", line: 0, message: "languages must be a list of entries" }]);
   expect(snap.machines.map((m) => m.id).sort()).toEqual(["cart", "order", "payment"]);
   expect(snap.specs.lists.languages).toEqual([]);
+});
+
+test("the snapshot lists the open Drifts that a resolution being written or open holds, so Dismiss Drift can be disabled", () => {
+  const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Held in writing", refs: ["payment"], happens: "Code differs.", should: "Model says so." });
+  expect(buildSnapshot(p).resolutionDrifts).toEqual([]);
+  const res = newProposal(p, "Resolve", "", { kind: "resolution" });
+  resolveDriftInProposal(p, res.id, drift.id, { decision: "dismissed" });
+  expect(buildSnapshot(p).resolutionDrifts).toEqual([drift.id]);
 });

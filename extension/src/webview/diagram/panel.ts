@@ -9,6 +9,7 @@ import { dismissButton } from "../dismiss";
 import { renderResolves } from "../resolves";
 import type { Detail, DetailItem } from "./details";
 import type { Level } from "./graph";
+import { type IconName, setIconLabel } from "../icons";
 
 export interface PanelActions {
   /** Jump to an element reference. */
@@ -40,8 +41,10 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text 
   return e;
 }
 
-function button(label: string, onClick: () => void, options: { primary?: boolean; disabled?: boolean; title?: string } = {}): HTMLButtonElement {
-  const b = el("button", `trama-btn${options.primary ? " primary" : ""}`, label);
+function button(label: string, onClick: () => void, options: { primary?: boolean; disabled?: boolean; title?: string; icon?: IconName } = {}): HTMLButtonElement {
+  const b = el("button", `trama-btn${options.primary ? " primary" : ""}`);
+  if (options.icon) setIconLabel(b, options.icon, label);
+  else b.textContent = label;
   b.type = "button";
   b.disabled = options.disabled ?? false;
   if (options.title) b.title = options.title;
@@ -176,8 +179,8 @@ export function createPanel(root: HTMLElement, actions: PanelActions): Panel {
     const blocker = approveBlocker(p, numbers);
     const row = el("div", "dg-actions");
     row.append(
-      button("Approve", () => actions.approve(p.id), { primary: true, disabled: blocker !== null, title: blocker ?? "Apply this Proposal to the Model" }),
-      button("Reject", () => actions.reject(p.id), { title: "Reject this Proposal; feedback for the agent is optional" }),
+      button("Approve", () => actions.approve(p.id), { primary: true, icon: "check", disabled: blocker !== null, title: blocker ?? "Apply this Proposal to the Model" }),
+      button("Reject", () => actions.reject(p.id), { icon: "close", title: "Reject this Proposal; feedback for the agent is optional" }),
     );
     box.append(row);
     return box;

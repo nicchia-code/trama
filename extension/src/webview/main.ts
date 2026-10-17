@@ -27,8 +27,8 @@ app.innerHTML = `
     <button class="shell-tab" data-view="board" role="tab">Board<span class="shell-badge" data-badge hidden></span></button>
     <button class="shell-tab" data-view="diagram" role="tab">Diagram</button>
     <button class="shell-tab" data-view="requirements" role="tab">Requirements</button>
-    <button class="shell-tab" data-view="specs" role="tab">Specs</button>
     <button class="shell-tab" data-view="settings" role="tab">Settings</button>
+    <button class="shell-tab" data-view="specs" role="tab">Specs</button>
     <span class="shell-spacer"></span>
   </div>
   <div class="shell-error" data-error hidden><span data-error-text></span><button data-dismiss aria-label="Dismiss">×</button></div>
@@ -135,6 +135,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   } else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal });
   else if (message.type === "questions") questions.update(message.round);
   else if (message.type === "settings") settings.receive(message);
+  else if (message.type === "modelSuggestions") settings.receiveModels(message);
 });
 
 navigate(current);

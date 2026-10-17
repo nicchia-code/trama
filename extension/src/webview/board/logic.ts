@@ -16,15 +16,15 @@ export type ColumnId = "decide" | Column;
 export const COLUMN_ORDER: readonly ColumnId[] = ["decide", "todo", "doing", "done"];
 
 export const COLUMN_TITLES: Record<ColumnId, string> = {
-  decide: "To decide",
-  todo: "To do",
+  decide: "Work Items",
+  todo: "Ready",
   doing: "In progress",
   done: "Done",
 };
 
 export const EMPTY_HINTS: Record<ColumnId, string> = {
-  decide: "Nothing to decide",
-  todo: "Nothing to do",
+  decide: "No work items",
+  todo: "Nothing ready",
   doing: "Nothing in progress",
   done: "Nothing done in this period",
 };
@@ -162,7 +162,26 @@ export interface TaskCard {
   unchanged: string | null;
 }
 
-export type Card = ProposalCard | DriftCard | TaskCard;
+/**
+ * The Tasks of one design, when there are at least two: one card named after the Proposal, in the column its Tasks add
+ * up to, closed until the developer expands it to see each Task with its status dot.
+ */
+export interface DesignCard {
+  kind: "design";
+  key: string;
+  /** The Proposal's permanent identity. */
+  id: string;
+  /** The Proposal's title. */
+  title: string;
+  /** Ready while none of its Tasks has started, Done once all are finished, In progress otherwise. */
+  column: Column;
+  /** Its Tasks in creation order. */
+  tasks: TaskCard[];
+  /** How many of its Tasks are in Done. */
+  done: number;
+}
+
+export type Card = ProposalCard | DriftCard | TaskCard | DesignCard;
 
 export interface BoardColumn {
   id: ColumnId;
@@ -290,6 +309,14 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, autopilo
   };
 }
 
+/** The card of one design: its Tasks (given in creation order) in the column they add up to, and how many are done. */
+export function designCard(proposal: string, tasks: TaskView[], numbers: CardNumbers = noNumbers, failed: Map<string, string> = new Map()): DesignCard {
+  const cards = tasks.map((t) => taskCard(t, numbers, failed.get(`task:${t.id}`) ?? null));
+  const column: Column = cards.every((c) => c.column === "done") ? "done" : cards.every((c) => c.column === "todo") ? "todo" : "doing";
+  const title = tasks.find((t) => t.proposalTitle !== null)?.proposalTitle ?? cardNameOf(numbers, "proposal", proposal).text;
+  return { kind: "design", key: `design:${proposal}`, id: proposal, title, column, tasks: cards, done: cards.filter((c) => c.column === "done").length };
+}
+
 /** A stable hue, 0 to 359, from a Proposal's identity: all its Tasks wear the same tint in every column. */
 export function proposalHue(id: string): number {
   let hash = 0;
@@ -331,10 +358,10 @@ export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilot
   const numbers = snapshot.numbers ?? noNumbers;
   const failed = failedReasons(failures);
   const resolving = new Set(snapshot.proposals.filter((p) => p.kind === "resolution").flatMap((p) => p.resolves.map((r) => r.drift)));
-  // To decide holds the open Proposals and Drifts together, oldest first, as the Board Requirement says.
+  // Work Items holds the open Proposals and Drifts together, oldest first, as the Board Requirement says.
   const decide = [
     ...snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, (drift) => failed.get(`drift:${drift}`) ?? null) })),
-    ...snapshot.drifts.filter((d) => !resolving.has(d.id)).map((d) => ({ id: d.id, created: d.created, card: driftCard(d, numbers, failed.get(`drift:${d.id}`) ?? null, dismissBlocker(d.id, snapshot.proposals, resolveBlocker)) })),
+    ...snapshot.drifts.filter((d) => !resolving.has(d.id)).map((d) => ({ id: d.id, created: d.created, card: driftCard(d, numbers, failed.get(`drift:${d.id}`) ?? null, dismissBlocker(d.id, snapshot.resolutionDrifts, resolveBlocker)) })),
   ];
   const cards: Record<ColumnId, Card[]> = {
     decide: decide.sort(compareByCreation).map((x) => x.card),
@@ -342,8 +369,20 @@ export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilot
     doing: [],
     done: [],
   };
-  // Each Task is a card of its own, in creation order, which is the order of the snapshot.
-  for (const t of snapshot.tasks) cards[t.column].push(taskCard(t, numbers, failed.get(`task:${t.id}`) ?? null));
+  // The Tasks of one design, when there are at least two, are one card at the place of its first Task; every other Task is a card of its own. Creation order is the snapshot's.
+  const sizes = new Map<string, number>();
+  for (const t of snapshot.tasks) if (t.proposal !== null) sizes.set(t.proposal, (sizes.get(t.proposal) ?? 0) + 1);
+  const placed = new Set<string>();
+  for (const t of snapshot.tasks) {
+    if (t.proposal === null || (sizes.get(t.proposal) ?? 0) < 2) {
+      cards[t.column].push(taskCard(t, numbers, failed.get(`task:${t.id}`) ?? null));
+      continue;
+    }
+    if (placed.has(t.proposal)) continue;
+    placed.add(t.proposal);
+    const design = designCard(t.proposal, snapshot.tasks.filter((x) => x.proposal === t.proposal), numbers, failed);
+    cards[design.column].push(design);
+  }
   return COLUMN_ORDER.map((id) => ({ id, title: COLUMN_TITLES[id], hint: EMPTY_HINTS[id], cards: cards[id] }));
 }
 
@@ -366,8 +405,12 @@ export interface DoneGroup {
   cards: Card[];
 }
 
-/** When a Done card was finished, in ms: a Task's `finished`; null when it is not known. */
+/** When a Done card was finished, in ms: a Task's `finished`, a design's latest one; null when it is not known. */
 export function finishedAt(card: Card): number | null {
+  if (card.kind === "design") {
+    const times = card.tasks.map((t) => finishedAt(t)).filter((time): time is number => time !== null);
+    return times.length === 0 ? null : Math.max(...times);
+  }
   if (card.kind !== "task" || card.finished === null) return null;
   const time = Date.parse(card.finished);
   return Number.isNaN(time) ? null : time;
@@ -449,8 +492,8 @@ export interface PlacedGhost {
 }
 
 /**
- * The ghosts of the announced cards, by column and in the order announced, whatever their kind. To decide takes Proposals
- * and Drifts, To do takes Tasks, In progress takes checks. A ghost stands after the real cards of its column, and a check
+ * The ghosts of the announced cards, by column and in the order announced, whatever their kind. Work Items takes Proposals
+ * and Drifts, Ready takes Tasks, In progress takes checks. A ghost stands after the real cards of its column, and a check
  * after every real card. A Proposal whose Draft is attached to a Drift is not announced to the Board at all (see `buildSnapshot`).
  */
 export function announcedGhosts(columns: BoardColumn[], announcements: AnnouncementView[], asking: boolean): Record<ColumnId, PlacedGhost[]> {

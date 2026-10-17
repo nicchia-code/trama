@@ -3,7 +3,7 @@ import type { Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
 import type { MountView, View } from "../types";
 import { createCanvas } from "./canvas";
-import { type Detail, detailOfSelection, requirementItems, tooltipOf } from "./details";
+import { type Detail, containersOf, detailOfSelection, requirementItems, tooltipOf } from "./details";
 import { homeLevel, resolveElement, selectionFor, showsElement } from "./elements";
 import { type GraphSpec, type Level, sameLevel } from "./graph";
 import { breadcrumb, buildGraph, drillTarget, isEmptyModel, scanFeature, validLevel } from "./levels";
@@ -13,6 +13,7 @@ import { type Scene, buildScene, pathTo } from "./scene";
 import { viewOfRef } from "../requirements/logic";
 import css from "./diagram.css" with { type: "text" };
 import { scanButtonLabel } from "../scan-label";
+import { setIconLabel } from "../icons";
 
 /** The Model reference of what a level shows, for the Requirements attached to it. */
 const levelRef = (level: Level): string | null =>
@@ -141,12 +142,12 @@ export const mountDiagram: MountView = (root, context) => {
     select.value = proposalId ?? "";
 
     if (feature) {
-      scan.textContent = "Scan";
+      setIconLabel(scan, "search", "Scan");
       scan.title = `Ask an agent to scan the code against Feature ${feature}`;
       scan.setAttribute("aria-label", `Scan. ${scan.title}`);
     } else {
       const label = scanButtonLabel("Scan", snapshot.tasksSinceScan);
-      scan.textContent = label.text;
+      setIconLabel(scan, "search", label.text);
       scan.title = label.tooltip || "Ask an agent to scan the code against the whole System";
       scan.setAttribute("aria-label", label.tooltip ? label.ariaLabel : `Scan. ${scan.title}`);
     }
@@ -157,7 +158,7 @@ export const mountDiagram: MountView = (root, context) => {
   /** Draws the panel for the selection; «Dismiss Drift» is decided from the snapshot and the resolve blocker. */
   function renderPanel() {
     const detail = currentDetail();
-    panel.render(detail, detail.drift && snapshot ? dismissBlocker(detail.drift.id, snapshot.proposals, resolveBlocker) : null);
+    panel.render(detail, detail.drift && snapshot ? dismissBlocker(detail.drift.id, snapshot.resolutionDrifts, resolveBlocker) : null);
   }
 
   /** The detail of the selection, or of the level, with the Requirement sections written for that element. */
@@ -166,9 +167,14 @@ export const mountDiagram: MountView = (root, context) => {
     const node = graph?.nodes.find((n) => n.id === selected);
     const edge = graph?.edges.find((e) => e.id === selected);
     const levelOf = levelRef(level);
-    const refs = node?.ref ? [node.ref] : edge ? edge.refs : selected === null && levelOf ? [levelOf] : [];
-    const items = snapshot ? requirementItems(snapshot.areas, refs) : [];
-    return items.length === 0 ? detail : { ...detail, sections: [...detail.sections, { heading: "Requirements", items }] };
+    // A Drift has no node reference of its own: its Requirements are those of what it points at.
+    const own = detail.drift ? detail.drift.refs : node?.ref ? [node.ref] : edge ? edge.refs : selected === null && levelOf ? [levelOf] : [];
+    const areas = snapshot?.areas ?? [];
+    const items = requirementItems(areas, [...new Set(own)]);
+    // A State or a Transition also shows the Requirements of what contains it, each under the name of its container.
+    const inherited = containersOf(scene as Scene, node, edge).map((c) => ({ heading: `Requirements inherited from ${c.name}`, items: requirementItems(areas, [c.ref]) }));
+    const sections = [...(items.length > 0 ? [{ heading: "Requirements", items }] : []), ...inherited.filter((s) => s.items.length > 0)];
+    return sections.length === 0 ? detail : { ...detail, sections: [...detail.sections, ...sections] };
   }
 
   function draw(fit: boolean) {

@@ -1,9 +1,10 @@
 import type { AnnouncementView, Snapshot } from "../../src/core/snapshot";
 import type { DriftAutopilotStatus } from "./host/drift-resolution";
+import type { ModelSuggestion } from "./host/model-lists";
 import type { InitChoice } from "./host/project";
 import type { QuestionRoundView } from "./host/question-session";
 import type { QuestionAction } from "./host/question-state";
-import type { SettingSchema, SettingsValues, SettingValue } from "./host/settings-schema";
+import type { DelegationMode, SettingSchema, SettingsValues, SettingValue } from "./host/settings-schema";
 
 export type Column = "todo" | "doing" | "done";
 
@@ -16,6 +17,8 @@ export type AgentAction =
   | { kind: "implement"; task: string }
   /** Every Task in "todo", in order; the agent stops at the first Drift it files. */
   | { kind: "implement-all" }
+  /** Every Task of one design in "todo", in order; the agent stops at the first Drift it files. */
+  | { kind: "implement-design"; proposal: string }
   /** Describe the existing code as Proposals for the Model; the agent asks its own questions. */
   | { kind: "import" }
   /** One agent resolves every Drift open when the instruction is sent. The host refuses it while a Run or a resolution is going on, or one resolution Proposal is still to be decided. */
@@ -39,8 +42,12 @@ export type ToHost =
   | { type: "rejectProposal"; id: string }
   /** The developer pressed «Dismiss Drift»: the host asks for confirmation in a modal dialog, then closes the Drift without changes, discarding its attached Proposal. */
   | { type: "dismissDrift"; id: string }
+  /** The Settings tab was opened: the host answers with the model names of the agent (`modelSuggestions`). */
+  | { type: "modelSuggestionsWanted" }
   /** The developer changed a Trama setting in the Settings tab: the host checks it against the manifest and saves it in the user settings. */
   | { type: "setSetting"; key: string; value: SettingValue }
+  /** The developer chose a level in the Drift autopilot menu: the host saves both delegation settings, asking first when it raises them. */
+  | { type: "setDelegation"; mode: DelegationMode }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
   | { type: "openLink"; url: string }
   /** Get Started: the developer chose how to set up the folder; the host initializes it and starts what that choice starts. */
@@ -73,4 +80,6 @@ export type ToWebview =
   /** The question round being answered, drawn over the tabs; null when none is. */
   | { type: "questions"; round: QuestionRoundView | null }
   /** The Trama settings: the schema from the manifest and, per key, the user value and (for keys not application-scoped) the workspace value. */
-  | { type: "settings"; schema: SettingSchema[]; values: Record<string, SettingsValues> };
+  | { type: "settings"; schema: SettingSchema[]; values: Record<string, SettingsValues> }
+  /** Model names the Settings tab suggests for the three model roles, from the agent of `trama.agent`; an empty list means plain text. */
+  | { type: "modelSuggestions"; models: ModelSuggestion[] };

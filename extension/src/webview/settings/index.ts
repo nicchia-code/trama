@@ -1,18 +1,24 @@
-import { CRITICAL_DRIFT_KEY, DRIFT_KEY, settingValueError, type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
+import { CRITICAL_DRIFT_KEY, DRIFT_KEY, delegationOf, MODEL_ROLE_KEYS, settingValueError, type DelegationMode, type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
+import type { ModelSuggestion } from "../../host/model-lists";
 import type { ToWebview } from "../../protocol";
 import { renderInline, renderMarkdown } from "../markdown";
 import type { View, ViewContext } from "../types";
-import { disabledBy, effectiveValue, groupSettings, numberFromText, workspaceOverride } from "./logic";
+import { delegationSetting, effectiveValue, groupSettings, numberFromText, workspaceOverride } from "./logic";
 import css from "./settings.css" with { type: "text" };
 type SettingsMessage = Extract<ToWebview, { type: "settings" }>;
+type ModelSuggestionsMessage = Extract<ToWebview, { type: "modelSuggestions" }>;
 
 /** The Settings tab takes the host's settings message directly: it is not driven by snapshots. */
 export interface SettingsView extends View {
   receive(message: SettingsMessage): void;
+  receiveModels(message: ModelSuggestionsMessage): void;
 }
 
 /** How long the bubble stays open after the pointer leaves the «i» or the bubble, so the pointer can cross the gap. */
 const CLOSE_DELAY_MS = 150;
+
+/** The input types of typing: a name typed out in full waits like any text, while a suggestion chosen from the list is sent at once. */
+const TYPED_INPUT: readonly string[] = ["insertText", "insertCompositionText", "insertFromPaste", "deleteContentBackward", "deleteContentForward"];
 
 /** One entry of an enum's bubble: the value, its entry, and the mark that shows it is the chosen one. */
 interface EnumEntry {
@@ -35,6 +41,9 @@ interface Field {
   workspace: HTMLElement;
   /** Typed but not yet sent: a message from the host does not overwrite it. */
   dirty: boolean;
+  /** Model roles only: the list of names the agent offers, and those names, to tell a chosen suggestion from typing. */
+  models: HTMLDataListElement | null;
+  suggestions: string[];
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -59,6 +68,8 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
   /** The only bubble open at a time, and the timer that closes it after the pointer leaves. */
   let shown: Field | null = null;
   let closeTimer: number | undefined;
+  /** The model names the agent offers, from the newest list the host sent. */
+  let models: ModelSuggestion[] = [];
 
   const send = (key: string, value: SettingValue) => context.post({ type: "setSetting", key, value });
 
@@ -110,12 +121,29 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     describe(field, value);
   }
 
+  /** Fills the field's list with the newest names; with none, the field is plain text again and has no list. */
+  function offerModels(field: Field) {
+    if (field.models === null) return;
+    field.models.replaceChildren(
+      ...models.map((model) => {
+        const option = el("option");
+        option.value = model.value;
+        if (model.label !== undefined) option.label = model.label;
+        return option;
+      }),
+    );
+    field.suggestions = models.map((model) => model.value);
+    if (field.suggestions.length === 0) field.control.removeAttribute("list");
+    else field.control.setAttribute("list", field.models.id);
+  }
+
   function enumControl(field: Field): HTMLSelectElement {
     const select = el("select", "st-select");
     select.id = field.id;
     for (const value of field.setting.values ?? []) select.append(new Option(value, value));
     select.addEventListener("change", () => {
-      send(field.setting.key, select.value);
+      if (field.setting.key === DRIFT_KEY) context.post({ type: "setDelegation", mode: select.value as DelegationMode });
+      else send(field.setting.key, select.value);
       markValue(field, select.value);
     });
     return select;
@@ -125,14 +153,7 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     const box = el("input");
     box.type = "checkbox";
     box.id = field.id;
-    box.addEventListener("change", () => {
-      // Turning Auto Fix Drifts off turns Auto Fix Critical Drifts off at once; the host clears it too and sends the real values.
-      if (field.setting.key === DRIFT_KEY && !box.checked) {
-        const critical = fields.get(CRITICAL_DRIFT_KEY);
-        if (critical !== undefined) (critical.control as HTMLInputElement).checked = false;
-      }
-      send(field.setting.key, box.checked);
-    });
+    box.addEventListener("change", () => send(field.setting.key, box.checked));
     return box;
   }
 
@@ -146,8 +167,14 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
       if (setting.minimum !== undefined) input.min = String(setting.minimum);
       input.step = "1";
     }
-    input.addEventListener("input", () => {
+    input.addEventListener("input", (event) => {
       field.dirty = true;
+      // A suggestion chosen from the list is sent at once; a name typed out in full waits for the field to be left, like any text.
+      const typed = event instanceof InputEvent && TYPED_INPUT.includes(event.inputType);
+      if (!typed && field.suggestions.includes(input.value)) {
+        field.dirty = false;
+        send(setting.key, input.value);
+      }
     });
     input.addEventListener("change", () => {
       if (setting.control !== "integer") {
@@ -204,7 +231,9 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     const workspace = el("p", "st-workspace");
     workspace.hidden = true;
 
-    const field: Field = { id, setting, control: el("input"), info, bubble, entries, error, workspace, dirty: false };
+    const datalist = setting.control === "text" && MODEL_ROLE_KEYS.includes(setting.key) ? el("datalist") : null;
+    if (datalist !== null) datalist.id = `${id}-models`;
+    const field: Field = { id, setting, control: el("input"), info, bubble, entries, error, workspace, dirty: false, models: datalist, suggestions: [] };
     field.control = setting.control === "enum"
       ? enumControl(field)
       : setting.control === "boolean"
@@ -212,6 +241,7 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
         : inputControl(field);
     field.control.classList.add("st-control");
     describe(field, undefined);
+    offerModels(field);
 
     // The «i» and the bubble form one hover and focus area: the bubble opens on entry, closes after a short pause on leave,
     // closes when focus leaves the area, and Esc closes it and keeps the focus on the «i».
@@ -242,6 +272,7 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
 
     const node = el("div", "st-setting");
     node.append(head, field.control, error, workspace);
+    if (field.models !== null) node.append(field.models);
     return node;
   }
 
@@ -253,7 +284,11 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
       ...groupSettings(schema).map((group) => {
         const section = el("section", "st-group");
         const settings = el("div", "st-settings");
-        settings.append(...group.settings.map(settingNode));
+        settings.append(
+          ...group.settings
+            .filter((setting) => setting.key !== CRITICAL_DRIFT_KEY)
+            .map((setting) => settingNode(setting.key === DRIFT_KEY ? delegationSetting(setting) : setting)),
+        );
         section.append(el("h2", "st-group-title", group.title), settings);
         return section;
       }),
@@ -284,7 +319,8 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
       // The settings do not depend on the snapshot: the host sends them on their own.
     },
     show() {
-      // Nothing to reset: the tab keeps what the developer typed.
+      // Nothing to reset: the tab keeps what the developer typed. The model names are asked again, since the agent may have changed.
+      context.post({ type: "modelSuggestionsWanted" });
     },
     receive(message) {
       const schema = JSON.stringify(message.schema);
@@ -293,14 +329,20 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
         built = schema;
       }
       for (const field of fields.values()) {
-        const values = message.values[field.setting.key];
+        // The Drift autopilot menu shows the level that the two Auto Fix settings give.
+        const values = field.setting.key === DRIFT_KEY
+          ? { user: delegationOf(message.values[DRIFT_KEY]?.user, message.values[CRITICAL_DRIFT_KEY]?.user) }
+          : message.values[field.setting.key];
         if (!field.dirty) apply(field, values);
-        field.control.disabled = disabledBy(field.setting, message.values);
         const override = workspaceOverride(field.setting, values);
         field.workspace.hidden = override === null;
         field.workspace.replaceChildren();
         if (override !== null) field.workspace.append("The workspace setting overrides this: ", el("code", "st-code", override), ".");
       }
+    },
+    receiveModels(message) {
+      models = message.models;
+      for (const field of fields.values()) offerModels(field);
     },
   };
 };

@@ -258,7 +258,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const lastContext = () => contexts.filter(([key]) => key === "trama.designRequest").at(-1)?.[1];
 const idOf = (document: FakeDocument) => basename(document.uri.fsPath, ".md");
 
-/** Design… followed by the developer typing `text`. */
+/** Add Work Item… followed by the developer typing `text`. */
 async function writeRequest(text: string): Promise<FakeDocument> {
   await requests.write();
   const document = active as FakeDocument;
@@ -266,7 +266,7 @@ async function writeRequest(text: string): Promise<FakeDocument> {
   return document;
 }
 
-describe("Design… creates the request file", () => {
+describe("Add Work Item… creates the request file", () => {
   test("writes an empty file named after the date and time and opens it in a tab that is not a preview", async () => {
     await requests.write();
     const files = readdirSync(requestsDir(p)).filter((f) => f !== ".gitignore");
@@ -302,7 +302,7 @@ describe("Trama saves a request by itself", () => {
     expect(readFileSync(document.uri.fsPath, "utf8")).toBe("# Returns\n  trailing spaces  \n");
   });
 
-  test("a request left on disk and reopened behaves like one Design… opened", async () => {
+  test("a request left on disk and reopened behaves like one Add Work Item… opened", async () => {
     await requests.write();
     const file = (active as FakeDocument).uri.fsPath;
     documents.length = 0;
@@ -728,7 +728,7 @@ describe("closing the tab of a request", () => {
 });
 
 describe("Start from Scratch: the setup request", () => {
-  test("is opened as Design… does and joins the setup list", async () => {
+  test("is opened as Add Work Item… does and joins the setup list", async () => {
     await requests.writeSetup();
     const document = active as FakeDocument;
     expect(shown.at(-1)?.preview).toBe(false);
@@ -747,7 +747,7 @@ describe("Start from Scratch: the setup request", () => {
     expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
   });
 
-  test("a setup request whose file is gone leaves the setup list and, when its setup Proposal is approved, starts Run all To do", async () => {
+  test("a setup request whose file is gone leaves the setup list and, when its setup Proposal is approved, starts Run Ready Tasks", async () => {
     const runs: number[] = [];
     requests.dispose();
     requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch, async () => void runs.push(1));
@@ -822,7 +822,7 @@ const DESIGN_GHOST = "Describe the change to design: behaviour, edge cases, requ
 const SETUP_GHOST = "Describe the application to build: what it does and who it is for. Close this tab or press Send to agent when you are done.";
 
 describe("the ghost text of a request never sent", () => {
-  test("Design… shows the design text in the disabled colour, at the start, and the file stays empty and unsaved", async () => {
+  test("Add Work Item… shows the design text in the disabled colour, at the start, and the file stays empty and unsaved", async () => {
     await requests.write();
     const document = active as FakeDocument;
     expect(ghostOf(document.uri.fsPath)).toEqual({ text: DESIGN_GHOST, color: "disabledForeground" });

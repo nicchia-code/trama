@@ -2,7 +2,7 @@ import { renderResolves } from "../extension/src/webview/resolves";
 import { describe, expect, test } from "bun:test";
 import type { CardNumbers } from "../src/core/card-names";
 import { renderCard } from "../extension/src/webview/board/render";
-import type { ProposalCard, TaskCard } from "../extension/src/webview/board/logic";
+import type { DesignCard, ProposalCard, TaskCard } from "../extension/src/webview/board/logic";
 
 class Node {
   children: Node[] = [];
@@ -21,6 +21,7 @@ class Node {
   set textContent(value: string) { this.text = value; this.children = []; }
   constructor(readonly tagName: string) {}
   append(...nodes: Node[]) { this.children.push(...nodes); }
+  replaceChildren(...nodes: Node[]) { this.children = nodes; this.text = ""; }
   prepend(...nodes: Node[]) { this.children.unshift(...nodes); }
   setAttribute(key: string, value: string) { this.attributes[key] = value; }
   addEventListener(type: string, listener: () => void) { (this.listeners[type] ??= []).push(listener); }
@@ -52,6 +53,7 @@ describe("Board card rendering", () => {
     const previous = (globalThis as { document?: unknown }).document;
     (globalThis as { document?: unknown }).document = {
       createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
       createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
     };
     try {
@@ -90,6 +92,7 @@ describe("Board card rendering", () => {
     const previous = (globalThis as { document?: unknown }).document;
     (globalThis as { document?: unknown }).document = {
       createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
       createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
     };
     try {
@@ -108,6 +111,7 @@ describe("Board card rendering", () => {
     const previous = (globalThis as { document?: unknown }).document;
     (globalThis as { document?: unknown }).document = {
       createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
       createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
     };
     try {
@@ -126,6 +130,7 @@ describe("Board card rendering", () => {
     const previous = Reflect.get(globalThis, "document");
     Reflect.set(globalThis, "document", {
       createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
       createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
     });
     try {
@@ -144,6 +149,7 @@ describe("Board card rendering", () => {
     const previous = (globalThis as { document?: unknown }).document;
     (globalThis as { document?: unknown }).document = {
       createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
       createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
     };
     try {
@@ -166,6 +172,7 @@ describe("Board card rendering", () => {
     const saved = Reflect.get(globalThis, "document");
     Reflect.set(globalThis, "document", {
       createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
       createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
     });
     try {
@@ -187,6 +194,7 @@ describe("Run buttons say every reason that holds", () => {
     const previous = (globalThis as { document?: unknown }).document;
     (globalThis as { document?: unknown }).document = {
       createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
       createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
     };
     try {
@@ -198,5 +206,67 @@ describe("Run buttons say every reason that holds", () => {
       if (previous === undefined) Reflect.deleteProperty(globalThis, "document");
       else Reflect.set(globalThis, "document", previous);
     }
+  });
+});
+
+describe("A design card", () => {
+  const withDom = <T>(run: () => T): T => {
+    const previous = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
+    };
+    try {
+      return run();
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(globalThis, "document");
+      else Reflect.set(globalThis, "document", previous);
+    }
+  };
+  const member = (over: Partial<TaskCard>): TaskCard => ({ ...task, drift: null, blocks: [], blockedBy: [], ...over });
+  const design = (over: Partial<DesignCard> = {}): DesignCard => ({
+    kind: "design",
+    key: "design:live",
+    id: "live",
+    title: "Refunds",
+    column: "todo",
+    done: 1,
+    tasks: [
+      member({ key: "task:liveTask", id: "liveTask", title: "First", column: "todo" }),
+      member({ key: "task:second", id: "second", name: { text: "second", isNumber: false }, title: "Second", column: "done", finished: "2026-10-06T10:00:00.000Z" }),
+    ],
+    ...over,
+  });
+
+  test("is closed until expanded, counts its finished Tasks, and lists each Task with its status dot", () => {
+    withDom(() => {
+      let expanded = false;
+      const rendered = renderCard(design(), { ...env(), isExpanded: () => expanded, setExpanded: (_key: string, open: boolean) => { expanded = open; } } as never) as unknown as Node;
+      const list = rendered.all.find((n) => n.className === "board-design-tasks")!;
+      const toggle = rendered.all.find((n) => n.className.includes("board-design-toggle"))!;
+      expect([list.hidden, toggle.renderedText, toggle.attributes["aria-expanded"]]).toEqual([true, "Show tasks", "false"]);
+      expect(rendered.all.find((n) => n.className.includes("board-design-count"))?.renderedText).toBe("1/2 done");
+      toggle.click();
+      expect([list.hidden, toggle.renderedText, toggle.attributes["aria-expanded"], expanded]).toEqual([false, "Hide tasks", "true", true]);
+      expect(rendered.all.filter((n) => n.className === "board-design-task").map((n) => n.dataset["key"])).toEqual(["task:liveTask", "task:second"]);
+      expect(rendered.all.filter((n) => n.className.startsWith("board-dot")).map((n) => n.attributes["aria-label"])).toEqual(["Ready", "Done"]);
+    });
+  });
+
+  test("Run this design asks the agent for the design, and says why it is disabled when every Ready Task of the design is blocked", () => {
+    withDom(() => {
+      let posted: unknown;
+      const free = renderCard(design(), env({ post: (value) => { posted = value; } }) as never) as unknown as Node;
+      const run = free.all.find((n) => n.dataset["action"] === "run-design")!;
+      expect([run.renderedText, run.disabled]).toEqual(["Run this design", false]);
+      run.click();
+      expect(posted).toEqual({ type: "launch", action: { kind: "implement-design", proposal: "live" } });
+
+      const stuck = design({ tasks: [member({ key: "task:liveTask", id: "liveTask", title: "First", column: "todo", blockedBy: [{ kind: "drift", drift: "liveDrift", title: "Refunds differ" }] })] });
+      const blocked = renderCard(stuck, env() as never) as unknown as Node;
+      const blockedRun = blocked.all.find((n) => n.dataset["action"] === "run-design")!;
+      expect([blockedRun.disabled, blockedRun.title]).toEqual([true, "All the Ready Tasks are blocked: Task T3 is blocked by Drift D4"]);
+    });
   });
 });

@@ -30,6 +30,8 @@ export function buildPrompt(action: ResolvedAction): string {
       return `Use the trama-implement skill on Task ${action.task}.`;
     case "implement-all":
       return 'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, one group at a time, until it says there is none.';
+    case "implement-design":
+      return `Use the trama-implement skill on every Task of design ${action.proposal} in the "todo" column. Take them from \`trama task next --batch --proposal ${action.proposal} --max {maxParallelAgents}\`, one group at a time, until it says there is none.`;
     case "import":
       return "Use the trama-import skill on this repository.";
   }
@@ -37,7 +39,7 @@ export function buildPrompt(action: ResolvedAction): string {
 
 /** A restricted implementation Run: the Task identities are not named here, the agent reads the coordinator's current authorization before each group. */
 export function buildAutomaticRunPrompt(collection: string): string {
-  return `Use the trama-implement skill for automatic collection ${collection}. Before each group, run \`trama drift autopilot --json\` and take the authorized Task IDs from its \`tasks\` field, then select only those using \`trama task next --batch --task <id>… --max {maxParallelAgents}\`, passing each ID as a repeated \`--task\`. Do not use the general Task queue or start any other Task. If a Task cannot be started/completed or its check fails, report it with \`trama agent-event failed --task <id> --reason <reason>\`; if a Trama check was announced, also complete it with \`trama announce done <check-id> --failed\`. Stop when the authorized set has no runnable Tasks.`;
+  return `Use the trama-implement skill for automatic collection ${collection}. Before each group, run \`trama drift autopilot --json\` and take the authorized Task IDs from its \`tasks\` field, then select only those using \`trama task next --batch --task <id>… --max {maxParallelAgents}\`, passing each ID as a repeated \`--task\`. Do not use the general Task queue or start any other Task. If a Task cannot be started/completed or its check fails, report it with \`trama agent-event failed --task <id> --reason <reason>\`; if a Trama check was announced, also complete it with \`trama announce done <check-id> --failed\`. If the final check fails and you can tell which Task broke it, report that Task the same way after the failed check: the other authorized Tasks still go on. Stop when the authorized set has no runnable Tasks.`;
 }
 
 /** The scan prompt for one Feature, or the whole System when there is none, as the developer starts it by hand. It names no Proposal. */
@@ -58,6 +60,8 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
       return short("task", action.task);
     case "implement-all":
       return "All tasks";
+    case "implement-design":
+      return short("proposal", action.proposal);
     case "import":
       return "Import";
     case "scan":

@@ -1,8 +1,18 @@
-import { CRITICAL_DRIFT_KEY, DRIFT_KEY, type SettingSchema, type SettingsValues } from "../../host/settings-schema";
+import { DELEGATION_DESCRIPTIONS, DELEGATION_ORDER, type SettingSchema, type SettingsValues } from "../../host/settings-schema";
 
-/** Whether another setting disables this control: Auto Fix Critical Drifts stays disabled while Auto Fix Drifts is not on. */
-export const disabledBy = (setting: SettingSchema, values: Record<string, SettingsValues | undefined>): boolean =>
-  setting.key === CRITICAL_DRIFT_KEY && values[DRIFT_KEY]?.user !== true;
+/** The explanation the Drift autopilot menu shows above its levels. */
+const DELEGATION_MARKDOWN = "How much the agent does with Drifts on its own. It is one choice: each level includes the one before it. It applies only in your user settings.";
+
+/** The Drift autopilot menu, in place of the two Auto Fix checkboxes: an enum over the three levels, built from the Auto Fix Drifts setting. */
+export const delegationSetting = (drift: SettingSchema): SettingSchema => ({
+  ...drift,
+  title: "Delegation",
+  control: "enum",
+  values: [...DELEGATION_ORDER],
+  descriptions: DELEGATION_ORDER.map((mode) => DELEGATION_DESCRIPTIONS[mode] ?? ""),
+  default: "disabled",
+  markdown: DELEGATION_MARKDOWN,
+});
 
 /** The settings grouped under their titles, in schema order. */
 export function groupSettings(schema: readonly SettingSchema[]): { title: string; settings: SettingSchema[] }[] {

@@ -4,7 +4,7 @@ import { identityNamer, type Namer } from "./card-names";
 export type TaskColumn = "todo" | "doing" | "done";
 
 /**
- * Why Run all To do (given its Tasks) is unavailable because the agent has taken a
+ * Why Run Ready Tasks (given its Tasks) is unavailable because the agent has taken a
  * Task: the message names the Task, or says an agent is working. Null when none is taken.
  */
 export function takenBlocker(tasks: { id: string; agent: boolean }[], name: Namer = identityNamer): string | null {
@@ -17,7 +17,7 @@ export function takenBlocker(tasks: { id: string; agent: boolean }[], name: Name
 export type Waits = { kind: "drift"; drift: string } | { kind: "fix"; task: string };
 
 /**
- * Why Run all To do, given these Tasks in creation order, is unavailable, or null. Every reason that holds comes, in
+ * Why Run Ready Tasks, given these Tasks in creation order, is unavailable, or null. Every reason that holds comes, in
  * order: the agent has taken one of them; then, when none is in To do, that is said; otherwise, when every one in To
  * do is blocked, the Drift or the fix Task of the first.
  */
@@ -25,11 +25,11 @@ export function runBlocker(tasks: { id: string; column: TaskColumn; agent: boole
   const todo = tasks.filter((t) => t.column === "todo");
   const first = todo[0];
   let idle: string | null = null;
-  if (first === undefined) idle = "No Task is in To do";
+  if (first === undefined) idle = "No Task is Ready";
   else if (todo.every((t) => t.blockedBy.length > 0)) {
     const why = first.blockedBy[0];
     const reason = why?.kind === "fix" ? `waiting for Task ${name("task", why.task)}, which fixes its Drift` : `blocked by Drift ${why === undefined ? "" : name("drift", why.drift)}`;
-    idle = `All the Tasks in To do are blocked: Task ${name("task", first.id)} is ${reason}`;
+    idle = `All the Ready Tasks are blocked: Task ${name("task", first.id)} is ${reason}`;
   }
   return joinReasons([takenBlocker(tasks, name), idle]);
 }

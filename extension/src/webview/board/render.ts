@@ -1,13 +1,15 @@
-import { type CardName, cardNameOf, type CardNumbers, ID_NAMES } from "../../../../src/core/card-names";
+import { type CardName, cardNameOf, type CardNumbers, ID_NAMES, namerOf } from "../../../../src/core/card-names";
+import { joinReasons, runBlocker } from "../../../../src/core/design";
 import { idTag } from "../id-tag";
 import type { ViewContext } from "../types";
-import type { AnnouncedCard, Badge, BlockBadge, Card, DriftCard, ProposalCard, TaskCard } from "./logic";
+import type { AnnouncedCard, Badge, BlockBadge, Card, DesignCard, DriftCard, ProposalCard, TaskCard } from "./logic";
 import { COLUMN_TITLES, proposalHue, recurringLabel } from "./logic";
 import { renderDriftCompare } from "../drift-compare";
 import { dismissButton } from "../dismiss";
 import { renderMarkdown } from "../markdown";
 import { renderResolves } from "../resolves";
 import { viewOfRef } from "../requirements/logic";
+import { type IconName, setIconLabel } from "../icons";
 
 export interface CardEnv {
   context: ViewContext;
@@ -39,10 +41,14 @@ interface ButtonOptions {
   /** A reason: disables the button, shows as its tooltip and is its accessible description. */
   disabled?: string | boolean;
   className?: string;
+  /** An icon before the label, in the button's text colour. */
+  icon?: IconName;
 }
 
 function button(o: ButtonOptions): HTMLButtonElement {
-  const node = el("button", `trama-btn board-btn${o.primary ? " primary" : ""}${o.className ? ` ${o.className}` : ""}`, o.label);
+  const node = el("button", `trama-btn board-btn${o.primary ? " primary" : ""}${o.className ? ` ${o.className}` : ""}`);
+  if (o.icon) setIconLabel(node, o.icon, o.label);
+  else node.textContent = o.label;
   node.type = "button";
   node.dataset["action"] = o.action;
   if (o.aria) node.setAttribute("aria-label", o.aria);
@@ -157,14 +163,14 @@ function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
   const touches = card.touches;
   const views: HTMLElement[] = [];
   if (touches.model || !touches.requirements)
-    views.push(button({ label: "View on diagram", aria: `View ${card.heading} on diagram`, action: "view", onClick: () => env.context.navigate("diagram", { proposal: card.id }) }));
+    views.push(button({ label: "View on diagram", icon: "type-hierarchy", aria: `View ${card.heading} on diagram`, action: "view", onClick: () => env.context.navigate("diagram", { proposal: card.id }) }));
   if (touches.requirements)
-    views.push(button({ label: "View requirements", aria: `View the Requirements ${card.heading} changes`, action: "view-requirements", onClick: () => env.context.navigate("requirements", { proposal: card.id }) }));
+    views.push(button({ label: "View requirements", icon: "checklist", aria: `View the Requirements ${card.heading} changes`, action: "view-requirements", onClick: () => env.context.navigate("requirements", { proposal: card.id }) }));
   node.append(
     actions(
       ...views,
-      button({ label: "Approve", aria: `Approve ${card.heading}`, action: "approve", primary: true, disabled: card.blocker ?? false, onClick: () => env.context.post({ type: "approveProposal", id: card.id }) }),
-      button({ label: "Reject", aria: `Reject ${card.heading}`, action: "reject", onClick: () => env.context.post({ type: "rejectProposal", id: card.id }) }),
+      button({ label: "Approve", icon: "check", aria: `Approve ${card.heading}`, action: "approve", primary: true, disabled: card.blocker ?? false, onClick: () => env.context.post({ type: "approveProposal", id: card.id }) }),
+      button({ label: "Reject", icon: "close", aria: `Reject ${card.heading}`, action: "reject", onClick: () => env.context.post({ type: "rejectProposal", id: card.id }) }),
     ),
   );
   return node;
@@ -191,7 +197,7 @@ function drift(card: DriftCard, env: CardEnv): HTMLElement {
   if (firstRef !== undefined) {
     const view = viewOfRef(firstRef);
     const label = view === "requirements" ? "View requirement" : "View on diagram";
-    views.push(button({ label, aria: `${label} for ${card.heading}`, action: "view", onClick: () => env.context.navigate(view, view === "diagram" ? { drift: card.id } : { ref: firstRef }) }));
+    views.push(button({ label, icon: view === "requirements" ? "checklist" : "type-hierarchy", aria: `${label} for ${card.heading}`, action: "view", onClick: () => env.context.navigate(view, view === "diagram" ? { drift: card.id } : { ref: firstRef }) }));
   }
   views.push(dismissButton({ blocker: card.dismissBlocker, className: "board-btn", onDismiss: () => env.context.post({ type: "dismissDrift", id: card.id }) }));
   node.append(actions(...views));
@@ -222,8 +228,9 @@ function taskDetails(card: TaskCard, env: CardEnv): { body: HTMLElement; toggle:
   let isOpen = env.isExpanded(key);
   const show = () => {
     body.hidden = !isOpen;
-    toggle.textContent = isOpen ? "Hide details" : "Show details";
-    toggle.setAttribute("aria-label", `${toggle.textContent} of task ${card.name.text}`);
+    const text = isOpen ? "Hide details" : "Show details";
+    setIconLabel(toggle, isOpen ? "chevron-up" : "chevron-down", text);
+    toggle.setAttribute("aria-label", `${text} of task ${card.name.text}`);
     toggle.setAttribute("aria-expanded", String(isOpen));
   };
   toggle.setAttribute("aria-controls", body.id);
@@ -270,6 +277,7 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
   if (details) node.append(details.body);
   const open = button({
     label: "Open",
+    icon: "go-to-file",
     aria: `Open file of task ${card.name.text}`,
     action: "open",
     onClick: () => env.context.post({ type: "openFile", path: card.file }),
@@ -278,10 +286,63 @@ function task(card: TaskCard, env: CardEnv): HTMLElement {
   node.append(
     actions(
       ...(details ? [details.toggle] : []),
-      ...(runnable ? [button({ label: "Run", aria: `Run task ${card.name.text}`, action: "run", primary: true, disabled: env.resolvingReason() ?? false, onClick: () => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } }) })] : []),
+      ...(runnable ? [button({ label: "Run", icon: "play", aria: `Run task ${card.name.text}`, action: "run", primary: true, disabled: env.resolvingReason() ?? false, onClick: () => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } }) })] : []),
       open,
     ),
   );
+  return node;
+}
+
+/** A Task inside a design card: its status dot, its ID and title, and its blocked, waiting or closed-without-changes marks. No move, no details. */
+function designRow(card: TaskCard, env: CardEnv): HTMLElement {
+  const row = el("li", "board-design-task");
+  row.dataset["key"] = card.key;
+  row.tabIndex = -1;
+  const top = head(null, card.name, ...card.blocks.map((b) => blockBadgeLink(b, env)), ...failedBadge(card.autopilotFailed, env), ...(card.unchanged === null ? [] : [noChangesBadge(card.unchanged)]));
+  top.prepend(statusDot(card));
+  row.append(top, el("span", "board-row-title", card.title));
+  return row;
+}
+
+/**
+ * The Tasks of one design as one card: the Proposal's title, how many of its Tasks are done, the Tasks behind a toggle that
+ * is closed when the Board first shows, and Run this design, disabled with the reasons of Run Ready Tasks for its Tasks.
+ */
+function design(card: DesignCard, env: CardEnv): HTMLElement {
+  const node = shell(card, `Design: ${card.title}`);
+  const count = el("span", "board-badge info board-design-count", `${card.done}/${card.tasks.length} done`);
+  node.append(head("Design", null, count), el("h3", "board-card-title", card.title));
+  const list = el("ul", "board-design-tasks");
+  list.id = `board-design-${card.id}`;
+  list.append(...card.tasks.map((t) => designRow(t, env)));
+  // The developer's choice is kept for the session in `env`, so a refresh does not close the card.
+  let isOpen = env.isExpanded(card.key);
+  const toggle = button({ label: "", action: "design-toggle", className: "board-design-toggle", onClick: () => {} });
+  const show = () => {
+    list.hidden = !isOpen;
+    const text = isOpen ? "Hide tasks" : "Show tasks";
+    setIconLabel(toggle, isOpen ? "chevron-up" : "chevron-down", text);
+    toggle.setAttribute("aria-label", `${text} of design ${card.title}`);
+    toggle.setAttribute("aria-expanded", String(isOpen));
+  };
+  toggle.setAttribute("aria-controls", list.id);
+  toggle.addEventListener("click", () => {
+    isOpen = !isOpen;
+    env.setExpanded(card.key, isOpen);
+    show();
+  });
+  show();
+  const reason = joinReasons([env.resolvingReason(), runBlocker(card.tasks, namerOf(env.numbers()))]);
+  const run = button({
+    label: "Run this design",
+    icon: "play",
+    aria: `Run this design: ${card.title}`,
+    action: "run-design",
+    primary: true,
+    disabled: reason ?? false,
+    onClick: () => env.context.post({ type: "launch", action: { kind: "implement-design", proposal: card.id } }),
+  });
+  node.append(list, actions(toggle, run));
   return node;
 }
 
@@ -315,6 +376,7 @@ export function renderAnnounced(card: AnnouncedCard): HTMLElement {
 
 export function renderCard(card: Card, env: CardEnv): HTMLElement {
   if (card.kind === "proposal") return proposal(card, env);
+  if (card.kind === "design") return design(card, env);
   if (card.kind === "drift") return drift(card, env);
   return task(card, env);
 }

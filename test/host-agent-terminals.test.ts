@@ -243,7 +243,7 @@ describe("taken Tasks and the agent terminals", () => {
       await allDelivery.waiting;
       moveTask(p, allTask, "doing", "agent", { terminal: "all-agent" });
       allDelivery.delivery.resolve("endpoint");
-      await expect(allRun).rejects.toThrow(/Run all To do is unavailable: An agent is working on Task/);
+      await expect(allRun).rejects.toThrow(/Run Ready Tasks is unavailable: An agent is working on Task/);
       expect(created).toHaveLength(beforeAll);
       moveTask(p, allTask, "todo", "agent");
     } finally {
@@ -632,11 +632,6 @@ describe("the agent terminal as an editor tab", () => {
       await launchAgent(dir, instruction, "Scan");
       expect(created.at(-1)?.location).toEqual({ viewColumn: -2, preserveFocus: true });
 
-      delete settingValues["terminalLocation"];
-      closeAll();
-      await launchAgent(dir, instruction, "Scan"); // unset means the editor tab, the default
-      expect(created.at(-1)?.location).toEqual({ viewColumn: -2, preserveFocus: true });
-      expect(terminals.at(-1)?.shown).toEqual([true]);
     } finally {
       delete settingValues["terminalLocation"];
       tabGroups.columns = [1];

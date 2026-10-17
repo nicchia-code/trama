@@ -45,6 +45,7 @@ test("the agent terminal is named after the work: the card's short number, or a 
   expect(terminalName({ kind: "resolve-drifts", drifts: [] }, short)).toBe("Drifts");
   expect(terminalName({ kind: "scan", feature: "checkout" }, short)).toBe("Scan");
   expect(terminalName({ kind: "implement-all" }, short)).toBe("All tasks");
+  expect(terminalName({ kind: "implement-design", proposal: "8ga7dqpb" }, short)).toBe("P8");
   expect(terminalName({ kind: "import" }, short)).toBe("Import");
 });
 
@@ -56,6 +57,9 @@ test("a chosen language ends the instruction on the same line, trimmed; blank as
   expect(withLanguage(scan, "Deutsch")).toBe(`${scan} Write everything you generate in Deutsch, except code, which always stays in English.`);
   expect(withLanguage(scan, "")).toBe(scan);
   expect(withLanguage(scan, " \t ")).toBe(scan);
+});
+test("a design run takes the Tasks of that design from the batch queue, with the limit at send time", () => {
+  expect(buildPrompt({ kind: "implement-design", proposal: "8ga7dqpb" })).toContain("trama task next --batch --proposal 8ga7dqpb --max {maxParallelAgents}");
 });
 test("implementation batch commands receive the configured limit at send time", () => {
   const all = buildPrompt({ kind: "implement-all" }).replaceAll("{maxParallelAgents}", "7");

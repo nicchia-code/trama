@@ -53,7 +53,7 @@ export class DesignRequests implements vscode.Disposable {
     tramaFiles: vscode.FileSystemWatcher,
     private readonly project: () => Project | undefined = findProject,
     private readonly launch: (root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement, canSend?: () => boolean) => Promise<Launch | undefined> = launchAgent,
-    /** Run all To do, started when a setup Proposal is approved on its own; the host always passes it. */
+    /** Run Ready Tasks, started when a setup Proposal is approved on its own; the host always passes it. */
     private readonly runAll?: () => Promise<void>,
   ) {
     this.subscriptions = [
@@ -183,7 +183,7 @@ export class DesignRequests implements vscode.Disposable {
 
   /**
    * A setup request whose file is gone leaves the setup list at once. Its setup Proposal, if it has one: approved, it
-   * starts Run all To do as the Board's button does (a refusal is shown); still open, the developer is told why it was
+   * starts Run Ready Tasks as the Board's button does (a refusal is shown); still open, the developer is told why it was
    * not approved on its own. Nothing else is done.
    */
   private async settleSetup(project: Project): Promise<void> {

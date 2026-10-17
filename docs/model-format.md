@@ -329,7 +329,7 @@ touched: 2026-01-01T12:03:10.000Z
 
 ## Written design request
 
-`requests/<id>.md`: a design request the developer writes in the editor. **Design…** creates it empty and the extension saves it while the developer writes; **Send to agent**, or closing its last tab, sends it to the agent. It is temporary, not project information: it lasts until the Proposal bound to it is handed over.
+`requests/<id>.md`: a design request the developer writes in the editor. **Add Work Item…** creates it empty and the extension saves it while the developer writes; **Send to agent**, or closing its last tab, sends it to the agent. It is temporary, not project information: it lasts until the Proposal bound to it is handed over.
 
 - The ID is the file name: the local date and time of creation with seconds, `YYYY-MM-DDTHH-MM-SS` (for example `2026-10-04T19-05-12`), with the suffix `-2`, `-3`, … up to the first free one when that file already exists.
 - The file holds only the developer's Markdown, exactly as written: no front matter, and it may have no title. Its title, used only for the ghost of the terminal launcher, is the first level-one `#` heading outside code blocks, or else the first non-empty line.

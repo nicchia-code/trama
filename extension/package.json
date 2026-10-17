@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "trama-dev",
   "license": "AGPL-3.0-only",
   "private": true,
@@ -103,9 +103,9 @@
             "A terminal tab beside the active editor.",
             "The terminal area."
           ],
-          "default": "editor",
+          "default": "panel",
           "scope": "application",
-          "markdownDescription": "Where `omp` and Claude Code terminals open: `editor` (a terminal tab beside the active editor; the default) or `panel` (the terminal area). It applies only in your user settings."
+          "markdownDescription": "Where `omp` and Claude Code terminals open: `panel` (the terminal area; the default) or `editor` (a terminal tab beside the active editor). It applies only in your user settings."
         },
         "trama.autoFixDrifts": {
           "type": "boolean",
@@ -122,7 +122,7 @@
         "trama.submitWhileRunning": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Let a run start while another run started by Trama is in progress. Off (the default): Run and Run all To do are unavailable while a run started by Trama is in progress. On: a run can start while another one is in progress."
+          "markdownDescription": "Let a run start while another run started by Trama is in progress. Off (the default): Run, Run this design and Run Ready Tasks are unavailable while a run started by Trama is in progress. On: a run can start while another one is in progress."
         },
         "trama.analysis": {
           "type": "string",
@@ -163,7 +163,7 @@
         "trama.language": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Language the agent writes in, for example `Italian` or `Deutsch`. Trama fills it in on first start with your system language (or the editor's, otherwise `English`); you can change it or empty it. When set, every instruction Trama sends to the agent asks it to write everything it generates in that language, except code, which always stays in English. Empty asks nothing about language. It only reaches agents that Trama starts, changes nothing already written, and the Trama interface stays in English."
+          "markdownDescription": "Language the agent writes in, for example `Italian` or `Deutsch`. Empty by default: Trama never fills it in. When set, every instruction Trama sends to the agent asks it to write everything it generates in that language, except code, which always stays in English. Empty asks nothing about language. It only reaches agents that Trama starts, changes nothing already written, and the Trama interface stays in English."
         }
       }
     }

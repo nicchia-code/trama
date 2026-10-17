@@ -33,10 +33,10 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
 });
 const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, title: "Code refunds late", body: "line one\n\nline two\nline three", critical: false, previous: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTitle: null, agent: false, finished: null, unchanged: null, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
-const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], drifts: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, specs: EMPTY_SPECS, specsPresent: false, ...over });
+const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, specs: EMPTY_SPECS, specsPresent: false, ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
 
-test("groups the snapshot into four columns, To decide in creation order with Proposals and Drifts mixed", () => {
+test("groups the snapshot into four columns, Work Items in creation order with Proposals and Drifts mixed", () => {
   const board = buildBoard(
     snapshot({
       proposals: [proposal({ id: "0007", created: "2026-10-01T10:00:00.000Z" }), proposal({ id: "0009", created: "2026-10-03T10:00:00.000Z" })],
@@ -44,7 +44,7 @@ test("groups the snapshot into four columns, To decide in creation order with Pr
       tasks: [task({ id: "0001", column: "done" }), task({ id: "0002", column: "todo" }), task({ id: "0003", column: "doing" }), task({ id: "0004", column: "todo" })],
     }),
   );
-  expect(board.map((c) => c.title)).toEqual(["To decide", "To do", "In progress", "Done"]);
+  expect(board.map((c) => c.title)).toEqual(["Work Items", "Ready", "In progress", "Done"]);
   expect(board.map((c) => c.id)).toEqual(["decide", "todo", "doing", "done"]);
   expect(board[0]?.cards.map((c) => c.key)).toEqual(["proposal:0007", "drift:0003", "proposal:0009"]);
   expect(board[1]?.cards.map((c) => c.key)).toEqual(["task:0002", "task:0004"]);
@@ -64,7 +64,7 @@ test("a handed-over resolution replaces only its listed open Drift cards", () =>
 test("an empty snapshot gives four empty columns with a hint each", () => {
   const board = buildBoard(snapshot());
   expect(board.every((c) => c.cards.length === 0 && c.hint.length > 0)).toBe(true);
-  expect(board[0]?.hint).toBe("Nothing to decide");
+  expect(board[0]?.hint).toBe("No work items");
 });
 
 test("keys differ across kinds that share an ID", () => {
@@ -139,13 +139,23 @@ test("badges name each problem and list the files or the first messages in the t
 const design = (id: string, column: TaskView["column"], proposal: string | null = "0007") => task({ id, column, proposal, proposalTitle: proposal === null ? null : "Returns" });
 const cardsOf = (tasks: TaskView[]) => buildBoard(snapshot({ tasks })).map((c) => c.cards.map((card) => card.key));
 
-test("every Task is a card of its own, even when several come from one Proposal, in creation order", () => {
-  const board = buildBoard(snapshot({ tasks: [design("0001", "todo"), task({ id: "0002" }), design("0003", "todo"), design("0004", "todo")] }));
-  expect(board[1]?.cards.map((c) => c.key)).toEqual(["task:0001", "task:0002", "task:0003", "task:0004"]);
+test("the Tasks of one design, when there are at least two, are one design card at the place of its first Task", () => {
+  const board = buildBoard(snapshot({ tasks: [design("0001", "todo"), task({ id: "0002" }), design("0003", "todo"), design("0004", "doing")] }));
+  expect(board.map((c) => c.cards.map((card) => card.key))).toEqual([[], ["task:0002"], ["design:0007"], []]);
+  expect(board[2]?.cards[0]).toMatchObject({ kind: "design", id: "0007", title: "Returns", column: "doing", done: 0 });
+  expect(board[2]?.cards[0]?.kind === "design" && board[2].cards[0].tasks.map((t) => t.id)).toEqual(["0001", "0003", "0004"]);
 });
 
-test("a Task stays in its own column and carries its Proposal's title; a Task with no Proposal has none", () => {
-  const board = buildBoard(snapshot({ tasks: [design("0001", "done"), design("0002", "doing"), design("0003", "todo"), task({ id: "0004", column: "todo" })] }));
+test("a design card stands in Ready when none of its Tasks started, in Done when all are finished, In progress otherwise", () => {
+  const designOf = (tasks: TaskView[]) => buildBoard(snapshot({ tasks })).flatMap((c) => c.cards).find((card) => card.kind === "design");
+  expect(designOf([design("0001", "todo"), design("0002", "todo")])).toMatchObject({ column: "todo", done: 0 });
+  expect(designOf([design("0001", "done"), design("0002", "done")])).toMatchObject({ column: "done", done: 2 });
+  expect(designOf([design("0001", "done"), design("0002", "todo")])).toMatchObject({ column: "doing", done: 1 });
+  expect(designOf([design("0001", "doing"), design("0002", "todo")])).toMatchObject({ column: "doing", done: 0 });
+});
+
+test("a Task alone from its Proposal, and a Task with no Proposal, stay cards of their own in their own column, carrying their Proposal's title", () => {
+  const board = buildBoard(snapshot({ tasks: [design("0001", "done", "0005"), design("0002", "doing", "0006"), design("0003", "todo"), task({ id: "0004", column: "todo" })] }));
   expect(board.map((c) => c.cards.map((card) => card.key))).toEqual([[], ["task:0003", "task:0004"], ["task:0002"], ["task:0001"]]);
   expect(board[1]?.cards[0]).toMatchObject({ kind: "task", proposal: "0007", proposalTitle: "Returns" });
   expect(board[1]?.cards[1]).toMatchObject({ kind: "task", proposal: null, proposalTitle: null });
@@ -157,24 +167,24 @@ test("a Proposal's tint is stable for its identity and lies on the hue circle", 
   for (const id of ["0007", "a1b2c3d4", "zzzzzzzz"]) expect(proposalHue(id) >= 0 && proposalHue(id) < 360).toBe(true);
 });
 
-test("Run all To do is unavailable while a Task is taken, when none is in To do, and when every one in To do is blocked", () => {
+test("Run Ready Tasks is unavailable while a Task is taken, when none is Ready, and when every Ready Task is blocked", () => {
   const drift: TaskView["blockedBy"] = [{ kind: "drift", drift: "0003", title: "Refunds differ" }];
   const fix: TaskView["blockedBy"] = [{ kind: "fix", task: "0009", title: "Fix refunds", drift: "0004" }];
   const t = (id: string, column: TaskView["column"], agent = false, blockedBy: TaskView["blockedBy"] = []) => ({ id, column, agent, blockedBy });
   expect(runBlocker([t("0001", "todo"), t("0002", "doing")])).toBeNull();
-  expect(runBlocker([t("0001", "done")])).toMatch(/No Task is in To do/);
+  expect(runBlocker([t("0001", "done")])).toMatch(/No Task is Ready/);
   // A taken Task blocks even when To do has Tasks.
   expect(runBlocker([t("0001", "todo"), t("0002", "doing", true)])).toBe("An agent is working on Task 0002");
-  expect(runBlocker([t("0001", "doing", true), t("0002", "doing", true)])).toBe("An agent is working on Tasks 0001, 0002. No Task is in To do");
+  expect(runBlocker([t("0001", "doing", true), t("0002", "doing", true)])).toBe("An agent is working on Tasks 0001, 0002. No Task is Ready");
 
   // Blocked Tasks outside To do do not matter; one free Task in To do keeps the button available.
   expect(runBlocker([t("0001", "todo", false, drift), t("0002", "todo")])).toBeNull();
   expect(runBlocker([t("0001", "doing", false, drift), t("0002", "todo")])).toBeNull();
   // Every Task in To do blocked: the tooltip names the Drift, or the fix Task, of the first of them.
-  expect(runBlocker([t("0001", "doing"), t("0002", "todo", false, drift), t("0003", "todo", false, fix)])).toBe("All the Tasks in To do are blocked: Task 0002 is blocked by Drift 0003");
-  expect(runBlocker([t("0001", "todo", false, fix), t("0002", "todo", false, drift)])).toBe("All the Tasks in To do are blocked: Task 0001 is waiting for Task 0009, which fixes its Drift");
+  expect(runBlocker([t("0001", "doing"), t("0002", "todo", false, drift), t("0003", "todo", false, fix)])).toBe("All the Ready Tasks are blocked: Task 0002 is blocked by Drift 0003");
+  expect(runBlocker([t("0001", "todo", false, fix), t("0002", "todo", false, drift)])).toBe("All the Ready Tasks are blocked: Task 0001 is waiting for Task 0009, which fixes its Drift");
   // When both reasons hold, both are given, the agent working first.
-  expect(runBlocker([t("0001", "doing", true), t("0002", "todo", false, drift)])).toBe("An agent is working on Task 0001. All the Tasks in To do are blocked: Task 0002 is blocked by Drift 0003");
+  expect(runBlocker([t("0001", "doing", true), t("0002", "todo", false, drift)])).toBe("An agent is working on Task 0001. All the Ready Tasks are blocked: Task 0002 is blocked by Drift 0003");
 });
 
 test("a blocked Task, alone or inside a design, gets one badge per blocker that says why and where it leads", () => {
@@ -187,13 +197,13 @@ test("a blocked Task, alone or inside a design, gets one badge per blocker that 
     { label: "blocked 0003", tooltip: "Blocked by Drift 0003: Refunds differ. Show it on the diagram.", target: { kind: "diagram", drift: "0003" } },
     { label: "waiting 0009", tooltip: "Waiting for Task 0009: Fix refunds, which fixes the code for Drift 0004. Go to its card.", target: { kind: "card", key: "task:0009" } },
   ]);
-  const pair = buildBoard(snapshot({ tasks: [design("0001", "todo"), { ...design("0002", "todo"), blockedBy: [blockedBy[0] as TaskView["blockedBy"][number]] }] }))[1]?.cards ?? [];
-  expect(pair.map((c) => (c.kind === "task" ? c.blocks.map((b) => b.label) : null))).toEqual([[], ["blocked 0003"]]);
+  const pair = buildBoard(snapshot({ tasks: [design("0001", "todo"), { ...design("0002", "todo"), blockedBy: [blockedBy[0] as TaskView["blockedBy"][number]] }] }))[1]?.cards[0];
+  expect(pair?.kind === "design" && pair.tasks.map((t) => t.blocks.map((b) => b.label))).toEqual([[], ["blocked 0003"]]);
 });
 
 test("a badge that leads to a Task of another Proposal's card leads to that Task's own card", () => {
   const fix: TaskView["blockedBy"] = [{ kind: "fix", task: "0009", title: "Fix refunds", drift: "0004" }];
-  const board = buildBoard(snapshot({ tasks: [{ ...design("0001", "todo"), blockedBy: fix }, design("0009", "doing")] }));
+  const board = buildBoard(snapshot({ tasks: [{ ...design("0001", "todo"), blockedBy: fix }, design("0009", "doing", "0008")] }));
   expect(board[1]?.cards[0]?.kind === "task" && board[1].cards[0].blocks.map((b) => b.target)).toEqual([{ kind: "card", key: "task:0009" }]);
 });
 
@@ -330,8 +340,8 @@ test("blockers, requirements and the reasons that name them use the numbers, whi
 test("the run blockers name the Tasks and the Drift by number", () => {
   const name = namerOf(NUMBERS);
   const blocked = { id: "0012", column: "todo" as const, agent: false, blockedBy: [{ kind: "drift" as const, drift: "0003" }] };
-  expect(runBlocker([blocked], name)).toBe("All the Tasks in To do are blocked: Task T3 is blocked by Drift D2");
-  expect(runBlocker([{ ...blocked, agent: true }], name)).toBe("An agent is working on Task T3. All the Tasks in To do are blocked: Task T3 is blocked by Drift D2");
+  expect(runBlocker([blocked], name)).toBe("All the Ready Tasks are blocked: Task T3 is blocked by Drift D2");
+  expect(runBlocker([{ ...blocked, agent: true }], name)).toBe("An agent is working on Task T3. All the Ready Tasks are blocked: Task T3 is blocked by Drift D2");
 });
 
 describe("the Done column", () => {
@@ -359,16 +369,15 @@ describe("the Done column", () => {
 
   test("puts the latest finished first, by local day; ties go to the newer card", () => {
     expect(shown("week")).toEqual([
-      ["Today · 3", ["task:0005", "task:0004", "task:0001"]],
+      ["Today · 3", ["design:0007", "task:0004", "task:0001"]],
       ["Yesterday · 1", ["task:0002"]],
       ["October 4, 2026 · 1", ["task:0008"]],
-      ["October 3, 2026 · 1", ["task:0003"]],
     ]);
   });
 
   test("the period lets through today, the last 7 or 30 local days, or all with the undated cards last", () => {
-    expect(shown("today")).toEqual([["Today · 3", ["task:0005", "task:0004", "task:0001"]]]);
-    expect(shown("month").map(([heading]) => heading)).toEqual(["Today · 3", "Yesterday · 1", "October 4, 2026 · 1", "October 3, 2026 · 1", "September 26, 2026 · 1"]);
+    expect(shown("today")).toEqual([["Today · 3", ["design:0007", "task:0004", "task:0001"]]]);
+    expect(shown("month").map(([heading]) => heading)).toEqual(["Today · 3", "Yesterday · 1", "October 4, 2026 · 1", "September 26, 2026 · 1"]);
     expect(shown("all").at(-1)).toEqual(["No date · 1", ["task:0006"]]);
     expect(shown("all").flatMap(([, keys]) => keys)).toHaveLength(cards.length);
   });
@@ -396,7 +405,7 @@ describe("the Done column", () => {
         expect(groups.flatMap((g) => g.cards.map((c) => c.key))).toEqual(["task:last0001", "task:start001"]);
         expect(groups.reduce((count, g) => count + g.cards.length, 0)).toBe(2);
         expect(doneGroups(edge, "all", date, "en-US").flatMap((g) => g.cards.map((c) => c.key))).toEqual([
-          "task:future02", "task:future01", "task:nextday1", "task:last0001", "task:start001", "task:before01", "task:nodate01",
+          "design:design01", "task:nextday1", "task:last0001", "task:start001", "task:before01", "task:nodate01",
         ]);
       }
     }

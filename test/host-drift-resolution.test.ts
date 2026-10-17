@@ -22,12 +22,13 @@ import {
   isKnownSuccessfulScan,
   endTerminalJobs,
   excludeAutopilotDrift,
-  forgetSkippedDrifts,
+  forgetDeveloperScanCases,
   jobAbnormalEnd,
   lastFailedScan,
   receiveCoordinatorMessage,
   recordAutopilotFailure,
   recordSkippedDrift,
+  runContinuationHeld,
   shownAutopilotFailures,
   autopilotFailures,
   autopilotReady,
@@ -71,7 +72,7 @@ test("an interrupted or closed Cursor conversation ends its job abnormally; a co
   expect(jobAbnormalEnd(project, "completed-job")).toBeUndefined();
 });
 
-test("a skipped Drift stays out of automatic resolution until it changes or a developer scan forgets it; automatic failures stay", () => {
+test("a skipped Drift and a failed case stay out of automatic resolution until they change or a developer scan forgets them", () => {
   const project = root();
   recordSkippedDrift(project, "skipped", "signature-1");
   recordAutopilotFailure(project, "job", "failed", undefined, "fix did not apply");
@@ -81,9 +82,9 @@ test("a skipped Drift stays out of automatic resolution until it changes or a de
   clearAutopilotFailure(project, "skipped", "signature-2");
   expect(autopilotFailedCase(project, "skipped")).toBe(false);
   recordSkippedDrift(project, "skipped", "signature-2");
-  forgetSkippedDrifts(project);
+  forgetDeveloperScanCases(project);
   expect(autopilotFailedCase(project, "skipped")).toBe(false);
-  expect(autopilotFailedCase(project, "failed")).toBe(true);
+  expect(autopilotFailedCase(project, "failed")).toBe(false);
 });
 
 test("a skipped question shows only with the autopilot on, and not for a critical Drift in enabled mode", () => {
@@ -231,34 +232,25 @@ test("only a received failure for a known automatic job excludes its authorized 
   receiveCoordinatorMessage({ type: "job", id: "auto-job", root: project, kind: "resolve", active: false, place: { chat: "copilot" }, origin: "automatic", windowId: "window" });
 });
 
-test("a developer scan makes failed cases eligible again but an automatic scan does not", () => {
+test("a developer scan makes failed cases eligible again when it starts; an automatic scan does not", () => {
   const project = root();
   recordAutopilotFailure(project, "run-job", "drift-1", undefined, "could not resolve");
   startJob("scan", project, { terminal: "automatic-scan" }, false, undefined, "automatic-scan", "automatic");
   receiveCoordinatorMessage({ type: "check", root: project, job: "automatic-scan", title: "Automatic scan", phase: "scanning", failed: false });
-  expect(autopilotFailedCase(project, "drift-1")).toBe(true);
-  startJob("scan", project, { terminal: "developer-scan" }, false, undefined, "developer-scan", "manual");
-  receiveCoordinatorMessage({ type: "check", root: project, job: "developer-scan", title: "Developer scan", phase: "scanning", failed: false });
-  expect(autopilotFailedCase(project, "drift-1")).toBe(false);
   endTerminalJobs("automatic-scan");
-  endTerminalJobs("developer-scan");
+  expect(autopilotFailedCase(project, "drift-1")).toBe(true);
+  receiveCoordinatorMessage({ type: "developer-scan-started", root: project });
+  expect(autopilotFailedCase(project, "drift-1")).toBe(false);
 });
 
-test("a developer scan that fails or is interrupted makes failed cases eligible again too, an automatic one does not", () => {
+test("a developer scan that fails or is interrupted frees failed cases at its start and records none", () => {
   const project = root();
   recordAutopilotFailure(project, "run-job", "drift-1", undefined, "could not resolve");
-  startJob("scan", project, { terminal: "automatic-scan" }, false, undefined, "automatic-scan", "automatic");
-  receiveCoordinatorMessage({ type: "check", root: project, job: "automatic-scan", title: "Automatic scan", phase: "scanning", failed: true });
-  endTerminalJobs("automatic-scan");
-  expect(autopilotFailedCase(project, "drift-1")).toBe(true);
-
   startJob("scan", project, { terminal: "failed-scan" }, false, undefined, "failed-scan", "manual");
-  receiveCoordinatorMessage({ type: "check", root: project, job: "failed-scan", title: "Developer scan", phase: "scanning", failed: true });
+  receiveCoordinatorMessage({ type: "developer-scan-started", root: project });
   expect(autopilotFailedCase(project, "drift-1")).toBe(false);
-
-  recordAutopilotFailure(project, "run-job", "drift-1", undefined, "could not resolve");
-  startJob("scan", project, { terminal: "interrupted-scan" }, false, undefined, "interrupted-scan", "manual");
-  endTerminalJobs("interrupted-scan");
+  receiveCoordinatorMessage({ type: "check", root: project, job: "failed-scan", title: "Developer scan", phase: "scanning", failed: true });
+  endTerminalJobs("failed-scan");
   expect(autopilotFailedCase(project, "drift-1")).toBe(false);
 });
 
@@ -283,12 +275,13 @@ test("a Run's check, failed or not, does not make failed cases eligible again", 
   endTerminalJobs("run-terminal");
 });
 
-test("a failed final check of an automatic Run is recorded with its case and holds nothing", () => {
+test("a failed final check of an automatic Run is recorded with its case and holds only that Run's continuation", () => {
   const project = root();
   startJob("run", project, { terminal: "auto-run-terminal" }, false, undefined, "auto-run", "automatic");
   receiveCoordinatorMessage({ type: "check", root: project, job: "auto-run", title: "Final check after all Tasks", phase: "verifying", failed: true });
   expect(driftAutopilotStatus(project, "enabled").failures).toEqual([expect.objectContaining({ job: "auto-run" })]);
   expect(driftAutopilotStatus(project, "enabled").phase).not.toBe("suspended");
+  expect(runContinuationHeld(project, "auto-run")).toBe(true);
   endTerminalJobs("auto-run-terminal");
 });
 

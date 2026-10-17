@@ -83,6 +83,7 @@ export function snapshotOf(files: FileMap): Snapshot {
     diagnostics: model.diagnostics,
     areas: [],
     proposals: [],
+    resolutionDrifts: [],
     drifts: [],
     tasks: [],
     announcements: [],

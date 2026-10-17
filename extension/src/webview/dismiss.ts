@@ -1,11 +1,10 @@
-import type { ProposalView } from "../../../src/core/snapshot";
-
+import { setIconLabel } from "./icons";
 /** The text `Resolve Drifts` puts in its reason while an agent works on the Drifts (`resolveDriftsBlocker` in `src/core`). */
 const RESOLVING_REASON = "Drifts are being resolved";
 
-/** Why «Dismiss Drift» cannot be used on this open Drift now, or null: it sits in a resolution, or an agent works on the Drifts. */
-export function dismissBlocker(driftId: string, proposals: readonly ProposalView[], resolveBlocker: string | null): string | null {
-  if (proposals.some((p) => p.kind === "resolution" && p.resolves.some((r) => r.drift === driftId))) return "This Drift is part of a resolution: decide it there";
+/** Why «Dismiss Drift» cannot be used on this open Drift now, or null: it sits in a resolution being written or open, or an agent works on the Drifts. `resolutionDrifts` is the Snapshot's list of those. */
+export function dismissBlocker(driftId: string, resolutionDrifts: readonly string[], resolveBlocker: string | null): string | null {
+  if (resolutionDrifts.includes(driftId)) return "This Drift is part of a resolution: decide it there";
   if (resolveBlocker?.includes(RESOLVING_REASON)) return "An agent is resolving Drifts";
   return null;
 }
@@ -23,7 +22,7 @@ export function dismissButton(o: DismissOptions): HTMLButtonElement {
   const node = document.createElement("button");
   node.type = "button";
   node.className = `trama-btn${o.className ? ` ${o.className}` : ""}`;
-  node.textContent = "Dismiss Drift";
+  setIconLabel(node, "circle-slash", "Dismiss Drift");
   node.dataset["action"] = "dismiss";
   if (o.blocker !== null) {
     node.disabled = true;

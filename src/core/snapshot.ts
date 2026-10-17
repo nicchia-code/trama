@@ -181,6 +181,8 @@ export interface Snapshot extends ModelView {
   diagnostics: Diagnostic[];
   /** Open Proposals that await a decision: those attached to an open Drift are left out, decided through the Drift. */
   proposals: ProposalView[];
+  /** The open Drifts listed in a resolution Proposal still being written or open: they are decided there, not from the panel. */
+  resolutionDrifts: string[];
   drifts: DriftView[];
   tasks: TaskView[];
   /** Done Tasks finished after this working copy's remembered global Scan launch. */
@@ -340,6 +342,7 @@ export function buildSnapshot(p: Project): Snapshot {
     specsPresent: project.specsPresent,
     diagnostics: project.diagnostics,
     proposals: openProposals.filter((v) => !attachedDrift(p, v.id)),
+    resolutionDrifts: allProposals.filter((x) => x.data.kind === "resolution" && (x.data.status === "draft" || x.data.status === "open")).flatMap((x) => x.data.drifts.map((d) => d.drift)),
     drifts: drifts.filter((d) => d.data.status === "open").map((d) => ({
       id: d.id,
       created: d.data.created,

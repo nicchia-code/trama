@@ -22,7 +22,7 @@ export const settings = () => vscode.workspace.getConfiguration("trama");
 export const userDelegation = (): DriftAutopilotMode =>
   delegationOf(settings().inspect<unknown>("autoFixDrifts")?.globalValue, settings().inspect<unknown>("autoFixCriticalDrifts")?.globalValue);
 
-const configuredAgent = (): "chat" | TerminalAgent => {
+export const configuredAgent = (): "chat" | TerminalAgent => {
   const agent = settings().inspect<string>("agent")?.globalValue;
   return agent === "omp" || agent === "claude" ? agent : "chat";
 };
@@ -364,7 +364,7 @@ export async function launchAgent(
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
-    const asTab = settings().inspect<string>("terminalLocation")?.globalValue !== "panel";
+    const asTab = settings().inspect<string>("terminalLocation")?.globalValue === "editor";
     const terminalId = newTerminalId();
     const defaultShell = vscode.env.shell;
     // On Windows a default shell other than Windows PowerShell 5.1, PowerShell 7 or Git Bash is replaced for this terminal only.

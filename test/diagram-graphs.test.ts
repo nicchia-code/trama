@@ -134,6 +134,19 @@ test("State level: the sub-Machine of one State, with the far ends of leaving Tr
   expect(child.sections.find((s) => s.heading === "Inherited from Paid")?.items).toHaveLength(2);
 });
 
+test("the prose of a Transition is shown as full Markdown in the details of a State and of an edge", () => {
+  const files: FileMap = new Map([
+    ["system.md", "# S\n"],
+    ["actors/u.md", "# U\n\n## Events\n\n### GO\nx\n"],
+    ["a/feature.md", "# A\n"],
+    ["a/m.md", "# M\n\n## States\n\n### A (initial)\n\n#### A1 (initial)\n- `u.GO` → B: **subito**\n\n### B\n\n#### B1 (initial)\n"],
+  ]);
+  const s = buildScene(snapshotOf(files), null);
+  const g = buildGraph(s, { kind: "state", machine: "m", state: "A" }, new Map());
+  const transitions = detailOfSelection(s, g, "s:A1").sections.find((x) => x.heading === "Transitions")?.items;
+  expect(transitions?.map((i) => [i.text, i.note, i.block])).toEqual([["u.GO → B", "**subito**", true]]);
+});
+
 test("State level: a State drawn outside the shown one offers no Drill in, even with sub-States", () => {
   const files: FileMap = new Map([
     ["system.md", "# S\n"],

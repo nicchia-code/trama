@@ -463,7 +463,7 @@ describe("Tasks and Drifts", () => {
     expect(() => run2({}, a, "done")).toThrow(/agent is working on Task/);
   });
 
-  test("the textual board lists every Task on its own line in its column, with no design entry", () => {
+  test("the textual board lists a design of two or more Tasks once, in its derived column, and every other Task on its own line", () => {
     const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
     const prop = newProposal(p, "Returns");
     const mk = (title: string, proposal?: string) => newTask(p, { title, refs: ["order"], technical: false, proposal }).id;
@@ -475,11 +475,10 @@ describe("Tasks and Drifts", () => {
     cli("task", "move", b as string, "doing");
 
     const board = cli("board").out;
-    expect(board).toContain(`## In progress\n- ${named("task", b as string)} Refund on return\n`);
-    expect(board).toContain(`## Done\n- ${named("task", a as string)} Return request`);
-    expect(board).toMatch(new RegExp(`## To do\\n- ${named("task", c as string)} Return label\\n- ${named("task", alone)} Alone\\n- ${named("task", one)} Only one\\n`));
+    expect(board).toContain(`## In progress\n- Proposal ${named("proposal", prop.id)}: Returns\n  - [Done] ${named("task", a as string)} Return request\n  - [In progress] ${named("task", b as string)} Refund on return\n  - [To do] ${named("task", c as string)} Return label\n`);
+    expect(board).toContain(`## To do\n- ${named("task", alone)} Alone\n- ${named("task", one)} Only one\n`);
+    expect(board).toContain("## Done\n_none_");
     expect(board).not.toContain("(1/3 done)");
-    expect(board).not.toMatch(/^  - /m);
 
     const json = JSON.parse(cli("--json", "board").out) as { doing: { kind: string; id: string }[] };
     expect(json.doing).toHaveLength(1);

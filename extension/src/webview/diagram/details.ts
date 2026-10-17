@@ -54,7 +54,7 @@ function detail(init: Partial<Detail> & Pick<Detail, "kind" | "title">): Detail 
   return { change: "same", description: "", changes: [], sections: [], file: null, drill: null, toggle: null, proposal: null, drift: null, numbers: noNumbers, ...init };
 }
 
-const transitionItem = (t: MergedTransition): DetailItem => item(`${t.event.owner}.${t.event.name} → ${t.target}`, { note: t.prose, change: t.change });
+const transitionItem = (t: MergedTransition): DetailItem => item(`${t.event.owner}.${t.event.name} → ${t.target}`, { note: t.prose, change: t.change, block: true });
 
 /** Element references of the States that receive an Event, at any depth, each once. */
 function receiverRefs(scene: Scene, event: string): string[] {
@@ -192,7 +192,7 @@ export function detailOfEdge(scene: Scene, graph: GraphSpec, edge: GEdge): Detai
     sections: [
       {
         heading: flow ? "Events" : "Transitions",
-        items: edge.items.map((i) => (flow ? item(i.label, { note: i.text, change: i.change }) : item(`${i.label}: ${i.from} → ${i.to}`, { note: i.text, change: i.change }))),
+        items: edge.items.map((i) => (flow ? item(i.label, { note: i.text, change: i.change, block: true }) : item(`${i.label}: ${i.from} → ${i.to}`, { note: i.text, change: i.change, block: true }))),
       },
     ],
     file: machine ? (scene.files.get(machine.id) ?? null) : null,
@@ -272,6 +272,35 @@ export function requirementItems(areas: AreaView[], refs: string[]): DetailItem[
         .map((s) => item(a.title, { note: s.text, ref: `requirements/${a.id}#${s.ref}`, block: true })),
     ),
   );
+}
+
+/** A Model container a State or a Transition takes its Requirements from, with the name its Requirements are headed by. */
+export interface Container {
+  ref: string;
+  name: string;
+}
+
+/**
+ * The containers a State or a Transition takes its Requirements from, besides its own: the States that contain it, its
+ * Machine and its Feature, since a Requirement written for a container applies to everything it holds. A Transition's
+ * source State counts too, as it contains the Transition.
+ */
+export function containersOf(scene: Scene, node: GNode | undefined, edge: GEdge | undefined): Container[] {
+  const element = node?.ref ? resolveElement(scene, node.ref) : null;
+  if (element?.kind === "state") return containersOfState(scene, element.machine, element.state.name, false);
+  if (edge?.kind !== "transition") return [];
+  const found = edge.refs.flatMap((ref) => {
+    const [machineId, stateName] = ref.split("/");
+    const machine = machineId ? scene.machine.get(machineId) : undefined;
+    return machine && stateName ? containersOfState(scene, machine, stateName, true) : [];
+  });
+  return [...new Map(found.map((c) => [c.ref, c] as const)).values()];
+}
+
+function containersOfState(scene: Scene, machine: MergedMachine, state: string, withState: boolean): Container[] {
+  const path = pathTo(machine, state);
+  const states = (withState ? path : path.slice(0, -1)).reverse().map((name) => ({ ref: `${machine.id}/${name}`, name }));
+  return [...states, { ref: machine.id, name: machine.name }, { ref: machine.feature, name: scene.feature.get(machine.feature)?.name ?? machine.feature }];
 }
 
 /**

@@ -65,6 +65,9 @@
 
 .board-column-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
 .board-hint { margin: 12px 0; text-align: center; color: var(--board-muted); font-style: italic; }
+.board-column-foot { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 8px; }
+.board-column-foot .trama-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; box-sizing: border-box; }
+.board-column-add { background: transparent; border: 1px dashed var(--board-muted); color: inherit; }
 .board-done-period {
   margin: 8px 8px 0;
   padding: 2px 4px;
@@ -129,6 +132,11 @@ button.board-blocked:focus-visible { outline: 1px solid var(--vscode-focusBorder
 .board-details[hidden] { display: none; }
 .board-muted { color: var(--board-muted); }
 .board-origin { margin: 0; font-size: 12px; }
+.board-design-tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.board-design-tasks[hidden] { display: none; }
+.board-design-task { display: flex; flex-direction: column; gap: 2px; }
+.board-design-task:focus-visible { outline: 1px solid var(--vscode-focusBorder, currentColor); outline-offset: 1px; }
+.board-row-title { overflow-wrap: anywhere; }
 
 .board-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .board-chip {

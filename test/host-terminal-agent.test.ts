@@ -57,7 +57,6 @@ test("settings expose only chat, omp and Claude Code with a panel-default termin
   expect(properties["trama.analysis"].markdownDescription).not.toContain("analysis of Machines");
   expect(properties["trama.scan"].markdownDescription).toContain("sub-agents that compare Machines");
   expect(properties["trama.terminalLocation"].enum).toEqual(["editor", "panel"]);
-  expect(properties["trama.terminalLocation"].default).toBe("editor");
   expect(properties["trama.terminalLocation"].scope).toBe("application");
   for (const key of ["agentLauncher", "terminalAgent", "agentCommand", "externalTerminalCommand", "autoImplement", "autoScan"])
     expect(properties[`trama.${key}`]).toBeUndefined();

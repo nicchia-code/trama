@@ -52,7 +52,7 @@ The returns design became nine Tasks, each tagged with the Proposal it comes fro
 
 ![Nine Tasks tagged with the returns Proposal](docs/images/tasks-ready.png)
 
-Click **Run all To do**, and the agent works through them while you follow along.
+Click **Run Ready Tasks**, and the agent works through them while you follow along.
 
 ### 5. Know when code and map disagree
 
@@ -130,7 +130,7 @@ Trama runs in VS Code and Cursor, on Linux (x64), macOS (Apple silicon) and Wind
    Terminal agents must already be installed and on your `PATH`.
 3. **Open your project** and run **Trama: Open**.
 4. In **Get Started** (the panel shows it in any folder without a Trama project), choose **Import from Code** for an existing app, or **Start from Scratch** for an empty folder: it creates the project and opens an empty design request for your first feature, which the agent answers with the `trama-setup` skill.
-5. In the Board, click **Design…** and describe your first feature (with an empty Model, the Diagram offers **Import from Code** and **Start from Scratch** too).
+5. In the Board, click **Add Work Item…** and describe your first feature (with an empty Model, the Diagram offers **Import from Code** and **Start from Scratch** too).
 
 > **Windows is in preview.** The `win32-x64` build is not yet verified end to end on Windows 11 (VS Code and Cursor, omp and Claude Code, Windows PowerShell 5.1, PowerShell 7 and Git Bash); the manual check in [`docs/uat.md`](docs/uat.md) decides when the preview ends.
 >
@@ -153,7 +153,7 @@ For Claude Code, writing in Italian, a typical setup looks like this:
 |---|---|---|
 | `trama.agent` | `chat` | Where Trama sends its instructions: `chat`, `claude` or `omp`. |
 | `trama.skillsDir` | `.agents/skills` | Where Get Started installs the agent skills. Use `.claude/skills` for Claude Code. |
-| `trama.language` | *detected* | Language for the prose the agent writes (descriptions, Proposals, Tasks, Drifts), e.g. `Italian`. On first start Trama saves the language of your system (else the editor's, else `English`) here, once. Code, names, titles and IDs stay in English. |
+| `trama.language` | *empty* | Language for the prose the agent writes (descriptions, Proposals, Tasks, Drifts), e.g. `Italian`. Trama never fills it in: empty asks the agent nothing about language. Code, names, titles and IDs stay in English. |
 | `trama.terminalLocation` | `editor` | Where terminal agents open: `editor` (a tab beside your code) or `panel` (terminal area, in the background). |
 | `trama.analysis` | *empty* | Model for design requests, Drift resolution and import. |
 | `trama.scan` | *empty* | Model for scans, including the sub-agents that compare each Machine. |

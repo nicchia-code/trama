@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseToHost } from "../extension/src/host/messages";
-import { delegationOf, planSettingChange, raisesDelegation, settingsSchema, settingTitle, settingValueError, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
-import { disabledBy, groupSettings, numberFromText, workspaceOverride } from "../extension/src/webview/settings/logic";
+import { DELEGATION_DESCRIPTIONS, delegationOf, planDelegationChange, planSettingChange, raisesDelegation, settingsSchema, settingTitle, settingValueError, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
+import { delegationSetting, groupSettings, numberFromText, workspaceOverride } from "../extension/src/webview/settings/logic";
 
 const manifest: ManifestPackage = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
 const properties = manifest.contributes?.configuration?.properties ?? {};
@@ -41,14 +41,14 @@ test("the groups and their keys keep the order of the Settings tab", () => {
   expect(SETTING_GROUPS.map((group) => [group.title, [...group.keys]])).toEqual([
     ["Agent", ["trama.agent", "trama.terminalLocation", "trama.autoExit", "trama.language"]],
     ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
-    ["Auto Fix Drifts", ["trama.autoFixDrifts", "trama.autoFixCriticalDrifts"]],
+    ["Drift autopilot", ["trama.autoFixDrifts", "trama.autoFixCriticalDrifts"]],
     ["Runs", ["trama.submitWhileRunning"]],
     ["Project", ["trama.skillsDir"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["Agent", ["trama.autoExit", "trama.language"]],
     ["Models", ["trama.maxParallelAgents"]],
-    ["Auto Fix Drifts", ["trama.autoFixDrifts", "trama.autoFixCriticalDrifts"]],
+    ["Drift autopilot", ["trama.autoFixDrifts", "trama.autoFixCriticalDrifts"]],
     ["Runs", ["trama.submitWhileRunning"]],
     ["Project", ["trama.skillsDir"]],
   ]);
@@ -63,12 +63,12 @@ test("controls follow the manifest type; maxParallelAgents is a whole number of 
   expect(setting("trama.maxParallelAgents")).toMatchObject({ control: "integer", minimum: 1, default: 20 });
 });
 
-test("titles come from the key without its prefix, except the one in the title map", () => {
+test("titles come from the key without its prefix", () => {
   expect(settingTitle("trama.maxParallelAgents")).toBe("Max Parallel Agents");
   expect(settingTitle("trama.autoFixCriticalDrifts")).toBe("Auto Fix Critical Drifts");
   expect(settingTitle("trama.skillsDir")).toBe("Skills Dir");
-  expect(settingTitle("trama.autoExit")).toBe("Auto Exit Terminal");
-  expect(setting("trama.autoExit").title).toBe("Auto Exit Terminal");
+  expect(settingTitle("trama.autoExit")).toBe("Auto Exit");
+  expect(setting("trama.autoExit").title).toBe("Auto Exit");
 });
 
 test("a value is valid only when it conforms to the schema", () => {
@@ -106,47 +106,58 @@ test("the delegation comes from the two checkboxes; critical Drifts alone grant 
   expect(raisesDelegation("enabled", "enabled")).toBe(false);
 });
 
-test("the critical checkbox is disabled while Auto Fix Drifts is not on", () => {
-  const critical = setting("trama.autoFixCriticalDrifts");
-  expect(disabledBy(critical, { "trama.autoFixDrifts": { user: false } })).toBe(true);
-  expect(disabledBy(critical, {})).toBe(true);
-  expect(disabledBy(critical, { "trama.autoFixDrifts": { user: true } })).toBe(false);
-  expect(disabledBy(setting("trama.autoFixDrifts"), {})).toBe(false);
+test("the Drift autopilot menu is one enum over the three levels, in place of the two checkboxes", () => {
+  expect(delegationSetting(setting("trama.autoFixDrifts"))).toMatchObject({
+    key: "trama.autoFixDrifts",
+    group: "Drift autopilot",
+    title: "Delegation",
+    control: "enum",
+    default: "disabled",
+    values: ["disabled", "enabled", "yolo"],
+  });
+  expect(delegationSetting(setting("trama.autoFixDrifts")).descriptions).toEqual(["disabled", "enabled", "yolo"].map((mode) => DELEGATION_DESCRIPTIONS[mode] ?? ""));
 });
 
-test("raising the delegation asks first, with the explanation of the checkbox that grants it", () => {
+test("raising the delegation asks first, with the explanation of the level chosen", () => {
   const user = (values: Record<string, unknown>) => (key: string) => values[key];
-  const raiseMain = planSettingChange(schema, user({}), "trama.autoFixDrifts", true);
-  expect(raiseMain).toEqual({
+  expect(planDelegationChange(user({}), "enabled")).toEqual({
     ok: true,
-    ask: { question: "Let the agent approve and fix non-critical Drifts on its own?", detail: "Non-critical Drifts." },
+    ask: { question: "Let the agent approve and fix non-critical Drifts on its own?", detail: DELEGATION_DESCRIPTIONS.enabled ?? "" },
     writes: [{ key: "trama.autoFixDrifts", value: true }],
   });
-  const raiseCritical = planSettingChange(schema, user({ "trama.autoFixDrifts": true }), "trama.autoFixCriticalDrifts", true);
-  expect(raiseCritical.ok && raiseCritical.ask).toEqual({ question: "Let the agent approve and fix every Drift on its own, critical ones included?", detail: "Critical Drifts too." });
-  const raiseMainWithCritical = planSettingChange(schema, user({ "trama.autoFixCriticalDrifts": true }), "trama.autoFixDrifts", true);
-  expect(raiseMainWithCritical.ok && raiseMainWithCritical.ask?.question).toBe("Let the agent approve and fix every Drift on its own, critical ones included?");
-  expect(raiseMainWithCritical.ok && raiseMainWithCritical.ask?.detail).toBe("Critical Drifts too.");
+  expect(planDelegationChange(user({ "trama.autoFixDrifts": true }), "yolo")).toEqual({
+    ok: true,
+    ask: { question: "Let the agent approve and fix every Drift on its own, critical ones included?", detail: DELEGATION_DESCRIPTIONS.yolo ?? "" },
+    writes: [{ key: "trama.autoFixCriticalDrifts", value: true }],
+  });
+  expect(planDelegationChange(user({}), "yolo")).toEqual({
+    ok: true,
+    ask: { question: "Let the agent approve and fix every Drift on its own, critical ones included?", detail: DELEGATION_DESCRIPTIONS.yolo ?? "" },
+    writes: [
+      { key: "trama.autoFixDrifts", value: true },
+      { key: "trama.autoFixCriticalDrifts", value: true },
+    ],
+  });
 });
 
-test("lowering the delegation asks nothing; turning Auto Fix Drifts off clears the critical one first", () => {
+test("lowering the delegation asks nothing; Off clears both settings, critical first", () => {
   const user = (values: Record<string, unknown>) => (key: string) => values[key];
-  const off = planSettingChange(schema, user({ "trama.autoFixDrifts": true, "trama.autoFixCriticalDrifts": true }), "trama.autoFixDrifts", false);
-  expect(off).toEqual({
+  const both = user({ "trama.autoFixDrifts": true, "trama.autoFixCriticalDrifts": true });
+  expect(planDelegationChange(both, "disabled")).toEqual({
     ok: true,
     writes: [
       { key: "trama.autoFixCriticalDrifts", value: undefined },
       { key: "trama.autoFixDrifts", value: undefined },
     ],
   });
-  const lowerCritical = planSettingChange(schema, user({ "trama.autoFixDrifts": true, "trama.autoFixCriticalDrifts": true }), "trama.autoFixCriticalDrifts", false);
-  expect(lowerCritical).toEqual({ ok: true, writes: [{ key: "trama.autoFixCriticalDrifts", value: undefined }] });
+  expect(planDelegationChange(both, "enabled")).toEqual({ ok: true, writes: [{ key: "trama.autoFixCriticalDrifts", value: undefined }] });
+  expect(planDelegationChange(both, "yolo")).toEqual({ ok: true, writes: [] });
 });
 
-test("the host refuses a critical setting while Auto Fix Drifts is off", () => {
-  const plan = planSettingChange(schema, () => undefined, "trama.autoFixCriticalDrifts", true);
-  expect(plan.ok).toBe(false);
-  expect(planSettingChange(schema, () => undefined, "trama.unknown", true).ok).toBe(false);
+test("the Drift autopilot keys change only through the menu; the host refuses them one by one", () => {
+  expect(planSettingChange(schema, "trama.autoFixDrifts", true).ok).toBe(false);
+  expect(planSettingChange(schema, "trama.autoFixCriticalDrifts", true).ok).toBe(false);
+  expect(planSettingChange(schema, "trama.unknown", true).ok).toBe(false);
 });
 
 test("the workspace value is named only when it differs from the user's", () => {
@@ -178,4 +189,10 @@ test("the host accepts a setting change only for a manifest key with a conformin
   expect(set("trama.unknown", "x").ok).toBe(false);
   expect(set("editor.fontSize", 12).ok).toBe(false);
   expect(parseToHost({ type: "setSetting", key: "trama.autoExit", value: true }).ok).toBe(false);
+});
+
+test("the host accepts a Drift autopilot level only as one of the three", () => {
+  expect(parseToHost({ type: "setDelegation", mode: "yolo" }).ok).toBe(true);
+  expect(parseToHost({ type: "setDelegation", mode: "on" }).ok).toBe(false);
+  expect(parseToHost({ type: "setDelegation" }).ok).toBe(false);
 });

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError } from "./errors";
-import { compareByCreation, createdField } from "./schema";
+import { compareByCreation, createdField, idField } from "./schema";
 import { listCards, type CardLayout, type Project, readDocument } from "./store";
 
 export type { CardKind };
@@ -29,6 +29,46 @@ const KIND_SPEC: Record<CardKind, { folder: string; layout: CardLayout; field: s
   task: { folder: "tasks", layout: "file", field: "column", fallback: "todo", live: ["todo", "doing"] },
   drift: { folder: "drifts", layout: "file", field: "status", fallback: "open", live: ["open"] },
 };
+
+interface TaskRow extends LiveCard {
+  column: string;
+  /** The Proposal (the design) the Task comes from, or null. */
+  design: string | null;
+}
+
+/** Every readable Task of one `.trama/` folder, with its column and design. A Task that cannot be read has no number. */
+function taskRowsIn(dir: string): TaskRow[] {
+  const spec = KIND_SPEC.task;
+  const folder = join(dir, spec.folder);
+  const rows: TaskRow[] = [];
+  for (const entry of listCards(folder, spec.layout)) {
+    const file = join(folder, entry.name);
+    try {
+      const raw = readDocument(file).data;
+      const column = raw[spec.field] ?? spec.fallback;
+      if (typeof column !== "string") continue;
+      rows.push({ id: entry.id, created: createdField(raw, file), column, design: idField(raw, "proposal", file) });
+    } catch {
+      // not a readable card: it gets no number
+    }
+  }
+  return rows;
+}
+
+/**
+ * The Tasks that take a number: those in To do or In progress, and a Done Task that still holds its number while the
+ * design it comes from has a Task in To do or In progress. A Done Task without a number never takes one, so `previous`
+ * (the numbers already written) decides which Done Tasks stay.
+ */
+function numberedTasks(dir: string, previous: Map<string, number> | undefined): LiveCard[] {
+  const rows = taskRowsIn(dir);
+  const openDesigns = new Set(rows.filter((r) => KIND_SPEC.task.live.includes(r.column) && r.design !== null).map((r) => r.design));
+  return rows.filter(
+    (r) =>
+      KIND_SPEC.task.live.includes(r.column) ||
+      (r.column === "done" && r.design !== null && openDesigns.has(r.design) && previous?.has(r.id) === true),
+  );
+}
 
 /**
  * The live cards of a kind in one `.trama/` folder. A card that cannot be read has no number: reading it is another
@@ -152,7 +192,6 @@ export class ShortNumbers {
  * command warns once and goes on with the numbers it rebuilt.
  */
 export function syncShortNumbers(p: Project): ShortNumbers {
-  const live = Object.fromEntries(CARD_KINDS.map((kind) => [kind, cardsIn(p.dir, kind).sort(compareByCreation)])) as Record<CardKind, LiveCard[]>;
   let current: string | null;
   try {
     current = readFileSync(assignedFile(p), "utf8");
@@ -160,6 +199,9 @@ export function syncShortNumbers(p: Project): ShortNumbers {
     current = null; // missing, or unreadable: a folder in its place, no permission
   }
   const previous = current === null ? null : parseAssigned(current);
+  const liveOf = (kind: CardKind): LiveCard[] =>
+    (kind === "task" ? numberedTasks(p.dir, previous?.task) : cardsIn(p.dir, kind)).sort(compareByCreation);
+  const live = Object.fromEntries(CARD_KINDS.map((kind) => [kind, liveOf(kind)])) as Record<CardKind, LiveCard[]>;
   const numbers = emptyNumbers();
   for (const kind of CARD_KINDS) numbers[kind] = assign(live[kind], previous?.[kind]);
 

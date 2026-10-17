@@ -53,8 +53,8 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
   const attached = attachedDrift(p, proposal.id);
   const resolvedDrifts = proposal.data.kind === "resolution" ? resolvedDriftsOf(p, proposal) : [];
   const h = live ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
-  // A change or setup Proposal's removals and scope are computed now while it is live; once approved, only the scope it saved before is history.
-  const coverage = live && coversScope(proposal.data.kind) ? proposalCoverage(p, proposal) : null;
+  // Only an ordinary Proposal not attached to a Drift brings Tasks, so only it has removals and scope: computed now while it is live; once approved, only the scope it saved before is history.
+  const coverage = live && coversScope(proposal.data.kind) && attached === null ? proposalCoverage(p, proposal) : null;
   const history = live ? null : proposal.data.scanScope ?? null;
   const fileChanges = changes(p, proposal);
   const errors = live ? [...validateProposal(p, proposal), ...unfixableDrifts(p, proposal).map((message) => ({ file: "proposal.md", line: 0, message }))] : [];
@@ -62,7 +62,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
     proposal.body.trim(),
     "",
     `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}${proposal.data.kind === "change" ? "" : ` · ${proposal.data.kind}`}${proposal.data.automatic ? " · automatic" : ""}`,
-    attached ? `Attached to Drift ${numbers.name("drift", attached.id)} ${attached.title}` : "",
+    attached ? `Attached to Drift ${numbers.name("drift", attached.id)} ${attached.title}. It brings no Tasks and is decided on the Drift.` : "",
     proposal.data.status === "draft" ? "Still being written; submit when finished. The developer cannot approve or reject it yet." : "",
     proposal.data.requires.length > 0 ? `Requires: ${proposal.data.requires.map((r) => numbers.name("proposal", r)).join(", ")}. Changes and validation below are on top of them.` : "",
     h.requires.length > 0 ? `\nCannot be approved yet:\n${requiredReasons(h.requires, (id) => numbers.name("proposal", id)).map((r) => `- ${r}`).join("\n")}` : "",
@@ -422,10 +422,26 @@ export function boardView(p: Project): Result {
   const blocked = blockedTasks(p);
   const tasks = listTasks(p).map((task) => taskSummary(task, blocked, numbers));
   const line = (t: TaskSummary) => `${t.number ?? t.id} ${t.title}${t.technical ? " (technical)" : ""}${t.agent ? WORKING : ""}${t.unchanged !== null ? NO_CHANGES : ""}${blockedMarks(t.blockedBy, numbers)}`;
-  const entries = (column: string) =>
-    tasks
-      .filter((x) => x.column === column)
-      .map((x) => ({ md: `- ${line(x)}`, json: { kind: "task" as const, ...x } }));
+  // A design of two or more Tasks is one group, in the column its Tasks add up to; every other Task stays a line of its own.
+  const designs = new Map<string, TaskSummary[]>();
+  for (const t of tasks) if (t.proposal !== null) designs.set(t.proposal, [...(designs.get(t.proposal) ?? []), t]);
+  const columnName = { todo: "To do", doing: "In progress", done: "Done" } as const;
+  const designLines = (proposalId: string, ts: TaskSummary[]) => {
+    const title = allProposals.find((x) => x.id === proposalId)?.title;
+    return [`- Proposal ${numbers.name("proposal", proposalId)}${title ? `: ${title}` : ""}`, ...ts.map((t) => `  - [${columnName[t.column]}] ${line(t)}`)].join("\n");
+  };
+  const entries = (column: string): string[] => {
+    const seen = new Set<string>();
+    return tasks.flatMap((t) => {
+      const design = t.proposal === null ? undefined : designs.get(t.proposal);
+      if (t.proposal === null || design === undefined || design.length < 2) return t.column === column ? [`- ${line(t)}`] : [];
+      if (seen.has(t.proposal)) return [];
+      seen.add(t.proposal);
+      const derived = design.every((t) => t.column === "todo") ? "todo" : design.every((t) => t.column === "done") ? "done" : "doing";
+      return derived === column ? [designLines(t.proposal, design)] : [];
+    });
+  };
+  const flat = (column: string) => tasks.filter((x) => x.column === column).map((x) => ({ kind: "task" as const, ...x }));
   const md = [
     "# Board",
     "",
@@ -440,22 +456,22 @@ export function boardView(p: Project): Result {
     ]),
     "",
     "## To do",
-    bullets(entries("todo").map((e) => e.md)),
+    bullets(entries("todo")),
     "",
     "## In progress",
-    bullets(entries("doing").map((e) => e.md)),
+    bullets(entries("doing")),
     "",
     "## Done",
-    bullets(entries("done").map((e) => e.md)),
+    bullets(entries("done")),
   ].join("\n");
   return {
     md,
     json: {
       inWriting: drafts,
       toDecide: { proposals, drifts },
-      todo: entries("todo").map((e) => e.json),
-      doing: entries("doing").map((e) => e.json),
-      done: entries("done").map((e) => e.json),
+      todo: flat("todo"),
+      doing: flat("doing"),
+      done: flat("done"),
     },
   };
 }

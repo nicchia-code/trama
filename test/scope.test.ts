@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildModel } from "../src/core/model";
 import { approveProposal, deleteInProposal, editInProposal, getProposal, newProposal, proposalCoverage } from "../src/core/proposals";
+import { newDrift } from "../src/core/work";
 import { run } from "../src/cli/main";
 import { handOver } from "./handover";
 import { coverWithTask } from "./cover";
@@ -166,6 +167,15 @@ describe("scan scope, computed live and not saved at approval", () => {
     expect(JSON.parse(run(["--root", dir, "proposal", "show", prop.id, "--json"], dir, {}).out)).not.toHaveProperty("scanScope");
   });
 
+  test("a changed Machine description and a changed State in it both enter the scope, each as its own entry", () => {
+    const prop = newProposal(p, "Describe");
+    const order = editInProposal(p, prop.id, "checkout/order.md");
+    writeFileSync(order, readFileSync(order, "utf8").replace("from composition to delivery.", "from composition to delivery, tracked.").replace("### Paid\n", "### Paid\nMoney received.\n"));
+    coverWithTask(p, prop.id, "checkout");
+    handOver(p, prop.id);
+    expect(proposalCoverage(p, getProposal(p, prop.id)).scope.map((e) => `${e.ref} (${e.reason})`)).toEqual(["order (changed)", "order/Paid (changed)", "order/Awaiting payment/payment.SUCCEEDED (leads into a change)"]);
+  });
+
   test("an import, a Proposal not approved yet, and one approved before the field have no scan scope and no section", () => {
     const imported = newProposal(p, "Imported", "", { kind: "import" });
     const file = editInProposal(p, imported.id, "checkout/order.md");
@@ -193,5 +203,18 @@ describe("proposal show: removals and scope coverage", () => {
     const prop = newProposal(p, "Order");
     writeFileSync(editInProposal(p, prop.id, "checkout/order.md"), readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8").replace("### Paid\n", "### Paid\nMoney received.\n"));
     expect(run(["--root", dir, "proposal", "show", prop.id], dir, {}).out).toContain("- `order/Paid` (changed) — not covered");
+  });
+
+  test("a Proposal attached to an open Drift shows no removals and no scope, since it brings no Tasks", () => {
+    const prop = newProposal(p, "Drop cart attached");
+    deleteInProposal(p, prop.id, "checkout/cart.md");
+    newDrift(p, { where: "src/refund.ts", title: "Attached", refs: ["checkout"], happens: "The code does it one way.", should: "The Model says another.", options: [{ title: "A", text: "a" }, { title: "B", text: "b" }], proposal: prop.id });
+    const shown = run(["--root", dir, "proposal", "show", prop.id], dir, {}).out;
+    expect(shown).not.toContain("## Created on approval");
+    expect(shown).not.toContain("## Scope");
+    expect(shown).toContain("It brings no Tasks and is decided on the Drift.");
+    const json = JSON.parse(run(["--root", dir, "proposal", "show", prop.id, "--json"], dir, {}).out);
+    expect(json).not.toHaveProperty("removals");
+    expect(json).not.toHaveProperty("scope");
   });
 });

@@ -116,7 +116,7 @@ test("a fix Task closed without changes unblocks its origin in the automatic Run
   delegation = undefined;
 });
 
-test("a failed final check of an automatic Run stops its further Tasks, which then carry the reason", async () => {
+test("a failed final check of an automatic Run holds its continuation: no Task is authorized, unfinished ones wait in To do with the reason", async () => {
   delegation = "enabled";
   const root = mkdtempSync(join(tmpdir(), "trama-final-check-"));
   cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });

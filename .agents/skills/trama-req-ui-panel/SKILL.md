@@ -30,28 +30,28 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 - Rendered text never makes the panel scroll sideways: long words wrap and a long line of a code block scrolls inside its own block. Text stays selectable.
 - Malformed Markdown never prevents a text from showing: it is shown as written, as far as it cannot be read as Markdown.
 - L'overlay delle domande segue le stesse regole: il testo della domanda, il contesto, la descrizione e i dettagli di ogni opzione sono resi come Markdown; le etichette delle opzioni, i pulsanti e la risposta libera mostrata nel riepilogo restano testo semplice.
+- Ogni pulsante con testo della Board ha, oltre al testo, un'icona a sinistra del testo: i pulsanti della barra, quelli in fondo alle colonne, quelli delle schede (anche dentro una scheda di design o di risoluzione) e `Close` degli avvisi. I chip dei riferimenti, i badge `blocked` e `waiting`, le righe dei Drift di una scheda di risoluzione e il menu del periodo di Done restano senza icona.
+- Le stesse azioni hanno la stessa icona anche nel Diagramma: `Scan` nella sua barra, `Approve`, `Reject` e `Dismiss Drift` nei dettagli. Gli altri controlli del Diagramma e le altre schede del pannello non cambiano.
+- Le icone sono glifi codicon, una per azione:
+  - `Run Ready Tasks`, `Run all`, `Run` di un Task e `Run this design`: `play`.
+  - `Add Work Item…` e `+ Work Item`: `add`.
+  - `Quick request…`: `comment`.
+  - `Resolve Drifts`: `wand`.
+  - `Scan System` nella Board e `Scan` nel Diagramma: `search`.
+  - `View on diagram`: `type-hierarchy`.
+  - `View requirements` e `View requirement`: `checklist`.
+  - `Approve`: `check`. `Reject`: `close`.
+  - `Dismiss Drift`: `circle-slash`.
+  - `Open` di un Task: `go-to-file`.
+  - `Show details` e `Show tasks`: `chevron-down`; `Hide details` e `Hide tasks`: `chevron-up`.
+  - `Close` di un avviso: `close`.
+- L'icona è grande 16 px, come quelle in fondo alle colonne, e resta a sinistra del testo anche quando lo spazio è poco: il testo non sparisce mai e il pulsante va a capo o si stringe come senza icona. Quando l'etichetta cambia (`Scan System · N`, `Show details` che diventa `Hide details`) l'icona resta, e cambia solo dove la mappa dà un'icona diversa.
+- L'icona ha il colore del testo del pulsante, anche nei pulsanti primari e in quelli disabilitati; nessuna icona ha un colore proprio.
+- L'icona è decorativa: testo, tooltip, nome accessibile e motivi di disabilitazione di ogni pulsante restano quelli di prima.
+- La chevron della colonna Done è il glifo codicon `chevron-right` quando la colonna è aperta e `chevron-left` quando è collassata, a 16 px come le altre icone, al posto dei caratteri `›` e `‹`. Resta un pulsante a sola icona, con gli stessi tooltip e nome accessibile.
 
 ## panel/Requirements
 
 - Ogni Area mostra titolo, descrizione e introduzione, poi i suoi frammenti nell'ordine dei nomi dei file; ogni frammento è un gruppo con il titolo, il nome del file (`<frammento>.md`) in testo secondario, la descrizione e sotto le sue sezioni. La sezione General, in qualunque frammento stia, compare per prima nel suo frammento.
 - Un'Area senza frammenti mostra, sotto la descrizione, la riga `No fragments.`
 - Con una Proposal selezionata, i frammenti seguono le stesse etichette delle Aree: `new fragment` per uno nuovo, `fragment removed` per uno cancellato, nessuna per uno cambiato; le sezioni dentro tengono le loro (`added`, `removed`, `changed`). Una sezione spostata da un frammento a un altro compare solo nel frammento di arrivo, con l'etichetta `moved from <frammento>`, seguita da `changed` e dal testo di prima se anche il testo cambia.
-
-## panel/Settings
-
-- La tab `Settings` è la quarta della barra in cima al pannello, subito dopo `Requirements`, con lo stesso aspetto delle altre e senza badge.
-- Le impostazioni stanno in cinque gruppi, in quest'ordine, ciascuno con il suo titolo: `Agent` (`trama.agent`, `trama.terminalLocation`, `trama.autoExit`, `trama.language`), `Models` (`trama.analysis`, `trama.scan`, `trama.execution`, `trama.maxParallelAgents`), `Drift autopilot` (`trama.driftAutoPilot`), `Runs` (`trama.submitWhileRunning`) e `Project` (`trama.skillsDir`). Dentro un gruppo l'ordine è quello elencato.
-- La pagina delle impostazioni si allarga con il pannello fino a una larghezza massima di circa 1100 px. I gruppi stanno uno sotto l'altro, ciascuno su tutta la larghezza della pagina, anche quelli con una sola impostazione. Dentro un gruppo le impostazioni stanno affiancate in una griglia di colonne di pari larghezza, larghe almeno circa 240 px, nell'ordine del gruppo da sinistra a destra; quando il pannello non ha spazio per tutte, vanno a capo, fino a una colonna sola nei pannelli stretti. La pagina non scorre mai di lato.
-- In una riga della griglia titoli e controlli delle impostazioni affiancate stanno alla stessa altezza; messaggi di errore e avvisi del workspace stanno sotto il controllo della loro impostazione, dentro la sua colonna.
-- I campi di testo occupano tutta la larghezza della loro colonna; il campo numerico e i menu restano larghi quanto il loro contenuto, senza superare la colonna. Il fumetto di una «i» in una colonna a destra resta dentro il pannello.
-- Ogni impostazione mostra il titolo leggibile, ricavato dalla chiave senza `trama.` separando le parole e con l'iniziale maiuscola (`maxParallelAgents` → `Max Parallel Agents`), con subito a destra la «i» informativa; sotto, il controllo. La chiave completa (`trama.maxParallelAgents`) non compare nella scheda, né nella pagina né nel fumetto. La spiegazione non compare nella pagina.
-- La «i» è un pulsante piccolo, un'icona «i» in un cerchio nel colore secondario del testo, con tooltip e nome accessibile `About <titolo>` (`About Max Parallel Agents`). È una fermata del Tab e mostra l'anello del fuoco come gli altri controlli.
-- Il fumetto compare quando il puntatore entra nella «i» o quando la «i» riceve il fuoco, accanto alla «i» e sopra il resto della pagina, con lo sfondo, il bordo e l'ombra dei fumetti dell'editor e una larghezza massima che non fa scorrere il pannello di lato. Contiene la spiegazione dell'impostazione, cioè la `markdownDescription` del manifest resa come Markdown; per un enum, sotto, un elenco con una voce per valore: il valore nel carattere a spaziatura fissa e la sua voce di `enumDescriptions` resa come Markdown in linea, con la voce del valore scelto evidenziata dallo sfondo e dall'indicazione testuale `(current)`.
-- Il fumetto resta aperto mentre il puntatore è sulla «i» o sul fumetto: il testo si seleziona e i link si aprono come nel resto del pannello. Si chiude dopo una breve pausa quando il puntatore li lascia entrambi (la pausa permette di passare dalla «i» al fumetto), quando la «i» perde il fuoco e il fuoco non è nel fumetto, o con `Esc`, che lascia il fuoco sulla «i». Aprire un fumetto chiude quello aperto. Un nuovo valore delle impostazioni aggiorna il valore evidenziato in un fumetto aperto senza chiuderlo.
-- Controlli: un enum è un `<select>` nativo con lo stesso stile dei selettori del pannello, una voce per valore con il valore come etichetta, senza spiegazione del valore scelto sotto. `trama.autoExit` è una casella di spunta. `trama.maxParallelAgents` è un campo numerico con minimo 1 e passo 1. Le altre sono campi di testo su una riga; un campo vuoto mostra come segnaposto il valore predefinito, quando non è vuoto.
-- Un valore non valido lascia il campo come l'ha scritto il developer e mostra sotto, in colore di errore e con testo, `Enter a whole number of at least 1.`; il campo ha `aria-invalid` e il messaggio è collegato con `aria-describedby`. Il messaggio sparisce quando il campo torna valido o riceve il valore reale.
-- Per `trama.skillsDir`, `trama.language` e `trama.submitWhileRunning`, quando il workspace ha un valore diverso da quello utente, sotto il controllo compare `The workspace setting overrides this: <valore>.`, con il valore nel carattere a spaziatura fissa (`(empty)` per un testo vuoto).
-- Una scrittura fallita mostra un messaggio di errore dell'editor `Trama: could not save <titolo>: <motivo>.` con il titolo leggibile dell'impostazione (`Trama: could not save Max Parallel Agents: <motivo>.`), e il controllo torna al valore reale.
-- Il dialogo di conferma della delega è un avviso modale dell'editor con il pulsante `Enable` (Cancel lo aggiunge l'editor). Messaggio per `enabled`: `Let the agent approve and fix non-critical Drifts on its own?`; per `yolo`: `Let the agent approve and fix every Drift on its own, critical ones included?`. Il dettaglio è la spiegazione del valore scelto.
-- Ogni controllo ha come nome accessibile il titolo dell'impostazione; la spiegazione dell'impostazione e, per un enum, quella del valore scelto sono collegate con `aria-describedby` anche quando il fumetto è chiuso, così uno screen reader le legge al fuoco del controllo. La «i» ha `aria-expanded` secondo il fumetto e il fumetto ha `role="tooltip"`. Tutto si raggiunge e si cambia da tastiera.
-- Tutti i testi della scheda e del dialogo sono in inglese e non seguono `trama.language`.

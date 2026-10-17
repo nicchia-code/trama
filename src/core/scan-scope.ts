@@ -34,7 +34,7 @@ export function scanScope(before: ProjectModel, after: ProjectModel): ScanScopeE
   };
   const changedEvents: { owner: string; name: string }[] = [];
   const changedStates: { machine: Machine; state: State }[] = [];
-  /** Machines whose whole content a changed Machine reference covers: its entries come with it. */
+  /** Machines whose whole content their own reference covers: a new Machine enters whole, a changed one keeps its changed entries. */
   const changedMachines = new Set<string>();
 
   const diffEvents = (owner: string, old: EventDecl[] | undefined, now: EventDecl[]) => {
@@ -66,7 +66,6 @@ export function scanScope(before: ProjectModel, after: ProjectModel): ScanScopeE
       continue;
     }
     if (o.name !== m.name || o.description !== m.description) {
-      changedMachines.add(m.id);
       add(m.id, "changed");
     }
     const oldStates = new Map(flattenStates(o.states).map((s) => [s.name.toLowerCase(), s]));
@@ -173,7 +172,7 @@ export interface ChangedEvent {
 /**
  * The scope a targeted scan compares, from the elements that changed or were removed (`changed`) and the Model they belong to.
  * A Proposal and a finished Task both call it, so the same named elements give the same scope:
- * - a changed Machine covers everything inside it (States, Transitions, Events): those entries are dropped;
+ * - a new Machine (or one a finished Task names) covers everything inside it (States, Transitions, Events): those entries are dropped;
  * - a changed State covers the States and Transitions inside it: those entries are dropped;
  * - the Transitions of any Machine that enter a changed State or react to a changed Event are added, as `leads into a change`.
  */

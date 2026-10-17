@@ -1,10 +1,10 @@
 # Announcement
 
-A card the agent is about to create, announced so that the Board can show a ghost of it meanwhile: a Proposal or a Drift waiting in To decide, or a Task waiting in To do. An announcement is not a card: it cannot be decided on or moved, it does not count among what awaits a decision and it has no effect on the Model.
+A card the agent is about to create, announced so that the Board can show a ghost of it meanwhile: a Proposal or a Drift waiting in Work Items, or a Task waiting in Ready. An announcement is not a card: it cannot be decided on or moved, it does not count among what awaits a decision and it has no effect on the Model.
 
 An announcement is created Preparing, as soon as the agent knows it will create the card, by the agent announcing it with the kind and the title of the card. Trama itself creates one when the developer asks the agent for a design with an agent of the terminal; the title is then the developer's request. Lo stesso fa quando il developer lancia Resolve Drifts con un agente del terminale: annuncia la Proposal di risoluzione, con il titolo del pulsante. A Proposal the agent starts that no announcement is waiting for, as happens with the chat, creates its own announcement already Writing. An announcement lasts only as long as the agent's work: once the real card has arrived, or the work is over without it, it is gone.
 
-Una Proposal destinata a un Drift non ha mai un ghost a sé in To decide, perché il developer non la vede. Un Drift che porterà una Proposal ha un solo annuncio, quello del Drift: la Draft che l'agente comincia per esso si lega a quell'annuncio, che resta un Drift e mostra che la sua Proposal è in scrittura; il Drift arriva poi con la Draft allegata, che l'agente consegna subito dopo.
+Una Proposal destinata a un Drift non ha mai un ghost a sé in Work Items, perché il developer non la vede. Un Drift che porterà una Proposal ha un solo annuncio, quello del Drift: la Draft che l'agente comincia per esso si lega a quell'annuncio, che resta un Drift e mostra che la sua Proposal è in scrittura; il Drift arriva poi con la Draft allegata, che l'agente consegna subito dopo.
 
 An announcement belongs to the agent terminal in which its agent runs, when there is one: the terminal Trama typed a design request into, or the terminal of the agent that announced it. What happens in another agent terminal, or to a command other than the one Trama typed, never touches it. Un annuncio fatto da un agente che Trama non ha avviato non appartiene a nessun terminale e Trama non sa distinguerlo da quello dell'agente della chat dell'editor, perché la chat di Copilot non segna i comandi del suo agente: è trattato come un annuncio della chat e ritirato come dice il paragrafo seguente, oltre che dall'avvio dell'editor. Il suo ghost può quindi sparire mentre quell'agente lavora ancora; la scheda arriva comunque quando l'agente la archivia. L'annuncio di Resolve Drifts appartiene al terminale in cui Trama ne scrive l'istruzione, come quello di un design.
 
@@ -16,7 +16,7 @@ Un annuncio può anche essere un controllo: non una scheda che arriverà, ma il 
 
 ### Announced (initial)
 The card has not arrived yet, or the check is not finished. The Board shows its ghost. Whatever the agent does with it applies in every sub-State.
-- `agent.SUBMIT_PROPOSAL` → Delivered: the agent hands over the Proposal the announcement is bound to, so its card arrives in To decide. Vale solo per un annuncio di Proposal. La consegna della Draft legata all'annuncio di un Drift non lo consegna: lo consegna il Drift.
+- `agent.SUBMIT_PROPOSAL` → Delivered: the agent hands over the Proposal the announcement is bound to, so its card arrives in Work Items. Vale solo per un annuncio di Proposal. La consegna della Draft legata all'annuncio di un Drift non lo consegna: lo consegna il Drift.
 - `agent.FILE_TASK` → Delivered: the agent files the Task it announced.
 - `agent.FILE_DRIFT` → Delivered: the agent files the Drift it announced.
 - `developer.DISCARD_PROPOSAL` → Withdrawn: only if the Proposal bound to the announcement is the one discarded; the developer gave up the draft on purpose, so no notice is shown.

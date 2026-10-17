@@ -1,7 +1,7 @@
 import type { Raw } from "../../../src/core/schema";
 import type { AgentAction, ToHost } from "../protocol";
 import type { QuestionAction } from "./question-state";
-import { type SettingSchema, type SettingValue, settingValueError } from "./settings-schema";
+import { DELEGATION_ORDER, type DelegationMode, type SettingSchema, type SettingValue, settingValueError } from "./settings-schema";
 import { safeLink } from "../../../src/core/links";
 
 export type Parsed = { ok: true; message: ToHost } | { ok: false; reason: string };
@@ -26,6 +26,8 @@ function parseAction(value: unknown): AgentAction | string {
       return typeof raw["task"] === "string" && ID.test(raw["task"]) ? { kind: "implement", task: raw["task"] } : "implement needs a valid Task ID";
     case "implement-all":
       return { kind: "implement-all" };
+    case "implement-design":
+      return typeof raw["proposal"] === "string" && ID.test(raw["proposal"]) ? { kind: "implement-design", proposal: raw["proposal"] } : "implement-design needs a valid Proposal ID";
     case "resolve-drifts":
       return { kind: "resolve-drifts" };
     case "import":
@@ -68,6 +70,7 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
   switch (type) {
     case "ready":
     case "writeDesignRequest":
+    case "modelSuggestionsWanted":
       return { ok: true, message: { type } };
     case "launch": {
       const action = parseAction(raw["action"]);
@@ -101,6 +104,10 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       if (setting === undefined) return bad("setSetting needs a key of the Trama settings");
       const reason = settingValueError(setting, raw["value"]);
       return reason === null ? { ok: true, message: { type, key: setting.key, value: raw["value"] as SettingValue } } : bad(`${setting.key}: ${reason}`);
+    }
+    case "setDelegation": {
+      const mode = raw["mode"];
+      return typeof mode === "string" && DELEGATION_ORDER.includes(mode) ? { ok: true, message: { type, mode: mode as DelegationMode } } : bad("setDelegation needs a mode: disabled, enabled or yolo");
     }
     default:
       return bad(`unknown message type "${type}"`);

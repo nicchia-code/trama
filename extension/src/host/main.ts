@@ -7,7 +7,6 @@ import { agentName, watchAgentTerminal, configuredSkillsDir } from "./agent";
 import { Controller, describeError } from "./controller";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./cursor";
-import { detectLanguageName } from "./language";
 import { findProject, installCopilotHooks } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
@@ -67,39 +66,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("trama")) trama.settingsChanged();
     }),
+    ...(vscode.lm === undefined ? [] : [vscode.lm.onDidChangeChatModels(() => void trama.postModelSuggestions())]),
   );
+  exposeBundledCli(context);
   void guarded(() => installCopilotHooks(context.globalStorageUri))();
-  void detectFirstStartLanguage(context);
-}
-
-/** `trama.languageDetected` in global state: the agent language was chosen on the first start, once per editor. */
-const LANGUAGE_DETECTED_KEY = "trama.languageDetected";
-
-/**
- * On the first start, saves the agent language in the user settings when they have none: the operating system's
- * language, else the editor's, else English. Silent: a failed write is retried at the next start. A value the user
- * already has is never touched, and the flag is set without writing.
- */
-async function detectFirstStartLanguage(context: vscode.ExtensionContext): Promise<void> {
-  if (context.globalState.get<boolean>(LANGUAGE_DETECTED_KEY)) return;
-  const user = vscode.workspace.getConfiguration("trama").inspect<string>("language")?.globalValue;
-  if (user !== undefined && user !== null && !(typeof user === "string" && user.trim() === "")) {
-    await context.globalState.update(LANGUAGE_DETECTED_KEY, true);
-    return;
-  }
-  let intlLocale: string | undefined;
-  try {
-    intlLocale = Intl.DateTimeFormat().resolvedOptions().locale;
-  } catch {
-    intlLocale = undefined;
-  }
-  const name = detectLanguageName({ env: process.env, intlLocale, editorLanguage: vscode.env.language });
-  try {
-    await vscode.workspace.getConfiguration("trama").update("language", name, vscode.ConfigurationTarget.Global);
-  } catch {
-    return;
-  }
-  await context.globalState.update(LANGUAGE_DETECTED_KEY, true);
 }
 
 /**

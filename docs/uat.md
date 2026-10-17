@@ -74,7 +74,7 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Scan System**, **Trama: Import from Code**. No initialize command (no **Trama: Initialize Project**), no design command (no **Quick Design Request…**, no **Design…**). **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
+| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Scan System**, **Trama: Import from Code**. No initialize command (no **Trama: Initialize Project**) and no design command: design requests start only from the Board buttons (**Quick request…**, **Add Work Item…**). **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
 | 2 | Run **Trama: Open** | One new editor tab titled `Trama`, in the editor area | ☐ |
 | 3 | Look at the tab header inside the panel | Four tabs, in this order: **Board** (grey badge `4`), **Diagram** (selected, underlined), **Requirements**, **Settings** | ☐ |
 | 4 | Look under the tabs | No red banner | ☐ |
@@ -114,7 +114,7 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 | 2 | Look at the box on the right | `Checkout` with the text `3 machines · ⚠ 2 drifts inside`, a **red** outline, and a small ↗ icon at its right edge | ☐ |
 | 3 | Look at the edges | Four grey edges Actor → Checkout, labelled `1` (Courier), `3` (Stripe), `3` (User), `1` (Warehouse) | ☐ |
 | 4 | Look under Checkout | Two red dashed pill nodes `Drift 0001` and `Drift 0002`, each with a dashed red edge going up to Checkout | ☐ |
-| 5 | Look at the toolbar | Left: `System`. Right: `Proposal` selector, buttons `−`, `+`, `Fit`, `Scan`. No **Quick request…** and no **Design…** here: they are on the Board only | ☐ |
+| 5 | Look at the toolbar | Left: `System`. Right: `Proposal` selector, buttons `−`, `+`, `Fit`, `Scan`. No **Quick request…** and no **Add Work Item…** here: they are on the Board only | ☐ |
 | 6 | Look at the panel | `SYSTEM`, `Shop`, `An online shop selling printed books to private customers.`, then `FEATURES` with the link `Checkout` and `3 machines` under it | ☐ |
 | 7 | Look at the bottom-left legend | `Legend` (collapsible, open) with six entries: Proposal adds it, Proposal removes it, Proposal changes it, Drift, Initial State, Final State | ☐ |
 | 8 | Click the `Legend` header | It collapses to its title; click again to expand | ☐ |
@@ -257,7 +257,7 @@ j proposal show <id>
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Read the output of `j proposal show <id>` | Status open; changes list `- State Refunding`, `- Transition Paid \| user.CANCEL → Refunding…`, `- Transition Refunding \| payment.REFUNDED → Cancelled`; `Valid.` | ☐ |
-| 2 | Board tab | The submitted Proposal is in To decide; the existing draft remains outside the decision count | ☐ |
+| 2 | Board tab | The submitted Proposal is in Work Items; the existing draft remains outside the decision count | ☐ |
 | 3 | Diagram, Machine level `order`, choose `<id> · Drop refunds` | `Refunding` is **faded** with a dashed red border and the word `removed`; the edges into and out of it are dashed red | ☐ |
 | 4 | Look at the panel | `- State Refunding` and the two removed Transitions listed; **Approve** enabled | ☐ |
 | 5 | ↻ reset when done | The new Proposal is gone | ☐ |
@@ -312,10 +312,10 @@ j proposal submit <id>           # exit code 1; stays Draft
 ### E1. Layout
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Click the **Board** tab | Toolbar: **Run all To do** (blue), **Scan System**, **Quick request…**, **Design…**, with the same tooltips as in B1.5 | ☐ |
-| 2 | Look at the columns | `TO DECIDE 4`, `TO DO 2`, `IN PROGRESS 1`, `DONE 1`, each with a count badge | ☐ |
+| 1 | Clic sulla scheda **Board** | Barra: **Run Ready Tasks** (blu), **Scan System**, **Quick request…**, **Add Work Item…**, con gli stessi tooltip di B1.5. In fondo a Work Items c'è solo **+ Work Item**; in fondo a Ready c'è solo **Run all**; In progress e Done non hanno pulsanti in fondo | ☐ |
+| 2 | Look at the columns | `WORK ITEMS 4`, `READY 2`, `IN PROGRESS 1`, `DONE 1`, each with a count badge | ☐ |
 
-### E2. To decide
+### E2. Work Items
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Read the first card | `Proposal 0001`, `Returns after shipping`, rows `actors/user.md +1`, `checkout/order.md +2 ~2`, `checkout/return.md +5`, buttons **View on diagram**, **Approve** (blue), **Reject**; a blue left border | ☐ |
@@ -326,10 +326,10 @@ j proposal submit <id>           # exit code 1; stays Draft
 ### E3. Task cards
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Read `0001` in To do | Title `Implement refunds for prepared orders`, chips `order/Refunding` and `order/Paid/user.CANCEL`, no excerpt, buttons **Show details**, **Run** (blue) and **Open**, and no move arrows | ☐ |
+| 1 | Read `0001` in Ready | Title `Implement refunds for prepared orders`, chips `order/Refunding` and `order/Paid/user.CANCEL`, no excerpt, buttons **Show details**, **Run** (blue) and **Open**, and no move arrows | ☐ |
 | 1b | Click **Show details** on `0001` | The body shows as Markdown in the card: `When a paid order is cancelled after preparation has started:`, a two-item list with **refunded** in bold, and `order/Refunding` in a code span; the button reads **Hide details** and its accessible name is `Hide details of task 0001` | ☐ |
 | 1c | With the details open, make the Board refresh (`j task move 2 doing`) | `0001` stays open. Closing the panel and reopening it shows every card closed again | ☐ |
-| 1d | Read `0002` in To do | No **Show details** button (the Task has no body) | ☐ |
+| 1d | Read `0002` in Ready | No **Show details** button (the Task has no body) | ☐ |
 | 2 | Read `0004` in Done | Badge `technical`, no chips, only **Open**, no move buttons | ☐ |
 | 3 | Read `0003` in In progress | Chip `cart/Has items/user.CHECKOUT`, no move buttons | ☐ |
 
@@ -347,12 +347,12 @@ Needs the real omp agent configured in S2 for row 6; the other rows need none.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | ↻. Look at every Task card and the Proposal tag on each | No ← → buttons, no **Take back** button and no button that removes a card; no card has the `draggable` attribute | ☐ |
-| 2 | Try to drag Task 0001 over In progress, over To decide and over its own column | Nothing is dragged: no outline appears on any column and `grep column $D/tasks/0001-*.md` still says `column: todo` | ☐ |
+| 2 | Try to drag Task 0001 over In progress, over Work Items and over its own column | Nothing is dragged: no outline appears on any column and `grep column $D/tasks/0001-*.md` still says `column: todo` | ☐ |
 | 3 | Press Tab through the Board | Focus reaches only **Show details**, **Run**, **Open**, the links and badges, and the buttons of Proposals and Drifts; none of them moves a Task | ☐ |
 | 4 | `j task move 1 doing` | Within about a second the card is in In progress. At no moment is it dimmed or marked busy, and no error appears | ☐ |
-| 5 | `TRAMA_AGENT=1 j task move 2 doing` | The dot of Task 0002 pulses in the accent colour and its label is `Agent working`; there is no badge and no **Take back** button. **Run all To do** is disabled with the tooltip `An agent is working on Task 0002` | ☐ |
-| 6 | `j task move 2 done` (as the developer), then `j task take-back 2` | The first is refused: the message says the agent is working on Task 0002 and points to `trama task take-back 2` only. The second clears the mark: the dot stops pulsing, Task 0002 stays In progress and **Run all To do** is enabled again | ☐ |
-| 7 | Start an agent that does not end by itself (E12), `TRAMA_AGENT=1 j task move 2 doing`, then press Ctrl+C in the **Design** terminal | Task 0002 goes back to To do with its dot no longer pulsing; no Take back is needed | ☐ |
+| 5 | `TRAMA_AGENT=1 j task move 2 doing` | The dot of Task 0002 pulses in the accent colour and its label is `Agent working`; there is no badge and no **Take back** button. **Run Ready Tasks** is disabled with the tooltip `An agent is working on Task 0002` | ☐ |
+| 6 | `j task move 2 done` (as the developer), then `j task take-back 2` | The first is refused: the message says the agent is working on Task 0002 and points to `trama task take-back 2` only. The second clears the mark: the dot stops pulsing, Task 0002 stays In progress and **Run Ready Tasks** is enabled again | ☐ |
+| 7 | Start an agent that does not end by itself (E12), `TRAMA_AGENT=1 j task move 2 doing`, then press Ctrl+C in the **Design** terminal | Task 0002 goes back to Ready with its dot no longer pulsing; no Take back is needed | ☐ |
 
 ### E8. Open a Task
 | # | Action | Expected | ✓ |
@@ -371,8 +371,8 @@ Needs the real omp agent configured in S2 for row 6; the other rows need none.
 | 1 | Look at the Board after the three commands | Three separate cards in To do, one per Task, each with the tag of Proposal 0001 and its title `Returns after shipping`; no design card, no `0/3 done` counter and no **Show 3 tasks** button | ☐ |
 | 2 | Read the tag on one card | It shows the Proposal's short number, or `0001` when it has none, with the title `Returns after shipping`. The number and the ID are never both shown | ☐ |
 | 3 | Look at the buttons of each card | **Run** (blue) and **Open** (and **Show details** where the Task has a body); no **Run this design** anywhere on the Board | ☐ |
-| 4 | `j task move <id of the first> doing` | Within about a second that card is In progress; the other two stay in To do with their tags | ☐ |
-| 5 | `j task move <id of the first> done` | That card moves to Done with its tag; the other two stay in To do | ☐ |
+| 4 | `j task move <id of the first> doing` | Within about a second that card is In progress; the other two stay in Ready with their tags | ☐ |
+| 5 | `j task move <id of the first> done` | That card moves to Done with its tag; the other two stay in Ready | ☐ |
 | 6 | Edit any file under `$D/tasks/` from outside (see F1) | The cards stay in place after the refresh | ☐ |
 | 7 | Try to drag a card onto another column | It cannot be dragged; nothing moves | ☐ |
 | 8 | **Run** on one of the three cards | The terminal prints `Use the trama-implement skill on Task <id>.` for that Task only | ☐ |
@@ -390,7 +390,7 @@ Needs the real omp agent configured in S2 for row 6; the other rows need none.
 | 5 | `j task move 1 doing`, and the same with `TRAMA_AGENT=1 j task move 1 doing` | The first prints `Task 0001 is now doing`; the second is refused naming `Drift 0006 "Refund amount differs"` and `Drift 0007`, saying the developer must decide; the Task is unchanged | ☐ |
 | 6 | `j board`, `j task list`, `j task show 1` | `(blocked by Drift 0006) (blocked by Drift 0007)` after the title; `task show` also lists `Blocked by Drift 0006: Refund amount differs` and the same for 0007 | ☐ |
 | 7 | `j drift show 6` | It does not list Task 0001 | ☐ |
-| 8 | Click **Keep this** under **WHAT SHOULD HAPPEN** on Drift 0006 | Task `0001` goes back to To do and its badges become `waiting 0010` and `blocked 0007`; clicking `waiting 0010` scrolls to the fix Task's card and focuses it | ☐ |
+| 8 | Click **Keep this** under **WHAT SHOULD HAPPEN** on Drift 0006 | Task `0001` goes back to Ready and its badges become `waiting 0010` and `blocked 0007`; clicking `waiting 0010` scrolls to the fix Task's card and focuses it | ☐ |
 | 9 | Move the fix Task `0010` to Done and click **Keep this** under **WHAT HAPPENS** on Drift 0007 | Task `0001` has no badge any more | ☐ |
 | 10 | `j --json drift show 7`, then `j drift new "x" --ref order --task 99 --happens a --should b --option A --option-text a --option B --option-text b` | The first has `"origin": null` (filed without `--task`) and the two texts; the second fails with `No Task with ID "99"` and creates nothing | ☐ |
 | 11 | ↻, seed the two Drifts again, then `j task next`, then `j task list --column todo` | `Next Task: 0002 Payment declined email`: the lowest Task in To do that is not blocked, skipping `0001`. The command moved nothing: `task list` still shows `0001`, `0002`, `0006`, `0008` and `0009` in `todo` | ☐ |
@@ -402,15 +402,15 @@ Needs the real omp agent configured in S2 for row 6; the other rows need none.
 Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `"trama.autoExit": false` in your **user** settings; ↻ and reload the window. `j` below is the verification shell's.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Board: **Quick request…**, type `Add refunds after pickup`, Enter. Note the To decide count and the number on the Board tab | Within about a second a dashed, translucent skeleton appears in To decide after the last real Proposal and before the first Drift: kind `Proposal`, title `Add refunds after pickup`, the line `Preparing`, and a shimmer on its text lines | ☐ |
-| 2 | Look at the To decide count and the number on the Board tab again | Both are as in row 1: a ghost is not counted | ☐ |
+| 1 | Board: **Quick request…**, type `Add refunds after pickup`, Enter. Note the Work Items count and the number on the Board tab | Within about a second a dashed, translucent skeleton appears in Work Items after the last real Proposal and before the first Drift: kind `Proposal`, title `Add refunds after pickup`, the line `Preparing`, and a shimmer on its text lines | ☐ |
+| 2 | Look at the Work Items count and the number on the Board tab again | Both are as in row 1: a ghost is not counted | ☐ |
 | 3 | Press Tab through the Board, then click the ghost | Focus never lands on it, the click does nothing, it has no buttons or links and cannot be dragged. Its accessible name is `Proposal the agent is creating, preparing: Add refunds after pickup` | ☐ |
 | 4 | `ls -A $D/announcements` and `cat $D/announcements/*.md`, then `T=$(sed -n 's/^terminal: //p' $D/announcements/*.md)` | `.gitignore` and one `<id>.md` with `kind: proposal`, `source: request`, a `terminal:` line with six lowercase letters and digits (kept in `$T`) and the H1 `Add refunds after pickup`; `cat $D/announcements/.gitignore` prints `*` | ☐ |
 | 5 | `j proposal new "Refunds after pickup"`; note the ID it prints, `<P>` | No note in the output. The same ghost (no second one) now reads title `Refunds after pickup` and the line `Writing` | ☐ |
 | 6 | `j proposal submit <P>` | The ghost disappears and the real card of that Proposal stands in its place; the count and the badge go up by one; no notice appears | ☐ |
-| 7 | `A=$(j announce task "Refund prepared orders")` | A ghost of kind `Task` and line `Preparing` stands in To do after the real cards, with the count of To do unchanged | ☐ |
+| 7 | `A=$(j announce task "Refund prepared orders")` | A ghost of kind `Task` and line `Preparing` stands in Ready after the real cards, with the count of Ready unchanged | ☐ |
 | 8 | `j task new "Refund prepared orders" --ref order/Refunding --announcement $A` | The ghost gives way to the real card, at the same place; `ls -A $D/announcements` shows only `.gitignore` | ☐ |
-| 9 | `j announce drift "Cart differs"` | A `Drift` ghost stands in To decide after the last real Drift. It belongs to no terminal (`terminal: null` in its file) | ☐ |
+| 9 | `j announce drift "Cart differs"` | A `Drift` ghost stands in Work Items after the last real Drift. It belongs to no terminal (`terminal: null` in its file) | ☐ |
 | 10 | `j task new "Unannounced" --ref order --announcement zzzzzz` | The Task is created and the output adds `No announcement "zzzzzz" was found …`; no ghost appears or is left | ☐ |
 | 11 | `TRAMA_TERMINAL=$T j announce task "Left behind"`, then in the **Design** terminal press Ctrl+C | The `Task` ghost disappears at once. At the top of the Board one notice, `The agent finished without delivering Task Left behind.`, with a **Close** button. The `Drift` ghost of row 9 stays: it belongs to no terminal | ☐ |
 | 12 | Click **Close** on the notice, switch to the Diagram tab and back | The notice is gone; closing the Trama tab and opening it again shows none | ☐ |
@@ -427,7 +427,7 @@ Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `
 ### E13. Collapse the Done column
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Open the Board the first time after opening the panel | The Done column is collapsed: a narrow strip with a `‹` button (accessible name `Expand Done column`, not expanded) and the title `Done` read top to bottom; no cards, no period menu, no count, no `Nothing done in this period`; To decide, To do and In progress share the freed space | ☐ |
+| 1 | Open the Board the first time after opening the panel | The Done column is collapsed: a narrow strip with a `‹` button (accessible name `Expand Done column`, not expanded) and the title `Done` read top to bottom; no cards, no period menu, no count, no `Nothing done in this period`; Work Items, Ready and In progress share the freed space | ☐ |
 | 2 | Activate the button | The column opens with the period menu, count and cards; the button reads `Collapse Done column` and reports expanded; focus stays on the button | ☐ |
 | 3 | Collapse it again, then edit a Task file so the Board refreshes | The column stays collapsed after the refresh | ☐ |
 | 4 | Close the Trama panel and open it again | The column starts collapsed again | ☐ |
@@ -438,7 +438,7 @@ Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| F1 | ↻. Open `tasks/0004-upgrade-dependencies.md` in any editor, change `column: done` to `column: todo`, save | Within about a second, Task 0004 moves to To do (To do now has 3 cards, Done is empty and shows its empty hint). No reload. The Board badge stays `4` | ☐ |
+| F1 | ↻. Open `tasks/0004-upgrade-dependencies.md` in any editor, change `column: done` to `column: todo`, save | Within about a second, Task 0004 moves to Ready (Ready now has 3 cards, Done is empty and shows its empty hint). No reload. The Board badge stays `4` | ☐ |
 | F2 | In the same file change `refs: []` to `refs: text`, save | A red banner appears under the tabs, naming `…/tasks/0004-upgrade-dependencies.md` and saying `"refs" must be a list of strings`. The board and diagram keep showing the last good data | ☐ |
 | F3 | Change it back to `refs: []`, save | The banner disappears by itself | ☐ |
 | F4 | ↻. In the verification shell run `echo >> $D/model/checkout/order.md` | Proposal 0001 gets the badge `stale`; **Approve** (Board and Diagram) is disabled. `j proposal list` prints `0001 [open, stale]` | ☐ |
@@ -458,7 +458,7 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 ### G1. Approve a Proposal from the Board
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Board: **Approve** on Proposal 0001 | The card leaves To decide (count 3). No error banner | ☐ |
+| 1 | Board: **Approve** on Proposal 0001 | The card leaves Work Items (count 3). No error banner | ☐ |
 | 2 | Look at the bottom panel | A terminal named **Scan** opens in the project folder | ☐ |
 | 3 | Read the terminal | Exactly **one** command was sent and one line printed: ``Use the trama-scan skill on what Proposal 0001 changed: its scan scope is in `trama proposal show 0001`. Link every Task you file to it with --proposal 0001.``, senza nulla su trama-implement | ☐ |
 | 4 | Verification shell: `j validate` | `The Model and its Requirements are valid.` | ☐ |
@@ -479,7 +479,7 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | ↻. Board: **Reject** on Proposal 0001 | An input box titled `Reject Proposal 0001`, prompt `Feedback for the agent (optional): what should the next Proposal do differently? Press Enter to reject without feedback, Esc to cancel.` | ☐ |
-| 2 | Type `Split it by state`, press Enter | The card leaves To decide. No terminal is opened | ☐ |
+| 2 | Type `Split it by state`, press Enter | The card leaves Work Items. No terminal is opened | ☐ |
 | 3 | `grep status $D/proposals/0001-*/proposal.md` | `status: rejected` | ☐ |
 | 4 | `tail -4 $D/proposals/0001-*/proposal.md` | A `## Feedback` heading followed by `Split it by state` | ☐ |
 | 5 | `j validate` | The Model is unchanged and valid (order.md has no `Returned`) | ☐ |
@@ -487,7 +487,7 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 ### G3b. Reject without feedback
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | ↻. Board: **Reject** on Proposal 0001, press Enter with the box empty | The box accepts it. The card leaves To decide. No terminal is opened | ☐ |
+| 1 | ↻. Board: **Reject** on Proposal 0001, press Enter with the box empty | The box accepts it. The card leaves Work Items. No terminal is opened | ☐ |
 | 2 | `grep status $D/proposals/0001-*/proposal.md` | `status: rejected` | ☐ |
 | 3 | `grep -c Feedback $D/proposals/0001-*/proposal.md` | `0`: no Feedback section was added | ☐ |
 | 4 | ↻. **Reject** on 0001, type spaces only, press Enter | The same: rejected, still no Feedback section | ☐ |
@@ -500,7 +500,7 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 ### G5. Accept a Drift's attached Proposal
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | ↻. Board: **Keep this** under **WHAT HAPPENS** on Drift 0002 | Both Drift 0002 and Proposal 0002 leave To decide (count 2) | ☐ |
+| 1 | ↻. Board: **Keep this** under **WHAT HAPPENS** on Drift 0002 | Both Drift 0002 and Proposal 0002 leave Work Items (count 2) | ☐ |
 | 2 | Read the terminal | Exactly **one** line: ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
 | 3 | `grep -n 'Written off' $D/model/checkout/payment.md` | A line `### Written off (final)` | ☐ |
 | 4 | `sed -n 1,8p $D/drifts/0002-*.md` | `status: resolved`, `resolution: proposal`, `proposal: "0002"` | ☐ |
@@ -509,8 +509,8 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 ### G6. Fix the code (Drift → Task)
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | ↻. Board: in Drift 0001 select **Refund only after the return**, type `Keep the audit log` in the note and click **Keep this** under **WHAT SHOULD HAPPEN** | Drift 0001 leaves To decide (count 3) | ☐ |
-| 2 | Look at To do | A new card `0005` `Fix code to match the Model: Code refunds after the package is picked up`, chip `order/Shipped`, text `from Drift 0001` | ☐ |
+| 1 | ↻. Board: in Drift 0001 select **Refund only after the return**, type `Keep the audit log` in the note and click **Keep this** under **WHAT SHOULD HAPPEN** | Drift 0001 leaves Work Items (count 3) | ☐ |
+| 2 | Look at Ready | A new card `0005` `Fix code to match the Model: Code refunds after the package is picked up`, chip `order/Shipped`, text `from Drift 0001` | ☐ |
 | 3 | `ls $D/tasks` | Includes `0005-fix-code-to-match-the-model-code-refunds.md` | ☐ |
 | 4 | `sed -n 1,8p $D/tasks/0005-*.md` | `column: todo`, `technical: false`, refs `order/Shipped`, `drift: "0001"` | ☐ |
 | 5 | `sed -n 1,10p $D/drifts/0001-*.md` | `status: resolved`, `resolution: fix-code`, `task: "0005"`, `option: 2`, `note: Keep the audit log` | ☐ |
@@ -575,13 +575,13 @@ Each launch starts a new agent terminal named after its work (cwd = the demo fol
 | H6 | In H5 press Enter with the box empty | `Describe what to design` | ☐ |
 | H7 | In H5 type `Add refunds with $HOME and 'quotes'`, Enter | The printed line is exactly `Use the trama-design skill. Add refunds with $HOME and 'quotes'` (the `$HOME` is **not** expanded, the quotes survive) | ☐ |
 | H8 | Click **Quick request…** and press Esc | Nothing is printed | ☐ |
-| H9 | Diagram toolbar and Requirements toolbar | Neither has **Quick request…** nor **Design…**; the Requirements toolbar shows only the Proposal selector and the filter. The buttons are in the Board toolbar only (H5–H8) | ☐ |
+| H9 | Diagram toolbar and Requirements toolbar | Neither has **Quick request…** nor **Add Work Item…**; the Requirements toolbar shows only the Proposal selector and the filter. The buttons are in the Board toolbar only (H5–H8) | ☐ |
 | H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
-| H11 | Board: **Run all To do** | ``Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch`, one group at a time, until it says there is none.`` | ☐ |
-| H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task take-back 5` and `j task take-back 7`, then look at **Run all To do** and at the Task card `0006`, tagged `Proposal 0003` | **Run all To do** is **disabled** with the tooltip and accessible description `All the Tasks in To do are blocked: Task 0001 is blocked by Drift 0006`; Task `0006` shows its tag `Proposal 0003` and the badge `blocked 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run all To do** | ☐ |
+| H11 | Board: **Run Ready Tasks** | ``Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch`, one group at a time, until it says there is none.`` | ☐ |
+| H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task take-back 5` and `j task take-back 7`, then look at **Run Ready Tasks** and at the Task card `0006`, tagged `Proposal 0003` | **Run Ready Tasks** is **disabled** with the tooltip and accessible description `All the Ready Tasks are blocked: Task 0001 is blocked by Drift 0006`; Task `0006` shows its tag `Proposal 0003` and the badge `blocked 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run Ready Tasks** | ☐ |
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
-| H15 | Palette: type `Trama`, look at the list | No **Quick Design Request…** and no **Design…**: design requests start only from the Board buttons (and, with an empty Model, the Diagram's **Import from Code** and **Start from Scratch**) | ☐ |
+| H15 | Palette: type `Trama`, look at the list | No **Quick Design Request…** and no **Add Work Item…** command: design requests start only from the Board buttons (and, with an empty Model, the Diagram's **Import from Code** and **Start from Scratch**) | ☐ |
 | H16 | After H1 to H15, open the terminal dropdown | Every launch has its own terminal, even when an earlier command with the same name has ended. Terminals are named for their work: `Scan`, `Design`, a Task's short number or `All tasks`; no terminal is reused | ☐ |
 | H17 | Set `"trama.agent": "claude"` in your **user** settings; click **Scan System** | A new terminal named `Scan` runs Claude Code; no choice prompt appears | ☐ |
 | H18 | Set `"trama.agent": "chat"` in your **user** settings; click **Scan System** | Copilot Chat receives the prompt; no terminal is created and no choice prompt appears | ☐ |
@@ -590,7 +590,7 @@ Each launch starts a new agent terminal named after its work (cwd = the demo fol
 | H21 | Set `"trama.language": " Italian "` in user settings; click **Scan System** | The instruction includes `Write everything you generate in Italian, except code, which always stays in English.`; the setting applies to scans, Runs, quick/written design and imports | ☐ |
 | H22 | Change `trama.language` to `"   "`; click **Scan System** | The instruction has no language sentence | ☐ |
 | H23 | Restore S2 and remove `trama.language` | The setup is restored | ☐ |
-| H23a | Remove `trama.language` from user settings (keeping the rest), reload the window; then open a fresh profile with no `trama.language` and `LANG=it_IT.UTF-8`, start the extension | The user setting is saved as `Italian`; the instruction then carries the language sentence. Reloading again changes nothing, and clearing the setting stays cleared | ☐ |
+| H23a | Remove `trama.language` from user settings (keeping the rest), reload the window; then open a fresh profile with no `trama.language` and `LANG=it_IT.UTF-8`, start the extension | The user setting stays empty (Trama does not save the system language); the instruction carries no language sentence | ☐ |
 
 ### H32–H50. Written design requests
 
@@ -598,8 +598,8 @@ With the real agent from S2, in the verification shell, `ls -A $D/requests` list
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| H32 | Board: **Design…** | A new tab `<id>.md`, language Markdown, not in preview (title not italic), completely empty. Its editor title has a **Send to agent** button with the send icon and the tooltip `Send to agent (closing the tab sends it too)` | ☐ |
-| H32a | On the empty tab from **Design…**, look at the start of the first line | The grey text `Describe the change to design: behaviour, edge cases, requirements. Close this tab or press Send to agent when you are done.` is shown on one line; the file stays empty | ☐ |
+| H32 | Board: **Add Work Item…** | A new tab `<id>.md`, language Markdown, not in preview (title not italic), completely empty. Its editor title has a **Send to agent** button with the send icon and the tooltip `Send to agent (closing the tab sends it too)` | ☐ |
+| H32a | On the empty tab from **Add Work Item…**, look at the start of the first line | The grey text `Describe the change to design: behaviour, edge cases, requirements. Close this tab or press Send to agent when you are done.` is shown on one line; the file stays empty | ☐ |
 | H32b | Type one letter, then delete it; type a space on the empty tab and delete it again | The grey text disappears at the first letter and comes back when everything is deleted; with only a space it stays away | ☐ |
 | H33 | `ls -A $D/requests` and `cat $D/requests/.gitignore` | `.gitignore` and the empty `<id>.md` already exist; the `.gitignore` prints `*`. `git status` in the demo shows nothing under `.trama/requests/` | ☐ |
 | H34 | Switch to any other file tab, then back | **Send to agent** is shown only on the request's tab | ☐ |
@@ -608,9 +608,9 @@ With the real agent from S2, in the verification shell, `ls -A $D/requests` list
 | H37 | **Send to agent** | The tab closes without asking to save. The terminal prints ``Use the trama-design skill on the design request in `.trama/requests/<id>.md`. Bind the first Proposal you open to it with `--request <id>`.`` A ghost titled `Returns after shipping` appears in To decide. No other message | ☐ |
 | H38 | Reopen `<id>.md` from the Explorer, add a line, wait, then close the tab. Reopen it, delete all its text, wait and close it again | No **Send to agent** button; the line is saved by itself. Closing prints nothing, even when empty, and the file stays | ☐ |
 | H38a | Reopen the H37 request from the Explorer, delete all its text, wait | No grey ghost text on the tab; the file stays empty and is not sent again | ☐ |
-| H39 | Board: **Design…**, type `Cancel orders`, wait, close the tab | Closing sends it: the same instruction for the new ID is printed and a ghost `Cancel orders` appears. Reopened from the Explorer, the file has no **Send to agent** | ☐ |
-| H40 | **Design…**, then close the empty tab at once | No message, nothing printed; the new file is gone from `$D/requests` | ☐ |
-| H41 | Set `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (no agent command), ↻. **Design…**, type `Refunds`, **Send to agent**, and press Esc in the `Trama: agent command` box | Nothing is printed; the tab stays open with **Send to agent** | ☐ |
+| H39 | Board: **Add Work Item…**, type `Cancel orders`, wait, close the tab | Closing sends it: the same instruction for the new ID is printed and a ghost `Cancel orders` appears. Reopened from the Explorer, the file has no **Send to agent** | ☐ |
+| H40 | **Add Work Item…**, then close the empty tab at once | No message, nothing printed; the new file is gone from `$D/requests` | ☐ |
+| H41 | Set `printf '{}\n' > /tmp/trama-demo/shop/.vscode/settings.json` (no agent command), ↻. **Add Work Item…**, type `Refunds`, **Send to agent**, and press Esc in the `Trama: agent command` box | Nothing is printed; the tab stays open with **Send to agent** | ☐ |
 | H42 | Close the tab and press Esc again in the box | The tab is closed and nothing is printed; the file stays. Reopened from the Explorer it has **Send to agent**. Restore S2 | ☐ |
 | H43 | Run **Developer: Reload Window** with the H42 request open | Nothing is printed. After the reload the tab is back with **Send to agent**; the H37 request, reopened, still has none | ☐ |
 | H44 | **Send to agent** on the H42 request, then reopen it and close it | One instruction is printed for the send, none for the close | ☐ |
@@ -618,7 +618,7 @@ With the real agent from S2, in the verification shell, `ls -A $D/requests` list
 | H46 | Reopen the H37 request. `j proposal new "Returns" --request <id>`; note `<P>`. In `proposal.md`, look at the front matter | `request: <id>` | ☐ |
 | H47 | Make `<P>` invalid (`j proposal edit <P> checkout/order.md`, point a Transition at a missing State) and `j proposal submit <P>` | Refused; `$D/requests/<id>.md` still exists and its tab is still open | ☐ |
 | H48 | Fix the file and `j proposal submit <P>` again | Output `Submitted Proposal <P> for review` and `Deleted design request <id>: it is now consumed.`; the file is gone and its tab closes. `request: <id>` stays in `proposal.md` | ☐ |
-| H49 | Reopen the H39 request (its ID is `<id2>`), `chmod a-w $D/requests/<id2>.md`, add a line (the editor cannot save it), then `rm $D/requests/<id2>.md`. Then **Design…**, type `Gone`, wait and `rm` that file | The first tab stays open, marked as deleted, with the unsaved change, and the file is not written back. The second tab closes; nothing is printed for either | ☐ |
+| H49 | Reopen the H39 request (its ID is `<id2>`), `chmod a-w $D/requests/<id2>.md`, add a line (the editor cannot save it), then `rm $D/requests/<id2>.md`. Then **Add Work Item…**, type `Gone`, wait and `rm` that file | The first tab stays open, marked as deleted, with the unsaved change, and the file is not written back. The second tab closes; nothing is printed for either | ☐ |
 | H50 | With the Trama panel closed, repeat the second half of H49 | The tab still closes | ☐ |
 
 
@@ -630,7 +630,7 @@ Set `trama.agent="omp"` and `trama.terminalLocation="editor"` in **user** settin
 |---|---|---|---|
 | H71 | Set S2t, reload, click in the panel's search box (or any editor), then Board: **Scan System** | A `Scan` terminal tab opens in a new editor group beside the panel; it does **not** take focus, the panel stays visible, and the terminal area gets no `Scan` terminal. `echo $TRAMA_AGENT` in the tab prints `1` | ☐ |
 | H72 | Click on the panel, then **Scan System** again | A new tab titled `Scan` opens in the same group without taking focus | ☐ |
-| H73 | With S2u, repeat **Scan System** while the first command runs | A second `Scan` tab opens in the same group; each terminal's end is followed independently, releasing its Tasks and withdrawing undelivered announcements with local notices. After both end, **Run all To do** opens an `All tasks` tab in the same group | ☐ |
+| H73 | With S2u, repeat **Scan System** while the first command runs | A second `Scan` tab opens in the same group; each terminal's end is followed independently, releasing its Tasks and withdrawing undelivered announcements with local notices. After both end, **Run Ready Tasks** opens an `All tasks` tab in the same group | ☐ |
 | H74 | With S2u, close every agent tab and the group of H73, click **Scan System**, then close the group of the new tab while it runs and click **Scan System** again | Each time a new group opens beside the active one, since the previous tab's group is gone | ☐ |
 | H75 | With S2u, **Quick request…** `Tabbed request`, then close the tab while the command runs | The `Tabbed request` ghost appears at once and is withdrawn when the tab closes, as when the integrated terminal closes; the next **Scan System** opens a new tab beside the active group | ☐ |
 | H76 | Drag the `Scan` tab of H71 into another group, then click **Scan System** twice with S2u | The second new tab opens in the group where Trama had opened the first one, not where you dragged it: Trama does not follow a moved tab | ☐ |
@@ -689,7 +689,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | K2 | Switch back to a dark theme | Same | ☐ |
 | K3 | Narrow the editor group to about 700 px | Board scrolls horizontally (columns keep a minimum width); the Diagram canvas is not hidden by the panel | ☐ |
 | K4 | Use only the keyboard on the Board (Tab, Shift+Tab, Enter) | Every button is reachable and shows a visible focus ring | ☐ |
-| K5 | Hover disabled buttons | Disabled **Approve** shows its reason; so does a disabled **Run all To do** | ☐ |
+| K5 | Hover disabled buttons | Disabled **Approve** shows its reason; so does a disabled **Run Ready Tasks** | ☐ |
 
 ---
 
@@ -797,7 +797,7 @@ Run R1–R4 on **every new Cursor version** before declaring it supported (smoke
 | R3 | Let the agent ask its questions | `trama ask` brings the Trama panel forward in this window with the overlay of P1, the agent named `Cursor`. If the agent first gets `unavailable` inside Cursor's sandbox, it retries once outside it after asking permission; it keeps waiting when Cursor moves the command to the background | ☐ |
 | R4 | In the chat's terminal output, check that `trama proposal approve 1` run by the agent would be refused | The agent reports `"trama proposal approve" is the developer's decision … (CURSOR_AGENT is set)` | ☐ |
 | R5 | Interrupt the agent (Stop) while a ghost it announced is on the Board | The ghost disappears and the notice `The agent finished without delivering …` appears. Closing the chat instead removes such a ghost without a notice | ☐ |
-| R5b | Have the agent run `trama task move 1 doing`, then let its turn end | Task 0001 goes back to To do, no longer marked `(agent working)` | ☐ |
+| R5b | Have the agent run `trama task move 1 doing`, then let its turn end | Task 0001 goes back to Ready, no longer marked `(agent working)` | ☐ |
 | R8 | Set `"trama.agent": "omp"` and `"trama.terminalLocation": "editor"` in user settings, then click **Scan System** | omp starts in a `Scan` terminal tab; legacy launcher and command settings do not change the route | ☐ |
 
 ## U. Short numbers
@@ -873,7 +873,7 @@ These are acceptance scenarios for the coordinated automatic flow. Use a disposa
 | Y9 | Start a scan with an external agent not launched by Trama | It does not appear in Trama's coordination barrier; the developer coordinates that work manually | ☐ |
 | Y10 | Allow a successful Run and its selective scan to produce another eligible Drift | The existing Run check represents its selective scan once; a later cycle may run without an extra built-in cycle/time/spending limit. The developer can stop further cycles by withdrawing delegation or interrupting work | ☐ |
 | Y11 | Trigger a failed resolution or Task case, then find its card in the Board | The card of the failed Drift or Task shows an `autopilot failed` badge; its tooltip and accessible name `Autopilot failed: <reason>` give the reason. Focus does not move and the panel does not open by itself; selecting the card opens the permanent Drift or Task card, and keyboard focus survives status refresh | ☐ |
-| Y12 | Leave `"trama.submitWhileRunning"` unset or `false` (default); start a Run, then look at Run all To do and a Task's Run button while the Run is in progress; tick the setting (`true`) and look again | With `false`, those Run buttons are disabled while the Run is in progress, and a launch is refused with `A run cannot start: A run is in progress.`; with `true` they are available. Scan System, Quick request… and Resolve Drifts are not affected by the setting | ☐ |
+| Y12 | Leave `"trama.submitWhileRunning"` unset or `false` (default); start a Run, then look at Run Ready Tasks and a Task's Run button while the Run is in progress; tick the setting (`true`) and look again | With `false`, those Run buttons are disabled while the Run is in progress, and a launch is refused with `A run cannot start: A run is in progress.`; with `true` they are available. Scan System, Quick request… and Resolve Drifts are not affected by the setting | ☐ |
 
 ---
 

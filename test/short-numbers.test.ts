@@ -127,7 +127,7 @@ describe("release", () => {
     expect(numberOf("task", c.id)).toBe(1);
   });
 
-  test("a Done Task of a design loses its number at once, like any other, and a reopened one takes the lowest free", () => {
+  test("a Done Task of a design keeps its number while the design is open, and loses it with the others once all are Done", () => {
     const design = newProposal(p, "Design").id;
     const linked = (title: string) => newTask(p, { title, refs: ["order"], technical: false, proposal: design });
     const a = linked("A");
@@ -137,14 +137,17 @@ describe("release", () => {
 
     moveTask(p, a.id, "done", "developer");
     const halfway = syncShortNumbers(p);
-    expect([halfway.of("task", a.id), halfway.of("task", b.id), halfway.of("task", loose.id)]).toEqual([null, 2, 3]);
+    expect([halfway.of("task", a.id), halfway.of("task", b.id), halfway.of("task", loose.id)]).toEqual([1, 2, 3]);
     expect(run(["--root", dir, "task", "show", b.id], dir, {}).out).toContain("# B");
 
     moveTask(p, b.id, "done", "developer");
-    expect(syncShortNumbers(p).of("task", b.id)).toBeNull();
+    const closed = syncShortNumbers(p);
+    expect([closed.of("task", a.id), closed.of("task", b.id), closed.of("task", loose.id)]).toEqual([null, null, 3]);
 
-    moveTask(p, b.id, "todo", "developer");
-    expect(syncShortNumbers(p).of("task", b.id)).toBe(1);
+    // A Done Task without a number never takes one: a reopened design gives the number only to the Task that moves back.
+    moveTask(p, a.id, "todo", "developer");
+    const reopened = syncShortNumbers(p);
+    expect([reopened.of("task", a.id), reopened.of("task", b.id)]).toEqual([1, null]);
   });
 
   test("a line for a card that no longer exists is removed", () => {
