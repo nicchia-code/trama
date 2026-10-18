@@ -12,6 +12,10 @@ import type { CopilotHook } from "./copilot-chat";
 import { type Project, projectAt } from "./store";
 
 export const QUESTION_ENDPOINT_ENV = "TRAMA_QUESTION_ENDPOINT";
+/** Set by Cursor in the commands of its agent when they run in its sandbox (Linux). */
+const CURSOR_SANDBOX_ENV = "CURSOR_SANDBOX";
+/** Cursor's sandbox maps the commands to UID 0; the real UID of the user is here. */
+const CURSOR_ORIG_UID_ENV = "CURSOR_ORIG_UID";
 
 
 export type CoordinatorJson = null | boolean | number | string | CoordinatorJson[] | { [key: string]: CoordinatorJson };
@@ -68,11 +72,19 @@ export function questionProjectId(project: Project): string {
   return createHash("sha256").update(root).digest("hex");
 }
 
+/** Inside Cursor's Linux sandbox the record folder is named after the real UID, not the mapped one (UID 0). */
+function runtimeUid(): number | string {
+  const original = process.env[CURSOR_ORIG_UID_ENV]?.trim();
+  if (process.env[CURSOR_SANDBOX_ENV] && original !== undefined && /^\d+$/.test(original)) return original;
+  return process.getuid!();
+}
+
 function runtimeDirectory(override?: string): string {
   if (override) return resolve(override);
   if (process.platform === "win32") return join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "Trama", "questions");
-  return join(process.env.XDG_RUNTIME_DIR ?? tmpdir(), `trama-q-${process.getuid!()}`);
+  return join(process.env.XDG_RUNTIME_DIR ?? tmpdir(), `trama-q-${runtimeUid()}`);
 }
+
 
 function outsideProject(directory: string, project: Project): void {
   const root = realpathSync(project.root);
@@ -630,7 +642,7 @@ export async function askEditor(project: Project, request: QuestionRequest, cont
       ? await connectEndpoint(runtimeDirectory(options.runtimeDir), projectId, endpoint, context.signal, sockets)
       : await liveEditor(projectId, context.signal, sockets, options.runtimeDir);
     if (context.signal?.aborted) throw questionAborted();
-    if (!editor) return unavailableQuestions();
+    if (!editor) return unavailableQuestions(!!process.env[CURSOR_SANDBOX_ENV]);
     return await submit(editor, projectId, validated, { ...context, fromTramaTerminal: endpoint !== undefined, fromCursorChat: env[CURSOR_AGENT_ENV] === "1" });
   } finally {
     context.signal?.removeEventListener("abort", abort);
@@ -640,23 +652,34 @@ export async function askEditor(project: Project, request: QuestionRequest, cont
 }
 
 /**
- * Hands a hook of Cursor's chat to the editor of its project and waits until the editor has taken it, for at most
- * `timeoutMs`. Returns whether an editor took it; never throws, since Cursor must not be held up.
+ * Hands a hook of Cursor's chat to every live editor window of its project, each window on its own, and waits until they
+ * have taken it, for at most `timeoutMs` (1 second for a prompt, 5 for the other hooks). A window that is slow or does not
+ * answer holds back none of the others. Returns whether a window took it; never throws, since Cursor must not be held up.
  */
 export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: number; runtimeDir?: string } = {}): Promise<boolean> {
   const controller = new AbortController();
   const sockets = new Set<Socket>();
-  const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, options.timeoutMs ?? 1000);
+  const timeoutMs = options.timeoutMs ?? (hook.hook === "beforeSubmitPrompt" ? 1000 : 5000);
+  const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, timeoutMs);
   try {
     const projectId = questionProjectId(projectAt(hook.root));
-    const editor = await liveEditor(projectId, controller.signal, sockets, options.runtimeDir);
-    if (!editor || controller.signal.aborted) return false;
-    return await new Promise<boolean>((done) => {
-      const { socket } = editor;
-      socket.once("data", () => done(true));
-      socket.once("close", () => done(false));
-      socket.write(requestLine(editor.record, { type: "cursor-hook", projectId, hook }));
-    });
+    const directory = runtimeDirectory(options.runtimeDir);
+    if (!runtimeDirectoryReady(directory, false)) return false;
+    const taken = await Promise.all(records(directory, projectId).map(async (record) => {
+      try {
+        const editor = await connectEditor(record, controller.signal, sockets);
+        if (!editor || controller.signal.aborted) return false;
+        return await new Promise<boolean>((done) => {
+          const { socket } = editor;
+          socket.once("data", () => done(true));
+          socket.once("close", () => done(false));
+          socket.write(requestLine(editor.record, { type: "cursor-hook", projectId, hook }));
+        });
+      } catch {
+        return false;
+      }
+    }));
+    return taken.some(Boolean);
   } catch {
     return false;
   } finally {

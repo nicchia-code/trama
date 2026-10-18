@@ -34,6 +34,7 @@ import {
   autopilotFailures,
   autopilotReady,
   resumeAutopilot,
+  endUnsentJob,
   startJob,
 } from "../extension/src/host/drift-resolution";
 
@@ -71,6 +72,15 @@ test("an interrupted or closed Cursor conversation ends its job abnormally; a co
   bindChatJob(project, "completed");
   endChatJobs(project, "completed");
   expect(jobAbnormalEnd(project, "completed-job")).toBeUndefined();
+});
+
+test("a chat job whose send was not made by the chat ends at once, without an abnormal outcome", () => {
+  const project = root();
+  startJob("run", project, { chat: "cursor" }, false, undefined, "unsent-job");
+  expect(activeProjectJobs(project).some((job) => job.id === "unsent-job")).toBe(true);
+  endUnsentJob(project, "unsent-job");
+  expect(activeProjectJobs(project).some((job) => job.id === "unsent-job")).toBe(false);
+  expect(jobAbnormalEnd(project, "unsent-job")).toBeUndefined();
 });
 
 test("a skipped Drift and a failed case stay out of automatic resolution until they change or a developer scan forgets them", () => {

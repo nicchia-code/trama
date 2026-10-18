@@ -8,12 +8,14 @@ import { modelDir, projectAt, writeFileEnsuringDir } from "./store";
  * project folder. Never the prompt: only whether it starts with one of Trama's skills.
  */
 export interface CursorHook {
-  hook: "beforeSubmitPrompt" | "stop" | "sessionEnd";
+  hook: "beforeSubmitPrompt" | "stop" | "sessionEnd" | "afterShellExecution";
   conversation: string;
   /** The project folder: the first of Cursor's `workspace_roots` that holds a Trama Model. */
   root: string;
   /** beforeSubmitPrompt: the prompt starts with «Use the trama-» or «/trama-». */
   tramaPrompt?: boolean;
+  /** afterShellExecution: the command line runs a Trama command that registers the agent's work. The command is never passed on. */
+  tramaWork?: boolean;
   /** stop: `completed`, `aborted` or `error`. */
   status?: string;
   /** sessionEnd: why the conversation ended, e.g. `window_close` or `user_close`. */
@@ -29,7 +31,7 @@ export interface CursorChatEvent {
   root: string;
 }
 
-const HOOKS: readonly CursorHook["hook"][] = ["beforeSubmitPrompt", "stop", "sessionEnd"];
+const HOOKS: readonly CursorHook["hook"][] = ["beforeSubmitPrompt", "stop", "sessionEnd", "afterShellExecution"];
 const SKILL_PROMPT = /^(Use the trama-|\/trama-)/;
 
 /** What Cursor needs back from every hook: it must never be blocked. */
@@ -42,15 +44,19 @@ const TRAMA_ENTRY = /^(& )?".+" cursor-hook$/;
 
 /**
  * Writes Trama's entries into Cursor's user hooks file, one per hook, each running `program`: older Trama entries are
- * replaced, every other entry is kept, a missing file is created. A file that is not valid JSON is left as it is.
- * On Windows the command has the PowerShell form `& "<program>" cursor-hook` (not tried on Cursor's shell).
+ * replaced, every other entry is kept, a missing file is created, and a file whose Trama entries already are these is
+ * not written again. A file that is not valid JSON is left as it is. On Windows the command has the PowerShell form
+ * `& "<program>" cursor-hook` (not tried on Cursor's shell). The shell-command hook runs only for command lines that
+ * contain `trama`.
  */
 export function writeCursorHooks(file: string, program: string, windows = process.platform === "win32"): void {
   let config: { [key: string]: unknown; hooks?: unknown } = { version: 1 };
+  let existing: unknown;
   if (existsSync(file)) {
     let parsed: unknown;
     try { parsed = JSON.parse(readFileSync(file, "utf8")); } catch { parsed = undefined; }
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new TramaError(`${file} is not valid JSON, so Trama did not add its hooks to it`);
+    existing = parsed;
     config = { version: 1, ...parsed };
   }
   const hooks: Record<string, unknown> = typeof config.hooks === "object" && config.hooks !== null && !Array.isArray(config.hooks) ? { ...config.hooks } : {};
@@ -58,9 +64,11 @@ export function writeCursorHooks(file: string, program: string, windows = proces
   for (const name of HOOKS) {
     const entries: unknown[] = Array.isArray(hooks[name]) ? hooks[name] : [];
     const others = entries.filter((e) => !(typeof e === "object" && e !== null && "command" in e && typeof e.command === "string" && TRAMA_ENTRY.test(e.command)));
-    hooks[name] = [...others, { command }];
+    hooks[name] = [...others, name === "afterShellExecution" ? { command, matcher: "trama" } : { command }];
   }
-  writeFileEnsuringDir(file, `${JSON.stringify({ ...config, hooks }, null, 2)}\n`);
+  const next = { ...config, hooks };
+  if (existing !== undefined && JSON.stringify(existing) === JSON.stringify(next)) return;
+  writeFileEnsuringDir(file, `${JSON.stringify(next, null, 2)}\n`);
 }
 
 /** Reads the JSON Cursor passes to a hook; null when it is not one of Trama's hooks or names no Trama project. */
@@ -76,7 +84,60 @@ export function parseCursorHook(input: unknown): CursorHook | null {
   if (hook === "beforeSubmitPrompt") out.tramaPrompt = SKILL_PROMPT.test(text(raw["prompt"]) ?? "");
   if (hook === "stop") out.status = text(raw["status"]) ?? "";
   if (hook === "sessionEnd") out.reason = text(raw["reason"]) ?? "";
+  if (hook === "afterShellExecution") out.tramaWork = registersAgentWork(text(raw["command"]) ?? "");
   return out;
+}
+
+/** `trama` as the program of a command: the word itself, or a path ending in `/trama` or `\trama.exe`, quoted or not. */
+const TRAMA_PROGRAM = /^(?:.*[\\/])?trama(?:\.exe)?$/i;
+/** A shell word that sets a variable before the command, as `PATH=…`. */
+const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/**
+ * Whether a shell command line runs one of Trama's commands that register the agent's work: `announce` (of any kind),
+ * `ask`, `proposal new` or `task move <id> doing`. Reads such as `task next`, `search` or `proposal show` do not count,
+ * nor does a `trama` word that is not the program of its command.
+ */
+export function registersAgentWork(command: string): boolean {
+  for (const segment of command.split(/&&|\|\||[;|&()\r\n]/)) {
+    const words = shellWords(segment);
+    while (words.length > 0 && ENV_ASSIGNMENT.test(words[0]!)) words.shift();
+    if (words.length === 0 || !TRAMA_PROGRAM.test(words[0]!)) continue;
+    const args = words.slice(1);
+    if (args[0] === "--root") args.splice(0, 2);
+    else if (args[0]?.startsWith("--root=")) args.shift();
+    const [first, second, third, fourth] = args;
+    if (first === "announce" || first === "ask") return true;
+    if (first === "proposal" && second === "new") return true;
+    if (first === "task" && second === "move" && third !== undefined && fourth === "doing") return true;
+  }
+  return false;
+}
+
+/** The words of one shell command segment, quotes removed; backslashes stay, since Windows paths use them. */
+function shellWords(segment: string): string[] {
+  const words: string[] = [];
+  let word = "";
+  let inWord = false;
+  let quote = "";
+  for (const ch of segment) {
+    if (quote !== "") {
+      if (ch === quote) quote = "";
+      else word += ch;
+    } else if (ch === "\"" || ch === "'") {
+      quote = ch;
+      inWord = true;
+    } else if (/\s/.test(ch)) {
+      if (inWord) words.push(word);
+      word = "";
+      inWord = false;
+    } else {
+      word += ch;
+      inWord = true;
+    }
+  }
+  if (inWord) words.push(word);
+  return words;
 }
 
 /**
@@ -88,6 +149,11 @@ export class CursorConversations {
   private readonly trama = new Set<string>();
   translate(h: CursorHook): CursorChatEvent | null {
     if (h.hook === "beforeSubmitPrompt" && h.tramaPrompt) this.trama.add(h.conversation);
+    // A command that registers the agent's work makes its conversation Trama's too, but produces no Event.
+    if (h.hook === "afterShellExecution") {
+      if (h.tramaWork) this.trama.add(h.conversation);
+      return null;
+    }
     if (!this.trama.has(h.conversation)) return null;
     const event = (name: CursorChatEventName): CursorChatEvent => ({ event: name, conversation: h.conversation, root: h.root });
     switch (h.hook) {

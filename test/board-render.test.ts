@@ -330,6 +330,45 @@ describe("History entry details", () => {
       else scope.document = previous;
     }
   });
+
+  test("an open entry keeps its details, and the Close button, while the Board updates an unchanged entry", () => {
+    const scope = globalThis as { document?: unknown };
+    const previous = scope.document;
+    scope.document = {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
+    };
+    try {
+      const entry: HistoryView = {
+        id: "hist0002", title: "Refunds", summary: "Refunds now arrive.", body: "Long text.", created: "2026-10-01T00:00:00.000Z", updated: "2026-10-16T08:30:00.000Z", file: "history/hist0002-refunds.md",
+        tasks: [],
+      };
+      const ctx = { post: () => {}, navigate: () => {}, openLink: () => {} } as never;
+      const view = historyEntryNode(ctx);
+      const now = new Date("2026-10-17T12:00:00Z");
+      view.update(entry, numbers, now);
+      const rendered = view.node as unknown as Node;
+      rendered.all.find((n) => n.className === "board-history-info")?.click();
+      const dialog = rendered.all.find((n) => n.tagName === "dialog") as Node;
+      const body = dialog.children[0];
+      const close = dialog.all.find((n) => n.className === "trama-btn board-history-close");
+
+      // The Board refreshes with the same entry: nothing is redrawn.
+      view.update({ ...entry, tasks: [] }, numbers, now);
+      expect(dialog.open).toBe(true);
+      expect(dialog.children[0]).toBe(body);
+      expect(dialog.all.find((n) => n.className === "trama-btn board-history-close")).toBe(close);
+
+      // A change of the title redraws the details.
+      view.update({ ...entry, title: "Refunds, again" }, numbers, now);
+      expect(dialog.children[0]).not.toBe(body);
+      expect(dialog.all.find((n) => n.className === "board-history-dialog-title")?.renderedText).toBe("Refunds, again");
+    } finally {
+      if (previous === undefined) delete scope.document;
+      else scope.document = previous;
+    }
+  });
 });
 
 test("a row names the Tasks its Drift leaves free by number, each with its reason as tooltip and accessible name", () => {

@@ -16,6 +16,8 @@ Ogni terminale porta il nome del lavoro che gli è affidato: il numero breve del
 
 Nella chat l'agente riceve l'istruzione e la chat la invia da sola, senza che il developer debba fare altro. In Cursor, se la chat non lo permette, l'istruzione resta pronta nella chat e aspetta la conferma e l'Invio del developer, oppure, se nemmeno questo è possibile (per esempio il testo è rifiutato da Cursor), va negli appunti e il developer è avvisato di incollarla. In VS Code, se la chat di Copilot non accetta l'istruzione, va negli appunti con lo stesso avviso. Non c'è mai un fallimento silenzioso. Cursor ha anche un'altra interfaccia per gli agenti, la finestra degli agenti: Trama non la usa, perché il pannello vive nell'editor.
 
+Con la chat l'istruzione parte davvero nel momento in cui Trama comincia a consegnarla alla chat che la invia da sola, in Cursor come in VS Code, senza aspettare che la chat confermi l'invio: da quel momento il lavoro affidato è in corso, come appena scritto nel terminale, e il suo annuncio è già sulla Board. Così i pulsanti che un lavoro in corso rende indisponibili, come Run all, lo diventano subito dopo il clic. Se poi la chat non la invia da sola e l'istruzione resta pronta nella chat o va negli appunti, il lavoro non è mai partito: smette subito di contare come in corso e il suo annuncio sparisce senza avvisi.
+
 Nella chat l'agente non trova da solo il programma `trama`: l'istruzione gli dice dove si trova.
 
 Only the command Trama typed into a terminal counts as the agent's command: its start and end are what move this Machine. Another command that starts or ends in the same terminal, such as a shell start-up command or one the developer types, does not.

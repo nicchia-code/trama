@@ -89,13 +89,14 @@
 .board-history-dialog { width: min(640px, 90vw); max-height: 85vh; padding: 0; border: 1px solid var(--board-border); border-radius: 4px; background: var(--vscode-editor-background, #1e1e1e); color: inherit; }
 .board-history-dialog::backdrop { background: rgb(0 0 0 / 40%); }
 .board-history-dialog-body { display: flex; flex-direction: column; gap: 10px; max-height: 85vh; padding: 14px 16px; box-sizing: border-box; overflow: auto; }
-.board-history-dialog-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
-.board-history-dialog-title { flex: 1; min-width: 0; margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.board-history-dialog-head { display: flex; align-items: flex-start; gap: 12px; }
+.board-history-dialog-titles { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.board-history-dialog-title { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
 .board-history-tasks-head { margin: 6px 0 0; font-size: 11px; font-weight: 600; color: var(--board-muted); }
 .board-history-tasks { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .board-history-task { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .board-history-task-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-.board-history-task-title { overflow-wrap: anywhere; }
+.board-history-task-title { min-width: 0; overflow-wrap: anywhere; }
 
 .board-card {
   display: flex;

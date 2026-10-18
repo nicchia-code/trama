@@ -68,7 +68,7 @@ Il developer riscrive, dalla riga di comando, l'identità di ogni Proposal, Task
 ### OPEN_PANEL
 The developer opens the Trama panel, or brings it to the front.
 
-Anche il pulsante Reopen della notifica di domande in attesa chiede questa apertura ordinaria: se il round esiste ancora, l'overlay si ripristina; altrimenti si apre soltanto il pannello. Senza un progetto il pannello si apre su Get Started.
+Anche il pulsante Reopen della notifica di domande in attesa chiede questa apertura ordinaria: se il round esiste ancora e la finestra è sul suo progetto, l'overlay si ripristina; altrimenti si apre soltanto il pannello. Senza un progetto il pannello si apre su Get Started, senza il round, che resta in attesa finché il suo progetto torna nella finestra.
 
 Il developer lo chiede con il comando, con l'icona di Trama in alto, nella barra dell'editor, oppure con il pulsante «Trama» nella barra di stato in basso. L'icona si trova in ogni finestra con almeno una cartella aperta, anche dove non c'è ancora un progetto: lì porta a Get Started. Con il pannello già aperto l'icona e il pulsante, come il comando, lo portano in primo piano tenendo la sua scheda.
 

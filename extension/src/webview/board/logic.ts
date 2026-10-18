@@ -4,7 +4,7 @@ import { formatDiagnostic } from "../../../../src/core/model";
 import { compareByCreation } from "../../../../src/core/schema";
 import { joinReasons } from "../../../../src/core/design";
 import type { Blocker } from "../../../../src/core/blocking";
-import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
+import type { AnnouncementView, DriftView, HistoryView, ProposalTag, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
 import type { Column } from "../../protocol";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import { proposalTouches } from "../requirements/logic";
@@ -188,8 +188,8 @@ export interface TaskCard {
   driftName: string | null;
   /** ID of the Proposal (the design) the Task comes from, if any. */
   proposal: string | null;
-  /** The tag the Board shows on the Task (the Proposal's label, or its title); null when the Task has none or the Proposal is gone. */
-  proposalTag: string | null;
+  /** The tag the Board shows on the Task: the Proposal's label, or its shortened title; null when the Task has none or the Proposal is gone. */
+  proposalTag: ProposalTag | null;
   /** How the Proposal is written, named by its identity or number; the tag falls back to it. */
   proposalName: CardName | null;
   /** True while the agent has taken the Task. */

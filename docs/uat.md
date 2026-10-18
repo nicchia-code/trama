@@ -786,7 +786,7 @@ Run R1–R4 on **every new Cursor version** before declaring it supported (smoke
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| R1 | `cat ~/.cursor/hooks.json` | `version: 1` and, under each of `beforeSubmitPrompt`, `stop` and `sessionEnd`, one entry `"<extension folder>/bin/trama" cursor-hook`; entries you had before are still there | ☐ |
+| R1 | `cat ~/.cursor/hooks.json` | `version: 1` and, under each of `beforeSubmitPrompt`, `stop`, `sessionEnd` and `afterShellExecution`, one entry `"<extension folder>/bin/trama" cursor-hook`; the `afterShellExecution` entry also has `"matcher": "trama"`; entries you had before are still there | ☐ |
 | R1b | `cat ~/.cursor/agents/trama-analysis.md` after **Update Agent Skills**, with `"trama.scan": "sonnet"` | Front matter `name: trama-analysis`, a `description`, and `model: "sonnet"`; the body begins `Compare one Machine following the trama-scan skill`. With `trama.scan` empty, `model: inherit` | ☐ |
 | R2 | Board: **Add Work Item…**, write `Orders can also be returned` in the request and send it | A **new** chat opens and sends `Use the trama-design skill on the design request in \`.trama/requests/<id>.md\`. Bind the first Proposal you open to it with \`--request <id>\`.` by itself, with a second line `The trama command may not be on your PATH. Before anything else run: export PATH="…/bin:$PATH"`. No «Create chat with prompt» confirmation and no clipboard notice | ☐ |
 | R2b | With `"trama.analysis": "sonnet"`, **Add Work Item…** with `Orders can also be returned`, sent | The new chat runs on `sonnet`, shown in the chat, with Max mode off; the chats already open keep their model. If the chat fell back to the deeplink or the clipboard, it starts without a model | ☐ |

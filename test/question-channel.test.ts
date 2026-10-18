@@ -600,3 +600,37 @@ test("runtime files contain routing identities only, never pending questions or 
   expect(presented).toBe(0);
   chmodSync(runtimeDir, 0o700);
 });
+
+(process.platform === "win32" ? test.skip : test)("inside Cursor's sandbox the record folder is named after CURSOR_ORIG_UID, and an unreachable editor says so", async () => {
+  const saved = { xdg: process.env.XDG_RUNTIME_DIR, sandbox: process.env.CURSOR_SANDBOX, uid: process.env.CURSOR_ORIG_UID };
+  const xdg = join(root, "x");
+  mkdirSync(xdg);
+  process.env.XDG_RUNTIME_DIR = xdg;
+  try {
+    // The sandbox maps the commands to UID 0: the editor's folder is still named after the real UID.
+    process.env.CURSOR_SANDBOX = "native";
+    process.env.CURSOR_ORIG_UID = "4242";
+    const created = await createQuestionServer({ project: projectAt(projectRoot), handler: async () => answer("choice") });
+    servers.push(created);
+    expect(existsSync(join(xdg, "trama-q-4242"))).toBe(true);
+    expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toMatchObject({ status: "answered" });
+
+    // No editor reached from inside the sandbox: the reason tells the agent to ask once more outside it.
+    process.env.CURSOR_ORIG_UID = "4343";
+    expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toEqual({ status: "unavailable", reason: "Editor not reachable from Cursor's sandbox. Run the same trama ask once more outside the sandbox before using your own question tool." });
+
+    // A non-integer original UID is ignored: the folder keeps the mapped UID and the reason stays the sandbox one.
+    process.env.CURSOR_ORIG_UID = "root";
+    expect(existsSync(join(xdg, `trama-q-${process.getuid!()}`))).toBe(false);
+    expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toMatchObject({ status: "unavailable", reason: expect.stringContaining("Cursor's sandbox") });
+
+    // Outside the sandbox CURSOR_ORIG_UID changes nothing, and the reason is the usual one.
+    delete process.env.CURSOR_SANDBOX;
+    process.env.CURSOR_ORIG_UID = "4242";
+    expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toEqual(unavailableQuestions());
+  } finally {
+    if (saved.xdg === undefined) delete process.env.XDG_RUNTIME_DIR; else process.env.XDG_RUNTIME_DIR = saved.xdg;
+    if (saved.sandbox === undefined) delete process.env.CURSOR_SANDBOX; else process.env.CURSOR_SANDBOX = saved.sandbox;
+    if (saved.uid === undefined) delete process.env.CURSOR_ORIG_UID; else process.env.CURSOR_ORIG_UID = saved.uid;
+  }
+});

@@ -1021,6 +1021,33 @@ describe("announcing every launch as its instruction starts", () => {
       settingValues.agent = "omp";
     }
   });
+
+  test("a chat launch's card is already announced when its self-sending step runs, and is taken back silently when that step fails", async () => {
+    // Dynamic: the module must load after mock.module replaced "vscode".
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const p = projectAt(dir);
+    const before = listAnnouncements(p).length;
+    const previousHandler = commandHandler;
+    const previousApp = editor.appName;
+    const previousAgent = settingValues.agent;
+    let seenDuringSend = -1;
+    settingValues.agent = "chat";
+    try {
+      editor.appName = "Cursor";
+      commandHandler = (id) => {
+        if (id !== "composer.createNew") return undefined;
+        seenDuringSend = listAnnouncements(p).length;
+        throw new Error("missing");
+      };
+      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan")).toBe("confirm");
+      expect(seenDuringSend).toBe(before + 1);
+      expect(listAnnouncements(p)).toHaveLength(before);
+    } finally {
+      commandHandler = previousHandler;
+      editor.appName = previousApp;
+      settingValues.agent = previousAgent;
+    }
+  });
 });
 
 describe("the selected chat in Cursor", () => {
@@ -1088,6 +1115,16 @@ describe("the selected chat in Cursor", () => {
     } finally {
       if (platform) Object.defineProperty(process, "platform", platform);
     }
+  });
+
+  test("the ask line follows the PATH line in Cursor's instruction, or the instruction when there is no PATH line", async () => {
+    // Dynamic, as above: the module must load after mock.module replaced "vscode".
+    const { withAskLine, withTramaPath } = await import("../extension/src/host/cursor");
+    const ask = "Ask the developer only with `trama ask`, as the skill says.";
+    expect(withAskLine(withTramaPath("Use the trama-design skill on the design request in `.trama/requests/r.md`.", "/ext/bin/trama"))).toBe(
+      `Use the trama-design skill on the design request in \`.trama/requests/r.md\`.\nThe trama command may not be on your PATH. Before anything else run: export PATH="/ext/bin:$PATH"\n${ask}`,
+    );
+    expect(withAskLine("Use the trama-import skill on this repository.")).toBe(`Use the trama-import skill on this repository.\n${ask}`);
   });
 });
 
@@ -1382,7 +1419,7 @@ describe("the ghosts of Cursor's chat agent", () => {
 
 
 describe("starting the editor with Tasks an agent had taken", () => {
-  test("opening the editor withdraws the announcements left on disk and sends every Task an agent took back to To do, keeping the developer's", async () => {
+  test("opening the editor withdraws the announcements left on disk and leaves the Tasks an agent took taken", async () => {
     // Dynamic: the module must load after mock.module replaced "vscode".
     const { watchAnnouncements } = await import("../extension/src/host/announcements");
     const root = mkdtempSync(join(tmpdir(), "trama-startup-"));
@@ -1399,10 +1436,10 @@ describe("starting the editor with Tasks an agent had taken", () => {
       const watching = watchAnnouncements(() => root);
       try {
         expect(listAnnouncements(p)).toEqual([]);
-        expect([byTerminal, byCursor, byEditor, byDeveloper].map((id) => [getTask(p, id).data.column, getTask(p, id).data.agent])).toEqual([
-          ["todo", false],
-          ["todo", false],
-          ["todo", false],
+        expect([byTerminal, byCursor, byEditor, byDeveloper].map((id) => [getTask(p, id).data.column, getTask(p, id).data.agent !== false])).toEqual([
+          ["doing", true],
+          ["doing", true],
+          ["doing", true],
           ["doing", false],
         ]);
       } finally {

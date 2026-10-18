@@ -687,6 +687,10 @@ export const endTerminalJobs = (terminal: string, abnormal?: string): Job[] => e
 export const endHeldJob = (root: string, id: string, abnormal?: string): Job[] =>
   endWhere((j) => j.id === id && j.root === root && "held" in j.place, abnormal);
 
+/** The job `id` in the project at `root` ends without an abnormal outcome: its instruction never reached the agent. */
+export const endUnsentJob = (root: string, id: string): Job[] =>
+  endWhere((j) => j.id === id && j.root === root);
+
 /** Trama chat conversations already seen in this window, by project, service and conversation. */
 const seenChats = new Set<string>();
 

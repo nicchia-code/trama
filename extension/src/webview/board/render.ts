@@ -3,6 +3,7 @@ import { idTag } from "../id-tag";
 import type { ViewContext } from "../types";
 import type { Column } from "../../protocol";
 import type { AnnouncedCard, Badge, BlockBadge, Card, DriftCard, ProposalCard, TaskCard, WaitingCard } from "./logic";
+import type { ProposalTag } from "../../../../src/core/snapshot";
 import { AGENT_NAMES, recurringLabel, tagColour } from "./logic";
 import { renderDriftCompare } from "../drift-compare";
 import { dismissButton } from "../dismiss";
@@ -294,20 +295,26 @@ function taskDetails(card: TaskCard, env: CardEnv): { body: HTMLElement; toggle:
   return { body, toggle };
 }
 
-/** A Proposal's tag: its title in a colour taken from the hash of the title. Not a button; it does nothing. */
-export function proposalTagNode(title: string): HTMLElement {
-  const node = el("span", "board-proposal-tag", title);
-  node.style.setProperty("--tag-colour", tagColour(title));
+/** A tag with its text in a colour taken from that text. Not a button; it does nothing. */
+function tagNode(text: string, tooltip: string): HTMLElement {
+  const node = el("span", "board-proposal-tag", text);
+  node.style.setProperty("--tag-colour", tagColour(text));
   node.setAttribute("role", "img");
-  node.setAttribute("aria-label", `Proposal: ${title}`);
-  node.title = `Proposal: ${title}`;
+  node.setAttribute("aria-label", tooltip);
+  node.title = tooltip;
   return node;
 }
 
-/** The Proposal a Task comes from, as a tag; null when the Task has none. */
+/** A Proposal's tag: its label or shortened title, with the tooltip `From Proposal <identity>: <title>`. */
+export function proposalTagNode(tag: ProposalTag): HTMLElement {
+  return tagNode(tag.text, `From Proposal ${tag.proposal}: ${tag.title}`);
+}
+
+/** The Proposal a Task comes from, as a tag; null when the Task has none. A Proposal that is gone is named by its number or identity. */
 function proposalTag(card: TaskCard): HTMLElement | null {
   if (card.proposal === null) return null;
-  return proposalTagNode(card.proposalTag ?? `Proposal ${card.proposalName?.text ?? card.proposal}`);
+  if (card.proposalTag !== null) return proposalTagNode(card.proposalTag);
+  return tagNode(`Proposal ${card.proposalName?.text ?? card.proposal}`, `From Proposal ${card.proposal}`);
 }
 
 function task(card: TaskCard, env: CardEnv): HTMLElement {

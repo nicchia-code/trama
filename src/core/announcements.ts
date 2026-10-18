@@ -52,8 +52,6 @@ export interface Announcement {
 }
 
 export const announcementsDir = (p: Project) => join(p.dir, "announcements");
-/** Shared only by Task-release and resolution-job timers; announcements never use it. */
-export const QUIET_PERIOD_MS = 15 * 60 * 1000;
 
 
 const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -202,7 +200,7 @@ export function announce(
   if (input.kind === "check" && input.phase === "scanning" && input.source === undefined) {
     const waiting = listAnnouncements(p).find((a) => a.kind === "check" && a.source === "request" && (input.terminal !== undefined ? a.terminal === input.terminal : a.terminal === null && a.chat === (input.chat ?? "editor")));
     if (waiting) {
-      const taken: Announcement = { ...waiting, phase: "scanning", touched: now.toISOString() };
+      const taken: Announcement = { ...waiting, phase: "scanning", job: input.job ?? waiting.job, touched: now.toISOString() };
       write(p, taken);
       return taken;
     }

@@ -32,7 +32,7 @@ import type { QuestionSession } from "./question-session";
 import type { DesignRequests } from "./design-requests";
 import type { EditorQuestions } from "./questions";
 import { writeLastScan } from "../../../src/core/last-scan";
-import { buildAutomaticRunPrompt, buildPrompt, mayFileDrifts, runTerminalName, terminalName, type ResolvedAction } from "./prompts";
+import { asksDeveloper, buildAutomaticRunPrompt, buildPrompt, mayFileDrifts, runTerminalName, terminalName, type ResolvedAction } from "./prompts";
 
 const DEBOUNCE_MS = 150;
 
@@ -1231,7 +1231,7 @@ export class Controller implements vscode.Disposable {
       const rememberScan = resolved.kind === "scan" && resolved.feature === undefined
         ? (startedAt: number) => rememberDeliveredScan(project, startedAt)
         : undefined;
-      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), model });
+      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), model, asksDeveloper: asksDeveloper(resolved) });
       if (refused !== null) throw new TramaError(refused);
       return result;
     };

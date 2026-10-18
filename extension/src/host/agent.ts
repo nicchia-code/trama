@@ -1,15 +1,15 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
 import { basename, win32 } from "node:path";
-import { announce, newTerminalId, TERMINAL_ENV, type AgentOrigin } from "../../../src/core/announcements";
+import { announce, newTerminalId, TERMINAL_ENV, type AgentOrigin, withdrawAll } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
 import { QUESTION_ENDPOINT_ENV, requestCoordinatorMessage, sendCoordinatorMessage, type CoordinatorMessage } from "../../../src/core/question-channel";
-import { bundledOmpHook, bundledTrama, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, toClipboard, withTramaPath } from "./cursor";
+import { bundledOmpHook, bundledTrama, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, toClipboard, withAskLine, withTramaPath } from "./cursor";
 import { onCopilotChatEvent } from "./copilot-chat";
 import { withdrawWaiting } from "./announcements";
-import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
+import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnsentJob, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint, questionWindowId } from "./questions";
 import { withDriftBlocker, withLanguage } from "./prompts";
@@ -70,25 +70,25 @@ async function copilotModelSelector(run: RunModel): Promise<{ vendor: string; id
 /**
  * Starts a new agent-mode conversation in the editor's chat with `prompt`. Cursor has its own chain of steps. Elsewhere
  * `workbench.action.chat.open` with `{ query, mode }` is how VS Code's own actions do it, but it is not a documented
- * API: if it fails, the prompt goes to the clipboard instead.
+ * API: if it fails, the prompt goes to the clipboard instead. `announce` runs right before the step that sends the
+ * prompt by itself and returns how to take its announcement back when the prompt is not sent.
  */
-async function openChat(root: string, prompt: () => string, canSend: () => boolean, onSendStart: () => void, run: RunModel): Promise<ChatDelivery> {
+async function openChat(root: string, prompt: () => string, canSend: () => boolean, run: RunModel, announce: () => () => void, asks = false): Promise<ChatDelivery> {
   if (!canSend()) return "not-sent";
-  if (isCursor()) {
-    onSendStart();
-    return openCursorChat(root, withTramaPath(prompt()), canSend, run.model);
-  }
+  if (isCursor()) return openCursorChat(root, asks ? withAskLine(withTramaPath(prompt())) : withTramaPath(prompt()), canSend, run.model, announce);
+  let takeBack: (() => void) | undefined;
   try {
     const modelSelector = await copilotModelSelector(run);
     await vscode.commands.executeCommand("workbench.action.chat.newChat");
     if (!canSend()) return "not-sent";
     const query = prompt();
-    onSendStart();
+    takeBack = announce();
     await vscode.commands.executeCommand("workbench.action.chat.open", { query, mode: "agent", ...(modelSelector === undefined ? {} : { modelSelector }) });
     return "sent";
   } catch {
+    // Chat missing or disabled in this editor, or the send failed: the developer must paste the prompt from the clipboard.
+    takeBack?.();
     if (!canSend()) return "not-sent";
-    // Chat missing or disabled in this editor: the developer must paste the prompt from the clipboard.
     return toClipboard(prompt());
   }
 }
@@ -219,25 +219,35 @@ export type LaunchAnnouncement =
   | { kind: "resolve"; drifts: () => readonly string[] }
   | { kind: "work" | "check"; title: string };
 
-function announceLaunch(root: string, announcement: DesignAnnouncement | LaunchAnnouncement, origin: AgentOrigin): void {
+/** Announces the card of a launch and returns its ID, or undefined when no card is announced. */
+function announceLaunch(root: string, announcement: DesignAnnouncement | LaunchAnnouncement, origin: AgentOrigin): string | undefined {
   try {
-    if (typeof announcement === "string") {
-      announce(projectAt(root), { kind: "proposal", title: announcement, source: "request", ...origin });
-      return;
-    }
+    if (typeof announcement === "string") return announce(projectAt(root), { kind: "proposal", title: announcement, source: "request", ...origin }).id;
     if (announcement.kind === "resolve") {
       // Resolve Drifts is a Proposal named "Resolve Drifts" that names its Drifts; the panel titles it from them.
       const drifts = [...announcement.drifts()];
-      if (drifts.length === 0) return;
-      announce(projectAt(root), { kind: "proposal", title: "Resolve Drifts", drifts, source: "request", ...origin });
-      return;
+      if (drifts.length === 0) return undefined;
+      return announce(projectAt(root), { kind: "proposal", title: "Resolve Drifts", drifts, source: "request", ...origin }).id;
     }
     const phase = announcement.kind === "check" ? { kind: "check" as const, phase: "scanning" as const } : { kind: "work" as const };
-    announce(projectAt(root), { ...phase, title: announcement.title, source: "request", ...origin });
+    return announce(projectAt(root), { ...phase, title: announcement.title, source: "request", ...origin }).id;
   } catch (err) {
     if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: could not announce the card: ${err.message}`);
     else throw err;
+    return undefined;
   }
+}
+
+/**
+ * Announces a chat launch's card right before its instruction is sent by itself. The returned function takes the card
+ * back, silently, when the instruction ends up on the deeplink or the clipboard instead of being sent.
+ */
+function announceSend(root: string, announcement: DesignAnnouncement | LaunchAnnouncement | undefined, origin: AgentOrigin): () => void {
+  if (announcement === undefined) return () => undefined;
+  const id = announceLaunch(root, announcement, origin);
+  return () => {
+    if (id !== undefined) withdrawAll(projectAt(root), [id]);
+  };
 }
 
 
@@ -359,6 +369,8 @@ export interface LaunchJobOptions {
   origin?: JobOrigin;
   /** Whether the instruction lets the agent file Drifts: the experimental Drift blocker's sentence then goes to it. */
   filesDrifts?: boolean;
+  /** Whether the instruction has the agent ask the developer questions: in Cursor's chat it then gets the ask line. */
+  asksDeveloper?: boolean;
   /** The model the instruction runs on when a Proposal's model applies (`proposalRunModel`); absent, the model of the role in Settings. */
   model?: RunModel;
   /** Called once the Run's job ends: with why it ended abnormally, or with nothing for a normal end. A Run that did not start ends with a reason too. */
@@ -378,6 +390,7 @@ export async function launchAgent(
   const jobId = job === undefined ? undefined : jobOptions.id ?? randomUUID();
   const jobOrigin = jobOptions.origin ?? "manual";
   const filesDrifts = jobOptions.filesDrifts === true;
+  const asks = jobOptions.asksDeveloper === true;
   const role = roleOf(name);
   const runModel = jobOptions.model ?? { model: configuredModels()[role], from: `trama.${role}` };
   const windowId = job === undefined ? "" : await questionWindowId(root) ?? "";
@@ -388,23 +401,32 @@ export async function launchAgent(
   const launch = async (): Promise<Launch | undefined> => {
     if (!canSend()) return agent === "chat" ? "not-sent" : undefined;
     if (agent === "chat") {
-      let sentAfter = 0;
       const chat = isCursor() ? "cursor" : "copilot";
       const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, jobId);
-      const delivery = await openChat(root, prompt, canSend, () => {
-        sentAfter = chatJobSendStarted(root, chat);
-      }, runModel);
-      if (delivery === "sent" && announceProposal !== undefined) announceLaunch(root, announceProposal, { chat: isCursor() ? "cursor" : "editor" });
-      if (delivery === "sent" && job !== undefined && jobId !== undefined) {
+      const sent: { job?: string } = {};
+      // Runs right before the step that sends the prompt by itself: the card and the job begin now. The take-back, run when
+      // that step fails, ends both: the prompt is not sent, so the job never began.
+      const sendStarted = (): (() => void) => {
+        const takeBackCard = announceSend(root, announceProposal, { chat: isCursor() ? "cursor" : "editor" });
+        const sentAfter = chatJobSendStarted(root, chat);
+        if (job === undefined || jobId === undefined) return takeBackCard;
         const started = startJob(job, root, { chat }, false, sentAfter, jobId, jobOrigin, windowId);
-        if (jobOptions.onEnd !== undefined) {
-          if (started === undefined) jobOptions.onEnd("its conversation ended before its instruction began");
-          else runEnds.set(started, jobOptions.onEnd);
-        }
-        if (started !== undefined && shared) await broadcastJob(root, {
-          id: started, kind: job, root, place: { chat }, origin: jobOrigin, windowId,
-        }, true);
-      }
+        sent.job = started;
+        if (started === undefined) return takeBackCard;
+        if (jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
+        if (shared) void broadcastJob(root, { id: started, kind: job, root, place: { chat }, origin: jobOrigin, windowId }, true);
+        return () => {
+          takeBackCard();
+          for (const ended of endUnsentJob(root, started)) {
+            runEnds.get(ended.id)?.("its instruction was not sent to the chat");
+            runEnds.delete(ended.id);
+            if (shared) void broadcastJob(root, ended, false);
+          }
+        };
+      };
+      const delivery = await openChat(root, prompt, canSend, runModel, sendStarted, asks);
+      // The conversation ended before its instruction began: the sequence of Runs stops with it.
+      if (delivery === "sent" && job !== undefined && jobId !== undefined && sent.job === undefined) jobOptions.onEnd?.("its conversation ended before its instruction began");
       if (delivery !== "not-sent") onSent?.(Date.now());
       return delivery;
     }

@@ -115,6 +115,22 @@ export function mayFileDrifts(action: ResolvedAction): boolean {
   }
 }
 
+/** Whether the instruction for `action` has the agent ask the developer questions: designs, setup, import and a manual Resolve Drifts do; scans, implementations and the automatic collection do not. */
+export function asksDeveloper(action: ResolvedAction): boolean {
+  switch (action.kind) {
+    case "written-design":
+    case "setup-request":
+    case "import":
+      return true;
+    case "resolve-drifts":
+      return action.automaticCollection === undefined;
+    case "scan":
+    case "implement":
+    case "implement-all":
+      return false;
+  }
+}
+
 /** Ends an instruction with the Drift blocker's sentence, on the same line, when `on`; otherwise the instruction is exactly as built. */
 export function withDriftBlocker(prompt: string, on: boolean): string {
   return on ? `${prompt} ${DRIFT_BLOCKER_SENTENCE}` : prompt;

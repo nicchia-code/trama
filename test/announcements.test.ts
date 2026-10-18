@@ -94,6 +94,12 @@ describe("announcing", () => {
     expect(adopted).toMatchObject({ id: launched.id, title: "Scanning Feature order", phase: "scanning" });
     expect(listAnnouncements(p)).toHaveLength(1);
   });
+  test("an agent's scan that takes over the launched scan keeps the job it names", () => {
+    const launched = announce(p, { kind: "check", title: "Scanning Feature order", phase: "scanning", source: "request", terminal: "ab12cd" }, t(1));
+    const adopted = announce(p, { kind: "check", title: "Scan of Feature order", phase: "scanning", terminal: "ab12cd", job: "run-7" }, t(2));
+    expect(adopted).toMatchObject({ id: launched.id, title: "Scanning Feature order", job: "run-7" });
+    expect(getAnnouncement(p, launched.id)?.job).toBe("run-7");
+  });
 });
 
 describe("a Draft and its announcement", () => {

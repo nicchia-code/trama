@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reportActivity, runAgentEvent, runCursorHook } from "../src/cli/main";
 import type { AgentOrigin } from "../src/core/announcements";
-import { CursorConversations, type CursorHook, parseCursorHook, writeCursorHooks } from "../src/core/cursor-chat";
+import { CursorConversations, type CursorHook, parseCursorHook, registersAgentWork, writeCursorHooks } from "../src/core/cursor-chat";
 import { createQuestionServer } from "../src/core/question-channel";
 import { projectAt } from "../src/core/store";
 
@@ -74,7 +75,8 @@ test("Trama's hooks replace only Trama's earlier entries, keep the others, and l
   writeCursorHooks(file, "/old/bin/trama", false);
   const read = () => JSON.parse(readFileSync(file, "utf8"));
   const mine = (program: string) => [{ command: `"${program}" cursor-hook` }];
-  expect(read()).toEqual({ version: 1, hooks: { beforeSubmitPrompt: mine("/old/bin/trama"), stop: mine("/old/bin/trama"), sessionEnd: mine("/old/bin/trama") } });
+  const shell = (program: string) => [{ command: `"${program}" cursor-hook`, matcher: "trama" }];
+  expect(read()).toEqual({ version: 1, hooks: { beforeSubmitPrompt: mine("/old/bin/trama"), stop: mine("/old/bin/trama"), sessionEnd: mine("/old/bin/trama"), afterShellExecution: shell("/old/bin/trama") } });
 
   writeFileSync(file, JSON.stringify({ version: 1, hooks: { stop: [{ command: "./mine.sh" }, ...mine("/old/bin/trama")], afterFileEdit: [{ command: "fmt" }] } }));
   writeCursorHooks(file, "/new/bin/trama", false);
@@ -83,6 +85,7 @@ test("Trama's hooks replace only Trama's earlier entries, keep the others, and l
     afterFileEdit: [{ command: "fmt" }],
     beforeSubmitPrompt: mine("/new/bin/trama"),
     sessionEnd: mine("/new/bin/trama"),
+    afterShellExecution: shell("/new/bin/trama"),
   });
 
   writeFileSync(file, "{ broken");
@@ -137,4 +140,62 @@ test("the hook of an agent in a Trama terminal tells the project's editor it is 
   await runAgentEvent(["agent-event", "idle"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir });
   await expect(runAgentEvent(["agent-event", "alive"], project, { env: {}, runtimeDir })).rejects.toThrow("Usage: trama agent-event idle");
   await expect(runAgentEvent(["agent-event", "busy"], project, { env: {}, runtimeDir })).rejects.toThrow("Usage: trama agent-event idle");
+});
+
+test("a shell command that registers the agent's work makes its conversation Trama's, with no Event of its own", () => {
+  const commands: [string, boolean][] = [
+    ['export PATH="/x/bin:$PATH" && trama announce task "Card"', true],
+    ['"/home/u/.cursor/extensions/trama/bin/trama" task move abcd1234 doing', true],
+    ['& "C:\\Users\\u\\trama.exe" ask', true],
+    ["trama --root /project proposal new Design --json", true],
+    ["trama task next --batch --max 4", false],
+    ["trama search announce", false],
+    ["trama task move abcd1234 done", false],
+    ["grep trama announce notes.md", false],
+    ["echo trama announce", false],
+  ];
+  for (const [command, work] of commands) expect(registersAgentWork(command)).toBe(work);
+
+  const conversations = new CursorConversations();
+  const shell = (conversation: string, command: string) => parseCursorHook({ hook_event_name: "afterShellExecution", conversation_id: conversation, workspace_roots: [project], command, output: "Secret output" });
+  const work = shell("s1", 'trama announce task "Secret card"');
+  expect(work).toEqual({ hook: "afterShellExecution", conversation: "s1", root: project, tramaWork: true });
+  expect(JSON.stringify(work)).not.toContain("Secret");
+  expect(conversations.translate(work!)).toBeNull();
+  expect(conversations.translate({ hook: "stop", conversation: "s1", root: project, status: "completed" })?.event).toBe("AGENT_STOPPED");
+  const reads = shell("s2", "trama task next --batch --max 4");
+  expect(conversations.translate(reads!)).toBeNull();
+  expect(conversations.translate({ hook: "stop", conversation: "s2", root: project, status: "completed" })).toBeNull();
+});
+
+test("Cursor's hooks file is written again only when Trama's entries change", () => {
+  const file = join(root, ".cursor", "hooks.json");
+  writeCursorHooks(file, "/bin/trama", false);
+  utimesSync(file, new Date(1000), new Date(1000));
+  writeCursorHooks(file, "/bin/trama", false);
+  expect(statSync(file).mtimeMs).toBe(1000);
+  writeCursorHooks(file, "/other/trama", false);
+  expect(statSync(file).mtimeMs).not.toBe(1000);
+});
+
+test("every editor window of the project gets the hook, and a window that never answers holds back none of them", async () => {
+  const received: string[] = [];
+  const windows = [
+    await createQuestionServer({ project: projectAt(project), runtimeDir, windowId: "answering", handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => received.push(`answering ${h.hook}`) }),
+    await createQuestionServer({ project: projectAt(project), runtimeDir, windowId: "other", handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => received.push(`other ${h.hook}`) }),
+  ];
+  const record = JSON.parse(readFileSync(join(runtimeDir, readdirSync(runtimeDir).find((name) => name.endsWith(".json"))!), "utf8")) as { projectId: string };
+  const silentEndpoint = join(root, "silent.sock");
+  const silent = createServer(() => {});
+  await new Promise<void>((resolve) => silent.listen(silentEndpoint, resolve));
+  writeFileSync(join(runtimeDir, "silent.json"), JSON.stringify({ projectId: record.projectId, windowId: "silent", endpoint: silentEndpoint, focusedAt: Date.now(), secret: "s" }), { mode: 0o600 });
+  try {
+    const started = Date.now();
+    expect(await runCursorHook(JSON.stringify(prompt("Use the trama-design skill")), { runtimeDir })).toBe('{"continue":true}');
+    expect(received.sort()).toEqual(["answering beforeSubmitPrompt", "other beforeSubmitPrompt"]);
+    expect(Date.now() - started).toBeLessThan(2000);
+  } finally {
+    silent.close();
+    for (const server of windows) await server.dispose();
+  }
 });

@@ -68,8 +68,14 @@ export function parseQuestionRequest(value: unknown): QuestionRequest {
   return { questions };
 }
 
-export function unavailableQuestions(): QuestionResult {
-  return { status: "unavailable", reason: "Editor not available for this project. Use the agent's own question tool instead." };
+/** The reason of an initial unavailability; from Cursor's sandbox the agent is told to ask once more outside it. */
+export function unavailableQuestions(fromCursorSandbox = false): QuestionResult {
+  return {
+    status: "unavailable",
+    reason: fromCursorSandbox
+      ? "Editor not reachable from Cursor's sandbox. Run the same trama ask once more outside the sandbox before using your own question tool."
+      : "Editor not available for this project. Use the agent's own question tool instead.",
+  };
 }
 
 export function questionAborted(): Error {

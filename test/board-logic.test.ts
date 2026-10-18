@@ -166,14 +166,14 @@ test("badges name each problem and list the files or the first messages in the t
   expect(badges[1]?.tooltip).toContain("and 2 more");
 });
 
-const design = (id: string, column: TaskView["column"], proposal: string | null = "0007") => task({ id, column, proposal, proposalTag: proposal === null ? null : "Returns" });
+const design = (id: string, column: TaskView["column"], proposal: string | null = "0007") => task({ id, column, proposal, proposalTag: proposal === null ? null : { text: "Returns", proposal, title: "Returns" } });
 const cardsOf = (tasks: TaskView[]) => buildBoard(snapshot({ tasks })).map((c) => c.cards.map((card) => card.key));
 
 
 test("a Task alone from its Proposal, and a Task with no Proposal, stay cards of their own in their own column, carrying their Proposal's tag; a Done one has none", () => {
   const board = buildBoard(snapshot({ tasks: [design("0001", "done", "0005"), design("0002", "doing", "0006"), design("0003", "todo"), task({ id: "0004", column: "todo" })] }));
   expect(board.map((c) => c.cards.map((card) => card.key))).toEqual([[], ["task:0002", "task:0003", "task:0004"], []]);
-  expect(board[1]?.cards[1]).toMatchObject({ kind: "task", proposal: "0007", proposalTag: "Returns" });
+  expect(board[1]?.cards[1]).toMatchObject({ kind: "task", proposal: "0007", proposalTag: { text: "Returns" } });
   expect(board[1]?.cards[2]).toMatchObject({ kind: "task", proposal: null, proposalTag: null });
 });
 

@@ -35,6 +35,12 @@ export function withTramaPath(prompt: string, program = bundledTrama()): string 
   return `${prompt}\nThe trama command may not be on your PATH. Before anything else run: export PATH="${dirname(program)}:$PATH"`;
 }
 
+/** The line that keeps the agent in Cursor's chat from asking the developer anything but through `trama ask`. */
+const CURSOR_ASK_LINE = "Ask the developer only with `trama ask`, as the skill says.";
+
+/** Adds the ask line on its own line, after the PATH line when there is one; the instructions that ask questions get it in Cursor's chat only. */
+export const withAskLine = (prompt: string): string => `${prompt}\n${CURSOR_ASK_LINE}`;
+
 const conversations = new CursorConversations();
 const listeners = new Set<(event: CursorChatEvent) => void>();
 
@@ -71,18 +77,23 @@ export const deeplinkAccepts = (prompt: string): boolean => prompt.trim() !== ""
  * next, and none is tried twice, so no two chats get the same text: 1) `composer.createNew` with `autoSubmit`, which
  * sends it by itself (internal and undocumented); 2) the prompt deeplink, which waits for the developer's confirmation
  * and Enter; 3) the clipboard, with a notice. Automatic instructions take the same steps: one left waiting or on the
- * clipboard starts nothing, so the automatic flow holds until the developer acts.
+ * clipboard starts nothing, so the automatic flow holds until the developer acts. `announce` runs right before the
+ * self-sending step and returns how to take its announcement back when that step fails.
  */
-export async function openCursorChat(root: string, prompt: string, canSend: () => boolean = () => true, model = ""): Promise<ChatDelivery> {
+export async function openCursorChat(root: string, prompt: string, canSend: () => boolean = () => true, model = "", announce: () => () => void = () => () => undefined): Promise<ChatDelivery> {
   if (!canSend()) return "not-sent";
+  let takeBack: (() => void) | undefined;
   try {
     // Its result does not count: Cursor always returns nothing, so only an error moves to the deeplink.
     // The role's model starts this new conversation only, with Max mode off; the later steps carry none.
     const partialState = { text: prompt, richText: prompt, unifiedMode: "agent", ...(model === "" ? {} : { modelConfig: { modelName: model, maxMode: false } }) };
+    // Announced right before the self-sending step; taken back if that step fails and the chain moves on.
+    takeBack = announce();
     await vscode.commands.executeCommand("composer.createNew", { partialState, openInNewTab: true, autoSubmit: true });
     return "sent";
   } catch {
     // Missing in this version of Cursor, or failed: the deeplink is next.
+    takeBack?.();
   }
   if (!canSend()) return "not-sent";
   if (deeplinkAccepts(prompt)) {

@@ -5,7 +5,6 @@ import { announcementsDir, listAnnouncements, withdrawAll } from "../../../src/c
 import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { getProposal, listProposals } from "../../../src/core/proposals";
-import { releaseAbandonedTasks } from "../../../src/core/work";
 import { sendCoordinatorMessage } from "../../../src/core/question-channel";
 import { announcementView } from "../../../src/core/snapshot";
 import type { AnnouncementView } from "../../../src/core/snapshot";
@@ -114,8 +113,8 @@ export function synchronizeAnnouncementTitles(p: Project): void {
 
 /**
  * Starting up, announcements left on disk in the open folder belong to an agent run that can no longer be told: they
- * are withdrawn with no notice, and the Tasks an agent had taken are released the same way, since no agent is followed
- * yet. Draft title synchronization runs from the panel's existing snapshot refresh path.
+ * are withdrawn with no notice. The Tasks an agent had taken stay taken until that agent ends or the developer takes
+ * them back. Draft title synchronization runs from the panel's existing snapshot refresh path.
  */
 export function watchAnnouncements(root: () => string | undefined): vscode.Disposable {
   const startup = root();
@@ -124,9 +123,6 @@ export function watchAnnouncements(root: () => string | undefined): vscode.Dispo
       const p = projectAt(startup);
       withdrawAll(p);
     });
-    guarded(() => {
-      releaseAbandonedTasks(projectAt(startup));
-    }, "the Tasks an agent had taken could not be released");
   }
   const cursor = onCursorChatEvent(onCursorChat);
   const copilot = onCopilotChatEvent(onCopilotChat);

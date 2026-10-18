@@ -148,6 +148,14 @@ export interface DriftView {
   proposalChanges: FileChange[] | null;
 }
 
+/** The tag of a Task's Proposal: `text` is its label in full, or its title shortened past 30 characters; `title` is the whole title, for the tooltip. */
+export interface ProposalTag {
+  text: string;
+  /** The Proposal's permanent identity. */
+  proposal: string;
+  title: string;
+}
+
 export interface TaskView {
   id: string;
   title: string;
@@ -158,8 +166,8 @@ export interface TaskView {
   drift: string | null;
   /** ID of the Proposal (the design) the Task comes from, if any. */
   proposal: string | null;
-  /** The tag the Board shows on the Task: the Proposal's label, or its title when it has none; null when the Task has no Proposal or the Proposal is gone. */
-  proposalTag: string | null;
+  /** The tag the Board shows on the Task: the Proposal's label in full, or its title shortened past 30 characters; null when the Task has no Proposal or the Proposal is gone. */
+  proposalTag: ProposalTag | null;
   /** True while the agent has taken the Task: the developer cannot move it. */
   agent: boolean;
   /** When the Task arrived in Done, UTC ISO 8601; null outside Done and on Tasks that reached Done before the instant was kept. */
@@ -194,8 +202,8 @@ export interface HistoryTaskView {
   unchanged: string | null;
   finished: string | null;
   refs: string[];
-  /** The tag the Board shows on the Task: the Proposal's label, or its title; null when the Task has no Proposal or the Proposal is gone. */
-  proposalTag: string | null;
+  /** The tag the Board shows on the Task: the Proposal's label in full, or its title shortened past 30 characters; null when the Task has no Proposal or the Proposal is gone. */
+  proposalTag: ProposalTag | null;
   /** When the Task was created; null when it is gone. The panel lists the Tasks of an entry in this order. */
   created: string | null;
 }
@@ -427,7 +435,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
       refs: t.data.refs,
       drift: t.data.drift,
       proposal: t.data.proposal,
-      proposalTag: (t.data.proposal !== null && (proposalById.get(t.data.proposal)?.data.label || proposalById.get(t.data.proposal)?.title)) || null,
+      proposalTag: proposalTagOf(t.data.proposal, proposalById),
       agent: t.data.agent,
       finished: t.data.finished,
       created: t.data.created,
@@ -457,12 +465,26 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
           unchanged: t.data.unchanged,
           finished: t.data.finished,
           refs: t.data.refs,
-          proposalTag: (t.data.proposal !== null && (proposalById.get(t.data.proposal)?.data.label || proposalById.get(t.data.proposal)?.title)) || null,
+          proposalTag: proposalTagOf(t.data.proposal, proposalById),
         };
       }),
     })),
     historyFaults: history.faults,
   };
+}
+
+/** The tag of a Task's Proposal: its label in full, or else its title shortened past 30 characters; null when the Task has no Proposal or the Proposal is gone. */
+function proposalTagOf(id: string | null, proposalById: ReadonlyMap<string, Proposal>): ProposalTag | null {
+  if (id === null) return null;
+  const proposal = proposalById.get(id);
+  if (proposal === undefined) return null;
+  return { text: proposal.data.label || shortenTitle(proposal.title), proposal: id, title: proposal.title };
+}
+
+/** A title past 30 characters, cut there with an ellipsis; counted in code points, so no character is split. */
+function shortenTitle(title: string): string {
+  const chars = [...title];
+  return chars.length > 30 ? `${chars.slice(0, 30).join("")}…` : title;
 }
 
 /** An announcement as the Board draws it; `proposalTitle` is the title of the Draft bound to it, if any. Only a Proposal's ghost takes its Draft's title: a Drift and a Resolve Drifts keep their own. */

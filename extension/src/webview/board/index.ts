@@ -29,6 +29,16 @@ function reconcile(parent: HTMLElement, next: HTMLElement[]) {
   while (parent.children.length > next.length) parent.lastElementChild?.remove();
 }
 
+/** Puts `next` in order without moving a node already in `parent`: moving an open dialog out of the page closes it. The order is set with the CSS `order` property. */
+function arrange(parent: HTMLElement, next: HTMLElement[]) {
+  const shown = new Set<Element>(next);
+  for (const child of [...parent.children]) if (!shown.has(child)) child.remove();
+  next.forEach((node, i) => {
+    if (node.parentElement !== parent) parent.append(node);
+    node.style.order = String(i);
+  });
+}
+
 /** The Board: its view, and the model names the Board's model window offers. */
 export interface BoardView extends View {
   update(next: Snapshot, isAsking?: boolean, resolveState?: Parameters<View["update"]>[2], models?: BoardModels): void;
@@ -289,7 +299,7 @@ export const mountBoard = (root: HTMLElement, context: ViewContext): BoardView =
         }),
       ];
     });
-    reconcile(parts.history.body, historyShown.length > 0 ? historyShown : [parts.history.hint]);
+    arrange(parts.history.body, historyShown.length > 0 ? historyShown : [parts.history.hint]);
     historyHeads = nextHeads;
     historyEntries = nextEntries;
     const blocker = runReasonNow;

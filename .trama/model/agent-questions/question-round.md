@@ -4,7 +4,7 @@ A group of related decisions the agent asks the developer to make together. The 
 
 The round belongs to the window that started the agent terminal, or otherwise the most recently focused window with the project open. The developer sees which agent asked it. Queued rounds do not replace the one being answered. Trama imposes no response deadline; if the agent stops waiting, its round is removed and any visible question closes without delivering answers.
 
-Un round chiesto dall'agente della chat di Cursor appartiene alla finestra più recentemente attiva con il progetto aperto, perché l'agente della chat non porta con sé la finestra che lo ha lanciato. Il sandbox di Cursor può rendere l'editor irraggiungibile all'agente: in quel caso il round resta nel caso separato dell'editor non disponibile, e l'agente riprova una volta fuori dal sandbox prima di usare le sue domande.
+Un round chiesto dall'agente della chat di Cursor appartiene alla finestra più recentemente attiva con il progetto aperto, perché l'agente della chat non porta con sé la finestra che lo ha lanciato. Trama raggiunge l'editor anche quando l'agente di Cursor lavora nella sandbox di Cursor. Se dalla sandbox l'editor resta comunque irraggiungibile, il round resta nel caso separato dell'editor non disponibile e l'agente lo chiede di nuovo una volta fuori dalla sandbox; solo se anche lì l'editor non è raggiungibile usa il tool di domande di Cursor, come ultima risorsa.
 
 If the editor is lost after accepting the round, the round is interrupted and all its answers are discarded. The agent is told that the editor was lost and stops the workflow awaiting these decisions, without a fallback, automatic recommendation or automatic resumption. Initial editor unavailability remains a separate case.
 
@@ -12,7 +12,8 @@ If the editor is lost after accepting the round, the round is interrupted and al
 
 ### Not asked (initial)
 The round has not been requested yet.
-- `agent.ASK_QUESTIONS` → Unanswered: the editor is not reachable for the project. Tells the agent the editor is unavailable so it can use its own question interface.
+- `agent.ASK_QUESTIONS` → Unanswered: the editor is not reachable for the project e la richiesta non viene dalla sandbox di Cursor. Tells the agent the editor is unavailable so it can use its own question interface.
+- `agent.ASK_QUESTIONS` → Unanswered: l'editor non è raggiungibile e la richiesta viene dalla sandbox di Cursor. Dice all'agente che l'editor non è raggiungibile dalla sandbox e di chiedere lo stesso round una volta fuori dalla sandbox, prima di usare le sue domande.
 - `agent.ASK_QUESTIONS` → Queued: the editor is reachable but another round is being presented in the same window.
 - `agent.ASK_QUESTIONS` → Asking: the editor is reachable and no other round is being presented in the same window. Apre subito la prima domanda sopra il pannello, che si apre o torna in primo piano da solo.
 
@@ -24,6 +25,8 @@ Another round is being answered. This round waits its turn without showing a que
 
 ### Asking
 Il developer sta rispondendo a questo round. Le risposte confermate, e quello che il developer ha scelto o scritto su una domanda senza confermarlo, restano finché il round è aperto, anche spostandosi tra le domande, riducendo l'overlay o chiudendo il pannello. Perdere il focus non chiude nulla.
+
+Il round si vede solo mentre la finestra è sul suo progetto. Se la cartella del progetto lascia la finestra, che la finestra resti senza progetto o passi a un altro, il round va fuori vista con le sue risposte e la sua posizione, e l'agente continua ad aspettare. Quando il progetto torna nella finestra, il pannello si apre o torna in primo piano da solo e il round ricompare com'era.
 - `agent.STOP_WAITING` → Abandoned: chiude l'overlay o la barra e non consegna risposte.
 - `editor.DISCONNECTED` → Interrupted: the editor window serving this round is lost. Chiude l'overlay o la barra, discards the round's answers and tells the agent to stop the workflow awaiting its decisions.
 
@@ -55,16 +58,17 @@ Il developer sceglie se saltare tutte le domande che non hanno ancora una rispos
 - `developer.GO_BACK` → Reviewing: la conferma era stata chiesta dal riepilogo. Torna al riepilogo senza cambiare nulla.
 
 #### Out of sight
-Il round è ridotto alla barra delle domande in attesa, oppure il pannello è chiuso. L'agente continua ad aspettare; risposte e posizione restano.
+Il round è ridotto alla barra delle domande in attesa, oppure il pannello è chiuso, oppure la finestra non è più sul progetto del round: in quest'ultimo caso il round non si vede, nemmeno come barra, finché il progetto torna. L'agente continua ad aspettare; risposte e posizione restano.
 - `developer.RESTORE_QUESTIONS` → In view: il developer clicca la barra nel pannello già aperto. L'overlay riappare sulla domanda o sul riepilogo che mostrava.
-- `developer.OPEN_PANEL` → In view: il developer apre il pannello con il comando oppure con Reopen sulla notifica. Il pannello si apre o torna in primo piano con l'overlay riaperto sulla domanda o sul riepilogo che mostrava.
-- `developer.CLOSE_PANEL` → Out of sight: il pannello si chiude mentre l'overlay era ridotto. La notifica con l'offerta di riaprire le domande compare come quando si chiude il pannello con l'overlay aperto.
+- `developer.OPEN_PANEL` → In view: il developer apre il pannello con il comando oppure con Reopen sulla notifica, e la finestra è sul progetto del round. Il pannello si apre o torna in primo piano con l'overlay riaperto sulla domanda o sul riepilogo che mostrava.
+- `developer.OPEN_PANEL` → Out of sight: il developer apre il pannello con il comando oppure con Reopen sulla notifica, ma la cartella del progetto del round non è più nella finestra. Il pannello si apre o torna in primo piano senza il round (senza progetto, su Get Started); il round resta in attesa, invisibile, finché il progetto torna o l'agente smette di aspettare.
+- `developer.CLOSE_PANEL` → Out of sight: il pannello si chiude mentre l'overlay era ridotto, oppure mentre la finestra non è più sul progetto del round. Nel primo caso la notifica con l'offerta di riaprire le domande compare come quando si chiude il pannello con l'overlay aperto; nel secondo non compare nessuna notifica.
 
 ### Answered (final)
 The agent has received each question's choices, free answer or explicit skip. For each skipped question it applies its recommendation and lists it as a decision for the developer to verify.
 
 ### Unanswered (final)
-The editor was not reachable when the round was requested. The agent has received an explicit editor-unavailable result, not skipped or invented answers, and asks through its own question interface instead.
+The editor was not reachable when the round was requested. The agent has received an explicit editor-unavailable result, not skipped or invented answers. Se la richiesta veniva dalla sandbox di Cursor, l'agente chiede lo stesso round una volta fuori dalla sandbox, che è un round nuovo; altrimenti asks through its own question interface instead.
 
 ### Abandoned (final)
 The agent no longer waits for this round. It is removed, with no answers delivered and no recommendation silently applied.

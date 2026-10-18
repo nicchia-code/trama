@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.5
+- Opening the editor no longer sends back to To do the Tasks an agent had taken: they stay taken until that agent's command, turn or terminal ends, or the developer runs `task take-back`. Announcements left on disk are still withdrawn at startup.
+- Cursor's chat follows a conversation from the first shell command that registers the agent's work (`trama announce`, `trama ask`, `trama proposal new` or `trama task move <id> doing`): Trama adds an `afterShellExecution` entry with `"matcher": "trama"` to `~/.cursor/hooks.json`, and the command itself is never sent to the editor. `trama cursor-hook` hands each hook to every live editor window of the project, each on its own, with one second for a prompt and five for the other hooks, so a silent window no longer holds back the others. The hooks file is rewritten only when Trama's entries change, and the unused `QUIET_PERIOD_MS` constant is gone.
+- The tag of a Task that comes from a Proposal shows the Proposal's label in full or, for a Proposal with no label, its title shortened past 30 characters with an ellipsis; its tooltip and accessible name are `From Proposal <identity>: <title>`, with the Proposal's permanent identity. The tag stays the same on Active, on the Task's rows in the other columns and in the History details.
+
 ## 0.0.4
 - A Proposal cited by its short number (`P3`) under the lock is looked up only in the short numbers saved in `.trama/short-numbers/assigned`: a number the saved numbers do not name is refused with a message that says how to cite the Proposal, and no Proposal, Task or Drift file is read before the lock is taken. Cite such a Proposal by its identity or name, or run a command that reads the Proposals to save the numbers again.
 - The commands that change a Proposal's label, Model files or Drift decisions (`proposal label`, `proposal edit`, `proposal delete` and `proposal resolve-drift`) take the Proposal's lock from its folder name before any of its files is read, so the lock is no longer held behind a read of the whole Proposal.

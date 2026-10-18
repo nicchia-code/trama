@@ -30,9 +30,9 @@ function taskLine(task: HistoryTaskView, numbers: CardNumbers, context: ViewCont
     item.append(top, el("span", "board-muted", "no longer exists"));
     return item;
   }
-  top.append(statusDot({ column: task.column, agent: false }), idTag(cardNameOf(numbers, "task", task.id)));
+  top.append(statusDot({ column: task.column, agent: false }), idTag(cardNameOf(numbers, "task", task.id)), el("span", "board-history-task-title", task.title));
   if (task.proposalTag !== null) top.append(proposalTagNode(task.proposalTag));
-  item.append(top, el("span", "board-history-task-title", task.title));
+  item.append(top);
   if (task.finished !== null) {
     const finished = el("time", "board-muted", new Date(task.finished).toLocaleDateString(undefined, { dateStyle: "medium" }));
     finished.dateTime = task.finished;
@@ -60,17 +60,22 @@ export function historyEntryNode(context: ViewContext): HistoryEntryNode {
   head.append(title, info);
   node.append(head, time, summary, dialog);
 
-  let current: { entry: HistoryView; numbers: CardNumbers; now: Date } | null = null;
+  let current: { entry: HistoryView; numbers: CardNumbers; now: Date; key: string } | null = null;
   let summarised: string | null = null;
+  /** The content the details show, as last drawn: a redraw is needed only when it changes. */
+  let filled: string | null = null;
 
   /** The details of the entry as it is now: date, full text, then its Tasks. */
   const fill = () => {
     if (current === null) return;
-    const { entry, numbers, now } = current;
+    const { entry, numbers, now, key } = current;
+    filled = key;
     const heading = el("div", "board-history-dialog-head");
     const when = el("time", "board-history-time", historyWhen(entry.updated, now).title);
     when.dateTime = entry.updated;
-    heading.append(el("h2", "board-history-dialog-title", entry.title), when, close);
+    const titles = el("div", "board-history-dialog-titles");
+    titles.append(el("h2", "board-history-dialog-title", entry.title), when);
+    heading.append(titles, close);
     const body = el("div", "board-history-dialog-body", "");
     body.append(heading);
     if (entry.body.trim() !== "") body.append(renderMarkdown(entry.body, context.openLink));
@@ -80,7 +85,9 @@ export function historyEntryNode(context: ViewContext): HistoryEntryNode {
     const ordered = [...entry.tasks].sort((a, b) => (a.created ?? "9999").localeCompare(b.created ?? "9999") || a.id.localeCompare(b.id));
     tasks.append(...ordered.map((task) => taskLine(task, numbers, context)));
     body.append(tasks);
+    const focused = close === document.activeElement;
     dialog.replaceChildren(body);
+    if (focused) close.focus();
   };
 
   info.addEventListener("click", () => {
@@ -104,7 +111,8 @@ export function historyEntryNode(context: ViewContext): HistoryEntryNode {
   return {
     node,
     update(entry, numbers, now = new Date()) {
-      current = { entry, numbers, now };
+      const key = JSON.stringify([entry.title, entry.updated, historyWhen(entry.updated, now).title, entry.body, entry.tasks.map((task) => [task, cardNameOf(numbers, "task", task.id)])]);
+      current = { entry, numbers, now, key };
       const when = historyWhen(entry.updated, now);
       title.textContent = entry.title;
       const label = `Show the Tasks of ${entry.title}`;
@@ -119,7 +127,7 @@ export function historyEntryNode(context: ViewContext): HistoryEntryNode {
       }
       summary.hidden = entry.summary === "";
       dialog.setAttribute("aria-label", entry.title);
-      if (dialog.open) fill();
+      if (dialog.open && key !== filled) fill();
     },
   };
 }
