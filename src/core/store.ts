@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { dirname, join, resolve, sep } from "node:path";
 import { parse, stringify } from "yaml";
 import { TramaError } from "./errors";
+import { normalizeLf } from "./line-endings";
 import { asObject, compareByCreation, type Raw } from "./schema";
 import { buildModel } from "./model";
 import { SPECS_FILE } from "./specs";
@@ -29,9 +30,6 @@ export function findProject(start: string): Project {
 }
 
 export const modelDir = (p: Project) => join(p.dir, "model");
-
-/** The one line-ending normalisation of Trama's text: CRLF and lone CR become LF. Every read, hash, comparison and parse of `.trama/` or skill text goes through it, so a CRLF checkout behaves like Linux. */
-export const normalizeLf = (text: string): string => text.replace(/\r\n?/g, "\n");
 
 /** A file's text with LF line endings, read through `normalizeLf`. */
 export const readTextLf = (path: string): string => normalizeLf(readFileSync(path, "utf8"));

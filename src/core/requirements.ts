@@ -5,7 +5,8 @@ import { parse } from "yaml";
 import { TramaError } from "./errors";
 import { buildModel, findState, flattenStates } from "./model";
 import { type Element, resolveRef } from "./refs";
-import { normalizeLf, type Project, readTextLf, readTrackedFiles, REQUIREMENTS_PREFIX, requirementsDir, writeFileEnsuringDir } from "./store";
+import { normalizeLf } from "./line-endings";
+import { type Project, readTextLf, readTrackedFiles, REQUIREMENTS_PREFIX, requirementsDir, writeFileEnsuringDir } from "./store";
 import type { Diagnostic, FileMap, Machine, Model, State } from "./types";
 import { ID_PATTERN, isWindowsDeviceName } from "./types";
 

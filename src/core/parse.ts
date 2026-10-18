@@ -1,6 +1,6 @@
 import type { Actor, Diagnostic, EventDecl, Machine, State, Transition } from "./types";
 import { EVENT_NAME_PATTERN, ID_PATTERN } from "./types";
-import { normalizeLf } from "./store";
+import { normalizeLf } from "./line-endings";
 
 interface Line {
   n: number;

@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { extent } from "./blocking";
 import type { ProjectModel } from "./requirements";
-import { normalizeLf, type Project, readTextLf, sha256, writeFileEnsuringDir } from "./store";
+import { normalizeLf } from "./line-endings";
+import { type Project, readTextLf, sha256, writeFileEnsuringDir } from "./store";
 
 /*
  * The comparison registry: what a successful `trama compare file` archived, per code fingerprint. A reference counts as
