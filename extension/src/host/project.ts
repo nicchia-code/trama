@@ -45,7 +45,7 @@ export async function installCopilotHooks(storageUri: vscode.Uri, windows = proc
   const file = vscode.Uri.joinPath(storageUri, COPILOT_HOOKS_FILE);
   const command = `"${program}" copilot-hook`;
   const entry = { type: "command", command, ...(windows ? { windows: `& "${program}" copilot-hook` } : {}) };
-  const contents = JSON.stringify({ hooks: { UserPromptSubmit: [entry], Stop: [entry] } });
+  const contents = JSON.stringify({ hooks: { UserPromptSubmit: [entry], Stop: [entry], PreToolUse: [entry] } });
   const storagePath = storageUri.fsPath;
   try {
     await vscode.workspace.fs.createDirectory(storageUri);
@@ -59,7 +59,7 @@ export async function installCopilotHooks(storageUri: vscode.Uri, windows = proc
 }
 
 /** Installs the hooks for the active editor. */
-async function installEditorHooks(storageUri: vscode.Uri): Promise<void> {
+export async function installEditorHooks(storageUri: vscode.Uri): Promise<void> {
   if (isCursor()) installCursorHooks();
   else await installCopilotHooks(storageUri);
 }

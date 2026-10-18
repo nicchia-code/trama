@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import tramaHook from "../extension/src/omp/trama-hook";
+import { QUESTION_TOOL_REFUSAL } from "../src/core/questions";
 
 let savedTerminal: string | undefined;
 beforeEach(() => {
@@ -41,4 +42,18 @@ test("session shutdown reports only an explicitly main agent", () => {
   const { fire, execs } = setup();
   fire("session_shutdown", "sub");
   expect(execs).toEqual([]);
+});
+
+test("the omp hook refuses the agent's own question tool with the shared refusal, and no other tool", () => {
+  const handlers: Record<string, (event: unknown, ctx: { cwd: string; agent?: { kind: "main" | "sub" } }) => unknown> = {};
+  tramaHook({
+    on: (event: string, handler: (event: unknown, ctx: { cwd: string; agent?: { kind: "main" | "sub" } }) => unknown) => {
+      handlers[event] = handler;
+    },
+    exec: async () => undefined,
+  });
+  const refuse = handlers["tool_call"];
+  const ctx = { cwd: "/project", agent: { kind: "sub" as const } };
+  expect(refuse?.({ toolName: "ask" }, ctx)).toEqual({ block: true, reason: QUESTION_TOOL_REFUSAL });
+  expect(refuse?.({ toolName: "bash" }, ctx)).toBeUndefined();
 });

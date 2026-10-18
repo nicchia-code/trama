@@ -4,7 +4,9 @@ A group of related decisions the agent asks the developer to make together. The 
 
 The round belongs to the window that started the agent terminal, or otherwise the most recently focused window with the project open. The developer sees which agent asked it. Queued rounds do not replace the one being answered. Trama imposes no response deadline; if the agent stops waiting, its round is removed and any visible question closes without delivering answers.
 
-Un round chiesto dall'agente della chat di Cursor appartiene alla finestra più recentemente attiva con il progetto aperto, perché l'agente della chat non porta con sé la finestra che lo ha lanciato. Trama raggiunge l'editor anche quando l'agente di Cursor lavora nella sandbox di Cursor. Se dalla sandbox l'editor resta comunque irraggiungibile, il round resta nel caso separato dell'editor non disponibile e l'agente lo chiede di nuovo una volta fuori dalla sandbox; solo se anche lì l'editor non è raggiungibile usa il tool di domande di Cursor, come ultima risorsa.
+Un round chiesto dall'agente della chat di Cursor appartiene alla finestra più recentemente attiva con il progetto aperto, perché l'agente della chat non porta con sé la finestra che lo ha lanciato. Trama raggiunge l'editor anche quando l'agente di Cursor lavora nella sandbox di Cursor. Se dalla sandbox l'editor resta comunque irraggiungibile, il round resta nel caso separato dell'editor non disponibile e l'agente lo chiede di nuovo una volta fuori dalla sandbox; se anche lì l'editor non è raggiungibile, si ferma come per ogni editor non disponibile.
+
+Il round di Trama è l'unico modo in cui l'agente fa una domanda al developer in una conversazione o in un terminale di Trama. Se ci prova con il proprio strumento di domande, l'hook di Trama lo rifiuta prima che compaia qualunque domanda e gli risponde di chiedere con il round di Trama. Nelle conversazioni che non sono di Trama, o quando l'hook non riesce a stabilire che la conversazione è di Trama, lo strumento dell'agente funziona come sempre e Trama non lo vede.
 
 If the editor is lost after accepting the round, the round is interrupted and all its answers are discarded. The agent is told that the editor was lost and stops the workflow awaiting these decisions, without a fallback, automatic recommendation or automatic resumption. Initial editor unavailability remains a separate case.
 
@@ -12,10 +14,11 @@ If the editor is lost after accepting the round, the round is interrupted and al
 
 ### Not asked (initial)
 The round has not been requested yet.
-- `agent.ASK_QUESTIONS` → Unanswered: the editor is not reachable for the project e la richiesta non viene dalla sandbox di Cursor. Tells the agent the editor is unavailable so it can use its own question interface.
-- `agent.ASK_QUESTIONS` → Unanswered: l'editor non è raggiungibile e la richiesta viene dalla sandbox di Cursor. Dice all'agente che l'editor non è raggiungibile dalla sandbox e di chiedere lo stesso round una volta fuori dalla sandbox, prima di usare le sue domande.
+- `agent.ASK_QUESTIONS` → Unanswered: the editor is not reachable for the project e la richiesta non viene dalla sandbox di Cursor. Dice all'agente che l'editor non è disponibile, di non chiedere in nessun altro modo, di fermarsi e di chiedere al developer di aprire il progetto nell'editor con Trama.
+- `agent.ASK_QUESTIONS` → Unanswered: l'editor non è raggiungibile e la richiesta viene dalla sandbox di Cursor. Dice all'agente che l'editor non è raggiungibile dalla sandbox e di chiedere lo stesso round una volta fuori dalla sandbox; se anche lì non è disponibile, di fermarsi e di chiedere al developer di aprire l'editor.
 - `agent.ASK_QUESTIONS` → Queued: the editor is reachable but another round is being presented in the same window.
 - `agent.ASK_QUESTIONS` → Asking: the editor is reachable and no other round is being presented in the same window. Apre subito la prima domanda sopra il pannello, che si apre o torna in primo piano da solo.
+- `agent.TOOL_DOMANDE_CHIAMATO` → Not asked: la conversazione o il terminale è di Trama. L'hook di Trama rifiuta lo strumento di domande dell'agente, nessuna domanda compare, e l'agente riceve un messaggio che gli dice di chiedere solo con il round di Trama, come dice la sua skill.
 
 ### Queued
 Another round is being answered. This round waits its turn without showing a question.
@@ -68,7 +71,7 @@ Il round è ridotto alla barra delle domande in attesa, oppure il pannello è ch
 The agent has received each question's choices, free answer or explicit skip. For each skipped question it applies its recommendation and lists it as a decision for the developer to verify.
 
 ### Unanswered (final)
-The editor was not reachable when the round was requested. The agent has received an explicit editor-unavailable result, not skipped or invented answers. Se la richiesta veniva dalla sandbox di Cursor, l'agente chiede lo stesso round una volta fuori dalla sandbox, che è un round nuovo; altrimenti asks through its own question interface instead.
+The editor was not reachable when the round was requested. The agent has received an explicit editor-unavailable result, not skipped or invented answers. Se la richiesta veniva dalla sandbox di Cursor, l'agente chiede lo stesso round una volta fuori dalla sandbox, che è un round nuovo. Altrimenti non chiede in nessun altro modo, né con il proprio strumento di domande né scrivendo le domande nella conversazione: ferma il lavoro che aspettava quelle decisioni, senza aprire Proposal, e dice al developer di aprire il progetto nell'editor con Trama. Quando il developer gli dice di continuare, chiede di nuovo lo stesso round, che è un round nuovo.
 
 ### Abandoned (final)
 The agent no longer waits for this round. It is removed, with no answers delivered and no recommendation silently applied.

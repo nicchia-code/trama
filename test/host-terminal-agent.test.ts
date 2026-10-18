@@ -25,6 +25,7 @@ test("omp idle hooks and Claude session hooks are attached to their own commands
     hooks: {
       Stop: [{ hooks: [{ type: "command", command: "'/ext/bin/trama' agent-event idle", timeout: 3 }] }],
       SessionEnd: [{ hooks: [{ type: "command", command: "'/ext/bin/trama' agent-event idle", timeout: 3 }] }],
+      PreToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: "'/ext/bin/trama' agent-event question-tool", timeout: 3 }] }],
     },
   });
   expect(agentTemplate("claude", false, none, "posix", undefined, "/ext/bin/trama")).toBe(

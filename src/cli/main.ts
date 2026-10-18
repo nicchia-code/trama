@@ -6,7 +6,7 @@ import { loadModel, type Project } from "../core/store";
 import { hookAnswer, parseCursorHook } from "../core/cursor-chat";
 import { sendCopilotHook } from "../core/question-channel";
 import { parseCopilotHook } from "../core/copilot-chat";
-import { parseQuestionRequest, questionAborted, questionFailure, type QuestionHandler } from "../core/questions";
+import { parseQuestionRequest, QUESTION_TOOL_REFUSAL, questionAborted, questionFailure, type QuestionHandler } from "../core/questions";
 import { arity, COMMANDS, type Command, jobFromEnv, makeContext, type Values } from "./commands";
 import type { Result } from "./result";
 
@@ -28,7 +28,7 @@ function help(): string {
     "trama drift autopilot [--root <project>] [--job <id>] [--json] reads autopilot status from the project coordinator; --job returns only work authorized for that job.",
     "trama cursor-hook is run by Cursor's hooks: it reads the hook's JSON from stdin and tells the editor; it always exits with 0.",
     "trama copilot-hook is run by VS Code's hooks: it reads the hook's JSON from stdin and tells the editor; it always exits with 0.",
-    "trama agent-event idle or failed is run by an agent hook to report completion or an autopilot failure.",
+    "trama agent-event idle or failed is run by an agent hook to report completion or an autopilot failure; question-tool answers Claude Code's question-tool hook with the refusal.",
     "Exit codes: 0 ok, 1 failure (validation errors, unknown element, stale Proposal), 2 usage.",
   ].join("\n");
 }
@@ -63,7 +63,7 @@ const STANDALONE: Record<string, { usage: string; summary: string }> = {
   ask: { usage: "trama ask [--root <dir>]", summary: "Reads one question round as JSON from stdin, waits for the editor and prints the JSON result on stdout." },
   "cursor-hook": { usage: "trama cursor-hook", summary: "Run by Cursor's hooks: reads the hook's JSON from stdin and tells the editor. It always exits with 0." },
   "copilot-hook": { usage: "trama copilot-hook", summary: "Run by VS Code's hooks: reads the hook's JSON from stdin and tells the editor. It always exits with 0." },
-  "agent-event": { usage: "trama agent-event idle [--root <dir>] | failed --job <id> (--drift <id> | --task <id>) --reason <text>", summary: "Tell the editor when an agent settles or when an autopilot job fails." },
+  "agent-event": { usage: "trama agent-event idle [--root <dir>] | failed --job <id> (--drift <id> | --task <id>) --reason <text> | question-tool", summary: "Tell the editor when an agent settles or when an autopilot job fails; question-tool refuses Claude Code's own question tool." },
   "drift autopilot": { usage: "trama drift autopilot [--root <project>] [--job <id>] [--json]", summary: "Show the editor coordinator's autopilot status; --job includes only work authorized for that job." },
 };
 
@@ -246,17 +246,27 @@ export async function runCursorHook(input: string, options: { runtimeDir?: strin
   let raw: unknown;
   try { raw = parseStdinJson(input); } catch { return "{}"; }
   const hook = parseCursorHook(raw);
+  if (hook?.hook === "preToolUse") {
+    const refused = await sendCursorHook(hook, options);
+    return JSON.stringify(refused ? { permission: "deny", agent_message: QUESTION_TOOL_REFUSAL } : {});
+  }
   if (hook) await sendCursorHook(hook, options);
   return JSON.stringify(hookAnswer((raw as { hook_event_name?: unknown } | null)?.hook_event_name));
 }
 
-/** `trama copilot-hook`: forwards Copilot events without blocking the chat. */
+/** `trama copilot-hook`: forwards Copilot events without blocking the chat, and refuses the question tool in Trama's conversations. */
 export async function runCopilotHook(input: string, options: { runtimeDir?: string } = {}): Promise<string> {
   let raw: unknown;
   try { raw = parseStdinJson(input); } catch { return "{}"; }
   const hook = parseCopilotHook(raw);
+  if (hook?.hook === "PreToolUse") return (await sendCopilotHook(hook, options)) ? questionToolDenial() : "{}";
   if (hook) await sendCopilotHook(hook, options);
   return "{}";
+}
+
+/** `trama agent-event question-tool`: Claude Code's PreToolUse answer that refuses its own question tool in Trama's work. Reads nothing and never contacts the editor. */
+export function questionToolDenial(): string {
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: QUESTION_TOOL_REFUSAL } });
 }
 
 /** The `agent-event` command, which waits for the editor; null for any other command. */

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { helpFor, runCopilotHook } from "../src/cli/main";
 import { parseCopilotHook, type CopilotHook } from "../src/core/copilot-chat";
 import { createQuestionServer } from "../src/core/question-channel";
+import { QUESTION_TOOL_REFUSAL } from "../src/core/questions";
 import { projectAt } from "../src/core/store";
 
 let root: string;
@@ -24,7 +25,9 @@ const input = (hook_event_name: string, prompt?: string, cwd = project) => ({ ho
 test("Copilot hooks identify only Trama prompts and keep later prompts in the same project conversation", () => {
   expect(parseCopilotHook(input("UserPromptSubmit", "Use the trama-design skill"))).toEqual({ hook: "UserPromptSubmit", conversation: "session-1", root: project, tramaPrompt: true });
   expect(parseCopilotHook(input("UserPromptSubmit", "/trama-scan"))?.tramaPrompt).toBe(true);
-  expect(parseCopilotHook(input("UserPromptSubmit", "please use the trama-design skill"))?.tramaPrompt).toBe(false);
+  expect(parseCopilotHook(input("UserPromptSubmit", "please use the trama-design skill"))?.tramaPrompt).toBe(true);
+  expect(parseCopilotHook(input("UserPromptSubmit", "Use the trama-req-ui skill"))?.tramaPrompt).toBe(false);
+  expect(parseCopilotHook(input("UserPromptSubmit", "Use the trama-designer skill"))?.tramaPrompt).toBe(false);
   expect(parseCopilotHook(input("Stop"))).toEqual({ hook: "Stop", conversation: "session-1", root: project });
   expect(parseCopilotHook(input("Stop", undefined, join(root, "missing")))).toBeNull();
   expect(parseCopilotHook({ ...input("UserPromptSubmit"), session_id: undefined })).toBeNull();
@@ -33,7 +36,7 @@ test("Copilot hooks identify only Trama prompts and keep later prompts in the sa
 
 test("trama copilot-hook forwards project hooks without leaking prompts and always answers with an object", async () => {
   const received: CopilotHook[] = [];
-  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onCopilotHook: (hook) => received.push(hook) });
+  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onCopilotHook: (hook) => { received.push(hook); } });
   try {
     expect(await runCopilotHook(JSON.stringify(input("UserPromptSubmit", "Use the trama-design skill. private text")), { runtimeDir })).toBe("{}");
     expect(await runCopilotHook(JSON.stringify(input("Stop")), { runtimeDir })).toBe("{}");
@@ -48,4 +51,26 @@ test("trama copilot-hook forwards project hooks without leaking prompts and alwa
     await server.dispose();
   }
   expect(await runCopilotHook("not json", { runtimeDir })).toBe("{}");
+});
+
+const questionTool = (conversation = "session-1", toolName = "vscode_askQuestions") => ({ hook_event_name: "PreToolUse", session_id: conversation, cwd: project, tool_name: toolName });
+
+test("Copilot's question tool is read only for that tool", () => {
+  expect(parseCopilotHook(questionTool())).toEqual({ hook: "PreToolUse", conversation: "session-1", root: project });
+  expect(parseCopilotHook(questionTool("session-1", "run_in_terminal"))).toBeNull();
+});
+
+test("trama copilot-hook refuses Copilot's question tool only in a conversation an editor knows as Trama's", async () => {
+  const asked: CopilotHook[] = [];
+  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onCopilotHook: (h) => { asked.push(h); return h.conversation === "t"; } });
+  try {
+    expect(JSON.parse(await runCopilotHook(JSON.stringify(questionTool("t")), { runtimeDir }))).toEqual({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: QUESTION_TOOL_REFUSAL } });
+    expect(await runCopilotHook(JSON.stringify(questionTool("other")), { runtimeDir })).toBe("{}");
+  } finally {
+    await server.dispose();
+  }
+  expect(asked).toEqual([
+    { hook: "PreToolUse", conversation: "t", root: project },
+    { hook: "PreToolUse", conversation: "other", root: project },
+  ]);
 });

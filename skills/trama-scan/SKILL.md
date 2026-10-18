@@ -22,7 +22,7 @@ A scan that is not part of a `trama-implement` run (after an approval, or asked 
 ## Hard rules
 
 - NEVER edit code, `.trama/model/` or `.trama/requirements/` in this skill.
-- Agenti possono approvare o rifiutare una Proposal, scartare una Draft o risolvere un Drift solo se il developer chiede esplicitamente quella decisione nella conversazione. Senza la richiesta, fermati e chiedi al developer di decidere. La richiesta di scansionare o progettare non autorizza da sola a prendere queste decisioni.
+- Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. A request to scan or design does not by itself authorize deciding it.
 - Compare behaviour at the level of the **Diagram**: States, Transitions, Events, who reacts to what. Compare construction against what the Requirements actually state. Variable names, structure, style and performance that no Requirement mentions are not Drifts.
 - The Model matters far more than the code. By default the code is wrong, not the Model.
 
@@ -84,7 +84,7 @@ When the instruction asks you to write in a language, everything you generate fo
 - Unsure whether code is a Drift or only an implementation detail? Ask: would drawing it change the Diagram? If not, skip it.
 - If you cannot tell whether the code implements a Transition, say so in the report instead of guessing a Task or a Drift.
 - **No code at all is an answer, not a blocker.** If, after step 4, the project has no source files (only `.trama/`, agent skill folders and editor or tool settings), it is a greenfield: the whole Model is still to be built. Do not stop and ask where the code lives. Treat every State and Transition as missing and go to step 6: skip what an open or in-progress Task already covers, then file one Task per coherent unit (usually one per Machine, or per group of States if the Machine is large), each with a `--ref` for every State and Transition it covers and for the Requirement sections attached to them. If the `tech` Area or other General Requirements ask for setup (framework, project structure), file that first as a technical Task referencing them. Say in the report that the project had no code. A Drift needs code to differ from, so file none, and list existing Drifts whose code paths do not exist so the developer can dismiss them.
-- Only ask a question when you truly cannot tell whether code exists, for example because the sources may live in another repository.
+- Ask only when you truly cannot tell whether code exists, for example because the sources may live in another repository, and only when the scan was asked by hand: then ask with `trama ask`, as the "Asking" section of `trama-design` says. Inside a Run (the pre-flight or the end-of-run scan of `trama-implement`, manual or automatic) never ask: write the doubt in the report and do not wait for an answer.
 
 ## Writing a Drift
 

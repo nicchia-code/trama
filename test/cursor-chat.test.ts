@@ -7,6 +7,7 @@ import { reportActivity, runAgentEvent, runCursorHook } from "../src/cli/main";
 import type { AgentOrigin } from "../src/core/announcements";
 import { CursorConversations, type CursorHook, parseCursorHook, registersAgentWork, writeCursorHooks } from "../src/core/cursor-chat";
 import { createQuestionServer } from "../src/core/question-channel";
+import { QUESTION_TOOL_REFUSAL } from "../src/core/questions";
 import { projectAt } from "../src/core/store";
 
 // Short paths: a Unix socket path is limited to about 100 bytes.
@@ -27,7 +28,9 @@ const prompt = (text: string, conversation = "c1") => ({ hook_event_name: "befor
 test("the hook names the first workspace folder with a Trama Model, and keeps only whether the prompt names a Trama skill", () => {
   expect(parseCursorHook(prompt("Use the trama-design skill. Secret request"))).toEqual({ hook: "beforeSubmitPrompt", conversation: "c1", root: project, tramaPrompt: true });
   expect(parseCursorHook(prompt("/trama-scan"))?.tramaPrompt).toBe(true);
-  expect(parseCursorHook(prompt("Please use the trama-design skill"))?.tramaPrompt).toBe(false);
+  expect(parseCursorHook(prompt("Please use the trama-design skill"))?.tramaPrompt).toBe(true);
+  expect(parseCursorHook(prompt("Use the trama-req-ui skill"))?.tramaPrompt).toBe(false);
+  expect(parseCursorHook(prompt("Use the trama-designer skill"))?.tramaPrompt).toBe(false);
   expect(parseCursorHook({ ...prompt("x"), workspace_roots: [join(root, "other")] })).toBeNull();
   expect(parseCursorHook({ ...prompt("x"), hook_event_name: "afterFileEdit" })).toBeNull();
 });
@@ -50,7 +53,7 @@ test("only Trama's conversations produce Events, from the Trama prompt until the
 
 test("trama cursor-hook hands the hook, never the prompt, to the project's editor and always answers Cursor", async () => {
   const received: CursorHook[] = [];
-  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => received.push(h) });
+  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => { received.push(h); } });
   try {
     expect(await runCursorHook(JSON.stringify(prompt("Use the trama-design skill. Secret")), { runtimeDir })).toBe('{"continue":true}');
     expect(await runCursorHook(JSON.stringify({ hook_event_name: "stop", conversation_id: "c1", workspace_roots: [project], status: "completed" }), { runtimeDir })).toBe("{}");
@@ -76,7 +79,8 @@ test("Trama's hooks replace only Trama's earlier entries, keep the others, and l
   const read = () => JSON.parse(readFileSync(file, "utf8"));
   const mine = (program: string) => [{ command: `"${program}" cursor-hook` }];
   const shell = (program: string) => [{ command: `"${program}" cursor-hook`, matcher: "trama" }];
-  expect(read()).toEqual({ version: 1, hooks: { beforeSubmitPrompt: mine("/old/bin/trama"), stop: mine("/old/bin/trama"), sessionEnd: mine("/old/bin/trama"), afterShellExecution: shell("/old/bin/trama") } });
+  const question = (program: string) => [{ command: `"${program}" cursor-hook`, matcher: "AskQuestion" }];
+  expect(read()).toEqual({ version: 1, hooks: { beforeSubmitPrompt: mine("/old/bin/trama"), stop: mine("/old/bin/trama"), sessionEnd: mine("/old/bin/trama"), afterShellExecution: shell("/old/bin/trama"), preToolUse: question("/old/bin/trama") } });
 
   writeFileSync(file, JSON.stringify({ version: 1, hooks: { stop: [{ command: "./mine.sh" }, ...mine("/old/bin/trama")], afterFileEdit: [{ command: "fmt" }] } }));
   writeCursorHooks(file, "/new/bin/trama", false);
@@ -86,6 +90,7 @@ test("Trama's hooks replace only Trama's earlier entries, keep the others, and l
     beforeSubmitPrompt: mine("/new/bin/trama"),
     sessionEnd: mine("/new/bin/trama"),
     afterShellExecution: shell("/new/bin/trama"),
+    preToolUse: question("/new/bin/trama"),
   });
 
   writeFileSync(file, "{ broken");
@@ -181,8 +186,8 @@ test("Cursor's hooks file is written again only when Trama's entries change", ()
 test("every editor window of the project gets the hook, and a window that never answers holds back none of them", async () => {
   const received: string[] = [];
   const windows = [
-    await createQuestionServer({ project: projectAt(project), runtimeDir, windowId: "answering", handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => received.push(`answering ${h.hook}`) }),
-    await createQuestionServer({ project: projectAt(project), runtimeDir, windowId: "other", handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => received.push(`other ${h.hook}`) }),
+    await createQuestionServer({ project: projectAt(project), runtimeDir, windowId: "answering", handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => { received.push(`answering ${h.hook}`); } }),
+    await createQuestionServer({ project: projectAt(project), runtimeDir, windowId: "other", handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => { received.push(`other ${h.hook}`); } }),
   ];
   const record = JSON.parse(readFileSync(join(runtimeDir, readdirSync(runtimeDir).find((name) => name.endsWith(".json"))!), "utf8")) as { projectId: string };
   const silentEndpoint = join(root, "silent.sock");
@@ -198,4 +203,39 @@ test("every editor window of the project gets the hook, and a window that never 
     silent.close();
     for (const server of windows) await server.dispose();
   }
+});
+
+const questionTool = (conversation = "c1", toolName = "AskQuestion") => ({ hook_event_name: "preToolUse", conversation_id: conversation, workspace_roots: [project], tool_name: toolName });
+
+test("the question tool's hook is read only for that tool, and its check produces no Event", () => {
+  expect(parseCursorHook(questionTool("c1"))).toEqual({ hook: "preToolUse", conversation: "c1", root: project });
+  expect(parseCursorHook(questionTool("c1", "Shell"))).toBeNull();
+  const c = new CursorConversations();
+  c.translate({ root: project, hook: "beforeSubmitPrompt", conversation: "t", tramaPrompt: true });
+  expect(c.translate({ root: project, hook: "preToolUse", conversation: "t" })).toBeNull();
+  expect(c.isTrama("t")).toBe(true);
+  expect(c.isTrama("a")).toBe(false);
+});
+
+test("Cursor's hooks file has the question tool's entry, matched to that tool only", () => {
+  const file = join(root, ".cursor", "hooks.json");
+  writeCursorHooks(file, "/bin/trama", false);
+  expect(JSON.parse(readFileSync(file, "utf8")).hooks.preToolUse).toEqual([{ command: `"/bin/trama" cursor-hook`, matcher: "AskQuestion" }]);
+});
+
+test("trama cursor-hook refuses Cursor's question tool only in a conversation an editor knows as Trama's", async () => {
+  const asked: CursorHook[] = [];
+  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => { asked.push(h); return h.conversation === "t"; } });
+  try {
+    expect(await runCursorHook(JSON.stringify(questionTool("t")), { runtimeDir })).toBe(JSON.stringify({ permission: "deny", agent_message: QUESTION_TOOL_REFUSAL }));
+    expect(await runCursorHook(JSON.stringify(questionTool("other")), { runtimeDir })).toBe("{}");
+    expect(await runCursorHook(JSON.stringify(questionTool("t", "Shell")), { runtimeDir })).toBe("{}");
+    expect(asked).toEqual([
+      { hook: "preToolUse", conversation: "t", root: project },
+      { hook: "preToolUse", conversation: "other", root: project },
+    ]);
+  } finally {
+    await server.dispose();
+  }
+  expect(await runCursorHook(JSON.stringify(questionTool("t")), { runtimeDir })).toBe("{}");
 });

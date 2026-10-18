@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import { consumeRequest, createRequest, isEmptyRequest, requestFile, requestIdAt, requestsDir, requestTitle, sweepRequestImages } from "../../../src/core/design-requests";
 import { approvalBlock, listProposals } from "../../../src/core/proposals";
 import type { Project } from "../../../src/core/store";
-import { type DesignAnnouncement, type Launch, type LaunchJobOptions, launchAgent, launched } from "./agent";
+import { type DesignAnnouncement, type Launch, launchAgent, launched } from "./agent";
 import { findProject, NO_PROJECT_WARNING } from "./project";
 import { buildPrompt } from "./prompts";
 
@@ -52,7 +52,7 @@ export class DesignRequests implements vscode.Disposable {
     /** The extension's watcher of `.trama/`, on for the extension's whole life, whether or not the panel is open. */
     tramaFiles: vscode.FileSystemWatcher,
     private readonly project: () => Project | undefined = findProject,
-    private readonly launch: (root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement, canSend?: () => boolean, options?: LaunchJobOptions) => Promise<Launch | undefined> = (root, instruction, name, announceProposal, canSend, options) => launchAgent(root, instruction, name, announceProposal, canSend, undefined, undefined, options),
+    private readonly launch: (root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement, canSend?: () => boolean) => Promise<Launch | undefined> = (root, instruction, name, announceProposal, canSend) => launchAgent(root, instruction, name, announceProposal, canSend),
     /** Run all, started when a setup Proposal is approved on its own; the host always passes it. */
     private readonly runAll?: () => Promise<void>,
   ) {
@@ -169,7 +169,7 @@ export class DesignRequests implements vscode.Disposable {
     if (!canSend()) return false;
     const setup = this.setupIds().includes(id);
     const instruction = buildPrompt(setup ? { kind: "setup-request", request: id } : { kind: "written-design", request: id });
-    const launch = await this.launch(project.root, instruction, setup ? "Setup" : "Design", requestTitle(text) || id, canSend, { asksDeveloper: true });
+    const launch = await this.launch(project.root, instruction, setup ? "Setup" : "Design", requestTitle(text) || id, canSend);
     if (!launched(launch) || !canSend()) return false;
     await this.state.update(SENT_KEY, [...this.sentIds(), id]);
     this.refreshGhosts();

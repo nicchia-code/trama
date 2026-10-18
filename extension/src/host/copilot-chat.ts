@@ -20,11 +20,12 @@ export function onCopilotChatEvent(listener: (event: CopilotChatEvent) => void):
   return { dispose: () => listeners.delete(listener) };
 }
 
-/** Receives a Copilot hook; only prompt-prefixed conversations emit events. */
-export function receiveCopilotHook(hook: CopilotHook): void {
+/** Receives a Copilot hook; only prompt-prefixed conversations emit events. The question tool's check only answers whether this window knows the conversation as Trama's. */
+export function receiveCopilotHook(hook: CopilotHook): boolean {
   const id = key(hook.root, hook.conversation);
+  if (hook.hook === "PreToolUse") return conversations.has(id);
   if (hook.hook === "UserPromptSubmit" && hook.tramaPrompt) conversations.add(id);
-  if (!conversations.has(id)) return;
+  if (!conversations.has(id)) return false;
   if (hook.hook === "UserPromptSubmit") copilotTurnStarted(hook.root, hook.conversation);
   else copilotTurnEnded(hook.root, hook.conversation);
   const event: CopilotChatEvent = {
@@ -33,4 +34,5 @@ export function receiveCopilotHook(hook: CopilotHook): void {
     event: hook.hook === "UserPromptSubmit" ? "PROMPT_SUBMITTED" : "AGENT_STOPPED",
   };
   for (const listener of listeners) listener(event);
+  return false;
 }

@@ -11,7 +11,7 @@ For the format of Model and Requirement files, read [`trama-design`](../trama-de
 
 ## Hard rules
 
-- Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. This skill never does so on its own. Hand the Proposal over and stop: approval on hand-over is Trama's, not yours.
+- Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. This skill never does so on its own, and without that request it does not ask the developer about it: hand the Proposal over and stop, and tell them the decision is theirs, on the Board. Approval on hand-over is Trama's, not yours.
 - The Model describes *what can happen*, never *how it is built*: no variables, field names, database columns, endpoints, classes or file paths in Model files. Technology, layout, release and data choices belong in Requirements and Specs.
 - In every command and every file use only the **permanent identity** of a card (from `--json`, field `id`, or from the file name). Never write a short number (`P3`, `T3`) in a file.
 - Name cards to the developer by short number and title ("Proposal P3 – title"). A closed card has no number: use its identity.

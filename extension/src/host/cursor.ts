@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import * as vscode from "vscode";
 import { type CursorChatEvent, CursorConversations, type CursorHook } from "../../../src/core/cursor-chat";
+import { ASK_DEVELOPER_SENTENCE } from "./prompts";
 
 /** Whether the editor running the extension is Cursor. */
 export const isCursor = (): boolean => vscode.env.appName.toLowerCase().includes("cursor");
@@ -35,11 +36,8 @@ export function withTramaPath(prompt: string, program = bundledTrama()): string 
   return `${prompt}\nThe trama command may not be on your PATH. Before anything else run: export PATH="${dirname(program)}:$PATH"`;
 }
 
-/** The line that keeps the agent in Cursor's chat from asking the developer anything but through `trama ask`. */
-const CURSOR_ASK_LINE = "Ask the developer only with `trama ask`, as the skill says.";
-
-/** Adds the ask line on its own line, after the PATH line when there is one; the instructions that ask questions get it in Cursor's chat only. */
-export const withAskLine = (prompt: string): string => `${prompt}\n${CURSOR_ASK_LINE}`;
+/** Adds the ask sentence on its own line, after the PATH line when there is one: Cursor's chat gets it on a line of its own. */
+export const withAskLine = (prompt: string): string => `${prompt}\n${ASK_DEVELOPER_SENTENCE}`;
 
 const conversations = new CursorConversations();
 const listeners = new Set<(event: CursorChatEvent) => void>();
@@ -50,10 +48,12 @@ export function onCursorChatEvent(listener: (event: CursorChatEvent) => void): v
   return { dispose: () => listeners.delete(listener) };
 }
 
-/** A hook forwarded by `trama cursor-hook`: hooks of conversations that are not Trama's produce nothing. */
-export function receiveCursorHook(hook: CursorHook): void {
+/** A hook forwarded by `trama cursor-hook`. Hooks of conversations that are not Trama's produce nothing; the question tool's check only answers whether this window knows the conversation as Trama's. */
+export function receiveCursorHook(hook: CursorHook): boolean {
+  if (hook.hook === "preToolUse") return conversations.isTrama(hook.conversation);
   const event = conversations.translate(hook);
   if (event) for (const listener of listeners) listener(event);
+  return false;
 }
 
 /**

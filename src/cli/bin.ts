@@ -3,7 +3,7 @@ import { TramaError, UsageError } from "../core/errors";
 import { settleCoordinatorMessages } from "../core/question-channel";
 import { questionAborted, questionFailure } from "../core/questions";
 import { completeFixChoice } from "./fix-prompt";
-import { agentEventCommand, asyncCommand, autopilotCommand, helpFor, reportActivity, run, runAgentEvent, runAsk, runAutopilot, runCopilotHook, runCursorHook } from "./main";
+import { agentEventCommand, asyncCommand, autopilotCommand, helpFor, questionToolDenial, reportActivity, run, runAgentEvent, runAsk, runAutopilot, runCopilotHook, runCursorHook } from "./main";
 
 try {
   const argv = process.argv.slice(2);
@@ -26,18 +26,24 @@ try {
   }
   if (argv.length === 1 && argv[0] === "copilot-hook") {
     // Run by VS Code on every prompt and turn end; whatever happens, answer and exit with 0.
+    let out = "{}";
     try {
       const chunks: Buffer[] = [];
       for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      await runCopilotHook(Buffer.concat(chunks).toString("utf8"));
+      out = await runCopilotHook(Buffer.concat(chunks).toString("utf8"));
     } catch { /* Copilot is answered all the same. */ }
-    await new Promise<void>((resolve) => process.stdout.write("{}\n", () => resolve()));
+    await new Promise<void>((resolve) => process.stdout.write(`${out}\n`, () => resolve()));
     process.exit(0);
   }
   if (autopilotCommand(argv) !== null) {
     const { out, exit } = await runAutopilot(argv, process.cwd());
     await new Promise<void>((resolve) => process.stdout.write(`${out}\n`, () => resolve()));
     process.exit(exit);
+  }
+  if (argv.length === 2 && argv[0] === "agent-event" && argv[1] === "question-tool") {
+    // Run by Claude Code before its own question tool: it refuses the tool, reads nothing and never contacts the editor.
+    await new Promise<void>((resolve) => process.stdout.write(`${questionToolDenial()}\n`, () => resolve()));
+    process.exit(0);
   }
   if (agentEventCommand(argv) !== null) {
     await runAgentEvent(argv, process.cwd());

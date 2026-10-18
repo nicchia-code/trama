@@ -18,7 +18,7 @@ Trama has already announced the first resolution Proposal, so you do not announc
 ## Hard rules
 
 - NEVER edit `.trama/model/` or `.trama/requirements/` directly, nor the generated `trama-req-*` skills. Every change goes through a Proposal.
-- Agenti possono approvare o rifiutare una Proposal, scartare una Draft o risolvere un Drift solo se il developer chiede esplicitamente quella decisione nella conversazione. Senza la richiesta, fermati e chiedi al developer di decidere. La richiesta di preparare una risoluzione non autorizza da sola a risolvere il Drift.
+- Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. A request to prepare a resolution does not by itself authorize resolving the Drift.
 - NEVER change the code of the project, and never create Tasks: approving the resolution creates the Task of each Drift to be fixed in the code.
 - Never apply a recommendation for a Drift the developer skipped, and never decide a Drift on your own.
 
@@ -97,8 +97,10 @@ Run **`trama ask --root <project>`** with the JSON request on stdin. Make **one 
 - An **`editor-interrupted` error stops this workflow immediately**. Do not open or hand over any resolution from partial answers or recommendations, do not fall back, retry, reroute or resume the round. Tell the developer that the editor was lost.
 - **Wait for `trama ask` to finish**: it blocks until the developer answers. Run it with the default wait. If Cursor moves it to the background, wait only for the end of that command with Cursor's background-wait tool (`AwaitShell` on the command's id), which returns as soon as the command ends, then read its result at once. If that wait times out before the command ends, because the developer is still answering, wait again on the same command. Never use a timer or a fixed-duration wait, `sleep`, periodic reads of the terminal output or interval checks; never end the turn to be woken up; never treat `trama ask` as failed and never run it again.
 - In Cursor's sandbox (`CURSOR_SANDBOX` is set), an initial `status: "unavailable"` may only mean the sandbox hides the editor: run the same `trama ask` once more outside the sandbox, asking Cursor for permission, and treat that result as the real one.
-- Only an initial `status: "unavailable"` result means the editor is unavailable; then use the agent's own question tool (in Cursor's chat, `AskQuestion`, and only when `trama ask` is unavailable outside Cursor's sandbox too), or, if it has none, a numbered round written in the conversation (each question with options `a)`, `b)`, … and a line `➡️ <your recommendation and why>`).
-- A usage error of `trama ask` (exit code 2, wrong arguments, unrecognised command) or an input error is **never** editor unavailability: correct the call and repeat it. Never answer it by switching to the agent's own question tool or a round written in the conversation. A deliberate skip is not re-asked through the fallback either.
+- Only an initial `status: "unavailable"` result means the editor is unavailable. Then you ask in no other way: you stop, open no resolution, and tell the developer to open the project in the editor with Trama. When the developer says to continue, run the same `trama ask` again: it is a new round.
+- A usage error of `trama ask` (exit code 2, wrong arguments, unrecognised command) or an input error is **never** editor unavailability: correct the call and repeat it. A deliberate skip is not re-asked.
+
+- Never use your own question tool (`ask` in omp, `AskQuestion` in Cursor, `vscode_askQuestions` in VS Code, `AskUserQuestion` in Claude Code), and never write the questions in the conversation: `trama ask` is the only way to ask the developer.
 
 ## PowerShell
 

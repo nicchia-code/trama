@@ -22,7 +22,8 @@ Once the run has moved at least one Task to Done, announce its **check** right a
 ## Hard rules
 
 - NEVER edit `.trama/model/`, `.trama/requirements/` or the generated `trama-req-*` skills.
-- Agent can approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. Without that request, stop and ask the developer to decide. A request to design, implement Tasks or prepare a Drift resolution does not by itself authorize deciding it.
+- Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. A request to design, implement Tasks or prepare a Drift resolution does not by itself authorize deciding it.
+- Every question to the developer goes through `trama ask`, as the "Asking" section of `trama-design` says: never with your own question tool, and never as a round written in the conversation.
 - NEVER implement behaviour that contradicts the Model, or code that contradicts a Requirement, to get something working.
 - Do not touch code unrelated to the Task.
 

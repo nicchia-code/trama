@@ -100,6 +100,9 @@ export function withLanguage(prompt: string, language: string): string {
 /** The sentence the experimental Drift blocker adds to an instruction whose agent may file Drifts (`trama.experimentalDriftBlocker`). */
 export const DRIFT_BLOCKER_SENTENCE = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
 
+/** The sentence every instruction carries: the agent asks the developer only through `trama ask`, never with its own question tool. */
+export const ASK_DEVELOPER_SENTENCE = "Ask the developer only with `trama ask`, as the skill says, never with your own question tool.";
+
 /** Whether the instruction for `action` lets the agent file Drifts: scans, implementations and imports do; designs and Resolve Drifts do not. */
 export function mayFileDrifts(action: ResolvedAction): boolean {
   switch (action.kind) {
@@ -111,22 +114,6 @@ export function mayFileDrifts(action: ResolvedAction): boolean {
     case "written-design":
     case "setup-request":
     case "resolve-drifts":
-      return false;
-  }
-}
-
-/** Whether the instruction for `action` has the agent ask the developer questions: designs, setup, import and a manual Resolve Drifts do; scans, implementations and the automatic collection do not. */
-export function asksDeveloper(action: ResolvedAction): boolean {
-  switch (action.kind) {
-    case "written-design":
-    case "setup-request":
-    case "import":
-      return true;
-    case "resolve-drifts":
-      return action.automaticCollection === undefined;
-    case "scan":
-    case "implement":
-    case "implement-all":
       return false;
   }
 }

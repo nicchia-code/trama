@@ -8,11 +8,11 @@ import { modelDir, projectAt, writeFileEnsuringDir } from "./store";
  * project folder. Never the prompt: only whether it starts with one of Trama's skills.
  */
 export interface CursorHook {
-  hook: "beforeSubmitPrompt" | "stop" | "sessionEnd" | "afterShellExecution";
+  hook: "beforeSubmitPrompt" | "stop" | "sessionEnd" | "afterShellExecution" | "preToolUse";
   conversation: string;
   /** The project folder: the first of Cursor's `workspace_roots` that holds a Trama Model. */
   root: string;
-  /** beforeSubmitPrompt: the prompt starts with «Use the trama-» or «/trama-». */
+  /** beforeSubmitPrompt: the prompt names one of Trama's skills that start a job, anywhere in the text. */
   tramaPrompt?: boolean;
   /** afterShellExecution: the command line runs a Trama command that registers the agent's work. The command is never passed on. */
   tramaWork?: boolean;
@@ -31,8 +31,8 @@ export interface CursorChatEvent {
   root: string;
 }
 
-const HOOKS: readonly CursorHook["hook"][] = ["beforeSubmitPrompt", "stop", "sessionEnd", "afterShellExecution"];
-const SKILL_PROMPT = /^(Use the trama-|\/trama-)/;
+const HOOKS: readonly CursorHook["hook"][] = ["beforeSubmitPrompt", "stop", "sessionEnd", "afterShellExecution", "preToolUse"];
+const SKILL_PROMPT = /trama-(design|scan|implement|import|resolve-drifts|setup)(?![\p{L}\p{N}-])/u;
 
 /** What Cursor needs back from every hook: it must never be blocked. */
 export const hookAnswer = (hookName: unknown): object => (hookName === "beforeSubmitPrompt" ? { continue: true } : {});
@@ -64,7 +64,8 @@ export function writeCursorHooks(file: string, program: string, windows = proces
   for (const name of HOOKS) {
     const entries: unknown[] = Array.isArray(hooks[name]) ? hooks[name] : [];
     const others = entries.filter((e) => !(typeof e === "object" && e !== null && "command" in e && typeof e.command === "string" && TRAMA_ENTRY.test(e.command)));
-    hooks[name] = [...others, name === "afterShellExecution" ? { command, matcher: "trama" } : { command }];
+    const entry = name === "afterShellExecution" ? { command, matcher: "trama" } : name === "preToolUse" ? { command, matcher: "AskQuestion" } : { command };
+    hooks[name] = [...others, entry];
   }
   const next = { ...config, hooks };
   if (existing !== undefined && JSON.stringify(existing) === JSON.stringify(next)) return;
@@ -76,6 +77,8 @@ export function parseCursorHook(input: unknown): CursorHook | null {
   if (!input || typeof input !== "object") return null;
   const raw = input as Record<string, unknown>;
   const hook = HOOKS.find((h) => h === raw["hook_event_name"]);
+  // Only Cursor's question tool is of interest: any other tool is passed on without looking for a project.
+  if (hook === "preToolUse" && raw["tool_name"] !== "AskQuestion") return null;
   const conversation = text(raw["conversation_id"]);
   const roots = Array.isArray(raw["workspace_roots"]) ? raw["workspace_roots"].filter((r): r is string => typeof r === "string") : [];
   const root = roots.map((r) => resolve(r)).find((r) => existsSync(join(modelDir(projectAt(r)), "system.md")));
@@ -148,6 +151,8 @@ function shellWords(segment: string): string[] {
 export class CursorConversations {
   private readonly trama = new Set<string>();
   translate(h: CursorHook): CursorChatEvent | null {
+    // The question tool's check (isTrama) produces no Event.
+    if (h.hook === "preToolUse") return null;
     if (h.hook === "beforeSubmitPrompt" && h.tramaPrompt) this.trama.add(h.conversation);
     // A command that registers the agent's work makes its conversation Trama's too, but produces no Event.
     if (h.hook === "afterShellExecution") {
@@ -168,5 +173,10 @@ export class CursorConversations {
         this.trama.delete(h.conversation);
         return event("CONVERSATION_CLOSED");
     }
+  }
+
+  /** Whether this editor knows the conversation as Trama's: the answer to the question tool's check. */
+  isTrama(conversation: string): boolean {
+    return this.trama.has(conversation);
   }
 }

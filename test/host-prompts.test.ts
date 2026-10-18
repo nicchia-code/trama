@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { asksDeveloper, buildAutomaticRunPrompt, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, buildAutomaticRunPrompt, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
@@ -95,15 +95,6 @@ test("the Drift blocker's sentence is added on the same line only when on, and o
   expect(DRIFT_BLOCKER_SENTENCE).toBe(sentence);
 });
 
-test("only the instructions where the agent asks the developer questions take the ask flag: designs, setup, import and a manual Resolve Drifts", () => {
-  expect(asksDeveloper({ kind: "written-design", request: "r" })).toBe(true);
-  expect(asksDeveloper({ kind: "setup-request", request: "r" })).toBe(true);
-  expect(asksDeveloper({ kind: "import" })).toBe(true);
-  expect(asksDeveloper({ kind: "resolve-drifts", drifts: ["ab12cd34"] })).toBe(true);
-  expect(asksDeveloper({ kind: "resolve-drifts", drifts: ["ab12cd34"], scoped: true })).toBe(true);
-  expect(asksDeveloper({ kind: "resolve-drifts", drifts: ["ab12cd34"], automaticCollection: "c1" })).toBe(false);
-  expect(asksDeveloper({ kind: "scan" })).toBe(false);
-  expect(asksDeveloper({ kind: "scan", feature: "checkout" })).toBe(false);
-  expect(asksDeveloper({ kind: "implement", task: "abc" })).toBe(false);
-  expect(asksDeveloper({ kind: "implement-all" })).toBe(false);
+test("every instruction carries the one ask sentence, whatever the job", () => {
+  expect(ASK_DEVELOPER_SENTENCE).toBe("Ask the developer only with `trama ask`, as the skill says, never with your own question tool.");
 });

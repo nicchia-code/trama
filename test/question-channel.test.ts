@@ -8,8 +8,9 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { acquireCoordinatorLease, askEditor, createQuestionServer, QUESTION_ENDPOINT_ENV, questionProjectId, releaseCoordinatorLease, renewCoordinatorLease, requestCoordinatorMessage, sendCoordinatorMessage, type CoordinatorJson, type CoordinatorMessage, type QuestionServer } from "../src/core/question-channel";
 import { QuestionRoundQueue, type CompletedQuestionRound } from "../src/core/question-rounds";
-import { QuestionInterruptedError, unavailableQuestions, type QuestionHandler, type QuestionRequest } from "../src/core/questions";
+import { QUESTION_TOOL_REFUSAL, QuestionInterruptedError, unavailableQuestions, type QuestionHandler, type QuestionRequest } from "../src/core/questions";
 import { projectAt } from "../src/core/store";
+import { questionToolDenial } from "../src/cli/main";
 
 let root: string;
 let projectRoot: string;
@@ -617,7 +618,7 @@ test("runtime files contain routing identities only, never pending questions or 
 
     // No editor reached from inside the sandbox: the reason tells the agent to ask once more outside it.
     process.env.CURSOR_ORIG_UID = "4343";
-    expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toEqual({ status: "unavailable", reason: "Editor not reachable from Cursor's sandbox. Run the same trama ask once more outside the sandbox before using your own question tool." });
+    expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toEqual({ status: "unavailable", reason: "Editor not reachable from Cursor's sandbox. Run the same trama ask once more outside the sandbox; if the editor is still unavailable, stop and tell the developer to open the project in the editor with Trama." });
 
     // A non-integer original UID is ignored: the folder keeps the mapped UID and the reason stays the sandbox one.
     process.env.CURSOR_ORIG_UID = "root";
@@ -628,9 +629,20 @@ test("runtime files contain routing identities only, never pending questions or 
     delete process.env.CURSOR_SANDBOX;
     process.env.CURSOR_ORIG_UID = "4242";
     expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toEqual(unavailableQuestions());
+    expect(unavailableQuestions()).toEqual({ status: "unavailable", reason: "Editor not available for this project. Do not ask in any other way: stop, tell the developer to open the project in the editor with Trama, and run the same trama ask again when they say to continue." });
   } finally {
     if (saved.xdg === undefined) delete process.env.XDG_RUNTIME_DIR; else process.env.XDG_RUNTIME_DIR = saved.xdg;
     if (saved.sandbox === undefined) delete process.env.CURSOR_SANDBOX; else process.env.CURSOR_SANDBOX = saved.sandbox;
     if (saved.uid === undefined) delete process.env.CURSOR_ORIG_UID; else process.env.CURSOR_ORIG_UID = saved.uid;
   }
+});
+
+test("the refusal of an agent's own question tool is one exact shared message", () => {
+  expect(QUESTION_TOOL_REFUSAL).toBe("In Trama's work, ask the developer only with `trama ask --root <project>`, as the Trama skill says. This question tool is disabled here.");
+});
+
+test("Claude Code's question-tool hook answers with the shared refusal as a denied tool use", () => {
+  expect(JSON.parse(questionToolDenial())).toEqual({
+    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: QUESTION_TOOL_REFUSAL },
+  });
 });

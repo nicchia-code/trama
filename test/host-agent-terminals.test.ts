@@ -15,6 +15,7 @@ import { dismissDrift, getTask, moveTask, newDrift, newTask } from "../src/core/
 import { FIX_OPTIONS } from "./fix-options";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
 import type { AgentAction } from "../extension/src/protocol";
+import { ASK_DEVELOPER_SENTENCE, buildAutomaticRunPrompt, buildPrompt } from "../extension/src/host/prompts";
 import type { Project } from "../src/core/store";
 
 // A minimal editor: just the terminal events and the calls launchAgent makes.
@@ -643,7 +644,7 @@ describe("automatic terminal exit", () => {
     };
     try {
       expect(await launchAgent(dir, "Use the trama-design skill. Add refunds.", "Design")).toBe("sent");
-      expect(query).toBe("Use the trama-design skill. Add refunds. Run at most 6 sub-agents at once.");
+      expect(query).toBe(`Use the trama-design skill. Add refunds. Run at most 6 sub-agents at once. ${ASK_DEVELOPER_SENTENCE}`);
     } finally {
       commandHandler = previousHandler;
       editor.appName = previousApp;
@@ -668,12 +669,12 @@ describe("automatic terminal exit", () => {
     };
     try {
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence}`);
+      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}`);
       expect(await launchAgent(dir, "Use the trama-design skill. Add refunds.", "Design", undefined, undefined, undefined, undefined, { filesDrifts: false })).toBe("sent");
       expect(query).not.toContain(sentence);
       inspected.experimentalDriftBlocker = { workspaceValue: true };
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.`);
+      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}`);
     } finally {
       commandHandler = previousHandler;
       editor.appName = previousApp;
@@ -696,7 +697,7 @@ describe("automatic terminal exit", () => {
     };
     try {
       expect(await launchAgent(dir, () => `Resolve ${scope}.`, "Drifts")).toBe("sent");
-      expect(query).toBe("Resolve the Drift open at send time. Run at most 20 sub-agents at once.");
+      expect(query).toBe(`Resolve the Drift open at send time. Run at most 20 sub-agents at once. ${ASK_DEVELOPER_SENTENCE}`);
 
       editorCalls.length = 0;
       query = "";
@@ -813,32 +814,32 @@ describe("agent instruction settings", () => {
     const instruction = "Use the trama-scan skill on the whole System.";
 
     await launchAgent(dir, instruction, "Scan");
-    expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.'`);
+    expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
     settingValues["maxParallelAgents"] = 4;
     inspected["maxParallelAgents"] = { globalValue: 4, workspaceValue: 99 };
     await launchAgent(dir, instruction, "Scan");
-    expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.'`);
+    expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
     delete inspected["maxParallelAgents"];
     for (const invalid of ["", 0, -2, 1.5, "3"]) {
       settingValues["maxParallelAgents"] = invalid;
       await launchAgent(dir, instruction, "Scan");
-      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.'`);
+      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
     }
 
     settingValues["language"] = " Italian ";
     try {
       settingValues["maxParallelAgents"] = 4;
       await launchAgent(dir, instruction, "Scan");
-      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. Write everything you generate in Italian, except code, which always stays in English.'`);
+      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} Write everything you generate in Italian, except code, which always stays in English.'`);
       expect(typed.at(-1)?.split("\\n")).toHaveLength(1);
 
       settingValues["language"] = "English";
       await launchAgent(dir, instruction, "Scan");
-      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. Write everything you generate in English, except code, which always stays in English.'`);
+      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} Write everything you generate in English, except code, which always stays in English.'`);
 
       settingValues["language"] = "   ";
       await launchAgent(dir, instruction, "Scan");
-      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.'`);
+      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
     } finally {
       delete settingValues["language"];
       delete settingValues["maxParallelAgents"];
@@ -855,10 +856,10 @@ describe("agent instruction settings", () => {
     };
     inspected["experimentalDriftBlocker"] = { globalValue: true };
     try {
-      expect(await send(scan, "Scan", true)).toBe(`omp '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence}'`);
-      expect(await send("Use the trama-implement skill on Task abc.", "T3", true)).toBe(`omp 'Use the trama-implement skill on Task abc. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence}'`);
-      expect(await send("Use the trama-import skill on this repository.", "Import", true)).toBe(`omp 'Use the trama-import skill on this repository. Run at most 20 sub-agents at once. ${sentence}'`);
-      expect((await send(buildAutomaticRunPrompt("collection"), "All tasks", true)).endsWith(` ${sentence}'`)).toBe(true);
+      expect(await send(scan, "Scan", true)).toBe(`omp '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(await send("Use the trama-implement skill on Task abc.", "T3", true)).toBe(`omp 'Use the trama-implement skill on Task abc. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(await send("Use the trama-import skill on this repository.", "Import", true)).toBe(`omp 'Use the trama-import skill on this repository. Run at most 20 sub-agents at once. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
+      expect((await send(buildAutomaticRunPrompt("collection"), "All tasks", true)).endsWith(` ${sentence} ${ASK_DEVELOPER_SENTENCE}'`)).toBe(true);
       expect(await send("Use the trama-design skill. Add refunds.", "Design", false)).not.toContain(sentence);
       expect(await send("Use the trama-resolve-drifts skill on the open Drifts ab12cd34.", "Drifts", false)).not.toContain(sentence);
       expect(await send(scan, "Scan", false)).not.toContain(sentence);
@@ -874,10 +875,61 @@ describe("agent instruction settings", () => {
 
       inspected["experimentalDriftBlocker"] = { globalValue: true };
       settingValues["language"] = "Italian";
-      expect(await send(scan, "Scan", true)).toBe(`omp '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} Write everything you generate in Italian, except code, which always stays in English.'`);
+      expect(await send(scan, "Scan", true)).toBe(`omp '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE} Write everything you generate in Italian, except code, which always stays in English.'`);
     } finally {
       delete inspected["experimentalDriftBlocker"];
       delete settingValues["language"];
+    }
+  });
+  test("every instruction carries the ask sentence: on its line before the language in a terminal or Copilot's chat, on its own line in Cursor's chat", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const jobs: [string, string][] = [
+      [buildPrompt({ kind: "written-design", request: "r" }), "Design"],
+      [buildPrompt({ kind: "setup-request", request: "r" }), "Setup"],
+      [buildPrompt({ kind: "scan" }), "Scan"],
+      [buildPrompt({ kind: "implement", task: "abc" }), "T3"],
+      [buildPrompt({ kind: "implement-all" }), "All tasks"],
+      [buildPrompt({ kind: "import" }), "Import"],
+      [buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34"] }), "Drifts"],
+      [buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34"], automaticCollection: "c1" }), "Drifts"],
+      [buildAutomaticRunPrompt("c1"), "All tasks"],
+    ];
+    const previousHandler = commandHandler;
+    const previousApp = editor.appName;
+    let query = "";
+    commandHandler = (id, ...args) => {
+      const options = args[0];
+      if (id === "workbench.action.chat.open" && typeof options === "object" && options !== null && "query" in options && typeof options.query === "string") query = options.query;
+    };
+    try {
+      settingValues["language"] = "Italian";
+      for (const [instruction, name] of jobs) {
+        await launchAgent(dir, instruction, name);
+        expect(typed.at(-1)).toContain(`${ASK_DEVELOPER_SENTENCE} Write everything you generate in Italian, except code, which always stays in English.'`);
+      }
+      delete settingValues["language"];
+
+      settingValues.agent = "chat";
+      editor.appName = "Visual Studio Code";
+      for (const [instruction, name] of jobs) {
+        query = "";
+        await launchAgent(dir, instruction, name);
+        expect(query.endsWith(` ${ASK_DEVELOPER_SENTENCE}`)).toBe(true);
+      }
+
+      settingValues.agent = "chat";
+      editor.appName = "Cursor";
+      commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
+      for (const [instruction, name] of jobs) {
+        editorCalls.length = 0;
+        expect(await launchAgent(dir, instruction, name)).toBe("confirm");
+        expect(decodeURIComponent(String(editorCalls.at(-1)))).toContain(`\n${ASK_DEVELOPER_SENTENCE}`);
+      }
+    } finally {
+      delete settingValues["language"];
+      settingValues.agent = "omp";
+      editor.appName = previousApp;
+      commandHandler = previousHandler;
     }
   });
 });
@@ -1079,7 +1131,7 @@ describe("the selected chat in Cursor", () => {
       clipboard.length = 0;
       expect(await launchAgent(dir, "Use the trama-design skill. Read .env", "Design")).toBe("clipboard");
       expect(editorCalls).toEqual(["composer.createNew"]);
-      expect(clipboard).toEqual(["Use the trama-design skill. Read .env Run at most 20 sub-agents at once."]);
+      expect(clipboard).toEqual([`Use the trama-design skill. Read .env Run at most 20 sub-agents at once.\n${ASK_DEVELOPER_SENTENCE}`]);
       expect(typed.length).toBe(typedBefore);
 
       editorCalls.length = 0;
@@ -1120,7 +1172,7 @@ describe("the selected chat in Cursor", () => {
   test("the ask line follows the PATH line in Cursor's instruction, or the instruction when there is no PATH line", async () => {
     // Dynamic, as above: the module must load after mock.module replaced "vscode".
     const { withAskLine, withTramaPath } = await import("../extension/src/host/cursor");
-    const ask = "Ask the developer only with `trama ask`, as the skill says.";
+    const ask = ASK_DEVELOPER_SENTENCE;
     expect(withAskLine(withTramaPath("Use the trama-design skill on the design request in `.trama/requests/r.md`.", "/ext/bin/trama"))).toBe(
       `Use the trama-design skill on the design request in \`.trama/requests/r.md\`.\nThe trama command may not be on your PATH. Before anything else run: export PATH="/ext/bin:$PATH"\n${ask}`,
     );

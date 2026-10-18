@@ -51,10 +51,10 @@ interface ServerOptions {
   serves?: () => boolean;
   runtimeDir?: string;
   focusedAt?: number;
-  /** A hook of Cursor's chat, forwarded by `trama cursor-hook`. */
-  onCursorHook?: (hook: CursorHook) => void;
-  /** A hook of Copilot's chat, forwarded by `trama copilot-hook`. */
-  onCopilotHook?: (hook: CopilotHook) => void;
+  /** A hook of Cursor's chat, forwarded by `trama cursor-hook`; true when this window knows the conversation as Trama's (the question tool's check). */
+  onCursorHook?: (hook: CursorHook) => boolean | void;
+  /** A hook of Copilot's chat, forwarded by `trama copilot-hook`; true when this window knows the conversation as Trama's (the question tool's check). */
+  onCopilotHook?: (hook: CopilotHook) => boolean | void;
   /** A command of the agent changed something: where it ran, as Trama reports it. */
   onActivity?: (origin: AgentOrigin) => void;
   /** The agent in the terminal `terminal` (the hook of its agent said so) has settled: nothing is left to do. `root` is this window's project. */
@@ -651,27 +651,38 @@ export async function askEditor(project: Project, request: QuestionRequest, cont
   }
 }
 
+/** Whether an editor's answer to a hook says that its conversation is Trama's; a cut or other answer does not. */
+function saysTrama(chunk: unknown): boolean {
+  try {
+    const answer: unknown = JSON.parse(String(chunk).trim());
+    return typeof answer === "object" && answer !== null && "trama" in answer && answer.trama === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Hands a hook of Cursor's chat to every live editor window of its project, each window on its own, and waits until they
- * have taken it, for at most `timeoutMs` (1 second for a prompt, 5 for the other hooks). A window that is slow or does not
- * answer holds back none of the others. Returns whether a window took it; never throws, since Cursor must not be held up.
+ * have taken it, for at most `timeoutMs` (1 second for a prompt or the question tool's check, 5 for the other hooks). A
+ * window that is slow or does not answer holds back none of the others. Returns whether a window says the conversation is
+ * Trama's, which only the question tool's check asks; never throws, since Cursor must not be held up.
  */
 export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: number; runtimeDir?: string } = {}): Promise<boolean> {
   const controller = new AbortController();
   const sockets = new Set<Socket>();
-  const timeoutMs = options.timeoutMs ?? (hook.hook === "beforeSubmitPrompt" ? 1000 : 5000);
+  const timeoutMs = options.timeoutMs ?? (hook.hook === "beforeSubmitPrompt" || hook.hook === "preToolUse" ? 1000 : 5000);
   const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, timeoutMs);
   try {
     const projectId = questionProjectId(projectAt(hook.root));
     const directory = runtimeDirectory(options.runtimeDir);
     if (!runtimeDirectoryReady(directory, false)) return false;
-    const taken = await Promise.all(records(directory, projectId).map(async (record) => {
+    const answers = await Promise.all(records(directory, projectId).map(async (record) => {
       try {
         const editor = await connectEditor(record, controller.signal, sockets);
         if (!editor || controller.signal.aborted) return false;
         return await new Promise<boolean>((done) => {
           const { socket } = editor;
-          socket.once("data", () => done(true));
+          socket.once("data", (chunk) => done(saysTrama(chunk)));
           socket.once("close", () => done(false));
           socket.write(requestLine(editor.record, { type: "cursor-hook", projectId, hook }));
         });
@@ -679,7 +690,7 @@ export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: nu
         return false;
       }
     }));
-    return taken.some(Boolean);
+    return answers.some(Boolean);
   } catch {
     return false;
   } finally {
@@ -688,7 +699,7 @@ export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: nu
   }
 }
 
-/** Hands a Copilot hook to its project's editor without holding up Copilot. */
+/** Hands a Copilot hook to its project's editor without holding up Copilot; true when the editor says the conversation is Trama's (the question tool's check only). */
 export async function sendCopilotHook(hook: CopilotHook, options: { timeoutMs?: number; runtimeDir?: string } = {}): Promise<boolean> {
   const controller = new AbortController();
   const sockets = new Set<Socket>();
@@ -699,7 +710,7 @@ export async function sendCopilotHook(hook: CopilotHook, options: { timeoutMs?: 
     if (!editor || controller.signal.aborted) return false;
     return await new Promise<boolean>((done) => {
       const { socket } = editor;
-      socket.once("data", () => done(true));
+      socket.once("data", (chunk) => done(saysTrama(chunk)));
       socket.once("close", () => done(false));
       socket.write(requestLine(editor.record, { type: "copilot-hook", projectId, hook }));
     });
@@ -871,15 +882,15 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         if (phase === "ready" && message.type === "cursor-hook") {
           const hook = message.hook as CursorHook | undefined;
           if (!hook || typeof hook !== "object" || typeof hook.conversation !== "string" || typeof hook.root !== "string") throw new UsageError("A Cursor hook needs a conversation and a project folder");
-          options.onCursorHook?.(hook);
-          finish({ type: "taken" });
+          const trama = options.onCursorHook?.(hook) === true;
+          finish({ type: "taken", trama });
           return;
         }
         if (phase === "ready" && message.type === "copilot-hook") {
           const hook = message.hook as CopilotHook | undefined;
           if (!hook || typeof hook !== "object" || typeof hook.conversation !== "string" || typeof hook.root !== "string") throw new UsageError("A Copilot hook needs a conversation and a project folder");
-          options.onCopilotHook?.(hook);
-          finish({ type: "taken" });
+          const trama = options.onCopilotHook?.(hook) === true;
+          finish({ type: "taken", trama });
           return;
         }
         if (phase !== "ready" || message.type !== "ask") throw new UsageError("Identify the editor before submitting a question round");

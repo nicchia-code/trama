@@ -6,6 +6,8 @@ Ogni segnale della chat di Cursor arriva a tutte le finestre dell'editor aperte 
 
 Le due chat non sanno dire le stesse cose. Cursor produce tutti e quattro gli Event. La chat di Copilot produce solo `PROMPT_SUBMITTED` e `AGENT_STOPPED`: i suoi hook non distinguono un turno interrotto da uno concluso e non dicono quando una conversazione è chiusa, quindi `AGENT_INTERRUPTED` e `CONVERSATION_CLOSED` non arrivano mai da lei.
 
+Gli hook della chat non bloccano mai il lavoro dell'agente, con una sola eccezione: in una conversazione di Trama rifiutano lo strumento di domande dell'agente e gli rispondono di chiedere con il round di Trama (vedi il Question round). Per saperlo chiedono all'editor se la conversazione è di Trama; se l'editor non risponde in tempo o qualcosa va storto, lo strumento passa.
+
 ## Events
 
 ### PROMPT_SUBMITTED

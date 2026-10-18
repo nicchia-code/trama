@@ -44,7 +44,8 @@ export function agentTemplate(agent: TerminalAgent, scanning: boolean, models: {
         const hooks: string[] = [];
         if (tramaPath !== undefined) {
           const hook = [{ hooks: [{ type: "command", command: `${hookProgram(tramaPath, family)} agent-event idle`, timeout: 3 }] }];
-          hooks.push("--settings", quote(family, JSON.stringify({ hooks: { Stop: hook, SessionEnd: hook } })));
+          const refuse = [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: `${hookProgram(tramaPath, family)} agent-event question-tool`, timeout: 3 }] }];
+          hooks.push("--settings", quote(family, JSON.stringify({ hooks: { Stop: hook, SessionEnd: hook, PreToolUse: refuse } })));
         }
         return ["claude", ...hooks, ...option("--model", models.model), ...(scanning ? ["--agents", quote(family, claudeAgents(models.scan))] : [])];
       }

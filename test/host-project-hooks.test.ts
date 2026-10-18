@@ -15,8 +15,9 @@ const home = mkdtempSync(join(os.tmpdir(), "trama-hook-home-"));
 mock.module("node:os", () => ({ ...os, homedir: () => home }));
 afterAll(() => rmSync(home, { recursive: true, force: true }));
 
+const editor = { appName: "Visual Studio Code" };
 mock.module("vscode", () => ({
-  env: { appName: "Visual Studio Code" },
+  env: editor,
   extensions: { getExtension: () => ({ extensionPath }) },
   Uri: {
     joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: join(base.fsPath, ...parts) }),
@@ -51,7 +52,7 @@ mock.module("../src/cli/main", () => ({
     args.includes("update") ? { out: updateOutput } : { out: "", exit: 0 },
 }));
 
-const { installCopilotHooks, updateSkills } = await import("../extension/src/host/project");
+const { installCopilotHooks, installEditorHooks, updateSkills } = await import("../extension/src/host/project");
 
 function setup(): void {
   storage = mkdtempSync(join(tmpdir(), "trama-hook-storage-"));
@@ -78,6 +79,7 @@ test("Copilot hooks use the bundled program in extension storage and preserve us
     hooks: {
       UserPromptSubmit: [{ type: "command", command: `"${join(extensionPath, "bin", "trama")}" copilot-hook` }],
       Stop: [{ type: "command", command: `"${join(extensionPath, "bin", "trama")}" copilot-hook` }],
+      PreToolUse: [{ type: "command", command: `"${join(extensionPath, "bin", "trama")}" copilot-hook` }],
     },
   });
   expect(registered).toEqual({ "/other/hooks.json": true, [file]: true });
@@ -90,7 +92,7 @@ test("on Windows the Copilot hook file carries the PowerShell form next to the p
   await installCopilotHooks({ fsPath: storage } as never, true);
   const program = join(extensionPath, "bin", "trama");
   const entry = { type: "command", command: `"${program}" copilot-hook`, windows: `& "${program}" copilot-hook` };
-  expect(JSON.parse(readFileSync(join(storage, "copilot-hooks.json"), "utf8"))).toEqual({ hooks: { UserPromptSubmit: [entry], Stop: [entry] } });
+  expect(JSON.parse(readFileSync(join(storage, "copilot-hooks.json"), "utf8"))).toEqual({ hooks: { UserPromptSubmit: [entry], Stop: [entry], PreToolUse: [entry] } });
 });
 
 test("Copilot hook file write failures are reported", async () => {
@@ -125,4 +127,36 @@ test("updating skills reports why the trama-specs skill was kept", async () => {
   updateOutput = "Updated skills\nRequirement skills: one skill per fragment (budget 100/4000 characters).\nThe trama-specs skill was not updated, because Specs is not valid: line 3: unknown key `colour`";
   await updateSkills({ root: "/project" } as never, { fsPath: storage } as never);
   expect(errors.at(-1)).toContain("The trama-specs skill was not updated, because Specs is not valid: line 3: unknown key `colour`");
+});
+
+test("activation writes Cursor's hooks in the developer's own hooks file, rewriting only when the entries change", async () => {
+  setup();
+  editor.appName = "Cursor";
+  const cursorDir = join(home, ".cursor");
+  rmSync(cursorDir, { recursive: true, force: true });
+  try {
+    await installEditorHooks({ fsPath: storage } as never);
+    const program = join(extensionPath, "bin", "trama");
+    const hooks = JSON.parse(readFileSync(join(cursorDir, "hooks.json"), "utf8")).hooks;
+    expect(hooks.stop).toEqual([{ command: `"${program}" cursor-hook` }]);
+    expect(existsSync(join(storage, "copilot-hooks.json"))).toBe(false);
+  } finally {
+    editor.appName = "Visual Studio Code";
+  }
+});
+
+test("activation reports an invalid Cursor hooks file and leaves it untouched", async () => {
+  setup();
+  editor.appName = "Cursor";
+  const cursorDir = join(home, ".cursor");
+  rmSync(cursorDir, { recursive: true, force: true });
+  mkdirSync(cursorDir);
+  writeFileSync(join(cursorDir, "hooks.json"), "{ broken");
+  try {
+    await installEditorHooks({ fsPath: storage } as never);
+    expect(errors[0]).toContain("could not write Cursor's hooks");
+    expect(readFileSync(join(cursorDir, "hooks.json"), "utf8")).toBe("{ broken");
+  } finally {
+    editor.appName = "Visual Studio Code";
+  }
 });

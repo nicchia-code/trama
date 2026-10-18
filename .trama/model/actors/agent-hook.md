@@ -4,6 +4,8 @@ L'hook che un agente del terminale carica per dire a Trama quando ha finito, inv
 
 L'agente carica l'hook anche in ogni suo sotto-agente, ma solo l'agente principale dice di aver finito: un sotto-agente che finisce non dice nulla. L'hook non manda segnali di vita: non c'è più una quiete da far ripartire.
 
+Lo stesso hook, in ogni sessione dell'agente, principale e sotto-agenti, rifiuta lo strumento di domande dell'agente e gli risponde di chiedere con il round di Trama (vedi il Question round). Lo rifiuta sempre, perché c'è solo nei terminali di Trama, e senza contattare l'editor.
+
 ## Events
 
 ### IDLE

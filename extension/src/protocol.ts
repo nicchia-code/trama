@@ -23,7 +23,7 @@ export type AgentAction =
   | { kind: "implement"; task: string }
   /** Every Task in "todo", in order; the agent stops at the first Drift it files. `group` cuts it to one Run of a sequence. */
   | { kind: "implement-all"; group?: RunGroup }
-  /** Describe the existing code as Proposals for the Model; the agent asks its own questions. */
+  /** Describe the existing code as Proposals for the Model; the agent asks its questions only with `trama ask` and stops, asking the developer to open the editor, when the editor is unavailable. */
   | { kind: "import" }
   /** One agent resolves every Drift open when the instruction is sent, or only `drift` when it is given (Resolve on one Drift card). The host refuses it while a Run or a resolution is going on, or one resolution Proposal is still to be decided. */
   | { kind: "resolve-drifts"; drift?: string };

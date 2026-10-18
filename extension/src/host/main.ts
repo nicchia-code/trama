@@ -7,7 +7,7 @@ import { agentName, watchAgentTerminal, configuredSkillsDir } from "./agent";
 import { Controller, describeError } from "./controller";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./cursor";
-import { findProject, installCopilotHooks } from "./project";
+import { findProject, installEditorHooks } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
 
@@ -69,7 +69,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ...(vscode.lm === undefined ? [] : [vscode.lm.onDidChangeChatModels(() => void trama.postModelSuggestions())]),
   );
   exposeBundledCli(context);
-  void guarded(() => installCopilotHooks(context.globalStorageUri))();
+  void guarded(() => installEditorHooks(context.globalStorageUri))();
 }
 
 /**

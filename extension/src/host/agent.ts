@@ -12,7 +12,7 @@ import { withdrawWaiting } from "./announcements";
 import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnsentJob, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint, questionWindowId } from "./questions";
-import { withDriftBlocker, withLanguage } from "./prompts";
+import { ASK_DEVELOPER_SENTENCE, withDriftBlocker, withLanguage } from "./prompts";
 import { agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent } from "./terminal-agent";
 import { delegationOf } from "./settings-schema";
 
@@ -73,9 +73,9 @@ async function copilotModelSelector(run: RunModel): Promise<{ vendor: string; id
  * API: if it fails, the prompt goes to the clipboard instead. `announce` runs right before the step that sends the
  * prompt by itself and returns how to take its announcement back when the prompt is not sent.
  */
-async function openChat(root: string, prompt: () => string, canSend: () => boolean, run: RunModel, announce: () => () => void, asks = false): Promise<ChatDelivery> {
+async function openChat(root: string, prompt: () => string, canSend: () => boolean, run: RunModel, announce: () => () => void): Promise<ChatDelivery> {
   if (!canSend()) return "not-sent";
-  if (isCursor()) return openCursorChat(root, asks ? withAskLine(withTramaPath(prompt())) : withTramaPath(prompt()), canSend, run.model, announce);
+  if (isCursor()) return openCursorChat(root, withAskLine(withTramaPath(prompt())), canSend, run.model, announce);
   let takeBack: (() => void) | undefined;
   try {
     const modelSelector = await copilotModelSelector(run);
@@ -280,14 +280,18 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
 /** The identity a chat job's agent passes to the coordinator-aware commands: a chat has no environment, so the text gives it. */
 const jobIdentity = (jobId: string): string => `This Trama job has ID ${jobId}. Pass \`--job ${jobId}\` to every Trama command that accepts \`--job\`.`;
 
-/** The instruction with its limit, sub-agent, job, Drift blocker and language sentences on one line, for the chat and the terminal alike; a terminal's job comes from its environment. */
-function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, jobId?: string): string {
+/**
+ * The instruction with its limit, sub-agent, job, Drift blocker, ask and language sentences. The ask sentence stays on the
+ * instruction's line unless `askOwnLine` is set, which Cursor's chat needs: it gets the ask sentence on a line of its own,
+ * after the PATH line. A terminal's job comes from its environment.
+ */
+function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, jobId: string | undefined, askOwnLine: boolean): string {
   const limit = configuredMaxParallelAgents();
   const withLimit = withAgentLimit(instruction, limit);
   const withSubAgent = canScan(role) ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
   const withJob = jobId === undefined ? withSubAgent : `${withSubAgent} ${jobIdentity(jobId)}`;
   const withBlocker = withDriftBlocker(withJob, filesDrifts && configuredDriftBlocker());
-  return withLanguage(withBlocker, configuredLanguage());
+  return withLanguage(askOwnLine ? withBlocker : `${withBlocker} ${ASK_DEVELOPER_SENTENCE}`, configuredLanguage());
 }
 
 /** The model roles, trimmed (`trama.analysis`, `trama.scan`, `trama.execution`). Application scope: only the user's settings count. */
@@ -304,7 +308,7 @@ function terminalRun(agent: TerminalAgent, instruction: Instruction, name: strin
   const models = { model: run.model, scan: configuredModels().scan };
   return {
     template: (family) => agentTemplate(agent, canScan(role), models, family, hook, tramaPath),
-    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts),
+    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, undefined, false),
     hooked: hook !== undefined || tramaPath !== undefined,
   };
 }
@@ -369,8 +373,6 @@ export interface LaunchJobOptions {
   origin?: JobOrigin;
   /** Whether the instruction lets the agent file Drifts: the experimental Drift blocker's sentence then goes to it. */
   filesDrifts?: boolean;
-  /** Whether the instruction has the agent ask the developer questions: in Cursor's chat it then gets the ask line. */
-  asksDeveloper?: boolean;
   /** The model the instruction runs on when a Proposal's model applies (`proposalRunModel`); absent, the model of the role in Settings. */
   model?: RunModel;
   /** Called once the Run's job ends: with why it ended abnormally, or with nothing for a normal end. A Run that did not start ends with a reason too. */
@@ -390,7 +392,6 @@ export async function launchAgent(
   const jobId = job === undefined ? undefined : jobOptions.id ?? randomUUID();
   const jobOrigin = jobOptions.origin ?? "manual";
   const filesDrifts = jobOptions.filesDrifts === true;
-  const asks = jobOptions.asksDeveloper === true;
   const role = roleOf(name);
   const runModel = jobOptions.model ?? { model: configuredModels()[role], from: `trama.${role}` };
   const windowId = job === undefined ? "" : await questionWindowId(root) ?? "";
@@ -402,7 +403,7 @@ export async function launchAgent(
     if (!canSend()) return agent === "chat" ? "not-sent" : undefined;
     if (agent === "chat") {
       const chat = isCursor() ? "cursor" : "copilot";
-      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, jobId);
+      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, jobId, isCursor());
       const sent: { job?: string } = {};
       // Runs right before the step that sends the prompt by itself: the card and the job begin now. The take-back, run when
       // that step fails, ends both: the prompt is not sent, so the job never began.
@@ -424,7 +425,7 @@ export async function launchAgent(
           }
         };
       };
-      const delivery = await openChat(root, prompt, canSend, runModel, sendStarted, asks);
+      const delivery = await openChat(root, prompt, canSend, runModel, sendStarted);
       // The conversation ended before its instruction began: the sequence of Runs stops with it.
       if (delivery === "sent" && job !== undefined && jobId !== undefined && sent.job === undefined) jobOptions.onEnd?.("its conversation ended before its instruction began");
       if (delivery !== "not-sent") onSent?.(Date.now());
