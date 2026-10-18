@@ -21,6 +21,7 @@
     "@types/bun": "^1.4.2",
     "@types/cytoscape": "^3.31.0",
     "@types/vscode": "^1.138.0",
+    "simple-icons": "16.35.0",
     "typescript": "^7.0.2"
   }
 }

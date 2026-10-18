@@ -188,8 +188,5 @@
         }
       }
     }
-  },
-  "devDependencies": {
-    "simple-icons": "16.35.0"
   }
 }
