@@ -153,6 +153,8 @@ test("a shell command that registers the agent's work makes its conversation Tra
     ['"/home/u/.cursor/extensions/trama/bin/trama" task move abcd1234 doing', true],
     ['& "C:\\Users\\u\\trama.exe" ask', true],
     ["trama --root /project proposal new Design --json", true],
+    ["trama compare brief order --candidates", true],
+    ["trama compare file j340jw58 comparison.json", false],
     ["trama task next --batch --max 4", false],
     ["trama search announce", false],
     ["trama task move abcd1234 done", false],

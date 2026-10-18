@@ -35,6 +35,9 @@ The agent files a new Task.
 ### FILE_DRIFT
 The agent files a new Drift.
 
+### FILE_COMPARISON
+L'agente, o un suo sotto-agente, finisce il confronto di una Machine e archivia in un solo passo tutti i Task e i Drift che ha trovato, anche nessuno; un Drift del blocco può portare allegata una Draft, che l'agente consegna subito dopo.
+
 ### CHANGE_CHECK_PHASE
 L'agente dice che un controllo che ha annunciato passa a una nuova fase: dalla verifica allo scan, oppure, alla fine di una corsa, all'aggiornamento della History.
 

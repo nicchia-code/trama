@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readLastScan, writeLastScan } from "../src/core/last-scan";
@@ -26,6 +26,14 @@ test("initializes an ignored timestamp, repairs invalid data, and atomically rep
   const next = "2026-10-03T10:00:00.000Z";
   writeLastScan(p, next);
   expect(readFileSync(path, "utf8")).toBe(`${next}\n`);
+});
+
+test("reads a last-scan record saved with CRLF line endings as the same instant", () => {
+  cpSync(example, dir, { recursive: true });
+  const p = projectAt(dir);
+  mkdirSync(join(p.dir, "last-scan"), { recursive: true });
+  writeFileSync(join(p.dir, "last-scan/system"), "2026-10-03T10:00:00.000Z\r\n");
+  expect(readLastScan(p, new Date("2026-10-04T10:00:00.000Z"))).toBe("2026-10-03T10:00:00.000Z");
 });
 
 test("counts only currently Done Tasks finished strictly after the remembered scan", () => {

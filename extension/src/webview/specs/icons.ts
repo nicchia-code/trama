@@ -1,5 +1,4 @@
-import * as simpleIcons from "simple-icons";
-import type { SimpleIcon } from "simple-icons";
+import { LOGOS } from "./logos";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -9,17 +8,15 @@ const GENERIC_PATH = "M9.04 12.96Q8.88 12.96 8.72 12.88L4.96 11.28Q4.64 11.2 4.5
 /** Letters and digits only, lower case: `Next.js` and `nextdotjs` both read `nextjs`/`nextdotjs`, matched by title or slug. */
 const key = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-let byName: Map<string, SimpleIcon> | null = null;
+let byName: Map<string, string> | null = null;
 
-/** The Simple Icons logo of a name (title or slug, ignoring case, spaces and punctuation), or null. Built once, from the bundle. */
-function logoOf(name: string): SimpleIcon | null {
+/** The logo path of a name (title or slug, ignoring case, spaces and punctuation), or null. Built once, from the built-in logos. */
+export function logoOf(name: string): string | null {
   if (byName === null) {
     byName = new Map();
-    for (const value of Object.values(simpleIcons)) {
-      if (typeof value !== "object" || value === null || !("path" in value) || !("title" in value)) continue;
-      const icon = value as SimpleIcon;
-      byName.set(key(icon.title), icon);
-      byName.set(key(icon.slug), icon);
+    for (const [title, slug, path] of LOGOS) {
+      byName.set(key(title), path);
+      byName.set(key(slug), path);
     }
   }
   return byName.get(key(name)) ?? null;
@@ -35,7 +32,7 @@ export function iconNode(name: string): SVGSVGElement {
   svg.setAttribute("class", "sp-icon");
   svg.setAttribute("aria-hidden", "true");
   const path = document.createElementNS(SVG_NS, "path");
-  path.setAttribute("d", logo?.path ?? GENERIC_PATH);
+  path.setAttribute("d", logo ?? GENERIC_PATH);
   path.setAttribute("fill", "currentColor");
   if (logo === null) path.setAttribute("fill-rule", "evenodd");
   svg.append(path);

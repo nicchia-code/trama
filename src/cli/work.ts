@@ -9,9 +9,11 @@ import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
 import { formatDiagnostic } from "../core/model";
 import { type Blocker, concernSameThing } from "../core/blocking";
 import { TramaError, UsageError } from "../core/errors";
-import { attachedDrift, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftCandidates, driftOptions, driftSides, freedTasks, type FreedTask, getTask, listDrifts, listTasks, nextTask, type ProposalFilter, type Task } from "../core/work";
+import { attachedDrift, BATCH_DEFAULT, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftCandidates, driftOptions, driftSides, freedTasks, type FreedTask, getTask, listDrifts, listTasks, nextTask, type ProposalFilter, type Task } from "../core/work";
 import { machineReceiverLines, outgoingLines, reactionLines, stateTreeLines } from "./explore";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
+import type { AgentOrigin } from "../core/announcements";
+import { recordTiming } from "../core/timings";
 
 /** One-line summary of a Proposal for lists and the board. `number` is its short number (`P3`) while it is live, otherwise null. */
 export function proposalSummary(p: Project, proposal: Proposal, numbers: ShortNumbers) {
@@ -225,7 +227,7 @@ const quoteBlock = (key: string, text: string) => `- \`${key}\`\n${text.split("\
  * Requirements attached to the referenced Model elements or to what contains them, except those referenced
  * directly, plus a pointer to the Areas' General Requirements, which apply to everything.
  */
-export function requirementsBlock(project: ProjectModel, refs: string[], general: "pointer" | "text" = "pointer"): string {
+export function requirementsBlock(project: ProjectModel, refs: string[], general: "pointer" | "text" | "none" = "pointer"): string {
   const explicit = new Set(refs.filter((r) => parseRequirementRef(r) !== null));
   const seen = new Set<string>();
   const lines: string[] = [];
@@ -245,7 +247,7 @@ export function requirementsBlock(project: ProjectModel, refs: string[], general
       if (!section || explicit.has(key)) continue;
       lines.push(quoteBlock(key, section.text));
     }
-  } else {
+  } else if (general === "pointer") {
     const areas = project.areas.filter((a) => a.sections.some((s) => s.ref === null && s.text !== "") || a.intro !== "");
     const named = (a: Area) => {
       const general = a.sections.find((s) => s.ref === null && s.text !== "") ?? null;
@@ -303,8 +305,9 @@ function proposalScope(p: Project, numbers: ShortNumbers, filter: ProposalFilter
  * The next runnable Task, or with `batch` the group of a parallel run, one Task per line; or the statement that
  * there is none with the Tasks in To do that wait, the same either way. Moves nothing.
  */
-export function taskNextView(p: Project, filter: ProposalFilter = {}, batch = false, max?: number, taskIds?: string[]): Result {
+export function taskNextView(p: Project, filter: ProposalFilter = {}, batch = false, max?: number, taskIds?: string[], timing?: { origin: AgentOrigin; job?: string }): Result {
   const queue = nextTask(p, filter, max, taskIds);
+  if (batch && timing) recordTiming(p, timing.origin, { event: "queue", requested: max ?? BATCH_DEFAULT, given: queue.batch.length, remaining: queue.remaining }, { job: timing.job });
   const { next, waiting } = queue;
   const blocked = new Map(waiting.map((w) => [w.task.id, w.blockers]));
   const numbers = syncShortNumbers(p);

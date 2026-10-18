@@ -32,10 +32,10 @@ export function buildPrompt(action: ResolvedAction): string {
   }
 }
 
-/** A restricted implementation Run: the agent reads the coordinator's current authorization before each group. `tasks` are the Tasks of this Run's model group, which is all it takes. */
+/** A restricted implementation Run: the agent reads the coordinator's current authorization before each Task. `tasks` are the Tasks of this Run's model group, which is all it takes. */
 export function buildAutomaticRunPrompt(collection: string, tasks?: readonly string[]): string {
   const scope = tasks === undefined ? "" : ` This Run takes only the Tasks ${tasks.map((id) => `\`${id}\``).join(", ")} among the authorized ones; no other authorized Task belongs to it.`;
-  return `Use the trama-implement skill for automatic collection ${collection}.${scope} Before each group, run \`trama drift autopilot --json\` and take the authorized Task IDs from its \`tasks\` field, then select only those using \`trama task next --batch --task <id>… --max {maxParallelAgents}\`, passing each ID as a repeated \`--task\`. Do not use the general Task queue or start any other Task. If a Task cannot be started/completed or its check fails, report it with \`trama agent-event failed --task <id> --reason <reason>\`; if a Trama check was announced, also complete it with \`trama announce done <check-id> --failed\`. If the final check fails and you can tell which Task broke it, report that Task the same way after the failed check: the other authorized Tasks still go on. Stop when the authorized set has no runnable Tasks.`;
+  return `Use the trama-implement skill for automatic collection ${collection}.${scope} Before each Task, run \`trama drift autopilot --json\` and take the authorized Task IDs from its \`tasks\` field, then select only those using \`trama task next --batch --task <id>… --max {maxParallelAgents}\`, passing each ID as a repeated \`--task\`. Do not use the general Task queue or start any other Task. If a Task cannot be started/completed or its check fails, report it with \`trama agent-event failed --task <id> --reason <reason>\`; if a Trama check was announced, also complete it with \`trama announce done <check-id> --failed\`. If the final check fails and you can tell which Task broke it, report that Task the same way after the failed check: the other authorized Tasks still go on. Stop when the authorized set has no runnable Tasks.`;
 }
 
 /** The scan prompt for one Feature, or the whole System when there is none, as the developer starts it by hand. It names no Proposal. */
@@ -52,10 +52,10 @@ function runAllPrompt(group: RunGroup | undefined): string {
   const named = (ids: string[]) => `${ids.length === 1 ? "the Proposal" : "the Proposals"} ${ids.map((id) => `\`${id}\``).join(", ")}`;
   const flags = (flag: string, ids: string[]) => ids.map((id) => ` ${flag} ${id}`).join("");
   if (include.length > 0)
-    return `Use the trama-implement skill on every Task in the "todo" column that belongs to ${named(include)}. Take them from \`trama task next --batch${flags("--proposal", include)} --max {maxParallelAgents}\`, one group at a time, until it says there is none.`;
+    return `Use the trama-implement skill on every Task in the "todo" column that belongs to ${named(include)}. Take them from \`trama task next --batch${flags("--proposal", include)} --max {maxParallelAgents}\`, handing them out as sub-agent places free up, until it says there is none.`;
   if (exclude.length > 0)
-    return `Use the trama-implement skill on every Task in the "todo" column except those of ${named(exclude)}. Take them from \`trama task next --batch${flags("--not-proposal", exclude)} --max {maxParallelAgents}\`, one group at a time, until it says there is none.`;
-  return 'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, one group at a time, until it says there is none.';
+    return `Use the trama-implement skill on every Task in the "todo" column except those of ${named(exclude)}. Take them from \`trama task next --batch${flags("--not-proposal", exclude)} --max {maxParallelAgents}\`, handing them out as sub-agent places free up, until it says there is none.`;
+  return 'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, handing them out as sub-agent places free up, until it says there is none.';
 }
 
 /** The name of a Run all terminal: `All tasks` for the Settings group, `All tasks · <model>` for a sequence group, its model as written, trimmed. */

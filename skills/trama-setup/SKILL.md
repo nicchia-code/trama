@@ -58,11 +58,11 @@ The body says why and summarises each decision of the interview, one line each, 
 3. **Specs**: every field clarified in the interview, with `chosenByAgent` and the reason for each technology you chose yourself.
 4. **Tasks**: with `trama proposal edit <id> tasks/<slug>.md`, one per piece of work. Include the technical Tasks that create the project skeleton, the repository, the CI and the infrastructure files chosen (`technical: true`, no Model element). Non-technical Tasks name at least one Model element, as in `trama-design`.
 
-Then `trama proposal show <id>` and read it: it must match what was agreed and nothing else.
+The hand-over below reads the submission's output: it must match what was agreed and nothing else.
 
-## Step 5: validate and hand over
+## Step 5: hand over
 
-Run `trama validate --proposal <id>` until it reports no errors, as in `trama-design`. Then `trama proposal submit <id>`. If it is refused, fix the reported problems, validate again and retry.
+Run `trama proposal submit <id>` without `trama validate --proposal` or `trama proposal show` before it, as in `trama-design`. If it is refused, or its output does not match what was agreed, reopen the Proposal with `trama proposal edit <id>`, fix it, and submit again.
 
 After a successful hand-over, read the result of `trama proposal submit`:
 

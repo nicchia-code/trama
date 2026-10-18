@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
-import type { Project } from "./store";
+import { readTextLf, type Project } from "./store";
 
 const lastScanDir = (p: Project) => join(p.dir, "last-scan");
 const systemFile = (p: Project) => join(lastScanDir(p), "system");
@@ -19,7 +19,7 @@ function ensureIgnored(dir: string): void {
 export function readLastScan(p: Project, now = new Date()): string {
   const path = systemFile(p);
   try {
-    const value = readFileSync(path, "utf8").replace(/\r?\n$/, "");
+    const value = readTextLf(path).replace(/\n$/, "");
     if (ISO_INSTANT.test(value) && !Number.isNaN(Date.parse(value))) return value;
   } catch { /* Missing and unreadable records initialize like invalid ones. */ }
 

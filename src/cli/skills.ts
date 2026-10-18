@@ -7,6 +7,7 @@ import implement from "../../skills/trama-implement/SKILL.md" with { type: "text
 import importSkill from "../../skills/trama-import/SKILL.md" with { type: "text" };
 import resolveDrifts from "../../skills/trama-resolve-drifts/SKILL.md" with { type: "text" };
 import scan from "../../skills/trama-scan/SKILL.md" with { type: "text" };
+import compare from "../../skills/trama-compare/SKILL.md" with { type: "text" };
 import { SKILL_DIRS } from "../core/requirement-skills";
 import { readTextLf, writeFileEnsuringDir } from "../core/store";
 import { SUB_AGENTS } from "../core/sub-agents";
@@ -20,6 +21,7 @@ export const SKILLS: Record<string, string> = {
   "trama-implement/SKILL.md": implement,
   "trama-import/SKILL.md": importSkill,
   "trama-resolve-drifts/SKILL.md": resolveDrifts,
+  "trama-compare/SKILL.md": compare,
 };
 
 /** Skill folders that earlier versions installed and that no longer exist. */

@@ -30,8 +30,11 @@ export function findProject(start: string): Project {
 
 export const modelDir = (p: Project) => join(p.dir, "model");
 
-/** A file's text with LF line endings: the one read that content comparisons (installed skills, `.trama/` files, hashes) go through, so a CRLF checkout compares like Linux. */
-export const readTextLf = (path: string): string => readFileSync(path, "utf8").replace(/\r\n?/g, "\n");
+/** The one line-ending normalisation of Trama's text: CRLF and lone CR become LF. Every read, hash, comparison and parse of `.trama/` or skill text goes through it, so a CRLF checkout behaves like Linux. */
+export const normalizeLf = (text: string): string => text.replace(/\r\n?/g, "\n");
+
+/** A file's text with LF line endings, read through `normalizeLf`. */
+export const readTextLf = (path: string): string => normalizeLf(readFileSync(path, "utf8"));
 
 /** Every non-hidden file under `dir`, keyed by `/`-separated relative path, with LF line endings so a CRLF checkout hashes and compares like Linux. */
 export function readTree(dir: string): FileMap {

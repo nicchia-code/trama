@@ -1,10 +1,10 @@
 import type { CardKind, CardNumbers } from "./card-names";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError } from "./errors";
 import { compareByCreation, createdField, idField } from "./schema";
-import { listCards, type CardLayout, type Project, readDocument } from "./store";
+import { listCards, type CardLayout, type Project, readDocument, readTextLf } from "./store";
 
 export type { CardKind };
 
@@ -194,7 +194,7 @@ export class ShortNumbers {
 export function syncShortNumbers(p: Project): ShortNumbers {
   let current: string | null;
   try {
-    current = readFileSync(assignedFile(p), "utf8");
+    current = readTextLf(assignedFile(p));
   } catch {
     current = null; // missing, or unreadable: a folder in its place, no permission
   }
@@ -249,7 +249,7 @@ function citedCard(expected: CardKind, argument: string, find: (number: number) 
 /** The numbers saved in `assigned`, or null when the file is missing, unreadable or cannot be trusted. Reads no card. */
 function savedNumbers(p: Project): Numbers | null {
   try {
-    return parseAssigned(readFileSync(assignedFile(p), "utf8"));
+    return parseAssigned(readTextLf(assignedFile(p)));
   } catch {
     return null;
   }

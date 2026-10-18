@@ -12,7 +12,7 @@ test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "scan", feature: "checkout" })).toBe("Use the trama-scan skill on the Feature `checkout`.");
   expect(buildPrompt({ kind: "implement", task: "0012" })).toBe("Use the trama-implement skill on Task 0012.");
   expect(buildPrompt({ kind: "implement-all" })).toBe(
-    'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, one group at a time, until it says there is none.',
+    'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, handing them out as sub-agent places free up, until it says there is none.',
   );
   expect(buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34", "ef56gh78"] })).toBe(
     "Use the trama-resolve-drifts skill on the open Drifts ab12cd34, ef56gh78: ask the developer what should happen for each one, then write one resolution Proposal.",
@@ -27,7 +27,7 @@ test("automatic resolution and Runs stay scoped to coordinator authorization", (
   expect(resolve).toContain("first Fix option");
   expect(resolve).toContain("Do not approve the Proposal or start a Run.");
   const run = buildAutomaticRunPrompt("collection");
-  expect(run).toContain("Before each group, run `trama drift autopilot --json` and take the authorized Task IDs from its `tasks` field");
+  expect(run).toContain("Before each Task, run `trama drift autopilot --json` and take the authorized Task IDs from its `tasks` field");
   expect(run).not.toContain("--task task-");
   expect(run).toContain("trama announce done <check-id> --failed");
   expect(run).toContain("Do not use the general Task queue");
@@ -70,10 +70,10 @@ test("implementation batch commands receive the configured limit at send time", 
 test("a Run all group cut by Proposal names its Proposals and the filter, and its terminal names its model", () => {
   const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
   expect(buildPrompt({ kind: "implement-all", group: { include: ["aaaa1111", "bbbb2222"] } })).toBe(
-    'Use the trama-implement skill on every Task in the "todo" column that belongs to the Proposals `aaaa1111`, `bbbb2222`. Take them from `trama task next --batch --proposal aaaa1111 --proposal bbbb2222 --max {maxParallelAgents}`, one group at a time, until it says there is none.',
+    'Use the trama-implement skill on every Task in the "todo" column that belongs to the Proposals `aaaa1111`, `bbbb2222`. Take them from `trama task next --batch --proposal aaaa1111 --proposal bbbb2222 --max {maxParallelAgents}`, handing them out as sub-agent places free up, until it says there is none.',
   );
   expect(buildPrompt({ kind: "implement-all", group: { exclude: ["aaaa1111"] } })).toBe(
-    'Use the trama-implement skill on every Task in the "todo" column except those of the Proposal `aaaa1111`. Take them from `trama task next --batch --not-proposal aaaa1111 --max {maxParallelAgents}`, one group at a time, until it says there is none.',
+    'Use the trama-implement skill on every Task in the "todo" column except those of the Proposal `aaaa1111`. Take them from `trama task next --batch --not-proposal aaaa1111 --max {maxParallelAgents}`, handing them out as sub-agent places free up, until it says there is none.',
   );
   expect(buildPrompt({ kind: "implement-all", group: { include: [], exclude: [] } })).toBe(buildPrompt({ kind: "implement-all" }));
   expect(terminalName({ kind: "implement-all", group: { include: ["aaaa1111"], model: "  gpt-5  " } }, short)).toBe("All tasks · gpt-5");

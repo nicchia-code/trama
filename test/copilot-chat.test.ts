@@ -74,3 +74,17 @@ test("trama copilot-hook refuses Copilot's question tool only in a conversation 
     { hook: "PreToolUse", conversation: "other", root: project },
   ]);
 });
+
+test("the question tool's check asks every live window and refuses when a window that is not the first says the conversation is Trama's", async () => {
+  const asked: string[] = [];
+  const focused = await createQuestionServer({ project: projectAt(project), runtimeDir, windowId: "focused", focusedAt: 2000, handler: async () => ({ status: "unavailable" }) as never, onCopilotHook: (h) => { asked.push(`focused ${h.conversation}`); return false; } });
+  const other = await createQuestionServer({ project: projectAt(project), runtimeDir, windowId: "other", focusedAt: 1000, handler: async () => ({ status: "unavailable" }) as never, onCopilotHook: (h) => { asked.push(`other ${h.conversation}`); return h.conversation === "t"; } });
+  try {
+    expect(JSON.parse(await runCopilotHook(JSON.stringify(questionTool("t")), { runtimeDir }))).toEqual({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: QUESTION_TOOL_REFUSAL } });
+    expect(await runCopilotHook(JSON.stringify(questionTool("other")), { runtimeDir })).toBe("{}");
+  } finally {
+    await focused.dispose();
+    await other.dispose();
+  }
+  expect(asked.sort()).toEqual(["focused other", "focused t", "other other", "other t"]);
+});

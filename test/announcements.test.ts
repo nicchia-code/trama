@@ -9,6 +9,7 @@ import {
   bindDraft,
   changeCheckPhase,
   deliverCard,
+  deliverComparison,
   getAnnouncement,
   listAnnouncements,
   resolutionTitle,
@@ -18,6 +19,7 @@ import {
   checkOutcome,
   forgetCheck,
   withdrawAll,
+  removeBoundTo,
 } from "../src/core/announcements";
 import { createQuestionServer, settleCoordinatorMessages } from "../src/core/question-channel";
 import { discardProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
@@ -66,6 +68,19 @@ describe("announcing", () => {
     announce(p, { kind: "task", title: "Good" });
     writeFileSync(join(announcementsDir(p), "bad123.md"), "no front matter");
     expect(listAnnouncements(p).map((x) => x.title)).toEqual(["Good"]);
+  });
+
+  test("a comparison keeps its ghost and its title while its Drafts join its list, and it counts as no card", () => {
+    const comparison = announce(p, { kind: "comparison", title: "Comparing Refunds", machine: "Refunds", chat: "editor" });
+    expect(comparison).toMatchObject({ kind: "comparison", machine: "Refunds", proposals: [], phase: null, proposal: null });
+    const draft = newProposal(p, "Lighter comparison", "", { announcement: comparison.id, origin: { chat: "editor" } });
+    expect(getAnnouncement(p, comparison.id)).toMatchObject({ title: "Comparing Refunds", proposals: [draft.id], proposal: null });
+    expect(listAnnouncements(p)).toHaveLength(1);
+    expect(announcementNote(p, comparison.id, "proposal")).toBeNull();
+    removeBoundTo(p, draft.id);
+    expect(getAnnouncement(p, comparison.id)?.proposals).toEqual([]);
+    deliverComparison(p, comparison.id);
+    expect(getAnnouncement(p, comparison.id)).toBeNull();
   });
 
 

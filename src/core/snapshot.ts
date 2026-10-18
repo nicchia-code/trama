@@ -492,7 +492,7 @@ export function announcementView(p: Project, a: Announcement, proposalTitle: str
   // A Proposal that names Drifts is the Resolve Drifts ghost: its title comes from the Drifts it names, never from the Draft.
   const resolving = a.kind === "proposal" && a.drifts.length > 0;
   const kind = resolving ? "resolve" : a.kind === "check" && a.source === "request" ? "scan" : a.kind;
-  const phase = a.kind === "work" ? null : a.phase ?? (a.proposal === null ? "preparing" : a.kind === "drift" ? "writing-proposal" : "writing");
+  const phase = a.kind === "work" || a.kind === "comparison" ? null : a.phase ?? (a.proposal === null ? "preparing" : a.kind === "drift" ? "writing-proposal" : "writing");
   const title = resolving ? resolutionTitle(p, a.drifts) ?? a.title : (a.kind === "proposal" && a.proposal !== null && proposalTitle) || a.title;
   return { id: a.id, kind, title, phase };
 }

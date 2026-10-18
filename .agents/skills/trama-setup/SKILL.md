@@ -11,7 +11,7 @@ For the format of Model and Requirement files, read [`trama-design`](../trama-de
 
 ## Hard rules
 
-- Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. This skill never does so on its own. Hand the Proposal over and stop: approval on hand-over is Trama's, not yours.
+- Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. This skill never does so on its own, and without that request it does not ask the developer about it: hand the Proposal over and stop, and tell them the decision is theirs, on the Board. Approval on hand-over is Trama's, not yours.
 - The Model describes *what can happen*, never *how it is built*: no variables, field names, database columns, endpoints, classes or file paths in Model files. Technology, layout, release and data choices belong in Requirements and Specs.
 - In every command and every file use only the **permanent identity** of a card (from `--json`, field `id`, or from the file name). Never write a short number (`P3`, `T3`) in a file.
 - Name cards to the developer by short number and title ("Proposal P3 – title"). A closed card has no number: use its identity.
@@ -58,11 +58,11 @@ The body says why and summarises each decision of the interview, one line each, 
 3. **Specs**: every field clarified in the interview, with `chosenByAgent` and the reason for each technology you chose yourself.
 4. **Tasks**: with `trama proposal edit <id> tasks/<slug>.md`, one per piece of work. Include the technical Tasks that create the project skeleton, the repository, the CI and the infrastructure files chosen (`technical: true`, no Model element). Non-technical Tasks name at least one Model element, as in `trama-design`.
 
-Then `trama proposal show <id>` and read it: it must match what was agreed and nothing else.
+The hand-over below reads the submission's output: it must match what was agreed and nothing else.
 
-## Step 5: validate and hand over
+## Step 5: hand over
 
-Run `trama validate --proposal <id>` until it reports no errors, as in `trama-design`. Then `trama proposal submit <id>`. If it is refused, fix the reported problems, validate again and retry.
+Run `trama proposal submit <id>` without `trama validate --proposal` or `trama proposal show` before it, as in `trama-design`. If it is refused, or its output does not match what was agreed, reopen the Proposal with `trama proposal edit <id>`, fix it, and submit again.
 
 After a successful hand-over, read the result of `trama proposal submit`:
 

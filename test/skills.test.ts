@@ -138,11 +138,11 @@ test("trama-implement reads each Task once from task show and checks the run onc
   expect(skill).not.toContain("Understand the surroundings");
 });
 
-test("trama-implement runs the pre-flight scan before the first group, and its failure does not stop the Run", () => {
+test("trama-implement runs the pre-flight scan before the first Task, and its failure does not stop the Run", () => {
   const skill = SKILLS["trama-implement/SKILL.md"] as string;
   const steps = skill.slice(skill.indexOf("## Steps"));
-  expect(steps.indexOf("**Pre-flight, before the first group.**")).toBeGreaterThan(-1);
-  expect(steps.indexOf("**Pre-flight, before the first group.**")).toBeLessThan(steps.indexOf("1. **Pick the Task.**"));
+  expect(steps.indexOf("**Pre-flight, before the first Task.**")).toBeGreaterThan(-1);
+  expect(steps.indexOf("**Pre-flight, before the first Task.**")).toBeLessThan(steps.indexOf("1. **Pick the Task.**"));
   expect(skill).toContain("`trama task scope --pre-flight`");
   expect(skill).toContain("`trama announce check \"<title>\" --phase scanning`");
   expect(skill).toContain("Pre-flight scan failed: the Run continues without it.");

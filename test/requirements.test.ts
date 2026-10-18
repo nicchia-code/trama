@@ -8,7 +8,7 @@ import { approveProposal, deleteInProposal, editInProposal, getProposal, newProp
 import { coverWithTask } from "./cover";
 import { handOver } from "./handover";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
-import { loadProject, requirementsFor, resolveProjectRef } from "../src/core/requirements";
+import { convertSingleFileAreas, loadProject, requirementsFor, resolveProjectRef } from "../src/core/requirements";
 import { proposalScope } from "../src/core/scope";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
@@ -123,6 +123,17 @@ describe("Areas", () => {
       expect.stringMatching(/^requirements\/ui\/nul\.md:0 Fragment "nul" is a name Windows reserves for devices/),
     ]));
     expect(messages.some((m) => m.startsWith("requirements/ui/com-port.md"))).toBe(false);
+  });
+
+  test("a single-file Area saved with CRLF line endings is converted to LF files", () => {
+    rmSync(areaDir("ui"), { recursive: true, force: true });
+    writeFileSync(join(p.dir, "requirements/rules.md"), UI.replace(/\n/g, "\r\n"));
+    expect(convertSingleFileAreas(p).converted).toEqual(["rules"]);
+    const area = readFileSync(join(p.dir, "requirements/rules/area.md"), "utf8");
+    const main = readFileSync(join(p.dir, "requirements/rules/main.md"), "utf8");
+    expect(area).toBe("---\ndescription: Use when building screens.\n---\n# Screens\n");
+    expect(main).not.toContain("\r");
+    expect(main).toContain("## order/Paid\nShow a green badge.\n");
   });
 
   test("a State gets the Requirements of its parent States, Machine and Feature, most specific first", () => {
@@ -449,6 +460,21 @@ describe("Tasks and generated skills", () => {
     expect(submit.exit).toBe(0);
     expect(submit.out).toContain("Submitted Proposal");
     expect(submit.out).toContain("switch from one skill per fragment to one index skill per Area");
+  });
+
+  test("proposal submit prints the proposal show text after the outcome, and under --json in show", () => {
+    const prop = newProposal(p, "Shown after hand-over");
+    writeFileSync(editInProposal(p, prop.id, "requirements/ui/main.md"), UI.replace("description: Use when building screens.", "description: Use when building screens. Shown on submit."));
+    const submit = run(["proposal", "submit", prop.id], dir, {});
+    expect(submit.exit).toBe(0);
+    const shown = run(["proposal", "show", prop.id], dir, {}).out.trim();
+    expect(shown).not.toBe("");
+    expect(submit.out.indexOf("Submitted Proposal")).toBeLessThan(submit.out.indexOf(shown));
+    expect(submit.out.endsWith(shown)).toBe(true);
+    const second = newProposal(p, "Shown as JSON");
+    writeFileSync(editInProposal(p, second.id, "requirements/ui/main.md"), UI.replace("description: Use when building screens.", "description: Use when building screens. Shown as JSON."));
+    const json = JSON.parse(run(["proposal", "submit", second.id, "--json"], dir, {}).out);
+    expect(json.show).toContain("Shown as JSON");
   });
 
   test("Trama names the Requirement skill that exists in the current mode: the fragment's, or the Area's index", () => {

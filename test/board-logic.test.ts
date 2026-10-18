@@ -279,6 +279,12 @@ test("the notice of a withdrawn announcement names its kind and title", () => {
   expect(withdrawnNotice(announcement({ kind: "task", title: "Refunds" }))).toBe("The agent finished without delivering Task Refunds.");
 });
 
+test("a comparison ghost is named Compare, shows no phase, and its withdrawal notice says so", () => {
+  const card = announcedCard(announcement({ kind: "comparison", title: "Comparing Refunds", phase: null }), false);
+  expect(card).toMatchObject({ kindLabel: "Compare", phase: "", label: "Agent comparing the code: Comparing Refunds" });
+  expect(withdrawnNotice(announcement({ kind: "comparison", title: "Comparing Refunds" }))).toBe("The agent finished without delivering Compare Comparing Refunds.");
+});
+
 test("a check stands in Active after the real cards, in the order announced, and shows its phase even while a question round is open", () => {
   const columns = buildBoard(snapshot({ tasks: [task({ id: "0001", column: "doing" })] }));
   const placed = announcedGhosts(columns, [announcement({ id: "c00001", kind: "check", title: "Scan of Refunds", phase: "scanning" }), announcement({ id: "c00002", kind: "check", title: "Final check after all Tasks", phase: "verifying" })], true);

@@ -98,7 +98,7 @@ const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
  * Whether a shell command line runs one of Trama's commands that register the agent's work: `announce` (of any kind),
- * `ask`, `proposal new` or `task move <id> doing`. Reads such as `task next`, `search` or `proposal show` do not count,
+ * `ask`, `compare brief`, `proposal new` or `task move <id> doing`. Reads such as `task next`, `search` or `proposal show` do not count,
  * nor does a `trama` word that is not the program of its command.
  */
 export function registersAgentWork(command: string): boolean {
@@ -111,6 +111,7 @@ export function registersAgentWork(command: string): boolean {
     else if (args[0]?.startsWith("--root=")) args.shift();
     const [first, second, third, fourth] = args;
     if (first === "announce" || first === "ask") return true;
+    if (first === "compare" && second === "brief") return true;
     if (first === "proposal" && second === "new") return true;
     if (first === "task" && second === "move" && third !== undefined && fourth === "doing") return true;
   }

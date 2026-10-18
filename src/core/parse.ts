@@ -1,5 +1,6 @@
 import type { Actor, Diagnostic, EventDecl, Machine, State, Transition } from "./types";
 import { EVENT_NAME_PATTERN, ID_PATTERN } from "./types";
+import { normalizeLf } from "./store";
 
 interface Line {
   n: number;
@@ -12,7 +13,7 @@ interface Line {
 function scan(content: string): Line[] {
   const lines: Line[] = [];
   let fence: string | null = null;
-  const raw = content.replace(/\r\n?/g, "\n").split("\n");
+  const raw = normalizeLf(content).split("\n");
   for (let i = 0; i < raw.length; i++) {
     const text = raw[i] ?? "";
     const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(text);

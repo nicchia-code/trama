@@ -426,6 +426,21 @@ describe("Tasks and Drifts", () => {
     for (const id of [paid, order, payment]) moveTask(p, id, "done", "developer");
     expect(cli("task", "next", "--batch", "--proposal", prop.id).out).toBe(cli("task", "next", "--proposal", prop.id).out);
   });
+
+  test("task next and task next --batch leave out a Task that concerns a Task the agent has taken", () => {
+    const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
+    const add = (title: string, refs: string[]) => newTask(p, { title, refs, technical: false }).id;
+    const taken = add("Taken", ["cart/Empty"]);
+    const same = add("Same", ["cart/Empty"]);
+    const other = add("Other", ["stripe"]);
+    moveTask(p, taken, "doing", "agent", { terminal: "term-taken" });
+
+    const batch = cli("task", "next", "--batch").out;
+    expect(batch).toContain(`${named("task", other)} Other`);
+    expect(batch).not.toContain(named("task", same));
+    expect(cli("task", "next").out).not.toContain(named("task", same));
+    expect(JSON.parse(cli("--json", "task", "next", "--batch").out).batch.map((t: { id: string }) => t.id)).not.toContain(same);
+  });
   test("task next filters, de-duplicates and validates identities while preserving proposal and blocker scope", () => {
     const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {});
     const prop = newProposal(p, "Filtered");

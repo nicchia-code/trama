@@ -1,11 +1,11 @@
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { EMPTY_SPECS, isSpecField, isSpecsRef, parseSpecs, SPECS_FILE, type SpecField, type Specs } from "./specs";
 import { parse } from "yaml";
 import { TramaError } from "./errors";
 import { buildModel, findState, flattenStates } from "./model";
 import { type Element, resolveRef } from "./refs";
-import { type Project, readTrackedFiles, REQUIREMENTS_PREFIX, requirementsDir, writeFileEnsuringDir } from "./store";
+import { normalizeLf, type Project, readTextLf, readTrackedFiles, REQUIREMENTS_PREFIX, requirementsDir, writeFileEnsuringDir } from "./store";
 import type { Diagnostic, FileMap, Machine, Model, State } from "./types";
 import { ID_PATTERN, isWindowsDeviceName } from "./types";
 
@@ -96,7 +96,7 @@ export interface RequirementDoc {
 /** Parses an `area.md` or a fragment without checking it against the Model; problems with its shape go to `diags`. */
 export function parseRequirementDoc(file: string, content: string, diags: Diagnostic[]): RequirementDoc {
   const doc: RequirementDoc = { description: "", title: "", intro: "", introLine: 0, sections: [] };
-  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  const lines = normalizeLf(content).split("\n");
   let start = 0;
   if (lines[0] === "---") {
     const end = lines.indexOf("---", 1);
@@ -481,7 +481,7 @@ export function convertSingleFileAreas(p: Project): AreaConversion {
       continue;
     }
     const file = join(dir, entry.name);
-    const content = readFileSync(file, "utf8").replace(/\r\n?/g, "\n");
+    const content = readTextLf(file);
     const frontMatter = /^---\n[\s\S]*?\n---\n/.exec(content)?.[0] ?? "";
     const doc = parseRequirementDoc(`${REQUIREMENTS_PREFIX}${entry.name}`, content, []);
     const head = `${frontMatter}${doc.title === "" ? "" : `# ${doc.title}\n`}`;

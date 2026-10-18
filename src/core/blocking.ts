@@ -31,7 +31,7 @@ function elementKey(el: Element): string {
  * A Requirement section of an element stands for that element; the General section of an Area, and an Area as a
  * whole, stand only for themselves.
  */
-function extent(project: ProjectModel, ref: string): { self: string; containers: Set<string> } {
+export function extent(project: ProjectModel, ref: string): { self: string; containers: Set<string> } {
   const req = parseRequirementRef(ref);
   let modelRef = ref;
   if (req) {

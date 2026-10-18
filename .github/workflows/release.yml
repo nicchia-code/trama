@@ -45,12 +45,6 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bunx tsc --noEmit
       - run: bun test --isolate
-        if: runner.os != 'Windows'
-      # The Windows suite has known failures, so it reports but does not stop the release (see the release notes).
-      - name: Tests (Windows, not blocking)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        run: bun test --isolate
       - run: bun run package ${{ matrix.target }}
       - name: Smoke-test the packaged CLI
         if: runner.os != 'Windows'
@@ -103,7 +97,7 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"; else tag="v$(jq -r .version package.json)"; fi
           notes="Install with: code --install-extension trama-<platform>-<version>.vsix"
           if ls packages/*win32-x64*.vsix > /dev/null 2>&1; then
-            notes="$notes"$'\n\n'"**Windows is untested.** The win32-x64 package is only built and smoke-tested (\`--help\`, \`init\`, \`validate\`, \`copilot-hook\`) on a Windows CI runner. Its test suite still has known failures, and nobody has tried it by hand on a Windows machine, in VS Code or in Cursor. Cursor's hook form on Windows (\`& \"<trama.exe>\" cursor-hook\`) is a guess. Expect rough edges and please report them."
+            notes="$notes"$'\n\n'"**Windows is untested by hand.** The win32-x64 package is built, tested (the full suite must pass) and smoke-tested (\`--help\`, \`init\`, \`validate\`, \`copilot-hook\`) on a Windows CI runner, but nobody has tried it by hand on a Windows machine, in VS Code or in Cursor. Cursor's hook form on Windows (\`& \"<trama.exe>\" cursor-hook\`) is a guess. Expect rough edges and please report them."
           fi
           gh release create "$tag" packages/*.vsix --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "Trama $tag" --prerelease --notes "$notes"

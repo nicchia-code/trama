@@ -573,7 +573,7 @@ export interface AnnouncedCard {
   label: string;
 }
 
-const ANNOUNCED_KIND_LABELS: Record<AnnouncementView["kind"], string> = { proposal: "Proposal", task: "Task", drift: "Drift", check: "Check", scan: "Scan", resolve: "Resolve", work: "Import" };
+const ANNOUNCED_KIND_LABELS: Record<AnnouncementView["kind"], string> = { proposal: "Proposal", task: "Task", drift: "Drift", check: "Check", scan: "Scan", resolve: "Resolve", work: "Import", comparison: "Compare" };
 
 /** A check shows its own phase, which an open question round does not change. */
 export const announcedPhase = (phase: AnnouncementView["phase"], asking: boolean): string =>
@@ -586,6 +586,8 @@ export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCa
   const isCheck = a.kind === "check" || a.kind === "scan";
   const label = isCheck
     ? `Agent checking the code: ${title}, ${phase}`
+    : a.kind === "comparison"
+      ? `Agent comparing the code: ${title}`
     : a.kind === "resolve"
       ? `Agent resolving Drifts: ${title}, ${phase}`
       : a.kind === "work"

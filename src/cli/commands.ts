@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TramaError, UsageError } from "../core/errors";
 import { type AgentOrigin, AGENT_ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, announcementNote, CHECK_PHASES, CHECK_START_PHASES, type CheckPhase, changeCheckPhase, checkOutcome, deliverCard, forgetCheck, getAnnouncement } from "../core/announcements";
@@ -21,7 +21,12 @@ import {
   warningsText,
 } from "../core/proposals";
 import { sendCoordinatorMessageSoon } from "../core/question-channel";
+import { archiveComparison, briefing } from "../core/compare";
+import { codeFingerprint } from "../core/compared";
+import { archiveView, briefedTexts, briefingView, preflightCompared } from "./compare";
 import { resolveDriftInProposal } from "../core/resolution";
+import { recordTiming, TIMINGS_DEFAULT_LAST } from "../core/timings";
+import { timingsView } from "./timings";
 import type { DriftDecisionKind } from "../core/proposals";
 import { convertSingleFileAreas, createDefaultAreas, largeFragmentMessage, largeFragments, loadProject } from "../core/requirements";
 import { describeRequirementSkillSync, syncRequirementSkills } from "../core/requirement-skills";
@@ -339,7 +344,9 @@ export const COMMANDS: Command[] = [
       if (kind !== "check" && phase !== undefined) throw new UsageError("--phase is only for a check");
       if (kind !== "check" && job !== undefined) throw new UsageError("--job is only for a check");
       if (phase !== undefined && !(CHECK_START_PHASES as readonly string[]).includes(phase)) throw new UsageError(`--phase must be one of ${CHECK_START_PHASES.join(", ")}, not "${phase}"`);
-      const announcement = announce(ctx.project(), { kind: kind as AnnouncementKind, title: a[1] as string, ...(phase ? { phase: phase as CheckPhase } : {}), ...(job ? { job } : {}), ...ctx.origin });
+      const project = ctx.project();
+      const announcement = announce(project, { kind: kind as AnnouncementKind, title: a[1] as string, ...(phase ? { phase: phase as CheckPhase } : {}), ...(job ? { job } : {}), ...ctx.origin });
+      if (kind === "check" && announcement.phase) recordTiming(project, ctx.origin, { event: "phase-start", check: announcement.id, phase: announcement.phase, title: announcement.title }, { job: announcement.job ?? undefined, startsJob: announcement.phase === "scanning" });
       return text(announcement.id, { id: announcement.id, kind: announcement.kind, title: announcement.title, ...(announcement.phase ? { phase: announcement.phase } : {}), ...(announcement.job ? { job: announcement.job } : {}) });
     } },
   { name: "announce phase", args: "<id> <phase>", summary: "Move a check you announced forward: from verifying to scanning when the scan of the whole System starts, or from verifying or scanning to history when the final run updates the History (phase is scanning or history; a backward move is refused)", run(ctx, a) {
@@ -350,6 +357,7 @@ export const COMMANDS: Command[] = [
       const before = getAnnouncement(project, id);
       const outcome = changeCheckPhase(project, id, phase as CheckPhase);
       if (outcome === "refused") throw new UsageError(`Check ${id} cannot move back to ${phase}; a check only moves forward (verifying, scanning, history); nothing changed.`);
+      if (outcome === "changed" && before) recordTiming(project, ctx.origin, { event: "phase-start", check: id, phase: phase as CheckPhase, title: before.title }, { job: before.job ?? undefined });
       if (outcome === "changed") sendCoordinatorMessageSoon(project, { type: "check-phase", root: project.root, id, phase, ...(before?.job ? { job: before.job } : {}) }, (reason) => {
         process.stderr.write(`The editor did not receive the phase change of check ${id} (${reason}).\n`);
       });
@@ -366,6 +374,7 @@ export const COMMANDS: Command[] = [
       if (finished) sendCoordinatorMessageSoon(project, { type: "check", root: project.root, ...finished }, (reason) => {
         process.stderr.write(`The editor did not receive the outcome of check ${id} (${reason}); no success is assumed.\n`);
       }, () => forgetCheck(project, id));
+      if (finished && finished.phase) recordTiming(project, ctx.origin, { event: "phase-end", check: id, phase: finished.phase, outcome: failed ? "failed" : "done" }, { job: finished.job ?? undefined });
       const outcome = finished ? (failed ? "failed" : "done") : "missing";
       return text(finished ? `Check ${id} is ${outcome}` : `No check "${id}" was found (unknown, already finished or withdrawn, or not a check); nothing changed.`, { id, found: finished !== null, ...(finished ? { outcome } : {}) });
     } },
@@ -446,7 +455,8 @@ export const COMMANDS: Command[] = [
       const n = numbersOf(ctx);
       const head = p.approvedAtHandOver ? `Submitted and approved Proposal ${n.name("proposal", p.id)}` : `Submitted Proposal ${n.name("proposal", p.id)} for review`;
       const kept = p.openReason === null ? "" : `\nKept open for the developer: ${p.openReason}`;
-      return text(`${head}${consumed}${kept}${warningsText(p.warnings)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status, request: p.data.request, requestConsumed: p.requestConsumed, warnings: p.warnings, approvedAtHandOver: p.approvedAtHandOver, openReason: p.openReason });
+      const shown = proposalShowView(project, getProposal(project, p.id, true));
+      return text(`${head}${consumed}${kept}${warningsText(p.warnings)}\n\n${shown.md}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status, request: p.data.request, requestConsumed: p.requestConsumed, warnings: p.warnings, approvedAtHandOver: p.approvedAtHandOver, openReason: p.openReason, show: shown.md });
     } },
   { name: "proposal discard", args: "<id>", summary: "Discard a Draft the agent never finished", run(ctx, a) {
       const project = ctx.project();
@@ -474,6 +484,30 @@ export const COMMANDS: Command[] = [
       return text(`Rejected Proposal ${n.name("proposal", p.id)}`, { id: p.id, number: n.label("proposal", p.id), status: p.data.status });
     } },
 
+  { name: "compare brief", args: "<machine>", summary: "Announce a comparison of a Machine and print its briefing: the references (--ref <ref>, repeatable, limits them), their States, Events and Transitions, the Requirements that apply, the analysis, open Tasks and Drifts on the same thing, resolved or dismissed Drifts on the same references; --candidates adds the Tasks a Drift on each reference would block", options: { ref, candidates: { type: "boolean" } }, run(ctx, a, o) {
+      const project = ctx.project();
+      const b = briefing(project, a[0] as string, list(o["ref"]), o["candidates"] === true);
+      const code = codeFingerprint(project.root);
+      const announcement = announce(project, { kind: "comparison", title: `Comparing ${b.machine.name}`, machine: b.machine.id, refs: b.scope, code, texts: code === null ? {} : briefedTexts(b), ...ctx.origin });
+      recordTiming(project, ctx.origin, { event: "compare-start", comparison: announcement.id, machine: b.machine.name, refs: b.scope.length }, { job: ctx.job });
+      return briefingView(project, b, announcement.id);
+    } },
+  { name: "compare file", args: "<comparison id> <file>", summary: "File the cards of a comparison in one go from a JSON file, or from standard input with -: an optional design (Proposal) for every Task, Tasks, and Drifts with options and their optional fields; all cards are checked before any is written, and a valid comparison is delivered", run(ctx, a) {
+      const project = ctx.project();
+      const raw = a[1] === "-" ? readFileSync(0, "utf8") : readFileSync(a[1] as string, "utf8");
+      const result = archiveComparison(project, a[0] as string, raw);
+      recordTiming(project, ctx.origin, { event: "compare-end", comparison: a[0] as string, tasks: result.tasks.length, drifts: result.drifts.length }, { job: ctx.job });
+      // As with `task new` and `drift new`: the editor learns who holds each card filed by an agent, so it waits for that agent's turn.
+      const holder = ctx.origin.terminal ?? ctx.origin.chat;
+      for (const t of result.tasks) if (ctx.byAgent && holder !== undefined) sendCoordinatorMessageSoon(project, { type: "task-filed", root: project.root, task: t.id, holder }, (reason) => {
+        process.stderr.write(`The editor did not learn that Task ${t.id} was filed by an agent (${reason}); Run and Resolve are not held for that agent's turn.\n`);
+      });
+      for (const d of result.drifts) if (holder !== undefined) sendCoordinatorMessageSoon(project, { type: "drift-filed", root: project.root, drift: d.id, holder }, (reason) => {
+        if (ctx.byAgent) process.stderr.write(`The editor did not learn that Drift ${d.id} was filed by an agent (${reason}); «Dismiss Drift» is not held for that agent's turn.\n`);
+      });
+      return archiveView(project, a[0] as string, result);
+    } },
+
   { name: "task new", args: "<title>", summary: "Create a Task in 'todo' (--ref … or --technical; --proposal <id> links it to the design it comes from; with --drift the design is the origin Task's, and a different --proposal is refused; --announcement <id> names the announcement of this Task)", options: { ref, technical: { type: "boolean" }, drift: { type: "string" }, proposal: { type: "string" }, body: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       const note = announcementNote(project, str(o["announcement"]), "task");
@@ -493,7 +527,7 @@ export const COMMANDS: Command[] = [
       const raw = str(o["max"]);
       const max = raw === undefined ? undefined : Number(raw);
       if (max !== undefined && (!Number.isInteger(max) || max < 1)) throw new UsageError("--max must be a positive integer");
-      return taskNextView(ctx.project(), proposalFilter(ctx, o), o["batch"] === true, max, o["task"] === undefined ? undefined : list(o["task"]));
+      return taskNextView(ctx.project(), proposalFilter(ctx, o), o["batch"] === true, max, o["task"] === undefined ? undefined : list(o["task"]), { origin: ctx.origin, job: ctx.job });
     } },
   { name: "task scope", args: "[<id>…]", summary: "The scan scope of the named Tasks, or with --pre-flight the exact references of the runnable Tasks in To do (filtered by repeated --proposal, --not-proposal and --task); moves nothing", options: { "pre-flight": { type: "boolean" }, proposal: { type: "string", multiple: true }, "not-proposal": { type: "string", multiple: true }, task: { type: "string", multiple: true } }, run(ctx, args, o) {
       const project = ctx.project();
@@ -501,8 +535,10 @@ export const COMMANDS: Command[] = [
         if (args.length > 0) throw new UsageError("--pre-flight takes no Task ID: filter the runnable Tasks with --proposal, --not-proposal or --task");
         const { refs, tasks } = preflightScope(project, proposalFilter(ctx, o), o["task"] === undefined ? undefined : list(o["task"]));
         const n = numbersOf(ctx);
-        const body = refs.length ? refs.map((ref) => `- \`${ref}\``).join("\n") : "_Nothing to check._";
-        return text(`## Pre-flight scope\n\n${body}`, { refs: refs.map((ref) => ({ ref })), tasks: tasks.map((t) => ({ id: t.id, number: n.label("task", t.id), title: t.title })) });
+        const { remaining, already } = preflightCompared(project, refs);
+        const body = remaining.length ? remaining.map((ref) => `- \`${ref}\``).join("\n") : "_Nothing to check._";
+        const compared = already.length ? already.map((ref) => `- \`${ref}\``).join("\n") : "_None._";
+        return text(`## Pre-flight scope\n\n${body}\n\n## Already compared\n\n${compared}`, { refs: remaining.map((ref) => ({ ref })), alreadyCompared: already.map((ref) => ({ ref })), tasks: tasks.map((t) => ({ id: t.id, number: n.label("task", t.id), title: t.title })) });
       }
       if (args.length === 0) throw new UsageError("Name at least one Task ID, or pass --pre-flight");
       if (o["proposal"] !== undefined || o["not-proposal"] !== undefined || o["task"] !== undefined) throw new UsageError("--proposal, --not-proposal and --task apply only with --pre-flight");
@@ -521,7 +557,10 @@ export const COMMANDS: Command[] = [
     } },
   { name: "task move", args: "<id> <column>", summary: "Move a Task to todo, doing or done; --unchanged <note> closes a fix Task into done without changes (its Drift in Code to be fixed becomes Dismissed)", options: { unchanged: { type: "string" } }, run(ctx, a, o) {
       const unchanged = str(o["unchanged"]);
-      const t = moveTask(ctx.project(), taskArg(ctx, a[0] as string), a[1] as string, ctx.byAgent ? "agent" : "developer", ctx.origin, unchanged);
+      const project = ctx.project();
+      const t = moveTask(project, taskArg(ctx, a[0] as string), a[1] as string, ctx.byAgent ? "agent" : "developer", ctx.origin, unchanged);
+      if (ctx.byAgent && t.data.column === "doing") recordTiming(project, ctx.origin, { event: "task-start", task: t.id, title: t.title }, { job: ctx.job });
+      if (t.data.column === "done") recordTiming(project, ctx.origin, { event: "task-end", task: t.id, title: t.title, outcome: unchanged === undefined ? "done" : "unchanged" }, { job: ctx.job });
       const n = numbersOf(ctx);
       const dismissed = unchanged === undefined || t.data.drift === null ? "" : `; Drift ${n.name("drift", t.data.drift)} dismissed`;
       return text(`Task ${n.name("task", t.id)} is now ${t.data.column}${dismissed}`, { id: t.id, number: n.label("task", t.id), column: t.data.column, ...(unchanged === undefined ? {} : { unchanged: t.data.unchanged, drift: t.data.drift }) });
@@ -535,7 +574,9 @@ export const COMMANDS: Command[] = [
   { name: "drift new", args: "<title>", summary: "Record an open Drift with --happens (what the code does, in terms of behaviour) and --should (what the Model or Requirement says), both short Markdown; two to five fix options, each --option <title> followed by its --option-text <text>, the first being the one you recommend; --critical marks an urgent developer decision; --where is required and says where in the code the difference was seen (read that code before filing; files and code names go only there); --task <id> names the Task you were implementing when you found it; --not-blocking <id> (repeatable) with its --not-blocking-reason <text> names a Task that this Drift would block and leaves free, because the difference does not touch it (see drift candidates); --previous <id> names the resolved Drift this one follows, making it recurring (given by itself when --task names a fix Task); --announcement <id> names the announcement of this Drift", options: { ref, proposal: { type: "string" }, task: { type: "string" }, happens: { type: "string" }, should: { type: "string" }, option: ref, "option-text": ref, "not-blocking": ref, "not-blocking-reason": ref, critical: { type: "boolean" }, where: { type: "string" }, previous: { type: "string" }, announcement: { type: "string" } }, run(ctx, a, o) {
       const project = ctx.project();
       const note = announcementNote(project, str(o["announcement"]), "drift");
-      const d = newDrift(project, { title: a[0] as string, refs: list(o["ref"]), proposal: optionalArg(ctx, str(o["proposal"]), proposalArg), origin: optionalArg(ctx, str(o["task"]), taskArg), previous: optionalArg(ctx, str(o["previous"]), driftArg), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", options: fixOptions(list(o["option"]), list(o["option-text"])), critical: o["critical"] === true, announcement: str(o["announcement"]), where: str(o["where"]) ?? "", notBlocking: notBlockingPairs(ctx, list(o["not-blocking"]), list(o["not-blocking-reason"])) });
+      const origin = optionalArg(ctx, str(o["task"]), taskArg);
+      const d = newDrift(project, { title: a[0] as string, refs: list(o["ref"]), proposal: optionalArg(ctx, str(o["proposal"]), proposalArg), origin, previous: optionalArg(ctx, str(o["previous"]), driftArg), happens: str(o["happens"]) ?? "", should: str(o["should"]) ?? "", options: fixOptions(list(o["option"]), list(o["option-text"])), critical: o["critical"] === true, announcement: str(o["announcement"]), where: str(o["where"]) ?? "", notBlocking: notBlockingPairs(ctx, list(o["not-blocking"]), list(o["not-blocking-reason"])) });
+      if (origin !== undefined) recordTiming(project, ctx.origin, { event: "task-end", task: origin, title: getTask(project, origin, true).title, outcome: "drift", drift: d.id }, { job: ctx.job });
       // The agent that files a Drift keeps «Dismiss Drift» from it until its turn ends: the editor learns who holds it here. Copilot chat gives its agent no identity, so its filings arrive as the editor's chat holder and only the window with an open Copilot turn holds them.
       const holder = ctx.origin.terminal ?? ctx.origin.chat;
       if (holder !== undefined) sendCoordinatorMessageSoon(project, { type: "drift-filed", root: project.root, drift: d.id, holder }, (reason) => {
@@ -567,6 +608,12 @@ export const COMMANDS: Command[] = [
     } },
 
   { name: "board", args: "", summary: "To decide, To do, In progress, Done", run: (ctx) => boardView(ctx.project()) },
+  { name: "timings", args: "", summary: "The phase timings of the newest jobs: phases, machine comparisons, Tasks and queue waits; --last <n> sets how many jobs (default 5); --json prints the data", options: { last: { type: "string" } }, run(ctx, _a, o) {
+      const raw = str(o["last"]);
+      const last = raw === undefined ? TIMINGS_DEFAULT_LAST : Number(raw);
+      if (!Number.isInteger(last) || last < 1) throw new UsageError("--last must be a positive integer");
+      return timingsView(ctx.project(false), last);
+    } },
 ];
 
 /** Bounds on the number of positional arguments, from the `args` string. */

@@ -239,10 +239,17 @@ export function getTask(p: Project, id: string, asArgument = false): Task {
   return load(tasksDir(p), findCard(tasksDir(p), cited ?? id, "Task", "file", asArgument && cited === null), parseTask);
 }
 
-export function newTask(
+/** A Task checked and built but not written: what `newTask` writes, and what `trama compare file` checks for every card before it writes any. */
+export interface PlannedTask {
+  title: string;
+  data: TaskData;
+  body: string;
+}
+
+export function planTask(
   p: Project,
   input: { title: string; refs: string[]; technical: boolean; drift?: string; proposal?: string; body?: string },
-): Task {
+): PlannedTask {
   checkTaskRefs(input.technical, input.refs);
   checkRefs(p, input.refs);
   const drift = input.drift ? getDrift(p, input.drift) : null;
@@ -261,7 +268,15 @@ export function newTask(
     proposal = origin;
   }
   const data: TaskData = { column: "todo", technical: input.technical, refs: input.refs, drift: drift?.id ?? null, proposal, agent: false, holder: null, created: createdNow(), finished: null, unchanged: null };
-  return create(tasksDir(p), input.title, data, input.body ?? "", "Task");
+  return { title: input.title, data, body: input.body ?? "" };
+}
+
+export function writeTask(p: Project, plan: PlannedTask): Task {
+  return create(tasksDir(p), plan.title, plan.data, plan.body, "Task");
+}
+
+export function newTask(p: Project, input: { title: string; refs: string[]; technical: boolean; drift?: string; proposal?: string; body?: string }): Task {
+  return writeTask(p, planTask(p, input));
 }
 
 /** A Task an ordinary Proposal creates when it is approved: the file it will be, in To do. */
@@ -389,16 +404,19 @@ function unchangedDrift(p: Project, task: Task, column: string, note: string): D
 }
 
 /** Most Tasks a parallel run implements together without a configured limit. */
-const BATCH_DEFAULT = 20;
+export const BATCH_DEFAULT = 20;
 
 /** What a run can take: the next runnable Task, a bounded group for parallel work, and waiting Tasks. */
 export interface RunQueue {
   next: Task | null;
   /**
    * The group of a parallel run, starting with `next`: each later runnable Task, oldest first, that concerns
-   * the same thing as none already chosen, up to the requested maximum. Empty when no Task is runnable.
+   * the same thing as none already chosen nor any Task the agent has taken, up to the requested maximum. Empty when
+   * no Task is runnable.
    */
   batch: Task[];
+  /** Every Task in To do within the scope that the batch leaves out, blocked or not. */
+  remaining: number;
   /** Every Task in To do within the scope that is blocked, in order. */
   waiting: { task: Task; blockers: Blocker[] }[];
 }
@@ -414,24 +432,29 @@ export interface ProposalFilter {
 }
 
 /**
- * The next runnable Task(s) in creation order: only To do, unblocked Tasks in scope, grouped by distinct concerns.
- * The Proposal filter and an optional identity set intersect; every identity must name an existing card.
+ * The next runnable Task(s) in creation order: only To do, unblocked Tasks in scope, grouped by distinct concerns, and
+ * none concerning a Task In progress the agent has taken. The Proposal filter and an optional identity set intersect;
+ * every identity must name an existing card.
  */
 export function nextTask(p: Project, filter: ProposalFilter = {}, max = BATCH_DEFAULT, taskIds?: string[]): RunQueue {
-  const { project, blocked, todo } = scopedTodo(p, filter, taskIds);
+  const { project, blocked, todo, taken } = scopedTodo(p, filter, taskIds);
   const batch: Task[] = [];
   for (const task of todo) {
     if (batch.length === max) break;
-    if (!blocked.has(task.id) && !batch.some((chosen) => concernSameThing(project, chosen.data.refs, task.data.refs))) batch.push(task);
+    if (blocked.has(task.id)) continue;
+    if (batch.some((chosen) => concernSameThing(project, chosen.data.refs, task.data.refs))) continue;
+    if (taken.some((t) => concernSameThing(project, t.data.refs, task.data.refs))) continue;
+    batch.push(task);
   }
   return {
     next: batch[0] ?? null,
     batch,
+    remaining: todo.length - batch.length,
     waiting: todo.flatMap((task) => (blocked.has(task.id) ? [{ task, blockers: blocked.get(task.id) as Blocker[] }] : [])),
   };
 }
 
-/** The runnable Tasks of a scope in creation order: To do and unblocked, the same set `nextTask` chooses from. */
+/** The runnable Tasks of a scope in creation order: To do and unblocked. `nextTask` also leaves out those concerning a taken Task. */
 export function runnableTasks(p: Project, filter: ProposalFilter = {}, taskIds?: string[]): Task[] {
   const { blocked, todo } = scopedTodo(p, filter, taskIds);
   return todo.filter((t) => !blocked.has(t.id));
@@ -453,7 +476,8 @@ function scopedTodo(p: Project, filter: ProposalFilter, taskIds?: string[]) {
     return true;
   };
   const todo = tasks.filter((t) => t.data.column === "todo" && inScope(t) && (selected === null || selected.has(t.id)));
-  return { project, blocked, todo };
+  const taken = tasks.filter((t) => t.data.column === "doing" && t.data.agent);
+  return { project, blocked, todo, taken };
 }
 
 /** The developer's decision to get a Task back from the agent: the mark is cleared and the Task stays In progress. */
@@ -670,10 +694,17 @@ function checkNotBlocking(p: Project, named: NotBlocking[], refs: string[], orig
   });
 }
 
-export function newDrift(
+/** A Drift checked and built but not written: what `newDrift` writes, and what `trama compare file` checks for every card before it writes any. */
+export interface PlannedDrift {
+  title: string;
+  data: DriftData;
+  body: string;
+}
+
+export function planDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; critical?: boolean; where: string; announcement?: string; notBlocking?: NotBlocking[] },
-): Drift {
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; critical?: boolean; where: string; notBlocking?: NotBlocking[] },
+): PlannedDrift {
   if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with --ref");
   const happens = input.happens.trim();
   const should = input.should.trim();
@@ -697,9 +728,20 @@ export function newDrift(
     ...(options.length === 0 ? [] : [`## ${OPTIONS_HEADING}\n\n${options.map((o) => `### ${o.title}\n\n${o.text}`).join("\n\n")}`]),
     ...(where ? [`## ${WHERE_HEADING}\n\n${where}`] : []),
   ];
-  const drift = create(driftsDir(p), input.title, data, sections.join("\n\n"), "Drift");
-  deliverCard(p, input.announcement, "drift");
+  return { title: input.title, data, body: sections.join("\n\n") };
+}
+
+export function writeDrift(p: Project, plan: PlannedDrift, announcement?: string): Drift {
+  const drift = create(driftsDir(p), plan.title, plan.data, plan.body, "Drift");
+  deliverCard(p, announcement, "drift");
   return drift;
+}
+
+export function newDrift(
+  p: Project,
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; critical?: boolean; where: string; announcement?: string; notBlocking?: NotBlocking[] },
+): Drift {
+  return writeDrift(p, planDrift(p, input), input.announcement);
 }
 
 /** What the developer adds when fixing the code of a Drift: the number of the chosen fix option (from 1) and a free note. */

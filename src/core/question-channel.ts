@@ -662,6 +662,27 @@ function saysTrama(chunk: unknown): boolean {
 }
 
 /**
+ * Hands `message` to every live editor window of the project, each window on its own, and says for each one whether it
+ * answers that the conversation is Trama's; a window that fails, is slow or does not answer says no.
+ */
+async function editorsSayTrama(projectId: string, message: { type: "cursor-hook" | "copilot-hook"; hook: CursorHook | CopilotHook }, signal: AbortSignal, sockets: Set<Socket>, runtimeDir?: string): Promise<boolean[]> {
+  return Promise.all(records(runtimeDirectory(runtimeDir), projectId).map(async (record) => {
+    try {
+      const editor = await connectEditor(record, signal, sockets);
+      if (!editor || signal.aborted) return false;
+      return await new Promise<boolean>((done) => {
+        const { socket } = editor;
+        socket.once("data", (chunk) => done(saysTrama(chunk)));
+        socket.once("close", () => done(false));
+        socket.write(requestLine(editor.record, { ...message, projectId }));
+      });
+    } catch {
+      return false;
+    }
+  }));
+}
+
+/**
  * Hands a hook of Cursor's chat to every live editor window of its project, each window on its own, and waits until they
  * have taken it, for at most `timeoutMs` (1 second for a prompt or the question tool's check, 5 for the other hooks). A
  * window that is slow or does not answer holds back none of the others. Returns whether a window says the conversation is
@@ -674,23 +695,8 @@ export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: nu
   const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, timeoutMs);
   try {
     const projectId = questionProjectId(projectAt(hook.root));
-    const directory = runtimeDirectory(options.runtimeDir);
-    if (!runtimeDirectoryReady(directory, false)) return false;
-    const answers = await Promise.all(records(directory, projectId).map(async (record) => {
-      try {
-        const editor = await connectEditor(record, controller.signal, sockets);
-        if (!editor || controller.signal.aborted) return false;
-        return await new Promise<boolean>((done) => {
-          const { socket } = editor;
-          socket.once("data", (chunk) => done(saysTrama(chunk)));
-          socket.once("close", () => done(false));
-          socket.write(requestLine(editor.record, { type: "cursor-hook", projectId, hook }));
-        });
-      } catch {
-        return false;
-      }
-    }));
-    return answers.some(Boolean);
+    if (!runtimeDirectoryReady(runtimeDirectory(options.runtimeDir), false)) return false;
+    return (await editorsSayTrama(projectId, { type: "cursor-hook", hook }, controller.signal, sockets, options.runtimeDir)).some(Boolean);
   } catch {
     return false;
   } finally {
@@ -699,21 +705,15 @@ export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: nu
   }
 }
 
-/** Hands a Copilot hook to its project's editor without holding up Copilot; true when the editor says the conversation is Trama's (the question tool's check only). */
+/** Hands a Copilot hook to every live editor window of its project without holding up Copilot; true when a window says the conversation is Trama's (the question tool's check only). */
 export async function sendCopilotHook(hook: CopilotHook, options: { timeoutMs?: number; runtimeDir?: string } = {}): Promise<boolean> {
   const controller = new AbortController();
   const sockets = new Set<Socket>();
   const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, options.timeoutMs ?? 1000);
   try {
     const projectId = questionProjectId(projectAt(hook.root));
-    const editor = await liveEditor(projectId, controller.signal, sockets, options.runtimeDir);
-    if (!editor || controller.signal.aborted) return false;
-    return await new Promise<boolean>((done) => {
-      const { socket } = editor;
-      socket.once("data", (chunk) => done(saysTrama(chunk)));
-      socket.once("close", () => done(false));
-      socket.write(requestLine(editor.record, { type: "copilot-hook", projectId, hook }));
-    });
+    if (!runtimeDirectoryReady(runtimeDirectory(options.runtimeDir), false)) return false;
+    return (await editorsSayTrama(projectId, { type: "copilot-hook", hook }, controller.signal, sockets, options.runtimeDir)).some(Boolean);
   } catch {
     return false;
   } finally {

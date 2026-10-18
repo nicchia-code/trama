@@ -9,7 +9,7 @@ You describe the **existing code** as a Trama **Model** (what the System does) p
 
 ## Hand-over
 
-A new Proposal starts as a **Draft**, not approvable. Finish every file, validate and read the changes before `trama proposal submit <id>`. If submission is refused, fix the reported problems, validate and review again, then retry. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` again: it returns an open Proposal to Draft, so submit again when finished.
+A new Proposal starts as a **Draft**, not approvable. Finish every file, then run `trama proposal submit <id>` without `validate --proposal` or `proposal show` before it: read the changes in the submission's output. If they do not match what you meant, reopen the Proposal with `trama proposal edit <id>`, fix the files, and submit again. If submission is refused, fix the reported problems and submit again. Only after it succeeds tell the developer to review it. Before every later file change, call `trama proposal edit` again: it returns an open Proposal to Draft, so submit again when finished.
 
 ## Announcing cards
 
@@ -54,9 +54,8 @@ When the instruction asks you to write in a language, everything you generate fo
    - behaviour you could not determine.
    Write "None." if there are none. Documentation differences are Drifts, never doubts.
    Give each Drift a short title (see Naming cards).
-8. **Validate every Proposal.** `trama validate --proposal <id>` must report no errors. When it warns of a fragment larger than 12 KB that the Proposal writes into, split that fragment in the same Proposal before handing it over: cut by Feature or by a group of nearby Machines, give every new fragment a name and a description that say when it is needed, move the sections without changing their text, and prefer a few medium fragments to many tiny ones (every fragment counts against the 4,000-character budget of the Requirement skills). Then `trama proposal show <id>`: the changes must describe the code and nothing else.
-9. **Hand every Proposal over.** After validation and review, run `trama proposal submit <id>` for each. A dependency need not be approved for submission. Correct any refusal, validate and review again, then retry before continuing.
-10. **Report and stop.** After every submission succeeds, list the Proposals in the order to approve them, with how many doubts each has, the Drifts you filed (each named by short number and title), the differences you could not file yet, the folders you skipped, and any contradiction with Machines that were already modelled (suggest a Scan for those Features). Approving an import Proposal starts no Scan: the Model already matches the code.
+8. **Hand every Proposal over.** Run `trama proposal submit <id>` for each, without `trama validate --proposal` or `trama proposal show` before it: its checks report the problems and its output prints the changes, which must describe the code and nothing else. When it warns of a fragment larger than 12 KB that the Proposal writes into, split that fragment in the same Proposal and submit again: cut by Feature or by a group of nearby Machines, give every new fragment a name and a description that say when it is needed, move the sections without changing their text, and prefer a few medium fragments to many tiny ones (every fragment counts against the 4,000-character budget of the Requirement skills). A dependency need not be approved for submission. If a submission is refused or its output does not match, reopen the Proposal with `trama proposal edit <id>`, correct it, and submit again before continuing.
+9. **Report and stop.** After every submission succeeds, list the Proposals in the order to approve them, with how many doubts each has, the Drifts you filed (each named by short number and title), the differences you could not file yet, the folders you skipped, and any contradiction with Machines that were already modelled (suggest a Scan for those Features). Approving an import Proposal starts no Scan: the Model already matches the code.
 
 ## Drifts for documentation differences
 
@@ -110,7 +109,7 @@ When the import is over, gather those Drifts into one resolution, unless none is
 
 1. Leave out a Drift that is critical or recurring (it follows an earlier Drift). Read the delegation with `trama drift autopilot --json`: if its `status` is `unavailable`, its `mode` is `disabled`, or it cannot be read, the delegation is off; otherwise leave out each non-critical, non-recurring Drift that has a Fix option, because the delegation resolves it on its own. A Drift left out stays open.
 2. For each remaining Drift, record the recommended decision: when it has an attached Proposal, `proposal`, and the resolution carries that Proposal's changes as the trama-resolve-drifts skill describes; otherwise `fix-code` with option 1.
-3. Announce it with `trama announce proposal "<title>"`, write it with `trama proposal new "<title>" --resolution --non-blocking --announcement <id> --body "<what is resolved and why>"`, and record each decision with `trama proposal resolve-drift <proposal id> <drift id> --decision <decision> [--option 1]`. Validate it with `trama validate --proposal <id>`, read it with `trama proposal show <id>`, and hand it over with `trama proposal submit <id>`.
+3. Announce it with `trama announce proposal "<title>"`, write it with `trama proposal new "<title>" --resolution --non-blocking --announcement <id> --body "<what is resolved and why>"`, and record each decision with `trama proposal resolve-drift <proposal id> <drift id> --decision <decision> [--option 1]`. Hand it over with `trama proposal submit <id>` and read its output.
 
 Never approve or reject this resolution, and never start a Run because of it: the developer decides it, as any manual resolution.
 
