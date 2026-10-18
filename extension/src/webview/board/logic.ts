@@ -126,6 +126,8 @@ export interface ProposalCard {
   name: CardName;
   heading: string;
   title: string;
+  /** The Proposal's text after its title, in Markdown; empty when it has none. */
+  body: string;
   resolution: boolean;
   badges: Badge[];
   changes: ChangeSummary;
@@ -299,6 +301,7 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, 
     name,
     heading: p.kind === "resolution" ? `Resolution Proposal ${name.text}` : `Proposal ${name.text}`,
     title: p.title,
+    body: p.body,
     resolution: p.kind === "resolution",
     badges: proposalBadges(p, numbers),
     changes: summarizeChanges(p.changes),

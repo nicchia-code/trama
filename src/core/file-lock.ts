@@ -1,4 +1,5 @@
-import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { pause } from "./atomic-write";
 import { TramaError } from "./errors";
@@ -39,18 +40,52 @@ function acquire(path: string, name: string): void {
       return;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (isStale(path)) rmSync(path, { force: true });
-      else if (Date.now() >= deadline) throw new TramaError(`${name} is being written by another process; try again in a moment`);
-      else pause(RETRY_STEP_MS);
+      const age = lockAgeMs(path);
+      // Only a lock older than STALE_MS was left by a process that died holding it. One that vanished meanwhile was
+      // released, maybe already taken by another process: it is never removed here, only created again.
+      if (age !== null && age > STALE_MS) {
+        removeStale(path, name);
+        continue;
+      }
+      if (Date.now() >= deadline) throw new TramaError(`${name} is being written by another process; try again in a moment`);
+      pause(RETRY_STEP_MS);
     }
   }
 }
 
-/** A lock that vanished meanwhile, or one older than STALE_MS, may be taken. */
-function isStale(path: string): boolean {
+/**
+ * Removes a lock that was found older than STALE_MS. The lock is first moved aside under a unique name, so the file
+ * that is checked is the file that is removed: a fresh lock taken by another process meanwhile is put back, never deleted.
+ */
+function removeStale(path: string, name: string): void {
+  const aside = `${path}.${randomBytes(6).toString("hex")}.stale`;
   try {
-    return Date.now() - statSync(path).mtimeMs > STALE_MS;
+    renameSync(path, aside);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  try {
+    const age = lockAgeMs(aside);
+    if (age === null) return;
+    if (age > STALE_MS) return;
+    // A fresh lock: put it back, but never over a lock another process has taken meanwhile.
+    try {
+      linkSync(aside, path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      throw new TramaError(`${name} is being written by another process; try again in a moment`);
+    }
+  } finally {
+    rmSync(aside, { force: true });
+  }
+}
+
+/** How long the lock has existed, or null when it is gone by now. */
+function lockAgeMs(path: string): number | null {
+  try {
+    return Date.now() - statSync(path).mtimeMs;
   } catch {
-    return true;
+    return null;
   }
 }

@@ -227,12 +227,12 @@ const LETTER_KIND: Record<string, CardKind> = { P: "proposal", T: "task", D: "dr
 const KIND_NAME: Record<CardKind, string> = { proposal: "Proposal", task: "Task", drift: "Drift" };
 
 /**
- * For an argument a command received where it expects a card of kind `expected`: the permanent identity of the live card
- * the argument names, when the argument is a short number (`T3` or `t3`); null when it is not shaped like one. A letter
- * followed only by digits is always a short number, never the start of an identity. It is refused, saying why, when the
- * letter is another kind's or when no live card of that kind has the number, so nothing is written for it.
+ * The identity of the live card of kind `expected` that a command argument names by short number (`T3` or `t3`). `find`
+ * gives the identity of a number. Null when the argument is not shaped like a short number. A letter followed only by
+ * digits is always a short number, never the start of an identity. It is refused, saying why, when the letter is another
+ * kind's or when no live card of that kind has the number, so nothing is written for it.
  */
-export function identityOfShortNumber(p: Project, expected: CardKind, argument: string): string | null {
+function citedCard(expected: CardKind, argument: string, find: (number: number) => string | null): { id: string; label: string } | null {
   const match = SHORT_NUMBER.exec(argument);
   if (!match) return null;
   const kind = LETTER_KIND[(match[1] as string).toUpperCase()] as CardKind;
@@ -240,10 +240,38 @@ export function identityOfShortNumber(p: Project, expected: CardKind, argument: 
   const cited = `${KIND_LETTER[kind]}${digits}`;
   if (kind !== expected)
     throw new TramaError(`"${argument}" is the short number ${cited} of a ${KIND_NAME[kind]}, not of a ${KIND_NAME[expected]}. A ${KIND_NAME[expected]} is cited as ${KIND_LETTER[expected]}<number>.`);
-  const identity = /^[1-9]\d{0,14}$/.test(digits) ? syncShortNumbers(p).find(expected, Number(digits)) : null;
-  if (identity === null)
+  const id = /^[1-9]\d{0,14}$/.test(digits) ? find(Number(digits)) : null;
+  if (id === null)
     throw new TramaError(`No live ${KIND_NAME[expected]} has the short number ${cited}. A closed ${KIND_NAME[expected]} has no number: cite it by its identity.`);
-  return identity;
+  return { id, label: cited };
+}
+
+/** The numbers saved in `assigned`, or null when the file is missing, unreadable or cannot be trusted. Reads no card. */
+function savedNumbers(p: Project): Numbers | null {
+  try {
+    return parseAssigned(readFileSync(assignedFile(p), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** The identity of the live card of kind `expected` that a command argument names by short number, or null when it is not one. */
+export function identityOfShortNumber(p: Project, expected: CardKind, argument: string): string | null {
+  return citedCard(expected, argument, (number) => syncShortNumbers(p).find(expected, number))?.id ?? null;
+}
+
+/**
+ * Like `identityOfShortNumber`, for the lock of a Proposal: the number is looked up in the numbers saved in `assigned`,
+ * so no card file is read before the lock is held. A number the saved ones do not name is refused, not looked up in the
+ * cards: reading them first is what the lock must not wait for. Null when the argument is not a short number.
+ */
+export function savedIdentityOfShortNumber(p: Project, expected: CardKind, argument: string): { id: string; label: string } | null {
+  return citedCard(expected, argument, (number) => {
+    const saved = savedNumbers(p);
+    const id = saved === null ? null : new ShortNumbers(saved).find(expected, number);
+    if (id === null) throw new TramaError(`${KIND_LETTER[expected]}${number} is not in the short numbers saved in this working copy, so no card is read: cite the ${KIND_NAME[expected]} by its identity or name, or run a command that reads the ${KIND_NAME[expected]}s to save the numbers again. Nothing was written.`);
+    return id;
+  });
 }
 
 /** How `id` is written in a message: its short number in this working copy while live, otherwise its identity. */

@@ -298,6 +298,7 @@ describe("taken Tasks and the agent terminals", () => {
     const root = mkdtempSync(join(tmpdir(), "trama-resolve-one-"));
     cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
     const p = projectAt(root);
+    const terminalCount = terminals.length;
     const drift = (title: string) => newDrift(p, { where: "src/refund.ts", title, refs: ["order"], happens: "Code does it.", should: "Model says so.", options: FIX_OPTIONS });
     const named = drift("Named");
     const other = drift("Other");
@@ -314,6 +315,8 @@ describe("taken Tasks and the agent terminals", () => {
       dismissDrift(p, other.id);
       await expect(launch.launchAction(p, { kind: "resolve-drifts", drift: other.id })).rejects.toThrow("Resolve this Drift is unavailable: Drift");
     } finally {
+      // Ends the terminal the Resolve opened, so its Run and resolution are not left open for the tests that follow.
+      for (const terminal of terminals.slice(terminalCount)) listeners.close.forEach((fn) => fn(terminal));
       watching.dispose();
       controller.dispose();
       if (previousAgent === undefined) delete settingValues["agent"];
@@ -960,25 +963,33 @@ describe("announcing every launch as its instruction starts", () => {
   test("a terminal scan, import and Resolve Drifts announce their card at once, and a Run announces nothing", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const p = projectAt(dir);
-    let before = listAnnouncements(p).length;
-    await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan");
-    expect(announced(p, before)).toEqual([{ kind: "check", title: "Scanning System", phase: "scanning", terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: [] }]);
+    const terminalCount = terminals.length;
+    try {
+      let before = listAnnouncements(p).length;
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan");
+      expect(announced(p, before)).toEqual([{ kind: "check", title: "Scanning System", phase: "scanning", terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: [] }]);
 
-    before = listAnnouncements(p).length;
-    await launchAgent(dir, "Use the trama-import skill on this repository.", "Import", { kind: "work", title: "Importing from code" });
-    expect(announced(p, before)).toEqual([{ kind: "work", title: "Importing from code", phase: null, terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: [] }]);
+      before = listAnnouncements(p).length;
+      await launchAgent(dir, "Use the trama-import skill on this repository.", "Import", { kind: "work", title: "Importing from code" });
+      expect(announced(p, before)).toEqual([{ kind: "work", title: "Importing from code", phase: null, terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: [] }]);
 
-    before = listAnnouncements(p).length;
-    await launchAgent(dir, "Use the trama-resolve-drifts skill on the Drifts.", "Drifts", { kind: "resolve", drifts: () => ["aaaa1111", "bbbb2222"] });
-    expect(announced(p, before)).toEqual([{ kind: "proposal", title: "Resolve Drifts", phase: null, terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: ["aaaa1111", "bbbb2222"] }]);
+      before = listAnnouncements(p).length;
+      await launchAgent(dir, "Use the trama-resolve-drifts skill on the Drifts.", "Drifts", { kind: "resolve", drifts: () => ["aaaa1111", "bbbb2222"] });
+      expect(announced(p, before)).toEqual([{ kind: "proposal", title: "Resolve Drifts", phase: null, terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: ["aaaa1111", "bbbb2222"] }]);
 
-    before = listAnnouncements(p).length;
-    await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
-    expect(listAnnouncements(p)).toHaveLength(before);
+      before = listAnnouncements(p).length;
+      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
+      expect(listAnnouncements(p)).toHaveLength(before);
+    } finally {
+      // Ends the terminals the launches opened, so no Run or resolution is left open for the tests that follow.
+      for (const terminal of terminals.slice(terminalCount)) listeners.close.forEach((fn) => fn(terminal));
+    }
   });
 
   test("a chat launch announces only when its instruction is really sent: the clipboard and the confirmation step announce nothing", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
+    // Dynamic: the module must load after mock.module replaced "vscode".
+    const { receiveCursorHook } = await import("../extension/src/host/cursor");
     const p = projectAt(dir);
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
@@ -1002,6 +1013,9 @@ describe("announcing every launch as its instruction starts", () => {
       expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan")).toBe("sent");
       expect(announced(p, before)).toEqual([{ kind: "check", title: "Scanning System", phase: "scanning", terminal: null, chat: "cursor", drifts: [] }]);
     } finally {
+      // Ends the chat job of the last launch, so no Run or resolution is left open for the tests that follow.
+      receiveCursorHook({ root: dir, conversation: "announce-chat", hook: "beforeSubmitPrompt", tramaPrompt: true });
+      receiveCursorHook({ root: dir, conversation: "announce-chat", hook: "stop", status: "completed" });
       commandHandler = previousHandler;
       editor.appName = previousApp;
       settingValues.agent = "omp";

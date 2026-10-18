@@ -1,13 +1,4 @@
-import { DELEGATION_DESCRIPTIONS, DELEGATION_ORDER, type SettingSchema, type SettingsValues } from "../../host/settings-schema";
-
-/** The Drift autopilot menu, in place of the two Auto Fix checkboxes: an enum over the three levels, built from the `driftAutoPilot` setting. */
-export const delegationSetting = (drift: SettingSchema): SettingSchema => ({
-  ...drift,
-  control: "enum",
-  values: [...DELEGATION_ORDER],
-  descriptions: DELEGATION_ORDER.map((mode) => DELEGATION_DESCRIPTIONS[mode] ?? ""),
-  default: "disabled",
-});
+import type { SettingSchema, SettingsValues } from "../../host/settings-schema";
 
 /** The settings grouped under their titles, in schema order. */
 export function groupSettings(schema: readonly SettingSchema[]): { title: string; settings: SettingSchema[] }[] {

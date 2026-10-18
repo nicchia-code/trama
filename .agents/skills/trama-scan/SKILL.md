@@ -32,6 +32,7 @@ Every live Proposal, Task and Drift has a temporary **short number** (`P3`, `T3`
 
 - Name cards to the developer by short number and title, for example "Task T3 – title" or "Drift D2 – title", also in the final report. A closed card has no number: use its permanent identity.
 - In every command you run and every file you write (`--proposal`, `--task`, card bodies, references) use **only the permanent identity**, taken from `--json` (field `id`; the number is the field `number`) or from the file name. **Never write a short number in a file**: it changes from one working copy to another.
+- Give every card you create, and its announcement, a **short title**: at most five words, about 40 characters, a name for the card rather than a sentence describing the work (for example "Testo fantasma" instead of "Descrivere Start from Scratch e guidare le richieste scritte con un testo fantasma"). Put the detail in the body, even when the title loses information. No command checks the length of a title. Titles that Trama or a skill composes from another title stay as they are: `Fix code to match the …`, `Import: <Feature>`, the titles of checks.
 
 ## Language
 
@@ -65,12 +66,14 @@ When the instruction asks you to write in a language, everything you generate fo
 
 6. **File Tasks.** One Task per coherent unit of work (typically a State with its Transitions), as specific as possible in `--ref`:
    `trama task new "<what to implement>" --ref order/Refunding --ref order/Paid/user.CANCEL --ref requirements/ui#order/Paid --body "<in domain words: what must be true when done>"`.
+   Give the Task a short title (see Naming cards).
    Reference the Requirement sections the Task must satisfy next to the Model elements. A Task that only applies Requirements without changing behaviour (for example adopting the required theme everywhere) is technical: `--technical --ref requirements/ui#General`.
    The body says *what*, in domain words, not which files to touch.
    **The design link.** When the instruction names a Proposal (the scan follows its approval, and says to link every Task to it), add `--proposal <id>` to every Task you file, so the Board shows the Tasks of one design together. When it names several Proposals, link each Task to the **most recent** of them (the last in the instruction's order) whose scan scope contains one of the Task's references or an element that contains it (`order` contains `order/Paid` and `order/Paid/user.CANCEL`); a Task that only satisfies a Requirement goes to the most recent whose scope lists that Requirement section or its Area. File Tasks with no `--proposal` when the instruction names no Proposal (a scan the developer started by hand).
 7. **File each Drift exactly once, in one of two ways.** `trama drift new` always creates a new card, so decide which way applies before running it.
   - **Ordinary Drift** (the default): first re-read the code at the place you will cite in `--where`, and file only if that code really does what `--happens` says. Then `trama drift new "<title>" --ref <nearest Model element or Requirement> --happens "<what the code does, in terms of behaviour>" --should "<what the Model or Requirement says>" --option "<title of the way you recommend>" --option-text "<what it changes and costs>" --option "<title of another way>" --option-text "<…>" [up to five] --where "<where in the code you saw it>" [--critical when a developer decision is urgently needed]`. Pass `--critical` only when the developer urgently needs to take a position on this case; severity or technical complexity alone is not enough. Otherwise omit it. The two texts, the options and `--where` are required; `--where` is the only place for code locations. Write them as described in "Writing a Drift". Do not pass `--task`: a Drift filed by a Scan has no origin Task. Do not choose the resolution.
   - **Drift with a Proposal**, only when the code handles an important case the Model forgot: first re-read the code at the place you will cite in `--where`, and announce only the Drift, then begin the Proposal by following the `trama-design` skill without its interview: `trama proposal new … --announcement <id of the Drift's announcement>`, then `edit`, write the files, `validate --proposal` and `proposal show` (list your choices in the Proposal body). If `validate` warns that a Requirement fragment the Proposal writes into is larger than 12 KB, split it in the same Proposal, as `trama-design` describes under "Good Requirement habits". Do not submit yet: run `trama drift new … --proposal <id of the Draft> --announcement <id>` once, with the same texts, options and `--where`, adding `--critical` only when the developer urgently needs to take a position on the case (not for severity or complexity alone), and right after it run `trama proposal submit <id>`. If the submission is refused, correct the Proposal, validate and review again, then retry the submission. Never run `drift new` a second time for the same difference.
+  - Give the Drift a short title (see Naming cards).
   - **Drift without Fix options, with a Proposal**, when no fix of the code respects the Model and the Requirements together (for example, two Requirements contradict each other): the same steps as above, but the Drift takes no `--option`, and its Proposal repairs the Model or the Requirements. Pass `--proposal` and `--where`, and omit every `--option`; a Drift without Fix options is refused without a Proposal.
 
    Do not open a Proposal for small differences: the default is that the code gets fixed.
@@ -93,6 +96,33 @@ The developer reads a Drift at a glance, as a programmer, but not as a code revi
 - **Give two to five fix options**, the one you recommend first: each `--option "<title>"` is followed by its `--option-text "<text>"`. Each is a different way to reach what should happen, not a step of one plan, and says in terms of behaviour what changes and what it costs. About 60 words each, short Markdown, no headings or tables inside an option. Titles differ. A Drift filed with fewer than two, more than five, or an option missing its title or text is refused.
 - **Fix options reach what should happen** without changing the Model or any Requirement, and respect every Requirement that applies to the elements of the Drift, not only those it names. An option that asks for an exception to, or a change of, the Model or a Requirement is not a fix option: that way goes to a Drift with a Proposal.
 - **Use short Markdown:** short paragraphs, a bulleted list when there are several separate points, **bold** for the one or two terms that carry the difference. No headings inside a section, no tables, about 100 words per side.
+
+## Experimental Drift blocker
+
+This section applies only when the instruction says "The experimental Drift blocker is on". Without that sentence, never name a Task in `--not-blocking`, and skip this section.
+
+When it applies, do this before each `trama drift new`:
+
+1. Ask for the candidates with the references and origin you will file with: `trama drift candidates --ref <ref>… [--task <origin>]`. It lists the Tasks that Drift would block, the origin included, and writes nothing. If it lists none, file the Drift as usual.
+2. Judge each candidate: does the difference you found touch that Task, its references or what it changes? Leave free only the Tasks the difference does not touch, with a one-line reason for each, in Italian. Judging only removes blocks: never leave free a Task the difference touches, and never name a Task the command did not list.
+3. Pass each Task you leave free as `--not-blocking <permanent ID>` followed by `--not-blocking-reason "<reason>"`, in the same order: they pair the way `--option` and `--option-text` do. Pass none when the difference touches every candidate.
+
+The judgement is made once, at filing: a Drift keeps the Tasks it leaves free and blocks every other one, including the Tasks created later about the same thing.
+
+When you start sub-agents, pass them the sentence "The experimental Drift blocker is on" together with this section, and ask each one to report the permanent IDs of the Drifts it registered and, for each, whether it blocks any Task.
+
+### Final resolution of the Drifts that block nothing
+
+Keep the permanent ID of each Drift you file that blocks no Task: it blocks none when every candidate was left free, or when there was no candidate. Sub-agents report the same, as above.
+
+When the scan is over (after its last step and the end-of-Run scan, if there is one), gather those Drifts into one resolution, unless none is left:
+
+1. Leave out a Drift that is critical or recurring (it follows an earlier Drift). Read the delegation with `trama drift autopilot --json`: if its `status` is `unavailable`, its `mode` is `disabled`, or it cannot be read, the delegation is off; otherwise leave out each non-critical, non-recurring Drift that has a Fix option, because the delegation resolves it on its own. A Drift left out stays open.
+2. For each remaining Drift, record the recommended decision: when it has an attached Proposal, `proposal`, and the resolution carries that Proposal's changes as the trama-resolve-drifts skill describes; otherwise `fix-code` with option 1.
+3. Announce it with `trama announce proposal "<title>"`, write it with `trama proposal new "<title>" --resolution --non-blocking --announcement <id> --body "<what is resolved and why>"`, and record each decision with `trama proposal resolve-drift <proposal id> <drift id> --decision <decision> [--option 1]`. Validate it with `trama validate --proposal <id>`, read it with `trama proposal show <id>`, and hand it over with `trama proposal submit <id>`.
+
+Never approve or reject this resolution, and never start a Run because of it: the developer decides it, as any manual resolution.
+
 ## Autopilot coordination
 
 - A scan started by Trama is part of the project-wide autopilot barrier, whether it scans the System, a Feature, or is the selective end-of-Run scan. Do not treat the global last-scan record as proof that all scans have finished.

@@ -43,7 +43,7 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
   - `Dismiss Drift`: `circle-slash`.
   - `Open` di un Task: `go-to-file`.
   - `Show details`: `chevron-down`; `Hide details`: `chevron-up`.
-  - `Close` di un avviso e della modale di una voce di History: `close`.
+  - `Close` di un avviso, della modale di una voce di History e della modale del corpo di una Proposal: `close`.
   - La «i» di una voce di History: `info`, a sola icona.
 - L'icona è grande 16 px, come quelle in fondo alle colonne, e resta a sinistra del testo anche quando lo spazio è poco: il testo non sparisce mai e il pulsante va a capo o si stringe come senza icona. Quando l'etichetta cambia (`Scan System · N`, `Show details` che diventa `Hide details`) l'icona resta, e cambia solo dove la mappa dà un'icona diversa.
 - L'icona ha il colore del testo del pulsante, anche nei pulsanti primari e in quelli disabilitati; nessuna icona ha un colore proprio.

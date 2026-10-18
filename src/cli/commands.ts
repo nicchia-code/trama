@@ -393,18 +393,17 @@ export const COMMANDS: Command[] = [
     } },
   { name: "proposal label", args: "<id> <label>", summary: "Write or change the short label of a Proposal (1 to 30 characters, one line); an open Proposal returns to Draft", run(ctx, a) {
       const project = ctx.project();
-      const id = proposalArg(ctx, a[0] as string);
-      const { proposal, returnedToDraft } = setProposalLabel(project, id, a[1] as string);
+      const { proposal, returnedToDraft } = withProposalLock(project, a[0] as string, (id) => setProposalLabel(project, id, a[1] as string), true);
+      const id = proposal.id;
       const n = numbersOf(ctx);
       return text(`Label of Proposal ${n.name("proposal", id)} is "${proposal.data.label}".${returnedToDraft ? "\nProposal returned to Draft; submit it again when finished." : ""}`, { id, number: n.label("proposal", id), label: proposal.data.label, status: proposal.data.status, returnedToDraft });
     } },
   { name: "proposal edit", args: "<id> <model-path>", summary: "Make a Model file, or specs.yaml, editable inside a Proposal; prints the path to edit", run(ctx, a) {
       const project = ctx.project();
-      const id = proposalArg(ctx, a[0] as string);
-      const { path, returnedToDraft } = withProposalLock(project, id, () => {
-        const wasOpen = getProposal(project, id).data.status === "open";
-        return { path: editInProposal(project, id, a[1] as string), returnedToDraft: wasOpen };
-      });
+      const { id, path, returnedToDraft } = withProposalLock(project, a[0] as string, (proposalId) => {
+        const wasOpen = getProposal(project, proposalId).data.status === "open";
+        return { id: proposalId, path: editInProposal(project, proposalId, a[1] as string), returnedToDraft: wasOpen };
+      }, true);
       return text(`${path}${returnedToDraft ? "\nProposal returned to Draft; submit it again when finished." : ""}`, { id, number: numbersOf(ctx).label("proposal", id), path, status: "draft", returnedToDraft });
     } },
   { name: "proposal resolve-drift", args: "<id> <drift>", summary: "Record or replace, in a resolution Proposal, the decision on an open Drift (--decision proposal|dismissed|fix-code; --option <n> and --note <text> only with fix-code); --remove takes the Drift out of the list. Returns an open resolution to Draft", options: { decision: { type: "string" }, option: { type: "string" }, note: { type: "string" }, remove: { type: "boolean" } }, run(ctx, a, o) {
@@ -415,19 +414,20 @@ export const COMMANDS: Command[] = [
       if (remove && (decision !== undefined || o["option"] !== undefined || o["note"] !== undefined)) throw new UsageError("--remove takes no decision, option or note");
       const option = o["option"] === undefined ? undefined : Number(str(o["option"]));
       if (option !== undefined && !Number.isInteger(option)) throw new UsageError("--option must be a whole number");
-      const drift = driftArg(ctx, a[1] as string);
-      const { proposal, returnedToDraft } = resolveDriftInProposal(project, proposalArg(ctx, a[0] as string), drift, { ...(decision ? { decision: decision as DriftDecisionKind } : {}), ...(option !== undefined ? { option } : {}), ...(o["note"] !== undefined ? { note: str(o["note"]) ?? "" } : {}), remove });
+      const { proposal, returnedToDraft, drift } = withProposalLock(project, a[0] as string, (id) => {
+        const driftId = driftArg(ctx, a[1] as string);
+        return { drift: driftId, ...resolveDriftInProposal(project, id, driftId, { ...(decision ? { decision: decision as DriftDecisionKind } : {}), ...(option !== undefined ? { option } : {}), ...(o["note"] !== undefined ? { note: str(o["note"]) ?? "" } : {}), remove }) };
+      }, true);
       const n = numbersOf(ctx);
       return text(`${remove ? "Removed" : "Recorded"} Drift ${n.name("drift", drift)} ${remove ? "from" : `as ${decision} in`} Proposal ${n.name("proposal", proposal.id)}.${returnedToDraft ? " Proposal returned to Draft; submit it again when finished." : ""}`, { id: proposal.id, number: n.label("proposal", proposal.id), drift, status: proposal.data.status, returnedToDraft, drifts: proposal.data.drifts });
     } },
   { name: "proposal delete", args: "<id> <model-path>", summary: "Mark a Model file, or specs.yaml, for deletion in a Proposal", run(ctx, a) {
       const project = ctx.project();
-      const id = proposalArg(ctx, a[0] as string);
-      const returnedToDraft = withProposalLock(project, id, () => {
-        const wasOpen = getProposal(project, id).data.status === "open";
-        deleteInProposal(project, id, a[1] as string);
-        return wasOpen;
-      });
+      const { id, returnedToDraft } = withProposalLock(project, a[0] as string, (proposalId) => {
+        const wasOpen = getProposal(project, proposalId).data.status === "open";
+        deleteInProposal(project, proposalId, a[1] as string);
+        return { id: proposalId, returnedToDraft: wasOpen };
+      }, true);
       const n = numbersOf(ctx);
       return text(`Marked ${a[1]} for deletion in Proposal ${n.name("proposal", id)}.${returnedToDraft ? " Proposal returned to Draft; submit it again when finished." : ""}`, { id, number: n.label("proposal", id), status: "draft", returnedToDraft });
     } },

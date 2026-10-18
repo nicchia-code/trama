@@ -10,6 +10,7 @@ import { announcedGhosts, autopilotNote, type BoardColumn, type BoardResolve, bu
 import { type CardEnv, renderAnnounced, renderCard } from "./render";
 import { historyEntryNode, type HistoryEntryNode } from "./history-entry";
 import { modelDialog } from "./model-dialog";
+import { proposalDialog } from "./proposal-dialog";
 import { icon, type IconName, setIcon, setIconLabel } from "../icons";
 import { scanButtonLabel } from "../scan-label";
 
@@ -90,6 +91,14 @@ export const mountBoard = (root: HTMLElement, context: ViewContext): BoardView =
     board.querySelector<HTMLElement>(`[data-key="proposal:${proposal}"] [data-action="model"]`)?.focus();
   });
   root.append(modelWindow.node);
+  /** The window that shows the body of a Backlog Proposal; the developer's focus goes back to its title when it closes. */
+  const proposalWindow = proposalDialog(context, (proposal) => {
+    board.querySelector<HTMLElement>(`[data-key="proposal:${proposal}"] [data-action="open"]`)?.focus();
+  });
+  root.append(proposalWindow.node);
+  /** The Proposal card of the Backlog with this identity, as the newest picture drew it. */
+  const backlogCard = (proposal: string): ProposalCard | undefined =>
+    lastColumns.find((column) => column.id === "backlog")?.cards.find((card): card is ProposalCard => card.kind === "proposal" && card.id === proposal);
   /** The Proposal card of the Backlog that can have its model chosen, as the newest picture drew it. */
   const choosableCard = (proposal: string): ProposalCard | undefined =>
     lastColumns.find((column) => column.id === "backlog")?.cards.find((card): card is ProposalCard => card.kind === "proposal" && card.id === proposal && card.choosable);
@@ -111,6 +120,10 @@ export const mountBoard = (root: HTMLElement, context: ViewContext): BoardView =
     chooseModel: (proposal) => {
       const card = choosableCard(proposal);
       if (card !== undefined) modelWindow.open(card, models.agent);
+    },
+    openProposal: (proposal) => {
+      const card = backlogCard(proposal);
+      if (card !== undefined) proposalWindow.open(card);
     },
   };
 
@@ -300,6 +313,9 @@ export const mountBoard = (root: HTMLElement, context: ViewContext): BoardView =
     // The model window follows its Proposal: it redraws from the newest card, and closes when the card is gone.
     const shownProposal = modelWindow.shown();
     if (shownProposal !== null) modelWindow.update(choosableCard(shownProposal), models.agent);
+    // The body window follows its Proposal too: it redraws from the newest card, and closes when the card left Backlog.
+    const shownBody = proposalWindow.shown();
+    if (shownBody !== null) proposalWindow.update(backlogCard(shownBody));
 
     if (focused?.key !== undefined && (document.activeElement === document.body || document.activeElement === null)) {
       const card = [...board.querySelectorAll<HTMLElement>("[data-key]")].find((n) => n.dataset["key"] === focused.key);

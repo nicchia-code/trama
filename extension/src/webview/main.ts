@@ -3,6 +3,7 @@ import type { NavigateOptions, ToHost, ToWebview, ViewName } from "../protocol";
 import { mountBoard } from "./board";
 import { mountDiagram } from "./diagram";
 import { mountGetStarted } from "./getstarted";
+import { icon } from "./icons";
 import { mountQuestions } from "./questions";
 import { mountRequirements } from "./requirements";
 import { mountSpecs } from "./specs";
@@ -27,13 +28,14 @@ app.innerHTML = `
     <button class="shell-tab" data-view="board" role="tab">Board<span class="shell-badge" data-badge hidden></span></button>
     <button class="shell-tab" data-view="diagram" role="tab">Diagram</button>
     <button class="shell-tab" data-view="requirements" role="tab">Requirements</button>
-    <button class="shell-tab" data-view="settings" role="tab">Settings</button>
     <button class="shell-tab" data-view="specs" role="tab">Specs</button>
     <span class="shell-spacer"></span>
+    <button class="shell-tab shell-tab-gear" data-view="settings" role="tab" title="Settings" aria-label="Settings"></button>
   </div>
   <div class="shell-error" data-error hidden><span data-error-text></span><button data-dismiss aria-label="Dismiss">×</button></div>
   <details class="shell-model-errors" data-model-errors hidden><summary data-model-errors-summary></summary><ul data-model-errors-list></ul></details>
   <div class="shell-views"></div>`;
+(app.querySelector('[data-view="settings"]') as HTMLElement).replaceChildren(icon("settings-gear"));
 
 const views = app.querySelector(".shell-views") as HTMLElement;
 const roots: Record<ViewName, HTMLElement> = { getstarted: document.createElement("div"), diagram: document.createElement("div"), board: document.createElement("div"), requirements: document.createElement("div"), specs: document.createElement("div"), settings: document.createElement("div") };

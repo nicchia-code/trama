@@ -259,3 +259,22 @@ export function findCard(dir: string, query: string, kind: string, layout: CardL
   if (prefixed.length > 1) matchingIds(kind, query, prefixed);
   throw new TramaError(`No ${kind} with ID "${query}"`);
 }
+
+/**
+ * The name the lock of the card `query` names is taken under, read from the folder or file names alone: no file of a
+ * card is opened, so a lock can be held before any of them is read. The name is the card's identity as its name gives
+ * it, and an all-digit identity is named by the number it spells, so `12` and `0012` name one lock. A query that names
+ * no card, or several, is refused as `findCard` refuses it.
+ */
+export function lockNameOf(dir: string, query: string, kind: string): string {
+  const stems = existsSync(dir) ? readdirSync(dir).filter((name) => !name.startsWith(".")).map(stemOf) : [];
+  const stemQuery = stemOf(query);
+  const digits = /^\d+$/.test(query);
+  const idOf = (stem: string) => stem.split("-")[0] ?? stem;
+  let hits = stems.filter((stem) => stem === stemQuery || (digits && /^\d+$/.test(idOf(stem)) ? Number(idOf(stem)) === Number(query) : idOf(stem) === query));
+  if (hits.length === 0 && !digits) hits = stems.filter((stem) => idOf(stem).startsWith(query));
+  const keys = new Set(hits.map((stem) => (/^\d+$/.test(idOf(stem)) ? String(Number(idOf(stem))).padStart(4, "0") : idOf(stem))));
+  if (keys.size === 0) throw new TramaError(`No ${kind} with ID "${query}"`);
+  if (keys.size > 1) throw new TramaError(`Several ${kind}s match "${query}": ${hits.map(idOf).sort((a, b) => a.localeCompare(b)).join(", ")}`);
+  return [...keys][0] as string;
+}

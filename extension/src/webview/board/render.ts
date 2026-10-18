@@ -26,6 +26,8 @@ export interface CardEnv {
   runReason(): string | null;
   /** Opens the model window of a Proposal that carries Tasks. */
   chooseModel(proposal: string): void;
+  /** Opens the body window of a Proposal in Backlog. */
+  openProposal(proposal: string): void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -178,7 +180,19 @@ function proposal(card: ProposalCard, env: CardEnv): HTMLElement {
   const node = shell(card, `${card.heading}: ${card.title}`);
   if (card.resolution) node.className = "board-card board-card-resolution";
   const controls = card.choosable ? modelControls(card, env) : [];
-  node.append(head(card.resolution ? "Resolution Proposal" : "Proposal", card.name, ...card.badges.map((b) => badge(b, env.numbers())), ...controls), el("h3", "board-card-title", card.title));
+  const open = el("button", "board-card-open", card.title);
+  open.type = "button";
+  open.dataset["action"] = "open";
+  open.addEventListener("click", () => env.openProposal(card.id));
+  const title = el("h3", "board-card-title");
+  title.append(open);
+  node.append(head(card.resolution ? "Resolution Proposal" : "Proposal", card.name, ...card.badges.map((b) => badge(b, env.numbers())), ...controls), title);
+  node.classList.add("board-card-openable");
+  // A click on the card, outside its buttons, badges and Drift rows, opens its body too.
+  node.addEventListener("click", (event) => {
+    if (event.target instanceof Element && event.target.closest("button, a, .board-badge") !== null) return;
+    env.openProposal(card.id);
+  });
   if (card.creates !== null) {
     const creates = el("p", "board-muted board-card-creates", card.creates);
     creates.title = card.creates;

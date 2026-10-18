@@ -1088,7 +1088,7 @@ export class Controller implements vscode.Disposable {
       return;
     }
     if (message.type === "setDelegation") {
-      await this.applyPlan(planDelegationChange(settings().inspect<unknown>(sectionKey(DRIFT_KEY))?.globalValue, message.mode));
+      await this.applyPlan(planDelegationChange(this.manifestSettings().find((s) => s.key === DRIFT_KEY), settings().inspect<unknown>(sectionKey(DRIFT_KEY))?.globalValue, message.mode));
       return;
     }
     if (message.type === "writeDesignRequest") {

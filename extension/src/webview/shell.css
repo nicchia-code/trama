@@ -12,6 +12,7 @@ body {
 .shell-tab { background: none; border: 0; border-bottom: 2px solid transparent; color: inherit; padding: 4px 12px; cursor: pointer; font: inherit; opacity: .75; }
 .shell-tab:hover { opacity: 1; }
 .shell-tab[aria-selected="true"] { opacity: 1; border-bottom-color: var(--vscode-focusBorder, #007fd4); }
+.shell-tab-gear { display: flex; align-items: center; padding: 4px 8px; }
 .shell-badge { background: var(--vscode-badge-background, #4d4d4d); color: var(--vscode-badge-foreground, #fff); border-radius: 9px; padding: 0 6px; margin-left: 6px; font-size: 11px; }
 .shell-spacer { flex: 1; }
 .shell-error { display: flex; gap: 8px; align-items: flex-start; padding: 6px 10px; background: var(--vscode-inputValidation-errorBackground, #5a1d1d); border-bottom: 1px solid var(--vscode-inputValidation-errorBorder, #be1100); white-space: pre-wrap; }

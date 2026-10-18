@@ -15,12 +15,15 @@ For the format of Model and Requirement files, read [`trama-design`](../trama-de
 - The Model describes *what can happen*, never *how it is built*: no variables, field names, database columns, endpoints, classes or file paths in Model files. Technology, layout, release and data choices belong in Requirements and Specs.
 - In every command and every file use only the **permanent identity** of a card (from `--json`, field `id`, or from the file name). Never write a short number (`P3`, `T3`) in a file.
 - Name cards to the developer by short number and title ("Proposal P3 – title"). A closed card has no number: use its identity.
+- Give every card you create, and its announcement, a **short title**: at most five words, about 40 characters, a name for the card rather than a sentence describing the work (for example "Testo fantasma" instead of "Descrivere Start from Scratch e guidare le richieste scritte con un testo fantasma"). Put the detail in the body, even when the title loses information. No command checks the length of a title. Titles that Trama or a skill composes from another title stay as they are: `Fix code to match the …`, `Import: <Feature>`, the titles of checks.
 
 ## Step 1: read the request
 
 The instruction names a file `.trama/requests/<id>.md`. Read the **whole** file before anything else. If it does not exist, tell the developer that the request is gone and stop, without opening any Proposal.
 
 The request is the starting point of the interview, never its answers. Every decision it makes still becomes a question with its options, the option the request indicates being your recommendation.
+
+Look at every image the request links, with the same rules as `trama-design`: local files and web addresses you can open, images you cannot see ignored silently, what matters written in words, and no copy, link or citation of the request's images, or their paths, in the Proposal, the Model, the Requirements, the Specs or the Tasks.
 
 ## Step 2: check the Model is empty
 
@@ -46,6 +49,8 @@ Open exactly one Proposal, bound to the request:
 
 `trama proposal new "<title>" --setup --body "<why>" --request <id>`
 
+Give the Proposal a short title (see Hard rules).
+
 The body says why and summarises each decision of the interview, one line each, with the assumptions made for skipped questions. Then:
 
 1. **Model**: System, Features, Machines and Actors as they are agreed, each through `trama proposal edit <id> <model-path>`.
@@ -57,7 +62,7 @@ Then `trama proposal show <id>` and read it: it must match what was agreed and n
 
 ## Step 5: validate and hand over
 
-Give the Proposal a short label, 1 to 30 characters on one line, with `trama proposal label <id> "<text>"` (or `--label` at `proposal new`): a Draft with Tasks is refused without one. Then run `trama validate --proposal <id>` until it reports no errors, as in `trama-design`. Then `trama proposal submit <id>`. If it is refused, fix the reported problems, validate again and retry.
+Run `trama validate --proposal <id>` until it reports no errors, as in `trama-design`. Then `trama proposal submit <id>`. If it is refused, fix the reported problems, validate again and retry.
 
 After a successful hand-over, read the result of `trama proposal submit`:
 

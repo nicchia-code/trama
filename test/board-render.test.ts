@@ -4,6 +4,7 @@ import type { CardNumbers } from "../src/core/card-names";
 import { announcedCard, type ProposalCard, type TaskCard, type WaitingCard } from "../extension/src/webview/board/logic";
 import { renderAnnounced, renderCard } from "../extension/src/webview/board/render";
 import { historyEntryNode } from "../extension/src/webview/board/history-entry";
+import { proposalDialog } from "../extension/src/webview/board/proposal-dialog";
 import type { HistoryTaskView, HistoryView } from "../src/core/snapshot";
 
 class Node {
@@ -47,6 +48,7 @@ const proposal: ProposalCard = {
   badges: [{ label: "requires old", tooltip: "Requires Proposal old", tone: "info", card: { kind: "proposal", id: "old" } }],
   resolution: false, changes: { files: [], more: 0 }, blocker: "Resolve the requirement first", touches: { model: true, requirements: false }, resolves: [],
   creates: null, rejectBlocker: null, choosable: false, model: null,
+  body: "",
 };
 const task: TaskCard = {
   kind: "task", key: "task:liveTask", id: "liveTask", name: { text: "T3", isNumber: true }, title: "A task", technical: false,
@@ -347,4 +349,59 @@ test("a row names the Tasks its Drift leaves free by number, each with its reaso
     if (saved === undefined) Reflect.deleteProperty(globalThis, "document");
     else Reflect.set(globalThis, "document", saved);
   }
+});
+
+describe("Backlog Proposal body window", () => {
+  const withDocument = (run: () => void) => {
+    const scope = globalThis as { document?: unknown };
+    const previous = scope.document;
+    scope.document = {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (text: string) => Object.assign(new Node("#text"), { textContent: text }),
+    };
+    try {
+      run();
+    } finally {
+      if (previous === undefined) delete scope.document;
+      else scope.document = previous;
+    }
+  };
+  const context = { post: () => {}, navigate: () => {}, openLink: () => {} } as never;
+
+  test("opens the body of its Proposal under its number and title, and Close shuts it", () => {
+    withDocument(() => {
+      const closed: string[] = [];
+      const dialog = proposalDialog(context, (id) => closed.push(id));
+      dialog.open({ ...proposal, body: "Testo **lungo** della Proposal." });
+      const node = dialog.node as unknown as Node;
+      expect(node.open).toBe(true);
+      expect(dialog.shown()).toBe("live");
+      expect(node.all.find((n) => n.className === "board-proposal-dialog-title")?.renderedText).toBe("P2 A proposal");
+      expect(node.renderedText).toContain("Testo lungo della Proposal.");
+      node.all.find((n) => n.className === "trama-btn board-proposal-close")?.click();
+      expect(node.open).toBe(false);
+      expect(closed).toEqual(["live"]);
+      expect(dialog.shown()).toBeNull();
+    });
+  });
+
+  test("a Proposal with no body says it has no description", () => {
+    withDocument(() => {
+      const dialog = proposalDialog(context, () => {});
+      dialog.open({ ...proposal, body: "  " });
+      expect((dialog.node as unknown as Node).renderedText).toContain("This Proposal has no description.");
+    });
+  });
+
+  test("the window closes by itself when its Proposal leaves Backlog", () => {
+    withDocument(() => {
+      const closed: string[] = [];
+      const dialog = proposalDialog(context, (id) => closed.push(id));
+      dialog.open(proposal);
+      dialog.update(undefined);
+      expect((dialog.node as unknown as Node).open).toBe(false);
+      expect(closed).toEqual(["live"]);
+    });
+  });
 });

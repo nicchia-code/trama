@@ -17,7 +17,7 @@
 .st-tip-current { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, inherit); }
 .st-tip-mark { font-style: italic; opacity: .85; }
 .st-select, .st-input { max-width: 100%; padding: 3px 6px; font: inherit; color: var(--vscode-dropdown-foreground, inherit); background: var(--vscode-dropdown-background, #3c3c3c); border: 1px solid var(--vscode-dropdown-border, transparent); border-radius: 2px; }
-.st-input[type="number"] { width: 120px; }
+.st-input[type="number"] { field-sizing: content; width: auto; justify-self: start; }
 .st-input[type="text"] { width: 100%; justify-self: stretch; }
 .st-input::placeholder { color: var(--vscode-input-placeholderForeground, inherit); opacity: .6; }
 .st-setting input[type="checkbox"] { margin: 0; }

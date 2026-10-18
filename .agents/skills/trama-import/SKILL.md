@@ -32,6 +32,7 @@ Every live Proposal and Drift has a temporary **short number** (`P3`, `D2`) besi
 
 - Name Proposals and Drifts to the developer by short number and title, for example "Proposal P3 – Import: title" or "Drift D2 – title", also in the final report. A closed card has no number: use its permanent identity.
 - In every command you run and every file you write (`--requires`, the Proposal bodies, the doubts) use **only the permanent identity**, taken from `--json` (field `id`; the number is the field `number`) or from the file or folder name. **Never write a short number in a file**: it changes from one working copy to another.
+- Give every card you create, and its announcement, a **short title**: at most five words, about 40 characters, a name for the card rather than a sentence describing the work (for example "Testo fantasma" instead of "Descrivere Start from Scratch e guidare le richieste scritte con un testo fantasma"). Put the detail in the body, even when the title loses information. No command checks the length of a title. Titles that Trama or a skill composes from another title stay as they are: `Fix code to match the …`, `Import: <Feature>`, the titles of checks.
 
 ## Language
 
@@ -52,6 +53,7 @@ When the instruction asks you to write in a language, everything you generate fo
    - code that looks like a bug, a missing case or dead code, with its location, where the documentation does not say otherwise;
    - behaviour you could not determine.
    Write "None." if there are none. Documentation differences are Drifts, never doubts.
+   Give each Drift a short title (see Naming cards).
 8. **Validate every Proposal.** `trama validate --proposal <id>` must report no errors. When it warns of a fragment larger than 12 KB that the Proposal writes into, split that fragment in the same Proposal before handing it over: cut by Feature or by a group of nearby Machines, give every new fragment a name and a description that say when it is needed, move the sections without changing their text, and prefer a few medium fragments to many tiny ones (every fragment counts against the 4,000-character budget of the Requirement skills). Then `trama proposal show <id>`: the changes must describe the code and nothing else.
 9. **Hand every Proposal over.** After validation and review, run `trama proposal submit <id>` for each. A dependency need not be approved for submission. Correct any refusal, validate and review again, then retry before continuing.
 10. **Report and stop.** After every submission succeeds, list the Proposals in the order to approve them, with how many doubts each has, the Drifts you filed (each named by short number and title), the differences you could not file yet, the folders you skipped, and any contradiction with Machines that were already modelled (suggest a Scan for those Features). Approving an import Proposal starts no Scan: the Model already matches the code.
@@ -88,9 +90,35 @@ Run **`trama ask --root <project>`** with the JSON request on stdin, for every r
 
 If the developer said not to ask, use your recommendations and list them in the report.
 
+## Experimental Drift blocker
+
+This section applies only when the instruction says "The experimental Drift blocker is on". Without that sentence, never name a Task in `--not-blocking`, and skip this section.
+
+When it applies, do this before each `trama drift new`:
+
+1. Ask for the candidates with the references and origin you will file with: `trama drift candidates --ref <ref>… [--task <origin>]`. It lists the Tasks that Drift would block, the origin included, and writes nothing. If it lists none, file the Drift as usual.
+2. Judge each candidate: does the difference you found touch that Task, its references or what it changes? Leave free only the Tasks the difference does not touch, with a one-line reason for each, in Italian. Judging only removes blocks: never leave free a Task the difference touches, and never name a Task the command did not list.
+3. Pass each Task you leave free as `--not-blocking <permanent ID>` followed by `--not-blocking-reason "<reason>"`, in the same order: they pair the way `--option` and `--option-text` do. Pass none when the difference touches every candidate.
+
+The judgement is made once, at filing: a Drift keeps the Tasks it leaves free and blocks every other one, including the Tasks created later about the same thing.
+
+When you start sub-agents, pass them the sentence "The experimental Drift blocker is on" together with this section, and ask each one to report the permanent IDs of the Drifts it registered and, for each, whether it blocks any Task.
+
+### Final resolution of the Drifts that block nothing
+
+Keep the permanent ID of each Drift you file that blocks no Task: it blocks none when every candidate was left free, or when there was no candidate. Sub-agents report the same, as above.
+
+When the import is over, gather those Drifts into one resolution, unless none is left:
+
+1. Leave out a Drift that is critical or recurring (it follows an earlier Drift). Read the delegation with `trama drift autopilot --json`: if its `status` is `unavailable`, its `mode` is `disabled`, or it cannot be read, the delegation is off; otherwise leave out each non-critical, non-recurring Drift that has a Fix option, because the delegation resolves it on its own. A Drift left out stays open.
+2. For each remaining Drift, record the recommended decision: when it has an attached Proposal, `proposal`, and the resolution carries that Proposal's changes as the trama-resolve-drifts skill describes; otherwise `fix-code` with option 1.
+3. Announce it with `trama announce proposal "<title>"`, write it with `trama proposal new "<title>" --resolution --non-blocking --announcement <id> --body "<what is resolved and why>"`, and record each decision with `trama proposal resolve-drift <proposal id> <drift id> --decision <decision> [--option 1]`. Validate it with `trama validate --proposal <id>`, read it with `trama proposal show <id>`, and hand it over with `trama proposal submit <id>`.
+
+Never approve or reject this resolution, and never start a Run because of it: the developer decides it, as any manual resolution.
+
 ## Autopilot boundary
 
-Import describes existing code and only creates import Proposals and the Drifts of "Drifts for documentation differences"; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.autoFixDrifts` is on (Auto Fix Drifts checked), the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.
+Import describes existing code and only creates import Proposals and the Drifts of "Drifts for documentation differences"; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.driftAutoPilot` is `enabled` or `yolo` (read it with `trama drift autopilot --json`), the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.
 
 ## PowerShell
 

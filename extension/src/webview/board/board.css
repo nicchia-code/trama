@@ -119,6 +119,10 @@
 /* The short number or the identity of a card: one place, one monospaced font; the tooltip and the accessible name tell them apart. */
 .board-card-id { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; font-weight: 600; color: var(--board-muted); font-variant-numeric: tabular-nums; }
 .board-card-title { margin: 0; font-size: 1em; font-weight: 600; overflow-wrap: anywhere; }
+/* A Backlog Proposal's card points at its body; its title is the button that opens it. Its buttons, badges and Drift rows keep their own clicks. */
+.board-card-openable { cursor: pointer; }
+.board-card-open { font: inherit; color: inherit; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.board-card-open:focus-visible { outline: 1px solid var(--vscode-focusBorder, currentColor); outline-offset: 1px; }
 /* The tag of a Task that comes from a Proposal: its title in the colour the hash of the title picks; one line, cut with dots. */
 .board-proposal-tag { flex: 0 1 auto; min-width: 0; max-width: 100%; padding: 0 6px; border-radius: 3px; border: 1px solid var(--tag-colour); font-size: 11px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: color-mix(in srgb, var(--tag-colour) 18%, transparent); color: var(--vscode-foreground); }
 
@@ -246,3 +250,9 @@ button.board-btn { padding: 2px 8px; }
 .board-model-body .st-input { width: 100%; box-sizing: border-box; }
 .board-model-body .st-note, .board-model-hint { margin: 0; }
 .board-model-chosen { margin: 0; color: var(--vscode-editorWarning-foreground, inherit); }
+.board-proposal-dialog { width: min(640px, 90vw); max-height: 85vh; padding: 0; border: 1px solid var(--board-border); border-radius: 4px; background: var(--vscode-editor-background, #1e1e1e); color: inherit; }
+.board-proposal-dialog::backdrop { background: rgb(0 0 0 / 40%); }
+.board-proposal-dialog-body { display: flex; flex-direction: column; gap: 10px; max-height: 85vh; padding: 14px 16px; box-sizing: border-box; overflow: auto; }
+.board-proposal-dialog-head { display: flex; align-items: baseline; gap: 12px; }
+.board-proposal-dialog-title { flex: 1; min-width: 0; margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.board-proposal-dialog-content .md { overflow-wrap: anywhere; }

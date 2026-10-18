@@ -14,6 +14,7 @@ import {
   createdNow,
   findCard,
   listCards,
+  lockNameOf,
   newCardId,
   type Project,
   type Document,
@@ -29,7 +30,7 @@ import {
 } from "./store";
 import type { Diagnostic, FileMap } from "./types";
 import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
-import { cardName, identityOfShortNumber } from "./short-numbers";
+import { cardName, identityOfShortNumber, savedIdentityOfShortNumber, syncShortNumbers } from "./short-numbers";
 import { isSpecsRef, SPECS_FILE } from "./specs";
 import { attachedDrift, type DriftOutcome, fixCodeRefusal, listDrifts, planApprovalTasks, requireNotAttached, resolveListedDrifts, writeApprovalTasks } from "./work";
 import { removedElements, type RemovedKind, SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
@@ -426,11 +427,22 @@ export function touch(proposal: Proposal) {
 }
 
 /**
- * Runs `fn` holding the write lock of the Proposal `id`, so the registrations on one Proposal, from several processes,
- * run one after the other: each reads what the previous one saved.
+ * Runs `fn` holding the write lock of the Proposal `citing` names, so the registrations on one Proposal, from several
+ * processes, run one after the other: each reads what the previous one saved. The lock is named from the Proposal's
+ * folder name, and a short number is resolved from the saved numbers, so no file of the Proposal is read before the lock
+ * is held; `fn` receives the identity, resolved under the lock. Under the lock, a short number must still name the same
+ * live Proposal, or nothing runs. `asArgument` applies the rules of a command argument, as `getProposal` does.
  */
-export function withProposalLock<T>(p: Project, id: string, fn: () => T): T {
-  return withFileLock(join(proposalsDir(p), ".locks"), getProposal(p, id).id, fn);
+export function withProposalLock<T>(p: Project, citing: string, fn: (id: string) => T, asArgument = false): T {
+  const dir = proposalsDir(p);
+  const cited = asArgument ? savedIdentityOfShortNumber(p, "proposal", citing) : null;
+  const query = cited?.id ?? citing;
+  const byArgument = asArgument && cited === null;
+  return withFileLock(join(dir, ".locks"), lockNameOf(dir, query, "Proposal"), () => {
+    if (cited !== null && syncShortNumbers(p).label("proposal", cited.id) !== cited.label)
+      throw new TramaError(`${cited.label} no longer names a live Proposal: its number changed while the command waited for the lock. Nothing was written; run the command again.`);
+    return fn(findCard(dir, query, "Proposal", "folder", byArgument).id);
+  });
 }
 
 /**

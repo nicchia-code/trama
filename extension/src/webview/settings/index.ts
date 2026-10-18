@@ -4,7 +4,7 @@ import type { ToWebview } from "../../protocol";
 import { renderInline, renderMarkdown } from "../markdown";
 import { type ModelField, modelField } from "../model-field";
 import type { View, ViewContext } from "../types";
-import { delegationSetting, effectiveValue, groupSettings, numberFromText, workspaceOverride } from "./logic";
+import { effectiveValue, groupSettings, numberFromText, workspaceOverride } from "./logic";
 import css from "./settings.css" with { type: "text" };
 type SettingsMessage = Extract<ToWebview, { type: "settings" }>;
 type ModelSuggestionsMessage = Extract<ToWebview, { type: "modelSuggestions" }>;
@@ -155,6 +155,8 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
     }
     input.addEventListener("input", () => {
       field.dirty = true;
+      // A whole number that is valid again drops its message at once; an invalid one waits for `change`.
+      if (setting.control === "integer" && settingValueError(setting, numberFromText(input.value)) === null) showError(field, null);
     });
     input.addEventListener("change", () => {
       if (setting.control !== "integer") {
@@ -168,6 +170,10 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
       if (reason !== null) return;
       field.dirty = false;
       send(setting.key, value);
+    });
+    // Left without a change (the text went back to what it was), the field no longer holds unsaved text.
+    input.addEventListener("blur", () => {
+      field.dirty = false;
     });
     return input;
   }
@@ -267,7 +273,7 @@ export const mountSettings = (root: HTMLElement, context: ViewContext): Settings
         const section = el("section", "st-group");
         const settings = el("div", "st-settings");
         settings.append(
-          ...group.settings.map((setting) => settingNode(setting.key === DRIFT_KEY ? delegationSetting(setting) : setting)),
+          ...group.settings.map((setting) => settingNode(setting)),
         );
         section.append(el("h2", "st-group-title", group.title), settings);
         return section;

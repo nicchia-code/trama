@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseToHost } from "../extension/src/host/messages";
-import { DELEGATION_DESCRIPTIONS, delegationOf, planDelegationChange, planSettingChange, raisesDelegation, settingsSchema, settingTitle, settingValueError, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
-import { delegationSetting, groupSettings, numberFromText, workspaceOverride } from "../extension/src/webview/settings/logic";
+import { delegationOf, planDelegationChange, planSettingChange, raisesDelegation, settingsSchema, settingTitle, settingValueError, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
+import { groupSettings, numberFromText, workspaceOverride } from "../extension/src/webview/settings/logic";
 
 const manifest: ManifestPackage = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
 const properties = manifest.contributes?.configuration?.properties ?? {};
@@ -17,7 +17,7 @@ const fixture: ManifestPackage = {
         "trama.language": { type: "string", default: "", markdownDescription: "Language." },
         "trama.experimentalDriftBlocker": { type: "boolean", default: false, scope: "application", markdownDescription: "Experimental." },
         "trama.maxParallelAgents": { type: "integer", default: 20, minimum: 1, scope: "application", markdownDescription: "Agents at once." },
-        "trama.driftAutoPilot": { type: "string", enum: ["disabled", "enabled", "yolo"], default: "disabled", scope: "application", markdownDescription: "Drift autopilot." },
+        "trama.driftAutoPilot": { type: "string", enum: ["disabled", "enabled", "yolo"], enumDescriptions: ["Off level.", "Enabled level.", "Yolo level."], default: "disabled", scope: "application", markdownDescription: "Drift autopilot." },
         "trama.submitWhileRunning": { type: "boolean", default: false, markdownDescription: "Runs overlap." },
         "trama.skillsDir": { type: "string", default: ".agents/skills", markdownDescription: "Skills folder." },
       },
@@ -120,40 +120,41 @@ test("the delegation is the value of the Drift autopilot setting; unset or unkno
   expect(raisesDelegation("enabled", "enabled")).toBe(false);
 });
 
-test("the Drift autopilot menu is one enum over the three levels", () => {
-  expect(delegationSetting(setting(DRIFT))).toMatchObject({
-    key: DRIFT,
+test("the Drift autopilot menu takes its levels, explanations and default from the manifest", () => {
+  expect(settingsSchema(manifest).find((s) => s.key === DRIFT)).toMatchObject({
     group: "Drift autopilot",
     control: "enum",
-    default: "disabled",
-    values: ["disabled", "enabled", "yolo"],
+    default: properties[DRIFT]?.default,
+    values: properties[DRIFT]?.enum,
+    descriptions: properties[DRIFT]?.enumDescriptions,
   });
-  expect(delegationSetting(setting(DRIFT)).descriptions).toEqual(["disabled", "enabled", "yolo"].map((mode) => DELEGATION_DESCRIPTIONS[mode] ?? ""));
 });
 
-test("raising the delegation asks first, with the explanation of the level chosen", () => {
-  expect(planDelegationChange(undefined, "enabled")).toEqual({
+test("raising the delegation asks first, with the manifest's explanation of the level chosen", () => {
+  const drift = setting(DRIFT);
+  expect(planDelegationChange(drift, undefined, "enabled")).toEqual({
     ok: true,
-    ask: { question: "Let the agent approve and fix non-critical Drifts on its own?", detail: DELEGATION_DESCRIPTIONS.enabled ?? "" },
+    ask: { question: "Let the agent approve and fix non-critical Drifts on its own?", detail: "Enabled level." },
     writes: [{ key: DRIFT, value: "enabled" }],
   });
-  expect(planDelegationChange("enabled", "yolo")).toEqual({
+  expect(planDelegationChange(drift, "enabled", "yolo")).toEqual({
     ok: true,
-    ask: { question: "Let the agent approve and fix every Drift on its own, critical ones included?", detail: DELEGATION_DESCRIPTIONS.yolo ?? "" },
+    ask: { question: "Let the agent approve and fix every Drift on its own, critical ones included?", detail: "Yolo level." },
     writes: [{ key: DRIFT, value: "yolo" }],
   });
-  expect(planDelegationChange(undefined, "yolo")).toEqual({
+  expect(planDelegationChange(drift, undefined, "yolo")).toEqual({
     ok: true,
-    ask: { question: "Let the agent approve and fix every Drift on its own, critical ones included?", detail: DELEGATION_DESCRIPTIONS.yolo ?? "" },
+    ask: { question: "Let the agent approve and fix every Drift on its own, critical ones included?", detail: "Yolo level." },
     writes: [{ key: DRIFT, value: "yolo" }],
   });
 });
 
 test("lowering the delegation asks nothing; Off clears the setting; the same level writes nothing", () => {
-  expect(planDelegationChange("yolo", "enabled")).toEqual({ ok: true, writes: [{ key: DRIFT, value: "enabled" }] });
-  expect(planDelegationChange("yolo", "disabled")).toEqual({ ok: true, writes: [{ key: DRIFT, value: undefined }] });
-  expect(planDelegationChange("enabled", "disabled")).toEqual({ ok: true, writes: [{ key: DRIFT, value: undefined }] });
-  expect(planDelegationChange("yolo", "yolo")).toEqual({ ok: true, writes: [] });
+  const drift = setting(DRIFT);
+  expect(planDelegationChange(drift, "yolo", "enabled")).toEqual({ ok: true, writes: [{ key: DRIFT, value: "enabled" }] });
+  expect(planDelegationChange(drift, "yolo", "disabled")).toEqual({ ok: true, writes: [{ key: DRIFT, value: undefined }] });
+  expect(planDelegationChange(drift, "enabled", "disabled")).toEqual({ ok: true, writes: [{ key: DRIFT, value: undefined }] });
+  expect(planDelegationChange(drift, "yolo", "yolo")).toEqual({ ok: true, writes: [] });
 });
 
 test("the Drift autopilot key changes only through the menu; the host refuses it in a generic change", () => {

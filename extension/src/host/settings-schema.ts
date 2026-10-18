@@ -74,13 +74,6 @@ export const DELEGATION_QUESTIONS: Record<string, string> = {
   yolo: "Let the agent approve and fix every Drift on its own, critical ones included?",
 };
 
-/** What each level of the Drift autopilot menu grants: its explanation, and the detail of the confirmation when it is raised. */
-export const DELEGATION_DESCRIPTIONS: Record<string, string> = {
-  disabled: "Manual: you decide on every Drift (the default).",
-  enabled: "The agent recommends, approves and fixes non-critical Drifts on its own.",
-  yolo: "Like enabled, critical Drifts included: the ones where your decision is urgently needed.",
-};
-
 /** The delegation of the user's Drift autopilot value: an unset or unknown value counts as `disabled`. */
 export function delegationOf(value: unknown): DelegationMode {
   return typeof value === "string" && DELEGATION_ORDER.includes(value) ? (value as DelegationMode) : "disabled";
@@ -167,10 +160,11 @@ export function planSettingChange(schema: readonly SettingSchema[], key: string,
 
 /**
  * Plans the Drift autopilot menu's level from the user value (`current`). Only a change is written, and `disabled` removes the
- * value. Raising the delegation asks first; the detail is the explanation of the level chosen.
+ * value. Raising the delegation asks first; the detail is the manifest's explanation of the level chosen (`drift`).
  */
-export function planDelegationChange(current: unknown, mode: DelegationMode): SettingPlan {
+export function planDelegationChange(drift: SettingSchema | undefined, current: unknown, mode: DelegationMode): SettingPlan {
   const writes = delegationOf(current) === mode ? [] : [{ key: DRIFT_KEY, value: mode === "disabled" ? undefined : mode }];
   if (!raisesDelegation(delegationOf(current), mode)) return { ok: true, writes };
-  return { ok: true, ask: { question: DELEGATION_QUESTIONS[mode] ?? "", detail: DELEGATION_DESCRIPTIONS[mode] ?? "" }, writes };
+  const level = drift?.values?.indexOf(mode) ?? -1;
+  return { ok: true, ask: { question: DELEGATION_QUESTIONS[mode] ?? "", detail: drift?.descriptions?.[level] ?? "" }, writes };
 }

@@ -1,6 +1,9 @@
 # Changelog
 
 ## 0.0.4
+- A Proposal cited by its short number (`P3`) under the lock is looked up only in the short numbers saved in `.trama/short-numbers/assigned`: a number the saved numbers do not name is refused with a message that says how to cite the Proposal, and no Proposal, Task or Drift file is read before the lock is taken. Cite such a Proposal by its identity or name, or run a command that reads the Proposals to save the numbers again.
+- The commands that change a Proposal's label, Model files or Drift decisions (`proposal label`, `proposal edit`, `proposal delete` and `proposal resolve-drift`) take the Proposal's lock from its folder name before any of its files is read, so the lock is no longer held behind a read of the whole Proposal.
+- A lock left behind by a dead process is moved aside under a unique name before it is removed, and only the moved file is checked for its age: a fresh lock that another process takes meanwhile is put back, never deleted.
 - The automatic Run takes the origin Tasks of its fix Tasks too: once a fix Task is Done, its origin is planned into a new Run of its model in the same collection, without waiting for a new collection. The Runs already planned do not change, and an origin already Done is not reopened.
 - `scripts/demo-agent.ts` only prints the `trama.agent` line for omp. Its `echo` and `path` modes, which wrote the removed custom agent command, are gone, and the acceptance guide no longer uses them.
 - The experimental Drift blocker adds its sentence to the instructions that may file Drifts (scan, implement, implement all, import and the automatic Run), only when the user setting `trama.experimentalDriftBlocker` is on in the user settings; a workspace value is ignored.
