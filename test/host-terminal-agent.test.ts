@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { agentCommandLine } from "../extension/src/host/quote";
-import { agentTemplate, roleOf } from "../extension/src/host/terminal-agent";
+import { advisorOverlay, agentTemplate, roleOf } from "../extension/src/host/terminal-agent";
 
 const none = { model: "", scan: "" };
 const all = { model: "opus", scan: "it's" };
@@ -43,6 +43,15 @@ test("Claude Code gives its Machine comparison sub-agent the scan model only whe
   expect(template).toEndWith("{prompt}");
   expect(agentTemplate("claude", true, { model: "opus", scan: "" }, "posix")).not.toContain('"model"');
   expect(agentTemplate("claude", false, { model: "opus", scan: "haiku" }, "posix")).not.toContain("--agents");
+});
+
+test("an omp Run with the Advisor Scanner on loads its overlay instead of --slow", () => {
+  expect(agentTemplate("omp", false, all, "posix", "/ext/omp-hook.js", undefined, "/store/advisor.yml")).toBe("omp --hook '/ext/omp-hook.js' --advisor --config '/store/advisor.yml' --model 'opus' {prompt}");
+});
+
+test("the advisor overlay sets the advisor role only when trama.scan is set, and turns the task advisors on", () => {
+  expect(advisorOverlay("")).toBe('task:\n  agentAdvisor:\n    task: "on"\n');
+  expect(advisorOverlay("it's \"x\"")).toBe('modelRoles:\n  advisor: "it\'s \\"x\\""\ntask:\n  agentAdvisor:\n    task: "on"\n');
 });
 
 test("settings expose only chat, omp and Claude Code with a panel-default terminal location", async () => {

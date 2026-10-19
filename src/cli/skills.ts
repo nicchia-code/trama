@@ -1,5 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { watchdogFile } from "../core/advisors";
+import { SUB_AGENTS } from "../core/sub-agents";
 import design from "../../skills/trama-design/SKILL.md" with { type: "text" };
 import designFormat from "../../skills/trama-design/FORMAT.md" with { type: "text" };
 import setup from "../../skills/trama-setup/SKILL.md" with { type: "text" };
@@ -10,7 +12,6 @@ import scan from "../../skills/trama-scan/SKILL.md" with { type: "text" };
 import compare from "../../skills/trama-compare/SKILL.md" with { type: "text" };
 import { SKILL_DIRS } from "../core/requirement-skills";
 import { readTextLf, writeFileEnsuringDir } from "../core/store";
-import { SUB_AGENTS } from "../core/sub-agents";
 
 /** Skill files, embedded in the binary: path relative to the skills directory -> content. */
 export const SKILLS: Record<string, string> = {
@@ -73,14 +74,15 @@ export function installSkills(dir: string): string[] {
 /** omp's default role for the Machine-comparison sub-agent; Trama passes `--slow` with the scan model when set. */
 const OMP_ROLES = [["trama-analysis", "@slow"]] as const;
 
-/** omp's definitions of the scan's sub-agents, as they are installed in the project's `.omp/agents/`: path -> content. */
+/** omp's definitions of the scan's sub-agents and the Advisor Scanner's advisors (`.omp/WATCHDOG.yml`), as they are installed in the project's `.omp/`: path -> content. */
 export function ompAgentFiles(root: string): Record<string, string> {
-  return Object.fromEntries(
+  const agents = Object.fromEntries(
     OMP_ROLES.map(([name, model]) => {
       const { description, prompt } = SUB_AGENTS[name];
       return [join(root, ".omp", "agents", `${name}.md`), `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\nmodel: "${model}"\n---\n\n${prompt}\n`];
     }),
   );
+  return { ...agents, [join(root, ".omp", "WATCHDOG.yml")]: watchdogFile() };
 }
 
 /** Existing omp sub-agent definitions under `root` whose content differs from ours, i.e. what an install would destroy. */

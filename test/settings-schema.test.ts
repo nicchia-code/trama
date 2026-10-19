@@ -16,6 +16,7 @@ const fixture: ManifestPackage = {
         "trama.autoExit": { type: "boolean", default: true, scope: "application", markdownDescription: "Close the terminal." },
         "trama.language": { type: "string", default: "", markdownDescription: "Language." },
         "trama.experimentalDriftBlocker": { type: "boolean", default: false, scope: "application", markdownDescription: "Experimental." },
+        "trama.experimentalAdvisorScanner": { type: "boolean", default: false, scope: "application", markdownDescription: "Advisor." },
         "trama.maxParallelAgents": { type: "integer", default: 20, minimum: 1, scope: "application", markdownDescription: "Agents at once." },
         "trama.driftAutoPilot": { type: "string", enum: ["disabled", "enabled", "yolo"], enumDescriptions: ["Off level.", "Enabled level.", "Yolo level."], default: "disabled", scope: "application", markdownDescription: "Drift autopilot." },
         "trama.submitWhileRunning": { type: "boolean", default: false, markdownDescription: "Runs overlap." },
@@ -42,22 +43,18 @@ test("the groups and their keys keep the order of the Settings tab", () => {
   expect(SETTING_GROUPS.map((group) => [group.title, [...group.keys]])).toEqual([
     ["Agent", ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.autoExit", "trama.language"]],
     ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
-    ["Drift autopilot", ["trama.driftAutoPilot"]],
-    ["Runs", ["trama.submitWhileRunning"]],
     ["Project", ["trama.skillsDir"]],
-    ["Experimental", ["trama.experimentalDriftBlocker"]],
+    ["Experimental", ["trama.driftAutoPilot", "trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["Agent", ["trama.autoExit", "trama.language"]],
     ["Models", ["trama.maxParallelAgents"]],
-    ["Drift autopilot", [DRIFT]],
-    ["Runs", ["trama.submitWhileRunning"]],
     ["Project", ["trama.skillsDir"]],
-    ["Experimental", ["trama.experimentalDriftBlocker"]],
+    ["Experimental", [DRIFT, "trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner"]],
   ]);
 });
 
-test("the Experimental Drift Blocker is the one checkbox of the last group, off by default and application-scoped", () => {
+test("the Experimental Drift Blocker is a checkbox of the last group, off by default and application-scoped", () => {
   const blocker = properties["trama.experimentalDriftBlocker"];
   expect(blocker?.type).toBe("boolean");
   expect(blocker?.default).toBe(false);
@@ -65,8 +62,18 @@ test("the Experimental Drift Blocker is the one checkbox of the last group, off 
   expect(settingTitle("trama.experimentalDriftBlocker")).toBe("Experimental Drift Blocker");
   const last = SETTING_GROUPS[SETTING_GROUPS.length - 1];
   expect(last?.title).toBe("Experimental");
-  expect(last?.keys).toEqual(["trama.experimentalDriftBlocker"]);
+  expect(last?.keys).toContain("trama.experimentalDriftBlocker");
   expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalDriftBlocker")?.control).toBe("boolean");
+});
+
+test("the Experimental Advisor Scanner is a checkbox of the last group, off by default and application-scoped", () => {
+  const scanner = properties["trama.experimentalAdvisorScanner"];
+  expect(scanner?.type).toBe("boolean");
+  expect(scanner?.default).toBe(false);
+  expect(scanner?.scope).toBe("application");
+  expect(settingTitle("trama.experimentalAdvisorScanner")).toBe("Experimental Advisor Scanner");
+  expect(SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys).toContain("trama.experimentalAdvisorScanner");
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalAdvisorScanner")?.control).toBe("boolean");
 });
 
 test("controls follow the manifest type; maxParallelAgents is a whole number of at least 1", () => {
@@ -122,7 +129,7 @@ test("the delegation is the value of the Drift autopilot setting; unset or unkno
 
 test("the Drift autopilot menu takes its levels, explanations and default from the manifest", () => {
   expect(settingsSchema(manifest).find((s) => s.key === DRIFT)).toMatchObject({
-    group: "Drift autopilot",
+    group: "Experimental",
     control: "enum",
     default: properties[DRIFT]?.default,
     values: properties[DRIFT]?.enum,

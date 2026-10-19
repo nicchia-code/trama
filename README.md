@@ -162,6 +162,7 @@ For Claude Code, writing in Italian, a typical setup looks like this:
 | `trama.maxParallelAgents` | `20` | How many sub-agents the agent may run at once. |
 | `trama.submitWhileRunning` | `false` | `true` lets you start a run while another is in progress; `false` keeps Run buttons unavailable until it finishes. |
 | `trama.driftAutoPilot` | `disabled` | Drift autopilot: `disabled` (you decide on every Drift), `enabled` (the agent recommends, approves and fixes non-critical Drifts on its own) or `yolo` (also critical Drifts). |
+| `trama.experimentalAdvisorScanner` | `false` | Experimental, with omp as the agent only: `true` makes omp's advisor check each Run's code against the Model and the Requirements, and turns the scans off (Scan buttons, pre-flight and end-of-run scan). See the [extension README](./extension/README.md). |
 
 For the three model settings, write the model name as your agent accepts it, or leave it empty for the agent's default. In the chat they pick the model of the new conversation: in Copilot, a model with that name; in Cursor, the conversation's starting model. Every setting except `trama.skillsDir`, `trama.language` and `trama.submitWhileRunning` lives in your user settings only, so it can't be overridden per workspace. You can change every setting in the Settings tab of the Trama panel, which always saves to your user settings. All the details are in the [extension README](./extension/README.md).
 

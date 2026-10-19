@@ -62,6 +62,32 @@ test("an abnormal job end received from another window keeps its reason; a norma
   expect(jobAbnormalEnd(project, "remote-clean")).toBeUndefined();
 });
 
+test("with the Advisor Scanner on, the end of an omp Run lifts the wait with any outcome, here and in other windows", () => {
+  const project = root();
+  expect(autopilotReady(project)).toBe(false);
+  startJob("run", project, { terminal: "advisor-run" }, true, undefined, "advisor-job", "automatic", "", true);
+  endTerminalJobs("advisor-run", "its terminal was closed");
+  expect(autopilotReady(project)).toBe(true);
+  const other = root();
+  receiveCoordinatorMessage({ type: "job", id: "remote-advisor", root: other, kind: "run", active: true, advisor: true, place: { terminal: "terminal-3" } });
+  expect(autopilotReady(other)).toBe(false);
+  receiveCoordinatorMessage({ type: "job", id: "remote-advisor", root: other, kind: "run", active: false, place: { terminal: "terminal-3" }, abnormal: "its terminal was closed" });
+  expect(autopilotReady(other)).toBe(true);
+});
+
+test("without the Advisor Scanner, the end of a Run does not lift the wait; a scan's end still does", () => {
+  const project = root();
+  startJob("run", project, { terminal: "plain-run" }, true, undefined, "plain-job");
+  endTerminalJobs("plain-run");
+  expect(autopilotReady(project)).toBe(false);
+  receiveCoordinatorMessage({ type: "job", id: "remote-plain", root: project, kind: "run", active: true, place: { terminal: "terminal-4" } });
+  receiveCoordinatorMessage({ type: "job", id: "remote-plain", root: project, kind: "run", active: false, place: { terminal: "terminal-4" } });
+  expect(autopilotReady(project)).toBe(false);
+  startJob("scan", project, { terminal: "plain-scan" }, true, undefined, "plain-scan-job");
+  endTerminalJobs("plain-scan");
+  expect(autopilotReady(project)).toBe(true);
+});
+
 test("an interrupted or closed Cursor conversation ends its job abnormally; a completed one ends normally", () => {
   const project = root();
   startJob("resolve", project, { chat: "cursor" }, false, undefined, "interrupted-job");

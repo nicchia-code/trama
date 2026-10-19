@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
+import { ADVISOR_INSTRUCTIONS, watchdogFile } from "../src/core/advisors";
+import { parse } from "yaml";
 import { ompAgentConflicts, SKILLS, skillConflicts } from "../src/cli/skills";
 
 
@@ -57,6 +59,38 @@ test("init ignores retired omp triage files but still refuses customised analysi
     expect(existsSync(join(root2, ".trama"))).toBe(false);
   } finally {
     rmSync(root2, { recursive: true, force: true });
+  }
+});
+
+test("init writes the advisor WATCHDOG file, blocks on a customised copy, and update replaces it", () => {
+  const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
+  try {
+    run(["--root", root, "init"], root);
+    const watchdog = join(root, ".omp/WATCHDOG.yml");
+    const parsed = parse(readFileSync(watchdog, "utf8"));
+    expect(parsed.instructions).toEqual(ADVISOR_INSTRUCTIONS);
+    expect(parsed.advisors).toEqual([
+      { name: "Trama turn reviewer", reviewMode: "turn", syncBacklog: "off", tools: ["read", "grep", "glob", "bash"] },
+      { name: "Trama final reviewer", reviewMode: "agent-end", syncBacklog: "strict", tools: ["read", "grep", "glob", "bash"] },
+    ]);
+    expect(ompAgentConflicts(root)).toEqual([]);
+
+    writeFileSync(watchdog, "custom watchdog\n");
+    expect(ompAgentConflicts(root)).toEqual([watchdog]);
+    const blocked = mkdtempSync(join(tmpdir(), "trama-skills-"));
+    try {
+      mkdirSync(join(blocked, ".omp"), { recursive: true });
+      writeFileSync(join(blocked, ".omp/WATCHDOG.yml"), "custom watchdog\n");
+      expect(() => run(["--root", blocked, "init"], blocked)).toThrow(/WATCHDOG\.yml/);
+      expect(existsSync(join(blocked, ".trama"))).toBe(false);
+    } finally {
+      rmSync(blocked, { recursive: true, force: true });
+    }
+
+    run(["--root", root, "skills", "update"], root);
+    expect(readFileSync(watchdog, "utf8")).toBe(watchdogFile());
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -165,6 +199,18 @@ test("trama-implement writes History after the check and before the report, and 
   expect(skill).toContain("`trama history add \"<title>\" --summary \"<text>\" --body \"<text>\" --task <id>`");
   expect(skill).toContain("a sub-agent never writes them");
   expect(skill).toContain("step 9 of the steps above");
+});
+
+test("trama-implement skips the pre-flight and the targeted scan when the Advisor Scanner is on, and keeps them otherwise", () => {
+  const skill = SKILLS["trama-implement/SKILL.md"] as string;
+  expect(skill).toContain("## Advisor Scanner");
+  expect(skill).toContain("This section applies only when the instruction says \"The Advisor Scanner is on\". Without that sentence, skip it and follow the steps as written.");
+  expect(skill).toContain("there is no pre-flight: announce no check for it, run no `trama task scope --pre-flight`, and go straight to step 1");
+  expect(skill).toContain("With the Advisor Scanner on, this step never runs: go on to step 8 with the check open.");
+  expect(skill).toContain("With the Advisor Scanner on, step 7 never runs: announce no Scanning phase");
+  expect(skill).toContain("it blocks every Task not Done that concerns the same thing");
+  expect(skill).toContain("A Task already In progress that it blocks is not stopped: finish it");
+  expect(skill).toContain("Correct that code before moving the Task to Done; do not file a Drift for it.");
 });
 
 test("trama-scan reports how many Machines were compared and how many produced cards, with no triage line", () => {

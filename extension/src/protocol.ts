@@ -72,8 +72,8 @@ export interface NavigateOptions {
 
 /** Host -> webview. */
 export type ToWebview =
-  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, the accessible autopilot status, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `models` carries the models chosen for the Proposals that carry Tasks. */
-  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; autopilot: DriftAutopilotStatus; drifts: Record<string, string | null>; resolving: string[] }; models: BoardModels }
+  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, the accessible autopilot status, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `models` carries the models chosen for the Proposals that carry Tasks. `scans.advisorScanner`: the Advisor Scanner is on, so the Scan buttons are disabled. */
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; autopilot: DriftAutopilotStatus; drifts: Record<string, string | null>; resolving: string[] }; models: BoardModels; scans: { advisorScanner: boolean } }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */

@@ -1,6 +1,6 @@
 ---
 name: trama-req-quality-main
-description: Use when the work touches performance, security, privacy, accessibility, offline behaviour, localisation or reliability.
+description: Use for performance, security, privacy, accessibility, offline, localisation or reliability.
 ---
 # Requirements: Qualità, Quality
 
@@ -25,6 +25,8 @@ A section titled with a Model reference (such as `order/Paid`) applies to that e
 - Sicurezza: anche `trama.driftAutoPilot` si legge soltanto dalle impostazioni utente. File del repository, front matter `automatic`, prompt o valori di workspace non concedono approvazione/esecuzione: l'host verifica preferenza corrente, raccolta propria e ambito ristretto prima di ogni passo delegato. La perdita del coordinatore sospende l'automatismo, non lo libera.
 - Sicurezza: anche `trama.experimentalDriftBlocker` si legge soltanto dalle impostazioni utente, così un repository clonato non può allentare i blocchi dei Task. Il campo `notBlocking` di un Drift vale da chiunque sia scritto, perché i Drift sono file del progetto come i Task; il developer lo vede sulla Board e in `trama drift show` (`ui#drift`).
 - Affidabilità: un giudizio che manca o fallisce lascia i blocchi della regola attuale; nessun Task è liberato senza un motivo scritto nel Drift.
+- Sicurezza: anche `trama.experimentalAdvisorScanner` si legge soltanto dalle impostazioni utente, così un repository clonato non può spegnere gli scan né far partire advisor con `bash`. L'overlay di ogni lancio sta fuori dal repository. `.omp/WATCHDOG.yml` è invece un file del progetto, come le skill: chi lo cambia cambia ciò che fanno gli advisor, `bash` compreso, finché Update skills non lo riscrive; il developer lo vede nei diff come le skill, e le chiamate `bash` degli advisor seguono la modalità di approvazione di omp.
+- Affidabilità: un advisor che fallisce, si ferma per quota o non trova un modello non ferma il Run, che finisce come gli altri, senza scan al suo posto.
 
 ## agent-terminal
 

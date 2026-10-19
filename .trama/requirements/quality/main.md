@@ -1,5 +1,5 @@
 ---
-description: "Use when the work touches performance, security, privacy, accessibility, offline behaviour, localisation or reliability."
+description: "Use for performance, security, privacy, accessibility, offline, localisation or reliability."
 ---
 # Quality
 
@@ -19,6 +19,8 @@ description: "Use when the work touches performance, security, privacy, accessib
 - Sicurezza: anche `trama.driftAutoPilot` si legge soltanto dalle impostazioni utente. File del repository, front matter `automatic`, prompt o valori di workspace non concedono approvazione/esecuzione: l'host verifica preferenza corrente, raccolta propria e ambito ristretto prima di ogni passo delegato. La perdita del coordinatore sospende l'automatismo, non lo libera.
 - Sicurezza: anche `trama.experimentalDriftBlocker` si legge soltanto dalle impostazioni utente, così un repository clonato non può allentare i blocchi dei Task. Il campo `notBlocking` di un Drift vale da chiunque sia scritto, perché i Drift sono file del progetto come i Task; il developer lo vede sulla Board e in `trama drift show` (`ui#drift`).
 - Affidabilità: un giudizio che manca o fallisce lascia i blocchi della regola attuale; nessun Task è liberato senza un motivo scritto nel Drift.
+- Sicurezza: anche `trama.experimentalAdvisorScanner` si legge soltanto dalle impostazioni utente, così un repository clonato non può spegnere gli scan né far partire advisor con `bash`. L'overlay di ogni lancio sta fuori dal repository. `.omp/WATCHDOG.yml` è invece un file del progetto, come le skill: chi lo cambia cambia ciò che fanno gli advisor, `bash` compreso, finché Update skills non lo riscrive; il developer lo vede nei diff come le skill, e le chiamate `bash` degli advisor seguono la modalità di approvazione di omp.
+- Affidabilità: un advisor che fallisce, si ferma per quota o non trova un modello non ferma il Run, che finisce come gli altri, senza scan al suo posto.
 
 ## agent-terminal
 - Affidabilità: l'hook di omp e quello di Claude Code non bloccano mai l'agente, tranne quando rifiutano il suo tool di domande: ogni chiamata a `trama agent-event` ha un timeout di 3 secondi e ogni errore è ignorato. Il rifiuto del tool di domande non contatta l'editor e non dipende da lui. Chiudere un terminale con `trama.autoExit` non blocca l'editor e non lancia errori se il terminale è già chiuso.

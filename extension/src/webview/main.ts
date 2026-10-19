@@ -122,8 +122,8 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   else if (message.type === "snapshot") {
     snapshot = message.snapshot;
     showError(null);
-    mounted.diagram.update(snapshot, message.asking, message.resolve);
-    board.update(snapshot, message.asking, message.resolve, message.models);
+    mounted.diagram.update(snapshot, message.asking, message.resolve, message.scans);
+    board.update(snapshot, message.asking, message.resolve, message.scans, message.models);
     mounted.requirements.update(snapshot);
     mounted.specs.update(snapshot);
     showModelErrors(snapshot.diagnostics);

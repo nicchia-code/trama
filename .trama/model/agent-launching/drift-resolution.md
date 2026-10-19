@@ -6,7 +6,7 @@ Il developer può delegare la scelta dei Drift non critici oppure di tutti i Dri
 
 Prima di cominciare una raccolta automatica devono essere finiti tutti gli scan e i Run lanciati da Trama sul progetto, in qualunque finestra. Una sola risoluzione opera sul progetto. I Drift sono raccolti quando l'istruzione parte davvero; scan avviati dopo non interrompono quella raccolta, e i loro Drift aspettano la successiva. Anche dopo le correzioni e la ripresa delle origini si possono trovare nuovi Drift: finché ci sono casi ammissibili, la delega continua, senza un limite aggiuntivo di cicli. Un Drift ricorrente, seguito di uno già risolto, non è mai ammissibile: una correzione che riproduce la stessa differenza, o ne crea una nuova realizzando il suo Task, si ferma al developer invece di far ripartire il ciclo.
 
-Un'approvazione non avvia più nessuno scan. Ogni Run, anche quello automatico delle correzioni, comincia con un pre-flight che confronta il codice dove i suoi Task stanno per lavorare, e può finire con la scansione mirata di fine corsa: entrambi sono parte del Run e la barriera li aspetta con lui. Un pre-flight fallito o interrotto è registrato come uno scan fallito: non sospende la delega e il Run parte lo stesso.
+Un'approvazione non avvia più nessuno scan. Ogni Run, anche quello automatico delle correzioni, comincia con un pre-flight che confronta il codice dove i suoi Task stanno per lavorare, e può finire con la scansione mirata di fine corsa: entrambi sono parte del Run e la barriera li aspetta con lui. Un pre-flight fallito o interrotto è registrato come uno scan fallito: non sospende la delega e il Run parte lo stesso. Con l'Advisor Scanner attivo e omp non c'è nessuno scan (vedi Agent launching): i Drift che l'advisor registra durante un Run aspettano, come gli altri, la fine di quel Run.
 
 Resolve Drifts applica sempre la delega corrente. Con delega ai soli non critici, i critici e le eccezioni seguono un flusso manuale separato; se il developer avvia una raccolta mista, questi casi vengono affrontati prima degli automatici. La risoluzione manuale e la sua approvazione non avviano automaticamente i loro Task. Senza un clic, l'automatismo tratta i casi ammissibili senza aprire domande sui critici esclusi. Un caso senza correzione raccomandata o fallito può richiedere domande manuali anche con delega totale; non si inventa una scelta e non si saltano i controlli.
 
@@ -14,7 +14,7 @@ I Run e la preparazione delle risoluzioni continuano a escludersi a vicenda. Una
 
 La delega è verificata prima di ogni scelta, approvazione e nuovo Run. Ritirarla impedisce nuovi passi automatici, ma il Task già iniziato può concludersi. I risultati già approvati non sono annullati. Un caso fallito non viene riprovato dal ciclo successivo: serve una richiesta esplicita, una modifica del Drift o uno scan avviato dal developer. Gli altri casi indipendenti possono proseguire. Uno scan fallito, o finito senza un controllo riuscito, non sospende la delega: conta come finito e la raccolta procede come dopo uno scan riuscito.
 
-Il coordinamento riguarda solo lavori lanciati da Trama, anche fra più finestre dello stesso progetto; non segue agenti avviati fuori da Trama. Riaprire l'editor perde il ricordo dei lavori: i file restano, ma la delega non riparte subito sui Drift esistenti. Serve la fine di uno scan, con qualunque esito, o una richiesta esplicita. I Run manuali conservano le loro regole.
+Il coordinamento riguarda solo lavori lanciati da Trama, anche fra più finestre dello stesso progetto; non segue agenti avviati fuori da Trama. Riaprire l'editor perde il ricordo dei lavori: i file restano, ma la delega non riparte subito sui Drift esistenti. Serve la fine di uno scan, con qualunque esito, o una richiesta esplicita; con l'Advisor Scanner attivo e omp, che spegne gli scan, basta anche la fine di un Run lanciato da Trama, con qualunque esito. I Run manuali conservano le loro regole.
 
 ## States
 
@@ -28,11 +28,13 @@ Nessun Run e nessun agente di risoluzione è in corso. La delega può iniziare u
 - `SCAN_BARRIER_CLEARED` → Resolving: gli scan già in corso sono tutti terminati, con qualunque esito, non ci sono Run né risoluzioni da decidere e una raccolta ammissibile parte davvero.
 - `SCAN_BARRIER_CLEARED` → Free: gli scan sono terminati e rendono operativa la delega, ma nessuna raccolta deve partire.
 - `developer.SET_DRIFT_AUTOPILOT` → Free: cambia la delega. Ritirarla impedisce nuovi passi; attivarla non supera la ripresa richiesta dopo l'apertura dell'editor. Se è già operativa, il progetto viene rivalutato per una nuova raccolta.
+- `AUTOMATIC_STEP_NOT_DELIVERED` → Sospesa: la raccolta automatica non raggiunge l'agente. La prenotazione è rilasciata, nessun lavoro resta aperto e un avviso dice al developer che la delega è sospesa.
 
 ### In attesa delle scansioni
 La delega aspetta che finiscano tutti gli scan già lanciati sul progetto. Gli scan che partono durante l'attesa si aggiungono alla stessa raccolta. Nessun Drift viene scelto automaticamente prima della barriera.
 - `developer.ASK_AGENT` → Running tasks: parte un Run manuale; la raccolta automatica aspetta anche questo, con il suo pre-flight e il suo eventuale scan di fine corsa.
 - `developer.ASK_AGENT` → Resolving: Resolve Drifts può affrontare soltanto i casi manuali mentre gli scan continuano. I casi automatici restano in attesa.
+- `AUTOMATIC_STEP_NOT_DELIVERED` → Sospesa: tolta la barriera, la raccolta automatica non raggiunge l'agente; la prenotazione è rilasciata, nessun lavoro resta aperto e un avviso lo dice al developer.
 - `agent.FINISH_CHECK` → In attesa delle scansioni: lo scan dichiara il suo esito, riuscito o fallito; si aspetta ancora la fine del suo lavoro e degli altri scan e Run. Un esito fallito non sospende la delega.
 - `SCAN_BARRIER_CLEARED` → Resolving: tutti gli scan sono terminati, con qualunque esito, nessun Run è in corso e una raccolta automatica ammissibile parte davvero.
 - `SCAN_BARRIER_CLEARED` → Free: tutti gli scan sono terminati, con qualunque esito, ma non si può o non serve avviare una raccolta.
@@ -40,7 +42,7 @@ La delega aspetta che finiscano tutti gli scan già lanciati sul progetto. Gli s
 
 ### Running tasks
 Almeno un Run è in corso. Resolve Drifts e nuove raccolte automatiche aspettano; altri Run manuali seguono le regole esistenti. Un Run automatico prende soltanto le correzioni della propria risoluzione e le loro origini ancora da completare, rispettando i blocchi e senza riprendere origini già finite. Se un Task fallisce, non viene ritentato; prosegue il lavoro indipendente. Una correzione chiusa senza modifiche, perché il codice faceva già ciò che dice il Model, non è un caso fallito: è un esito riuscito, la sua origine diventa eseguibile come dopo ogni correzione finita e il ciclo prosegue. Una sequenza di Run per modello, di Run all o del Run automatico (vedi il Task), conta come un solo Run: la fine di un suo Run che lascia partire il successivo non è la fine dell'ultimo Run. Una correzione sta sempre nel gruppo della sua origine, perché appartiene alla stessa Proposal, o a nessuna come lei.
-- `agent-hook.IDLE` → Free: termina l'ultimo Run, non ci sono scan ancora in corso; il progetto viene rivalutato per eventuali nuove raccolte, senza riaprire i casi falliti.
+- `agent-hook.IDLE` → Free: termina l'ultimo Run, non ci sono scan ancora in corso; il progetto viene rivalutato per eventuali nuove raccolte, senza riaprire i casi falliti. Con l'Advisor Scanner attivo e omp, la fine del Run rende anche operativa la delega che aspettava la ripresa dopo l'apertura dell'editor, come la fine di uno scan.
 - `terminal.COMMAND_ENDED` → Free: termina l'ultimo Run, alle stesse condizioni; una fine anomala conserva i risultati e segnala il fallimento.
 - `terminal.CLOSED` → Free: viene chiuso l'ultimo Run, alle stesse condizioni.
 - `editor-chat.AGENT_STOPPED` → Free: termina il turno dell'ultimo Run, alle stesse condizioni.
@@ -78,6 +80,14 @@ Un solo agente prepara una risoluzione manuale o automatica del progetto. Nessun
 - `editor-chat.CONVERSATION_CLOSED` → In attesa delle scansioni: viene chiusa la conversazione della risoluzione, alle stesse condizioni.
 - `developer.SET_DRIFT_AUTOPILOT` → Resolving: la nuova delega vale prima della prossima scelta o approvazione. Ritirarla lascia la Proposal da esaminare e impedisce il Run automatico; non annulla le decisioni già applicate.
 - `agent.FINISH_CHECK` → Resolving: uno scan avviato dopo la raccolta dichiara il suo esito, riuscito o fallito; la raccolta corrente prosegue e le successive non sono sospese.
+- `AUTOMATIC_STEP_NOT_DELIVERED` → Sospesa: l'agente della risoluzione ha finito, ma il Run automatico delle correzioni approvate non raggiunge l'agente. Nessun Task registra un fallimento; le correzioni restano autorizzate e il progetto resta riservato al loro Run, come durante un Run. Un avviso lo dice al developer.
+
+### Sospesa
+Un passo automatico non ha raggiunto l'agente: nessuna raccolta e nessun Run automatico parte da solo, e nessun timer toglie la sospensione. La sospensione vale per la modalità in cui è nata. I Run manuali seguono le loro regole e non la tolgono. Con un Run automatico non partito, Resolve Drifts resta rifiutato come durante un Run.
+- `developer.ASK_AGENT` → Resolving: Resolve Drifts parte davvero, dopo una raccolta automatica non partita, e toglie la sospensione; valgono le regole di Resolve Drifts.
+- `developer.ASK_AGENT` → In attesa delle scansioni: uno scan del progetto avviato dal developer parte davvero e toglie la sospensione; una nuova raccolta aspetta la sua fine, mentre il Run automatico ancora autorizzato di una risoluzione approvata riparte senza aspettarlo.
+- `developer.ASK_AGENT` → Sospesa: un Run manuale parte, secondo le regole dei Task; la sospensione resta.
+- `developer.SET_DRIFT_AUTOPILOT` → Free: cambiare la modalità toglie la sospensione; ritirare la delega impedisce nuovi passi, e con una modalità attiva il progetto viene rivalutato.
 
 ## Events
 
@@ -92,3 +102,6 @@ Dopo la fine dell'agente di risoluzione parte davvero il Run autorizzato delle s
 
 ### SCAN_BARRIER_CLEARED
 L'ultimo scan del progetto termina, con qualunque esito, e nessun altro scan resta in corso. Una dichiarazione di controllo, riuscito o fallito, da sola non emette questo fatto: serve la fine del lavoro dello scan.
+
+### AUTOMATIC_STEP_NOT_DELIVERED
+Un passo automatico, la raccolta o il Run automatico delle correzioni, non raggiunge l'agente senza essere stato rifiutato all'ultimo controllo: il lancio fallisce, oppure con la chat l'istruzione resta pronta in attesa dell'Invio del developer o finisce negli appunti. Un avvio rifiutato all'ultimo controllo non è questo fatto: non sospende nulla e si riprova al controllo successivo.

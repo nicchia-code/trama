@@ -33,13 +33,15 @@ export const canScan = (role: Role): boolean => role !== "analysis";
  * The template of the command line, with `{prompt}` where the quoted prompt goes: an agent's own line with the run's
  * `model`; for instructions that can scan, the comparison sub-agent and `--slow` use `scan`, the scan model.
  * `ompHook` tells omp when it is idle and `tramaPath` is the bundled CLI Claude Code uses for its session hooks.
+ * `advisorConfig` is the overlay of an omp Run with the Advisor Scanner on: omp then runs its advisors with that overlay
+ * instead of `--slow`, which the caller leaves out for such a Run.
  */
-export function agentTemplate(agent: TerminalAgent, scanning: boolean, models: { model: string; scan: string }, family: ShellFamily, ompHook?: string, tramaPath?: string): string {
+export function agentTemplate(agent: TerminalAgent, scanning: boolean, models: { model: string; scan: string }, family: ShellFamily, ompHook?: string, tramaPath?: string, advisorConfig?: string): string {
   const option = (flag: string, value: string) => (value === "" ? [] : [flag, quote(family, value)]);
   const words: string[] = (() => {
     switch (agent) {
       case "omp":
-        return ["omp", ...(ompHook === undefined ? [] : ["--hook", quote(family, ompHook)]), ...option("--model", models.model), ...(scanning ? option("--slow", models.scan) : [])];
+        return ["omp", ...(ompHook === undefined ? [] : ["--hook", quote(family, ompHook)]), ...(advisorConfig === undefined ? [] : ["--advisor", "--config", quote(family, advisorConfig)]), ...option("--model", models.model), ...(scanning ? option("--slow", models.scan) : [])];
       case "claude": {
         const hooks: string[] = [];
         if (tramaPath !== undefined) {
@@ -57,5 +59,19 @@ export function agentTemplate(agent: TerminalAgent, scanning: boolean, models: {
 /** Claude Code's Machine-comparison sub-agent, with the scan model only when it is set. */
 function claudeAgents(scan: string): string {
   return JSON.stringify({ "trama-analysis": { ...SUB_AGENTS["trama-analysis"], ...(scan === "" ? {} : { model: scan }) } });
+}
+
+/**
+ * The overlay an omp Run loads with `--config`: the advisor model role from `trama.scan` (when set) and the advisors of the
+ * task, on. Its text is YAML; the scan model is written as a double-quoted YAML string.
+ */
+export function advisorOverlay(scan: string): string {
+  return [
+    ...(scan === "" ? [] : ["modelRoles:", `  advisor: ${JSON.stringify(scan)}`]),
+    "task:",
+    "  agentAdvisor:",
+    '    task: "on"',
+    "",
+  ].join("\n");
 }
 

@@ -15,7 +15,7 @@ import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { blockedTasks, dismissDrift, driftOptions, fixCodeRefusal, getDrift, getTask, listDrifts, listTasks, requireNotAttached, type Drift, type DriftOutcome } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAgent, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type Launch, endHeldJob, launchAgent, launched, settings, startHeldJob, userDelegation } from "./agent";
+import { configuredAdvisorScanner, configuredAgent, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type Launch, endHeldJob, launchAgent, launched, settings, startHeldJob, userDelegation } from "./agent";
 import { isCursor } from "./cursor";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { activeProjectJobs, autopilotFailedCase, autopilotReady, clearAutopilotFailure, driftAutopilotStatus, driftWork, driftsFinishing, excludeAutopilotDrift, forgetDeveloperScanCases, forgetWindow, holdAutopilot, jobAbnormalEnd, lastFailedScan, observeAutopilotMode, onDriftResolutionChange, projectWindowIds, proposalsFinishing, recordAutopilotFailure, releaseSend, reserveSend, resumeAutopilot, runCauseTask, runContinuationHeld, runFinalCheckFailed, sendReserved, setCoordinatorAvailable, shownAutopilotFailures, tasksFinishing, type DriftAutopilotMode, type JobKind } from "./drift-resolution";
@@ -419,7 +419,7 @@ export class Controller implements vscode.Disposable {
       // The open Drifts the running resolution is working on: those an agent was asked to resolve, and those the automatic collection named.
       const collected = this.collection?.stage === "resolving" ? this.collection.drifts : [];
       const resolving = work.resolving ? Object.keys(drifts).filter((id) => this.namedByResolution.has(id) || collected.includes(id)) : [];
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker(work, settings().get<boolean>("submitWhileRunning", false) === true), autopilot, drifts, resolving }, models });
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker(work, settings().get<boolean>("submitWhileRunning", false) === true), autopilot, drifts, resolving }, models, scans: { advisorScanner: configuredAdvisorScanner() } });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -888,7 +888,7 @@ export class Controller implements vscode.Disposable {
       guarded,
       "run",
       undefined,
-      { id: job, origin: "automatic", filesDrifts: true, model: next.planned.run },
+      { id: job, origin: "automatic", filesDrifts: true, model: next.planned.run, advisorStorage: this.globalStorageUri },
     ));
     if (delivered) {
       // The hold keeps the project between the Runs of the sequence; the creation of its last Run releases it, as before.
@@ -967,7 +967,7 @@ export class Controller implements vscode.Disposable {
         () => true,
         "run",
         undefined,
-        { filesDrifts: true, model: planned.run, onEnd },
+        { filesDrifts: true, model: planned.run, onEnd, advisorStorage: this.globalStorageUri },
       );
       return launched(result);
     } catch (error) {
@@ -1215,6 +1215,7 @@ export class Controller implements vscode.Disposable {
         const blocker = resolveDriftsBlocker(project, driftWork(project.root, this.mode() !== "disabled"));
         return blocker === null ? null : `Resolve Drifts is unavailable: ${blocker}.`;
       }
+      if (action.kind === "scan" && configuredAdvisorScanner()) return "Scan is unavailable: the Advisor Scanner is on.";
       const isRun = action.kind === "implement" || action.kind === "implement-all";
       const submitWhileRunning = settings().get<boolean>("submitWhileRunning", false) === true;
       const runBlock = isRun ? runWindowBlocker(driftWork(project.root, this.mode() !== "disabled"), submitWhileRunning) : null;
@@ -1231,7 +1232,7 @@ export class Controller implements vscode.Disposable {
       const rememberScan = resolved.kind === "scan" && resolved.feature === undefined
         ? (startedAt: number) => rememberDeliveredScan(project, startedAt)
         : undefined;
-      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), model });
+      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), model, advisorStorage: this.globalStorageUri });
       if (refused !== null) throw new TramaError(refused);
       return result;
     };

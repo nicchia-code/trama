@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.7
+- The Settings tab has four groups: Agent, Models, Project and Experimental. The Drift autopilot menu and `trama.submitWhileRunning` moved into Experimental; their keys, values and behaviour are unchanged.
+- `trama.experimentalAdvisorScanner` (Experimental Advisor Scanner) is a checkbox, off by default and application-scoped. With omp as the agent and it on, omp's advisor checks each Run against the Model and the Requirements, and every scan is off (Scan buttons, pre-flight and end-of-run scan). With another agent or it off, scans work as usual. The host reads it from the user settings only, through `configuredAdvisorScanner()`.
+
 ## 0.0.6
 - A Machine is compared with one briefing and one filing. `trama compare brief <machine> [--ref <ref>…] [--candidates]` announces the comparison and prints, in one output, the references to compare, the States, Events and Transitions, every Requirement section that applies (once, without the General sections and without naming skills to load), the `analyze` warnings, the open Tasks and Drifts on the same thing, the resolved or dismissed Drifts on the same references and, with `--candidates`, the Tasks a Drift there would block. `trama compare file <comparison> <file.json|->` files all its Tasks and Drifts in one step, or nothing when any card is invalid, listing the problems card by card.
 - A comparison has one ghost on the Board, `Compare` · `Comparing <Machine>`, instead of one ghost per card; it goes without a notice when its cards are filed.

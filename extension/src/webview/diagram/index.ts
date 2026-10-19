@@ -74,6 +74,8 @@ export const mountDiagram: MountView = (root, context) => {
   let snapshot: Snapshot | null = null;
   /** The reason Resolve Drifts is unavailable now, from the snapshot the Board also reads; null when it is available. */
   let resolveBlocker: string | null = null;
+  /** Whether the Advisor Scanner is on: the Scan button is then disabled. */
+  let advisorScanner = false;
   let scene: Scene | null = null;
   let graph: GraphSpec | null = null;
   let level: Level = { kind: "system" };
@@ -142,13 +144,15 @@ export const mountDiagram: MountView = (root, context) => {
     }
     select.value = proposalId ?? "";
 
-    if (feature) {
+    if (feature && !advisorScanner) {
+      scan.disabled = false;
       setIconLabel(scan, "search", "Scan");
       scan.title = `Ask an agent to scan the code against Feature ${feature}`;
       scan.setAttribute("aria-label", `Scan. ${scan.title}`);
     } else {
-      const label = scanButtonLabel("Scan", snapshot.tasksSinceScan);
+      const label = scanButtonLabel("Scan", snapshot.tasksSinceScan, advisorScanner);
       setIconLabel(scan, "search", label.text);
+      scan.disabled = label.disabled;
       scan.title = label.tooltip || "Ask an agent to scan the code against the whole System";
       scan.setAttribute("aria-label", label.tooltip ? label.ariaLabel : `Scan. ${scan.title}`);
     }
@@ -277,9 +281,10 @@ export const mountDiagram: MountView = (root, context) => {
   recolour.observe(document.body, { attributes: true, attributeFilter: ["class", "style"] });
 
   const view: View = {
-    update(next, _asking?: boolean, resolve?: { blocker: string | null }) {
+    update(next, _asking?: boolean, resolve?: { blocker: string | null }, scans?: { advisorScanner: boolean }) {
       snapshot = next;
       resolveBlocker = resolve?.blocker ?? null;
+      advisorScanner = scans?.advisorScanner ?? false;
       if (pending) {
         const options = pending;
         pending = null;

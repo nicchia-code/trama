@@ -682,6 +682,25 @@ describe("automatic terminal exit", () => {
       delete inspected.experimentalDriftBlocker;
     }
   });
+  test("the Advisor Scanner is on only from the user value true, with omp as the agent", async () => {
+    // Loaded after the editor and home mocks above are in place: a static import would run before them.
+    const { configuredAdvisorScanner } = await import("../extension/src/host/agent");
+    try {
+      settingValues.agent = "omp";
+      inspected.experimentalAdvisorScanner = { globalValue: true };
+      expect(configuredAdvisorScanner()).toBe(true);
+      inspected.experimentalAdvisorScanner = { globalValue: "true" };
+      expect(configuredAdvisorScanner()).toBe(false);
+      inspected.experimentalAdvisorScanner = { workspaceValue: true };
+      expect(configuredAdvisorScanner()).toBe(false);
+      inspected.experimentalAdvisorScanner = { globalValue: true };
+      settingValues.agent = "chat";
+      expect(configuredAdvisorScanner()).toBe(false);
+    } finally {
+      settingValues.agent = "omp";
+      delete inspected.experimentalAdvisorScanner;
+    }
+  });
   test("chat instructions are built after newChat and not sent if delivery conditions change", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const previousHandler = commandHandler;

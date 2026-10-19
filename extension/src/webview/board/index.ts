@@ -41,7 +41,7 @@ function arrange(parent: HTMLElement, next: HTMLElement[]) {
 
 /** The Board: its view, and the model names the Board's model window offers. */
 export interface BoardView extends View {
-  update(next: Snapshot, isAsking?: boolean, resolveState?: Parameters<View["update"]>[2], models?: BoardModels): void;
+  update(next: Snapshot, isAsking?: boolean, resolveState?: Parameters<View["update"]>[2], scans?: { advisorScanner: boolean }, models?: BoardModels): void;
   receiveModels(message: { models: ModelSuggestion[]; error?: string }): void;
 }
 
@@ -71,7 +71,8 @@ export const mountBoard = (root: HTMLElement, context: ViewContext): BoardView =
   const scanSystem = toolbarButton("search", "Scan System", () => context.post({ type: "launch", action: { kind: "scan" } }));
 
   let snapshot: Snapshot | null = null;
-  /** Whether a question round is open: the ghosts then say the agent waits for the developer's answers. */
+  /** Whether the Advisor Scanner is on: the Scan System button is then disabled. */
+  let advisorScanner = false;
   let asking = false;
   /** Whether Resolve Drifts works and why the host would refuse it now; `runReason` is why every Run is disabled, if any; `resolving` names the open Drifts the running resolution works on. */
   let resolve: { blocker: string | null; runReason: string | null; autopilot: DriftAutopilotStatus; drifts: Record<string, string | null>; resolving: string[] } = {
@@ -310,8 +311,9 @@ export const mountBoard = (root: HTMLElement, context: ViewContext): BoardView =
       else button.setAttribute("aria-description", note);
     };
     for (const run of columnRuns) setRunReason(run, blocker);
-    const scanLabel = scanButtonLabel("Scan System", snapshot.tasksSinceScan);
+    const scanLabel = scanButtonLabel("Scan System", snapshot.tasksSinceScan, advisorScanner);
     setIconLabel(scanSystem, "search", scanLabel.text);
+    scanSystem.disabled = scanLabel.disabled;
     if (scanLabel.tooltip) scanSystem.title = scanLabel.tooltip;
     else scanSystem.removeAttribute("title");
     scanSystem.setAttribute("aria-label", scanLabel.ariaLabel);
@@ -354,11 +356,12 @@ export const mountBoard = (root: HTMLElement, context: ViewContext): BoardView =
   }
 
   return {
-    update(next, isAsking = false, resolveState: typeof resolve = { blocker: null, runReason: null, autopilot: { mode: "disabled", phase: "manual", reason: null, failures: [] }, drifts: {}, resolving: [] }, modelsState: BoardModels = NO_MODELS) {
+    update(next, isAsking = false, resolveState: typeof resolve = { blocker: null, runReason: null, autopilot: { mode: "disabled", phase: "manual", reason: null, failures: [] }, drifts: {}, resolving: [] }, scansState: { advisorScanner: boolean } = { advisorScanner: false }, modelsState: BoardModels = NO_MODELS) {
       snapshot = next;
       asking = isAsking;
       resolve = resolveState;
       models = modelsState;
+      advisorScanner = scansState.advisorScanner;
       render();
     },
     receiveModels(message) {

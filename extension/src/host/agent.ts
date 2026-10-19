@@ -1,7 +1,10 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
-import { basename, win32 } from "node:path";
+import { mkdirSync } from "node:fs";
+import { basename, join, win32 } from "node:path";
 import { announce, newTerminalId, TERMINAL_ENV, type AgentOrigin, withdrawAll } from "../../../src/core/announcements";
+import { ADVISOR_SENTENCE } from "../../../src/core/advisors";
+import { writeFileAtomic } from "../../../src/core/atomic-write";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
@@ -13,7 +16,7 @@ import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCo
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint, questionWindowId } from "./questions";
 import { ASK_DEVELOPER_SENTENCE, withDriftBlocker, withLanguage } from "./prompts";
-import { agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent } from "./terminal-agent";
+import { advisorOverlay, agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent } from "./terminal-agent";
 import { delegationOf } from "./settings-schema";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
@@ -34,6 +37,8 @@ export const configuredSkillsDir = (): string => settings().get<string>("skillsD
 export const configuredLanguage = (): string => settings().get<string>("language", "").trim();
 /** Whether `trama.experimentalDriftBlocker` is on, from user settings only: a workspace value does not turn it on. Read at every launch. */
 export const configuredDriftBlocker = (): boolean => settings().inspect<unknown>("experimentalDriftBlocker")?.globalValue === true;
+/** Whether the Advisor Scanner is on (`trama.experimentalAdvisorScanner`), from user settings only, with omp as the agent. Read at every launch. */
+export const configuredAdvisorScanner = (): boolean => settings().inspect<unknown>("experimentalAdvisorScanner")?.globalValue === true && configuredAgent() === "omp";
 /** The configured concurrent sub-agent limit, from user settings only; invalid values use the default. */
 export const configuredMaxParallelAgents = (): number => {
   const value: unknown = settings().inspect<number>("maxParallelAgents")?.globalValue ?? 20;
@@ -285,10 +290,11 @@ const jobIdentity = (jobId: string): string => `This Trama job has ID ${jobId}. 
  * instruction's line unless `askOwnLine` is set, which Cursor's chat needs: it gets the ask sentence on a line of its own,
  * after the PATH line. A terminal's job comes from its environment.
  */
-function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, jobId: string | undefined, askOwnLine: boolean): string {
+function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, jobId: string | undefined, askOwnLine: boolean, advisor = false): string {
   const limit = configuredMaxParallelAgents();
   const withLimit = withAgentLimit(instruction, limit);
-  const withSubAgent = canScan(role) ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
+  const withAdvisor = advisor ? `${withLimit} ${ADVISOR_SENTENCE}` : withLimit;
+  const withSubAgent = canScan(role) && !advisor ? `${withAdvisor} Compare each Machine with the trama-analysis sub-agent.` : withAdvisor;
   const withJob = jobId === undefined ? withSubAgent : `${withSubAgent} ${jobIdentity(jobId)}`;
   const withBlocker = withDriftBlocker(withJob, filesDrifts && configuredDriftBlocker());
   return withLanguage(askOwnLine ? withBlocker : `${withBlocker} ${ASK_DEVELOPER_SENTENCE}`, configuredLanguage());
@@ -301,16 +307,26 @@ export const configuredModels = (): Models => ({
   execution: settings().get<string>("execution", "").trim(),
 });
 
-function terminalRun(agent: TerminalAgent, instruction: Instruction, name: string, filesDrifts: boolean, run: RunModel): TerminalRun {
+function terminalRun(agent: TerminalAgent, instruction: Instruction, name: string, filesDrifts: boolean, run: RunModel, advisorConfig?: string): TerminalRun {
   const role = roleOf(name);
   const hook = agent === "omp" ? bundledOmpHook() : undefined;
   const tramaPath = agent === "claude" ? bundledTrama() : undefined;
   const models = { model: run.model, scan: configuredModels().scan };
+  const advisor = advisorConfig !== undefined;
   return {
-    template: (family) => agentTemplate(agent, canScan(role), models, family, hook, tramaPath),
-    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, undefined, false),
+    template: (family) => agentTemplate(agent, canScan(role) && !advisor, models, family, hook, tramaPath, advisorConfig),
+    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, undefined, false, advisor),
     hooked: hook !== undefined || tramaPath !== undefined,
   };
+}
+
+/** Writes the advisor overlay of an omp Run into the extension's storage and returns its path: the overlay never goes into the repository. */
+function writeAdvisorOverlay(storage: vscode.Uri | undefined): string {
+  if (storage === undefined) throw new TramaError("The Advisor Scanner needs the extension's storage.");
+  mkdirSync(storage.fsPath, { recursive: true });
+  const file = join(storage.fsPath, "advisor.yml");
+  writeFileAtomic(file, advisorOverlay(configuredModels().scan));
+  return file;
 }
 
 /**
@@ -349,6 +365,7 @@ async function broadcastJob(root: string, job: Job, active: boolean): Promise<vo
     windowId: job.windowId,
     place: job.place,
     ...(abnormal !== undefined ? { abnormal } : {}),
+    ...(job.advisor === true ? { advisor: true } : {}),
   };
   try { await sendCoordinatorMessage(projectAt(root), message); }
   catch { /* An unavailable coordinator suspends automation; it never changes the local job's outcome. */ }
@@ -377,6 +394,8 @@ export interface LaunchJobOptions {
   model?: RunModel;
   /** Called once the Run's job ends: with why it ended abnormally, or with nothing for a normal end. A Run that did not start ends with a reason too. */
   onEnd?: (abnormal?: string) => void;
+  /** The extension's global storage: an omp Run with the Advisor Scanner on writes its advisor overlay there. */
+  advisorStorage?: vscode.Uri;
 }
 
 export async function launchAgent(
@@ -431,7 +450,8 @@ export async function launchAgent(
       if (delivery !== "not-sent") onSent?.(Date.now());
       return delivery;
     }
-    const run = terminalRun(agent, instruction, name, filesDrifts, runModel);
+    const advisorConfig = job === "run" && configuredAdvisorScanner() ? writeAdvisorOverlay(jobOptions.advisorStorage) : undefined;
+    const run = terminalRun(agent, instruction, name, filesDrifts, runModel, advisorConfig);
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
@@ -459,10 +479,10 @@ export async function launchAgent(
     if (announceProposal !== undefined) announceLaunch(root, announceProposal, { terminal: terminalId });
     onSent?.(startedAt);
     if (job !== undefined && jobId !== undefined) {
-      const started = startJob(job, root, { terminal: terminalId }, run.hooked, undefined, jobId, jobOrigin, windowId);
+      const started = startJob(job, root, { terminal: terminalId }, run.hooked, undefined, jobId, jobOrigin, windowId, advisorConfig !== undefined);
       if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
       if (started !== undefined && shared) await broadcastJob(root, {
-        id: started, kind: job, root, place: { terminal: terminalId }, origin: jobOrigin, windowId,
+        id: started, kind: job, root, place: { terminal: terminalId }, origin: jobOrigin, windowId, advisor: advisorConfig !== undefined,
       }, true);
     }
     return "terminal";

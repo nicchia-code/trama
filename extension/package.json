@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "publisher": "trama-dev",
   "license": "AGPL-3.0-only",
   "private": true,
@@ -149,7 +149,7 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for scans: of the System, of Features, and for the sub-agents that compare Machines, including those of the pre-flight check at the start of each Run. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. The chats' sub-agents get it with Update skills. It only applies in your user settings."
+          "markdownDescription": "Model for scans: of the System, of Features, and for the sub-agents that compare Machines, including those of the pre-flight check at the start of each Run. With the Advisor Scanner on, the omp advisors that watch Runs use it too. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. The chats' sub-agents get it with Update skills. It only applies in your user settings."
         },
         "trama.execution": {
           "type": "string",
@@ -185,6 +185,12 @@
           "default": false,
           "scope": "application",
           "markdownDescription": "Experimental. On: the agent that files a Drift checks which of the Tasks it would block are really affected, blocks only those and says why it leaves each other one free; a Drift that blocks no Task is filed inside a resolution Proposal for you to approve. Off (the default): a Drift blocks every Task that concerns the same thing. Only agents started by Trama follow it."
+        },
+        "trama.experimentalAdvisorScanner": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Experimental. Only with omp as the agent. On: during every Run, omp's advisor checks the code the agent reads and writes against the Model and the Requirements, tells the agent when its work drifts and files a Drift for a difference in existing code; every scan is off (Scan buttons, the pre-flight and the end-of-run scan). The advisor uses the Scan model. Off (the default), or with another agent: scans work as usual. Trama's advisors live in `.omp/WATCHDOG.yml`, installed in every project: in an omp session you start yourself with the advisor on, they replace omp's default advisor and stay silent."
         }
       }
     }

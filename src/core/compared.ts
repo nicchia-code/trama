@@ -12,8 +12,8 @@ import { type Project, readTextLf, sha256, writeFileEnsuringDir } from "./store"
  * compared when it, or an element it sits in, was archived on the same code and its text has not changed since.
  */
 
-/** Folders of the working tree the code fingerprint leaves out: Trama's own, the skill folders and the agent definitions. */
-const LEFT_OUT = [".trama", ".agents/skills", ".claude/skills", ".github/skills", ".omp/agents"];
+/** Paths of the working tree the code fingerprint leaves out: Trama's own, the skill folders, the agent definitions and `.omp/WATCHDOG.yml`. */
+const LEFT_OUT = [".trama", ".agents/skills", ".claude/skills", ".github/skills", ".omp/agents", ".omp/WATCHDOG.yml"];
 
 const GIT_TIMEOUT_MS = 20_000;
 

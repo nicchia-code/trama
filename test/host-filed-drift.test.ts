@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { copilotTurnEnded, copilotTurnStarted, driftsFinishing, followsAgent, proposalsFinishing, receiveCoordinatorMessage, releaseFiledWork, setHooked, tasksFinishing } from "../extension/src/host/drift-resolution";
+import { activeProjectJobs, copilotTurnEnded, copilotTurnStarted, driftsFinishing, endTerminalJobs, followsAgent, proposalsFinishing, receiveCoordinatorMessage, releaseFiledWork, setHooked, startJob, tasksFinishing } from "../extension/src/host/drift-resolution";
 
 const root = () => join(tmpdir(), `trama-filed-drift-${crypto.randomUUID()}`);
 
@@ -56,6 +56,18 @@ test("a Task filed by an agent is held until the end of that agent's turn, and o
   expect(tasksFinishing(project)).toEqual(["0p1q2r3s"]);
   receiveCoordinatorMessage({ type: "turn-ended", root: project, holder: "terminal-1" });
   expect(tasksFinishing(project)).toEqual(["0p1q2r3s"]);
+});
+
+test("a Drift the advisor files during an omp Run is held until that Run's turn ends, and the Run stays active meanwhile", () => {
+  const project = root();
+  startJob("run", project, { terminal: "advisor-turn" }, true, undefined, "advisor-turn-job", "automatic", "", true);
+  receiveCoordinatorMessage({ type: "drift-filed", root: project, drift: "adv0d1f7", holder: "advisor-turn" });
+  expect(driftsFinishing(project)).toEqual(["adv0d1f7"]);
+  expect(activeProjectJobs(project).some((job) => job.id === "advisor-turn-job")).toBe(true);
+  releaseFiledWork(project, "advisor-turn");
+  expect(driftsFinishing(project)).toEqual([]);
+  endTerminalJobs("advisor-turn");
+  expect(activeProjectJobs(project).some((job) => job.id === "advisor-turn-job")).toBe(false);
 });
 
 test("a window follows its agent only for a hooked Trama terminal or a chat with a Trama job in progress", () => {

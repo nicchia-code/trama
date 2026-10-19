@@ -25,6 +25,8 @@ export interface Job {
   windowId: string;
   /** The conversation that owns this chat job once its first Trama prompt binds it. */
   conversation?: string;
+  /** An omp Run started with the Advisor Scanner on: its end makes delegation operative, as the end of a scan does. */
+  advisor?: boolean;
 }
 
 
@@ -204,6 +206,7 @@ export function receiveCoordinatorMessage(message: Record<string, unknown>): voi
     if (typeof abnormal === "string") abnormalEnds.set(key, abnormal);
     const ended = remoteJobs.get(key);
     if (ended?.kind === "scan") noteScanEnd(projectRootKey(message["root"]), ended.id);
+    if (ended?.kind === "run" && ended.advisor === true) noteAdvisorRunEnd(projectRootKey(message["root"]));
     if (remoteJobs.delete(key)) changed();
     return;
   }
@@ -221,6 +224,7 @@ export function receiveCoordinatorMessage(message: Record<string, unknown>): voi
     id: message["id"], kind, root: message["root"], place: jobPlace,
     origin: message["origin"] === "automatic" ? "automatic" : "manual",
     windowId: typeof message["windowId"] === "string" ? message["windowId"] : "",
+    ...(message["advisor"] === true ? { advisor: true } : {}),
   });
   const pending = pendingChecks.get(key);
   if (pending !== undefined) {
@@ -350,6 +354,11 @@ function receiveInterruptedPreflight(message: Record<string, unknown>): void {
 function noteScanEnd(key: string, job: string): void {
   if (checkSucceeded.has(`${key}\n${job}`)) readyProjects.add(key);
   else noteScanFailure(key, job, "Scan ended without a successful check");
+}
+
+/** With the Advisor Scanner on, the end of an omp Run lifts the initial wait with any outcome, as the end of a scan does: the advisors replace the scans. */
+function noteAdvisorRunEnd(key: string): void {
+  readyProjects.add(key);
 }
 
 /** Keeps the latest failure last in order, so `lastFailedScan` reads the most recent one. */
@@ -626,8 +635,9 @@ export function startJob(
   id: string = randomUUID(),
   origin: JobOrigin = "manual",
   windowId = "",
+  advisor = false,
 ): string | undefined {
-  const job: Job = { id, kind, root, place, origin, windowId };
+  const job: Job = { id, kind, root, place, origin, windowId, ...(advisor ? { advisor } : {}) };
   if ("chat" in place && place.chat !== "other") {
     const pending = takePendingChat(root, place.chat, sentAfter);
     if (pending?.ended) return undefined;
@@ -663,6 +673,7 @@ function endWhere(matches: (job: Job) => boolean, abnormal?: string): Job[] {
   for (const job of [...jobs]) {
     if (!matches(job) || !jobs.delete(job)) continue;
     if (job.kind === "scan") noteScanEnd(projectRootKey(job.root), job.id);
+    if (job.kind === "run" && job.advisor === true) noteAdvisorRunEnd(projectRootKey(job.root));
     if (abnormal !== undefined) abnormalEnds.set(`${projectRootKey(job.root)}\n${job.id}`, abnormal);
     ended.push(job);
   }
