@@ -15,7 +15,7 @@ test("init refuses to overwrite customised skill files and creates nothing", () 
     mkdirSync(join(custom, ".."), { recursive: true });
     writeFileSync(custom, "my own scan skill\n");
 
-    expect(() => run(["--root", root, "init"], root)).toThrow(/Refusing to overwrite[\s\S]*trama-scan\/SKILL\.md/);
+    expect(() => run(["--root", root, "init"], root)).toThrow(/Refusing to overwrite[\s\S]*trama-scan[\\/]SKILL\.md/);
     expect(readFileSync(custom, "utf8")).toBe("my own scan skill\n");
     expect(existsSync(join(root, ".trama"))).toBe(false);
     expect(existsSync(join(root, ".agents/skills/trama-design"))).toBe(false);

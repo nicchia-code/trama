@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import * as os from "node:os";
 
+// The program the packaging ships for this platform: `trama.exe` on Windows (see bundledTrama).
+const bundledName = process.platform === "win32" ? "trama.exe" : "trama";
+
 let storage: string;
 let extensionPath: string;
 let registered: Record<string, boolean> = { "/other/hooks.json": true };
@@ -58,7 +61,7 @@ function setup(): void {
   storage = mkdtempSync(join(tmpdir(), "trama-hook-storage-"));
   extensionPath = mkdtempSync(join(tmpdir(), "trama-hook-extension-"));
   mkdirSync(join(extensionPath, "bin"));
-  writeFileSync(join(extensionPath, "bin", "trama"), "binary");
+  writeFileSync(join(extensionPath, "bin", bundledName), "binary");
   registered = { "/other/hooks.json": true };
   writeError = undefined;
   updateError = undefined;
@@ -77,9 +80,9 @@ test("Copilot hooks use the bundled program in extension storage and preserve us
   await installCopilotHooks({ fsPath: storage } as never, false);
   expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
     hooks: {
-      UserPromptSubmit: [{ type: "command", command: `"${join(extensionPath, "bin", "trama")}" copilot-hook` }],
-      Stop: [{ type: "command", command: `"${join(extensionPath, "bin", "trama")}" copilot-hook` }],
-      PreToolUse: [{ type: "command", command: `"${join(extensionPath, "bin", "trama")}" copilot-hook` }],
+      UserPromptSubmit: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" copilot-hook` }],
+      Stop: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" copilot-hook` }],
+      PreToolUse: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" copilot-hook` }],
     },
   });
   expect(registered).toEqual({ "/other/hooks.json": true, [file]: true });
@@ -90,7 +93,7 @@ test("Copilot hooks use the bundled program in extension storage and preserve us
 test("on Windows the Copilot hook file carries the PowerShell form next to the plain command", async () => {
   setup();
   await installCopilotHooks({ fsPath: storage } as never, true);
-  const program = join(extensionPath, "bin", "trama");
+  const program = join(extensionPath, "bin", bundledName);
   const entry = { type: "command", command: `"${program}" copilot-hook`, windows: `& "${program}" copilot-hook` };
   expect(JSON.parse(readFileSync(join(storage, "copilot-hooks.json"), "utf8"))).toEqual({ hooks: { UserPromptSubmit: [entry], Stop: [entry], PreToolUse: [entry] } });
 });
@@ -136,9 +139,9 @@ test("activation writes Cursor's hooks in the developer's own hooks file, rewrit
   rmSync(cursorDir, { recursive: true, force: true });
   try {
     await installEditorHooks({ fsPath: storage } as never);
-    const program = join(extensionPath, "bin", "trama");
+    const program = join(extensionPath, "bin", bundledName);
     const hooks = JSON.parse(readFileSync(join(cursorDir, "hooks.json"), "utf8")).hooks;
-    expect(hooks.stop).toEqual([{ command: `"${program}" cursor-hook` }]);
+    expect(hooks.stop).toEqual([{ command: `${process.platform === "win32" ? "& " : ""}"${program}" cursor-hook` }]);
     expect(existsSync(join(storage, "copilot-hooks.json"))).toBe(false);
   } finally {
     editor.appName = "Visual Studio Code";

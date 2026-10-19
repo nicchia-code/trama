@@ -121,7 +121,7 @@ describe("handing over", () => {
 describe("line endings", () => {
   test("a CRLF checkout hashes and compares like Linux: no Proposal goes stale in either direction", () => {
     const model = join(p.dir, "model/checkout/order.md");
-    writeFileSync(model, readFileSync(model, "utf8").replace(/\n/g, "\r\n"));
+    writeFileSync(model, readFileSync(model, "utf8").replace(/\r?\n/g, "\r\n"));
     const prop = newProposal(p, "Lost");
     writeOrder(prop.id);
     const copy = join(getProposal(p, prop.id).dir, "model/checkout/order.md");

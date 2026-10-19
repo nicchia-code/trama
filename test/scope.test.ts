@@ -10,7 +10,7 @@ import { handOver } from "./handover";
 import { coverWithTask } from "./cover";
 import type { ScanScopeEntry } from "../src/core/scan-scope";
 import { affectedFeatures, proposalScope } from "../src/core/scope";
-import { type Project, projectAt, readModelFiles } from "../src/core/store";
+import { type Project, projectAt, readModelFiles, readTextLf } from "../src/core/store";
 
 let dir: string;
 let p: Project;
@@ -83,7 +83,7 @@ describe("proposalScope for Requirements", () => {
 
   test("sections are compared by Area and reference whichever fragment holds them; fragment titles, descriptions and new fragments affect nothing", () => {
     const split = newProposal(p, "Split");
-    const main = readFileSync(join(dir, ".trama/requirements/ui/main.md"), "utf8");
+    const main = readTextLf(join(dir, ".trama/requirements/ui/main.md"));
     const [head, rest] = main.split("## General\n") as [string, string];
     const [general, others] = rest.split("## checkout\n") as [string, string];
     writeFileSync(editInProposal(p, split.id, "requirements/ui/main.md"), `${head.replace("# Interface", "# Screens").replace("shown to customers", "shown anywhere")}## checkout\n${others}`);
@@ -201,7 +201,7 @@ describe("proposal show: removals and scope coverage", () => {
 
   test("an entry no Task or Already present row names is shown as not covered", () => {
     const prop = newProposal(p, "Order");
-    writeFileSync(editInProposal(p, prop.id, "checkout/order.md"), readFileSync(join(dir, ".trama/model/checkout/order.md"), "utf8").replace("### Paid\n", "### Paid\nMoney received.\n"));
+    writeFileSync(editInProposal(p, prop.id, "checkout/order.md"), readTextLf(join(dir, ".trama/model/checkout/order.md")).replace("### Paid\n", "### Paid\nMoney received.\n"));
     expect(run(["--root", dir, "proposal", "show", prop.id], dir, {}).out).toContain("- `order/Paid` (changed) — not covered");
   });
 

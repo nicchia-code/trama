@@ -60,7 +60,7 @@ test("cursorModels reads the list from Cursor's state database, and gives none w
     rmSync(join(globalStorage, "state.vscdb"));
     expect(await cursorModels(extensionStorage)).toEqual([]);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -126,7 +126,7 @@ posix("omp models names the exit code when omp fails, and never reads a list fro
 
 test("omp runs with the folder of trama.ompPath in front of the PATH, or else the folder of bun", () => {
   expect(ompPathVariable("/opt/omp/bin/omp", { PATH: "/usr/bin" })).toBe(["/opt/omp/bin", "/usr/bin"].join(delimiter));
-  expect(ompPathVariable("", { PATH: "/usr/bin", BUN_INSTALL: "/srv/bun" })).toBe(["/srv/bun/bin", "/usr/bin"].join(delimiter));
+  expect(ompPathVariable("", { PATH: "/usr/bin", BUN_INSTALL: "/srv/bun" })).toBe([join("/srv/bun", "bin"), "/usr/bin"].join(delimiter));
   expect(ompPathVariable("", { PATH: "/usr/bin", BUN_INSTALL: "" })).toBe([join(homedir(), ".bun", "bin"), "/usr/bin"].join(delimiter));
   expect(bunBinDir({ BUN_INSTALL: "/srv/bun" })).toBe(join("/srv/bun", "bin"));
 });

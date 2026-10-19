@@ -442,17 +442,18 @@ describe("a check", () => {
   });
   /** Runs `body` while a live editor answers the coordinator messages of the command with `onMessage`. */
   async function withEditor(onMessage: (message: Record<string, unknown>) => void | Promise<void>, body: () => Promise<void>) {
-    const previousRuntime = process.env.XDG_RUNTIME_DIR;
+    const runtimeVariable = process.platform === "win32" ? "LOCALAPPDATA" : "XDG_RUNTIME_DIR";
+    const previousRuntime = process.env[runtimeVariable];
     const runtimeRoot = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-check-phase-") : "/tmp/trama-cp-");
-    process.env.XDG_RUNTIME_DIR = runtimeRoot;
-    const runtimeName = process.platform === "win32" ? "trama-q" : `trama-q-${process.getuid!()}`;
-    const server = await createQuestionServer({ project: p, runtimeDir: join(runtimeRoot, runtimeName), handler: async () => ({ status: "unavailable", reason: "No project coordinator is available." }), onCoordinatorMessage: onMessage });
+    process.env[runtimeVariable] = runtimeRoot;
+    const runtimeDir = process.platform === "win32" ? join(runtimeRoot, "Trama", "questions") : join(runtimeRoot, `trama-q-${process.getuid!()}`);
+    const server = await createQuestionServer({ project: p, runtimeDir, handler: async () => ({ status: "unavailable", reason: "No project coordinator is available." }), onCoordinatorMessage: onMessage });
     try {
       await body();
     } finally {
       await server.dispose();
-      if (previousRuntime === undefined) delete process.env.XDG_RUNTIME_DIR;
-      else process.env.XDG_RUNTIME_DIR = previousRuntime;
+      if (previousRuntime === undefined) delete process.env[runtimeVariable];
+      else process.env[runtimeVariable] = previousRuntime;
       rmSync(runtimeRoot, { recursive: true, force: true });
     }
   }

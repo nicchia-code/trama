@@ -11,18 +11,19 @@ import resolveDrifts from "../../skills/trama-resolve-drifts/SKILL.md" with { ty
 import scan from "../../skills/trama-scan/SKILL.md" with { type: "text" };
 import compare from "../../skills/trama-compare/SKILL.md" with { type: "text" };
 import { SKILL_DIRS } from "../core/requirement-skills";
+import { normalizeLf } from "../core/line-endings";
 import { readTextLf, writeFileEnsuringDir } from "../core/store";
 
-/** Skill files, embedded in the binary: path relative to the skills directory -> content. */
+/** Skill files, embedded in the binary: path relative to the skills directory -> content. The text is LF-normalised: a CRLF checkout embeds the same text as Linux, so an installed copy compares equal. */
 export const SKILLS: Record<string, string> = {
-  "trama-design/SKILL.md": design,
-  "trama-design/FORMAT.md": designFormat,
-  "trama-setup/SKILL.md": setup,
-  "trama-scan/SKILL.md": scan,
-  "trama-implement/SKILL.md": implement,
-  "trama-import/SKILL.md": importSkill,
-  "trama-resolve-drifts/SKILL.md": resolveDrifts,
-  "trama-compare/SKILL.md": compare,
+  "trama-design/SKILL.md": normalizeLf(design),
+  "trama-design/FORMAT.md": normalizeLf(designFormat),
+  "trama-setup/SKILL.md": normalizeLf(setup),
+  "trama-scan/SKILL.md": normalizeLf(scan),
+  "trama-implement/SKILL.md": normalizeLf(implement),
+  "trama-import/SKILL.md": normalizeLf(importSkill),
+  "trama-resolve-drifts/SKILL.md": normalizeLf(resolveDrifts),
+  "trama-compare/SKILL.md": normalizeLf(compare),
 };
 
 /** Skill folders that earlier versions installed and that no longer exist. */

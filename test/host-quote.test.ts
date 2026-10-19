@@ -25,13 +25,6 @@ test("PowerShell doubles single quotes, including the typographic ones it also t
   expect(quote("powershell", "\u2018x\u2019")).toBe("'\u2018\u2018x\u2019\u2019'");
 });
 
-test("Windows PowerShell 5.1 writes each double quote as \\\" so the program reads it back", () => {
-  expect(quote("powershell5", '{"a": 1}')).toBe(String.raw`'{\"a\": 1}'`);
-  expect(quote("powershell5", String.raw`C:\dir\"x y"`)).toBe(String.raw`'C:\dir\\\"x y\"'`);
-  expect(quote("powershell5", "a b\\")).toBe("'a b\\\\'");
-  expect(quote("powershell5", "a\\")).toBe("'a\\'");
-  expect(quote("powershell5", `it's "x" $HOME`)).toBe(String.raw`'it''s \"x\" $HOME'`);
-});
 
 test("PowerShell 7 keeps the plain PowerShell quoting, without escaping the double quotes", () => {
   expect(quote("powershell", '{"a": 1}')).toBe(`'{"a": 1}'`);

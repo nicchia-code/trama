@@ -62,11 +62,12 @@ function psLiteral(text: string): string {
 
 /**
  * The text as Windows PowerShell 5.1 must write it so the program receives it intact. That shell wraps an argument
- * holding whitespace in double quotes without escaping the quotes inside, so each `"` is written `\"` and the program's
- * parser reads it back as `"`. A run of backslashes before a `"` is doubled, and so is a run at the end of a wrapped argument.
+ * holding whitespace in double quotes only when the whitespace is outside every double quote in it (each `"` not
+ * preceded by a backslash counts), and it writes the quotes inside unescaped. So the argument is wrapped here, in the
+ * program's own rules, and PowerShell has nothing to add: each `"` is written `\"`, a run of backslashes before a `"`
+ * is doubled, and so is a run at the end of the wrapped argument.
  */
 function nativeArgument(text: string): string {
-  const wrapped = /\s/.test(text);
   let out = "";
   let backslashes = 0;
   for (const ch of text) {
@@ -76,7 +77,8 @@ function nativeArgument(text: string): string {
       backslashes = 0;
     }
   }
-  return out + "\\".repeat(wrapped ? backslashes * 2 : backslashes);
+  if (!/\s/.test(text)) return out + "\\".repeat(backslashes);
+  return `"${out}${"\\".repeat(backslashes * 2)}"`;
 }
 
 /** Puts the quoted prompt where `{prompt}` is in `template`, or at the end when the template has no placeholder. */

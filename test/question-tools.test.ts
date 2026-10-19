@@ -7,6 +7,9 @@ import { createQuestionServer, QUESTION_ENDPOINT_ENV, type QuestionServer } from
 import { questionAborted, type QuestionRequest, type QuestionResult } from "../src/core/questions";
 import { projectAt, type Project } from "../src/core/store";
 
+// The default runtime directory is under %LOCALAPPDATA% on Windows and under $XDG_RUNTIME_DIR elsewhere.
+const RUNTIME_VARIABLE = process.platform === "win32" ? "LOCALAPPDATA" : "XDG_RUNTIME_DIR";
+
 let dir: string;
 let runtimeRoot: string;
 let runtimeDir: string;
@@ -17,17 +20,17 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-question-tools-"));
   // The command line finds the window's discovery record in the default runtime directory, so the tests use that one.
   runtimeRoot = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-qr-") : "/tmp/trama-qr-");
-  previousRuntime = process.env.XDG_RUNTIME_DIR;
-  process.env.XDG_RUNTIME_DIR = runtimeRoot;
-  runtimeDir = join(runtimeRoot, process.platform === "win32" ? "trama-q" : `trama-q-${process.getuid!()}`);
+  previousRuntime = process.env[RUNTIME_VARIABLE];
+  process.env[RUNTIME_VARIABLE] = runtimeRoot;
+  runtimeDir = process.platform === "win32" ? join(runtimeRoot, "Trama", "questions") : join(runtimeRoot, `trama-q-${process.getuid!()}`);
   cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
   project = projectAt(dir);
 });
 afterEach(async () => {
   await server?.dispose();
   server = undefined;
-  if (previousRuntime === undefined) delete process.env.XDG_RUNTIME_DIR;
-  else process.env.XDG_RUNTIME_DIR = previousRuntime;
+  if (previousRuntime === undefined) delete process.env[RUNTIME_VARIABLE];
+  else process.env[RUNTIME_VARIABLE] = previousRuntime;
   rmSync(dir, { recursive: true, force: true });
   rmSync(runtimeRoot, { recursive: true, force: true });
 });

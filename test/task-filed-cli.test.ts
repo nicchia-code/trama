@@ -6,6 +6,9 @@ import { run } from "../src/cli/main";
 import { createQuestionServer, settleCoordinatorMessages, type QuestionServer } from "../src/core/question-channel";
 import { projectAt } from "../src/core/store";
 
+// The default runtime directory is under %LOCALAPPDATA% on Windows and under $XDG_RUNTIME_DIR elsewhere.
+const RUNTIME_VARIABLE = process.platform === "win32" ? "LOCALAPPDATA" : "XDG_RUNTIME_DIR";
+
 let root: string;
 let projectRoot: string;
 let runtimeDir: string;
@@ -16,15 +19,15 @@ beforeEach(() => {
   root = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-task-filed-") : "/tmp/trama-tf-");
   projectRoot = join(root, "project");
   cpSync(join(import.meta.dir, "../examples/shop"), projectRoot, { recursive: true });
-  previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
-  process.env.XDG_RUNTIME_DIR = root;
-  runtimeDir = join(root, process.platform === "win32" ? "trama-q" : `trama-q-${process.getuid!()}`);
+  previousRuntimeDir = process.env[RUNTIME_VARIABLE];
+  process.env[RUNTIME_VARIABLE] = root;
+  runtimeDir = process.platform === "win32" ? join(root, "Trama", "questions") : join(root, `trama-q-${process.getuid!()}`);
 });
 afterEach(async () => {
   await server?.dispose();
   server = undefined;
-  if (previousRuntimeDir === undefined) delete process.env.XDG_RUNTIME_DIR;
-  else process.env.XDG_RUNTIME_DIR = previousRuntimeDir;
+  if (previousRuntimeDir === undefined) delete process.env[RUNTIME_VARIABLE];
+  else process.env[RUNTIME_VARIABLE] = previousRuntimeDir;
   rmSync(root, { recursive: true, force: true });
 });
 

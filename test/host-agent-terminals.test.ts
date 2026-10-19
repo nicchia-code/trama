@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, mock, spyOn, test, vi } from "bun:test";
-import { basename, join, relative, isAbsolute } from "node:path";
+import { basename, join, relative, isAbsolute, sep } from "node:path";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 const { tmpdir } = os;
@@ -144,7 +144,7 @@ mock.module("vscode", () => ({
     getWorkspaceFolder: (uri: FileUri) => {
       const root = (workspaceRoots ?? [workspaceRoot]).find((root) => {
         const path = relative(root, uri.fsPath);
-        return path !== ".." && !path.startsWith("../") && !isAbsolute(path);
+        return path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
       });
       return root === undefined ? undefined : { uri: { scheme: "file", fsPath: root } };
     },
@@ -431,7 +431,7 @@ describe("Claude Code run hooks", () => {
     projectAt(testDir);
     extensionPath = join(testDir, "extension");
     mkdirSync(join(extensionPath, "bin"), { recursive: true });
-    writeFileSync(join(extensionPath, "bin", "trama"), "");
+    writeFileSync(join(extensionPath, "bin", process.platform === "win32" ? "trama.exe" : "trama"), "");
     settingValues.agent = "claude";
     settingValues.execution = "haiku";
     watchAgentTerminal();
@@ -1121,6 +1121,17 @@ describe("announcing every launch as its instruction starts", () => {
   });
 });
 
+/** Runs `check` as if the editor ran on `platform`: the PATH line of Cursor's instruction depends on it. */
+function onPlatform(platform: string, check: () => void): void {
+  const original = Object.getOwnPropertyDescriptor(process, "platform");
+  try {
+    Object.defineProperty(process, "platform", { value: platform });
+    check();
+  } finally {
+    if (original) Object.defineProperty(process, "platform", original);
+  }
+}
+
 describe("the selected chat in Cursor", () => {
   test("the chat tries self-sending, then the deeplink, then the clipboard, each once", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
@@ -1173,28 +1184,28 @@ describe("the selected chat in Cursor", () => {
   test("the instruction to Cursor's chat says where the shipped trama program is, and stays one line without one", async () => {
     // Dynamic, as above: the module must load after mock.module replaced "vscode".
     const { withTramaPath } = await import("../extension/src/host/cursor");
-    expect(withTramaPath("Use the trama-scan skill on the whole System. Write in Italian.", "/ext/bin/trama")).toBe(
-      'Use the trama-scan skill on the whole System. Write in Italian.\nThe trama command may not be on your PATH. Before anything else run: export PATH="/ext/bin:$PATH"',
-    );
-    expect(withTramaPath("Use the trama-scan skill on the whole System.")).toBe("Use the trama-scan skill on the whole System.");
-    const platform = Object.getOwnPropertyDescriptor(process, "platform");
-    try {
-      Object.defineProperty(process, "platform", { value: "win32" });
+    onPlatform("darwin", () => {
+      expect(withTramaPath("Use the trama-scan skill on the whole System. Write in Italian.", "/ext/bin/trama")).toBe(
+        'Use the trama-scan skill on the whole System. Write in Italian.\nThe trama command may not be on your PATH. Before anything else run: export PATH="/ext/bin:$PATH"',
+      );
+      expect(withTramaPath("Use the trama-scan skill on the whole System.")).toBe("Use the trama-scan skill on the whole System.");
+    });
+    onPlatform("win32", () => {
       expect(withTramaPath("Use the trama-scan skill on the whole System. Write in Italian.", "C:\\ext\\bin\\trama.exe")).toBe(
         "Use the trama-scan skill on the whole System. Write in Italian.\nThe trama command may not be on your PATH. Run it by its full path: C:\\ext\\bin\\trama.exe",
       );
-    } finally {
-      if (platform) Object.defineProperty(process, "platform", platform);
-    }
+    });
   });
 
   test("the ask line follows the PATH line in Cursor's instruction, or the instruction when there is no PATH line", async () => {
     // Dynamic, as above: the module must load after mock.module replaced "vscode".
     const { withAskLine, withTramaPath } = await import("../extension/src/host/cursor");
     const ask = ASK_DEVELOPER_SENTENCE;
-    expect(withAskLine(withTramaPath("Use the trama-design skill on the design request in `.trama/requests/r.md`.", "/ext/bin/trama"))).toBe(
-      `Use the trama-design skill on the design request in \`.trama/requests/r.md\`.\nThe trama command may not be on your PATH. Before anything else run: export PATH="/ext/bin:$PATH"\n${ask}`,
-    );
+    onPlatform("darwin", () => {
+      expect(withAskLine(withTramaPath("Use the trama-design skill on the design request in `.trama/requests/r.md`.", "/ext/bin/trama"))).toBe(
+        `Use the trama-design skill on the design request in \`.trama/requests/r.md\`.\nThe trama command may not be on your PATH. Before anything else run: export PATH="/ext/bin:$PATH"\n${ask}`,
+      );
+    });
     expect(withAskLine("Use the trama-import skill on this repository.")).toBe(`Use the trama-import skill on this repository.\n${ask}`);
   });
 });
