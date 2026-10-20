@@ -76,13 +76,13 @@ Il developer lo chiede con il comando, con l'icona di Trama in alto, nella barra
 The developer closes the Trama panel.
 
 ### SHOW_DIAGRAM
-The developer switches to the Diagram tab, or follows a link from another tab to an element or to a Proposal drawn over the Model.
+The developer switches to the Diagram tab, or follows a link from another tab to an element. I pulsanti View on diagram e i chip dei riferimenti aprono invece un focus (FOCUS_PROPOSAL, FOCUS_TASK, FOCUS_REF).
 
 ### SHOW_BOARD
 The developer switches to the Board tab.
 
 ### SHOW_REQUIREMENTS
-The developer switches to the Requirements tab, or follows a link to a Requirement.
+The developer switches to the Requirements tab, or follows a link to a Requirement. I pulsanti View requirements e i chip dei riferimenti aprono invece un focus (FOCUS_PROPOSAL, FOCUS_TASK, FOCUS_REF).
 
 ### SHOW_SPECS
 Il developer passa alla scheda Specs del pannello.
@@ -106,7 +106,25 @@ The developer shows one Machine in the Diagram, by opening it, with the breadcru
 The developer zooms into a State that has sub-States, in the Diagram, aprendolo oppure risalendo con il breadcrumb a uno Stato che contiene quello mostrato.
 
 ### CHOOSE_DRAWN_PROPOSAL
-Il developer cambia la Proposal che il Diagramma disegna sopra il Modello: ne sceglie un'altra, o None, nel selettore del Diagramma, oppure segue un link a una Proposal disegnata sopra il Modello. Selezionare un Drift, nel Diagramma o arrivandoci dalla Board, non cambia la Proposal disegnata. Il livello del Diagramma resta quello che il developer guardava, finché esiste ancora.
+Il developer cambia la Proposal che una scheda disegna sopra il Modello: ne sceglie un'altra, o None, nel selettore del Diagramma, dei Requisiti o delle Specs. Ogni scheda ha il suo selettore e la sua Proposal disegnata; un pulsante View di una Proposal la disegna invece con FOCUS_PROPOSAL. Selezionare un Drift, nel Diagramma o arrivandoci dalla Board, non cambia la Proposal disegnata. Il livello del Diagramma resta quello che il developer guardava, finché esiste ancora.
+
+### FOCUS_PROPOSAL
+Il developer preme View on diagram o View requirements sulla scheda di una Proposal in Backlog, per vedere nel Diagramma o nei Requisiti ciò che la Proposal cambia.
+
+### FOCUS_TASK
+Il developer preme View on diagram o View requirements sulla scheda di un Task in Active, per vedere nel Diagramma o nei Requisiti ciò che il Task nomina.
+
+### FOCUS_REF
+Il developer segue un chip di riferimento: sulla scheda di un Task, sulla scheda di un Drift o fra i Task dei dettagli di una voce di History. Un chip di un elemento del Modello porta al Diagramma, uno di un Requisito ai Requisiti, uno delle Specs alle Specs.
+
+### STEP_FOCUS
+Il developer passa al passo precedente o al successivo del focus della scheda, con le frecce della barra del focus.
+
+### TOGGLE_ONLY_FOCUSED
+Il developer accende o spegne Only these nella barra del focus dei Requisiti.
+
+### CLEAR_FOCUS
+Il developer toglie il focus della scheda, con Clear nella barra del focus o con Esc.
 
 ### CHOOSE_ANSWER
 Il developer conferma la domanda corrente con le scelte selezionate, con la risposta scritta o con entrambe.

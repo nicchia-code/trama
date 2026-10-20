@@ -125,7 +125,7 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 | 1 | Click the `Checkout` box once | The box gets a blue outline and a darker blue fill. The panel shows `FEATURE`, `Checkout`, `From a filled cart to a delivered order, including payment and cancellation.`, buttons **Drill in** and **Open file**, then `MACHINES`: `cart · 3 states`, `order · 8 states`, `payment · 6 states` | ☐ |
 | 2 | Hover the box | A tooltip with the description appears | ☐ |
 | 3 | Click an Actor node, for example `User` 🔍 | Not observed. By design the panel shows that Actor and its Events, and nothing is drilled into | ☐ |
-| 4 | Press Escape with the diagram focused | Selection is cleared; the panel goes back to the System description | ☐ |
+| 4 | Press Escape with the diagram focused | Selection is cleared; the panel goes back to the System description. With a focus bar showing, a second Escape takes the focus off (the bar, the dimming and the highlights go; level and position stay) | ☐ |
 
 ### B3. Three ways to drill in
 | # | Action | Expected | ✓ |
@@ -710,7 +710,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 |---|---|---|---|
 | M1 | Click the **Requirements** tab | Two Areas, **Data** (`requirements/data`) and **Interface** (`requirements/ui`), each with its italic "Use when…" line and **Open file**, then one fragment group **main.md** (title, file name in grey, its italic description, a small **Open file** link) holding the sections, General first. The Proposal selector is disabled (no open Proposal touches Requirements) | ☐ |
 | M2 | Click the section title **order/Paid** | The Diagram opens on `order` with Paid selected; the panel ends with **Requirements → Interface** and the two Paid lines | ☐ |
-| M3 | In the panel, click **Interface** | The Requirements tab shows only `order/Paid`, with "Showing requirements/ui#order/Paid" and **Show all** | ☐ |
+| M3 | In the panel, click **Interface** | The Requirements tab still shows both Areas; `order/Paid` has a cyan left border and light cyan background, the focus bar above the page reads `requirements/ui#order/Paid` and the page scrolled to the section. There is no "Showing …" row and no **Show all**; **Clear** (or Escape) removes the marks and the bar | ☐ |
 | M4 | Verification shell: `j model show order/Preparing` | Ends with `## Requirements`: `requirements/ui#order/Paid (via order/Paid)`, `requirements/data#order (via order)`, `requirements/ui#checkout (via checkout)` | ☐ |
 | M5 | `ls /tmp/trama-demo/shop/.agents/skills` after `j project edit` | `trama-req-data-main` and `trama-req-ui-main` next to the Trama skills; `trama-req-ui-main/SKILL.md` has `description: Use when building or changing screens…`. The output has the line `Requirement skills: one skill per fragment (budget <n>/4000 characters).` | ☐ |
 | M5b | `mkdir /tmp/trama-demo/shop/.agents/skills/trama-fix` with a file inside, and the same under `.claude/skills`, then `j project edit` | The output has a line `Deleted the retired trama-fix skill:` naming both folders; neither exists any more. Running it again prints no `Deleted` line. In the editor, **Trama: Update Agent Skills** shows the same line in its notification | ☐ |

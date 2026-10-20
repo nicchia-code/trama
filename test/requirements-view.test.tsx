@@ -10,15 +10,15 @@ const fragment = (id: string, sections: unknown[], over: Record<string, unknown>
 const area = (fragments: unknown[], over: Record<string, unknown> = {}) => ({ id: "ui", title: "UI", file: "requirements/ui/area.md", description: "", intro: "", change: "same", fragments, ...over });
 
 function tab(areas: unknown[], over: Partial<RequirementsProps> = {}, proposals: unknown[] = []) {
-  const calls = { files: [] as string[], targets: [] as (string | null)[], diagram: [] as unknown[] };
+  const calls = { files: [] as string[], focus: [] as unknown[], diagram: [] as unknown[] };
   const snapshot = { areas, proposals, numbers: undefined } as unknown as Snapshot;
   render(
     <RequirementsTab
       snapshot={snapshot}
       proposalId={null}
-      target={null}
+      focus={null}
       onProposal={() => {}}
-      onTarget={(t) => calls.targets.push(t)}
+      onFocus={(f) => calls.focus.push(f)}
       navigate={(_, o) => calls.diagram.push(o)}
       openFile={(p) => calls.files.push(p)}
       openLink={() => {}}
@@ -55,11 +55,12 @@ test("a section reference opens the Diagram on it, and Open file asks the host f
   expect(calls.files).toEqual(["requirements/ui/area.md"]);
 });
 
-test("a focused target filters the Areas, and Show all clears it", () => {
-  const calls = tab([area([fragment("main", [section("panel", "text")])])], { target: "requirements/other" });
-  expect(screen.getByText("No Requirements for requirements/other.")).not.toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Show all" }));
-  expect(calls.targets).toEqual([null]);
+test("every Area stays visible and nothing says a reference filters them", () => {
+  tab([area([fragment("main", [section("panel", "text")])]), area([], { id: "empty", title: "Empty" })]);
+  expect(screen.queryByText(/Showing/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
+  expect(screen.getByText("UI")).not.toBeNull();
+  expect(screen.getByText("Empty")).not.toBeNull();
 });
 
 test("the Proposal selector is disabled when no Proposal touches the Requirements", () => {

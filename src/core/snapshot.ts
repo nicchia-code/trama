@@ -2,6 +2,7 @@ import type { CardNumbers } from "./card-names";
 import { type Announcement, type AnnouncementKind, type CheckPhase, listAnnouncements, resolutionTitle } from "./announcements";
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
+import { scanScope } from "./scan-scope";
 import { applied, type ApprovalBlock, approvalBlock, baseFiles, changes, coversScope, health, listProposals, type Proposal, type ProposalKind, proposalCoverage, type RemovalEntry, unfixableDrifts } from "./proposals";
 import { appliesUnder, type RequiredProposal } from "./required";
 import { type ResolvedDrift, resolvedDrifts } from "./resolution";
@@ -120,6 +121,8 @@ export interface ProposalView {
   specs: Specs;
   /** What the Proposal changes in the Specs against the Specs it builds on: drawn in the Specs tab. */
   specsChange: SpecsChange;
+  /** The references of the Proposal's scope, as `trama proposal show` prints them (`## Scope`): the focus of the Proposal starts from them. */
+  scope: string[];
 }
 
 export interface DriftView {
@@ -373,6 +376,7 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     }),
     specs: afterProject.specs,
     specsChange: specsChange(baseProject.specs, afterProject.specs),
+    scope: scanScope(baseProject, afterProject).map((entry) => entry.ref),
   };
 }
 

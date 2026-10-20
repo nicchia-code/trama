@@ -5,9 +5,9 @@ import { compareByCreation } from "../../../../src/core/schema";
 import { joinReasons } from "../../../../src/core/design";
 import type { Blocker } from "../../../../src/core/blocking";
 import type { AnnouncementView, DriftView, HistoryView, ProposalTag, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
-import type { Column } from "../../protocol";
+import type { Column, FocusRequest } from "../../protocol";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
-import { proposalTouches } from "../requirements/logic";
+import { focusStepCount } from "../focus/steps";
 import { dismissBlocker } from "../dismiss";
 import { type CardName, cardNameOf, type CardNumbers, namerOf, noNumbers } from "../../../../src/core/card-names";
 import type { DriftAutopilotFailure, DriftAutopilotMode, DriftAutopilotStatus } from "../../host/drift-resolution";
@@ -99,6 +99,21 @@ export interface NotBlockingItem {
 export const notBlockingItems = (freed: DriftView["notBlocking"], numbers: CardNumbers): NotBlockingItem[] =>
   freed.flatMap((f) => (f.title === null ? [] : [{ name: cardNameOf(numbers, "task", f.task), reason: f.reason }]));
 
+/** Which of the two View buttons a card has. */
+export interface FocusViews {
+  diagram: boolean;
+  requirements: boolean;
+}
+
+/** No View button: a card whose focus is not computed. */
+export const NO_VIEWS: FocusViews = { diagram: false, requirements: false };
+
+/** The View buttons a Proposal or a Task has on the current picture: one per tab that would show at least one step of its focus. */
+export const focusViews = (snapshot: Snapshot, focus: FocusRequest): FocusViews => ({
+  diagram: focusStepCount(snapshot, focus, "diagram") > 0,
+  requirements: focusStepCount(snapshot, focus, "requirements") > 0,
+});
+
 export interface ResolvedRow {
   drift: string;
   name: CardName;
@@ -135,8 +150,8 @@ export interface ProposalCard {
   blocker: string | null;
   /** Why Reject is disabled; null when the Proposal can be rejected. */
   rejectBlocker: string | null;
-  /** Whether it changes the Model, its Requirements or both: which views can show it. */
-  touches: { model: boolean; requirements: boolean };
+  /** Which View buttons the card has: each shows only when its tab would have at least one step of the Proposal's focus (`rules#focus`). */
+  views: FocusViews;
   /** The Drifts a resolution resolves, one row each; empty for any other Proposal. */
   resolves: ResolvedRow[];
   /** The text of the muted `Creates N Tasks` line; null when the Proposal creates no Task. */
@@ -207,6 +222,8 @@ export interface TaskCard {
   /** Path relative to `.trama/`. */
   file: string;
   column: Column;
+  /** Which View buttons the card has: each shows only when its tab would have at least one step of the Task's focus (`rules#focus`). */
+  views: FocusViews;
 }
 
 /** A fix Task that other Tasks wait for, in Blocked: the fix Task stays in Active, and this card lists the Tasks it holds up. */
@@ -290,7 +307,7 @@ export function createsText(n: number): string | null {
   return n === 0 ? null : `Creates ${n} ${n === 1 ? "Task" : "Tasks"}`;
 }
 
-export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null, blocked: Map<string, TaskCard[]> = new Map(), finishing: readonly string[] = [], models: BoardModels = NO_MODELS): ProposalCard {
+export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, failed: (drift: string) => string | null = () => null, blocked: Map<string, TaskCard[]> = new Map(), finishing: readonly string[] = [], models: BoardModels = NO_MODELS, views: FocusViews = NO_VIEWS): ProposalCard {
   const wait = finishingBlocker(p.id, finishing);
   const name = cardNameOf(numbers, "proposal", p.id);
   const choosable = Object.hasOwn(models.proposals, p.id);
@@ -307,7 +324,7 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, 
     changes: summarizeChanges(p.changes),
     blocker: joinReasons([wait, approveBlocker(p, numbers)]),
     rejectBlocker: wait,
-    touches: proposalTouches(p),
+    views,
     resolves: resolvedRows(p, numbers, failed, blocked),
     creates: createsText(p.creates),
     choosable,
@@ -345,7 +362,7 @@ export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers, autopi
   };
 }
 
-export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, autopilotFailed: string | null = null, finishing: string | null = null): TaskCard {
+export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, autopilotFailed: string | null = null, finishing: string | null = null, views: FocusViews = NO_VIEWS): TaskCard {
   const name = namerOf(numbers);
   return {
     kind: "task",
@@ -368,6 +385,7 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, autopilo
     column: t.column,
     autopilotFailed,
     finishing,
+    views,
   };
 }
 
@@ -439,7 +457,7 @@ export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilot
   const failed = failedReasons(failures);
   // A Drift a delivered resolution lists is decided on that Proposal's card, so it has no card of its own in Blocked.
   const delivered = new Set(snapshot.proposals.filter((p) => p.kind === "resolution").flatMap((p) => p.resolves.map((r) => r.drift)));
-  const tasks = new Map<string, TaskCard>(snapshot.tasks.map((t): [string, TaskCard] => [t.id, taskCard(t, numbers, failed.get(`task:${t.id}`) ?? null, finishingBlocker(t.id, snapshot.finishingTasks))]));
+  const tasks = new Map<string, TaskCard>(snapshot.tasks.map((t): [string, TaskCard] => [t.id, taskCard(t, numbers, failed.get(`task:${t.id}`) ?? null, finishingBlocker(t.id, snapshot.finishingTasks), t.column === "done" ? NO_VIEWS : focusViews(snapshot, { kind: "task", id: t.id }))]));
   // The Tasks blocked and not taken by the agent, by the Drift or fix Task they wait for. A fix Task some Task waits for
   // keeps its waiting card even when the agent has taken all of them: the card then lists no rows.
   const underDrift = new Map<string, TaskCard[]>();
@@ -456,7 +474,7 @@ export function buildBoard(snapshot: Snapshot, failures: readonly DriftAutopilot
       list.set(id, [...(list.get(id) ?? []), card]);
     }
   }
-  const backlog = byCreation(snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, (drift) => failed.get(`drift:${drift}`) ?? null, underDrift, snapshot.finishingProposals, models) })));
+  const backlog = byCreation(snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, (drift) => failed.get(`drift:${drift}`) ?? null, underDrift, snapshot.finishingProposals, models, focusViews(snapshot, { kind: "proposal", id: p.id })) })));
   const blocked = byCreation([
     ...snapshot.drifts
       .filter((d) => !delivered.has(d.id))

@@ -3,8 +3,8 @@ import type { ViewName } from "../../protocol";
 
 export const REQUIREMENTS_PREFIX = "requirements/";
 
-/** Where a reference is shown: Requirement references in the Requirements tab, everything else on the Diagram. */
-export const viewOfRef = (ref: string): ViewName => (ref.startsWith(REQUIREMENTS_PREFIX) ? "requirements" : "diagram");
+/** Where a reference is shown: Requirement references in the Requirements tab, `specs` and `specs#<field>` in the Specs tab, everything else on the Diagram. */
+export const viewOfRef = (ref: string): ViewName => (ref.startsWith(REQUIREMENTS_PREFIX) ? "requirements" : ref === "specs" || ref.startsWith("specs#") ? "specs" : "diagram");
 
 /** `requirements/ui#order/Paid` → `{ area: "ui", section: "order/Paid" }`; a Model reference → `{ section: ref }`. */
 export function parseTarget(ref: string): { area: string | null; section: string | null } {
@@ -28,13 +28,6 @@ export function areasWith(snapshot: Snapshot, proposal: ProposalView | undefined
   const shown = current.map((a) => touched.get(a.id) ?? a);
   for (const a of proposal.areas) if (!current.some((x) => x.id === a.id)) shown.push(a);
   return shown.sort((a, b) => a.id.localeCompare(b.id));
-}
-
-/** Whether a Proposal changes the Model, its Requirements, or both: decides which tab its "View" buttons open. */
-export function proposalTouches(p: Pick<ProposalView, "changes">): { model: boolean; requirements: boolean } {
-  const requirements = p.changes.some((c) => c.path.startsWith(REQUIREMENTS_PREFIX));
-  const model = p.changes.some((c) => !c.path.startsWith(REQUIREMENTS_PREFIX));
-  return { model, requirements };
 }
 
 /** Sections of a fragment that say something, or that a Proposal adds, changes, moves or removes. */

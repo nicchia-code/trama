@@ -61,6 +61,9 @@ export type ToHost =
 
 export type ViewName = "getstarted" | "diagram" | "board" | "requirements" | "specs" | "settings";
 
+/** What a View button or a reference chip asks a tab to focus: a Proposal in Backlog, a Task in Active, or one reference (the focus of a Task that had only that reference). */
+export type FocusRequest = { kind: "proposal"; id: string } | { kind: "task"; id: string } | { kind: "ref"; ref: string };
+
 export interface NavigateOptions {
   /** Element reference (`checkout`, `order`, `order/Paid`, `user.CANCEL`…): the Diagram shows it. */
   ref?: string;
@@ -68,6 +71,8 @@ export interface NavigateOptions {
   proposal?: string;
   /** Open Drift: the Diagram goes to where it is drawn and selects it. */
   drift?: string;
+  /** Focus to open in the tab arrived at from a View button or a chip; it replaces the focus and the drawn Proposal that tab had. */
+  focus?: FocusRequest;
 }
 
 /** Host -> webview. */

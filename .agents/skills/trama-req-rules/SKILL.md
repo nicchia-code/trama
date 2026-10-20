@@ -31,6 +31,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole dell'autopilota dei Drift** (`autopilot.md`): Usa per la risoluzione automatica dei Drift, l'attesa degli scan e la ripresa dei lavori. Sections: `drift-resolution`.
 - **Regole delle Proposal** (`decisions.md`): Usa quando implementi le regole delle Proposal, dalla scrittura all'approvazione. Sections: `proposal`.
 - **Regole dei Drift** (`drifts.md`): Usa quando implementi le regole dei Drift, della loro risoluzione e del pulsante Resolve Drifts. Sections: `drift`.
+- **Regole del focus** (`focus.md`): Usa quando calcoli cosa evidenzia il focus di una scheda del pannello: elementi, sezioni, passi e riferimenti mancanti. Sections: `focus`.
 - **Regole generali** (`general.md`): Usa sempre quando implementi regole di business: valgono per tutto il Sistema. Sections: `General`.
 - **Regole di agenti e modelli** (`models.md`): Usa per scelta dell'agente, ruoli dei modelli e istruzioni all'agente. Sections: `agent-launching`.
 - **Regole del progetto** (`project.md`): Usa quando implementi init, aggiornamento delle skill e skill dei Requisiti. Sections: `project`.

@@ -46,3 +46,13 @@ export const CHANGE_BORDER = {
   removed: "border-l-red-600 dark:border-l-red-400",
   changed: "border-l-amber-600 dark:border-l-amber-400",
 } as const;
+
+/** The light background that goes with a change's border when a focus marks the element. */
+export const CHANGE_TINT = {
+  added: "bg-green-600/10 dark:bg-green-400/10",
+  removed: "bg-red-600/10 dark:bg-red-400/10",
+  changed: "bg-amber-600/10 dark:bg-amber-400/10",
+} as const;
+
+/** The mark of an element of the focus that no change colours: the left border and the light background in cyan, the shade of each theme. */
+export const FOCUS_MARK = "border-l-cyan-600 bg-cyan-600/10 dark:border-l-cyan-400 dark:bg-cyan-400/10";

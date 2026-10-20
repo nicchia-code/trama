@@ -23,6 +23,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 
 - **Interfaccia del lavoro dell'agente** (`agents.md`): Usa quando mostri richieste di design, terminale dell'agente, agente e modelli. Sections: `design-request`, `agent-terminal`, `agent-launching`.
 - **Board interface** (`board.md`): Usa quando mostri le colonne, le schede e i pulsanti della Board. Sections: `panel/Board`.
+- **Interfaccia del focus** (`focus.md`): Usa quando mostri il focus nel Diagramma, nei Requisiti o nelle Specs, o i pulsanti View e i chip che lo aprono. Sections: `focus`.
 - **Get Started e Start from Scratch** (`get-started.md`): Usa quando mostri Get Started, Start from Scratch, Import from Code o il Diagramma con il Modello vuoto. Sections: `panel/Get Started`, `panel/Diagram`, `project`.
 - **Ghost e avvisi** (`ghosts.md`): Usa quando mostri i ghost degli annunci e i loro avvisi nella Board. Sections: `announcement`.
 - **Interfaccia generale e pannello** (`panel.md`): Usa sempre quando lavori sull'interfaccia: regole generali, pannello, Board e Requisiti. Sections: `General`, `panel`, `panel/Requirements`.

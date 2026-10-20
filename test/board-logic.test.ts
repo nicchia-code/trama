@@ -4,6 +4,7 @@ import type { FileChange } from "../src/core/diff";
 import type { DriftCard, TaskCard } from "../extension/src/webview/board/logic";
 import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
 import { announcedCard, announcedGhosts, approveBlocker, blockBadge, boardDecisionCount, buildBoard, createsText, finishingBlocker, formatCounts, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, summarizeChanges, summarizeFile, tagColour, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
 import { runBlocker } from "../src/core/design";
 import { namerOf } from "../src/core/card-names";
 
@@ -30,7 +31,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   actors: [],
   areas: [],
   specs: EMPTY_SPECS,
-  specsChange: { entries: [], notesBefore: null },
+  specsChange: { entries: [], notesBefore: null }, scope: [],
   ...over,
 });
 const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, title: "Code refunds late", body: "line one\n\nline two\nline three", critical: false, previous: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
@@ -472,4 +473,19 @@ test("a Drift's card names the Tasks it leaves free by number, and leaves out th
   const numbers = { proposal: {}, task: { "0012": "T2" }, drift: {} };
   const [card] = buildBoard(snapshot({ drifts: [free], numbers }))[2]?.cards ?? [];
   expect(card).toMatchObject({ kind: "drift", notBlocking: [{ name: { text: "T2", isNumber: true }, reason: "Only the wording." }] });
+});
+
+test("a card has a View button only for the tab that would show a step of its focus, on the current picture", () => {
+  const shop = shopSnapshot();
+  const tasks = [task({ id: "named", refs: ["order/Paid"] }), task({ id: "bare", refs: [] }), task({ id: "gone", refs: ["order/Nope"] }), task({ id: "finished", refs: ["order/Paid"], column: "done" })];
+  const active = buildBoard({ ...shop, tasks })[1]?.cards ?? [];
+  const views = Object.fromEntries(active.flatMap((c) => (c.kind === "task" ? [[c.id, c.views]] : [])));
+  expect(views.named?.diagram).toBe(true);
+  expect(views.bare).toEqual({ diagram: false, requirements: false });
+  expect(views.gone).toEqual({ diagram: false, requirements: false });
+  expect(views.finished).toBeUndefined();
+
+  const withProposal = shopWithProposals();
+  const [card] = buildBoard(withProposal)[0]?.cards ?? [];
+  expect(card).toMatchObject({ kind: "proposal", views: { diagram: true } });
 });

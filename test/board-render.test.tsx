@@ -71,14 +71,14 @@ function draw(node: ReactNode, over: Partial<BoardEnv> = {}) {
 const proposal: ProposalCard = {
   kind: "proposal", key: "proposal:live", id: "live", name: { text: "P2", isNumber: true }, heading: "Proposal P2", title: "A proposal",
   badges: [{ label: "requires old", tooltip: "Requires Proposal old", tone: "info", card: { kind: "proposal", id: "old" } }],
-  resolution: false, changes: { files: [], more: 0 }, blocker: "Resolve the requirement first", touches: { model: true, requirements: false }, resolves: [],
+  resolution: false, changes: { files: [], more: 0 }, blocker: "Resolve the requirement first", views: { diagram: true, requirements: false }, resolves: [],
   creates: null, rejectBlocker: null, choosable: false, model: null,
   body: "",
 };
 const task: TaskCard = {
   kind: "task", key: "task:liveTask", id: "liveTask", name: { text: "T3", isNumber: true }, title: "A task", technical: false,
   refs: [], drift: "liveDrift", driftName: "D4", proposal: null, proposalTag: null, proposalName: null, agent: false, blocks: [{ label: "blocked D4", tooltip: "Blocked by Drift D4", target: { kind: "diagram", drift: "liveDrift" } }],
-  blockedBy: [], body: "", file: "task.md", column: "todo", autopilotFailed: null, finishing: null,
+  blockedBy: [], body: "", file: "task.md", column: "todo", autopilotFailed: null, finishing: null, views: { diagram: false, requirements: false },
 };
 const resolved = (over: Partial<ProposalCard["resolves"][number]> = {}): ProposalCard["resolves"][number] => ({
   drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", critical: false, previous: null, decision: "Closed, nothing changes", autopilotFailed: null, blocked: [], notBlocking: [], ...over,
@@ -96,13 +96,13 @@ describe("Board card rendering", () => {
   });
 
   test("an approvable Proposal sends its decisions and its links, and a click outside the buttons opens its body", () => {
-    const calls = draw(<CardView card={{ ...proposal, blocker: null, touches: { model: true, requirements: true } }} />);
+    const calls = draw(<CardView card={{ ...proposal, blocker: null, views: { diagram: true, requirements: true } }} />);
     fireEvent.click(screen.getByRole("button", { name: "Approve Proposal P2" }));
     fireEvent.click(screen.getByRole("button", { name: "Reject Proposal P2" }));
-    fireEvent.click(screen.getByRole("button", { name: "View Proposal P2 on diagram" }));
-    fireEvent.click(screen.getByRole("button", { name: "View the Requirements Proposal P2 changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show what P2 changes on the diagram" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show what P2 changes in Requirements" }));
     expect(calls.posted).toEqual([{ type: "approveProposal", id: "live" }, { type: "rejectProposal", id: "live" }]);
-    expect(calls.navigated).toEqual([["diagram", { proposal: "live" }], ["requirements", { proposal: "live" }]]);
+    expect(calls.navigated).toEqual([["diagram", { focus: { kind: "proposal", id: "live" } }], ["requirements", { focus: { kind: "proposal", id: "live" } }]]);
     expect(calls.opened).toEqual([]);
     fireEvent.click(screen.getByRole("article"));
     fireEvent.click(screen.getByRole("button", { name: "A proposal" }));
@@ -188,10 +188,36 @@ describe("Board card rendering", () => {
     expect(screen.getByText("It refunds at once.")).not.toBeNull();
     expect(screen.getByRole("img", { name: "An agent is resolving this Drift" }).textContent).toBe("Resolving");
     fireEvent.click(screen.getByRole("button", { name: "order/Shipped" }));
-    expect(calls.navigated).toEqual([["diagram", { ref: "order/Shipped" }]]);
+    expect(calls.navigated).toEqual([["diagram", { focus: { kind: "ref", ref: "order/Shipped" } }]]);
     fireEvent.click(screen.getByRole("button", { name: "Resolve Drift D4" }));
     fireEvent.click(screen.getByRole("button", { name: "Dismiss Drift" }));
     expect(calls.posted).toEqual([{ type: "launch", action: { kind: "resolve-drifts", drift: "liveDrift" } }, { type: "dismissDrift", id: "liveDrift" }]);
+  });
+
+  test("a Drift's chips go to Requirements, Specs or the diagram with the tooltip that says so, each with the focus of its reference", () => {
+    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, critical: false, previous: null } as unknown as DriftView;
+    const refs = ["requirements/ui#focus", "specs#frameworks", "order/Paid"];
+    const calls = draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs, proposal: null, drift, autopilotFailed: null, dismissBlocker: null, resolving: false, resolveNote: "", resolveBlocker: null, blocked: [], notBlocking: [] }} />);
+    expect(refs.map((ref) => screen.getByRole("button", { name: ref }).getAttribute("aria-description"))).toEqual(["Show requirements/ui#focus in Requirements", "Show specs#frameworks in Specs", "Show order/Paid on the diagram"]);
+    for (const ref of refs) fireEvent.click(screen.getByRole("button", { name: ref }));
+    expect(calls.navigated).toEqual([
+      ["requirements", { focus: { kind: "ref", ref: "requirements/ui#focus" } }],
+      ["specs", { focus: { kind: "ref", ref: "specs#frameworks" } }],
+      ["diagram", { focus: { kind: "ref", ref: "order/Paid" } }],
+    ]);
+  });
+
+  test("a Task in Active has the View buttons before Run and Open, each only when its tab has a step, and they open the focus of the Task", () => {
+    const calls = draw(<CardView card={{ ...task, blocks: [], views: { diagram: true, requirements: true } }} />);
+    const names = screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent);
+    expect(names).toEqual(["Show what T3 touches on the diagram", "Show what T3 touches in Requirements", "Run task T3", "Open file of task T3"]);
+    fireEvent.click(screen.getByRole("button", { name: "Show what T3 touches on the diagram" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show what T3 touches in Requirements" }));
+    expect(calls.navigated).toEqual([["diagram", { focus: { kind: "task", id: "liveTask" } }], ["requirements", { focus: { kind: "task", id: "liveTask" } }]]);
+    cleanup();
+    draw(<CardView card={{ ...task, blocks: [], views: { diagram: false, requirements: true } }} />);
+    expect(screen.queryByRole("button", { name: "Show what T3 touches on the diagram" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Show what T3 touches in Requirements" })).not.toBeNull();
   });
 
   test("a Drift's Dismiss that cannot be used is disabled with its reason as accessible description", () => {
@@ -307,14 +333,14 @@ describe("History entry details", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show the Tasks of Refunds" }));
     expect(within(screen.getByRole("dialog")).getByText("Long text.")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "order/Paid" }));
-    expect(calls.navigated).toEqual([["diagram", { ref: "order/Paid" }]]);
+    expect(calls.navigated).toEqual([["diagram", { focus: { kind: "ref", ref: "order/Paid" } }]]);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 
 const proposalView = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "live", created: "2026-10-01T10:00:00.000Z", title: "A proposal", body: "Testo **lungo** della Proposal.", kind: "change", automatic: false, nonBlocking: false, resolves: [], requires: [], base: null, stale: [], unbased: [], errors: [], unfixable: [], creates: 1,
-  tasks: [{ id: "t1", title: "Do it", refs: [], technical: true, body: "" }], removals: [], changes: [], machines: [], actors: [], areas: [], specs: EMPTY_SPECS, specsChange: { entries: [], notesBefore: null }, ...over,
+  tasks: [{ id: "t1", title: "Do it", refs: [], technical: true, body: "" }], removals: [], changes: [], machines: [], actors: [], areas: [], specs: EMPTY_SPECS, specsChange: { entries: [], notesBefore: null }, scope: [], ...over,
 });
 const taskView = (over: Partial<TaskView> = {}): TaskView => ({ id: "liveTask", created: "2026-10-01T10:00:00.000Z", title: "A task", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, finished: null, unchanged: null, blockedBy: [], file: "tasks/liveTask.md", ...over });
 const driftView = (over: Partial<DriftView> = {}): DriftView => ({ id: "liveDrift", created: "2026-10-01T10:00:00.000Z", title: "Code refunds late", body: "", critical: false, previous: null, refs: [], proposal: null, sides: { happens: "A", should: "B", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });

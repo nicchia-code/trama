@@ -2,9 +2,14 @@ import { cardLabel, noNumbers } from "../../../../src/core/card-names";
 import type { SpecEntry } from "../../../../src/core/specs";
 import type { ProposalView, Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
+import { useEffect, useMemo, useRef } from "react";
+import { FocusBar } from "../focus/bar";
+import { type PageFocus, goTo, openPageFocus, scrollToStep, settle } from "../focus/page";
+import { focusSpec, neighbour, stepIndex } from "../focus/spec";
+import { specsSteps } from "../focus/specs";
 import { cn } from "../lib/utils";
 import { Markdown } from "../markdown";
-import { CHANGE_BORDER, CHANGE_TEXT, ProposalSelect } from "../proposal-select";
+import { CHANGE_BORDER, CHANGE_TEXT, CHANGE_TINT, FOCUS_MARK, ProposalSelect } from "../proposal-select";
 import type { MountView } from "../types";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
@@ -54,9 +59,19 @@ function Entry({ row, openLink }: { row: SpecRow; openLink: (url: string) => voi
   );
 }
 
-function Field({ view, openLink }: { view: SpecFieldView; openLink: (url: string) => void }) {
+/** The colour of a field's change: its one kind of change, `changed` when they are mixed, none when the Proposal leaves it as it is. */
+function fieldChange(view: SpecFieldView): "added" | "removed" | "changed" | "same" {
+  const kinds = new Set(view.rows.map((r) => r.change).filter((c) => c !== "same"));
+  if (view.notesBefore !== null) kinds.add("changed");
+  const only = kinds.size === 1 ? [...kinds][0] : undefined;
+  return only ?? (kinds.size > 1 ? "changed" : "same");
+}
+
+function Field({ view, openLink, focus }: { view: SpecFieldView; openLink: (url: string) => void; focus: { marked: boolean; current: boolean } }) {
+  const change = fieldChange(view);
+  const mark = focus.marked ? cn(change === "same" ? FOCUS_MARK : cn(CHANGE_BORDER[change], CHANGE_TINT[change]), focus.current && "ring-2 ring-ring") : "border-l-transparent";
   return (
-    <section className="border-t pt-2">
+    <section data-step={view.field} data-focus={focus.marked ? "true" : undefined} aria-current={focus.current ? "step" : undefined} className={cn("border-t border-l-[3px] pt-2 pl-2.5", mark)}>
       <h3 className="mb-1.5 font-semibold">{view.title}</h3>
       {view.notes !== null ? (
         <>
@@ -81,24 +96,54 @@ function Field({ view, openLink }: { view: SpecFieldView; openLink: (url: string
 export interface SpecsProps {
   snapshot: Snapshot | null;
   proposalId: string | null;
+  /** The focus of this tab, or null without one; the tab never keeps it itself. */
+  focus: PageFocus | null;
   onProposal(id: string | null): void;
+  onFocus(focus: PageFocus | null): void;
   openLink(url: string): void;
 }
 
-/** Read-only Specs, field by field; a Proposal is drawn over them with what it adds, removes or changes. */
-export function SpecsTab({ snapshot, proposalId, onProposal, openLink }: SpecsProps) {
+/** Read-only Specs, field by field; a Proposal is drawn over them with what it adds, removes or changes, and a focus marks its fields. */
+export function SpecsTab({ snapshot, proposalId, focus, onProposal, onFocus, openLink }: SpecsProps) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const found = useMemo(() => {
+    const spec = snapshot && focus ? focusSpec(snapshot, focus.request) : null;
+    return snapshot && spec ? { spec, ...specsSteps(snapshot, spec) } : null;
+  }, [snapshot, focus?.request]);
+  const nonce = focus?.nonce;
+  const step = focus?.step ?? null;
+  useEffect(() => {
+    if (scroller.current && step !== null) scrollToStep(scroller.current, step);
+  }, [nonce]);
+
   if (!snapshot) return null;
   const proposal: ProposalView | undefined = snapshot.proposals.find((p) => p.id === proposalId);
   const numbers = snapshot.numbers ?? noNumbers;
   const options = snapshot.proposals.map((p) => ({ id: p.id, label: `${cardLabel(numbers, "proposal", p.id)} ${p.title}` }));
   const problems = snapshot.diagnostics.filter((d) => d.file === SPECS_FILE);
   const fields = specsView(snapshot, proposal);
+  const at = found && focus ? stepIndex(found.steps, focus.step) : -1;
+  const current = found?.steps[at]?.key ?? null;
+  const move = (delta: -1 | 1) => {
+    const next = found && focus ? neighbour(found.steps, focus.step, delta) : null;
+    if (focus && next) onFocus(goTo(focus, next.key));
+  };
   return (
     <TooltipProvider>
-      <div className="flex h-full min-h-0 flex-col">
+      <div
+        tabIndex={-1}
+        className="flex h-full min-h-0 flex-col outline-none"
+        onKeyDown={(event) => {
+          // A modal, drop-down, popover or tooltip that is open takes the Esc first and marks the event handled.
+          if (event.key === "Escape" && focus && !event.defaultPrevented) onFocus(null);
+        }}
+      >
         <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
           <ProposalSelect label="Proposal to draw over the Specs" options={options} value={proposal ? proposal.id : null} onChange={onProposal} />
         </div>
+        {found && focus ? (
+          <FocusBar title={found.spec.title} stepName={found.steps[at]?.name ?? ""} index={at} count={found.steps.length} missing={found.missing} onPrevious={() => move(-1)} onNext={() => move(1)} onClear={() => onFocus(null)} />
+        ) : null}
         {problems.length > 0 ? (
           <div className="border-b border-destructive/50 bg-destructive/15 px-3 py-1.5">
             {problems.map((d, at) => (
@@ -108,9 +153,9 @@ export function SpecsTab({ snapshot, proposalId, onProposal, openLink }: SpecsPr
             ))}
           </div>
         ) : null}
-        <div className="flex max-w-6xl min-h-0 flex-1 flex-col gap-3.5 overflow-auto p-3">
+        <div ref={scroller} className="flex max-w-6xl min-h-0 flex-1 flex-col gap-3.5 overflow-auto p-3">
           {fields.map((view) => (
-            <Field key={view.field} view={view} openLink={openLink} />
+            <Field key={view.field} view={view} openLink={openLink} focus={{ marked: found?.steps.some((s) => s.key === view.field) ?? false, current: current === view.field }} />
           ))}
           {fields.length === 0 && !snapshot.specsPresent ? <p className="text-muted-foreground">This project has no Specs yet.</p> : null}
         </div>
@@ -122,14 +167,33 @@ export function SpecsTab({ snapshot, proposalId, onProposal, openLink }: SpecsPr
 export const mountSpecs: MountView = (slot, context) => {
   let snapshot: Snapshot | null = null;
   let proposalId: string | null = null;
+  let focus: PageFocus | null = null;
+
+  /** A focus whose Proposal is no longer open (or whose Task is gone) ends, the tab back on the Specs without a Proposal; any other stays at its field while it exists, else goes to the first. */
+  function settleFocus() {
+    if (!focus || !snapshot) return;
+    const spec = focusSpec(snapshot, focus.request);
+    if (!spec) {
+      if (focus.request.kind === "proposal") proposalId = null;
+      focus = null;
+      return;
+    }
+    focus = settle(focus, specsSteps(snapshot, spec).steps);
+  }
 
   function render() {
     slot(
       <SpecsTab
         snapshot={snapshot}
         proposalId={proposalId}
+        focus={focus}
         onProposal={(id) => {
           proposalId = id;
+          focus = null;
+          render();
+        }}
+        onFocus={(next) => {
+          focus = next;
           render();
         }}
         openLink={context.openLink}
@@ -140,10 +204,16 @@ export const mountSpecs: MountView = (slot, context) => {
   return {
     update(next) {
       snapshot = next;
+      settleFocus();
       render();
     },
     show(options: NavigateOptions) {
-      if (options.proposal !== undefined) proposalId = options.proposal;
+      if (options.focus) {
+        // A new focus replaces the old one and the Proposal drawn: only a Proposal's focus draws one.
+        focus = openPageFocus(options.focus);
+        proposalId = options.focus.kind === "proposal" ? options.focus.id : null;
+        settleFocus();
+      } else if (options.proposal !== undefined) proposalId = options.proposal;
       render();
     },
   };

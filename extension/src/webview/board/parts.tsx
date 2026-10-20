@@ -155,7 +155,7 @@ export function TaskProposalTag({ card }: { card: TaskCard }) {
   return <TagChip text={`Proposal ${card.proposalName?.text ?? card.proposal}`} tooltip={`From Proposal ${card.proposal}`} />;
 }
 
-/** Links to the Diagram or to Requirements, one chip per reference. `navigate` replaces the page's own navigation. */
+/** Links to the Diagram, to Requirements or to Specs, one chip per reference, each opening that tab with the focus of the reference. `navigate` replaces the page's own navigation. */
 export function RefChips({ refs, navigate }: { refs: string[]; navigate?: ViewContext["navigate"] }) {
   const { context } = useBoardEnv();
   const go = navigate ?? context.navigate;
@@ -163,10 +163,10 @@ export function RefChips({ refs, navigate }: { refs: string[]; navigate?: ViewCo
     <div className="flex flex-wrap gap-1">
       {refs.map((ref) => {
         const view = viewOfRef(ref);
-        const text = view === "requirements" ? `Show ${ref} in Requirements` : `Show ${ref} on the diagram`;
+        const text = view === "requirements" ? `Show ${ref} in Requirements` : view === "specs" ? `Show ${ref} in Specs` : `Show ${ref} on the diagram`;
         return (
           <Tip key={ref} text={text}>
-            <Button variant="outline" size="sm" aria-description={text} className="h-auto max-w-full rounded-full px-1.5 py-0 text-[11px] font-normal text-primary" onClick={() => go(view, { ref })}>
+            <Button variant="outline" size="sm" aria-description={text} className="h-auto max-w-full rounded-full px-1.5 py-0 text-[11px] font-normal text-primary" onClick={() => go(view, { focus: { kind: "ref", ref } })}>
               <span className="truncate">{ref}</span>
             </Button>
           </Tip>

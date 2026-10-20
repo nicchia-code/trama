@@ -13,6 +13,8 @@ export interface Palette {
   red: string;
   purple: string;
   focus: string;
+  /** The colour of the elements of a focus: Tailwind cyan, the 600 shade in the light theme and the 400 shade in the dark one. */
+  cyan: string;
   font: string;
 }
 
@@ -23,8 +25,8 @@ const hex = (value: string): string => {
   return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
 };
 
-const LIGHT = { fg: hex("#09090b"), bg: hex("#ffffff"), node: hex("#f4f4f5"), blue: hex("#2563eb"), red: hex("#dc2626"), purple: hex("#9333ea"), focus: hex("#2563eb") };
-const DARK = { fg: hex("#fafafa"), bg: hex("#09090b"), node: hex("#18181b"), blue: hex("#60a5fa"), red: hex("#f87171"), purple: hex("#c084fc"), focus: hex("#3b82f6") };
+const LIGHT = { fg: hex("#09090b"), bg: hex("#ffffff"), node: hex("#f4f4f5"), blue: hex("#2563eb"), red: hex("#dc2626"), purple: hex("#9333ea"), focus: hex("#2563eb"), cyan: hex("#0891b2") };
+const DARK = { fg: hex("#fafafa"), bg: hex("#09090b"), node: hex("#18181b"), blue: hex("#60a5fa"), red: hex("#f87171"), purple: hex("#c084fc"), focus: hex("#3b82f6"), cyan: hex("#22d3ee") };
 
 function parse(color: string): Rgba {
   const nums = (/\(([^)]+)\)/.exec(color)?.[1] ?? "0 0 0").split(/[\s,/]+/).filter(Boolean).map(Number);

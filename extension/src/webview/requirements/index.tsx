@@ -1,14 +1,19 @@
+import { useEffect, useMemo, useRef } from "react";
 import { cardLabel, noNumbers } from "../../../../src/core/card-names";
 import type { AreaView, FragmentView, SectionView, Snapshot } from "../../../../src/core/snapshot";
 import type { NavigateOptions } from "../../protocol";
+import { FocusBar } from "../focus/bar";
+import { type PageFocus, goTo, openPageFocus, scrollToStep, settle } from "../focus/page";
+import { areaKey, requirementSteps, sectionKey } from "../focus/requirements";
+import { focusSpec, neighbour, stepIndex } from "../focus/spec";
 import { Markdown } from "../markdown";
-import { CHANGE_BORDER, CHANGE_TEXT, ProposalSelect } from "../proposal-select";
+import { CHANGE_BORDER, CHANGE_TEXT, CHANGE_TINT, FOCUS_MARK, ProposalSelect } from "../proposal-select";
 import type { MountView } from "../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { cn } from "../lib/utils";
-import { areasWith, parseTarget, sectionMatches, visibleSections } from "./logic";
+import { areasWith, visibleSections } from "./logic";
 
 const CHANGE_LABEL: Record<SectionView["change"], string> = { added: "added", removed: "removed", changed: "changed", same: "" };
 const AREA_LABEL: Record<AreaView["change"], string> = { added: "new Area", removed: "Area removed", modified: "", same: "" };
@@ -32,19 +37,34 @@ function ChangeBadge({ change, children }: { change: string; children: string })
 export interface RequirementsProps {
   snapshot: Snapshot | null;
   proposalId: string | null;
-  /** A Model reference or `requirements/<area>[#section]` to focus on. */
-  target: string | null;
+  /** The focus of this tab, or null without one; the tab never keeps it itself. */
+  focus: PageFocus | null;
   onProposal(id: string | null): void;
-  onTarget(target: string | null): void;
+  onFocus(focus: PageFocus | null): void;
   navigate(view: "diagram", options: NavigateOptions): void;
   openFile(path: string): void;
   openLink(url: string): void;
 }
 
-function Section({ area, section, props }: { area: AreaView; section: SectionView; props: RequirementsProps }) {
-  const border = section.change === "same" ? "border-l-transparent" : CHANGE_BORDER[section.change];
+/** What the page marks: the keys of the steps (sections, or Areas taken whole), the one the page is at, and whether the rest is hidden. */
+interface FocusView {
+  keys: ReadonlySet<string>;
+  current: string | null;
+  only: boolean;
+}
+
+/** The mark of an element of the focus: the colour of its change when it has one, otherwise cyan; the current step also gets the theme's ring. */
+function focusClass(change: "added" | "removed" | "changed" | "same", current: boolean): string {
+  return cn(change === "same" ? FOCUS_MARK : cn(CHANGE_BORDER[change], CHANGE_TINT[change]), current && "ring-2 ring-ring");
+}
+
+function Section({ area, section, props, view }: { area: AreaView; section: SectionView; props: RequirementsProps; view: FocusView | null }) {
+  const key = sectionKey(area.id, section.ref);
+  const tone = section.change !== "same" ? section.change : section.movedFrom !== null ? "changed" : "same";
+  const marked = view !== null && view.keys.has(key);
+  const border = marked ? focusClass(tone, view.current === key) : section.change === "same" ? "border-l-transparent" : CHANGE_BORDER[section.change];
   return (
-    <section data-key={`${area.id}#${section.ref ?? "General"}`} className={cn("mt-2 border-l-[3px] py-1 pl-2.5", border)}>
+    <section data-key={`${area.id}#${section.ref ?? "General"}`} data-step={key} data-focus={marked ? "true" : undefined} aria-current={marked && view.current === key ? "step" : undefined} className={cn("mt-2 border-l-[3px] py-1 pl-2.5", border)}>
       <div className="mb-1 flex items-center gap-2 font-semibold">
         {section.ref === null ? (
           <span>General</span>
@@ -68,7 +88,7 @@ function Section({ area, section, props }: { area: AreaView; section: SectionVie
   );
 }
 
-function Fragment({ area, fragment, sections, props }: { area: AreaView; fragment: FragmentView; sections: SectionView[]; props: RequirementsProps }) {
+function Fragment({ area, fragment, sections, props, view }: { area: AreaView; fragment: FragmentView; sections: SectionView[]; props: RequirementsProps; view: FocusView | null }) {
   const border = fragment.change === "added" ? "border-t-green-600 dark:border-t-green-400" : fragment.change === "removed" ? "border-t-red-600 dark:border-t-red-400 opacity-75" : "";
   return (
     <section className={cn("mt-2.5 border-t pt-2", border)}>
@@ -89,23 +109,26 @@ function Fragment({ area, fragment, sections, props }: { area: AreaView; fragmen
       ) : null}
       {sections.length === 0 ? <p className="text-muted-foreground">No Requirements in this fragment yet.</p> : null}
       {sections.map((s) => (
-        <Section key={s.ref ?? "General"} area={area} section={s} props={props} />
+        <Section key={s.ref ?? "General"} area={area} section={s} props={props} view={view} />
       ))}
     </section>
   );
 }
 
-function Area({ area, props }: { area: AreaView; props: RequirementsProps }) {
-  const focus = props.target ? parseTarget(props.target) : null;
-  if (focus?.area && focus.area !== area.id) return null;
+function Area({ area, props, view }: { area: AreaView; props: RequirementsProps; view: FocusView | null }) {
+  const key = areaKey(area.id);
+  const whole = view !== null && view.keys.has(key);
+  // `Only these` hides the sections out of the focus and the fragments and Areas left with none; an Area taken whole stays entire.
+  const hides = view !== null && view.only && !whole;
   const fragments = area.fragments
-    .map((fragment) => ({ fragment, sections: visibleSections(fragment.sections).filter((s) => !focus?.section || sectionMatches(s.ref, focus.section)) }))
-    .filter((f) => !focus?.section || f.sections.length > 0);
-  if (focus?.section && fragments.length === 0) return null;
+    .map((fragment) => ({ fragment, sections: visibleSections(fragment.sections).filter((s) => !hides || view.keys.has(sectionKey(area.id, s.ref))) }))
+    .filter((f) => !hides || f.sections.length > 0);
+  if (hides && fragments.length === 0) return null;
   const border = area.change === "added" ? "border-green-600 dark:border-green-400" : area.change === "removed" ? "border-red-600 opacity-75 dark:border-red-400" : "";
+  const tone = area.change === "added" ? "added" : area.change === "removed" ? "removed" : area.change === "modified" ? "changed" : "same";
   return (
-    <Card data-area={area.id} className={cn("px-0", border)}>
-      <CardHeader className="flex-row items-center gap-2">
+    <Card data-area={area.id} data-step={key} data-focus={whole ? "true" : undefined} aria-current={whole && view.current === key ? "step" : undefined} className={cn("px-0", border)}>
+      <CardHeader className={cn("flex-row items-center gap-2", whole && cn("border-l-[3px]", focusClass(tone, view.current === key)))}>
         <CardTitle className="text-lg">{area.title || area.id}</CardTitle>
         <code className="text-sm text-muted-foreground">{`requirements/${area.id}`}</code>
         {AREA_LABEL[area.change] ? <ChangeBadge change={area.change}>{AREA_LABEL[area.change]}</ChangeBadge> : null}
@@ -122,47 +145,70 @@ function Area({ area, props }: { area: AreaView; props: RequirementsProps }) {
         {area.fragments.length === 0 ? <p className="text-muted-foreground">No fragments.</p> : null}
         {area.intro ? <Markdown source={area.intro} openLink={props.openLink} /> : null}
         {fragments.map((f) => (
-          <Fragment key={f.fragment.id} area={area} fragment={f.fragment} sections={f.sections} props={props} />
+          <Fragment key={f.fragment.id} area={area} fragment={f.fragment} sections={f.sections} props={props} view={view} />
         ))}
       </CardContent>
     </Card>
   );
 }
 
-/** The Requirement Areas, read-only; a selected Proposal is drawn over them. */
+/** The Requirement Areas, read-only, all of them always; a selected Proposal is drawn over them and a focus marks its sections. */
 export function RequirementsTab(props: RequirementsProps) {
-  const { snapshot, target } = props;
+  const { snapshot, focus } = props;
+  const scroller = useRef<HTMLDivElement>(null);
+  const found = useMemo(() => {
+    const spec = snapshot && focus ? focusSpec(snapshot, focus.request) : null;
+    return snapshot && spec ? { spec, ...requirementSteps(snapshot, spec) } : null;
+  }, [snapshot, focus?.request]);
+  const nonce = focus?.nonce;
+  const step = focus?.step ?? null;
+  useEffect(() => {
+    if (scroller.current && step !== null) scrollToStep(scroller.current, step);
+  }, [nonce]);
+
   if (!snapshot) return null;
   const proposal = snapshot.proposals.find((p) => p.id === props.proposalId);
   const numbers = snapshot.numbers ?? noNumbers;
   const options = snapshot.proposals.filter((p) => p.areas.length > 0).map((p) => ({ id: p.id, label: `${cardLabel(numbers, "proposal", p.id)} ${p.title}` }));
   const areas = areasWith(snapshot, proposal);
-  const shown = areas.filter((area) => {
-    const focus = target ? parseTarget(target) : null;
-    if (focus?.area && focus.area !== area.id) return false;
-    if (!focus?.section) return true;
-    return area.fragments.some((f) => visibleSections(f.sections).some((s) => sectionMatches(s.ref, focus.section ?? "")));
-  });
+  const at = found && focus ? stepIndex(found.steps, focus.step) : -1;
+  const view: FocusView | null = found && focus ? { keys: new Set(found.steps.map((s) => s.key)), current: found.steps[at]?.key ?? null, only: focus.only } : null;
+  const move = (delta: -1 | 1) => {
+    const next = found && focus ? neighbour(found.steps, focus.step, delta) : null;
+    if (focus && next) props.onFocus(goTo(focus, next.key));
+  };
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div
+      tabIndex={-1}
+      className="flex h-full min-h-0 flex-col outline-none"
+      onKeyDown={(event) => {
+        // A modal, drop-down, popover or tooltip that is open takes the Esc first and marks the event handled.
+        if (event.key === "Escape" && focus && !event.defaultPrevented) props.onFocus(null);
+      }}
+    >
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <ProposalSelect label="Proposal to draw over the Requirements" options={options} value={proposal ? proposal.id : null} onChange={props.onProposal} />
-        {target ? (
-          <span className="flex items-center gap-2">
-            <span className="text-muted-foreground">{`Showing ${target}`}</span>
-            <Button variant="link" className="h-auto p-0" title="Show every Area" onClick={() => props.onTarget(null)}>
-              Show all
-            </Button>
-          </span>
-        ) : null}
       </div>
-      <div className="flex max-w-4xl min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
+      {found && focus ? (
+        <FocusBar
+          title={found.spec.title}
+          stepName={found.steps[at]?.name ?? ""}
+          index={at}
+          count={found.steps.length}
+          missing={found.missing}
+          onPrevious={() => move(-1)}
+          onNext={() => move(1)}
+          onClear={() => props.onFocus(null)}
+          only={{ pressed: focus.only, onToggle: () => props.onFocus({ ...focus, only: !focus.only }) }}
+        />
+      ) : null}
+      <div ref={scroller} className="flex max-w-4xl min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
         {areas.length === 0 ? (
           <p className="text-muted-foreground">No Requirement Areas in .trama/requirements/. Run “trama project edit” to create the starting ones.</p>
-        ) : shown.length === 0 ? (
-          <p className="text-muted-foreground">{`No Requirements for ${target}.`}</p>
+        ) : view?.only && found?.steps.length === 0 ? (
+          <p className="text-muted-foreground">Nothing in the focus.</p>
         ) : (
-          areas.map((area) => <Area key={area.id} area={area} props={props} />)
+          areas.map((area) => <Area key={area.id} area={area} props={props} view={view} />)
         )}
       </div>
     </div>
@@ -173,20 +219,33 @@ export function RequirementsTab(props: RequirementsProps) {
 export const mountRequirements: MountView = (slot, context) => {
   let snapshot: Snapshot | null = null;
   let proposalId: string | null = null;
-  let target: string | null = null;
+  let focus: PageFocus | null = null;
+
+  /** A focus whose Proposal is no longer open (or whose Task is gone) ends, the tab back on the Model without a Proposal; any other stays at its step while it exists, else goes to the first. */
+  function settleFocus() {
+    if (!focus || !snapshot) return;
+    const spec = focusSpec(snapshot, focus.request);
+    if (!spec) {
+      if (focus.request.kind === "proposal") proposalId = null;
+      focus = null;
+      return;
+    }
+    focus = settle(focus, requirementSteps(snapshot, spec).steps);
+  }
 
   function render() {
     slot(
       <RequirementsTab
         snapshot={snapshot}
         proposalId={proposalId}
-        target={target}
+        focus={focus}
         onProposal={(id) => {
           proposalId = id;
+          focus = null;
           render();
         }}
-        onTarget={(next) => {
-          target = next;
+        onFocus={(next) => {
+          focus = next;
           render();
         }}
         navigate={(view, options) => context.navigate(view, options)}
@@ -199,11 +258,16 @@ export const mountRequirements: MountView = (slot, context) => {
   return {
     update(next) {
       snapshot = next;
+      settleFocus();
       render();
     },
     show(options: NavigateOptions) {
-      if (options.proposal !== undefined) proposalId = options.proposal;
-      if (options.ref !== undefined) target = options.ref;
+      if (options.focus) {
+        // A new focus replaces the old one and the Proposal drawn: only a Proposal's focus draws one.
+        focus = openPageFocus(options.focus);
+        proposalId = options.focus.kind === "proposal" ? options.focus.id : null;
+        settleFocus();
+      } else if (options.proposal !== undefined) proposalId = options.proposal;
       render();
     },
   };

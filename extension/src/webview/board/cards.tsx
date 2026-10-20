@@ -1,5 +1,6 @@
 import { Ban, Check, ChevronDown, ChevronUp, FileInput, Link, ListChecks, Network, Play, Settings, WandSparkles, X } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
+import type { FocusRequest } from "../../protocol";
 import { cardNameOf, ID_NAMES } from "../../../../src/core/card-names";
 import { joinReasons } from "../../../../src/core/design";
 import { CriticalBadge, DriftCompare, IdTag, RecurringBadge } from "../diagram/panel";
@@ -216,9 +217,19 @@ function ResolvesList({ card }: { card: ProposalCard }) {
   );
 }
 
+/** `View on diagram` or `View requirements`: opens that tab with the focus of a Proposal in Backlog or of a Task in Active. */
+function ViewButton({ kind, focus, verb, name }: { kind: "diagram" | "requirements"; focus: FocusRequest; verb: "changes" | "touches"; name: string }) {
+  const env = useBoardEnv();
+  const text = `Show what ${name} ${verb} ${kind === "diagram" ? "on the diagram" : "in Requirements"}`;
+  return kind === "diagram" ? (
+    <BoardButton icon={Network} label="View on diagram" aria={text} tooltip={text} onClick={() => env.context.navigate("diagram", { focus })} />
+  ) : (
+    <BoardButton icon={ListChecks} label="View requirements" aria={text} tooltip={text} onClick={() => env.context.navigate("requirements", { focus })} />
+  );
+}
+
 function ProposalCardView({ card }: { card: ProposalCard }) {
   const env = useBoardEnv();
-  const touches = card.touches;
   return (
     <Shell
       card={card}
@@ -263,10 +274,8 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
       ) : null}
       {card.resolves.length > 0 ? <ResolvesList card={card} /> : null}
       <Actions>
-        {touches.model || !touches.requirements ? (
-          <BoardButton icon={Network} label="View on diagram" aria={`View ${card.heading} on diagram`} onClick={() => env.context.navigate("diagram", { proposal: card.id })} />
-        ) : null}
-        {touches.requirements ? <BoardButton icon={ListChecks} label="View requirements" aria={`View the Requirements ${card.heading} changes`} onClick={() => env.context.navigate("requirements", { proposal: card.id })} /> : null}
+        {card.views.diagram ? <ViewButton kind="diagram" focus={{ kind: "proposal", id: card.id }} verb="changes" name={card.name.text} /> : null}
+        {card.views.requirements ? <ViewButton kind="requirements" focus={{ kind: "proposal", id: card.id }} verb="changes" name={card.name.text} /> : null}
         <BoardButton icon={Check} label="Approve" aria={`Approve ${card.heading}`} variant="default" disabled={card.blocker !== null} tooltip={card.blocker} onClick={() => env.context.post({ type: "approveProposal", id: card.id })} />
         <BoardButton icon={X} label="Reject" aria={`Reject ${card.heading}`} disabled={card.rejectBlocker !== null} tooltip={card.rejectBlocker} onClick={() => env.context.post({ type: "rejectProposal", id: card.id })} />
       </Actions>
@@ -360,6 +369,8 @@ function TaskCardView({ card }: { card: TaskCard }) {
             {toggle}
           </Button>
         ) : null}
+        {card.views.diagram ? <ViewButton kind="diagram" focus={{ kind: "task", id: card.id }} verb="touches" name={card.name.text} /> : null}
+        {card.views.requirements ? <ViewButton kind="requirements" focus={{ kind: "task", id: card.id }} verb="touches" name={card.name.text} /> : null}
         {runnable ? (
           <BoardButton icon={Play} label="Run" aria={`Run task ${card.name.text}`} variant="default" disabled={runReason !== null} tooltip={runReason} onClick={() => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } })} />
         ) : null}

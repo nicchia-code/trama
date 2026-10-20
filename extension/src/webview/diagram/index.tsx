@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { cardLabel, noNumbers } from "../../../../src/core/card-names";
+import { FocusBar } from "../focus/bar";
 import type { MountView, ViewContext } from "../types";
 import { scanButtonLabel } from "../scan-label";
 import { Button } from "../ui/button";
@@ -69,12 +70,12 @@ function DiagramCanvas({ store, stage, canvasRef }: { store: DiagramStore; stage
   }, [state.selected, canvasRef]);
 
   useEffect(() => {
-    const { graph, fit } = state;
+    const { graph, fit, fitTo, focus } = state;
     if (!graph) return;
     const refit = fit !== fitSeen.current;
     fitSeen.current = fit;
-    void canvasRef.current?.render(graph, refit);
-  }, [state.graph, state.fit, canvasRef]);
+    void canvasRef.current?.render(graph, refit, fitTo, focus?.highlight);
+  }, [state.graph, state.fit, state.fitTo, state.focus, canvasRef]);
 
   const graph = state.graph;
   return (
@@ -143,7 +144,11 @@ export function DiagramView({ store, context }: { store: DiagramStore; context: 
     if (e.key === "+" || e.key === "=") canvasRef.current?.zoomBy(1.25);
     else if (e.key === "-") canvasRef.current?.zoomBy(0.8);
     else if (e.key === "0") canvasRef.current?.fit();
-    else if (e.key === "Escape") store.select(null);
+    // With an element selected the first Esc takes only the selection off; the focus goes with the next one, handled by the whole tab.
+    else if (e.key === "Escape" && state.selected !== null) {
+      store.select(null);
+      e.preventDefault();
+    }
   };
 
   const trail = scene ? breadcrumb(scene, level) : [];
@@ -162,7 +167,14 @@ export function DiagramView({ store, context }: { store: DiagramStore; context: 
 
   return (
     <TooltipProvider>
-      <div className="flex h-full flex-col overflow-hidden">
+      <div
+        tabIndex={-1}
+        className="flex h-full flex-col overflow-hidden outline-none"
+        onKeyDown={(e) => {
+          // A modal, drop-down, popover or tooltip that is open takes the Esc first and marks the event handled.
+          if (e.key === "Escape" && state.focus && !e.defaultPrevented) store.clearFocus();
+        }}
+      >
         <div className="flex flex-wrap items-center gap-2 border-b px-2.5 py-1.5">
           <nav className="flex min-w-0 flex-wrap items-center gap-0.5" aria-label="Zoom level">
             {trail.map((crumb, i) => {
@@ -221,6 +233,18 @@ export function DiagramView({ store, context }: { store: DiagramStore; context: 
             <TooltipContent>{scan.tooltip}</TooltipContent>
           </Tooltip>
         </div>
+        {state.focus ? (
+          <FocusBar
+            title={state.focus.title}
+            stepName={state.focus.steps[state.focus.index]?.name ?? ""}
+            index={state.focus.index}
+            count={state.focus.steps.length}
+            missing={state.focus.missing}
+            onPrevious={() => store.stepFocus(-1)}
+            onNext={() => store.stepFocus(1)}
+            onClear={() => store.clearFocus()}
+          />
+        ) : null}
         <div className="flex min-h-0 flex-1">
           {/* Cytoscape handles pointer events itself and blurs the page on mousedown, so the stage is focused once the button is released; otherwise the shortcuts never fire. */}
           <div

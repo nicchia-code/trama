@@ -22,11 +22,16 @@ export interface CanvasHandlers {
 }
 
 export interface Canvas {
-  /** Draws a graph. The viewport stays where it is unless the graph's nodes and edges changed or `fit` is set. */
-  render(graph: GraphSpec, fit: boolean): Promise<void>;
+  /**
+   * Draws a graph. The viewport stays where it is unless the graph's nodes and edges changed or `fit` is set; `fitIds` narrows that fit to those nodes and edges.
+   * `focusIds` are the nodes and edges of the focus: they are drawn in the colour of the focus (or keep the colours of their change) and everything else
+   * drops to 30% opacity; null or empty draws the level as it is.
+   */
+  render(graph: GraphSpec, fit: boolean, fitIds?: readonly string[] | null, focusIds?: readonly string[] | null): Promise<void>;
   select(id: string | null): void;
   zoomBy(factor: number): void;
-  fit(): void;
+  /** Fits the view to the whole drawing, or to the given nodes and edges. */
+  fit(ids?: readonly string[] | null): void;
   /** The container became visible or changed size. */
   resize(): void;
   /** Colours changed (theme switch). */
@@ -122,6 +127,11 @@ function stylesheet(p: Palette): cytoscape.StylesheetJson {
     { selector: "edge.change-removed", style: { "line-style": "dashed", "line-dash-pattern": [6, 4], "line-color": p.red, "target-arrow-color": p.red, opacity: 0.6 } },
     { selector: "edge.change-changed", style: { "line-color": p.blue, "target-arrow-color": p.blue, width: 2.5 } },
     { selector: "edge.kind-drift", style: { "line-style": "dashed", "line-dash-pattern": [6, 4], "line-color": p.red, "target-arrow-shape": "none", "z-index": 2 } },
+    { selector: "node.dim, edge.dim", style: { opacity: 0.3 } },
+    { selector: "node.focus", style: { "border-color": p.cyan, "border-width": 4, "border-style": "solid", "background-color": tint(p.cyan) } },
+    { selector: "node.final.focus", style: { "border-style": "double", "border-width": 5 } },
+    { selector: "node.edge-label.focus", style: { "border-width": 2, color: p.cyan, "background-color": p.bg } },
+    { selector: "edge.focus", style: { "line-color": p.cyan, "target-arrow-color": p.cyan, width: 3.5 } },
     { selector: "node.sel", style: { "border-color": p.focus, "border-width": 3, "border-style": "solid", "overlay-color": p.focus, "overlay-opacity": 0.14, "overlay-padding": 4 } },
     { selector: "edge.sel", style: { "line-color": p.focus, "target-arrow-color": p.focus, width: 3 } },
   ];
@@ -160,6 +170,8 @@ export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): 
   let selected: string | null = null;
   /** The nodes that have drill and expand buttons in the graph drawn. */
   let handled: string[] = [];
+  /** The nodes and edges of the focus in the graph drawn; null when the level is drawn as it is. */
+  let focused: readonly string[] | null = null;
 
   const elementId = (el: cytoscape.SingularElementReturnValue): string => (el.data("edge") as string | undefined) ?? el.id();
 
@@ -255,20 +267,40 @@ export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): 
   };
 
   /** A fit asked for while the container has no size (the tab is hidden) happens when it gets one. */
-  let fitPending = false;
-  const fit = () => {
+  let fitIsPending = false;
+  let fitPending: readonly string[] | null = null;
+  const fit = (ids?: readonly string[] | null) => {
     cy.resize();
     if (cy.width() === 0 || cy.height() === 0) {
-      fitPending = true;
+      fitPending = ids ?? null;
+      fitIsPending = true;
       return;
     }
-    fitPending = false;
+    fitIsPending = false;
+    fitPending = null;
     if (cy.elements().empty()) return;
-    cy.fit(undefined, FIT_PADDING);
+    const wanted = ids && ids.length > 0 ? cy.elements().filter((el) => ids.includes(el.id())) : null;
+    cy.fit(wanted && wanted.nonempty() ? wanted : undefined, FIT_PADDING);
     if (cy.zoom() > MAX_FIT_ZOOM) {
       cy.zoom(MAX_FIT_ZOOM);
-      cy.center();
+      if (wanted && wanted.nonempty()) {
+        const box = wanted.boundingBox();
+        cy.pan({ x: cy.width() / 2 - ((box.x1 + box.x2) / 2) * cy.zoom(), y: cy.height() / 2 - ((box.y1 + box.y2) / 2) * cy.zoom() });
+      } else cy.center();
     }
+  };
+
+  /** Dims everything but the elements of the focus; those a change colours keep their colours, the others take the colour of the focus. */
+  const applyFocus = () => {
+    cy.batch(() => {
+      cy.elements().removeClass("dim focus");
+      if (focused === null || focused.length === 0) return;
+      const ids = new Set(focused);
+      cy.elements().forEach((el) => {
+        if (!ids.has(elementId(el))) el.addClass("dim");
+        else if (!el.is(".change-added, .change-removed, .change-changed")) el.addClass("focus");
+      });
+    });
   };
 
   const select = (id: string | null) => {
@@ -280,7 +312,7 @@ export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): 
   };
 
   return {
-    async render(graph, refit) {
+    async render(graph, refit, fitIds, focusIds) {
       const mine = ++ticket;
       const key = layoutKey(graph);
       const layout = drawn?.key === key ? drawn.layout : await layoutGraph(graph);
@@ -289,7 +321,9 @@ export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): 
       drawn = { key, graph, layout };
       sync(graph, layout);
       select(selected);
-      if (changed || refit) fit();
+      focused = focusIds ?? null;
+      applyFocus();
+      if (changed || refit) fit(fitIds);
     },
     select,
     zoomBy(factor) {
@@ -297,7 +331,7 @@ export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): 
     },
     fit,
     resize() {
-      if (fitPending) fit();
+      if (fitIsPending) fit(fitPending);
       else cy.resize();
       scheduleHandles();
     },

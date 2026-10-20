@@ -54,7 +54,7 @@ describe("specsView", () => {
 });
 
 function tab(snap: Snapshot, proposalId: string | null = null) {
-  return render(<SpecsTab snapshot={snap} proposalId={proposalId} onProposal={() => {}} openLink={() => {}} />);
+  return render(<SpecsTab snapshot={snap} proposalId={proposalId} focus={null} onProposal={() => {}} onFocus={() => {}} openLink={() => {}} />);
 }
 
 describe("SpecsTab", () => {
