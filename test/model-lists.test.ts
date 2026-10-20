@@ -60,7 +60,12 @@ test("cursorModels reads the list from Cursor's state database, and gives none w
     rmSync(join(globalStorage, "state.vscdb"));
     expect(await cursorModels(extensionStorage)).toEqual([]);
   } finally {
-    rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+    // On Windows CI the folder stayed locked (EBUSY) after its files were gone; it is under the system temp folder.
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EBUSY") throw error;
+    }
   }
 });
 
