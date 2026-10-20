@@ -57,15 +57,12 @@ test("cursorModels reads the list from Cursor's state database, and gives none w
     const extensionStorage = join(globalStorage, "trama-dev.trama");
     expect(await cursorModels(extensionStorage)).toEqual([{ value: "auto-smart", label: "Auto" }, { value: "claude-sonnet" }]);
 
+    // node:sqlite keeps the file open until a statement is collected; Windows cannot delete it before that.
+    Bun.gc(true);
     rmSync(join(globalStorage, "state.vscdb"));
     expect(await cursorModels(extensionStorage)).toEqual([]);
   } finally {
-    // On Windows CI the folder stayed locked (EBUSY) after its files were gone; it is under the system temp folder.
-    try {
-      rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EBUSY") throw error;
-    }
+    rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
   }
 });
 
