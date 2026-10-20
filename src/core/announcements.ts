@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { TramaError } from "./errors";
 import { enumField, idField, type Raw } from "./schema";
@@ -37,6 +37,8 @@ export interface Announcement {
   proposal: string | null;
   /** Timestamp of announcement or Draft binding; check phase changes update it too. */
   touched: string;
+  /** When it was announced; set once and never changed, so it orders the list (`touched` moves with a binding). */
+  announced: string;
   /** The agent terminal it belongs to (see `TERMINAL_ENV`), or null: made from a chat or by an agent Trama did not start, or written before this field existed. */
   terminal: string | null;
   /** `cursor` or `editor` when a chat agent made it; null in announcements written before this field existed. Never set together with `terminal`. */
@@ -122,6 +124,7 @@ function parse(raw: Raw, body: string, id: string, where: string): Announcement 
     kind: enumField(raw, "kind", ANNOUNCEMENT_KINDS, "proposal", where),
     source: enumField(raw, "source", SOURCES, "agent", where),
     proposal: idField(raw, "proposal", where),
+    announced: raw["announced"] === undefined ? stamp("touched") : stamp("announced"),
     touched: stamp("touched"),
     terminal: terminalField(raw, where),
     chat: raw["chat"] === undefined || raw["chat"] === null ? null : enumField(raw, "chat", CHATS, "cursor", where),
@@ -210,20 +213,27 @@ function remove(p: Project, id: string) {
 export function listAnnouncements(p: Project): Announcement[] {
   const dir = announcementsDir(p);
   if (!existsSync(dir)) return [];
-  const out: { a: Announcement; born: bigint; changed: bigint }[] = [];
+  const out: Announcement[] = [];
   for (const name of readdirSync(dir)) {
     if (!FILE_PATTERN.test(name)) continue;
     const id = name.slice(0, -3);
     try {
       const doc = readDocument(join(dir, name));
-      const st = statSync(join(dir, name), { bigint: true });
-      // ponytail: announcement order is the file's birth, with the last change breaking equal birth times.
-      out.push({ a: parse(doc.data, doc.body, id, join(dir, name)), born: st.birthtimeNs > 0n ? st.birthtimeNs : st.mtimeNs, changed: st.mtimeNs });
+      out.push(parse(doc.data, doc.body, id, join(dir, name)));
     } catch {
       // Half written or edited by hand: not an announcement.
     }
   }
-  return out.sort((x, y) => (x.born < y.born ? -1 : x.born > y.born ? 1 : x.changed < y.changed ? -1 : x.changed > y.changed ? 1 : x.a.id.localeCompare(y.a.id))).map((x) => x.a);
+  return out.sort((x, y) => Date.parse(x.announced) - Date.parse(y.announced) || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+}
+
+/**
+ * The stamp for a new announcement: the clock now, but always after every announcement already in the folder. The file
+ * clock can be too coarse to tell two announcements made together apart, and the list is in the order they were made.
+ */
+function nextAnnouncedStamp(p: Project): string {
+  const latest = listAnnouncements(p).reduce((max, a) => Math.max(max, Date.parse(a.announced)), 0);
+  return new Date(Math.max(Date.now(), latest + 1)).toISOString();
 }
 
 export const getAnnouncement = (p: Project, id: string): Announcement | null => listAnnouncements(p).find((a) => a.id === id) ?? null;
@@ -256,6 +266,7 @@ export function announce(
     kind: input.kind,
     source: input.source ?? "agent",
     proposal: input.proposal ?? null,
+    announced: nextAnnouncedStamp(p),
     touched: stamp,
     terminal: input.terminal ?? null,
     chat: input.terminal ? null : (input.chat ?? (input.source === "request" ? null : "editor")),

@@ -60,7 +60,7 @@ test("cursorModels reads the list from Cursor's state database, and gives none w
     rmSync(join(globalStorage, "state.vscdb"));
     expect(await cursorModels(extensionStorage)).toEqual([]);
   } finally {
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
   }
 });
 

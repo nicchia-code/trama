@@ -62,10 +62,10 @@ function psLiteral(text: string): string {
 
 /**
  * The text as Windows PowerShell 5.1 must write it so the program receives it intact. That shell wraps an argument
- * holding whitespace in double quotes only when the whitespace is outside every double quote in it (each `"` not
- * preceded by a backslash counts), and it writes the quotes inside unescaped. So the argument is wrapped here, in the
- * program's own rules, and PowerShell has nothing to add: each `"` is written `\"`, a run of backslashes before a `"`
- * is doubled, and so is a run at the end of the wrapped argument.
+ * holding whitespace in double quotes only when it holds an even number of `"`; with an odd number it leaves the
+ * argument bare and the program splits it at the spaces. Each `"` is written `\"`, and a run of backslashes before a
+ * `"` or at the end of the argument is doubled, as the program reads them. An even argument is left to PowerShell to
+ * wrap; an odd one is wrapped here, so PowerShell has nothing to add.
  */
 function nativeArgument(text: string): string {
   let out = "";
@@ -78,6 +78,8 @@ function nativeArgument(text: string): string {
     }
   }
   if (!/\s/.test(text)) return out + "\\".repeat(backslashes);
+  const quotes = [...text].filter((ch) => ch === '"').length;
+  if (quotes % 2 === 0) return out + "\\".repeat(backslashes * 2);
   return `"${out}${"\\".repeat(backslashes * 2)}"`;
 }
 

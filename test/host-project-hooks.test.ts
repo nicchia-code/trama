@@ -122,7 +122,7 @@ test("updating skills reports retired omp definition in editor notification", as
   updateOutput = "Updated skills\nDeleted the retired omp sub-agent definition: /project/.omp/agents/trama-triage.md";
   await updateSkills({ root: "/project" } as never, { fsPath: storage } as never);
   expect(errors.at(-1)).toContain("trama-triage.md");
-  expect(JSON.parse(readFileSync(file, "utf8")).hooks.UserPromptSubmit[0].command).toBe(`"${join(extensionPath, "bin", "trama")}" copilot-hook`);
+  expect(JSON.parse(readFileSync(file, "utf8")).hooks.UserPromptSubmit[0].command).toBe(`"${join(extensionPath, "bin", bundledName)}" copilot-hook`);
 });
 
 test("updating skills reports why the trama-specs skill was kept", async () => {
