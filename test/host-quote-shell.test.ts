@@ -6,19 +6,22 @@ import { agentCommandLine, quote, type ShellFamily } from "../extension/src/host
 
 // Runs the agent command line in each shell of the platform and checks the arguments the program received. On Windows
 // the shells are Windows PowerShell 5.1, PowerShell 7 and Git Bash (the shells the terminal supports); elsewhere `sh`.
-// Each run is a script file with one agent command per line: the shell parses every line as it would a typed line.
+// Each run is a script file with one agent command per line, one line per prompt and program (Bun, and node when it is
+// installed; Windows always has it): the shell parses every line as it would a typed line.
 
 const windows = process.platform === "win32";
-const echo = join(import.meta.dir, "shell-argv-echo.ts");
+const echo = join(import.meta.dir, "shell-argv-echo.mjs");
 
 // Empty is left out: Windows PowerShell 5.1 drops an empty argument passed to a program, and a prompt is never empty.
 const PROMPTS = [
   String.raw`{"name": "Task T3", "body": "C:\dir\", "q": "\"x\""}`,
+  String.raw`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"C:/Program Files/trama.exe agent-event idle"}]}]}}`,
   "it's $HOME `id` $(id) %PATH% & | < > ^ !!",
   "perché €uro 🙂 日本",
   "  leading and trailing  ",
   "a\\",
   "x\\\"y z\\",
+  "x\"y z\\",
   "two\\\\ back \"quoted\" end\\\\",
   "line one\nline two",
 ];
@@ -51,12 +54,22 @@ const SHELLS: Shell[] = windows
     ]
   : [{ name: "sh", family: "posix", exe: () => "sh", args: (file) => [file] }];
 
-/** The agent command template: `bun` runs the echo script with the prompt as its argument. PowerShell calls with `&`. */
-function template(family: ShellFamily): string {
+// The programs that read the echo script's arguments: Bun, and `node` (it reads the command line the same way on Windows).
+// Windows must have `node`; elsewhere it runs only when installed.
+function runtimes(): string[] {
+  const node = Bun.which("node");
+  if (!node && windows) throw new Error("node is not on PATH");
+  return [process.execPath, ...(node ? [node] : [])];
+}
+
+/** The agent command template: `runtime` runs the echo script with the prompt as its argument. PowerShell calls with `&`. */
+function template(family: ShellFamily, runtime: string): string {
   const invoke = family.startsWith("powershell") ? "& " : "";
   // Git Bash reads Windows paths only with forward slashes.
   const slashes = windows && family === "posix";
-  const program = quote(family, slashes ? process.execPath.replaceAll("\\", "/") : process.execPath);
+  // The program is not an argument: PowerShell 5.1 gets it as a plain PowerShell literal, never wrapped in its own quotes.
+  const programFamily: ShellFamily = family === "powershell5" ? "powershell" : family;
+  const program = quote(programFamily, slashes ? runtime.replaceAll("\\", "/") : runtime);
   const script = quote(family, slashes ? echo.replaceAll("\\", "/") : echo);
   return `${invoke}${program} ${script} {prompt}`;
 }
@@ -78,7 +91,8 @@ function runLines(shell: Shell, lines: string[]): { exitCode: number | null; std
 
 for (const shell of SHELLS) {
   test(`${shell.name} hands each agent command argument to the program intact`, () => {
-    const lines = PROMPTS.map((prompt) => agentCommandLine(template(shell.family), prompt, shell.family));
-    expect(runLines(shell, lines)).toEqual({ exitCode: 0, stderr: "", args: PROMPTS.map((prompt) => [prompt]) });
+    const pairs = PROMPTS.flatMap((prompt) => runtimes().map((runtime) => ({ prompt, runtime })));
+    const lines = pairs.map(({ prompt, runtime }) => agentCommandLine(template(shell.family, runtime), prompt, shell.family));
+    expect(runLines(shell, lines)).toEqual({ exitCode: 0, stderr: "", args: pairs.map(({ prompt }) => [prompt]) });
   }, 180_000);
 }

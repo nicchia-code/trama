@@ -17,8 +17,13 @@ const LEFT_OUT = [".trama", ".agents/skills", ".claude/skills", ".github/skills"
 
 const GIT_TIMEOUT_MS = 20_000;
 
-function git(cwd: string, args: string[]): string | null {
-  const r = spawnSync("git", ["--no-optional-locks", ...args], { cwd, encoding: "utf8", timeout: GIT_TIMEOUT_MS, maxBuffer: 1 << 30 });
+/**
+ * Runs git in `cwd` and returns its output, or null when it fails or runs past `timeoutMs`. The timeout ends git with
+ * SIGKILL, not SIGTERM: a git that ignores SIGTERM would otherwise block this synchronous wait, and the whole process, for good.
+ * git reads no input and never prompts on the terminal.
+ */
+export function git(cwd: string, args: string[], timeoutMs = GIT_TIMEOUT_MS): string | null {
+  const r = spawnSync("git", ["--no-optional-locks", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 1 << 30, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
   return r.error || r.status !== 0 ? null : r.stdout;
 }
 

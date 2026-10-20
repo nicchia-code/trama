@@ -212,7 +212,7 @@ test("an authoritative endpoint for another project refuses without presentation
 
 test("a worktree of the window's repository is another project, even on a trama branch", async () => {
   const git = (cwd: string, ...args: string[]) => {
-    const result = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd });
+    const result = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, timeout: 30_000, killSignal: "SIGKILL" });
     if (result.exitCode !== 0) throw new Error(result.stderr.toString());
   };
   git(projectRoot, "init", "-q");

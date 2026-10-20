@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { announce, listAnnouncements } from "../src/core/announcements";
 import { archiveComparison } from "../src/core/compare";
-import { codeFingerprint, comparedRefs, recordComparison, splitCompared, textFingerprint } from "../src/core/compared";
+import { codeFingerprint, comparedRefs, git, recordComparison, splitCompared, textFingerprint } from "../src/core/compared";
 import { loadProject } from "../src/core/requirements";
 import { type Project, projectAt } from "../src/core/store";
 import { newTask } from "../src/core/work";
@@ -25,13 +25,14 @@ const validComparison = JSON.stringify({ tasks: [{ title: "Refund paid orders", 
 
 /** Makes the project folder a git repository with every file committed. */
 function gitRepo(): void {
-  const git = (...args: string[]) => {
-    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
-    if (r.status !== 0) throw new Error(r.stderr);
+  const gitCmd = (...args: string[]) => {
+    // Bounded, ended by SIGKILL at the bound, and without a terminal: a git that waits for input or a credential fails the test instead of hanging the run.
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30_000, killSignal: "SIGKILL", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+    if (r.error !== undefined || r.status !== 0) throw new Error(r.error?.message ?? r.stderr);
   };
-  git("init", "-q");
-  git("add", "-A");
-  git("-c", "user.name=Trama", "-c", "user.email=trama@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init");
+  gitCmd("init", "-q");
+  gitCmd("add", "-A");
+  gitCmd("-c", "user.name=Trama", "-c", "user.email=trama@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init");
 }
 
 describe("text fingerprint", () => {
@@ -44,6 +45,20 @@ describe("text fingerprint", () => {
 describe("code fingerprint", () => {
   test("is null outside git", () => {
     expect(codeFingerprint(dir)).toBeNull();
+  });
+
+  // A git that ignores SIGTERM is ended by SIGKILL at its bound, so the synchronous wait returns and the run goes on.
+  (process.platform === "win32" ? test.skip : test)("a git that ignores SIGTERM is ended at its bound and reads as a failure", () => {
+    const bin = mkdtempSync(join(tmpdir(), "trama-git-"));
+    writeFileSync(join(bin, "git"), "#!/bin/sh\ntrap '' TERM\nwhile :; do :; done\n", { mode: 0o755 });
+    const path = process.env.PATH ?? "";
+    process.env.PATH = `${bin}${delimiter}${path}`;
+    try {
+      expect(git(dir, ["status"], 1000)).toBeNull();
+    } finally {
+      process.env.PATH = path;
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 
   test("changes with the content of a changed file, and ignores Trama's own folder", () => {

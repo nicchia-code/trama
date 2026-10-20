@@ -61,11 +61,10 @@ function psLiteral(text: string): string {
 }
 
 /**
- * The text as Windows PowerShell 5.1 must write it so the program receives it intact. That shell wraps an argument
- * holding whitespace in double quotes only when it holds an even number of `"`; with an odd number it leaves the
- * argument bare and the program splits it at the spaces. An even argument writes each `"` as `\"`, and a run of
- * backslashes before a `"` or at the end is doubled, as the program reads them. An odd argument is wrapped in double
- * quotes with each inner `"` written `""`, which the program reads as one `"`; the text it reads back is the original.
+ * The text as Windows PowerShell 5.1 must write it so the program receives it intact: always wrapped in double quotes,
+ * each inner `"` written `""`, and the backslashes before a `"` and at the end doubled. PowerShell 5.1 wraps an argument
+ * in its own quotes only when a space has an even number of `"` before it; here every space has an odd number, so it
+ * never does. The C runtime reads `""` inside quotes as one `"`, and a doubled backslash before a `"` as one backslash.
  */
 function nativeArgument(text: string): string {
   let out = "";
@@ -73,14 +72,11 @@ function nativeArgument(text: string): string {
   for (const ch of text) {
     if (ch === "\\") backslashes++;
     else {
-      out += ch === '"' ? "\\".repeat(backslashes * 2 + 1) + ch : "\\".repeat(backslashes) + ch;
+      out += ch === '"' ? "\\".repeat(backslashes * 2) + '""' : "\\".repeat(backslashes) + ch;
       backslashes = 0;
     }
   }
-  if (!/\s/.test(text)) return out + "\\".repeat(backslashes);
-  const quotes = [...text].filter((ch) => ch === '"').length;
-  if (quotes % 2 === 0) return out + "\\".repeat(backslashes * 2);
-  return `"${text.slice(0, text.length - backslashes).replace(/"/g, '""')}${"\\".repeat(backslashes * 2)}"`;
+  return `"${out}${"\\".repeat(backslashes * 2)}"`;
 }
 
 /** Puts the quoted prompt where `{prompt}` is in `template`, or at the end when the template has no placeholder. */

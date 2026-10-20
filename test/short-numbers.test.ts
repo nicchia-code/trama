@@ -328,7 +328,7 @@ describe("as a command argument", () => {
 describe("cards in a worktree left from a round", () => {
   test("this working copy numbers only its own cards", () => {
     const git = (...args: string[]) => {
-      const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, encoding: "utf8" });
+      const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL" });
       if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
     };
     const mine = task("Mine");

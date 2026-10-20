@@ -25,6 +25,14 @@ test("PowerShell doubles single quotes, including the typographic ones it also t
   expect(quote("powershell", "\u2018x\u2019")).toBe("'\u2018\u2018x\u2019\u2019'");
 });
 
+test("Windows PowerShell 5.1 wraps every argument in double quotes, doubles inner quotes and the backslashes before a quote or at the end", () => {
+  expect(quote("powershell5", "plain")).toBe(`'"plain"'`);
+  expect(quote("powershell5", "it's")).toBe(`'"it''s"'`);
+  expect(quote("powershell5", '{"a":"b c"}')).toBe(`'"{""a"":""b c""}"'`);
+  expect(quote("powershell5", 'x"y z\\')).toBe(String.raw`'"x""y z\\"'`);
+  expect(quote("powershell5", 'a\\"b')).toBe(String.raw`'"a\\""b"'`);
+});
+
 
 test("PowerShell 7 keeps the plain PowerShell quoting, without escaping the double quotes", () => {
   expect(quote("powershell", '{"a": 1}')).toBe(`'{"a": 1}'`);
@@ -50,7 +58,7 @@ test("on Windows only Git Bash is POSIX; PowerShell 7 and Windows PowerShell 5.1
 test("{prompt} is replaced literally, every time, even when the prompt looks like a replacement pattern", () => {
   expect(agentCommandLine("claude {prompt}", "a $& b $1", "posix")).toBe("claude 'a $& b $1'");
   expect(agentCommandLine("agent --first {prompt} --again {prompt}", "x", "posix")).toBe("agent --first 'x' --again 'x'");
-  expect(agentCommandLine("codex exec {prompt} --json", "x", "powershell5")).toBe("codex exec 'x' --json");
+  expect(agentCommandLine("codex exec {prompt} --json", "x", "powershell5")).toBe(`codex exec '"x"' --json`);
 });
 
 test("the prompt is appended when the command has no {prompt}", () => {

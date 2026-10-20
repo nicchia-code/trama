@@ -175,6 +175,8 @@ test("an agent can run ids rewrite, and worktrees and trama/* branches left over
     const result = spawnSync("git", ["-c", "core.autocrlf=false", ...args], {
       cwd,
       encoding: "utf8",
+      timeout: 30_000,
+      killSignal: "SIGKILL",
       env: { ...process.env, GIT_AUTHOR_NAME: "Test", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "Test", GIT_COMMITTER_EMAIL: "t@example.com" },
     });
     if (result.status !== 0) throw new Error(result.stderr || result.stdout);
@@ -182,7 +184,7 @@ test("an agent can run ids rewrite, and worktrees and trama/* branches left over
   git(["init", "-b", "main"]);
   git(["add", "-A"]);
   git(["commit", "-m", "init"]);
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL" }).stdout.trim();
   writeFileSync(join(dir, "dirty.txt"), "uncommitted\n");
   const left = join(`${dir}.trama-worktrees`, "abcd1234");
   git(["worktree", "add", "-b", "trama/abcd1234", left, "HEAD"]);
@@ -191,7 +193,7 @@ test("an agent can run ids rewrite, and worktrees and trama/* branches left over
   expect(existsSync(join(p.dir, "tasks", "0007-wait.md"))).toBe(false);
   expect(existsSync(join(p.dir, "tasks", `${rewrittenId("task", "0007")}-wait.md`))).toBe(true);
   expect(existsSync(join(left, ".trama", "tasks", "0007-wait.md"))).toBe(true);
-  expect(spawnSync("git", ["branch", "--list", "trama/*"], { cwd: dir, encoding: "utf8" }).stdout).toContain("trama/abcd1234");
-  expect(spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim()).toBe(head);
+  expect(spawnSync("git", ["branch", "--list", "trama/*"], { cwd: dir, encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL" }).stdout).toContain("trama/abcd1234");
+  expect(spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL" }).stdout.trim()).toBe(head);
   expect(existsSync(join(dir, "dirty.txt"))).toBe(true);
 });
