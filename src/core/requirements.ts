@@ -53,7 +53,7 @@ export const AREA_FILE = "area.md";
 /** Characters of Requirement skill descriptions the agents' skill list can take before Trama switches to index skills. */
 export const REQUIREMENT_SKILLS_BUDGET = 4000;
 
-/** Bytes of a fragment file, front matter included, past which `trama validate` and `trama analyze` warn. */
+/** Bytes of a fragment file, front matter included, past which `trama model check` warns. */
 export const FRAGMENT_MAX_BYTES = 12288;
 
 /** The Model with its Requirements, validated together. */
@@ -199,7 +199,7 @@ function buildAreas(requirements: FileMap, model: Model, diagnostics: Diagnostic
         file: path,
         line: 0,
         message: folder.endsWith(".md")
-          ? `Requirement Areas are folders, requirements/<area>/area.md with fragments beside it: run "trama skills update" to convert this file`
+          ? `Requirement Areas are folders, requirements/<area>/area.md with fragments beside it: run "trama project edit" to convert this file`
           : "Requirement files live in Area folders, requirements/<area>/",
       });
       continue;

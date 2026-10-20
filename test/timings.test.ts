@@ -66,19 +66,19 @@ describe("recording timings", () => {
   });
 });
 
-describe("trama timings", () => {
+describe("trama timing list", () => {
   test("says so when nothing is recorded", () => {
-    expect(run(["--root", dir, "timings"], dir, {}).out).toContain("No timings recorded yet.");
+    expect(run(["--root", dir, "timing", "list"], dir, {}).out).toContain("No timings recorded yet.");
   });
 
-  test("refuses a --last that is not a positive integer", () => {
-    expect(() => run(["--root", dir, "timings", "--last", "0"], dir, {})).toThrow("--last must be a positive integer");
-    expect(() => run(["--root", dir, "timings", "--last", "x"], dir, {})).toThrow("--last must be a positive integer");
+  test("refuses a last that is not a positive integer", () => {
+    expect(() => run(["--root", dir, "timing", "list", "--input", '{"last":0}'], dir, {})).toThrow(/last/);
+    expect(() => run(["--root", dir, "timing", "list", "--input", '{"last":"x"}'], dir, {})).toThrow(/last/);
   });
 
   test("prints the newest jobs as JSON", () => {
     recordTiming(p, origin, { event: "task-start", task: "t1", title: "Refund" }, { startsJob: true }, at(1));
-    const json = JSON.parse(run(["--json", "--root", dir, "timings"], dir, {}).out) as { jobs: { terminal: string | null }[] };
+    const json = JSON.parse(run(["--json", "--root", dir, "timing", "list"], dir, {}).out) as { jobs: { terminal: string | null }[] };
     expect(json.jobs).toHaveLength(1);
     expect(json.jobs[0]?.terminal).toBe("abc123");
   });
@@ -96,5 +96,61 @@ describe("trama timings", () => {
       expect.objectContaining({ task: other.id, outcome: "open" }),
       expect.objectContaining({ task: mine.id, outcome: "done", start: null }),
     ]);
+  });
+});
+
+describe("trama timing new", () => {
+  const tasks = () => [
+    newTask(p, { title: "Refund paid orders", refs: ["order/Paid"], technical: false }).id,
+    newTask(p, { title: "Refund unpaid orders", refs: ["order/Draft"], technical: false }).id,
+  ];
+  const input = (value: object) => ["--root", dir, "timing", "new", "--input", JSON.stringify(value)];
+  const agent = { TRAMA_TERMINAL: "abc123", TRAMA_AGENT: "1" };
+
+  test("refuses fewer than two Tasks, an empty reason, an unknown kind or Task, and writes nothing", () => {
+    const [a, b] = tasks() as [string, string];
+    expect(() => run(input({ kind: "release", tasks: [a], reason: "Different files." }), dir, agent)).toThrow(/tasks/);
+    expect(() => run(input({ kind: "release", tasks: [a, a], reason: "Different files." }), dir, agent)).toThrow(/two different Tasks/);
+    expect(() => run(input({ kind: "release", tasks: [a, b], reason: "   " }), dir, agent)).toThrow(/reason/);
+    expect(() => run(input({ kind: "release", tasks: [a, b], reason: "two\nlines" }), dir, agent)).toThrow(/reason/);
+    expect(() => run(input({ kind: "later", tasks: [a, b], reason: "Why." }), dir, agent)).toThrow(/kind/);
+    expect(() => run(input({ kind: "order", tasks: [a, "nothing0x"], reason: "Why." }), dir, agent)).toThrow(/not found/);
+    expect(existsSync(join(p.dir, "timings"))).toBe(false);
+  });
+
+  test("outside a Trama terminal or chat it writes nothing, says so and exits with 0", () => {
+    const [a, b] = tasks() as [string, string];
+    const out = run(input({ kind: "order", tasks: [a, b], reason: "The second needs the first." }), dir, {});
+    expect(out.exit).toBe(0);
+    expect(out.out).toContain("Nothing recorded");
+    expect(existsSync(join(p.dir, "timings"))).toBe(false);
+  });
+
+  test("records the choice in the job and timing list summarises the choices", () => {
+    const [a, b] = tasks() as [string, string];
+    run(input({ kind: "release", tasks: [a, b], reason: "They touch different files." }), dir, agent);
+    run(input({ kind: "order", tasks: [b, a], reason: "The second needs the first." }), dir, agent);
+    run(input({ kind: "release", tasks: [a, b], reason: "Still apart." }), dir, agent);
+
+    const [job] = timingJobs(p, 1);
+    expect(job?.parallelChoices.map((c) => [c.kind, c.tasks.map((t) => t.id), c.reason])).toEqual([
+      ["release", [a, b], "They touch different files."],
+      ["order", [b, a], "The second needs the first."],
+      ["release", [a, b], "Still apart."],
+    ]);
+    const json = JSON.parse(run(["--json", "--root", dir, "timing", "list"], dir, {}).out) as { jobs: { parallelChoices: unknown[] }[] };
+    expect(json.jobs[0]?.parallelChoices).toHaveLength(3);
+    const md = run(["--root", dir, "timing", "list"], dir, {}).out;
+    expect(md).toContain("Parallel choices");
+    expect(md).toContain("2 release, 1 order, 0 conflict");
+    expect(md).toContain("order:");
+    expect(md).toContain("Refund unpaid orders");
+    expect(md).toContain("The second needs the first.");
+  });
+
+  test("a job without choices shows no Parallel choices section", () => {
+    recordTiming(p, origin, { event: "task-start", task: "t1", title: "Refund" }, { startsJob: true }, at(1));
+    expect(run(["--root", dir, "timing", "list"], dir, {}).out).not.toContain("Parallel choices");
+    expect(timingJobs(p, 1)[0]?.parallelChoices).toEqual([]);
   });
 });

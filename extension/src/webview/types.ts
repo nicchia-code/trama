@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { AnnouncementView, Snapshot } from "../../../src/core/snapshot";
 import type { DriftAutopilotStatus } from "../host/drift-resolution";
 import type { NavigateOptions, ToHost, ViewName } from "../protocol";
@@ -23,4 +24,7 @@ export interface View {
   withdrawn?(announcements: AnnouncementView[]): void;
 }
 
-export type MountView = (root: HTMLElement, context: ViewContext) => View;
+/** Where a view puts what it draws: the panel has one React root, and each view gives it the element of its tab. */
+export type Slot = (node: ReactNode) => void;
+
+export type MountView = (slot: Slot, context: ViewContext) => View;

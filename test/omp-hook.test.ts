@@ -36,7 +36,7 @@ test("only main session completion emits idle; starts, ends and timers emit noth
   expect(execs).toEqual([]);
   fire("session_stop");
   fire("session_shutdown");
-  expect(execs).toEqual([["agent-event", "idle"], ["agent-event", "idle"]]);
+  expect(execs).toEqual([["hook", "idle"], ["hook", "idle"]]);
 });
 test("session shutdown reports only an explicitly main agent", () => {
   const { fire, execs } = setup();

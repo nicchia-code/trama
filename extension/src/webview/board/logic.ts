@@ -371,18 +371,13 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, autopilo
   };
 }
 
-/** The six terminal colours a tag can wear, in the order the hash picks them. */
-const TAG_COLOURS = [
-  "var(--vscode-terminal-ansiBlue)",
-  "var(--vscode-terminal-ansiGreen)",
-  "var(--vscode-terminal-ansiYellow)",
-  "var(--vscode-terminal-ansiMagenta)",
-  "var(--vscode-terminal-ansiCyan)",
-  "var(--vscode-terminal-ansiRed)",
-] as const;
+/** The six colours of Tailwind's palette a tag can wear, in the order the hash picks them. */
+export const TAG_COLOURS = ["blue", "green", "amber", "fuchsia", "cyan", "red"] as const;
+
+export type TagColour = (typeof TAG_COLOURS)[number];
 
 /** A stable colour for a tag, from the hash of its label text: the same label always wears the same colour. */
-export function tagColour(label: string): string {
+export function tagColour(label: string): TagColour {
   let hash = 0;
   for (const ch of label) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return TAG_COLOURS[hash % TAG_COLOURS.length]!;

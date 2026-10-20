@@ -76,7 +76,7 @@ export function briefingView(p: Project, b: Briefing, announcement: string): Res
   };
 }
 
-/** The cards `trama compare file` wrote, with their identity, short number and title. */
+/** The cards `trama comparison move` wrote, with their identity, short number and title. */
 export function archiveView(p: Project, comparisonId: string, result: ArchiveResult): Result {
   const n = syncShortNumbers(p);
   const tasks = result.tasks.map((t) => ({ id: t.id, number: n.label("task", t.id), title: t.title }));

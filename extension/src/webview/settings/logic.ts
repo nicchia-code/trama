@@ -1,3 +1,6 @@
+import type { ModelSuggestion } from "../../host/model-lists";
+import type { ComboboxOption } from "../ui/combobox";
+import type { ThemeSetting } from "../theme";
 import type { SettingSchema, SettingsValues } from "../../host/settings-schema";
 
 /** The settings grouped under their titles, in schema order. */
@@ -25,4 +28,17 @@ export function workspaceOverride(setting: SettingSchema, values: SettingsValues
   const workspace = values?.workspace;
   if (workspace === undefined || workspace === effectiveValue(setting, values)) return null;
   return workspace === "" ? "(empty)" : String(workspace);
+}
+
+/** The setting `trama.theme`: the key of the only setting of the Appearance group. */
+export const THEME_KEY = "trama.theme";
+
+/** The panel's theme setting from the user value: a value outside `auto`, `light` and `dark` counts as `auto`. */
+export function themeSetting(value: unknown): ThemeSetting {
+  return value === "light" || value === "dark" ? value : "auto";
+}
+
+/** The entries of a model field's list: the name typed in the field, and its readable name when it differs. */
+export function modelOptions(models: readonly ModelSuggestion[]): ComboboxOption[] {
+  return models.map((model) => (model.label !== undefined && model.label !== model.value ? { value: model.value, label: model.label } : { value: model.value }));
 }

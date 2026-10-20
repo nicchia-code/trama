@@ -13,8 +13,12 @@ import { type Project, readTextLf, writeFileEnsuringDir } from "./store";
 /** Job files kept: the newest this many; older ones are deleted when a new job starts. */
 export const TIMING_JOBS_KEPT = 20;
 
-/** Jobs `trama timings` shows when no `--last` is given. */
+/** Jobs `trama timing list` shows when no `last` is given. */
 export const TIMINGS_DEFAULT_LAST = 5;
+
+/** A choice of the experimental parallel execution: Tasks started together, one waiting for the others, or a sub-agent stopped by a clash. */
+export const PARALLEL_CHOICE_KINDS = ["release", "order", "conflict"] as const;
+export type ParallelChoiceKind = (typeof PARALLEL_CHOICE_KINDS)[number];
 
 /** An event worth timing; `at`, the holder and the job are added when it is recorded. */
 export type TimingEvent =
@@ -24,7 +28,8 @@ export type TimingEvent =
   | { event: "task-end"; task: string; title: string; outcome: "done" | "unchanged" | "drift"; drift?: string }
   | { event: "compare-start"; comparison: string; machine: string; refs: number }
   | { event: "compare-end"; comparison: string; tasks: number; drifts: number }
-  | { event: "queue"; requested: number; given: number; remaining: number };
+  | { event: "queue"; requested: number; given: number; remaining: number }
+  | { event: "choice"; kind: ParallelChoiceKind; tasks: { id: string; title: string }[]; reason: string };
 
 /** One line of a job file. */
 export type TimingRecord = TimingEvent & { at: string; terminal?: string; chat?: Chat; job?: string };
@@ -124,6 +129,14 @@ export interface QueueTiming {
   longestMs: number;
 }
 
+export interface ParallelChoice {
+  at: string;
+  kind: ParallelChoiceKind;
+  /** The Tasks of the choice, the first being the one it is about. */
+  tasks: { id: string; title: string }[];
+  reason: string;
+}
+
 export interface JobTiming {
   terminal: string | null;
   chat: Chat | null;
@@ -136,6 +149,8 @@ export interface JobTiming {
   comparisons: ComparisonTiming[];
   tasks: TaskTiming[];
   queue: QueueTiming;
+  /** The choices of the experimental parallel execution recorded in the job, in time order. */
+  parallelChoices: ParallelChoice[];
 }
 
 /** The job's summary: durations run to `end`, or to `now` while the job runs. */
@@ -225,6 +240,7 @@ function buildJob(records: TimingRecord[], start: string, end: string | null, no
     comparisons,
     tasks: taskList,
     queue: { waits: waits.length, totalMs: waitMs.reduce((sum, ms) => sum + ms, 0), longestMs: Math.max(0, ...waitMs) },
+    parallelChoices: records.flatMap((r) => (r.event === "choice" ? [{ at: r.at, kind: r.kind, tasks: r.tasks, reason: r.reason }] : [])),
   };
 }
 

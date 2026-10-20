@@ -35,7 +35,7 @@ export function taskScope(p: Project, ids: string[]): ScanScopeEntry[] {
 /**
  * The exact references the runnable Tasks of a scope name, for the pre-flight comparison: each reference once, a
  * Requirement section as the element it is about, no General section, Area, or Transition added. A reference that no
- * longer resolves is skipped. Chooses the Tasks as `trama task next` does, and returns them too.
+ * longer resolves is skipped. Chooses the Tasks as `trama task list` with `runnable` does, and returns them too.
  */
 export function preflightScope(p: Project, filter: ProposalFilter = {}, taskIds?: string[]): { refs: string[]; tasks: Task[] } {
   const project = loadProject(p);

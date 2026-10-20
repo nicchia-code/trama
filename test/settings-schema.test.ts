@@ -17,6 +17,7 @@ const fixture: ManifestPackage = {
         "trama.language": { type: "string", default: "", markdownDescription: "Language." },
         "trama.experimentalDriftBlocker": { type: "boolean", default: false, scope: "application", markdownDescription: "Experimental." },
         "trama.experimentalAdvisorScanner": { type: "boolean", default: false, scope: "application", markdownDescription: "Advisor." },
+        "trama.experimentalParallelExecution": { type: "boolean", default: false, scope: "application", markdownDescription: "Parallel." },
         "trama.maxParallelAgents": { type: "integer", default: 20, minimum: 1, scope: "application", markdownDescription: "Agents at once." },
         "trama.driftAutoPilot": { type: "string", enum: ["disabled", "enabled", "yolo"], enumDescriptions: ["Off level.", "Enabled level.", "Yolo level."], default: "disabled", scope: "application", markdownDescription: "Drift autopilot." },
         "trama.submitWhileRunning": { type: "boolean", default: false, markdownDescription: "Runs overlap." },
@@ -41,16 +42,17 @@ test("every key the manifest declares belongs to exactly one group, and every gr
 
 test("the groups and their keys keep the order of the Settings tab", () => {
   expect(SETTING_GROUPS.map((group) => [group.title, [...group.keys]])).toEqual([
+    ["Appearance", ["trama.theme"]],
     ["Agent", ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.autoExit", "trama.language"]],
     ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Experimental", ["trama.driftAutoPilot", "trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner"]],
+    ["Experimental", ["trama.driftAutoPilot", "trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["Agent", ["trama.autoExit", "trama.language"]],
     ["Models", ["trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Experimental", [DRIFT, "trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner"]],
+    ["Experimental", [DRIFT, "trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution"]],
   ]);
 });
 
@@ -74,6 +76,17 @@ test("the Experimental Advisor Scanner is a checkbox of the last group, off by d
   expect(settingTitle("trama.experimentalAdvisorScanner")).toBe("Experimental Advisor Scanner");
   expect(SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys).toContain("trama.experimentalAdvisorScanner");
   expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalAdvisorScanner")?.control).toBe("boolean");
+});
+
+test("the Experimental Parallel Execution is a checkbox right after the Advisor Scanner, off by default and application-scoped", () => {
+  const parallel = properties["trama.experimentalParallelExecution"];
+  expect(parallel?.type).toBe("boolean");
+  expect(parallel?.default).toBe(false);
+  expect(parallel?.scope).toBe("application");
+  expect(settingTitle("trama.experimentalParallelExecution")).toBe("Experimental Parallel Execution");
+  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
+  expect(keys.indexOf("trama.experimentalParallelExecution")).toBe(keys.indexOf("trama.experimentalAdvisorScanner") + 1);
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalParallelExecution")?.control).toBe("boolean");
 });
 
 test("controls follow the manifest type; maxParallelAgents is a whole number of at least 1", () => {

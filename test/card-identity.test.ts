@@ -178,9 +178,9 @@ describe("a command cites a card", () => {
     writeFileSync(join(proposals, "ijkl5555-found", "proposal.md"), "---\nstatus: draft\nbase: {}\ndelete: []\ncreated: 2020-01-01T00:00:00.000Z\n---\n# found\n");
     expect(cli("proposal", "show", "ijkl4444").out).toContain("# lost");
     expect(cli("proposal", "show", "ijkl4444-lost").out).toContain("# lost");
-    expect(cli("validate", "--proposal", "ijkl4").exit).toBe(0);
+    expect(cli("proposal", "show", "ijkl4").out).toContain("# lost");
     expect(() => cli("proposal", "show", "ijkl")).toThrow('Several Proposals match "ijkl": ijkl4444, ijkl5555');
-    expect(cli("task", "next", "--proposal", "ijkl444").out).toContain(`Proposal ${cardName(p, "proposal", "ijkl4444")}`);
+    expect(cli("task", "list", "--input", '{"runnable":true,"proposals":["ijkl444"]}').out).toContain(`Proposal ${cardName(p, "proposal", "ijkl4444")}`);
   });
 });
 

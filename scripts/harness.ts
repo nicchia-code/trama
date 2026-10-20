@@ -41,7 +41,7 @@ function syncInPlace(from: string, to: string): void {
 }
 
 // An open Proposal: a Returned State and a new Machine.
-const proposal = newProposal(p, "Returns after shipping", "Customers may send a shipped order back.");
+const proposal = newProposal(p, "Returns after shipping", "Customers may send a shipped order back.", { label: "Returns" });
 const order = editInProposal(p, proposal.id, "checkout/order.md");
 writeFileSync(
   order,
@@ -57,6 +57,10 @@ writeFileSync(
   editInProposal(p, proposal.id, "checkout/return.md"),
   "# Return\n\nA package coming back.\n\n## States\n\n### Requested (initial)\n- `user.RETURN` → In transit\n\n### In transit\n- `courier.PICKED_UP` → Received\n\n### Received (final)\n",
 );
+writeFileSync(
+  editInProposal(p, proposal.id, "tasks/returns.md"),
+  "---\nrefs:\n  - order\n  - return\n  - user.RETURN\n---\n# Returns after shipping\n\nA shipped order can be sent back within 30 days and is refunded.\n",
+);
 submitProposal(p, proposal.id);
 
 // Drifts: one plain, one with its own Proposal.
@@ -64,8 +68,8 @@ newDrift(p, { options: [{ title: "Refuse the refund", text: "Check the **courier
 const forgotten = newProposal(p, "Orders can be lost in transit", "The code handles a lost package; the Model forgot it.");
 const lost = editInProposal(p, forgotten.id, "checkout/payment.md");
 writeFileSync(lost, readFileSync(lost, "utf8").replace("### Declined (final)", "### Declined (final)\n### Written off (final)"));
-submitProposal(p, forgotten.id);
 newDrift(p, { options: FIX_OPTIONS, title: "Code has a Written off payment", refs: ["payment"], proposal: forgotten.id, happens: "worker/lost.ts writes the payment off after 30 days.", should: "A payment ends as Declined or Refunded; nothing writes it off.", where: "`worker/lost.ts`" });
+submitProposal(p, forgotten.id);
 
 // Tasks in every column.
 newTask(p, { title: "Implement refunds for prepared orders", refs: ["order/Refunding", "order/Paid/user.CANCEL"], technical: false, body: "When a paid order is cancelled after preparation has started:\n\n- the customer is **refunded**\n- the courier is told\n\nSee `order/Refunding`." });
@@ -101,10 +105,16 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><title>Trama harn
 <body><div id="app"></div>
 <script>
   window.__posts = [];
-  window.acquireVsCodeApi = () => ({ postMessage: (m) => { window.__posts.push(m); console.log("post", JSON.stringify(m)); } });
   window.__snapshot = ${JSON.stringify(snapshot).replace(/</g, "\\u003c")};
-  // The real host answers "ready" with a snapshot.
-  window.addEventListener("load", () => setTimeout(() => window.postMessage({ type: "snapshot", snapshot: window.__snapshot }, "*"), 0));
+  // The real host answers "ready" with a snapshot; the webview posts it once its listener is in place.
+  window.acquireVsCodeApi = () => ({ postMessage: (m) => {
+    window.__posts.push(m);
+    console.log("post", JSON.stringify(m));
+    if (m && m.type === "ready") setTimeout(() => {
+      window.postMessage({ type: "project", present: true }, "*");
+      window.postMessage({ type: "snapshot", snapshot: window.__snapshot }, "*");
+    }, 0);
+  } });
 </script>
 <script src="harness-questions.js"></script>
 <script src="webview.js"></script></body></html>`;

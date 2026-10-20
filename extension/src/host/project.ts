@@ -43,8 +43,8 @@ export async function installCopilotHooks(storageUri: vscode.Uri, windows = proc
   const program = bundledTrama();
   if (!program) return;
   const file = vscode.Uri.joinPath(storageUri, COPILOT_HOOKS_FILE);
-  const command = `"${program}" copilot-hook`;
-  const entry = { type: "command", command, ...(windows ? { windows: `& "${program}" copilot-hook` } : {}) };
+  const command = `"${program}" hook copilot`;
+  const entry = { type: "command", command, ...(windows ? { windows: `& "${program}" hook copilot` } : {}) };
   const contents = JSON.stringify({ hooks: { UserPromptSubmit: [entry], Stop: [entry], PreToolUse: [entry] } });
   const storagePath = storageUri.fsPath;
   try {
@@ -109,8 +109,8 @@ async function confirmScratch(root: string): Promise<InitChoice | undefined> {
 }
 
 /**
- * Runs `trama init` in a workspace folder for the developer's Get Started choice, with the same code and skills folder as
- * the command line. When it refuses to overwrite customised skill files, shows why and retries with `--force` only after
+ * Runs `trama project new` in a workspace folder for the developer's Get Started choice, with the same code and skills folder as
+ * the command line. When it refuses to overwrite customised skill files, shows why and retries with `force: true` only after
  * an explicit modal confirmation. Installs editor hooks after initialization. Returns the new Project and the choice
  * carried out, or undefined when nothing was created.
  */
@@ -124,14 +124,14 @@ export async function initializeProject(choice: InitChoice, storageUri?: vscode.
   const skillsDir = configuredSkillsDir();
   for (let force = false; ; force = true) {
     try {
-      run(["--root", root, "init", "--skills-dir", skillsDir, ...(force ? ["--force"] : [])], root);
+      run(["--root", root, "project", "new", "--input", JSON.stringify({ skillsDir, ...(force ? { force: true } : {}) })], root);
       const subAgent = installChatSubAgent();
       if (subAgent.error !== undefined) void vscode.window.showErrorMessage(`Trama: could not write the trama-analysis sub-agent in ${subAgent.path}: ${subAgent.error}`);
       if (storageUri) await installEditorHooks(storageUri);
       return { project: projectAt(root), choice: carried };
     } catch (err) {
       if (!(err instanceof TramaError || err instanceof UsageError)) throw err;
-      if (force || !err.message.includes("--force")) {
+      if (force || !err.message.includes('"force": true')) {
         throw new Error(err.message);
       }
       const answer = await vscode.window.showWarningMessage(
@@ -147,7 +147,7 @@ export async function initializeProject(choice: InitChoice, storageUri?: vscode.
 /** Replaces the project's skills and rewrites the active editor's hooks for this version's program. */
 export async function updateSkills(project: Project, storageUri?: vscode.Uri): Promise<void> {
   const skillsDir = configuredSkillsDir();
-  const { out } = run(["--root", project.root, "skills", "update", "--skills-dir", skillsDir], project.root);
+  const { out } = run(["--root", project.root, "project", "edit", "--input", JSON.stringify({ skillsDir })], project.root);
   const subAgent = installChatSubAgent();
   const shown = ["Deleted ", "Created ", "Converted ", "Left ", "Requirement skills: ", "Switched ", "Installed omp", "Updated ", "The trama-specs skill was not updated"];
   const report = out.split("\n").filter((line, i) => i === 0 || shown.some((start) => line.startsWith(start)));

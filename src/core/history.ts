@@ -164,7 +164,7 @@ export function addHistory(p: Project, input: { title: string; summary: string; 
   const title = input.title.trim();
   const summary = input.summary.trim();
   const problems = [...titleProblems(title), ...summaryProblems(summary)];
-  if (input.tasks.length === 0) problems.push("no Task is cited: name one with --task");
+  if (input.tasks.length === 0) problems.push("no Task is cited: name one in `tasks`");
   const resolved = resolveTasks(p, input.tasks, []);
   problems.push(...resolved.problems);
   if (problems.length > 0) throw refusal("The history entry was not written", problems);

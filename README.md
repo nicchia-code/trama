@@ -163,6 +163,7 @@ For Claude Code, writing in Italian, a typical setup looks like this:
 | `trama.submitWhileRunning` | `false` | `true` lets you start a run while another is in progress; `false` keeps Run buttons unavailable until it finishes. |
 | `trama.driftAutoPilot` | `disabled` | Drift autopilot: `disabled` (you decide on every Drift), `enabled` (the agent recommends, approves and fixes non-critical Drifts on its own) or `yolo` (also critical Drifts). |
 | `trama.experimentalAdvisorScanner` | `false` | Experimental, with omp as the agent only: `true` makes omp's advisor check each Run's code against the Model and the Requirements, and turns the scans off (Scan buttons, pre-flight and end-of-run scan). See the [extension README](./extension/README.md). |
+| `trama.experimentalParallelExecution` | `false` | Experimental, for runs over several Tasks with an agent that has sub-agents: `true` lets the agent start together Tasks that Trama would keep apart because they concern the same thing, or hold a Task until another is done, giving a reason for each choice. See the [extension README](./extension/README.md). |
 
 For the three model settings, write the model name as your agent accepts it, or leave it empty for the agent's default. In the chat they pick the model of the new conversation: in Copilot, a model with that name; in Cursor, the conversation's starting model. Every setting except `trama.skillsDir`, `trama.language` and `trama.submitWhileRunning` lives in your user settings only, so it can't be overridden per workspace. You can change every setting in the Settings tab of the Trama panel, which always saves to your user settings. All the details are in the [extension README](./extension/README.md).
 
@@ -190,9 +191,9 @@ flowchart LR
 
 **Requirements become skills.** Requirements are grouped into Areas (`ui`, `tech`, `quality`, `data`, `rules`, or your own), split into fragments. Each Area and fragment says when an agent needs it, and each section applies to the whole System or to one Feature, Machine or State. Whenever a Requirement file changes, Trama regenerates them as agent skills (`trama-req-<area>-<fragment>`), with that "when" as the skill's description. The agent's own skill loader then pulls in only the rules that matter for the task at hand. Past a size budget, each Area becomes one index skill instead, so a large rulebook never floods the agent's context.
 
-**Agents go through the CLI.** The `trama` CLI is a single binary bundled with the extension. Agents use it to explore the Model (`trama machine order`, `trama paths order Draft Shipped`, `trama search refund`), check it (`trama validate`, `trama analyze`), and create Proposals, Tasks and Drifts. It never reads your code: comparing the Model with the code is the agent's job.
+**Agents go through the CLI.** The `trama` CLI is a single binary bundled with the extension. Agents use it to explore the Model (`trama model show order`, `trama model show order/Draft`, `trama model list`), check it (`trama model check`), and create Proposals, Tasks and Drifts. It never reads your code: comparing the Model with the code is the agent's job.
 
-**Skills drive the workflow.** `trama init` installs five agent skills into your project, each one step of the loop:
+**Skills drive the workflow.** `trama project new` installs five agent skills into your project, each one step of the loop:
 
 | Skill | Does |
 |---|---|

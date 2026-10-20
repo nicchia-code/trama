@@ -30,19 +30,20 @@ async function ask(argv: string[], typed: string[]): Promise<{ argv: string[]; s
   input.end(typed.map((l) => `${l}\n`).join(""));
   return { argv: await completeFixChoice(argv, dir, { input, output }), shown };
 }
-const base = () => ["--root", dir, "drift", "resolve", id, "--fix-code"];
+const base = () => ["--root", dir, "drift", "move", id, "code-to-be-fixed"];
+const withInput = (argv: string[], input: object) => [...argv, "--input", JSON.stringify(input)];
 
-test("a fix without --option shows the options with the recommended one as default, then asks for a note", async () => {
+test("a fix without option shows the options with the recommended one as default, then asks for a note", async () => {
   const empty = await ask(base(), ["", ""]);
-  expect(empty.argv).toEqual([...base(), "--option", "1"]);
+  expect(empty.argv).toEqual(withInput(base(), { option: 1 }));
   expect(empty.shown).toContain("1) Change the code (recommended)");
   expect(empty.shown).toContain("2) Remove the code");
   expect(empty.shown).not.toContain("2) Remove the code (recommended)");
 
-  expect((await ask(base(), ["2", "Keep the log"])).argv).toEqual([...base(), "--option", "2", "--note", "Keep the log"]);
+  expect((await ask(base(), ["2", "Keep the log"])).argv).toEqual(withInput(base(), { option: 2, note: "Keep the log" }));
 
   const retried = await ask(base(), ["9", "two", "2", ""]);
-  expect(retried.argv).toEqual([...base(), "--option", "2"]);
+  expect(retried.argv).toEqual(withInput(base(), { option: 2 }));
   expect(retried.shown).toContain("Choose a number from 1 to 2");
 
   const completed = run(retried.argv, dir, {});
@@ -52,17 +53,18 @@ test("a fix without --option shows the options with the recommended one as defau
 
 test("the prompt asks nothing when the command line already decides, or the Drift has nothing to choose", async () => {
   for (const argv of [
-    [...base(), "--option", "1"],
-    ["--root", dir, "drift", "resolve", id, "--dismiss"],
-    ["--root", dir, "drift", "resolve", id],
-    ["--root", dir, "drift", "resolve", "9999", "--fix-code"],
+    withInput(base(), { option: 1 }),
+    ["--root", dir, "drift", "move", id, "dismissed"],
+    ["--root", dir, "drift", "move", id, "proposal-accepted"],
+    ["--root", dir, "drift", "move", "9999", "code-to-be-fixed"],
     ["--root", dir, "drift", "show", id],
+    [...base(), "--input", "-"],
   ]) {
     const { argv: out, shown } = await ask(argv, ["2"]);
     expect(out).toEqual(argv);
     expect(shown).toBe("");
   }
-  expect((await ask([...base(), "--note", "Keep the log"], ["2"])).argv).toEqual([...base(), "--note", "Keep the log", "--option", "2"]);
+  expect((await ask(withInput(base(), { note: "Keep the log" }), ["2"])).argv).toEqual(withInput(base(), { note: "Keep the log", option: 2 }));
 });
 
 test("closing the input before an option is chosen refuses, saying that an option must be chosen", async () => {

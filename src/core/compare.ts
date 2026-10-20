@@ -25,7 +25,7 @@ import {
   writeTask,
 } from "./work";
 
-/** What `trama compare brief` gathers for one Machine: the references, what concerns them, and their candidates. */
+/** What `trama comparison new` gathers for one Machine: the references, what concerns them, and their candidates. */
 export interface Briefing {
   project: ProjectModel;
   machine: Machine;
@@ -69,7 +69,7 @@ export function briefing(p: Project, machineId: string, refs: string[], candidat
   };
 }
 
-/** One Task of a comparison file, as `trama compare file` reads it. */
+/** One Task of a comparison file, as `trama comparison move` reads it. */
 export interface ComparisonTask {
   title: string;
   refs: string[];

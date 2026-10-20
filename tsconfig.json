@@ -4,6 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
+    "jsx": "react-jsx",
     "resolveJsonModule": true,
     "noUncheckedIndexedAccess": true,
     "noEmit": true,

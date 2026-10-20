@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
@@ -52,12 +52,52 @@ describe("the short label of a Proposal", () => {
     expect(validateProposal(p, getProposal(p, prop.id))).toEqual([]);
   });
 
-  test("proposal new --label and proposal label set the label; proposal show prints it and carries it in JSON", () => {
+  test("proposal new with label and proposal edit with label set the label; proposal show prints it and carries it in JSON", () => {
     const out = (...a: string[]) => run(["--root", dir, ...a], process.cwd()).out;
-    const created = JSON.parse(out("--json", "proposal", "new", "Design", "--label", "Checkout", "--body", "Body"));
-    out("proposal", "label", created.id, "Checkout total");
+    const created = JSON.parse(out("--json", "proposal", "new", "--input", JSON.stringify({ title: "Design", label: "Checkout", body: "Body" })));
+    out("proposal", "edit", created.id, "--input", JSON.stringify({ label: "Checkout total" }));
     expect(getProposal(p, created.id).data.label).toBe("Checkout total");
     expect(out("proposal", "show", created.id)).toContain("Label: Checkout total");
     expect(JSON.parse(out("--json", "proposal", "show", created.id)).label).toBe("Checkout total");
+  });
+
+  test("an invalid label is a refusal before anything is written, by proposal new and by proposal edit", () => {
+    const out = (...a: string[]) => run(["--root", dir, ...a], process.cwd()).out;
+    const before = listProposals(p).length;
+    expect(() => out("proposal", "new", "--input", JSON.stringify({ title: "Design", label: "x".repeat(31) }))).toThrow(/at most 30 are allowed/);
+    expect(listProposals(p).length).toBe(before);
+    const prop = newProposal(p, "Design", "", { label: "Kept" });
+    expect(() => out("proposal", "edit", prop.id, "--input", JSON.stringify({ label: "   " }))).toThrow(/the label is empty/);
+    expect(getProposal(p, prop.id).data.label).toBe("Kept");
+  });
+
+  test("proposal edit without input returns an open Proposal to Draft and touches no file", () => {
+    const out = (...a: string[]) => run(["--root", dir, ...a], process.cwd()).out;
+    const prop = newProposal(p, "Design");
+    submitProposal(p, prop.id);
+    const file = join(getProposal(p, prop.id).dir, "proposal.md");
+    const before = readFileSync(file, "utf8").replace(/^status: open$/m, "status: draft");
+    const printed = out("proposal", "edit", prop.id);
+    expect(printed).toContain("returned to Draft");
+    expect(getProposal(p, prop.id).data.status).toBe("draft");
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(JSON.parse(out("--json", "proposal", "edit", prop.id)).returnedToDraft).toBe(false);
+  });
+
+  test("several paths in one proposal edit each print the path to write, and delete marks files", () => {
+    const out = (...a: string[]) => run(["--root", dir, ...a], process.cwd()).out;
+    const prop = newProposal(p, "Design");
+    const printed = out("--json", "proposal", "edit", prop.id, "--input", JSON.stringify({ edit: ["checkout/order.md", "tasks/total.md"] }));
+    const paths = JSON.parse(printed).paths as { path: string; edit: string }[];
+    expect(paths.map((x) => x.path)).toEqual(["checkout/order.md", "tasks/total.md"]);
+    expect(paths[0]?.edit).toContain(join("checkout", "order.md"));
+    expect(paths[1]?.edit).toMatch(/tasks[\\/][a-z0-9]{8}-total\.md$/);
+    expect(out("proposal", "edit", prop.id, "--input", JSON.stringify({ delete: ["checkout/cart.md"] }))).toContain("Marked checkout/cart.md for deletion");
+    expect(getProposal(p, prop.id).data.delete).toEqual(["checkout/cart.md"]);
+  });
+
+  test("proposal edit refuses an option with a decision other than fix-code before writing", () => {
+    const prop = newProposal(p, "Design");
+    expect(() => run(["--root", dir, "proposal", "edit", prop.id, "--input", JSON.stringify({ drifts: [{ drift: "abcd1234", decision: "proposal", option: 1 }] })], process.cwd())).toThrow(/option: applies only with decision fix-code/);
   });
 });

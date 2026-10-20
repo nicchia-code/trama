@@ -1,11 +1,10 @@
-import { run } from "../src/cli/main";
 import { cardName } from "../src/core/short-numbers";
  import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { approvalBlock, approveProposal, deleteInProposal, driftListProblems, getProposal, newProposal, rejectProposal, save, submitProposal } from "../src/core/proposals";
+import { approvalBlock, approveProposal, deleteInProposal, driftListProblems, getProposal, newProposal, rejectProposal, save, submitProposal, unfixableDrifts } from "../src/core/proposals";
 import { awaitingResolution, resolveDriftBlocker, resolveDriftInProposal, resolveDriftsBlocker, runWindowBlocker } from "../src/core/resolution";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
@@ -138,7 +137,7 @@ describe("approving a resolution", () => {
     writeFileSync(getDrift(p, a.id).path, readFileSync(getDrift(p, a.id).path, "utf8").replace("- order", "- gone/Paid\n  - requirements/ui#General"));
     const r = resolution();
     expect(() => resolveDriftInProposal(p, r.id, a.id, { decision: "fix-code", option: 1 })).toThrow(/no longer exist/);
-    expect(() => resolveDrift(p, a.id, "fix-code", [], { option: 1 })).toThrow(/no longer exist.*drift resolve --dismiss/);
+    expect(() => resolveDrift(p, a.id, "fix-code", [], { option: 1 })).toThrow(/no longer exist.*drift move <id> dismissed/);
     expect(getDrift(p, a.id).data.status).toBe("open");
 
     // A decision recorded while the Machine was there is refused at delivery once it is gone.
@@ -167,7 +166,7 @@ describe("approving a resolution", () => {
     expect([getDrift(p, a.id).data.status, getDrift(p, b.id).data.status]).toEqual(["open", "open"]);
   });
 
-  test("validate --proposal names the Drift whose code cannot be fixed, as approval does", () => {
+  test("the checks of a hand-over name the Drift whose code cannot be fixed, as approval does", () => {
     const [a, b] = [drift("A"), drift("B")] as const;
     const r = resolution();
     resolveDriftInProposal(p, r.id, a.id, { decision: "dismissed" });
@@ -175,10 +174,9 @@ describe("approving a resolution", () => {
     submitProposal(p, r.id);
     writeFileSync(getDrift(p, b.id).path, readFileSync(getDrift(p, b.id).path, "utf8").replace("- order", "- gone"));
 
-    const out = run(["--root", dir, "validate", "--proposal", r.id], dir, {});
-    expect(out.exit).toBe(1);
-    expect(out.out).toContain(cardName(p, "drift", b.id));
-    expect(out.out).toMatch(/no longer exist/);
+    const unfixable = unfixableDrifts(p, getProposal(p, r.id));
+    expect(unfixable.join("\n")).toContain(cardName(p, "drift", b.id));
+    expect(unfixable.join("\n")).toMatch(/no longer exist/);
   });
 
   test("a resolution whose own files remove the Machine of a fix-code Drift is refused at hand-over and at approval, changing nothing", () => {

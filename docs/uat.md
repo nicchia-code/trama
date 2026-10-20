@@ -44,8 +44,8 @@ Buttons were activated through the DOM, not clicked with the real mouse, so a bu
 | S1 | Run `cd /home/luca/Developer/Trama && TRAMA_DEMO_DIR=/tmp/trama-demo/shop bun run scripts/harness.ts` | Prints `wrote extension/dist/harness.html`. No error | ☐ |
 | S2 | Make sure omp is installed and set `"trama.agent": "omp"` in your **user** settings, with no model roles (`trama.analysis`, `trama.scan`, `trama.execution`) | Every Trama instruction starts omp in a new integrated terminal; no workspace setting selects a different agent | ☐ |
 | S3 | Run `code --extensionDevelopmentPath=/home/luca/Developer/Trama/extension --new-window /tmp/trama-demo/shop` (skip if the window is already open) | A VS Code window titled `shop`. If a Welcome dialog appears, close it | ☐ |
-| S4 | In the verification shell paste: `j() { /home/luca/Developer/Trama/dist/trama --root /tmp/trama-demo/shop "$@"; }` and `D=/tmp/trama-demo/shop/.trama` | No output. `j board` prints the board (see S5) | ☐ |
-| S5 | Run `j board` | `To decide`: Proposal `P1`, Proposal `P2`, Drift `D1`, Drift `D2` (Proposal `P2`). `To do`: `T1`, `T2`. `In progress`: `T3`. `Done`: `0004` (its identity, because it has no number) | ☐ |
+| S4 | In the verification shell paste: `j() { /home/luca/Developer/Trama/dist/trama --root /tmp/trama-demo/shop "$@"; }` and `D=/tmp/trama-demo/shop/.trama` | No output. `j project show` prints the board (see S5) | ☐ |
+| S5 | Run `j project show` | `To decide`: Proposal `P1`, Proposal `P2`, Drift `D1`, Drift `D2` (Proposal `P2`). `To do`: `T1`, `T2`. `In progress`: `T3`. `Done`: `0004` (its identity, because it has no number) | ☐ |
 
 ## 2. The seeded demo (reference)
 
@@ -276,7 +276,7 @@ j proposal submit <id>           # exit code 1; stays Draft
 | 2 | Open the Diagram selector | No entry for the Draft | ☐ |
 | 3 | `j proposal show <id>` | Status draft, the validation error and the removed cart are listed | ☐ |
 | 4 | Board tab | No card for the Draft anywhere on the Board, and no Discard button | ☐ |
-| 5 | `j board`, then `j proposal discard <id>` | `j board` lists the Draft under **In writing** marked `(draft)`; after the discard it is marked discarded and never enters To decide | ☐ |
+| 5 | `j project show`, then `j proposal discard <id>` | `j project show` lists the Draft under **In writing** marked `(draft)`; after the discard it is marked discarded and never enters To decide | ☐ |
 | 6 | ↻ reset when done | | ☐ |
 
 ---
@@ -351,7 +351,7 @@ Needs the real omp agent configured in S2 for row 6; the other rows need none.
 | 3 | Press Tab through the Board | Focus reaches only **Show details**, **Run**, **Open**, the links and badges, and the buttons of Proposals and Drifts; none of them moves a Task | ☐ |
 | 4 | `j task move 1 doing` | Within about a second the card is in In progress. At no moment is it dimmed or marked busy, and no error appears | ☐ |
 | 5 | `TRAMA_AGENT=1 j task move 2 doing` | The dot of Task 0002 pulses in the accent colour and its label is `Agent working`; there is no badge and no **Take back** button. **Run all** is disabled with the tooltip `An agent is working on Task 0002` | ☐ |
-| 6 | `j task move 2 done` (as the developer), then `j task take-back 2` | The first is refused: the message says the agent is working on Task 0002 and points to `trama task take-back 2` only. The second clears the mark: the dot stops pulsing, Task 0002 stays In progress and **Run all** is enabled again | ☐ |
+| 6 | `j task move 2 done` (as the developer), then `j task move 2 doing` | The first is refused: the message says the agent is working on Task 0002 and points to `trama task move 2 doing` only. The second takes the Task back and clears the mark: the dot stops pulsing, Task 0002 stays In progress and **Run all** is enabled again | ☐ |
 | 7 | Start an agent that does not end by itself (E12), `TRAMA_AGENT=1 j task move 2 doing`, then press Ctrl+C in the **Design** terminal | Task 0002 goes back to Ready with its dot no longer pulsing; no Take back is needed | ☐ |
 
 ### E8. Open a Task
@@ -380,23 +380,23 @@ Needs the real omp agent configured in S2 for row 6; the other rows need none.
 | 10 | Create a fourth Task with `--proposal 2` only (a second Proposal) | It carries the tag of Proposal 0002 and its title, like the others; a Task with no `--proposal` has no tag | ☐ |
 
 ### E11. Blocked Tasks
-↻ first. Seed it from the verification shell: `j drift new "Refund amount differs" --ref order/Refunding --task 1 --happens "The code refunds late." --should "The Model refunds at once." --option "Refund at once" --option-text "Refund when the order is cancelled." --option "Queue the refund" --option-text "Keep the queue but refund within a minute."`, then `j drift new "Cancel differs" --ref order/Paid --happens "The code cancels twice." --should "The Model cancels once." --option "Cancel once" --option-text "Ignore a second cancel." --option "Reject the second cancel" --option-text "Answer it with an error."`. The harness seed already has blocked Tasks too (Tasks tagged with a Proposal, Task `0008` waiting for the fix Task `0009`); the new Drifts are 0006 and 0007. Task `0005`, taken by the agent, also gets the badge `blocked 0006`: blocking does not release it.
+↻ first. Seed it from the verification shell: `j drift new --input '{"title":"Refund amount differs","refs":["order/Refunding"],"task":"1","happens":"The code refunds late.","should":"The Model refunds at once.","where":"src/refund.ts","options":[{"title":"Refund at once","text":"Refund when the order is cancelled."},{"title":"Queue the refund","text":"Keep the queue but refund within a minute."}]}'`, then `j drift new --input '{"title":"Cancel differs","refs":["order/Paid"],"happens":"The code cancels twice.","should":"The Model cancels once.","where":"src/cancel.ts","options":[{"title":"Cancel once","text":"Ignore a second cancel."},{"title":"Reject the second cancel","text":"Answer it with an error."}]}'`. The harness seed already has blocked Tasks too (Tasks tagged with a Proposal, Task `0008` waiting for the fix Task `0009`); the new Drifts are 0006 and 0007. Task `0005`, taken by the agent, also gets the badge `blocked 0006`: blocking does not release it.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Look at Task `0001` on the Board | Red badges `blocked 0006` (the Drift filed with `--task 1`) and `blocked 0007` (it refs `order/Paid/user.CANCEL`, inside `order/Paid`); **Run** stays enabled | ☐ |
+| 1 | Look at Task `0001` on the Board | Red badges `blocked 0006` (the Drift filed with `task` `1`) and `blocked 0007` (it refs `order/Paid/user.CANCEL`, inside `order/Paid`); **Run** stays enabled | ☐ |
 | 2 | Hover a badge, and read its accessible name | The tooltip says `Blocked by Drift 0006: Refund amount differs. Show it on the diagram.` | ☐ |
 | 3 | Click `blocked 0006` | The Diagram tab opens at the `order` Machine with the red ghost `Drift 0006` selected and its panel shown | ☐ |
 | 4 | `j task move 1 doing` as the developer (no `TRAMA_AGENT`) | It moves to In progress and keeps its badges: the developer is never refused | ☐ |
 | 5 | `j task move 1 doing`, and the same with `TRAMA_AGENT=1 j task move 1 doing` | The first prints `Task 0001 is now doing`; the second is refused naming `Drift 0006 "Refund amount differs"` and `Drift 0007`, saying the developer must decide; the Task is unchanged | ☐ |
-| 6 | `j board`, `j task list`, `j task show 1` | `(blocked by Drift 0006) (blocked by Drift 0007)` after the title; `task show` also lists `Blocked by Drift 0006: Refund amount differs` and the same for 0007 | ☐ |
+| 6 | `j project show`, `j task list`, `j task show 1` | `(blocked by Drift 0006) (blocked by Drift 0007)` after the title; `task show` also lists `Blocked by Drift 0006: Refund amount differs` and the same for 0007 | ☐ |
 | 7 | `j drift show 6` | It does not list Task 0001 | ☐ |
 | 8 | Click **Keep this** under **WHAT SHOULD HAPPEN** on Drift 0006 | Task `0001` goes back to Ready and its badges become `waiting 0010` and `blocked 0007`; clicking `waiting 0010` scrolls to the fix Task's card and focuses it | ☐ |
 | 9 | Move the fix Task `0010` to Done and click **Keep this** under **WHAT HAPPENS** on Drift 0007 | Task `0001` has no badge any more | ☐ |
-| 10 | `j --json drift show 7`, then `j drift new "x" --ref order --task 99 --happens a --should b --option A --option-text a --option B --option-text b` | The first has `"origin": null` (filed without `--task`) and the two texts; the second fails with `No Task with ID "99"` and creates nothing | ☐ |
-| 11 | ↻, seed the two Drifts again, then `j task next`, then `j task list --column todo` | `Next Task: 0002 Payment declined email`: the lowest Task in To do that is not blocked, skipping `0001`. The command moved nothing: `task list` still shows `0001`, `0002`, `0006`, `0008` and `0009` in `todo` | ☐ |
-| 12 | `j task next --proposal 3`, then `j task next --proposal 99` | The first prints `No Task is runnable in Proposal 0003.`, a blank line, `Still in To do:` and `- 0006 Return request (Proposal 0003) (blocked by Drift 0003)`, and exits with `0`. The second fails with `No Proposal with ID "99"` and exits with `1` | ☐ |
-| 13 | `j task move 2 doing` as the developer (no `TRAMA_AGENT`), then `j task next` | The second prints `No Task is runnable.`, a blank line, `Still in To do:` and one line for each of `0001`, `0006`, `0008` and `0009`, each with its marks, for example `- 0008 Order confirmation email (waiting for Task 0009) (blocked by Drift 0005)`. It exits with `0` | ☐ |
-| 14 | `j --json task next` | `"next": null` and a `waiting` list with the same four Tasks, each with its `blockedBy` | ☐ |
+| 10 | `j --json drift show 7`, then `j drift new --input '{"title":"x","refs":["order"],"task":"99","happens":"a","should":"b","where":"w","options":[{"title":"A","text":"a"},{"title":"B","text":"b"}]}'` | The first has `"origin": null` (filed without `task`) and the two texts; the second fails with `No Task with ID "99"` and creates nothing | ☐ |
+| 11 | ↻, seed the two Drifts again, then `j task list --input '{"runnable":true}'`, then `j task list --input '{"column":"todo"}'` | `Next Task: 0002 Payment declined email`: the lowest Task in To do that is not blocked, skipping `0001`. The command moved nothing: `task list` still shows `0001`, `0002`, `0006`, `0008` and `0009` in `todo` | ☐ |
+| 12 | `j task list --input '{"runnable":true,"proposals":["3"]}'`, then the same with `"99"` | The first prints `No Task is runnable in Proposal 0003.`, a blank line, `Still in To do:` and `- 0006 Return request (Proposal 0003) (blocked by Drift 0003)`, and exits with `0`. The second fails with `No Proposal with ID "99"` and exits with `1` | ☐ |
+| 13 | `j task move 2 doing` as the developer (no `TRAMA_AGENT`), then `j task list --input '{"runnable":true}'` | The second prints `No Task is runnable.`, a blank line, `Still in To do:` and one line for each of `0001`, `0006`, `0008` and `0009`, each with its marks, for example `- 0008 Order confirmation email (waiting for Task 0009) (blocked by Drift 0005)`. It exits with `0` | ☐ |
+| 14 | `j --json task list --input '{"runnable":true}'` | `"next": null` and a `waiting` list with the same four Tasks, each with its `blockedBy` | ☐ |
 
 ### E12. Ghosts of announced cards
 Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `"trama.autoExit": false` in your **user** settings; ↻ and reload the window. `j` below is the verification shell's.
@@ -408,21 +408,21 @@ Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `
 | 4 | `ls -A $D/announcements` and `cat $D/announcements/*.md`, then `T=$(sed -n 's/^terminal: //p' $D/announcements/*.md)` | `.gitignore` and one `<id>.md` with `kind: proposal`, `source: request`, a `terminal:` line with six lowercase letters and digits (kept in `$T`) and the H1 `Add refunds after pickup`; `cat $D/announcements/.gitignore` prints `*` | ☐ |
 | 5 | `j proposal new "Refunds after pickup"`; note the ID it prints, `<P>` | No note in the output. The same ghost (no second one) now reads title `Refunds after pickup` and the line `Writing` | ☐ |
 | 6 | `j proposal submit <P>` | The ghost disappears and the real card of that Proposal stands in its place; the count and the badge go up by one; no notice appears | ☐ |
-| 7 | `A=$(j announce task "Refund prepared orders")` | A ghost of kind `Task` and line `Preparing` stands in Ready after the real cards, with the count of Ready unchanged | ☐ |
+| 7 | `A=$(j announcement new --input - <<<'{"kind":"task","title":"Refund prepared orders"}')` | A ghost of kind `Task` and line `Preparing` stands in Ready after the real cards, with the count of Ready unchanged | ☐ |
 | 8 | `j task new "Refund prepared orders" --ref order/Refunding --announcement $A` | The ghost gives way to the real card, at the same place; `ls -A $D/announcements` shows only `.gitignore` | ☐ |
-| 9 | `j announce drift "Cart differs"` | A `Drift` ghost stands in Work Items after the last real Drift. It belongs to no terminal (`terminal: null` in its file) | ☐ |
+| 9 | `j announcement new --input - <<<'{"kind":"drift","title":"Cart differs"}'` | A `Drift` ghost stands in Work Items after the last real Drift. It belongs to no terminal (`terminal: null` in its file) | ☐ |
 | 10 | `j task new "Unannounced" --ref order --announcement zzzzzz` | The Task is created and the output adds `No announcement "zzzzzz" was found …`; no ghost appears or is left | ☐ |
-| 11 | `TRAMA_TERMINAL=$T j announce task "Left behind"`, then in the **Design** terminal press Ctrl+C | The `Task` ghost disappears at once. At the top of the Board one notice, `The agent finished without delivering Task Left behind.`, with a **Close** button. The `Drift` ghost of row 9 stays: it belongs to no terminal | ☐ |
+| 11 | `TRAMA_TERMINAL=$T j announcement new --input - <<<'{"kind":"task","title":"Left behind"}'`, then in the **Design** terminal press Ctrl+C | The `Task` ghost disappears at once. At the top of the Board one notice, `The agent finished without delivering Task Left behind.`, with a **Close** button. The `Drift` ghost of row 9 stays: it belongs to no terminal | ☐ |
 | 12 | Click **Close** on the notice, switch to the Diagram tab and back | The notice is gone; closing the Trama tab and opening it again shows none | ☐ |
 | 13 | `j proposal new "Never finished"`, read the ghost, then `j proposal discard <ID it printed>` | A `Writing` ghost titled `Never finished`; after the discard it disappears and **no** notice is shown | ☐ |
-| 14 | `j announce task "Before reload"`, then Developer: Reload Window and open the Board | The ghost is not there and no notice is shown: leftovers are withdrawn at startup | ☐ |
+| 14 | `j announcement new --input - <<<'{"kind":"task","title":"Before reload"}'`, then Developer: Reload Window and open the Board | The ghost is not there and no notice is shown: leftovers are withdrawn at startup | ☐ |
 | 15 | Set `"trama.agent": "chat"` in your **user** settings; reload, **Add Work Item…**, type any text and close the tab | The prompt goes to Copilot Chat and no terminal ghost appears | ☐ |
 | 16 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with chat, the ghost starts with the Draft | ☐ |
 | 17 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
 | 18 | Restore S2. ↻, then `j task move 1 doing` | The card moves to In progress without ever looking busy; no dashed copy of it appears in In progress at any moment | ☐ |
-| 19 | `C=$(j announce check "Final check after all Tasks" --phase verifying)` | In In progress, dopo le schede vere, un ghost `Check` intitolato `Final check after all Tasks` con la riga `Verifying (tests, lint, build)`; il numero della colonna non cambia | ☐ |
-| 20 | `j announce phase $C scanning`, poi di nuovo lo stesso comando | Il ghost passa a `Scanning`; il secondo comando dice che il controllo è già in Scanning | ☐ |
-| 21 | `j announce done $C` | Il ghost sparisce e **nessun** avviso compare | ☐ |
+| 19 | `C=$(j announcement new --input - <<<'{"kind":"check","title":"Final check after all Tasks","phase":"verifying"}')` | In In progress, dopo le schede vere, un ghost `Check` intitolato `Final check after all Tasks` con la riga `Verifying (tests, lint, build)`; il numero della colonna non cambia | ☐ |
+| 20 | `j announcement move $C scanning`, poi di nuovo lo stesso comando | Il ghost passa a `Scanning`; il secondo comando dice che il controllo è già in Scanning | ☐ |
+| 21 | `j announcement move $C delivered` | Il ghost sparisce e **nessun** avviso compare | ☐ |
 
 ### E13. Collapse the History column
 | # | Action | Expected | ✓ |
@@ -445,7 +445,7 @@ Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `
 | F5 | ↻. Add a new file with `printf '%s\n' '---' 'column: todo' 'technical: true' 'refs: []' 'drift: null' '---' '# Rebuild CI cache' > $D/tasks/0005-rebuild-ci-cache.md` | A new Task `0005` appears in To do within a second with the badge `technical`; counts update | ☐ |
 | F6 | Delete that file | The card disappears | ☐ |
 | F7 | Trigger any error banner (F2) and click the `×` | The banner hides | ☐ |
-| F8 | ↻. In `model/checkout/order.md` remove the text ` (initial)` from `### Draft (initial)`, save 🔍 | No crash. The UI does **not** warn that the Model is invalid (no code shows Model errors). Note what you see. Run `j validate`: exit 1 with `The Machine must have exactly one (initial) State, found 0` | ☐ |
+| F8 | ↻. In `model/checkout/order.md` remove the text ` (initial)` from `### Draft (initial)`, save 🔍 | No crash. The UI does **not** warn that the Model is invalid (no code shows Model errors). Note what you see. Run `j model check`: exit 1 with `The Machine must have exactly one (initial) State, found 0` | ☐ |
 | F9 | ↻. Edit `proposals/0001-*/proposal.md`, change `status: open` to `status: bogus`, save | Red banner naming that file with `"status" must be one of open, approved, rejected` | ☐ |
 | F10 | With the Trama tab hidden behind another tab, edit a Task file, then return to the Trama tab | The change is already shown | ☐ |
 
@@ -461,7 +461,7 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 | 1 | Board: **Approve** on Proposal 0001 | The card leaves Work Items (count 3). No error banner | ☐ |
 | 2 | Look at the bottom panel | A terminal named **Scan** opens in the project folder | ☐ |
 | 3 | Read the terminal | Exactly **one** command was sent and one line printed: ``Use the trama-scan skill on what Proposal 0001 changed: its scan scope is in `trama proposal show 0001`. Link every Task you file to it with --proposal 0001.``, senza nulla su trama-implement | ☐ |
-| 4 | Verification shell: `j validate` | `The Model and its Requirements are valid.` | ☐ |
+| 4 | Verification shell: `j model check` | `The Model and its Requirements are valid.` | ☐ |
 | 5 | `grep -c Returned $D/model/checkout/order.md` | `2` | ☐ |
 | 6 | `ls $D/model/checkout` | `cart.md feature.md order.md payment.md return.md` | ☐ |
 | 7 | `grep -n RETURN $D/model/actors/user.md` | A line `### RETURN` | ☐ |
@@ -482,7 +482,7 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 | 2 | Type `Split it by state`, press Enter | The card leaves Work Items. No terminal is opened | ☐ |
 | 3 | `grep status $D/proposals/0001-*/proposal.md` | `status: rejected` | ☐ |
 | 4 | `tail -4 $D/proposals/0001-*/proposal.md` | A `## Feedback` heading followed by `Split it by state` | ☐ |
-| 5 | `j validate` | The Model is unchanged and valid (order.md has no `Returned`) | ☐ |
+| 5 | `j model check` | The Model is unchanged and valid (order.md has no `Returned`) | ☐ |
 
 ### G3b. Reject without feedback
 | # | Action | Expected | ✓ |
@@ -519,13 +519,13 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 | 6 | Terminal | Nothing was launched | ☐ |
 
 ### G6b. Fix options on the command line
-Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." --should "The Model says so." --option "Change it" --option-text "Make the code do it." --option "Drop it" --option-text "Remove the behaviour."` (its ID below is `<id>`).
+Seed a Drift: `j drift new --input '{"title":"Cli fix","refs":["order"],"happens":"The code does it.","should":"The Model says so.","where":"src/cli.ts","options":[{"title":"Change it","text":"Make the code do it."},{"title":"Drop it","text":"Remove the behaviour."}]}'` (its ID below is `<id>`).
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | `j drift new "Few" --ref order --happens a --should b --option "Only" --option-text one`, then the same with `--option "A" --option-text a --option "B"` (no text), then with two options titled `A` | Each is refused, naming the problem (from 2 to 5 options; option 2 needs its text; two options titled `A`); no Drift is created | ☐ |
-| 2 | `j drift resolve <id> --fix-code` with the input not a terminal (for example `j drift resolve <id> --fix-code < /dev/null`) | Refused: `An option must be chosen …`; the Drift stays open | ☐ |
-| 3 | `j drift resolve <id> --fix-code --option 9`, then `--accept-proposal --option 1` and `--dismiss --note x` | The first is refused (an option must be chosen, from 1 to 2); the others are refused (an option or a note only goes with fixing the code); the Drift stays open | ☐ |
-| 4 | 🔍 In a real terminal: `j drift resolve <id> --fix-code` | A numbered menu of the options with `(recommended)` on the first and the prompt `Option [1]:`; typing `9` asks again; pressing Enter takes option 1; then `Note (optional, Enter for none):`. Typing a note and Enter resolves the Drift | ☐ |
+| 1 | `j drift new --input '{"title":"Few","refs":["order"],"happens":"a","should":"b","where":"w","options":[{"title":"Only","text":"one"}]}'`, then the same with the options `[{"title":"A","text":"a"},{"title":"B"}]` (no text), then with two options titled `A` | Each is refused, naming the problem (from 2 to 5 options; option 2 needs its text; two options titled `A`); no Drift is created | ☐ |
+| 2 | `j drift move <id> code-to-be-fixed` with the input not a terminal (for example `j drift move <id> code-to-be-fixed < /dev/null`) | Refused: `An option must be chosen …`; the Drift stays open | ☐ |
+| 3 | `j drift move <id> code-to-be-fixed --input '{"option":9}'`, then `j drift move <id> proposal-accepted --input '{"option":1}'` and `j drift move <id> dismissed --input '{"note":"x"}'` | The first is refused (an option must be chosen, from 1 to 2); the others are refused (an option or a note only goes with fixing the code); the Drift stays open | ☐ |
+| 4 | 🔍 In a real terminal: `j drift move <id> code-to-be-fixed` | A numbered menu of the options with `(recommended)` on the first and the prompt `Option [1]:`; typing `9` asks again; pressing Enter takes option 1; then `Note (optional, Enter for none):`. Typing a note and Enter resolves the Drift | ☐ |
 | 5 | `j drift show <id>` | `## Chosen option` `1. Change it` and the note, if you typed one | ☐ |
 
 ### G7. Keep what happens with no Proposal
@@ -533,7 +533,7 @@ Seed a Drift: `j drift new "Cli fix" --ref order --happens "The code does it." -
 |---|---|---|---|
 | 1 | ↻. Board: **Keep this** under **WHAT HAPPENS** on Drift 0001 | The card disappears; the Tasks do not change (still 4 files in `$D/tasks`) | ☐ |
 | 2 | `sed -n 1,8p $D/drifts/0001-*.md` | `status: resolved`, `resolution: dismissed`, `task: null` | ☐ |
-| 3 | `j drift resolve 2 --dismiss` (Drift 0002 has Proposal 0002 attached) | Refused: the Drift has an attached Proposal; accept it or fix the code | ☐ |
+| 3 | `j drift move 2 dismissed` (Drift 0002 has Proposal 0002 attached) | Refused: the Drift has an attached Proposal; accept it or fix the code | ☐ |
 
 ### G8. Keep what happens when the Proposal was rejected
 | # | Action | Expected | ✓ |
@@ -574,8 +574,8 @@ Each launch starts a new agent terminal named after its work (cwd = the demo fol
 | H5 | Board toolbar | Only **Scan System** is there, with no **Quick request…**, no **Add Work Item…** and no input box. No line with `Use the trama-design skill.` is ever printed by a Board button | ☐ |
 | H6 | Diagram toolbar and Requirements toolbar | Neither has **Quick request…** nor **+ Add Work Item**; the Requirements toolbar shows only the Proposal selector and the filter. **+ Add Work Item** is in the Board's Work Items column only | ☐ |
 | H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
-| H11 | Board: **Run all** | ``Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, handing them out as sub-agent places free up, until it says there is none.`` | ☐ |
-| H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task take-back 5` and `j task take-back 7`, then look at **Run all** and at the Task card `0006`, tagged `Proposal 0003` | **Run all** is **disabled** with the tooltip and accessible description `All the Ready Tasks are blocked: Task 0001 is blocked by Drift 0006`; Task `0006` shows its tag `Proposal 0003` and the badge `blocked 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run all** | ☐ |
+| H11 | Board: **Run all** | ``Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task list --input '{"runnable":true,"max":{maxParallelAgents}}'`, one group at a time, until it says there is none.`` | ☐ |
+| H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task move 5 doing` and `j task move 7 doing`, then look at **Run all** and at the Task card `0006`, tagged `Proposal 0003` | **Run all** is **disabled** with the tooltip and accessible description `All the Ready Tasks are blocked: Task 0001 is blocked by Drift 0006`; Task `0006` shows its tag `Proposal 0003` and the badge `blocked 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run all** | ☐ |
 | H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
 | H15 | Palette: type `Trama`, look at the list | No **Quick Design Request…** and no **Add Work Item…** command: design requests start only from the Board's **+ Add Work Item** button (and, with an empty Model, the Diagram's **Import from Code** and **Start from Scratch**) | ☐ |
@@ -646,8 +646,8 @@ Print the setting with the script, from the repo (it works from any shell, fish 
 | I1 | `bun run scripts/demo-agent.ts`, put the line in user settings, reload, ↻, then Board: **Scan System** | The terminal shows `omp 'Use the trama-scan skill on the whole System.'` and omp starts and starts working on the prompt. `dist/` of this repo must be on the PATH the editor gives its terminals, or omp cannot run `trama`. If it fails for you, copy the exact text the terminal shows | ☐ |
 | I2 | In omp type `/skill:trama-scan` (or ask which skills are loaded) | The skill `trama-scan` is known. If not, omp does not read `.agents/skills/` of the project: report it | ☐ |
 | I3 | Interrupt omp and ask it to run `command -v trama` | `/home/luca/Developer/Trama/dist/trama` | ☐ |
-| I4 | Ask it to run `trama board` | The same board as S5 | ☐ |
-| I5 | Let the scan finish. In the verification shell: `j board` | Tasks 0005 to 0008 were created (about four, one per Machine or group of States; the demo has no code, so everything not covered by Tasks 0001 to 0004 is missing) and **no Drift**. **Proposals 0001 and 0002 are still open**: the agent must not have run `proposal approve`, `proposal reject` or `drift resolve`. `j validate` is still valid and `.trama/model/` is unchanged. Ran against a real omp: passed | ☐ |
+| I4 | Ask it to run `trama project show` | The same board as S5 | ☐ |
+| I5 | Let the scan finish. In the verification shell: `j project show` | Tasks 0005 to 0008 were created (about four, one per Machine or group of States; the demo has no code, so everything not covered by Tasks 0001 to 0004 is missing) and **no Drift**. **Proposals 0001 and 0002 are still open**: the agent must not have run `proposal approve`, `proposal reject` or `drift move`. `j model check` is still valid and `.trama/model/` is unchanged. Ran against a real omp: passed | ☐ |
 | I6 | While the scan runs watch the board | The new Tasks appear in To do by themselves while the agent works (seen: 2 to 5 cards after about 27 s, 6 after 33 s). Ran against a real omp: passed | ☐ |
 | I7 | While omp is still running in the terminal, click **Scan System** again | A **new** terminal named `Scan` opens and runs the command there; the running omp receives nothing. (Before this was fixed the command line was typed into omp as a message.) Once every command has finished, the next launch with the same name reuses the last terminal instead of opening another. Reproduced the old bug twice and verified the fix with a slow command; not yet repeated with omp itself | ☐ |
 | I8 | Quit omp. **Add Work Item…** with `Orders can also be returned`, sent | omp reads the `trama-design` skill and explores the Model. Because Proposal 0001 already covers part of this, it asks you with a menu (options such as replacing or extending 0001) and **waits for your answer**. Pick an option; omp then writes a Proposal that appears in To decide as soon as the file exists, with its changes listed. Ran against a real omp as far as the question; the answer and the new Proposal still need a human | ☐ |
@@ -681,8 +681,9 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| K1 | Switch to a light theme (Ctrl+K Ctrl+T) and look at the Board and each Diagram level | Text, edges, badges and ghost colours stay readable; no white text on white | ☐ |
-| K2 | Switch back to a dark theme | Same | ☐ |
+| K1 | With **Theme** on `Auto` in Settings (Appearance), switch the editor to a light theme (Ctrl+K Ctrl+T) and look at every tab and each Diagram level | The panel has its own zinc and blue look, light; text, edges, badges, tags and ghost colours stay readable; no white text on white; the buttons, badges and tabs show lucide icons (no icon font) | ☐ |
+| K2 | Switch the editor to a dark theme, then to a high contrast one (dark and light) | The panel changes at once, without reloading: dark for dark and high contrast, light for light and high contrast light; same readability | ☐ |
+| K2b | Set **Theme** to `Light`, then to `Dark`, and change the editor theme each time | The panel keeps the theme chosen, whatever the editor does; back to `Auto` it follows the editor again | ☐ |
 | K3 | Narrow the editor group to about 700 px | Board scrolls horizontally (columns keep a minimum width); the Diagram canvas is not hidden by the panel | ☐ |
 | K4 | Use only the keyboard on the Board (Tab, Shift+Tab, Enter) | Every button is reachable and shows a visible focus ring | ☐ |
 | K5 | Hover disabled buttons | Disabled **Approve** shows its reason; so does a disabled **Run all** | ☐ |
@@ -710,9 +711,9 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | M1 | Click the **Requirements** tab | Two Areas, **Data** (`requirements/data`) and **Interface** (`requirements/ui`), each with its italic "Use when…" line and **Open file**, then one fragment group **main.md** (title, file name in grey, its italic description, a small **Open file** link) holding the sections, General first. The Proposal selector is disabled (no open Proposal touches Requirements) | ☐ |
 | M2 | Click the section title **order/Paid** | The Diagram opens on `order` with Paid selected; the panel ends with **Requirements → Interface** and the two Paid lines | ☐ |
 | M3 | In the panel, click **Interface** | The Requirements tab shows only `order/Paid`, with "Showing requirements/ui#order/Paid" and **Show all** | ☐ |
-| M4 | Verification shell: `j state order/Preparing` | Ends with `## Requirements`: `requirements/ui#order/Paid (via order/Paid)`, `requirements/data#order (via order)`, `requirements/ui#checkout (via checkout)` | ☐ |
-| M5 | `ls /tmp/trama-demo/shop/.agents/skills` after `j skills update` | `trama-req-data-main` and `trama-req-ui-main` next to the Trama skills; `trama-req-ui-main/SKILL.md` has `description: Use when building or changing screens…`. The output has the line `Requirement skills: one skill per fragment (budget <n>/4000 characters).` | ☐ |
-| M5b | `mkdir /tmp/trama-demo/shop/.agents/skills/trama-fix` with a file inside, and the same under `.claude/skills`, then `j skills update` | The output has a line `Deleted the retired trama-fix skill:` naming both folders; neither exists any more. Running it again prints no `Deleted` line. In the editor, **Trama: Update Agent Skills** shows the same line in its notification | ☐ |
+| M4 | Verification shell: `j model show order/Preparing` | Ends with `## Requirements`: `requirements/ui#order/Paid (via order/Paid)`, `requirements/data#order (via order)`, `requirements/ui#checkout (via checkout)` | ☐ |
+| M5 | `ls /tmp/trama-demo/shop/.agents/skills` after `j project edit` | `trama-req-data-main` and `trama-req-ui-main` next to the Trama skills; `trama-req-ui-main/SKILL.md` has `description: Use when building or changing screens…`. The output has the line `Requirement skills: one skill per fragment (budget <n>/4000 characters).` | ☐ |
+| M5b | `mkdir /tmp/trama-demo/shop/.agents/skills/trama-fix` with a file inside, and the same under `.claude/skills`, then `j project edit` | The output has a line `Deleted the retired trama-fix skill:` naming both folders; neither exists any more. Running it again prints no `Deleted` line. In the editor, **Trama: Update Agent Skills** shows the same line in its notification | ☐ |
 | M6 | Edit `.trama/requirements/ui/main.md` by hand: change "Mobile first" to "Mobile first, always" and save | Within a second `.agents/skills/trama-req-ui-main/SKILL.md` says "Mobile first, always". The Requirements tab shows the new text | ☐ |
 | M7 | Append `## order/Lost` and a line to `ui/main.md`, save | The yellow bar: "The Model or its Requirements have 1 validation error"; the link `requirements/ui/main.md:<line>` opens the fragment. Remove the section again: the bar disappears | ☐ |
 | M8 | `j proposal new "Blue badge"`, then `j proposal edit <id> requirements/ui/main.md`, change "green" to "blue" in the printed file and `j proposal submit <id>` | On the Board the submitted card lists `requirements/ui/main.md ~1` and has **View requirements**, not **View on diagram**. `j proposal show <id>` labels the file with Area `ui` and fragment `main` | ☐ |
@@ -721,10 +722,10 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | M11 | `j proposal discard <id>` | The Draft is discarded; `ui/main.md` and the skill unchanged | ☐ |
 | M12 | `j proposal new "Order screens"`; `j proposal edit <id> requirements/ui/main.md` and remove the `## order/Paid` section; `j proposal edit <id> requirements/ui/orders.md` and write a front matter `description: Use when building the order screens.`, `# Order screens` and the `## order/Paid` section with "green" changed to "blue"; `j proposal submit <id>`; select it in the Requirements tab | Interface shows **main.md** without order/Paid, then **Order screens** `orders.md` with the badge **new fragment**; inside it `order/Paid` carries **moved from main** and **changed**, the old text struck through above the new one. `order/Paid` appears nowhere else | ☐ |
 | M13 | `j proposal edit <id> requirements/ui.md`, then `j proposal edit <id> requirements/ui/x/y.md` | Both are refused, saying Areas are folders and an Area has no subfolders | ☐ |
-| M14 | Reject the Proposal of M12. Append 1,300 lines `- A rule.` to `ui/main.md`, then `j validate` and `j analyze` | `validate` says the Model and its Requirements are valid, exits `0`, then `1 warning(s)…` naming `requirements/ui/main.md` with its size over 12288 (12 KB). `analyze` lists `[large-fragment] requirements/ui/main.md: …`. Undo the lines | ☐ |
-| M15 | Make the description of `ui/main.md` longer than 4,000 characters and run `j skills update` | `Requirement skills: one index skill per Area (budget <n>/4000 characters).` and `Switched from one skill per fragment to one index skill per Area.`; `.agents/skills` holds `trama-req-data` and `trama-req-ui` (with `SKILL.md` and `main.md`) and no `trama-req-*-main`. `j requirements ui` ends its header with ``Load: skill `trama-req-ui` ``. Restore the description and run it again: the fragment skills come back with `Switched from one index skill per Area to one skill per fragment.` | ☐ |
-| M16 | Migration: in the verification shell `rm -r $D/requirements/data && printf -- '---\ndescription: "Data."\n---\n# Data\n\nAll amounts.\n\n## order\nCents.\n' > $D/requirements/data.md`, then `j validate` | One error on `requirements/data.md` telling to run `trama skills update` | ☐ |
-| M17 | `j skills update`, then `ls $D/requirements/data` and `cat` both files | The output says `Converted 1 single-file Requirement Area(s) … : data`. `area.md` holds the description, `# Data` and `All amounts.`; `main.md` the same description and title with `## order` and `Cents.`; `requirements/data.md` is gone and `j validate` is clean. A Task referencing `requirements/data#order` still shows its text. Recreate a `requirements/data.md` next to the folder and run it again: `Left 1 single-file Requirement Area(s) as they were: data (requirements/data/ already exists)` | ☐ |
+| M14 | Reject the Proposal of M12. Append 1,300 lines `- A rule.` to `ui/main.md`, then `j model check` and `j analyze` | `validate` says the Model and its Requirements are valid, exits `0`, then `1 warning(s)…` naming `requirements/ui/main.md` with its size over 12288 (12 KB). `analyze` lists `[large-fragment] requirements/ui/main.md: …`. Undo the lines | ☐ |
+| M15 | Make the description of `ui/main.md` longer than 4,000 characters and run `j project edit` | `Requirement skills: one index skill per Area (budget <n>/4000 characters).` and `Switched from one skill per fragment to one index skill per Area.`; `.agents/skills` holds `trama-req-data` and `trama-req-ui` (with `SKILL.md` and `main.md`) and no `trama-req-*-main`. `j requirements ui` ends its header with ``Load: skill `trama-req-ui` ``. Restore the description and run it again: the fragment skills come back with `Switched from one index skill per Area to one skill per fragment.` | ☐ |
+| M16 | Migration: in the verification shell `rm -r $D/requirements/data && printf -- '---\ndescription: "Data."\n---\n# Data\n\nAll amounts.\n\n## order\nCents.\n' > $D/requirements/data.md`, then `j model check` | One error on `requirements/data.md` telling to run `trama project edit` | ☐ |
+| M17 | `j project edit`, then `ls $D/requirements/data` and `cat` both files | The output says `Converted 1 single-file Requirement Area(s) … : data`. `area.md` holds the description, `# Data` and `All amounts.`; `main.md` the same description and title with `## order` and `Cents.`; `requirements/data.md` is gone and `j model check` is clean. A Task referencing `requirements/data#order` still shows its text. Recreate a `requirements/data.md` next to the folder and run it again: `Left 1 single-file Requirement Area(s) as they were: data (requirements/data/ already exists)` | ☐ |
 
 ---
 
@@ -735,7 +736,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | N1 | Verification shell: `j proposal new "Bank" --import`, `j proposal edit <A> actors/bank.md`, write an Actor `# Bank` with an Event `TRANSFER_RECEIVED`, then `j proposal submit <A>` | Board: handed-over card for A with an **import** badge | ☐ |
 | N2 | `j proposal new "Billing" --import --requires <A>`, then `j proposal edit <B> billing/feature.md` (write `# Billing`) and `j proposal edit <B> billing/invoice.md` (a Machine with `### Open (initial)` → `` - `bank.TRANSFER_RECEIVED` → Paid `` and `### Paid (final)`), then `j proposal submit <B>` | Submission succeeds despite A not being approved. Card B has **import** and **requires A** badges; **Approve** is disabled until A is approved | ☐ |
 | N3 | Diagram: pick Proposal B in the selector | The **Bank** Actor is drawn as normal (not as a ghost), **Billing** and **Invoice** as added; the panel says "Drawn on top of Proposal A, not yet approved" | ☐ |
-| N4 | Approve A, then B, from the Board | Both approved; no agent is launched (import Proposals start no Scan); `j validate` is valid | ☐ |
+| N4 | Approve A, then B, from the Board | Both approved; no agent is launched (import Proposals start no Scan); `j model check` is valid | ☐ |
 | N5 | Repeat N1 and N2, then reject A | Card B stays, with **requires A** in red and Approve disabled: "Proposal A "Bank" was rejected" | ☐ |
 | N6 | **Trama: Import from Code** on a repository with code (agent configured) | The agent receives `Use the trama-import skill on this repository.`, asks one round of questions (folders, Feature split) with a recommended option each, then writes Proposals: one for the System and Actors, one per Feature requiring it, each ending with `## Doubts` | ☐ |
 
@@ -747,7 +748,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 |---|---|---|---|
 | O1 | Board tab after reset | Nothing for Inventory checks: no card, no band, no Discard button | ☐ |
 | O2 | Inspect Diagram and Requirements selectors and Board badge | No Draft in either selector or the decision count | ☐ |
-| O3 | `j board` | Inventory checks is listed under **In writing** marked `(draft)`, apart from To decide | ☐ |
+| O3 | `j project show` | Inventory checks is listed under **In writing** marked `(draft)`, apart from To decide | ☐ |
 | O4 | Attempt to keep what happens on the Inventory Drift, whose attached Proposal is still a Draft | The left **Keep this** looks disabled with the still-being-written reason and the click shows the editor warning; a direct host or CLI attempt is refused too | ☐ |
 | O5 | Submit the Draft with `j proposal submit 4` | It appears in To decide and the Diagram selector; the badge increases by one | ☐ |
 | O6 | `j proposal edit 4 checkout/order.md`, without changing its contents | Notice says returned to Draft; overlay and decision card disappear and nothing replaces them on the Board | ☐ |
@@ -757,7 +758,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 
 ## P. Agent question rounds
 
-Use the [question request contract](./cli.md#question-rounds) with `trama ask --root /tmp/trama-demo/shop < round.json`. Include single-choice and multiple-choice questions, with different recommendations, a `context` and an option with `details`. Run P1–P6e in VS Code and again in Cursor.
+Use the [question request contract](./cli.md#question-rounds) with `trama question new --root /tmp/trama-demo/shop --input - < round.json`. Include single-choice and multiple-choice questions, with different recommendations, a `context` and an option with `details`. Run P1–P6e in VS Code and again in Cursor.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
@@ -773,8 +774,8 @@ Use the [question request contract](./cli.md#question-rounds) with `trama ask --
 | P6d | With a round open, close the Trama panel, then press **Reopen** | The notice `Trama has questions from the agent waiting.` appears; Reopen opens the panel on the same question. Pressing **Close** (×) in the overlay asks the Skip all confirmation instead of closing | ☐ |
 | P6e | Narrow the panel below 600 px | The index becomes a row of numbered dots coloured by state, ending with `Σ` for the summary; each dot's tooltip names its state and question | ☐ |
 | P7 | Start two rounds in one window; cancel the queued caller, then cancel the active caller with another round queued | Cancelling the queued caller leaves the active overlay as it is. Cancelling the active caller closes it and opens the next FIFO round, with no orphan overlay | ☐ |
-| P8 | Leave a multi-question round with text typed after one confirmed answer; queue two more `trama ask` rounds; remove or rename `.trama/` in the fixture | All three return `editor-interrupted`, no answers, and the overlay disappears; queued questions never appear | ☐ |
-| P9 | Close the editor with one `trama ask` round active and another queued | Both return `editor-interrupted`; a later new request without an editor returns `unavailable`, not an interruption or skipped answers, and the agent stops, asks the developer to open the project in the editor with Trama and runs the same `trama ask` again when told to continue | ☐ |
+| P8 | Leave a multi-question round with text typed after one confirmed answer; queue two more `trama question new` rounds; remove or rename `.trama/` in the fixture | All three return `editor-interrupted`, no answers, and the overlay disappears; queued questions never appear | ☐ |
+| P9 | Close the editor with one `trama question new` round active and another queued | Both return `editor-interrupted`; a later new request without an editor returns `unavailable`, not an interruption or skipped answers, and the agent stops, asks the developer to open the project in the editor with Trama and runs the same `trama question new` again when told to continue | ☐ |
 | P10 | Keep a round pending in one window while completing one in another; change focus between same-project windows | Windows remain independent. Discovery chooses the most recently focused live window; an endpoint supplied by a Trama-launched terminal takes precedence | ☐ |
 | P11 | Read the three shipped interview skills and exercise an explicit skip, initial absence and admitted-round interruption | Skips are reported as assumptions, initial absence makes the agent stop and ask the developer to open the editor (never its own question tool), and interruption stops the workflow without retry or creating work from unanswered decisions | ☐ |
 
@@ -786,16 +787,16 @@ Run R1–R4 on **every new Cursor version** before declaring it supported (smoke
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| R1 | `cat ~/.cursor/hooks.json` | `version: 1` and, under each of `beforeSubmitPrompt`, `stop`, `sessionEnd`, `afterShellExecution` and `preToolUse`, one entry `"<extension folder>/bin/trama" cursor-hook`; the `afterShellExecution` entry also has `"matcher": "trama"`, the `preToolUse` entry `"matcher": "AskQuestion"`; entries you had before are still there | ☐ |
+| R1 | `cat ~/.cursor/hooks.json` | `version: 1` and, under each of `beforeSubmitPrompt`, `stop`, `sessionEnd`, `afterShellExecution` and `preToolUse`, one entry `"<extension folder>/bin/trama" hook cursor`; the `afterShellExecution` entry also has `"matcher": "trama"`, the `preToolUse` entry `"matcher": "AskQuestion"`; entries you had before are still there | ☐ |
 | R1b | `cat ~/.cursor/agents/trama-analysis.md` after **Update Agent Skills**, with `"trama.scan": "sonnet"` | Front matter `name: trama-analysis`, a `description`, and `model: "sonnet"`; the body begins `Compare one Machine following the trama-scan skill`. With `trama.scan` empty, `model: inherit` | ☐ |
 | R2 | Board: **Add Work Item…**, write `Orders can also be returned` in the request and send it | A **new** chat opens and sends `Use the trama-design skill on the design request in \`.trama/requests/<id>.md\`. Bind the first Proposal you open to it with \`--request <id>\`.` by itself, with a second line `The trama command may not be on your PATH. Before anything else run: export PATH="…/bin:$PATH"`. No «Create chat with prompt» confirmation and no clipboard notice | ☐ |
 | R2b | With `"trama.analysis": "sonnet"`, **Add Work Item…** with `Orders can also be returned`, sent | The new chat runs on `sonnet`, shown in the chat, with Max mode off; the chats already open keep their model. If the chat fell back to the deeplink or the clipboard, it starts without a model | ☐ |
-| R3 | Let the agent ask its questions | `trama ask` brings the Trama panel forward in this window with the overlay of P1, the agent named `Cursor`. If the agent first gets `unavailable` inside Cursor's sandbox, it retries once outside it after asking permission; it keeps waiting when Cursor moves the command to the background. If the editor is unavailable outside the sandbox too, the agent stops and asks the developer to open the project in the editor with Trama | ☐ |
+| R3 | Let the agent ask its questions | `trama question new` brings the Trama panel forward in this window with the overlay of P1, the agent named `Cursor`. If the agent first gets `unavailable` inside Cursor's sandbox, it retries once outside it after asking permission; it keeps waiting when Cursor moves the command to the background. If the editor is unavailable outside the sandbox too, the agent stops and asks the developer to open the project in the editor with Trama | ☐ |
 | R4 | In the chat's terminal output, check that `trama proposal approve 1` run by the agent would be refused | The agent reports `"trama proposal approve" is the developer's decision … (CURSOR_AGENT is set)` | ☐ |
 | R5 | Interrupt the agent (Stop) while a ghost it announced is on the Board | The ghost disappears and the notice `The agent finished without delivering …` appears. Closing the chat instead removes such a ghost without a notice | ☐ |
 | R5b | Have the agent run `trama task move 1 doing`, then let its turn end | Task 0001 goes back to Ready, no longer marked `(agent working)` | ☐ |
 | R8 | Set `"trama.agent": "omp"` and `"trama.terminalLocation": "editor"` in user settings, then click **Scan System** | omp starts in a `Scan` terminal tab; legacy launcher and command settings do not change the route | ☐ |
-| R9 | In a Trama conversation (a prompt that names a Trama skill), let the agent call its own question tool | The tool is refused with the message `In Trama's work, ask the developer only with \`trama ask --root <project>\`, as the Trama skill says. This question tool is disabled here.`; no question appears in the editor. Confirm that `AskQuestion` is the name of Cursor's question tool: if Cursor does not accept the matcher, the entry has no matcher and the hook decides from `tool_name` | ☐ |
+| R9 | In a Trama conversation (a prompt that names a Trama skill), let the agent call its own question tool | The tool is refused with the message `In Trama's work, ask the developer only with \`trama question new --root <project>\`, as the Trama skill says. This question tool is disabled here.`; no question appears in the editor. Confirm that `AskQuestion` is the name of Cursor's question tool: if Cursor does not accept the matcher, the entry has no matcher and the hook decides from `tool_name` | ☐ |
 | R10 | In a chat that is not Trama's (a prompt without a Trama skill), let the agent call its question tool | The tool runs as usual | ☐ |
 
 ## U. Short numbers
@@ -815,7 +816,7 @@ Start each block with ↻. `$D` and `j` are the ones of S4.
 | U9 | `j task move T2 done`, then `j task list` and `cat $D/short-numbers/assigned` | Task `0002` is listed in Done by its identity and has lost its line; `T1` and `T3` keep their numbers | ☐ |
 | U10 | `j task new "Extra" --technical --ref requirements/ui#General` | The new Task takes the lowest free number, `T2`, which Task `0002` released. `j task list` shows it as `T2` in To do | ☐ |
 | U11 | `j task move 0004 todo` | Task `0004` leaves Done and takes the lowest free number, `T4` | ☐ |
-| U12 | `j proposal reject P1 --feedback x` (with `TRAMA_AGENT` and `CURSOR_AGENT` unset) | Proposal `0001` is rejected. `j proposal list --all` shows it by its identity `0001`, with no number, and Proposal `P2` keeps its number. `j drift resolve D1 --dismiss` behaves the same way for the Drift | ☐ |
+| U12 | `j proposal reject P1 --feedback x` (with `TRAMA_AGENT` and `CURSOR_AGENT` unset) | Proposal `0001` is rejected. `j proposal list --all` shows it by its identity `0001`, with no number, and Proposal `P2` keeps its number. `j drift move D1 dismissed` behaves the same way for the Drift | ☐ |
 | U14 | ↻, then `rm $D/short-numbers/assigned` and `j task list` | No error. The live cards get their numbers again in creation order (`T1`, `T2`, `T3`, as in U1) and `assigned` exists again | ☐ |
 | U15 | Write a line twice: add `task 0003 1` to `assigned` with `echo 'task 0003 1' >> $D/short-numbers/assigned`, then `j task list` | No error and no duplicate number among the Tasks; the numbers were rebuilt from zero in creation order | ☐ |
 | U16 | Board: read the badge of `0001` in To do and of `0004` in Done | The live Task shows `T…` and the Done Task shows its eight-character or four-digit identity, in the same place, in the same monospaced font; never both on one card | ☐ |
@@ -830,11 +831,11 @@ Start each block with ↻. `$D` and `j` are the ones of S4.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| V1 | `j task next --batch --max 2` | Up to two runnable Tasks per line, `<number> <title>`, the first being the one `j task next` names; no two concern the same thing (for example never `order` together with `order/Paid`). Nothing moves. Also try `--max 1` and verify that only the first Task is returned; `--max 0` and `--max x` are usage errors. | ☐ |
-| V2 | `j --json task next --batch --max 2` | `batch`: the same Tasks, each with `id`, `number` and `title` | ☐ |
-| V3 | Move every Task in To do to Done with `j task move <id> done`, then `j task next --batch` and `j task next` | The two outputs are identical: `No Task is runnable.` and the Tasks left | ☐ |
+| V1 | `j task list --input '{"runnable":true,"max":2}'` | Up to two runnable Tasks per line, `<number> <title>`, the first being the one `task list` with `runnable` and no `max` names; no two concern the same thing (for example never `order` together with `order/Paid`). Nothing moves. Also try `"max":1` and verify that only the first Task is returned; `"max":0` and `"max":"x"` are usage errors. | ☐ |
+| V2 | `j --json task list --input '{"runnable":true,"max":2}'` | `batch`: the same Tasks, each with `id`, `number` and `title` | ☐ |
+| V3 | Move every Task in To do to Done with `j task move <id> done`, then `task list` with `runnable` and `max`, and again without `max` | The two outputs are identical: `No Task is runnable.` and the Tasks left | ☐ |
 | V4 | `j proposal show 1` before approving it | A `## Scan scope` section, computed now, with the references of the changes; after approving it, no `## Scan scope` section: nothing is saved at approval | ☐ |
-| V5 | 🪙 With a real agent that has sub-agents, **Run all** with at least three Tasks on different Machines | The agent hands each Task of a group to a sub-agent, waits for all, asks `trama task next --batch --max <N>` again, runs tests, lint and build once at the end, then scans only the references returned by `trama task scope` for the Tasks it completed and reports the Tasks and Drifts filed | ☐ |
+| V5 | 🪙 With a real agent that has sub-agents, **Run all** with at least three Tasks on different Machines | The agent hands each Task of a group to a sub-agent, waits for all, runs `trama task list` with `runnable` and `max: <N>` again, runs tests, lint and build once at the end, then scans only the references returned by `trama task scope` for the Tasks it completed and reports the Tasks and Drifts filed | ☐ |
 
 
 ## X. Terminal agents and model roles
@@ -850,20 +851,20 @@ Written from the Requirements; these settings only count in your **user** settin
 | X5 | 🪙 With omp installed: set `"trama.scan": "sonnet"`; click **Scan System** | omp uses `--model 'sonnet' --slow 'sonnet'`, and the prompt ends with `Compare each Machine with the trama-analysis sub-agent.` | ☐ |
 | X6 | 🪙 With Claude Code: set `"trama.agent": "claude"` and `"trama.scan": "sonnet"`; click **Scan System** | Claude Code receives `--model 'sonnet'`, an analysis sub-agent with `"model":"sonnet"`, and the sub-agent sentence | ☐ |
 | X7 | Set `"trama.agent": "chat"` and `"trama.scan": "sonnet"` in user settings; click **Scan System**, then write `x` in an **Add Work Item…** request and send it | Cursor: the scan's new conversation runs on `sonnet` with Max mode off, and its prompt ends with `Compare each Machine with the trama-analysis sub-agent.`. Copilot: `sonnet` is selected in the chat picker, or the warning `Trama: no Copilot model is named "sonnet" (trama.scan). The instruction was sent with the model chosen in the chat.` appears. The design instruction has no sub-agent sentence and no model notice appears in either editor | ☐ |
-| X8 | `trama skills update` (or **Trama: Update Agent Skills**), then inspect `/tmp/trama-demo/shop/.omp/agents/trama-analysis.md` and check for `trama-triage.md` | The `trama-analysis` definition has `model: "@slow"` and names `trama-scan`; the obsolete triage file is absent | ☐ |
+| X8 | `trama project edit` (or **Trama: Update Agent Skills**), then inspect `/tmp/trama-demo/shop/.omp/agents/trama-analysis.md` and check for `trama-triage.md` | The `trama-analysis` definition has `model: "@slow"` and names `trama-scan`; the obsolete triage file is absent | ☐ |
 
 ---
 
 ## Y. Drift autopilot
 
-These are acceptance scenarios for the coordinated automatic flow. Use a disposable project with controllable Trama agent launches and at least two editor windows on the same canonical project. Run queries as `trama drift autopilot --root <project> --json`; automatic agent prompts must carry the job ID supplied by Trama.
+These are acceptance scenarios for the coordinated automatic flow. Use a disposable project with controllable Trama agent launches and at least two editor windows on the same canonical project. Run queries as `trama autopilot show --root <project> --json` (with `--input '{"job":"<id>"}'` for a job); automatic agent prompts must carry the job ID supplied by Trama.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | Y1 | Leave the delegation at `disabled` (`"trama.driftAutoPilot": "disabled"`); start Resolve Drifts | Existing manual question and developer-review flow; no automatic delegation | ☐ |
 | Y2 | Set `"trama.driftAutoPilot": "enabled"` with open ordinary and critical Drifts; allow the tracked scan/Run barrier to clear | Only eligible non-critical Drifts can be delegated; critical and exceptional cases remain manual. No new automatic collection starts while any tracked scan or Run in either project window is active | ☐ |
 | Y3 | Set `"trama.driftAutoPilot": "yolo"`; test an eligible Drift with Fix options and another with no applicable first Fix option | Only the authorized eligible Drift is prepared with `fix-code`, option 1, no note; the other stays out. The agent submits but neither approves nor implements the resolution | ☐ |
-| Y4 | Query autopilot with the active job ID, then query without it or with an unknown ID; inspect status from a second editor window | The known job reports only its own current authorized permanent IDs; an unknown/missing job grants no usable delegation. The Board shows no autopilot status line, and `trama drift autopilot` reports work active in another window | ☐ |
+| Y4 | Query autopilot with the active job ID, then query without it or with an unknown ID; inspect status from a second editor window | The known job reports only its own current authorized permanent IDs; an unknown/missing job grants no usable delegation. The Board shows no autopilot status line, and `trama autopilot show` reports work active in another window | ☐ |
 | Y5 | Submit an automatic resolution and inspect host actions while its agent is still running | Host does not start the separate implementation Run before normal resolution-agent completion; after approval it filters Run Tasks to that collection's fix Tasks and incomplete origins, excluding unrelated Tasks | ☐ |
 | Y6 | Set `"trama.driftAutoPilot"` to `disabled`, or from `yolo` to `enabled`, while automatic work is running | No new steps start; already-started work is not killed. Critical residual work is no longer authorized once the setting leaves `yolo` | ☐ |
 | Y7 | Force a resolution choice or fix Task to fail; then let an unrelated eligible case proceed, edit the failed Drift, and run a successful developer scan | Failure is reported against its permanent Drift/Task ID and reason; failed work is not retried by the next automatic cycle, while independent work may continue. A changed Drift or successful developer scan makes failed cases eligible for evaluation again | ☐ |

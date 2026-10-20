@@ -14,13 +14,13 @@ export type ResolvedAction =
 export function buildPrompt(action: ResolvedAction): string {
   switch (action.kind) {
     case "setup-request":
-      return `Use the trama-setup skill on the project request in \`.trama/requests/${action.request}.md\`. Bind the setup Proposal you open to it with \`--request ${action.request}\`.`;
+      return `Use the trama-setup skill on the project request in \`.trama/requests/${action.request}.md\`. Bind the setup Proposal you open to it with the \`request\` field.`;
     case "written-design":
-      return `Use the trama-design skill on the design request in \`.trama/requests/${action.request}.md\`. Bind the first Proposal you open to it with \`--request ${action.request}\`.`;
+      return `Use the trama-design skill on the design request in \`.trama/requests/${action.request}.md\`. Bind the first Proposal you open to it with the \`request\` field.`;
     case "resolve-drifts":
       return action.automaticCollection === undefined
         ? `Use the trama-resolve-drifts skill on the open Drifts ${action.drifts.join(", ")}${action.scoped ? ", and on no other open Drift" : ""}: ask the developer what should happen for each one, then write one resolution Proposal.`
-        : `Use the trama-resolve-drifts skill for automatic collection ${action.automaticCollection}, on only the named Drifts ${action.drifts.join(", ")}. Before each choice, run \`trama drift autopilot --json\` and use only Drifts still authorized for this collection. Choose only each Drift's first Fix option; never ask questions, edit the Model or Requirements, or implement code. If an authorized Drift cannot be resolved with that first Fix option, report it with \`trama agent-event failed --drift <id> --reason <reason>\` and omit it. Create and submit a resolution with \`trama proposal new --resolution --automatic\`, then hand control back to the host. Do not approve the Proposal or start a Run.`;
+        : `Use the trama-resolve-drifts skill for automatic collection ${action.automaticCollection}, on only the named Drifts ${action.drifts.join(", ")}. Before each choice, run \`trama autopilot show --json\` and use only Drifts still authorized for this collection. Choose only each Drift's first Fix option; never ask questions, edit the Model or Requirements, or implement code. If an authorized Drift cannot be resolved with that first Fix option, report it with \`trama autopilot move <job> failed --input -\` and \`{"drift":"<id>","reason":"<reason>"}\`, where \`<job>\` is the value of \`TRAMA_JOB\`, and omit it. Create a resolution with \`trama proposal new\`, giving it the \`automatic\` field, record the decisions with \`trama proposal edit\` and hand it over with \`trama proposal move <id> open\`, then hand control back to the host. Do not approve the Proposal or start a Run.`;
     case "scan":
       return buildScanPrompt(action.feature === undefined ? [] : [action.feature]);
     case "implement":
@@ -35,7 +35,7 @@ export function buildPrompt(action: ResolvedAction): string {
 /** A restricted implementation Run: the agent reads the coordinator's current authorization before each Task. `tasks` are the Tasks of this Run's model group, which is all it takes. */
 export function buildAutomaticRunPrompt(collection: string, tasks?: readonly string[]): string {
   const scope = tasks === undefined ? "" : ` This Run takes only the Tasks ${tasks.map((id) => `\`${id}\``).join(", ")} among the authorized ones; no other authorized Task belongs to it.`;
-  return `Use the trama-implement skill for automatic collection ${collection}.${scope} Before each Task, run \`trama drift autopilot --json\` and take the authorized Task IDs from its \`tasks\` field, then select only those using \`trama task next --batch --task <id>… --max {maxParallelAgents}\`, passing each ID as a repeated \`--task\`. Do not use the general Task queue or start any other Task. If a Task cannot be started/completed or its check fails, report it with \`trama agent-event failed --task <id> --reason <reason>\`; if a Trama check was announced, also complete it with \`trama announce done <check-id> --failed\`. If the final check fails and you can tell which Task broke it, report that Task the same way after the failed check: the other authorized Tasks still go on. Stop when the authorized set has no runnable Tasks.`;
+  return `Use the trama-implement skill for automatic collection ${collection}.${scope} Before each Task, run \`trama autopilot show --json\` and take the authorized Task IDs from its \`tasks\` field, then select only those using \`trama task list --input '{"runnable":true,"tasks":["<id>",…],"max":{maxParallelAgents}}'\`, passing every authorized ID in \`tasks\`. Do not use the general Task queue or start any other Task. If a Task cannot be started/completed or its check fails, report it with \`trama autopilot move <job> failed --input -\` and \`{"task":"<id>","reason":"<reason>"}\`, where \`<job>\` is the value of \`TRAMA_JOB\`; if a Trama check was announced, also complete it with \`trama announcement move <check-id> failed\`. If the final check fails and you can tell which Task broke it, report that Task the same way after the failed check: the other authorized Tasks still go on. Stop when the authorized set has no runnable Tasks.`;
 }
 
 /** The scan prompt for one Feature, or the whole System when there is none, as the developer starts it by hand. It names no Proposal. */
@@ -45,17 +45,17 @@ export function buildScanPrompt(features: string[]): string {
     : `Use the trama-scan skill on the ${features.length === 1 ? "Feature" : "Features"} ${features.map((f) => `\`${f}\``).join(", ")}.`;
 }
 
-/** The Run all instruction: the plain one, or, for a group cut by Proposal, the one that names its Proposals and the filter `trama task next` takes them by. */
+/** The Run all instruction: the plain one, or, for a group cut by Proposal, the one that names its Proposals and the filters `trama task list` takes them by. */
 function runAllPrompt(group: RunGroup | undefined): string {
   const include = group?.include ?? [];
   const exclude = group?.exclude ?? [];
   const named = (ids: string[]) => `${ids.length === 1 ? "the Proposal" : "the Proposals"} ${ids.map((id) => `\`${id}\``).join(", ")}`;
-  const flags = (flag: string, ids: string[]) => ids.map((id) => ` ${flag} ${id}`).join("");
+  const list = (field: "proposals" | "notProposals", ids: string[]) => `\`trama task list --input '{"runnable":true,"${field}":[${ids.map((id) => `"${id}"`).join(",")}],"max":{maxParallelAgents}}'\``;
   if (include.length > 0)
-    return `Use the trama-implement skill on every Task in the "todo" column that belongs to ${named(include)}. Take them from \`trama task next --batch${flags("--proposal", include)} --max {maxParallelAgents}\`, handing them out as sub-agent places free up, until it says there is none.`;
+    return `Use the trama-implement skill on every Task in the "todo" column that belongs to ${named(include)}. Take them from ${list("proposals", include)}, one group at a time, until it says there is none.`;
   if (exclude.length > 0)
-    return `Use the trama-implement skill on every Task in the "todo" column except those of ${named(exclude)}. Take them from \`trama task next --batch${flags("--not-proposal", exclude)} --max {maxParallelAgents}\`, handing them out as sub-agent places free up, until it says there is none.`;
-  return 'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, handing them out as sub-agent places free up, until it says there is none.';
+    return `Use the trama-implement skill on every Task in the "todo" column except those of ${named(exclude)}. Take them from ${list("notProposals", exclude)}, one group at a time, until it says there is none.`;
+  return 'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task list --input \'{"runnable":true,"max":{maxParallelAgents}}\'`, one group at a time, until it says there is none.';
 }
 
 /** The name of a Run all terminal: `All tasks` for the Settings group, `All tasks · <model>` for a sequence group, its model as written, trimmed. */
@@ -100,8 +100,11 @@ export function withLanguage(prompt: string, language: string): string {
 /** The sentence the experimental Drift blocker adds to an instruction whose agent may file Drifts (`trama.experimentalDriftBlocker`). */
 export const DRIFT_BLOCKER_SENTENCE = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
 
-/** The sentence every instruction carries: the agent asks the developer only through `trama ask`, never with its own question tool. */
-export const ASK_DEVELOPER_SENTENCE = "Ask the developer only with `trama ask`, as the skill says, never with your own question tool.";
+/** The sentence the experimental parallel execution adds to the instruction of a run over several Tasks (`trama.experimentalParallelExecution`). */
+export const PARALLEL_EXECUTION_SENTENCE = 'The experimental parallel execution is on: follow the "Experimental parallel execution" section of the trama-implement skill.';
+
+/** The sentence every instruction carries: the agent asks the developer only through `trama question new`, never with its own question tool. */
+export const ASK_DEVELOPER_SENTENCE = "Ask the developer only with `trama question new`, as the skill says, never with your own question tool.";
 
 /** Whether the instruction for `action` lets the agent file Drifts: scans, implementations and imports do; designs and Resolve Drifts do not. */
 export function mayFileDrifts(action: ResolvedAction): boolean {

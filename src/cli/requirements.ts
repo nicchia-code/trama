@@ -24,8 +24,8 @@ function areaMd(project: ProjectModel, area: Area): string {
 }
 
 /**
- * `trama requirements`: every Area with its sections; `requirements <area>`: one Area in full;
- * `requirements <model reference>`: the Requirements attached to that element or to what contains it.
+ * `trama model show requirements`: every Area with its sections; `requirements/<area>`: one Area in full;
+ * `requirements/<area>#<section>`: one section. The Requirements attached to a Model element follow that element's own view.
  */
 export function requirementsView(project: ProjectModel, arg?: string): Result {
   if (arg === undefined) {
@@ -42,21 +42,10 @@ export function requirementsView(project: ProjectModel, arg?: string): Result {
     ].join("\n");
     return { md, json: { areas: project.areas } };
   }
-  const area = project.areas.find((a) => a.id === arg || `requirements/${a.id}` === arg);
-  if (area) return { md: areaMd(project, area), json: area };
-  if (arg.startsWith("requirements/")) {
-    const el = resolveProjectRef(project, arg);
-    if (el.kind === "requirement" && el.section)
-      return { md: `# ${el.area.title}: ${sectionTitle(el.section.ref)}\n\n${el.section.text || "_empty_"}`, json: { area: el.area.id, section: el.section } };
-  }
-  try {
-    resolveProjectRef(project, arg);
-  } catch (err) {
-    throw new TramaError(`"${arg}" is neither an Area nor a Model reference. ${(err as Error).message}`);
-  }
-  const attached = requirementsFor(project, arg);
-  const md = [`# Requirements for ${arg}`, "", attachedMd(project, arg)].join("\n");
-  return { md, json: { ref: arg, requirements: attached.map((r) => ({ area: r.area.id, section: r.section.ref, attachedTo: r.ref, text: r.section.text })) } };
+  const el = resolveProjectRef(project, arg);
+  if (el.kind !== "requirement") throw new TramaError(`"${arg}" is not a Requirement reference (expected requirements/<area> or requirements/<area>#<section>)`);
+  if (el.section === null) return { md: areaMd(project, el.area), json: el.area };
+  return { md: `# ${el.area.title}: ${sectionTitle(el.section.ref)}\n\n${el.section.text || "_empty_"}`, json: { area: el.area.id, section: el.section } };
 }
 
 /** The Requirements attached to `ref` or what contains it, as Markdown bullets with quoted text. */

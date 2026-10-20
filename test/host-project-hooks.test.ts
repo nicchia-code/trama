@@ -52,7 +52,7 @@ mock.module("vscode", () => ({
 let updateOutput = "";
 mock.module("../src/cli/main", () => ({
   run: (args: string[]) =>
-    args.includes("update") ? { out: updateOutput } : { out: "", exit: 0 },
+    args.includes("edit") ? { out: updateOutput } : { out: "", exit: 0 },
 }));
 
 const { installCopilotHooks, installEditorHooks, updateSkills } = await import("../extension/src/host/project");
@@ -80,9 +80,9 @@ test("Copilot hooks use the bundled program in extension storage and preserve us
   await installCopilotHooks({ fsPath: storage } as never, false);
   expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
     hooks: {
-      UserPromptSubmit: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" copilot-hook` }],
-      Stop: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" copilot-hook` }],
-      PreToolUse: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" copilot-hook` }],
+      UserPromptSubmit: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" hook copilot` }],
+      Stop: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" hook copilot` }],
+      PreToolUse: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" hook copilot` }],
     },
   });
   expect(registered).toEqual({ "/other/hooks.json": true, [file]: true });
@@ -94,7 +94,7 @@ test("on Windows the Copilot hook file carries the PowerShell form next to the p
   setup();
   await installCopilotHooks({ fsPath: storage } as never, true);
   const program = join(extensionPath, "bin", bundledName);
-  const entry = { type: "command", command: `"${program}" copilot-hook`, windows: `& "${program}" copilot-hook` };
+  const entry = { type: "command", command: `"${program}" hook copilot`, windows: `& "${program}" hook copilot` };
   expect(JSON.parse(readFileSync(join(storage, "copilot-hooks.json"), "utf8"))).toEqual({ hooks: { UserPromptSubmit: [entry], Stop: [entry], PreToolUse: [entry] } });
 });
 
@@ -122,7 +122,7 @@ test("updating skills reports retired omp definition in editor notification", as
   updateOutput = "Updated skills\nDeleted the retired omp sub-agent definition: /project/.omp/agents/trama-triage.md";
   await updateSkills({ root: "/project" } as never, { fsPath: storage } as never);
   expect(errors.at(-1)).toContain("trama-triage.md");
-  expect(JSON.parse(readFileSync(file, "utf8")).hooks.UserPromptSubmit[0].command).toBe(`"${join(extensionPath, "bin", bundledName)}" copilot-hook`);
+  expect(JSON.parse(readFileSync(file, "utf8")).hooks.UserPromptSubmit[0].command).toBe(`"${join(extensionPath, "bin", bundledName)}" hook copilot`);
 });
 
 test("updating skills reports why the trama-specs skill was kept", async () => {
@@ -141,7 +141,7 @@ test("activation writes Cursor's hooks in the developer's own hooks file, rewrit
     await installEditorHooks({ fsPath: storage } as never);
     const program = join(extensionPath, "bin", bundledName);
     const hooks = JSON.parse(readFileSync(join(cursorDir, "hooks.json"), "utf8")).hooks;
-    expect(hooks.stop).toEqual([{ command: `${process.platform === "win32" ? "& " : ""}"${program}" cursor-hook` }]);
+    expect(hooks.stop).toEqual([{ command: `${process.platform === "win32" ? "& " : ""}"${program}" hook cursor` }]);
     expect(existsSync(join(storage, "copilot-hooks.json"))).toBe(false);
   } finally {
     editor.appName = "Visual Studio Code";

@@ -186,46 +186,43 @@ describe("a Proposal bound to a written design request", () => {
 });
 
 describe("the command line", () => {
-  test("proposal new --request binds, and says when the request was not found", () => {
+  test("proposal new with request binds, and says when the request was not found", () => {
     writeRequest(ID);
-    const bound = run(["proposal", "new", "Lost", "--request", ID], dir, {});
+    const bound = run(["proposal", "new", "--input", JSON.stringify({ title: "Lost", request: ID })], dir, {});
     expect(bound.out).not.toContain("not found");
-    const unbound = run(["proposal", "new", "Other", "--request", "zzz999"], dir, {});
+    const unbound = run(["proposal", "new", "--input", JSON.stringify({ title: "Other", request: "zzz999" })], dir, {});
     expect(unbound.out).toContain("Design request zzz999 was not found; the Proposal is not bound to any request.");
-    expect(run(["proposal", "new", "Another", "--request", ID], dir, {}).out).toContain(`Design request ${ID} is already bound to another Proposal; the Proposal is not bound to any request.`);
+    expect(run(["proposal", "new", "--input", JSON.stringify({ title: "Another", request: ID })], dir, {}).out).toContain(`Design request ${ID} is already bound to another Proposal; the Proposal is not bound to any request.`);
   });
 
-  test("proposal new --request binds an ID with a suffix", () => {
+  test("proposal new with request binds an ID with a suffix", () => {
     writeRequest(`${ID}-2`);
-    const out = run(["proposal", "new", "Lost", "--request", `${ID}-2`, "--json"], dir, {}).out;
+    const out = run(["proposal", "new", "--json", "--input", JSON.stringify({ title: "Lost", request: `${ID}-2` })], dir, {}).out;
     expect(JSON.parse(out).request).toBe(`${ID}-2`);
   });
 
-  test("proposal submit says it deleted the request", () => {
+  test("handing a Proposal over says it deleted the request", () => {
     writeRequest(ID);
     const prop = newProposal(p, "Lost", "", { request: ID, label: "Lost" });
     writeOrder(prop.id);
-    const out = run(["proposal", "submit", prop.id], dir, {}).out;
+    const out = run(["proposal", "move", prop.id, "open"], dir, {}).out;
     expect(out).toContain(`Submitted Proposal ${cardName(p, "proposal", prop.id)} for review`);
     expect(out).toContain(`Deleted design request ${ID}`);
   });
 
-  test("proposal new refuses --resolution together with --import", () => {
-    expect(() => run(["proposal", "new", "Both", "--resolution", "--import"], dir, {})).toThrow("--import and --resolution cannot go together");
+  test("proposal new has one kind, so a Proposal is never an import and a resolution at once", () => {
+    expect(() => run(["proposal", "new", "--input", JSON.stringify({ title: "Both", kind: "resolution", import: true })], dir, {})).toThrow(/Unknown field|unrecognized/i);
+    expect(() => run(["proposal", "new", "--input", JSON.stringify({ title: "Both", kind: "other" })], dir, {})).toThrow(/kind/);
   });
 
-  test("proposal new refuses --setup together with --import or --resolution", () => {
-    expect(() => run(["proposal", "new", "Both", "--setup", "--import"], dir, {})).toThrow("--setup cannot go together with --import or --resolution");
+  test("proposal new with kind setup refuses a Model that has Features or Actors", () => {
+    expect(() => run(["proposal", "new", "--input", JSON.stringify({ title: "Start", kind: "setup" })], dir, {})).toThrow('kind "setup" needs an empty Model');
   });
 
-  test("proposal new --setup refuses a Model that has Features or Actors", () => {
-    expect(() => run(["proposal", "new", "Start", "--setup"], dir, {})).toThrow("--setup needs an empty Model");
-  });
-
-  test("proposal new --setup creates a setup Proposal on an empty Model", () => {
+  test("proposal new with kind setup creates a setup Proposal on an empty Model", () => {
     const model = join(p.dir, "model");
     for (const entry of readdirSync(model)) if (entry !== "system.md") rmSync(join(model, entry), { recursive: true });
-    run(["proposal", "new", "Start", "--setup"], dir, {});
+    run(["proposal", "new", "--input", JSON.stringify({ title: "Start", kind: "setup" })], dir, {});
     expect(listProposals(p).map((x) => x.data.kind)).toEqual(["setup"]);
   });
 });

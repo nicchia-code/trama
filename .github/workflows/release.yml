@@ -54,7 +54,7 @@ jobs:
           mkdir -p smoke && cd smoke
           unzip -q ../dist/trama-${{ matrix.target }}-*.vsix 'extension/bin/trama'
           ./extension/bin/trama --help | head -1
-          mkdir project && ./extension/bin/trama --root project init && ./extension/bin/trama --root project validate
+          mkdir project && ./extension/bin/trama --root project project new && ./extension/bin/trama --root project model check
       - name: Smoke-test the packaged CLI (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -69,11 +69,11 @@ jobs:
           Set-Location smoke
           Expand-Archive package.zip -DestinationPath . -Force
           Invoke-Trama @("--help")
-          $answer = '{}' | & "./extension/bin/trama.exe" copilot-hook
-          if ($LASTEXITCODE -ne 0 -or ($answer | Out-String).Trim() -ne "{}") { throw "copilot-hook must answer {} with exit 0, got: $answer" }
+          $answer = '{}' | & "./extension/bin/trama.exe" hook copilot
+          if ($LASTEXITCODE -ne 0 -or ($answer | Out-String).Trim() -ne "{}") { throw "hook copilot must answer {} with exit 0, got: $answer" }
           New-Item -ItemType Directory project | Out-Null
-          Invoke-Trama @("--root", "project", "init")
-          Invoke-Trama @("--root", "project", "validate")
+          Invoke-Trama @("--root", "project", "project", "new")
+          Invoke-Trama @("--root", "project", "model", "check")
       - name: Check the macOS signature
         if: runner.os == 'macOS'
         run: codesign --verify --verbose smoke/extension/bin/trama
@@ -100,7 +100,7 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"; else tag="v$(jq -r .version package.json)"; fi
           notes="Install with: code --install-extension trama-<platform>-<version>.vsix"
           if ls packages/*win32-x64*.vsix > /dev/null 2>&1; then
-            notes="$notes"$'\n\n'"**Windows is untested by hand.** The win32-x64 package is built, tested (the full suite must pass) and smoke-tested (\`--help\`, \`init\`, \`validate\`, \`copilot-hook\`) on a Windows CI runner, but nobody has tried it by hand on a Windows machine, in VS Code or in Cursor. Cursor's hook form on Windows (\`& \"<trama.exe>\" cursor-hook\`) is a guess. Expect rough edges and please report them."
+            notes="$notes"$'\n\n'"**Windows is untested by hand.** The win32-x64 package is built, tested (the full suite must pass) and smoke-tested (\`--help\`, \`project new\`, \`model check\`, \`hook copilot\`) on a Windows CI runner, but nobody has tried it by hand on a Windows machine, in VS Code or in Cursor. Cursor's hook form on Windows (\`& \"<trama.exe>\" hook cursor\`) is a guess. Expect rough edges and please report them."
           fi
           gh release create "$tag" packages/*.vsix --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "Trama $tag" --prerelease --notes "$notes"

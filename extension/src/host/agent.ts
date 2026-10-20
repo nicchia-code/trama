@@ -15,7 +15,7 @@ import { withdrawWaiting } from "./announcements";
 import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnsentJob, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint, questionWindowId } from "./questions";
-import { ASK_DEVELOPER_SENTENCE, withDriftBlocker, withLanguage } from "./prompts";
+import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withDriftBlocker, withLanguage } from "./prompts";
 import { advisorOverlay, agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent } from "./terminal-agent";
 import { delegationOf } from "./settings-schema";
 
@@ -39,6 +39,8 @@ export const configuredLanguage = (): string => settings().get<string>("language
 export const configuredDriftBlocker = (): boolean => settings().inspect<unknown>("experimentalDriftBlocker")?.globalValue === true;
 /** Whether the Advisor Scanner is on (`trama.experimentalAdvisorScanner`), from user settings only, with omp as the agent. Read at every launch. */
 export const configuredAdvisorScanner = (): boolean => settings().inspect<unknown>("experimentalAdvisorScanner")?.globalValue === true && configuredAgent() === "omp";
+/** Whether `trama.experimentalParallelExecution` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a run over several Tasks is about to start. */
+export const configuredParallelExecution = (): boolean => settings().inspect<unknown>("experimentalParallelExecution")?.globalValue === true;
 /** The configured concurrent sub-agent limit, from user settings only; invalid values use the default. */
 export const configuredMaxParallelAgents = (): number => {
   const value: unknown = settings().inspect<number>("maxParallelAgents")?.globalValue ?? 20;
@@ -286,16 +288,19 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
 const jobIdentity = (jobId: string): string => `This Trama job has ID ${jobId}. Pass \`--job ${jobId}\` to every Trama command that accepts \`--job\`.`;
 
 /**
- * The instruction with its limit, sub-agent, job, Drift blocker, ask and language sentences. The ask sentence stays on the
+ * The instruction with its limit, sub-agent, parallel execution, advisor, job, Drift blocker, ask and language sentences. The
+ * parallel execution sentence goes right after the sub-agent sentence (or the limit one, when there is none), only to a
+ * run over several Tasks and only when `trama.experimentalParallelExecution` is on, read now. The ask sentence stays on the
  * instruction's line unless `askOwnLine` is set, which Cursor's chat needs: it gets the ask sentence on a line of its own,
  * after the PATH line. A terminal's job comes from its environment.
  */
-function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, jobId: string | undefined, askOwnLine: boolean, advisor = false): string {
+function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, severalTasks: boolean, jobId: string | undefined, askOwnLine: boolean, advisor = false): string {
   const limit = configuredMaxParallelAgents();
   const withLimit = withAgentLimit(instruction, limit);
-  const withAdvisor = advisor ? `${withLimit} ${ADVISOR_SENTENCE}` : withLimit;
-  const withSubAgent = canScan(role) && !advisor ? `${withAdvisor} Compare each Machine with the trama-analysis sub-agent.` : withAdvisor;
-  const withJob = jobId === undefined ? withSubAgent : `${withSubAgent} ${jobIdentity(jobId)}`;
+  const withSubAgent = canScan(role) && !advisor ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
+  const withParallel = severalTasks && configuredParallelExecution() ? `${withSubAgent} ${PARALLEL_EXECUTION_SENTENCE}` : withSubAgent;
+  const withAdvisor = advisor ? `${withParallel} ${ADVISOR_SENTENCE}` : withParallel;
+  const withJob = jobId === undefined ? withAdvisor : `${withAdvisor} ${jobIdentity(jobId)}`;
   const withBlocker = withDriftBlocker(withJob, filesDrifts && configuredDriftBlocker());
   return withLanguage(askOwnLine ? withBlocker : `${withBlocker} ${ASK_DEVELOPER_SENTENCE}`, configuredLanguage());
 }
@@ -307,7 +312,7 @@ export const configuredModels = (): Models => ({
   execution: settings().get<string>("execution", "").trim(),
 });
 
-function terminalRun(agent: TerminalAgent, instruction: Instruction, name: string, filesDrifts: boolean, run: RunModel, advisorConfig?: string): TerminalRun {
+function terminalRun(agent: TerminalAgent, instruction: Instruction, name: string, filesDrifts: boolean, severalTasks: boolean, run: RunModel, advisorConfig?: string): TerminalRun {
   const role = roleOf(name);
   const hook = agent === "omp" ? bundledOmpHook() : undefined;
   const tramaPath = agent === "claude" ? bundledTrama() : undefined;
@@ -315,7 +320,7 @@ function terminalRun(agent: TerminalAgent, instruction: Instruction, name: strin
   const advisor = advisorConfig !== undefined;
   return {
     template: (family) => agentTemplate(agent, canScan(role) && !advisor, models, family, hook, tramaPath, advisorConfig),
-    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, undefined, false, advisor),
+    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, undefined, false, advisor),
     hooked: hook !== undefined || tramaPath !== undefined,
   };
 }
@@ -390,6 +395,8 @@ export interface LaunchJobOptions {
   origin?: JobOrigin;
   /** Whether the instruction lets the agent file Drifts: the experimental Drift blocker's sentence then goes to it. */
   filesDrifts?: boolean;
+  /** Whether the instruction is for a run over several Tasks (Run all, a Run of its sequence by model, the automatic Run): the experimental parallel execution's sentence then goes to it. */
+  severalTasks?: boolean;
   /** The model the instruction runs on when a Proposal's model applies (`proposalRunModel`); absent, the model of the role in Settings. */
   model?: RunModel;
   /** Called once the Run's job ends: with why it ended abnormally, or with nothing for a normal end. A Run that did not start ends with a reason too. */
@@ -411,6 +418,7 @@ export async function launchAgent(
   const jobId = job === undefined ? undefined : jobOptions.id ?? randomUUID();
   const jobOrigin = jobOptions.origin ?? "manual";
   const filesDrifts = jobOptions.filesDrifts === true;
+  const severalTasks = jobOptions.severalTasks === true;
   const role = roleOf(name);
   const runModel = jobOptions.model ?? { model: configuredModels()[role], from: `trama.${role}` };
   const windowId = job === undefined ? "" : await questionWindowId(root) ?? "";
@@ -422,7 +430,7 @@ export async function launchAgent(
     if (!canSend()) return agent === "chat" ? "not-sent" : undefined;
     if (agent === "chat") {
       const chat = isCursor() ? "cursor" : "copilot";
-      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, jobId, isCursor());
+      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, jobId, isCursor());
       const sent: { job?: string } = {};
       // Runs right before the step that sends the prompt by itself: the card and the job begin now. The take-back, run when
       // that step fails, ends both: the prompt is not sent, so the job never began.
@@ -451,7 +459,7 @@ export async function launchAgent(
       return delivery;
     }
     const advisorConfig = job === "run" && configuredAdvisorScanner() ? writeAdvisorOverlay(jobOptions.advisorStorage) : undefined;
-    const run = terminalRun(agent, instruction, name, filesDrifts, runModel, advisorConfig);
+    const run = terminalRun(agent, instruction, name, filesDrifts, severalTasks, runModel, advisorConfig);
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");

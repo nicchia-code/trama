@@ -5,7 +5,7 @@ description: Use when the instruction names a written design request for startin
 
 # Trama: setup
 
-This skill starts an empty project. The **Model** in `.trama/model/` is still empty; the first **Proposal** of the project carries its first Model, its Requirements, its **Specs** and the Tasks that build the project skeleton. You never write code in this skill, and you never edit `.trama/model/`, `.trama/requirements/` or the generated `trama-req-*` skills directly: every change goes through the Proposal, created with `trama proposal new --setup`.
+This skill starts an empty project. The **Model** in `.trama/model/` is still empty; the first **Proposal** of the project carries its first Model, its Requirements, its **Specs** and the Tasks that build the project skeleton. You never write code in this skill, and you never edit `.trama/model/`, `.trama/requirements/` or the generated `trama-req-*` skills directly: every change goes through the Proposal, created with `trama proposal new --input -` and `"kind":"setup"`.
 
 For the format of Model and Requirement files, read [`trama-design`](../trama-design/FORMAT.md) (installed next to this skill); do not copy it here.
 
@@ -27,11 +27,11 @@ Look at every image the request links, with the same rules as `trama-design`: lo
 
 ## Step 2: check the Model is empty
 
-Run `trama system --json` and `trama search <word>` only as needed. If the Model already has a Feature or an Actor, stop and tell the developer that `trama-design` is the skill for it: `trama proposal new --setup` would be refused.
+Run `trama model show --json` and `trama model list --input -` (with `{"text":"<word>"}` in a heredoc) only as needed. If the Model already has a Feature or an Actor, stop and tell the developer that `trama-design` is the skill for it: `trama proposal new` with `"kind":"setup"` would be refused.
 
 ## Step 3: interview in rounds
 
-Ask in rounds with `trama ask --root <project>`, exactly as `trama-design` does (its "The interview" and "Asking" sections apply: one round per call, 2 to 5 options per question with tradeoffs, your recommendation on each, wait for the answers, no "Other", no fallback after `editor-interrupted`).
+Ask in rounds with `trama question new --root <project> --input -` (the JSON in a heredoc), exactly as `trama-design` does (its "The interview" and "Asking" sections apply: one round per call, 2 to 5 options per question with tradeoffs, your recommendation on each, wait for the answers, no "Other", no fallback after `editor-interrupted`).
 
 Ask only what the request leaves ambiguous and never repeat what is clear. When in doubt, ask one question more. Cover, when not already settled:
 
@@ -47,27 +47,27 @@ A technology the developer names vaguely ("a web framework used today") you choo
 
 Open exactly one Proposal, bound to the request:
 
-`trama proposal new "<title>" --setup --body "<why>" --request <id>`
+`trama proposal new --input -` with `{"title":"<title>","kind":"setup","body":"<why>","label":"<short label>","request":"<id>"}`
 
-Give the Proposal a short title (see Hard rules).
+Give the Proposal a short title (see Hard rules) and a `label` of at most 30 characters (for example the project name), because it will carry Tasks.
 
 The body says why and summarises each decision of the interview, one line each, with the assumptions made for skipped questions. Then:
 
-1. **Model**: System, Features, Machines and Actors as they are agreed, each through `trama proposal edit <id> <model-path>`.
-2. **Requirements**: the Areas and fragments the developer gave you, through `trama proposal edit <id> requirements/<area>/…` (see `trama-design`'s FORMAT.md).
+1. **Model**: System, Features, Machines and Actors as they are agreed, each through `trama proposal edit <id> --input -` with `{"edit":["<model-path>"]}`.
+2. **Requirements**: the Areas and fragments the developer gave you, through `{"edit":["requirements/<area>/…"]}` (see `trama-design`'s FORMAT.md).
 3. **Specs**: every field clarified in the interview, with `chosenByAgent` and the reason for each technology you chose yourself.
-4. **Tasks**: with `trama proposal edit <id> tasks/<slug>.md`, one per piece of work. Include the technical Tasks that create the project skeleton, the repository, the CI and the infrastructure files chosen (`technical: true`, no Model element). Non-technical Tasks name at least one Model element, as in `trama-design`.
+4. **Tasks**: with `{"edit":["tasks/<slug>.md"]}`, one per piece of work. Include the technical Tasks that create the project skeleton, the repository, the CI and the infrastructure files chosen (`technical: true`, no Model element). Non-technical Tasks name at least one Model element, as in `trama-design`.
 
-The hand-over below reads the submission's output: it must match what was agreed and nothing else.
+The hand-over below reads its own output: it must match what was agreed and nothing else.
 
 ## Step 5: hand over
 
-Run `trama proposal submit <id>` without `trama validate --proposal` or `trama proposal show` before it, as in `trama-design`. If it is refused, or its output does not match what was agreed, reopen the Proposal with `trama proposal edit <id>`, fix it, and submit again.
+Run `trama proposal move <id> open` without `trama proposal show` before it, as in `trama-design`. If it is refused, or its output does not match what was agreed, reopen the Proposal with `trama proposal edit <id>`, fix it, and hand over again.
 
-After a successful hand-over, read the result of `trama proposal submit`:
+After a successful hand-over, read the result of `trama proposal move <id> open`:
 
 - If it says the Proposal was **approved**, tell the developer that the Proposal is approved and that its Tasks start.
-- If it says the Proposal was **not approved** (it stays open), tell the developer that it was handed over and why it was not approved on its own, from the submit output.
+- If it says the Proposal was **not approved** (it stays open), tell the developer that it was handed over and why it was not approved on its own, from the hand-over output.
 
 Do not ask the developer to review the Proposal. Do not approve, reject or discard it yourself.
 
@@ -77,4 +77,4 @@ The request is consumed by the successful hand-over of the bound Proposal: its f
 
 ## PowerShell
 
-The examples use POSIX syntax. In PowerShell, pass JSON on standard input with a pipe, for example `Get-Content -Raw round.json | trama ask --root <project>`, not `<`. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Write `--body` and `--reason` values in single quotes, because PowerShell expands `$` and the backtick inside double quotes.
+The examples use POSIX syntax. In PowerShell, pass JSON with a pipe and `--input -`, for example `Get-Content -Raw round.json | trama question new --input -`, instead of `<` or a heredoc. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Never pass the JSON as the text of `--input`: Windows PowerShell 5.1 strips the inner quotes of arguments to external programs.

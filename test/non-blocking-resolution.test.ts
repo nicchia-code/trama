@@ -17,6 +17,7 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const cli = (...args: string[]) => run(args, dir, {}).out;
+const created = (input: object) => cli("proposal", "new", "--input", JSON.stringify(input));
 
 /** Adds a `nonBlocking: true` line to a Proposal's front matter, as a hand-written file would have it. */
 function markNonBlocking(id: string) {
@@ -25,24 +26,24 @@ function markNonBlocking(id: string) {
 }
 
 describe("a resolution that blocks nothing", () => {
-  test("proposal new --resolution --non-blocking writes nonBlocking and the flag is read back", () => {
-    cli("proposal", "new", "Free Drifts", "--resolution", "--non-blocking", "--body", "Filed by the blocker");
+  test("proposal new with nonBlocking writes nonBlocking and the flag is read back", () => {
+    created({ title: "Free Drifts", kind: "resolution", nonBlocking: true, body: "Filed by the blocker" });
     const id = listProposals(p).find((x) => x.title === "Free Drifts")?.id as string;
     expect(getProposal(p, id).data).toMatchObject({ kind: "resolution", nonBlocking: true, automatic: false });
     expect(readFileSync(join(getProposal(p, id).dir, "proposal.md"), "utf8")).toContain("nonBlocking: true");
   });
 
   test("an ordinary resolution writes no nonBlocking field", () => {
-    cli("proposal", "new", "Plain resolution", "--resolution");
+    created({ title: "Plain resolution", kind: "resolution" });
     const id = listProposals(p).find((x) => x.title === "Plain resolution")?.id as string;
     expect(getProposal(p, id).data.nonBlocking).toBe(false);
     expect(readFileSync(join(getProposal(p, id).dir, "proposal.md"), "utf8")).not.toContain("nonBlocking");
   });
 
-  test("--non-blocking without --resolution, or with --automatic, is a usage error that creates nothing", () => {
+  test("nonBlocking without a resolution, or with automatic, is a usage error that creates nothing", () => {
     const before = listProposals(p).length;
-    expect(() => cli("proposal", "new", "No resolution", "--non-blocking")).toThrow(/--non-blocking can only be used with --resolution, and not with --automatic/);
-    expect(() => cli("proposal", "new", "Automatic", "--resolution", "--automatic", "--non-blocking")).toThrow(/--non-blocking can only be used with --resolution, and not with --automatic/);
+    expect(() => created({ title: "No resolution", nonBlocking: true })).toThrow(/nonBlocking: applies only with kind resolution/);
+    expect(() => created({ title: "Automatic", kind: "resolution", automatic: true, nonBlocking: true })).toThrow(/nonBlocking: cannot go together with automatic/);
     expect(listProposals(p).length).toBe(before);
   });
 
@@ -63,8 +64,8 @@ describe("a resolution that blocks nothing", () => {
   });
 
   test("proposal list marks a nonBlocking resolution after its resolves count, and no other", () => {
-    cli("proposal", "new", "Free Drifts", "--resolution", "--non-blocking");
-    cli("proposal", "new", "Plain resolution", "--resolution");
+    created({ title: "Free Drifts", kind: "resolution", nonBlocking: true });
+    created({ title: "Plain resolution", kind: "resolution" });
     const list = cli("proposal", "list");
     expect(list).toMatch(/Free Drifts.*\(resolves 0 Drifts\) \(blocks nothing\)/);
     expect(list).toMatch(/Plain resolution.*\(resolves 0 Drifts\)/);

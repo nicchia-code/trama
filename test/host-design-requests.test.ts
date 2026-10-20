@@ -355,7 +355,7 @@ describe("Send to agent", () => {
     expect(launches).toEqual([
       {
         root: dir,
-        instruction: `Use the trama-design skill on the design request in \`.trama/requests/${id}.md\`. Bind the first Proposal you open to it with \`--request ${id}\`.`,
+        instruction: `Use the trama-design skill on the design request in \`.trama/requests/${id}.md\`. Bind the first Proposal you open to it with the \`request\` field.`,
         name: "Design",
         title: "Returns after shipping",
       },

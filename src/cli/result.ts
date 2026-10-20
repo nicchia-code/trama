@@ -26,7 +26,10 @@ export function marker(s: State): string {
 
 export function modelNote(model: Model): string {
   const n = model.diagnostics.length;
-  return n > 0 ? `\n> The Model has ${n} validation error${n === 1 ? "" : "s"}; run \`trama validate\`.\n` : "";
+  return n > 0 ? `\n> The Model has ${n} validation error${n === 1 ? "" : "s"}; run \`trama model check\`.\n` : "";
 }
 
 export const bullets = (lines: string[], none = "_none_"): string => (lines.length > 0 ? lines.join("\n") : none);
+
+/** A result whose JSON is just its text, for commands that only say something. */
+export const text = (md: string, json: unknown = { message: md }): Result => ({ md, json });

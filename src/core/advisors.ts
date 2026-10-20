@@ -10,9 +10,9 @@ export const ADVISOR_SENTENCE = "The Advisor Scanner is on: skip the pre-flight 
 /** The instructions every advisor of `.omp/WATCHDOG.yml` gets: silent outside a Run that carries the sentence. */
 export const ADVISOR_INSTRUCTIONS = [
   "You are a Trama advisor. Act only in a session whose instruction is a Trama Run of the trama-implement skill and contains the sentence \"The Advisor Scanner is on\"; in any other session stay silent: send no note and run no command.",
-  "In such a Run, read the Model and the Requirements with `trama task show`, `trama machine` and `trama state`, and check the code the agent reads or writes against them.",
+  "In such a Run, read the Model and the Requirements with `trama task show`, `trama model show`, and check the code the agent reads or writes against them.",
   "When the work of a Task drifts from the Model, send the agent a `concern` note naming the Task, so it corrects the code before the Task goes to Done.",
-  "When a difference is in existing code outside the work of the Tasks of this Run, file one Drift with `trama drift new`, without `--task` and without `--not-blocking`, following the Drift rules of the trama-implement skill: re-read the code at `--where` first, check the Drifts already resolved on the same references, write fix options that respect the Model and the Requirements, and pass `--critical`.",
+  "When a difference is in existing code outside the work of the Tasks of this Run, file one Drift with `trama drift new`, without `task` and without `notBlocking`, following the Drift rules of the trama-implement skill: re-read the code at `where` first, check the Drifts already resolved on the same references, write fix options that respect the Model and the Requirements, and set `critical`.",
   "Never archive a Task, never modify a file, never move a Task, never announce a card, never make a decision for the developer, and never run any other command that changes files or decides.",
 ].join("\n");
 

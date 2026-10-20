@@ -15,7 +15,7 @@ import { type Project, readDocument, writeDocument, writeFileEnsuringDir } from 
 /** `work` is announced by Trama when it launches an import; the Proposal of Resolve Drifts is a `proposal` that names its `drifts`. A `comparison` is a Machine compared with its code: it names its `machine` and the Drafts taken from it. */
 export type AnnouncementKind = "proposal" | "task" | "drift" | "check" | "work" | "comparison";
 export const ANNOUNCEMENT_KINDS: readonly AnnouncementKind[] = ["proposal", "task", "drift", "check", "work", "comparison"];
-/** The kinds the agent may announce with `trama announce`. */
+/** The kinds the agent may announce with `trama announcement new`. */
 export const AGENT_ANNOUNCEMENT_KINDS: readonly AnnouncementKind[] = ["proposal", "task", "drift", "check"];
 
 /** The phase of a check: the final verification (tests, lint, build), the scan, or the History update at the end of a run. Phases only move forward: Verifying → Scanning → History, or Verifying → History. */
@@ -366,7 +366,7 @@ export function deliverCard(p: Project, id: string | undefined, kind: "task" | "
   if (a?.kind === kind) remove(p, a.id);
 }
 
-/** A comparison is delivered by its `compare file`: its ghost goes, and no notice is given. Any other ID is ignored. */
+/** A comparison is delivered by its `comparison move`: its ghost goes, and no notice is given. Any other ID is ignored. */
 export function deliverComparison(p: Project, id: string): void {
   const a = getAnnouncement(p, id);
   if (a?.kind === "comparison") remove(p, a.id);

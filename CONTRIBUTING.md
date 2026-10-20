@@ -37,7 +37,7 @@ To run the extension, open `extension/` in VS Code and press F5 after `bun run b
 - `src/core`: Model, Requirements, Proposals, Tasks and Drifts. No dependency on Bun, so the extension reuses it.
 - `src/cli`: the `trama` command line.
 - `extension/`: the VS Code / Cursor extension.
-- `skills/`: the agent skills `trama init` installs.
+- `skills/`: the agent skills `trama project new` installs.
 - `docs/`: [file format](./docs/model-format.md), [CLI](./docs/cli.md), [decisions](./docs/adr).
 
 Read [CONTEXT.md](./CONTEXT.md) first: Trama's words (Model, Machine, Proposal, Drift…) have precise meanings, used the same way in code, docs and skills.

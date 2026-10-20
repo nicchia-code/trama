@@ -241,7 +241,7 @@ describe("when the numbers are given", () => {
     expect(readFileSync(assigned(), "utf8")).toBe(`task ${a.id} 1\n`);
 
     const b = task("B");
-    run(["--root", dir, "board"], dir);
+    run(["--root", dir, "project", "show"], dir);
     expect(readFileSync(assigned(), "utf8")).toBe(`task ${a.id} 1\ntask ${b.id} 2\n`);
   });
 
@@ -269,7 +269,7 @@ describe("as a command argument", () => {
     cli("task", "move", "T1", "doing");
     expect(readFileSync(a.path, "utf8")).toContain("column: doing");
 
-    const filed = cli("drift", "new", "Found", "--where", "src/refund.ts", "--ref", "order", "--happens", "h", "--should", "s", "--task", "T2", "--option", "x", "--option-text", "y", "--option", "z", "--option-text", "w");
+    const filed = cli("drift", "new", "--input", JSON.stringify({ title: "Found", where: "src/refund.ts", refs: ["order"], happens: "h", should: "s", task: "T2", options: [{ title: "x", text: "y" }, { title: "z", text: "w" }] }));
     expect(filed.exit).toBe(0);
     const text = readdirSync(join(p.dir, "drifts")).map((f) => readFileSync(join(p.dir, "drifts", f), "utf8")).join("");
     expect(text).toContain(`origin: ${b.id}`);
@@ -281,9 +281,9 @@ describe("as a command argument", () => {
     submitProposal(p, proposal.id);
     const open = drift("D");
 
-    cli("proposal", "reject", "P1", "--feedback", "no");
+    cli("proposal", "move", "P1", "rejected", "--input", JSON.stringify({ feedback: "no" }));
     expect(readFileSync(join(proposal.dir, "proposal.md"), "utf8")).toContain("status: rejected");
-    cli("drift", "resolve", "D1", "--dismiss");
+    cli("drift", "move", "D1", "dismissed");
     expect(readFileSync(open.path, "utf8")).toContain("status: resolved");
   });
 
@@ -373,8 +373,8 @@ describe("as the command line shows cards", () => {
     expect(JSON.parse(cli("--json", "proposal", "list")).proposals).toMatchObject([{ id: proposal.id, number: "P1" }]);
     expect(JSON.parse(cli("--json", "drift", "show", "D1")).number).toBe("D1");
     expect(JSON.parse(cli("--json", "proposal", "show", "P1")).id).toBe(proposal.id);
-    expect(JSON.parse(cli("--json", "task", "new", "Next", "--ref", "order")).number).toBe("T1");
-    const board = JSON.parse(cli("--json", "board"));
+    expect(JSON.parse(cli("--json", "task", "new", "--input", '{"title":"Next","refs":["order"]}')).number).toBe("T1");
+    const board = JSON.parse(cli("--json", "project", "show"));
     expect(board.inWriting).toMatchObject([{ id: proposal.id, number: "P1" }]);
     expect(board.toDecide.drifts).toMatchObject([{ id: open.id, number: "D1" }]);
   });

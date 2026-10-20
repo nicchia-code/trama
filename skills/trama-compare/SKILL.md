@@ -1,18 +1,18 @@
 ---
 name: trama-compare
-description: Use when comparing one Machine of a project with a `.trama/` folder against its code, as a sub-agent of trama-scan or trama-implement or on its own. Reads the briefing of `trama compare brief`, compares it with the code, and files all its Tasks and Drifts at once with `trama compare file`.
+description: Use when comparing one Machine of a project with a `.trama/` folder against its code, as a sub-agent of trama-scan or trama-implement or on its own. Reads the briefing of `trama comparison new`, compares it with the code, and files all its Tasks and Drifts at once with `trama comparison move <id> delivered`.
 ---
 
 # Compare one Machine
 
-You compare one **Machine** with its code. `trama compare brief` gives you the whole comparison; you file the result with one `trama compare file`. You change neither code, nor the Model, nor the Requirements.
+You compare one **Machine** with its code. `trama comparison new` gives you the whole comparison; you file the result with one `trama comparison move <id> delivered`. You change neither code, nor the Model, nor the Requirements.
 
-Read nothing else about the project. Do not run `trama task list`, `trama drift list`, `trama machine`, or `trama requirements`; do not read the General Requirements, any `trama-req-*` skill, or `trama-scan`. The briefing carries what you need.
+Read nothing else about the project. Do not run `trama task list`, `trama drift list`, or `trama model show`; do not read the General Requirements, any `trama-req-*` skill, or `trama-scan`. The briefing carries what you need.
 
 ## Briefing
 
-1. Run `trama compare brief <machine> [--ref <ref>…] [--candidates]`, with the `--ref` references your instruction gives (none: the whole Machine); each `--ref` must belong to the Machine. `--candidates` only when the experimental Drift blocker is on (see below). The command announces the comparison and prints its ID first, then the references, the State tree, the Events with their receivers, the Transitions, the Requirement sections that apply, the `analyze` warnings, the open and resolved cards on those references, and, with `--candidates`, for each reference the Tasks an open Drift there would block.
-2. Keep the comparison ID: you pass it to `compare file`.
+1. Run `trama comparison new <machine> --input -` with a JSON object on standard input, for example `trama comparison new <machine> --input - <<'JSON'` and `{"refs":["<ref>"],"candidates":true}` and `JSON`. `refs` are the references your instruction gives (none: the whole Machine); each must belong to the Machine. `candidates` only when the experimental Drift blocker is on (see below). The command announces the comparison and prints its ID first, then the references, the State tree, the Events with their receivers, the Transitions, the Requirement sections that apply, the `analyze` warnings, the open and resolved cards on those references, and, with `candidates`, for each reference the Tasks an open Drift there would block.
+2. Keep the comparison ID: you pass it to `comparison move`.
 3. If the command refuses (unknown Machine or reference), report it and stop.
 
 ## Compare
@@ -53,21 +53,21 @@ Compare State by State and Transition by Transition, then each Requirement secti
 
 ### Drift with a Proposal
 
-Only for an important case the Model forgot. Before `compare file`:
+Only for an important case the Model forgot. Before `comparison move`:
 
-1. Create a Draft that names this comparison in its body: `trama proposal new "<title>" --body "<the choices; the comparison <id> and the Drift it answers>"`.
-2. Write its files as the `trama-design` skill describes, without its interview. Do not validate it: `compare file` and the submission check it.
+1. Create a Draft that names this comparison in its body: `trama proposal new --input -` with `{"title":"<title>","body":"<the choices; the comparison <id> and the Drift it answers>","label":"<short label>"}`.
+2. Write its files as the `trama-design` skill describes, without its interview. Do not validate it: `comparison move` and the hand-over check it.
 3. Put the Draft's ID in the Drift as `proposal`.
 
-After `compare file` succeeds, run `trama proposal submit <draft id>` once and read its output. If it is refused, fix the reported problems with `trama proposal edit <id>` and submit again.
+After `comparison move` succeeds, run `trama proposal move <draft id> open` once and read its output. If it is refused, fix the reported problems with `trama proposal edit <id>` and hand over again.
 
 ### Experimental Drift blocker
 
-Only when your instruction contains the sentence "The experimental Drift blocker is on". Then use `--candidates` in the briefing. For each Drift, leave free the candidate Tasks the difference does not touch, and list them in the Drift as `notBlocking`, each with a one-line reason. Never use `--not-blocking` without that sentence.
+Only when your instruction contains the sentence "The experimental Drift blocker is on". Then use `candidates` in the briefing. For each Drift, leave free the candidate Tasks the difference does not touch, and list them in the Drift as `notBlocking` (a list of `{"task":"<id>","reason":"<one line>"}`), each with a one-line reason. Never use `notBlocking` without that sentence.
 
 ## File the cards
 
-Run `trama compare file <id> <file.json>` exactly once, after you have decided everything, even when there is nothing to file (then the file has empty lists). Use `-` to read the JSON from standard input. The file is one JSON object:
+Run `trama comparison move <id> delivered --input -` exactly once, after you have decided everything, even when there is nothing to file (then the lists are empty), with the JSON on standard input, as `trama comparison move <id> delivered --input - <<'JSON'` and the object below and `JSON`. The input is one JSON object:
 
 ```json
 {
@@ -80,7 +80,7 @@ Run `trama compare file <id> <file.json>` exactly once, after you have decided e
 }
 ```
 
-The command checks every card before writing and writes all or none. If it refuses, fix the file and run it again. Never run `compare file` a second time for cards already written.
+The command checks every card before writing and writes all or none. If it refuses, fix the JSON and run it again. Never run `comparison move` a second time for cards already written.
 
 Never approve, reject, discard or resolve any card, and never choose a resolution: decisions belong to the developer, unless the developer explicitly asks you in the conversation.
 
@@ -90,4 +90,4 @@ Name each card by short number and title, as `Task T3 – title` or `Drift D2 �
 
 ## PowerShell
 
-On Windows PowerShell, pipe the JSON with `Get-Content -Raw <file> | trama compare file <id> -`; do not use `<` redirection. Put `--body` and `--happens` texts in single quotes when they contain `$`.
+The examples use POSIX syntax. In PowerShell, pass JSON with a pipe and `--input -`, for example `Get-Content -Raw round.json | trama question new --input -`, instead of `<` or a heredoc. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Never pass the JSON as the text of `--input`: Windows PowerShell 5.1 strips the inner quotes of arguments to external programs. Write the `body` and `happens` values in single quotes, because PowerShell expands `$` and the backtick inside double quotes.

@@ -1,17 +1,24 @@
 import cytoscape from "cytoscape";
-import { type GEdge, type GNode, type GraphSpec, canExpand, hasHandles } from "./graph";
+import { type GEdge, type GNode, type GraphSpec, hasHandles } from "./graph";
 import { type Layout, type Route, edgeLabelSize, layoutGraph, nodeLines, routeOf } from "./layout";
 import { type Palette, mix, readPalette } from "./theme";
+
+/** Where the drill and expand buttons of a node sit, in pixels of the stage: its right edge and its top. */
+export interface HandleBox {
+  id: string;
+  right: number;
+  top: number;
+}
 
 export interface CanvasHandlers {
   /** A node or an edge was clicked (`null`: the background). */
   select(id: string | null): void;
-  /** Double-click or drill button on a node. */
+  /** Double-click on a node. */
   drill(id: string): void;
-  /** Expand or collapse button on a State. */
-  toggle(id: string): void;
-  /** Text shown while the pointer rests on a node or an edge. */
-  tooltip(id: string): string;
+  /** The pointer rests on a node or an edge (`id`, at `x`, `y` of the stage), or left it (`null`). */
+  hover(target: { id: string; x: number; y: number } | null): void;
+  /** The drawing moved or was redrawn: where the buttons of the nodes that have them are now. */
+  handles(boxes: HandleBox[]): void;
 }
 
 export interface Canvas {
@@ -24,6 +31,8 @@ export interface Canvas {
   resize(): void;
   /** Colours changed (theme switch). */
   restyle(): void;
+  /** Removes the instance. */
+  destroy(): void;
 }
 
 const FIT_PADDING = 36;
@@ -134,10 +143,10 @@ function labelId(edge: GEdge): string {
   return `${edge.id}#label`;
 }
 
-export function createCanvas(stage: HTMLElement, container: HTMLElement, handlers: CanvasHandlers): Canvas {
+export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): Canvas {
   const cy = cytoscape({
     container,
-    style: stylesheet(readPalette(stage)),
+    style: stylesheet(readPalette()),
     wheelSensitivity: 0.25,
     minZoom: 0.08,
     maxZoom: 2.5,
@@ -146,16 +155,11 @@ export function createCanvas(stage: HTMLElement, container: HTMLElement, handler
     autounselectify: true,
   });
 
-  const handles = document.createElement("div");
-  handles.className = "dg-handles";
-  const tip = document.createElement("div");
-  tip.className = "dg-tip";
-  tip.hidden = true;
-  stage.append(handles, tip);
-
   let drawn: { key: string; graph: GraphSpec; layout: Layout } | null = null;
   let ticket = 0;
   let selected: string | null = null;
+  /** The nodes that have drill and expand buttons in the graph drawn. */
+  let handled: string[] = [];
 
   const elementId = (el: cytoscape.SingularElementReturnValue): string => (el.data("edge") as string | undefined) ?? el.id();
 
@@ -174,68 +178,30 @@ export function createCanvas(stage: HTMLElement, container: HTMLElement, handler
   });
   cy.on("mouseover", "node, edge", (event) => {
     const id = elementId(event.target);
-    const text = drawn?.graph.nodes.find((n) => n.id === id)?.kind === "marker" ? "" : handlers.tooltip(id);
-    if (!text) return;
-    tip.textContent = text;
-    tip.hidden = false;
+    if (drawn?.graph.nodes.find((n) => n.id === id)?.kind === "marker") return;
     const at = event.renderedPosition as { x: number; y: number };
-    tip.style.left = `${Math.min(at.x + 14, stage.clientWidth - 280)}px`;
-    tip.style.top = `${at.y + 16}px`;
+    handlers.hover({ id, x: at.x, y: at.y });
   });
-  cy.on("mouseout pan zoom", () => {
-    tip.hidden = true;
-  });
+  cy.on("mouseout pan zoom", () => handlers.hover(null));
 
   /** Drill and expand buttons sit over the nodes that can use them. */
   let frame = 0;
   const placeHandles = () => {
     frame = 0;
-    for (const group of handles.querySelectorAll<HTMLElement>(".dg-handle-group")) {
-      const n = cy.getElementById(group.dataset["node"] as string);
+    const boxes: HandleBox[] = [];
+    for (const id of handled) {
+      const n = cy.getElementById(id);
       if (n.empty()) continue;
       const box = n.renderedBoundingBox({ includeLabels: false, includeOverlays: false, includeEdges: false });
-      const wide = box.w >= 64;
-      group.hidden = !wide;
-      if (!wide) continue;
-      const w = group.offsetWidth || 44;
-      const container = n.hasClass("container");
-      group.style.left = `${box.x2 - w - 6}px`;
-      group.style.top = `${container ? box.y1 + 6 : (box.y1 + box.y2) / 2 - 10}px`;
+      if (box.w < 64) continue;
+      boxes.push({ id, right: box.x2 - 6, top: n.hasClass("container") ? box.y1 + 6 : (box.y1 + box.y2) / 2 - 10 });
     }
+    handlers.handles(boxes);
   };
   const scheduleHandles = () => {
     if (!frame) frame = requestAnimationFrame(placeHandles);
   };
   cy.on("render", scheduleHandles);
-
-  const button = (glyph: string, title: string, onClick: () => void) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "dg-handle";
-    b.textContent = glyph;
-    b.title = title;
-    b.setAttribute("aria-label", title);
-    b.addEventListener("click", (e) => {
-      e.stopPropagation();
-      onClick();
-    });
-    b.addEventListener("dblclick", (e) => e.stopPropagation());
-    return b;
-  };
-
-  const buildHandles = (graph: GraphSpec) => {
-    handles.replaceChildren();
-    for (const n of graph.nodes) {
-      const drill = hasHandles(n);
-      if (!drill) continue;
-      const group = document.createElement("div");
-      group.className = "dg-handle-group";
-      group.dataset["node"] = n.id;
-      if (canExpand(graph, n)) group.append(button(n.expanded ? "▾" : "▸", `${n.expanded ? "Collapse" : "Expand"} ${n.label}`, () => handlers.toggle(n.id)));
-      group.append(button("↗", `Drill into ${n.label}`, () => handlers.drill(n.id)));
-      handles.append(group);
-    }
-  };
 
   const sync = (graph: GraphSpec, layout: Layout) => {
     const nodes: cytoscape.ElementDefinition[] = [];
@@ -284,7 +250,7 @@ export function createCanvas(stage: HTMLElement, container: HTMLElement, handler
         }
       }
     });
-    buildHandles(graph);
+    handled = graph.nodes.filter(hasHandles).map((n) => n.id);
     scheduleHandles();
   };
 
@@ -336,7 +302,11 @@ export function createCanvas(stage: HTMLElement, container: HTMLElement, handler
       scheduleHandles();
     },
     restyle() {
-      cy.style(stylesheet(readPalette(stage)));
+      cy.style(stylesheet(readPalette()));
+    },
+    destroy() {
+      if (frame) cancelAnimationFrame(frame);
+      cy.destroy();
     },
   };
 }

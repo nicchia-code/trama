@@ -38,6 +38,11 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+/** `trama announcement new` with this input. */
+const announcementNew = (input: Record<string, unknown>, env: Record<string, string | undefined> = {}) => run(["announcement", "new", "--input", JSON.stringify(input)], dir, env);
+/** `trama announcement move` of a check. */
+const announcementMove = (id: string, state: string, env: Record<string, string | undefined> = {}, ...common: string[]) => run([...common, "announcement", "move", id, state], dir, env);
+
 const t = (minutes: number) => new Date(Date.UTC(2026, 0, 1, 12, minutes));
 
 describe("announcing", () => {
@@ -186,7 +191,7 @@ describe("a Draft and its announcement", () => {
         }
         if (waiting) announce(p, { kind: "proposal", title: "Waiting request", source: "request", terminal: "ab12cd" });
         const before = buildSnapshot(p).announcements;
-        const result = run(["--json", "proposal", "new", "Without ghost", "--announcement", id], dir, { CURSOR_AGENT: "0" });
+        const result = run(["--json", "proposal", "new", "--input", JSON.stringify({ title: "Without ghost", announcement: id })], dir, { CURSOR_AGENT: "0" });
         expect(result.exit).toBe(0);
         const created = JSON.parse(result.out);
         expect(created.id).toBeString();
@@ -333,31 +338,31 @@ describe("the terminal an announcement belongs to", () => {
   });
 
   test("the command line announces from the agent's terminal, and a Draft with no waiting announcement makes its own there", async () => {
-    const id = run(["announce", "task", "From a terminal"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
+    const id = announcementNew({ kind: "task", title: "From a terminal" }, { TRAMA_TERMINAL: "ab12cd" }).out;
     expect(getAnnouncement(p, id)?.terminal).toBe("ab12cd");
-    expect(getAnnouncement(p, run(["announce", "task", "Outside"], dir, {}).out)?.terminal).toBeNull();
+    expect(getAnnouncement(p, announcementNew({ kind: "task", title: "Outside" }).out)?.terminal).toBeNull();
 
     withdrawAll(p);
-    run(["proposal", "new", "Own ghost"], dir, { TRAMA_TERMINAL: "ab12cd" });
+    run(["proposal", "new", "--input", JSON.stringify({ title: "Own ghost" })], dir, { TRAMA_TERMINAL: "ab12cd" });
     expect(listAnnouncements(p).map((a) => [a.title, a.terminal])).toEqual([["Own ghost", "ab12cd"]]);
   });
 
   test("an announced Task or Drift is delivered by creating it with --announcement, and an unknown ID only adds a note", () => {
-    const announced = (kind: string, title: string) => run(["announce", kind, title], dir, {}).out;
+    const announced = (kind: string, title: string) => announcementNew({ kind, title }).out;
     const taskAnnouncement = announced("task", "Refunds");
     expect(listAnnouncements(p).map((a) => a.kind)).toEqual(["task"]);
-    run(["--root", dir, "task", "new", "Refunds", "--ref", "order/Refunding", "--announcement", taskAnnouncement], dir, {});
+    run(["--root", dir, "task", "new", "--input", JSON.stringify({ title: "Refunds", refs: ["order/Refunding"], announcement: taskAnnouncement })], dir, {});
     expect(listAnnouncements(p)).toEqual([]);
 
-    const driftOptions = ["--option", "Change the code", "--option-text", "Make it so.", "--option", "Remove the code", "--option-text", "Drop it."];
-    const unknown = run(["--root", dir, "drift", "new", "Late refund", "--where", "src/refund.ts", "--ref", "order/Shipped", "--happens", "The code refunds late.", "--should", "The Model forbids it.", "--announcement", "zzzzzz", ...driftOptions], dir, {});
+    const driftInput = { title: "Late refund", where: "src/refund.ts", refs: ["order/Shipped"], happens: "The code refunds late.", should: "The Model forbids it.", announcement: "zzzzzz", options: [{ title: "Change the code", text: "Make it so." }, { title: "Remove the code", text: "Drop it." }] };
+    const unknown = run(["--root", dir, "drift", "new", "--input", JSON.stringify(driftInput)], dir, {});
     expect(unknown.out).toContain('No announcement "zzzzzz" was found');
-    expect(() => run(["announce", "card", "x"], dir, {})).toThrow(/The kind must be one of/);
+    expect(() => announcementNew({ kind: "card", title: "x" })).toThrow(/kind: Invalid option/);
   });
 
   test("a Draft in another terminal leaves the request untouched and creates its own announcement", () => {
     const request = announce(p, { kind: "proposal", title: "Request", source: "request", terminal: "ab12cd" });
-    run(["proposal", "new", "Draft"], dir, { TRAMA_TERMINAL: "zz99yy" });
+    run(["proposal", "new", "--input", JSON.stringify({ title: "Draft" })], dir, { TRAMA_TERMINAL: "zz99yy" });
     expect(listAnnouncements(p).map((a) => [a.title, a.proposal !== null, a.terminal])).toEqual([
       ["Request", false, "ab12cd"],
       ["Draft", true, "zz99yy"],
@@ -368,15 +373,15 @@ describe("the terminal an announcement belongs to", () => {
 
 describe("an announcement made by Cursor's chat agent", () => {
   test("carries chat: cursor only without TRAMA_TERMINAL, writes the field only when set, and reads old files", () => {
-    const chat = run(["announce", "task", "From the chat"], dir, { CURSOR_AGENT: "1" }).out;
-    const both = run(["announce", "task", "Terminal wins"], dir, { CURSOR_AGENT: "1", TRAMA_TERMINAL: "ab12cd" }).out;
-    const neither = run(["announce", "task", "Developer"], dir, { CURSOR_AGENT: "0" }).out;
+    const chat = announcementNew({ kind: "task", title: "From the chat" }, { CURSOR_AGENT: "1" }).out;
+    const both = announcementNew({ kind: "task", title: "Terminal wins" }, { CURSOR_AGENT: "1", TRAMA_TERMINAL: "ab12cd" }).out;
+    const neither = announcementNew({ kind: "task", title: "Developer" }, { CURSOR_AGENT: "0" }).out;
     expect([chat, both, neither].map((id) => [getAnnouncement(p, id)?.chat, getAnnouncement(p, id)?.terminal])).toEqual([["cursor", null], [null, "ab12cd"], ["editor", null]]);
     expect(readFileSync(join(announcementsDir(p), `${chat}.md`), "utf8")).toContain("chat: cursor");
     expect(readFileSync(join(announcementsDir(p), `${both}.md`), "utf8")).not.toContain("chat");
 
     withdrawAll(p);
-    run(["proposal", "new", "Own ghost"], dir, { CURSOR_AGENT: "1" });
+    run(["proposal", "new", "--input", JSON.stringify({ title: "Own ghost" })], dir, { CURSOR_AGENT: "1" });
     expect(listAnnouncements(p).map((a) => [a.title, a.chat])).toEqual([["Own ghost", "cursor"]]);
 
     // Written before the field existed: no `chat` line at all.
@@ -387,56 +392,56 @@ describe("an announcement made by Cursor's chat agent", () => {
 
 describe("a check", () => {
   test("is announced with its phase, moves forward only, and is delivered by done with its file gone", async () => {
-    const id = run(["announce", "check", "Final check after Task T3", "--phase", "verifying"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
+    const id = announcementNew({ kind: "check", title: "Final check after Task T3", phase: "verifying" }, { TRAMA_TERMINAL: "ab12cd" }).out;
     const check = getAnnouncement(p, id);
     expect([check?.kind, check?.phase, check?.source, check?.proposal, check?.terminal]).toEqual(["check", "verifying", "agent", null, "ab12cd"]);
     expect(buildSnapshot(p).announcements.map((a) => [a.kind, a.phase])).toEqual([["check", "verifying"]]);
 
-    expect(JSON.parse(run(["--json", "announce", "phase", id, "scanning"], dir, {}).out).outcome).toBe("changed");
+    expect(JSON.parse(announcementMove(id, "scanning", {}, "--json").out).outcome).toBe("changed");
     expect(getAnnouncement(p, id)?.phase).toBe("scanning");
-    expect(run(["announce", "phase", id, "scanning"], dir, {}).out).toContain("already scanning");
-    expect(() => run(["announce", "phase", id, "verifying"], dir, {})).toThrow(/cannot move back to verifying/);
+    expect(announcementMove(id, "scanning").out).toContain("already scanning");
+    expect(() => announcementMove(id, "verifying")).toThrow(/<state> must be one of scanning, history, delivered, failed/);
     expect(getAnnouncement(p, id)?.phase).toBe("scanning");
-    expect(() => run(["announce", "phase", id, "bogus"], dir, {})).toThrow(/must be one of verifying, scanning, history/);
+    expect(() => announcementMove(id, "bogus")).toThrow(/must be one of scanning, history, delivered, failed/);
 
-    expect(run(["announce", "done", id], dir, {}).out).toBe(`Check ${id} is done`);
+    expect(announcementMove(id, "delivered").out).toBe(`Check ${id} is done`);
     await settleCoordinatorMessages();
     expect(existsSync(join(announcementsDir(p), `${id}.md`))).toBe(false);
   });
 
   test("moves from verifying or scanning to history, and a History check cannot go back", () => {
-    const fromVerifying = run(["announce", "check", "Final check after Task T3", "--phase", "verifying"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
-    expect(JSON.parse(run(["--json", "announce", "phase", fromVerifying, "history"], dir, {}).out).outcome).toBe("changed");
+    const fromVerifying = announcementNew({ kind: "check", title: "Final check after Task T3", phase: "verifying" }, { TRAMA_TERMINAL: "ab12cd" }).out;
+    expect(JSON.parse(announcementMove(fromVerifying, "history", {}, "--json").out).outcome).toBe("changed");
     expect(getAnnouncement(p, fromVerifying)?.phase).toBe("history");
     expect(buildSnapshot(p).announcements.find((a) => a.id === fromVerifying)?.phase).toBe("history");
-    expect(run(["announce", "phase", fromVerifying, "history"], dir, {}).out).toContain("already history; nothing changed");
-    expect(() => run(["announce", "phase", fromVerifying, "scanning"], dir, {})).toThrow(/cannot move back to scanning/);
-    expect(() => run(["announce", "phase", fromVerifying, "verifying"], dir, {})).toThrow(/cannot move back to verifying/);
+    expect(announcementMove(fromVerifying, "history").out).toContain("already history; nothing changed");
+    expect(() => announcementMove(fromVerifying, "scanning")).toThrow(/cannot move back to scanning/);
+    expect(() => announcementMove(fromVerifying, "verifying")).toThrow(/<state> must be one of/);
     expect(getAnnouncement(p, fromVerifying)?.phase).toBe("history");
 
-    const fromScanning = run(["announce", "check", "Final check after Task T4", "--phase", "scanning"], dir, {}).out;
-    expect(run(["announce", "phase", fromScanning, "history"], dir, {}).out).toContain("is now history");
-    expect(() => run(["announce", "phase", fromScanning, "verifying"], dir, {})).toThrow(/cannot move back to verifying/);
+    const fromScanning = announcementNew({ kind: "check", title: "Final check after Task T4", phase: "scanning" }).out;
+    expect(announcementMove(fromScanning, "history").out).toContain("is now history");
+    expect(() => announcementMove(fromScanning, "scanning")).toThrow(/cannot move back to scanning/);
     expect(getAnnouncement(p, fromScanning)?.phase).toBe("history");
-    expect(() => run(["announce", "check", "Late check", "--phase", "history"], dir, {})).toThrow(/--phase must be one of verifying, scanning/);
+    expect(() => announcementNew({ kind: "check", title: "Late check", phase: "history" })).toThrow(/phase: Invalid option/);
     withdrawAll(p);
   });
   test("a finished check hands its outcome to the caller with its job, and forgetting it leaves nothing to finish", () => {
-    const id = run(["announce", "check", "Final check after completed Task", "--phase", "verifying", "--job", "run-7"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
+    const id = announcementNew({ kind: "check", title: "Final check after completed Task", phase: "verifying", job: "run-7" }, { TRAMA_TERMINAL: "ab12cd" }).out;
     const touched = getAnnouncement(p, id)!.touched;
     expect(checkOutcome(p, id, true)).toEqual({ id, title: "Final check after completed Task", phase: "verifying", terminal: "ab12cd", chat: null, job: "run-7", touched, failed: true });
     forgetCheck(p, id);
     expect(checkOutcome(p, id)).toBeNull();
   });
   test("a check announced in a terminal takes the job from TRAMA_JOB unless --job names another", () => {
-    const fromEnv = run(["announce", "check", "Final check after all Tasks", "--phase", "verifying"], dir, { TRAMA_TERMINAL: "ab12cd", TRAMA_JOB: "run-9" }).out;
-    const explicit = run(["announce", "check", "Final check after all Tasks", "--phase", "verifying", "--job", "run-7"], dir, { TRAMA_TERMINAL: "ab12cd", TRAMA_JOB: "run-9" }).out;
+    const fromEnv = announcementNew({ kind: "check", title: "Final check after all Tasks", phase: "verifying" }, { TRAMA_TERMINAL: "ab12cd", TRAMA_JOB: "run-9" }).out;
+    const explicit = announcementNew({ kind: "check", title: "Final check after all Tasks", phase: "verifying", job: "run-7" }, { TRAMA_TERMINAL: "ab12cd", TRAMA_JOB: "run-9" }).out;
     expect([getAnnouncement(p, fromEnv)?.job, getAnnouncement(p, explicit)?.job]).toEqual(["run-9", "run-7"]);
     withdrawAll(p);
   });
   test("a failed final check is finished with no success outcome", async () => {
-    const id = run(["announce", "check", "Final check after completed Task", "--phase", "verifying"], dir, {}).out;
-    expect(JSON.parse(run(["--json", "announce", "done", id, "--failed"], dir, {}).out).outcome).toBe("failed");
+    const id = announcementNew({ kind: "check", title: "Final check after completed Task", phase: "verifying" }).out;
+    expect(JSON.parse(announcementMove(id, "failed", {}, "--json").out).outcome).toBe("failed");
     await settleCoordinatorMessages();
     expect(listAnnouncements(p).map((a) => a.id)).not.toContain(id);
   });
@@ -460,13 +465,26 @@ describe("a check", () => {
   test("moving a check to scanning tells the editor its job, and a move that changes nothing tells it nothing", async () => {
     const received: Record<string, unknown>[] = [];
     await withEditor((message) => { received.push(message); }, async () => {
-      const id = run(["announce", "check", "Final check after completed Task", "--phase", "verifying", "--job", "run-7"], dir, {}).out;
-      run(["announce", "phase", id, "scanning"], dir, {});
+      const id = announcementNew({ kind: "check", title: "Final check after completed Task", phase: "verifying", job: "run-7" }).out;
+      announcementMove(id, "scanning");
       await settleCoordinatorMessages();
-      run(["announce", "phase", id, "scanning"], dir, {});
+      announcementMove(id, "scanning");
       await settleCoordinatorMessages();
       expect(received).toHaveLength(1);
       expect(received[0]).toEqual(expect.objectContaining({ type: "check-phase", id, phase: "scanning", job: "run-7" }));
+    });
+  });
+  test("a check that failed reaches the editor as a failed outcome, and one that is not found reports no outcome", async () => {
+    const received: Record<string, unknown>[] = [];
+    await withEditor((message) => { received.push(message); }, async () => {
+      const failed = announcementNew({ kind: "check", title: "Final check after all Tasks", phase: "verifying", job: "run-3" }).out;
+      const done = announcementNew({ kind: "check", title: "Final check after Task T3", phase: "verifying" }).out;
+      announcementMove(failed, "failed");
+      announcementMove(done, "delivered");
+      announcementMove("zzzzzz", "failed");
+      await settleCoordinatorMessages();
+      expect(received).toEqual([expect.objectContaining({ type: "check", id: failed, failed: true, job: "run-3" }), expect.objectContaining({ type: "check", id: done, failed: false })]);
+      expect(listAnnouncements(p).map((a) => a.id)).toEqual([]);
     });
   });
   test("the ghost of a finished check goes only after the editor has heard of its outcome", async () => {
@@ -474,8 +492,8 @@ describe("a check", () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     await withEditor(async (message) => { received.push(message); await gate; }, async () => {
-      const id = run(["announce", "check", "Final check after all Tasks", "--phase", "verifying"], dir, {}).out;
-      expect(run(["announce", "done", id], dir, {}).exit).toBe(0);
+      const id = announcementNew({ kind: "check", title: "Final check after all Tasks", phase: "verifying" }).out;
+      expect(announcementMove(id, "delivered").exit).toBe(0);
       expect(existsSync(join(announcementsDir(p), `${id}.md`))).toBe(true);
       release();
       await settleCoordinatorMessages();
@@ -486,17 +504,17 @@ describe("a check", () => {
 
 
   test("needs --phase, which no other kind takes", () => {
-    expect(() => run(["announce", "check", "Scan of the System"], dir, {})).toThrow(/needs --phase/);
-    expect(() => run(["announce", "task", "Refunds", "--phase", "scanning"], dir, {})).toThrow(/only for a check/);
-    expect(() => run(["announce", "check", "Scan", "--phase", "testing"], dir, {})).toThrow(/--phase must be one of/);
-    expect(readFileSync(join(announcementsDir(p), `${run(["announce", "task", "Plain"], dir, {}).out}.md`), "utf8")).not.toContain("phase");
+    expect(() => announcementNew({ kind: "check", title: "Scan of the System" })).toThrow(/phase: is required for a check: verifying or scanning/);
+    expect(() => announcementNew({ kind: "task", title: "Refunds", phase: "scanning" })).toThrow(/phase: is only for a check/);
+    expect(() => announcementNew({ kind: "check", title: "Scan", phase: "testing" })).toThrow(/phase: Invalid option/);
+    expect(readFileSync(join(announcementsDir(p), `${announcementNew({ kind: "task", title: "Plain" }).out}.md`), "utf8")).not.toContain("phase");
   });
 
   test("an ID that is unknown, finished or not a check succeeds and says the check was not found", () => {
-    const task = run(["announce", "task", "Refunds"], dir, {}).out;
+    const task = announcementNew({ kind: "task", title: "Refunds" }).out;
     for (const id of ["zzzzzz", task]) {
-      for (const args of [["phase", id, "scanning"], ["done", id]]) {
-        const result = run(["announce", ...args], dir, {});
+      for (const state of ["scanning", "history", "delivered", "failed"]) {
+        const result = announcementMove(id, state);
         expect([result.exit, result.out.includes(`No check "${id}" was found`)]).toEqual([0, true]);
       }
     }

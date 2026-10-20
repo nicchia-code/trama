@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { announce, listAnnouncements } from "../src/core/announcements";
@@ -36,7 +36,7 @@ const validComparison = JSON.stringify({
   ],
 });
 
-describe("trama compare brief", () => {
+describe("trama comparison new", () => {
   test("a Machine's briefing takes its whole scope by default and refuses references outside it, announcing nothing", () => {
     const b = briefing(p, "order", [], false);
     expect(b.scope).toContain("order");
@@ -55,7 +55,7 @@ describe("trama compare brief", () => {
   });
 
   test("the command announces the comparison and prints its announcement first", () => {
-    const out = run(["--root", dir, "compare", "brief", "order"], dir, {}).out;
+    const out = run(["--root", dir, "comparison", "new", "order"], dir, {}).out;
     const [ghost] = listAnnouncements(p);
     expect(ghost?.kind).toBe("comparison");
     expect(out.startsWith(ghost?.id ?? "")).toBe(true);
@@ -63,12 +63,12 @@ describe("trama compare brief", () => {
   });
 
   test("the command refuses an unknown Machine and announces nothing", () => {
-    expect(() => run(["--root", dir, "compare", "brief", "nope"], dir, {})).toThrow(TramaError);
+    expect(() => run(["--root", dir, "comparison", "new", "nope"], dir, {})).toThrow(TramaError);
     expect(listAnnouncements(p)).toEqual([]);
   });
 });
 
-describe("trama compare file", () => {
+describe("trama comparison move", () => {
   test("the comparison file is read as a JSON object with tasks and drifts lists", () => {
     expect(() => parseComparisonFile("[]")).toThrow(TramaError);
     expect(() => parseComparisonFile('{"tasks":[]}')).toThrow(TramaError);
@@ -102,9 +102,7 @@ describe("trama compare file", () => {
   });
 
   test("the command files a comparison file and says whether the comparison was waiting", () => {
-    const file = join(dir, "comparison.json");
-    writeFileSync(file, validComparison);
-    const out = run(["--root", dir, "compare", "file", "zzzzzz", file], dir, {}).out;
+    const out = run(["--root", dir, "comparison", "move", "zzzzzz", "delivered", "--input", validComparison], dir, {}).out;
     expect(out).toContain("No comparison is waiting for zzzzzz");
     expect(listTasks(p)).toHaveLength(1);
   });

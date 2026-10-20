@@ -117,7 +117,7 @@ describe("malformed Drift files", () => {
 describe("the CLI reports them instead of crashing", () => {
   test("`board` fails with a TramaError that names the broken file", () => {
     const file = task("refs: order/Paid");
-    expect(() => run(["--root", dir, "board"], dir)).toThrow(TramaError);
-    expect(() => run(["--root", dir, "board"], dir)).toThrow(file);
+    expect(() => run(["--root", dir, "project", "show"], dir)).toThrow(TramaError);
+    expect(() => run(["--root", dir, "project", "show"], dir)).toThrow(file);
   });
 });

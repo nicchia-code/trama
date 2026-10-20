@@ -15,7 +15,7 @@ export default function tramaHook(pi: Pi): void {
   if (!process.env["TRAMA_TERMINAL"]) return;
 
   const sendAgentEvent = async (cwd: string) => {
-    await pi.exec("trama", ["agent-event", "idle"], { cwd, timeout: 3000 }).catch(() => undefined);
+    await pi.exec("trama", ["hook", "idle"], { cwd, timeout: 3000 }).catch(() => undefined);
   };
 
   pi.on("session_stop", (_event, ctx) => {
@@ -24,7 +24,7 @@ export default function tramaHook(pi: Pi): void {
   pi.on("session_shutdown", (_event, ctx) => {
     if (ctx.agent?.kind === "main") void sendAgentEvent(ctx.cwd);
   });
-  // Trama's terminals refuse the agent's own question tool in every session, without the editor: the refusal says to use `trama ask`.
+  // Trama's terminals refuse the agent's own question tool in every session, without the editor: the refusal says to use `trama question new`.
   pi.on("tool_call", (event) => {
     const toolName = typeof event === "object" && event !== null && "toolName" in event ? event.toolName : undefined;
     if (toolName === "ask") return { block: true, reason: QUESTION_TOOL_REFUSAL };

@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
-import { approveProposal, deleteInProposal, editInProposal, getProposal, newProposal, validateProposal } from "../src/core/proposals";
+import { approveProposal, deleteInProposal, editInProposal, getProposal, newProposal, proposalWarnings, validateProposal } from "../src/core/proposals";
 import { coverWithTask } from "./cover";
 import { handOver } from "./handover";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
@@ -102,7 +102,7 @@ describe("Areas", () => {
     const messages = loadProject(p).diagnostics.map((d) => `${d.file}:${d.line} ${d.message}`).sort();
     expect(messages).toEqual([
       expect.stringMatching(/^requirements\/data\/area\.md:0 Missing area\.md/),
-      expect.stringMatching(/^requirements\/rules\.md:0 .*run "trama skills update"/),
+      expect.stringMatching(/^requirements\/rules\.md:0 .*run "trama project edit"/),
       expect.stringMatching(/^requirements\/tech\/area\.md:6 area\.md has no sections: move "## General" into a fragment/),
       expect.stringMatching(/^requirements\/ui\/Bad_Name\.md:0 Fragment "Bad_Name" is not a kebab-case name/),
       expect.stringMatching(/^requirements\/ui\/notes\.md:1 Missing "description"/),
@@ -208,7 +208,7 @@ describe("Proposals with Requirements", () => {
       editInProposal(p, prop.id, "requirements/ui/orders.md"),
       `---\ndescription: Use when showing **orders**.\n---\n# Orders\n\n## order/Paid\n${(paid as string).replace("progress bar", "spinner")}\n## General\nMaterial 3 everywhere.\n`,
     );
-    run(["proposal", "delete", prop.id, "requirements/ui/old.md"], dir, {});
+    run(["proposal", "edit", prop.id, "--input", JSON.stringify({ delete: ["requirements/ui/old.md"] })], dir, {});
     handOver(p, prop.id);
     const snapshot = buildSnapshot(p);
     expect(snapshot.areas.find((a) => a.id === "data")?.fragments).toEqual([]);
@@ -242,7 +242,7 @@ describe("Proposals with Requirements", () => {
     const file = join(prop.dir, "proposal.md");
     writeFileSync(file, readFileSync(file, "utf8").replace("status: draft\nbase: {}", 'status: rejected\nbase:\n  requirements/rules.md: "abc"'));
     expect(getProposal(p, prop.id).data.base).toEqual({ "requirements/rules.md": "abc" });
-    expect(run(["proposal", "list", "--all"], dir, {}).out).toContain("Old");
+    expect(run(["proposal", "list", "--input", '{"all":true}'], dir, {}).out).toContain("Old");
   });
 
   test("a Proposal writes a new Area and fragment, deletes a fragment, shows changes by Area and fragment, and is validated against the whole Area", () => {
@@ -250,10 +250,10 @@ describe("Proposals with Requirements", () => {
     const prop = newProposal(p, "Data and screens", "", { label: "Data and screens" });
     writeFileSync(editInProposal(p, prop.id, "requirements/data/area.md"), '---\ndescription: "Use when storing data."\n---\n# Data\n');
     writeFileSync(editInProposal(p, prop.id, "requirements/data/money.md"), '---\ndescription: "Use when storing amounts."\n---\n# Money\n\n## order\nCents.\n');
-    run(["proposal", "delete", prop.id, "requirements/ui/old.md"], dir, {});
+    run(["proposal", "edit", prop.id, "--input", JSON.stringify({ delete: ["requirements/ui/old.md"] })], dir, {});
     writeFileSync(editInProposal(p, prop.id, "requirements/ui/badges.md"), "---\ndescription: Badges.\n---\n# Badges\n\n## order/Paid\nA blue badge.\n");
     coverWithTask(p, prop.id, "order", "requirements/data", "requirements/ui");
-    expect(() => run(["proposal", "delete", prop.id, "requirements/ui.md"], dir, {})).toThrow(/Areas are folders/);
+    expect(() => run(["proposal", "edit", prop.id, "--input", JSON.stringify({ delete: ["requirements/ui.md"] })], dir, {})).toThrow(/Areas are folders/);
 
     const show = run(["proposal", "show", prop.id], dir, {}).out;
     expect(show).toContain("- `requirements/data/area.md` (added) · Area `data`, area.md");
@@ -354,35 +354,35 @@ describe("Tasks and generated skills", () => {
     const show = (id: string) => run(["task", "show", id], dir, {}).out;
 
     const order = show(machine.id);
-    const machineView = run(["machine", "order"], dir, {}).out;
+    const machineView = run(["model", "show", "order"], dir, {}).out;
     const machineFacts = machineView.split("## Requirements")[0] ?? "";
     for (const line of machineFacts.split("\n")) {
       const trimmed = line.trim();
       if (trimmed.startsWith("-")) expect(order).toContain(trimmed);
     }
     expect(order).toContain("An order placed by a customer, from composition to delivery.");
-    expect(order).not.toMatch(/trama (machine|state|event|paths|requirements|validate)/);
+    expect(order).not.toMatch(/trama (model|machine|state|event|paths|requirements|validate)/);
     expect(order).not.toContain("trama-req-");
     expect(order).not.toContain("Technology");
 
     const preparing = show(state.id);
-    const stateView = run(["state", "order/Preparing"], dir, {}).out;
+    const stateView = run(["model", "show", "order/Preparing"], dir, {}).out;
     const outgoing = stateView.split("## Incoming Transitions")[0] ?? "";
     for (const line of outgoing.split("\n")) {
       if (line.trimStart().startsWith("- `")) expect(preparing).toContain(line.trim());
     }
     expect(preparing).toContain("_(inherited from Paid)_");
-    expect(preparing).not.toContain("trama state");
+    expect(preparing).not.toContain("trama model show");
 
     const cancel = show(event.id);
-    const eventView = run(["event", "user.CANCEL"], dir, {}).out;
+    const eventView = run(["model", "show", "user.CANCEL"], dir, {}).out;
     const eventFacts = eventView.split("## Requirements")[0] ?? "";
     for (const line of eventFacts.split("\n")) {
       if (line.trimStart().startsWith("- ")) expect(cancel).toContain(line.trim());
     }
     expect(cancel).toContain("emitted by Actor `user`");
     expect(cancel).toContain("The user asks to cancel an order.");
-    expect(cancel).not.toContain("trama event");
+    expect(cancel).not.toContain("trama model show");
 
     const screens = show(area.id);
     for (const text of ["Material 3 everywhere.", "Checkout screens use the brand colour.", "Show a green badge.", "Show a progress bar."])
@@ -430,42 +430,41 @@ describe("Tasks and generated skills", () => {
     writeArea("ui", UI_AREA, { main: general as string, orders: `---\ndescription: Use when showing orders.\n---\n# Orders\n\n## order/Paid\n${paid}` });
     expect(syncRequirementSkills(p)).toMatchObject({ mode: "fragment", switchedFrom: "index" });
     expect(readdirSync(join(dir, ".agents/skills")).filter((n) => n.startsWith("trama-req-")).sort()).toEqual(["trama-req-data-money", "trama-req-ui-main", "trama-req-ui-orders"]);
-    const out = run(["skills", "update"], dir, {}).out;
+    const out = run(["project", "edit"], dir, {}).out;
     expect(out).toContain("Requirement skills: one skill per fragment (budget ");
     expect(out).toContain("/4000 characters).");
   });
 
-  test("validate, submit and analyze warn about fragments over 12 KB and about a mode switch, apart from errors and without failing", () => {
+  test("model check and submit warn about fragments over 12 KB and about a mode switch, apart from errors and without failing", () => {
     const big = `---\ndescription: Use when showing orders.\n---\n# Orders\n\n## order/Paid\n${"- A rule.\n".repeat(1300)}`;
     writeArea("ui", UI_AREA, { main: UI.replace("## order/Paid\nShow a green badge.\n\n", ""), orders: big });
-    const validate = run(["validate"], dir, {});
+    const validate = run(["model", "check"], dir, {});
     expect(validate.exit).toBe(0);
-    expect(validate.out).toStartWith("The Model and its Requirements are valid.\n\n1 warning(s), which do not prevent validation or the hand-over:\n");
-    expect(validate.out).toContain(`- requirements/ui/orders.md: fragment is ${big.length} bytes, more than 12288 (12 KB)`);
-    expect(run(["analyze"], dir, {}).out).toContain(`[large-fragment] requirements/ui/orders.md: fragment is ${big.length} bytes`);
+    expect(validate.out).toStartWith("The Model and its Requirements are valid.\n\n1 warning(s), which never fail the check:\n");
+    expect(validate.out).toContain(`- [large-fragment] requirements/ui/orders.md: fragment is ${big.length} bytes, more than 12288 (12 KB)`);
 
     writeFileSync(join(p.dir, "model/checkout/order.md"), readFileSync(join(p.dir, "model/checkout/order.md"), "utf8").replace("### Paid", "### Settled"));
-    const broken = run(["validate"], dir, {});
+    const broken = run(["model", "check"], dir, {});
     expect(broken.exit).toBe(1);
     expect(broken.out.indexOf("error(s):")).toBeLessThan(broken.out.indexOf("warning(s)"));
   });
 
-  test("a Proposal that pushes the skills past the budget is warned about in validate and still handed over", () => {
+  test("a Proposal that pushes the skills past the budget is warned about in its checks and still handed over", () => {
     const prop = newProposal(p, "Long descriptions");
     writeFileSync(editInProposal(p, prop.id, "requirements/ui/main.md"), UI.replace("description: Use when building screens.", `description: Use when building screens. ${"x".repeat(4000)}`));
-    const validate = run(["validate", "--proposal", prop.id], dir, {});
-    expect(validate.exit).toBe(0);
-    expect(validate.out).toContain("once applied, the Requirement skills switch from one skill per fragment to one index skill per Area");
-    const submit = run(["proposal", "submit", prop.id], dir, {});
+    const loaded = getProposal(p, prop.id);
+    expect(validateProposal(p, loaded)).toEqual([]);
+    expect(proposalWarnings(p, loaded).map((w) => w.message).join("\n")).toContain("once applied, the Requirement skills switch from one skill per fragment to one index skill per Area");
+    const submit = run(["proposal", "move", prop.id, "open"], dir, {});
     expect(submit.exit).toBe(0);
     expect(submit.out).toContain("Submitted Proposal");
     expect(submit.out).toContain("switch from one skill per fragment to one index skill per Area");
   });
 
-  test("proposal submit prints the proposal show text after the outcome, and under --json in show", () => {
+  test("handing a Proposal over prints the proposal show text after the outcome, and under --json in show", () => {
     const prop = newProposal(p, "Shown after hand-over");
     writeFileSync(editInProposal(p, prop.id, "requirements/ui/main.md"), UI.replace("description: Use when building screens.", "description: Use when building screens. Shown on submit."));
-    const submit = run(["proposal", "submit", prop.id], dir, {});
+    const submit = run(["proposal", "move", prop.id, "open"], dir, {});
     expect(submit.exit).toBe(0);
     const shown = run(["proposal", "show", prop.id], dir, {}).out.trim();
     expect(shown).not.toBe("");
@@ -473,7 +472,7 @@ describe("Tasks and generated skills", () => {
     expect(submit.out.endsWith(shown)).toBe(true);
     const second = newProposal(p, "Shown as JSON");
     writeFileSync(editInProposal(p, second.id, "requirements/ui/main.md"), UI.replace("description: Use when building screens.", "description: Use when building screens. Shown as JSON."));
-    const json = JSON.parse(run(["proposal", "submit", second.id, "--json"], dir, {}).out);
+    const json = JSON.parse(run(["proposal", "move", second.id, "open", "--json"], dir, {}).out);
     expect(json.show).toContain("Shown as JSON");
   });
 
@@ -485,21 +484,21 @@ describe("Tasks and generated skills", () => {
     const named = (out: string) => [...out.matchAll(/`(trama-req-[a-z0-9-]+)`/g)].map((m) => m[1] as string);
 
     syncRequirementSkills(p);
-    const paidView = run(["requirements", "order/Preparing"], dir, {}).out;
+    const paidView = run(["model", "show", "order/Preparing"], dir, {}).out;
     expect(paidView).toContain("`requirements/ui#order/Paid` (via order/Paid) (skill `trama-req-ui-orders`)");
     expect(paidView).toContain("`requirements/ui#checkout` (via checkout) (skill `trama-req-ui-main`)");
-    expect(run(["requirements", "ui"], dir, {}).out).toContain("Load: skills `trama-req-ui-main`, `trama-req-ui-orders`");
-    for (const name of named(run(["requirements"], dir, {}).out)) expect(installed()).toContain(name);
+    expect(run(["model", "show", "requirements/ui"], dir, {}).out).toContain("Load: skills `trama-req-ui-main`, `trama-req-ui-orders`");
+    for (const name of named(run(["model", "show", "requirements"], dir, {}).out)) expect(installed()).toContain(name);
 
     writeArea("ui", UI_AREA, { main: general as string, orders: orders(` ${"x".repeat(4100)}`) });
     syncRequirementSkills(p);
     expect(installed()).toEqual(["trama-req-ui"]);
-    const indexView = run(["requirements", "order/Preparing"], dir, {}).out;
+    const indexView = run(["model", "show", "order/Preparing"], dir, {}).out;
     expect(named(indexView)).toEqual(["trama-req-ui", "trama-req-ui", "trama-req-ui"]);
-    expect(run(["requirements", "ui"], dir, {}).out).toContain("Load: skill `trama-req-ui`");
+    expect(run(["model", "show", "requirements/ui"], dir, {}).out).toContain("Load: skill `trama-req-ui`");
   });
 
-  test("a skills update moves each single-file Area into its folder, keeping the text and the references, and leaves an Area that already has a folder", () => {
+  test("a project edit moves each single-file Area into its folder, keeping the text and the references, and leaves an Area that already has a folder", () => {
     const task = newTask(p, { title: "Badge", refs: ["order/Paid", "requirements/ui#order/Paid"], technical: false });
     rmSync(join(p.dir, "requirements"), { recursive: true });
     mkdirSync(join(p.dir, "requirements"));
@@ -509,7 +508,7 @@ describe("Tasks and generated skills", () => {
     writeFileSync(old("data"), UI);
     writeArea("data", UI_AREA);
 
-    const out = run(["skills", "update"], dir, {}).out;
+    const out = run(["project", "edit"], dir, {}).out;
     expect(out).toContain("Converted 2 single-file Requirement Area(s)");
     expect(out).toContain("tech, ui");
     expect(out).toContain("Left 1 single-file Requirement Area(s) as they were: data (requirements/data/ already exists)");
@@ -521,10 +520,10 @@ describe("Tasks and generated skills", () => {
     expect(run(["task", "show", task.id], dir, {}).out).toContain("`requirements/ui#order/Paid`\n  > Interface, order/Paid:\n  > Show a green badge.");
   });
 
-  test("init and a skills update without requirements/ create the five starting Areas as folders with only area.md, valid, and no Requirement skills", () => {
+  test("project new and a project edit without requirements/ create the five starting Areas as folders with only area.md, valid, and no Requirement skills", () => {
     const fresh = mkdtempSync(join(tmpdir(), "trama-init-"));
     try {
-      expect(run(["init"], fresh, {}).exit).toBe(0);
+      expect(run(["project", "new"], fresh, {}).exit).toBe(0);
       const project = loadProject(projectAt(fresh));
       expect(project.areas.map((a) => [a.id, a.file, a.fragments.length])).toEqual(
         ["data", "quality", "rules", "tech", "ui"].map((id) => [id, `requirements/${id}/area.md`, 0]),
@@ -535,7 +534,7 @@ describe("Tasks and generated skills", () => {
       expect(existsSync(join(fresh, ".agents/skills/trama-req-ui"))).toBe(false);
 
       rmSync(join(fresh, ".trama/requirements"), { recursive: true });
-      expect(run(["skills", "update"], fresh, {}).exit).toBe(0);
+      expect(run(["project", "edit"], fresh, {}).exit).toBe(0);
       expect(readdirSync(join(fresh, ".trama/requirements")).sort()).toEqual(["data", "quality", "rules", "tech", "ui"]);
       expect(readdirSync(join(fresh, ".trama/requirements/tech"))).toEqual(["area.md"]);
     } finally {

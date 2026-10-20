@@ -25,7 +25,7 @@ export function projectAt(root: string): Project {
 export function findProject(start: string): Project {
   for (let dir = resolve(start); ; dir = dirname(dir)) {
     if (existsSync(join(dir, TRAMA_DIR)) && statSync(join(dir, TRAMA_DIR)).isDirectory()) return projectAt(dir);
-    if (dirname(dir) === dir) throw new TramaError(`No ${TRAMA_DIR}/ found in ${resolve(start)} or any parent. Run "trama init".`);
+    if (dirname(dir) === dir) throw new TramaError(`No ${TRAMA_DIR}/ found in ${resolve(start)} or any parent. Run "trama project new".`);
   }
 }
 

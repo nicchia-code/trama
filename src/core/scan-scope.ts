@@ -8,7 +8,7 @@ export type ScanReason = "changed" | "removed, its container" | "leads into a ch
 
 export const SCAN_REASONS: readonly ScanReason[] = ["changed", "removed, its container", "leads into a change"];
 
-/** One reference a targeted scan compares with the code, written as `--ref` takes it, and why it is there. */
+/** One reference a targeted scan compares with the code, written as `refs` takes it, and why it is there. */
 export interface ScanScopeEntry {
   ref: string;
   reason: ScanReason;
@@ -99,7 +99,7 @@ export function scanScope(before: ProjectModel, after: ProjectModel): ScanScopeE
 /** The kinds of Model element a Proposal can remove. */
 export type RemovedKind = "feature" | "actor" | "machine" | "state" | "transition" | "event";
 
-/** A Model element a Proposal removes: `ref` as `--ref` names it, `container` its nearest container that still exists, or null for a Feature or an Actor. */
+/** A Model element a Proposal removes: `ref` as `refs` names it, `container` its nearest container that still exists, or null for a Feature or an Actor. */
 export interface RemovedElement {
   ref: string;
   kind: RemovedKind;
@@ -207,7 +207,7 @@ export function closeScope(model: Model, changed: ReadonlyMap<string, ScanReason
     .map(([ref, reason]) => ({ ref, reason }));
 }
 
-/** A State's Transitions grouped by Event, as `--ref` names them, each group as comparable text. */
+/** A State's Transitions grouped by Event, as `refs` names them, each group as comparable text. */
 function transitionGroups(state: State): Map<string, string> {
   const groups = new Map<string, { target: string; prose: string }[]>();
   for (const t of state.transitions) {

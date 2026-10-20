@@ -36,8 +36,9 @@ afterEach(async () => {
 });
 
 test("--job requires an automatic resolution", () => {
-  expect(() => run(["proposal", "new", "Resolve", "--job", "job-1"], projectRoot, {})).toThrow(/--job can only be used with --automatic --resolution/);
-  expect(() => run(["proposal", "new", "Resolve", "--automatic", "--job", "job-1"], projectRoot, {})).toThrow(/--job can only be used with --automatic --resolution/);
+  const job = (input: object) => run(["proposal", "new", "--input", JSON.stringify({ title: "Resolve", ...input })], projectRoot, {});
+  expect(() => job({ job: "job-1" })).toThrow(/job: applies only with automatic/);
+  expect(() => job({ kind: "resolution", job: "job-1" })).toThrow(/job: applies only with automatic/);
 });
 
 test("an automatic resolution draft relays its proposal and job ids without persisting the job", async () => {
@@ -45,7 +46,7 @@ test("an automatic resolution draft relays its proposal and job ids without pers
   const received = new Promise<Record<string, unknown>>((resolve) => { receive = resolve; });
   server = await createQuestionServer({ project: projectAt(projectRoot), runtimeDir, handler: async () => ({ status: "unavailable", reason: "No project coordinator is available." }), onCoordinatorMessage: receive });
 
-  const result = run(["proposal", "new", "Resolve", "--resolution", "--automatic", "--job", "job-123", "--json"], projectRoot, {});
+  const result = run(["proposal", "new", "--json", "--input", JSON.stringify({ title: "Resolve", kind: "resolution", automatic: true, job: "job-123" })], projectRoot, {});
   const output: unknown = JSON.parse(result.out);
   if (output === null || typeof output !== "object" || !("id" in output) || typeof output.id !== "string") throw new Error("CLI did not return a proposal id");
   const id = output.id;
@@ -57,7 +58,7 @@ test("an automatic resolution draft relays its proposal and job ids without pers
 });
 
 test("without a live editor, the automatic resolution draft still exists", () => {
-  const result = run(["proposal", "new", "Resolve", "--resolution", "--automatic", "--job", "job-456", "--json"], projectRoot, {});
+  const result = run(["proposal", "new", "--json", "--input", JSON.stringify({ title: "Resolve", kind: "resolution", automatic: true, job: "job-456" })], projectRoot, {});
   expect(result.exit).toBe(0);
   const output: unknown = JSON.parse(result.out);
   if (output === null || typeof output !== "object" || !("id" in output) || typeof output.id !== "string") throw new Error("CLI did not return a proposal id");
@@ -75,7 +76,7 @@ test("handing an automatic resolution over relays its id to the coordinator", as
   const proposal = newProposal(project, "Resolve", "", { kind: "resolution", automatic: true });
   resolveDriftInProposal(project, proposal.id, finding.id, { decision: "fix-code", option: 1 });
 
-  expect(run(["proposal", "submit", proposal.id], projectRoot, {}).exit).toBe(0);
+  expect(run(["proposal", "move", proposal.id, "open"], projectRoot, {}).exit).toBe(0);
   await settleCoordinatorMessages();
   expect(received).toEqual([{ type: "proposal-submitted", proposal: proposal.id }]);
 });

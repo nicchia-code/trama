@@ -48,7 +48,7 @@ export function onCursorChatEvent(listener: (event: CursorChatEvent) => void): v
   return { dispose: () => listeners.delete(listener) };
 }
 
-/** A hook forwarded by `trama cursor-hook`. Hooks of conversations that are not Trama's produce nothing; the question tool's check only answers whether this window knows the conversation as Trama's. */
+/** A hook forwarded by `trama hook cursor`. Hooks of conversations that are not Trama's produce nothing; the question tool's check only answers whether this window knows the conversation as Trama's. */
 export function receiveCursorHook(hook: CursorHook): boolean {
   if (hook.hook === "preToolUse") return conversations.isTrama(hook.conversation);
   const event = conversations.translate(hook);

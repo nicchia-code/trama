@@ -145,7 +145,7 @@ const NO_CHANGES = " (no changes)";
 const blockedMarks = (blockers: Blocker[], numbers: ShortNumbers) =>
   blockers.map((b) => (b.kind === "drift" ? ` (blocked by Drift ${numbers.name("drift", b.drift)})` : ` (waiting for Task ${numbers.name("task", b.task)})`)).join("");
 
-const taskSummary = (t: Task, blocked: Map<string, Blocker[]>, numbers: ShortNumbers): TaskSummary => ({ id: t.id, number: numbers.label("task", t.id), title: t.title, column: t.data.column, technical: t.data.technical, refs: t.data.refs, drift: t.data.drift, proposal: t.data.proposal, agent: t.data.agent, unchanged: t.data.unchanged, blockedBy: blocked.get(t.id) ?? [] });
+export const taskSummary = (t: Task, blocked: Map<string, Blocker[]>, numbers: ShortNumbers): TaskSummary => ({ id: t.id, number: numbers.label("task", t.id), title: t.title, column: t.data.column, technical: t.data.technical, refs: t.data.refs, drift: t.data.drift, proposal: t.data.proposal, agent: t.data.agent, unchanged: t.data.unchanged, blockedBy: blocked.get(t.id) ?? [] });
 
 /** The Task's text with, right after its title, the line that says it was closed without changes and its check note. */
 function withCheckNote(task: Task): string {
@@ -171,7 +171,7 @@ export function describeRef(project: ProjectModel, ref: string, full = false): s
     case "actor":
       return `${el.actor.name}${dash(el.actor.description)}\nEvents: ${el.actor.events.map((e) => e.name).join(", ") || "_none_"}`;
     case "machine":
-      if (!full) return `${el.machine.name}${dash(el.machine.description)}\nUse \`trama machine ${el.machine.id}\` for the full State tree.`;
+      if (!full) return `${el.machine.name}${dash(el.machine.description)}\nUse \`trama model show ${el.machine.id}\` for the full State tree.`;
       return [
         `${el.machine.name} (machine \`${el.machine.id}\`, feature \`${el.machine.feature}\`)`,
         el.machine.description,
@@ -283,17 +283,18 @@ export function taskShowView(p: Project, task: Task): Result {
 const taskLine = (t: Task, blocked: Map<string, Blocker[]>, numbers: ShortNumbers) =>
   `- ${numbers.name("task", t.id)} ${t.title}${t.data.technical ? " (technical)" : ""}${t.data.proposal ? ` (Proposal ${numbers.name("proposal", t.data.proposal)})` : ""}${t.data.agent ? WORKING : ""}${t.data.unchanged !== null ? NO_CHANGES : ""}${blockedMarks(blocked.get(t.id) ?? [], numbers)}`;
 
-export function taskListView(p: Project, column?: string): Result {
+/** The Tasks by column, flat, filtered by `column` and by the identities in `ids` when given. */
+export function taskListView(p: Project, column?: string, ids?: ReadonlySet<string>): Result {
   const blocked = blockedTasks(p);
   const numbers = syncShortNumbers(p);
-  const tasks = listTasks(p).filter((t) => !column || t.data.column === column);
+  const tasks = listTasks(p).filter((t) => (!column || t.data.column === column) && (ids === undefined || ids.has(t.id)));
   const md = COLUMNS.filter((c) => !column || c === column)
     .map((c) => `## ${c}\n${bullets(tasks.filter((t) => t.data.column === c).map((t) => taskLine(t, blocked, numbers)))}`)
     .join("\n\n");
   return { md: `# Tasks\n\n${md}`, json: { tasks: tasks.map((t) => taskSummary(t, blocked, numbers)) } };
 }
 
-/** The Proposals a `task next` answer is about, as its line names them: `in Proposal P3`, `outside Proposals P1, P2`, or nothing. */
+/** The Proposals a `task list` answer with `runnable` is about, as its line names them: `in Proposal P3`, `outside Proposals P1, P2`, or nothing. */
 function proposalScope(p: Project, numbers: ShortNumbers, filter: ProposalFilter): string {
   const named = (ids: string[]) => ids.map((id) => numbers.name("proposal", getProposal(p, id).id)).join(", ");
   if (filter.include?.length) return ` in Proposal${filter.include.length === 1 ? "" : "s"} ${named(filter.include)}`;
@@ -305,7 +306,7 @@ function proposalScope(p: Project, numbers: ShortNumbers, filter: ProposalFilter
  * The next runnable Task, or with `batch` the group of a parallel run, one Task per line; or the statement that
  * there is none with the Tasks in To do that wait, the same either way. Moves nothing.
  */
-export function taskNextView(p: Project, filter: ProposalFilter = {}, batch = false, max?: number, taskIds?: string[], timing?: { origin: AgentOrigin; job?: string }): Result {
+export function taskNextView(p: Project, filter: ProposalFilter = {}, batch = false, max?: number, taskIds?: string[], timing?: { origin: AgentOrigin; job?: string }, withHeldBack = false): Result {
   const queue = nextTask(p, filter, max, taskIds);
   if (batch && timing) recordTiming(p, timing.origin, { event: "queue", requested: max ?? BATCH_DEFAULT, given: queue.batch.length, remaining: queue.remaining }, { job: timing.job });
   const { next, waiting } = queue;
@@ -314,10 +315,16 @@ export function taskNextView(p: Project, filter: ProposalFilter = {}, batch = fa
   const scope = proposalScope(p, numbers, filter);
   const waitingJson = waiting.map((w) => taskSummary(w.task, blocked, numbers));
   const brief = (t: Task) => ({ id: t.id, number: numbers.label("task", t.id), title: t.title });
-  if (next && batch) return { md: queue.batch.map((t) => `${numbers.name("task", t.id)} ${t.title}`).join("\n"), json: { batch: queue.batch.map(brief), waiting: waitingJson } };
-  if (next) return { md: `Next Task${scope}: ${numbers.name("task", next.id)} ${next.title}`, json: { next: brief(next), waiting: waitingJson } };
+  const held = {
+    md: withHeldBack
+      ? `\n\n## Held back\n\n${queue.heldBack.length === 0 ? "_None._" : queue.heldBack.map((h) => `- ${numbers.name("task", h.task.id)} ${h.task.title} (overlaps ${h.overlaps.map((o) => numbers.name("task", o.id)).join(", ")})`).join("\n")}`
+      : "",
+    json: withHeldBack ? { heldBack: queue.heldBack.map((h) => ({ ...brief(h.task), overlaps: h.overlaps.map((o) => ({ id: o.id, number: numbers.label("task", o.id) })) })) } : {},
+  };
+  if (next && batch) return { md: queue.batch.map((t) => `${numbers.name("task", t.id)} ${t.title}`).join("\n") + held.md, json: { batch: queue.batch.map(brief), waiting: waitingJson, ...held.json } };
+  if (next) return { md: `Next Task${scope}: ${numbers.name("task", next.id)} ${next.title}${held.md}`, json: { next: brief(next), waiting: waitingJson, ...held.json } };
   const md = [`No Task is runnable${scope}.`, ...(waiting.length > 0 ? ["", "Still in To do:", ...waiting.map((w) => taskLine(w.task, blocked, numbers))] : [])].join("\n");
-  return { md, json: { next: null, waiting: waitingJson } };
+  return { md: md + held.md, json: { next: null, waiting: waitingJson, ...held.json } };
 }
 
 export function driftShowView(p: Project, drift: Drift): Result {
@@ -409,7 +416,7 @@ export function driftListView(p: Project, all: boolean, refs: string[] = []): Re
 
 /** The Tasks a new Drift with these references and this origin would block, by number or identity and title; writes nothing. */
 export function driftCandidatesView(p: Project, refs: string[], originArg: string | undefined): Result {
-  if (refs.length === 0) throw new UsageError("Name at least one reference with --ref");
+  if (refs.length === 0) throw new UsageError("Name at least one reference in `refs`");
   const numbers = syncShortNumbers(p);
   let candidates: Task[];
   try {

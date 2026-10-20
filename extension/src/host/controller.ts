@@ -888,7 +888,7 @@ export class Controller implements vscode.Disposable {
       guarded,
       "run",
       undefined,
-      { id: job, origin: "automatic", filesDrifts: true, model: next.planned.run, advisorStorage: this.globalStorageUri },
+      { id: job, origin: "automatic", filesDrifts: true, severalTasks: true, model: next.planned.run, advisorStorage: this.globalStorageUri },
     ));
     if (delivered) {
       // The hold keeps the project between the Runs of the sequence; the creation of its last Run releases it, as before.
@@ -967,7 +967,7 @@ export class Controller implements vscode.Disposable {
         () => true,
         "run",
         undefined,
-        { filesDrifts: true, model: planned.run, onEnd, advisorStorage: this.globalStorageUri },
+        { filesDrifts: true, severalTasks: true, model: planned.run, onEnd, advisorStorage: this.globalStorageUri },
       );
       return launched(result);
     } catch (error) {
@@ -1232,7 +1232,7 @@ export class Controller implements vscode.Disposable {
       const rememberScan = resolved.kind === "scan" && resolved.feature === undefined
         ? (startedAt: number) => rememberDeliveredScan(project, startedAt)
         : undefined;
-      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), model, advisorStorage: this.globalStorageUri });
+      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), severalTasks: resolved.kind === "implement-all", model, advisorStorage: this.globalStorageUri });
       if (refused !== null) throw new TramaError(refused);
       return result;
     };

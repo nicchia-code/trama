@@ -34,7 +34,7 @@ afterEach(async () => {
 test("a Task filed by an agent in a Trama terminal is relayed with its holder and never waits", async () => {
   const received: Record<string, unknown>[] = [];
   server = await createQuestionServer({ project: projectAt(projectRoot), runtimeDir, handler: async () => ({ status: "unavailable", reason: "No project coordinator is available." }), onCoordinatorMessage: (message) => { received.push(message); } });
-  const result = run(["task", "new", "Filed by agent", "--technical", "--json"], projectRoot, { TRAMA_AGENT: "1", TRAMA_TERMINAL: "abc123" });
+  const result = run(["task", "new", "--json", "--input", '{"title":"Filed by agent","technical":true}'], projectRoot, { TRAMA_AGENT: "1", TRAMA_TERMINAL: "abc123" });
   expect(result.exit).toBe(0);
   const id = (JSON.parse(result.out) as { id: string }).id;
   await settleCoordinatorMessages();
@@ -42,6 +42,6 @@ test("a Task filed by an agent in a Trama terminal is relayed with its holder an
 });
 
 test("a Task filed without an agent sends nothing, and without a live editor the command still succeeds", () => {
-  const result = run(["task", "new", "Filed by a developer", "--technical", "--json"], projectRoot, {});
+  const result = run(["task", "new", "--json", "--input", '{"title":"Filed by a developer","technical":true}'], projectRoot, {});
   expect(result.exit).toBe(0);
 });

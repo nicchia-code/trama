@@ -1,4 +1,8 @@
-/** Colours the canvas needs as plain `rgb()` strings, resolved from the `--dg-*` custom properties in diagram.css. */
+/**
+ * Colours the canvas needs as plain `rgb()` strings. Cytoscape cannot read CSS variables, so the canvas takes the panel's theme
+ * (the shadcn/ui zinc light or dark one, chosen by the class `dark` on the root) as the same zinc and Tailwind colours the
+ * components use: the 600 shade in the light theme and the 400 shade in the dark one.
+ */
 export interface Palette {
   fg: string;
   bg: string;
@@ -14,6 +18,14 @@ export interface Palette {
 
 type Rgba = [number, number, number, number];
 
+const hex = (value: string): string => {
+  const n = Number.parseInt(value.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+};
+
+const LIGHT = { fg: hex("#09090b"), bg: hex("#ffffff"), node: hex("#f4f4f5"), blue: hex("#2563eb"), red: hex("#dc2626"), purple: hex("#9333ea"), focus: hex("#2563eb") };
+const DARK = { fg: hex("#fafafa"), bg: hex("#09090b"), node: hex("#18181b"), blue: hex("#60a5fa"), red: hex("#f87171"), purple: hex("#c084fc"), focus: hex("#3b82f6") };
+
 function parse(color: string): Rgba {
   const nums = (/\(([^)]+)\)/.exec(color)?.[1] ?? "0 0 0").split(/[\s,/]+/).filter(Boolean).map(Number);
   return [nums[0] ?? 0, nums[1] ?? 0, nums[2] ?? 0, nums[3] ?? 1];
@@ -27,28 +39,13 @@ export function mix(a: string, b: string, t: number): string {
   return `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(bl)}, ${al})`;
 }
 
-export function readPalette(root: HTMLElement): Palette {
-  const probe = document.createElement("span");
-  probe.style.display = "none";
-  root.append(probe);
-  const color = (name: string) => {
-    probe.style.color = `var(${name})`;
-    return getComputedStyle(probe).color;
-  };
-  const fg = color("--dg-fg");
-  const bg = color("--dg-bg");
-  const palette: Palette = {
-    fg,
-    bg,
-    node: color("--dg-node"),
-    line: mix(fg, bg, 0.55),
-    muted: mix(fg, bg, 0.6),
-    blue: color("--dg-blue"),
-    red: color("--dg-red"),
-    purple: color("--dg-purple"),
-    focus: color("--dg-focus"),
+/** The colours of the panel's current theme, read from the class `dark` of the document root. */
+export function readPalette(root: HTMLElement = document.documentElement): Palette {
+  const base = root.ownerDocument.documentElement.classList.contains("dark") ? DARK : LIGHT;
+  return {
+    ...base,
+    line: mix(base.fg, base.bg, 0.55),
+    muted: mix(base.fg, base.bg, 0.6),
     font: getComputedStyle(root).fontFamily,
   };
-  probe.remove();
-  return palette;
 }

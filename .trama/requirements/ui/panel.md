@@ -4,7 +4,11 @@ description: "Usa sempre quando lavori sull'interfaccia: regole generali, pannel
 # Interfaccia generale e pannello
 
 ## General
-- Dove il pannello o la riga di comando nominano una Proposal, un Task o un Drift con il suo ID (schede della Board e righe dei Task dentro le altre schede, badge `blocked` e `waiting`, dettagli nel Diagramma, `trama board`, i comandi `list`, `show` e `next`, i messaggi dei comandi e i testi dei pulsanti, per esempio «Proposal P3 resolving Drifts awaits a decision»), mostrano il numero breve (`P3`, `T3`, `D3`) se la scheda ne ha uno e, solo se non ne ha (scheda chiusa, o Task Done senza numero, vedi `rules`), la sua identità permanente di otto caratteri. Mai tutti e due insieme. Il titolo resta accanto, come prima.
+- Il pannello ha il suo tema, non quello dell'editor: la palette di shadcn/ui con colore di base zinc e primario blu, in una versione chiara e una scura, scelte con `Theme` in Settings (`panel/Settings`). I colori con un significato (tag dei Task, pallini di stato, schede rosse dei Drift, schede gialle delle risoluzioni, bordo animato del Task preso) vengono dalla palette di Tailwind, con una tonalità per il chiaro e una per lo scuro, e restano leggibili in entrambi.
+- Ogni controllo è un componente di shadcn/ui: pulsanti `Button`, schede `Card`, badge e chip `Badge`, barra delle schede del pannello `Tabs`, modali e overlay `Dialog`, tendine `Select`, caselle `Checkbox`, tooltip `Tooltip`, fumetti `Popover`, campi con suggerimenti `Combobox`. Testi, tooltip, nomi accessibili, motivi di disabilitazione e comportamenti descritti negli altri Requisiti restano gli stessi.
+- Un tooltip è un `Tooltip` di shadcn/ui: compare al passaggio del puntatore e al fuoco da tastiera, si chiude con `Esc`, e il suo testo è anche nella descrizione accessibile del controllo. Un controllo disabilitato mostra il suo tooltip lo stesso.
+- Forme, spaziature, stati, movimento e profondità sono uguali in tutto il pannello: raggi e spaziature del tema di shadcn/ui; hover, fuoco (con l'anello `ring` sempre visibile da tastiera), disabilitato e selezionato con gli stili dei componenti; modali, tendine, fumetti e dettagli che si aprono e si chiudono con transizioni brevi, tolte quando il sistema chiede movimento ridotto; ombre leggere sulle schede e più marcate su modali, menu e fumetti.
+- Dove il pannello o la riga di comando nominano una Proposal, un Task o un Drift con il suo ID (schede della Board e righe dei Task dentro le altre schede, badge `blocked` e `waiting`, dettagli nel Diagramma, `trama project show`, i comandi `list` e `show`, i messaggi dei comandi e i testi dei pulsanti, per esempio «Proposal P3 resolving Drifts awaits a decision»), mostrano il numero breve (`P3`, `T3`, `D3`) se la scheda ne ha uno e, solo se non ne ha (scheda chiusa, o Task Done senza numero, vedi `rules`), la sua identità permanente di otto caratteri. Mai tutti e due insieme. Il titolo resta accanto, come prima.
 - Nel pannello il numero breve e l'identità permanente stanno nello stesso punto, con lo stesso carattere a spaziatura fissa; li distinguono il tooltip e il nome accessibile, «Short number (temporary)» o «Permanent ID», così il modo in cui sono scritti non è l'unico segnale.
 
 ## panel
@@ -19,29 +23,29 @@ description: "Usa sempre quando lavori sull'interfaccia: regole generali, pannel
 - All prose the panel shows is rendered as Markdown, in every tab: the descriptions of the System, Features, Machines, States, Actors and Events in the Diagram's details, the body of a Proposal, the introduction of an Area, la descrizione di un frammento and the text of every Requirement section (also the earlier text of a changed section), the texts of a Drift and the body of a Task. Titles, IDs, labels and button texts stay plain. Where an Event description sits in a one-line list entry, only inline formatting is rendered.
 - Supported: paragraphs, headings, bold, italic, inline code, fenced code blocks, bulleted and numbered lists (nested too), block quotes and links. Not supported: tables and images; what is not supported shows as written. Raw HTML is never interpreted: it shows as text.
 - A link opens in the system browser through the editor only when it is an http or https address, and its tooltip shows the address. Any other link shows its label as plain text.
-- Headings inside a rendered text are never larger than the heading of the element that holds the text, so a text cannot compete with the panel's own headings. Colours and fonts follow the editor's theme; code uses the editor's monospace font.
+- Headings inside a rendered text are never larger than the heading of the element that holds the text, so a text cannot compete with the panel's own headings. Colours follow the panel's theme; text uses the editor's UI font and code the editor's monospace font.
 - Rendered text never makes the panel scroll sideways: long words wrap and a long line of a code block scrolls inside its own block. Text stays selectable.
 - Malformed Markdown never prevents a text from showing: it is shown as written, as far as it cannot be read as Markdown.
 - L'overlay delle domande segue le stesse regole: il testo della domanda, il contesto, la descrizione e i dettagli di ogni opzione sono resi come Markdown; le etichette delle opzioni, i pulsanti e la risposta libera mostrata nel riepilogo restano testo semplice.
 - Ogni pulsante con testo della Board ha, oltre al testo, un'icona a sinistra del testo: il pulsante della barra, quelli in fondo alle colonne, quelli delle schede (anche dentro una scheda di risoluzione) e `Close` degli avvisi. I chip dei riferimenti, i tag dei Task, i badge `blocked`, `waiting` e `Resolving`, le righe dei Drift di una scheda di risoluzione, le righe dei Task dentro le altre schede e il menu del periodo di Done restano senza icona, salvo l'icona `link` dei Task bloccati da più Drift (vedi `panel/Board`).
 - Le stesse azioni hanno la stessa icona anche nel Diagramma: `Scan` nella sua barra, `Approve`, `Reject` e `Dismiss Drift` nei dettagli. Gli altri controlli del Diagramma e le altre schede del pannello non cambiano.
-- Le icone sono glifi codicon, una per azione:
-  - `Run all` e `Run` di un Task: `play`.
-  - `+ Add Work Item`: `add`.
-  - `Resolve all` e `Resolve` di un Drift: `wand`.
-  - `Scan System` nella Board e `Scan` nel Diagramma: `search`.
-  - `View on diagram`: `type-hierarchy`.
-  - `View requirements` e `View requirement`: `checklist`.
-  - `Approve`: `check`. `Reject`: `close`.
-  - `Dismiss Drift`: `circle-slash`.
-  - `Open` di un Task: `go-to-file`.
-  - `Show details`: `chevron-down`; `Hide details`: `chevron-up`.
-  - `Close` di un avviso, della modale di una voce di History e della modale del corpo di una Proposal: `close`.
-  - La «i» di una voce di History: `info`, a sola icona.
+- Le icone sono icone lucide, una per azione:
+  - `Run all` e `Run` di un Task: `Play`.
+  - `+ Add Work Item`: `Plus`.
+  - `Resolve all` e `Resolve` di un Drift: `WandSparkles`.
+  - `Scan System` nella Board e `Scan` nel Diagramma: `Search`.
+  - `View on diagram`: `Network`.
+  - `View requirements` e `View requirement`: `ListChecks`.
+  - `Approve`: `Check`. `Reject`: `X`.
+  - `Dismiss Drift`: `Ban`.
+  - `Open` di un Task: `FileInput`.
+  - `Show details`: `ChevronDown`; `Hide details`: `ChevronUp`.
+  - `Close` di un avviso, della modale di una voce di History e della modale del corpo di una Proposal: `X`.
+  - La «i» di una voce di History: `Info`, a sola icona.
 - L'icona è grande 16 px, come quelle in fondo alle colonne, e resta a sinistra del testo anche quando lo spazio è poco: il testo non sparisce mai e il pulsante va a capo o si stringe come senza icona. Quando l'etichetta cambia (`Scan System · N`, `Show details` che diventa `Hide details`) l'icona resta, e cambia solo dove la mappa dà un'icona diversa.
 - L'icona ha il colore del testo del pulsante, anche nei pulsanti primari e in quelli disabilitati; nessuna icona ha un colore proprio.
 - L'icona è decorativa: testo, tooltip, nome accessibile e motivi di disabilitazione di ogni pulsante restano quelli di prima.
-- La chevron della colonna History è il glifo codicon `chevron-right` quando la colonna è aperta e `chevron-left` quando è collassata, a 16 px come le altre icone, al posto dei caratteri `›` e `‹`. Resta un pulsante a sola icona, con gli stessi tooltip e nome accessibile.
+- La chevron della colonna History è l'icona lucide `ChevronRight` quando la colonna è aperta e `ChevronLeft` quando è collassata, a 16 px come le altre icone, al posto dei caratteri `›` e `‹`. Resta un pulsante a sola icona, con gli stessi tooltip e nome accessibile.
 
 ## panel/Requirements
 - Ogni Area mostra titolo, descrizione e introduzione, poi i suoi frammenti nell'ordine dei nomi dei file; ogni frammento è un gruppo con il titolo, il nome del file (`<frammento>.md`) in testo secondario, la descrizione e sotto le sue sezioni. La sezione General, in qualunque frammento stia, compare per prima nel suo frammento.

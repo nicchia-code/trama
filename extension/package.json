@@ -82,6 +82,22 @@
     "configuration": {
       "title": "Trama",
       "properties": {
+        "trama.theme": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "light",
+            "dark"
+          ],
+          "enumDescriptions": [
+            "Follow the editor's theme (the default).",
+            "Always light.",
+            "Always dark."
+          ],
+          "default": "auto",
+          "scope": "application",
+          "markdownDescription": "The colours of the Trama panel. Auto (the default) follows the editor: light with a light theme, dark with a dark one, high contrast included. Light and Dark keep the panel in that theme."
+        },
         "trama.agent": {
           "type": "string",
           "enum": [
@@ -191,6 +207,12 @@
           "default": false,
           "scope": "application",
           "markdownDescription": "Experimental. Only with omp as the agent. On: during every Run, omp's advisor checks the code the agent reads and writes against the Model and the Requirements, tells the agent when its work drifts and files a Drift for a difference in existing code; every scan is off (Scan buttons, the pre-flight and the end-of-run scan). The advisor uses the Scan model. Off (the default), or with another agent: scans work as usual. Trama's advisors live in `.omp/WATCHDOG.yml`, installed in every project: in an omp session you start yourself with the advisor on, they replace omp's default advisor and stay silent."
+        },
+        "trama.experimentalParallelExecution": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Experimental. Only for runs over several Tasks, with an agent that has sub-agents. On: the agent reads the Tasks before the run and may start together Tasks that Trama would keep apart because they concern the same thing, or hold a Task until another is done, giving a reason for each choice; a sub-agent that finds its Task touching the same things as another stops, and the agent resumes it later. Off (the default): Trama never gives two Tasks that concern the same thing at once. Only agents started by Trama follow it."
         }
       }
     }

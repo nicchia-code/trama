@@ -1,10 +1,9 @@
 import { TramaError } from "../core/errors";
 import { analyze, findPaths, lineage, type Warning } from "../core/graph";
 import { flattenStates, formatDiagnostic } from "../core/model";
-import { receivers, resolveRef } from "../core/refs";
-import { warningsText } from "../core/proposals";
+import { type Element, receivers, resolveRef } from "../core/refs";
 import type { ProjectModel } from "../core/requirements";
-import type { Diagnostic, Machine, Model, State } from "../core/types";
+import type { Actor, Diagnostic, Machine, Model, State } from "../core/types";
 import { bullets, dash, eventKey, firstLine, marker, modelNote, prose, type Result } from "./result";
 
 function machineOf(model: Model, id: string): Machine {
@@ -72,13 +71,13 @@ function renderStates(states: State[], depth: number): string[] {
   ]);
 }
 
-/** The State tree of a Machine, the same lines `trama machine` prints under States. */
+/** The State tree of a Machine, the same lines `trama model show <machine>` prints under States. */
 export function stateTreeLines(states: State[]): string[] {
   return renderStates(states, 0);
 }
 
-/** One line per Event of a Machine, with the States that receive it. */
-export function machineReceiverLines(model: Model, machine: Machine): string[] {
+/** One line per Event of a Machine or an Actor, with the States that receive it. */
+export function machineReceiverLines(model: Model, machine: Machine | Actor): string[] {
   return machine.events.map((e) => {
     const received = receivers(model, machine.id, e.name);
     const who = received.map((r) => `${r.machine.id}/${r.state.name} → ${r.transition.target}`).join("; ") || "_nobody_";
@@ -92,7 +91,7 @@ export function outgoingLines(machine: Machine, state: State): string[] {
   return own.map((o) => `- \`${eventKey(o.t)}\` → ${o.t.target}${prose(o.t)}${o.from === state.name ? "" : ` _(inherited from ${o.from})_`}`);
 }
 
-/** The Transitions that react to an Event, the same lines `trama event` prints. */
+/** The Transitions that react to an Event, the same lines `trama model show <owner.EVENT>` prints. */
 export function reactionLines(model: Model, ownerId: string, eventName: string): string[] {
   return receivers(model, ownerId, eventName).map((r) => `- ${r.machine.id}/${r.state.name} → ${r.transition.target}${prose(r.transition)}`);
 }
@@ -194,6 +193,24 @@ export function eventView(model: Model, ref: string): Result {
   };
 }
 
+export function actorView(model: Model, id: string): Result {
+  const actor = model.actors.get(id);
+  if (!actor) throw new TramaError(`Unknown Actor "${id}"`);
+  const events = actor.events.map((e) => ({
+    name: e.name,
+    description: e.description,
+    receivers: receivers(model, actor.id, e.name).map((r) => ({ machine: r.machine.id, state: r.state.name, target: r.transition.target, prose: r.transition.prose })),
+  }));
+  const md = [`# ${actor.name} (actor \`${actor.id}\`)`, "", actor.description, "", "## Events", bullets(machineReceiverLines(model, actor)), modelNote(model)].join("\n");
+  return { md, json: { id: actor.id, name: actor.name, description: actor.description, events } };
+}
+
+export function transitionView(el: Extract<Element, { kind: "transition" }>, model: Model): Result {
+  const lines = el.transitions.map((t) => `- → ${t.target}${prose(t)}`);
+  const md = [`# \`${el.ref}\``, "", `State \`${el.machine.id}/${el.state.name}\` reacts to \`${el.event}\`.`, "", "## Transitions", bullets(lines), modelNote(model)].join("\n");
+  return { md, json: { ref: el.ref, machine: el.machine.id, state: el.state.name, event: el.event, transitions: el.transitions.map((t) => ({ target: t.target, prose: t.prose })) } };
+}
+
 export function pathsView(model: Model, machineId: string, from: string, to: string, max: number): Result {
   const machine = machineOf(model, machineId);
   const { paths, limited } = findPaths(machine, from, to, max);
@@ -211,15 +228,15 @@ export function pathsView(model: Model, machineId: string, from: string, to: str
   return { md, json: { machine: machineId, from, to, limited, paths } };
 }
 
-/** `extra` are the warnings about the project beyond the Model, such as fragments larger than 12 KB; they join a whole-Model analysis only. */
-export function analyzeView(model: Model, machineId?: string, extra: Warning[] = []): Result {
-  const warnings = [...analyze(model, machineId), ...(machineId === undefined ? extra : [])];
-  const md = [
-    `# Analysis${machineId ? ` of \`${machineId}\`` : ""}`,
-    "",
-    bullets(warnings.map((w) => `- [${w.kind}] ${w.message}`), "_No warnings._"),
-    modelNote(model),
-  ].join("\n");
+/** The Model's own warnings (and, for the whole System, `extra` ones such as fragments larger than 12 KB); an unknown `machineId` is refused. */
+export function modelWarnings(model: Model, machineId?: string, extra: Warning[] = []): Warning[] {
+  return [...analyze(model, machineId), ...(machineId === undefined ? extra : [])];
+}
+
+/** The analysis of one Machine as a briefing section: its warnings, as text and as JSON. */
+export function analyzeView(model: Model, machineId: string): Result {
+  const warnings = modelWarnings(model, machineId);
+  const md = [`# Analysis of \`${machineId}\``, "", bullets(warnings.map((w) => `- [${w.kind}] ${w.message}`), "_No warnings._"), modelNote(model)].join("\n");
   return { md, json: { warnings } };
 }
 
@@ -257,9 +274,13 @@ function firstMatchingLine(text: string, q: string): string {
   return text.split("\n").find((l) => l.toLowerCase().includes(q))?.trim() ?? text.trim();
 }
 
-/** Errors decide validity and the exit code; warnings are written after them, apart, and never change either. */
-export function validateView(diagnostics: Diagnostic[], subject: string, warnings: Diagnostic[] = []): Result {
+/**
+ * `trama model check`: the errors of the Model and its Requirements decide validity and the exit code; the warnings
+ * (unreachable States, dead ends, Events nobody receives, fragments larger than 12 KB) are written after them, apart, and change neither.
+ */
+export function checkView(diagnostics: Diagnostic[], warnings: Warning[], machineId?: string): Result {
   const ok = diagnostics.length === 0;
-  const md = ok ? `${subject} are valid.` : [`${subject} have ${diagnostics.length} error(s):`, "", ...diagnostics.map((d) => `- ${formatDiagnostic(d)}`)].join("\n");
-  return { md: `${md}${warningsText(warnings)}`, json: { valid: ok, errors: diagnostics, warnings }, exit: ok ? 0 : 1 };
+  const errors = ok ? "The Model and its Requirements are valid." : [`The Model and its Requirements have ${diagnostics.length} error(s):`, "", ...diagnostics.map((d) => `- ${formatDiagnostic(d)}`)].join("\n");
+  const apart = warnings.length === 0 ? "" : `\n\n${warnings.length} warning(s)${machineId === undefined ? "" : ` of \`${machineId}\``}, which never fail the check:\n${warnings.map((w) => `- [${w.kind}] ${w.message}`).join("\n")}`;
+  return { md: `${errors}${apart}`, json: { valid: ok, errors: diagnostics, warnings }, exit: ok ? 0 : 1 };
 }

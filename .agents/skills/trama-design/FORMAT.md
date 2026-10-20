@@ -1,6 +1,6 @@
 # Model and Requirements file format (quick reference)
 
-Model paths below are relative to `.trama/model/`; Requirement files are `requirements/<area>/area.md` and `requirements/<area>/<fragment>.md` (in `.trama/requirements/`). `trama validate --proposal <id>` checks all of this.
+Model paths below are relative to `.trama/model/`; Requirement files are `requirements/<area>/area.md` and `requirements/<area>/<fragment>.md` (in `.trama/requirements/`). The hand-over (`trama proposal move <id> open`) and `trama proposal show <id>` check all of this.
 
 ```
 system.md              the System
@@ -82,7 +82,7 @@ Emitted when the order leaves Draft.
 - Event names: `UPPER_SNAKE_CASE`, unique within their owner. Under `## Events`, each `###` is an Event the Machine emits; the prose says when.
 - Actors have no States and no Transitions. Nothing in the Model points *to* an Actor; say in an Event's prose what the outside world does in response.
 
-## Element references (for `--ref` and CLI arguments)
+## Element references (for `refs` and CLI arguments)
 
 `checkout` (Feature), `order` (Machine), `user` (Actor), `order/Paid` (State, any depth), `order/Paid/user.CANCEL` (Transitions on that Event), `user.CANCEL` (Event).
 
@@ -121,18 +121,18 @@ description: Use when building the checkout and order screens.
 - A fragment's name is kebab-case (`area` is reserved). Front matter with `description` (required): when an agent needs this fragment. One H1 with the fragment's title. **No prose before the first section**; then only sections.
 - `## General`: applies everywhere. Every other `##` is titled with exactly one element reference (see above) and applies to that element and everything inside it (a Machine's sections apply to all its States; a Feature's to all its Machines).
 - A section must name an element that exists once the Proposal is applied, and appear **once in the whole Area**, in one fragment. Anything under it (lists, `###`, code) is free text.
-- No subfolders in an Area. A `.md` file directly in `requirements/` is an error: `trama skills update` converts it into a folder with `area.md` and one fragment, `main.md`.
+- No subfolders in an Area. A `.md` file directly in `requirements/` is an error: `trama project edit` converts it into a folder with `area.md` and one fragment, `main.md`.
 - Reference a Requirement from a Task or Drift with `requirements/<area>` or `requirements/<area>#<section>`, for example `requirements/ui#order/Paid` or `requirements/ui#General`. The fragment is never part of the reference: a section is unique in its Area.
 
 ### Generated skills and when to split a fragment
 
 - Trama generates the `trama-req-*` skills in one of two modes, the same for every Area. The **budget** is the sum, over the fragments with at least one non-empty section, of the characters of `trama-req-<area>-<fragment>` and of the fragment's description. Up to **4,000** characters: one skill per fragment, `trama-req-<area>-<fragment>`, with the fragment's description. Beyond: one **index** skill per Area, `trama-req-<area>`, with the Area's description, its General section in full and a list of its fragments, each in its own file next to the index.
-- `trama validate` also prints **warnings**, which never fail validation or the hand-over: a fragment larger than **12 KB** (12,288 bytes of the file, front matter included), and, with `--proposal`, the switch between the two modes the Proposal would cause.
+- `trama model check` also prints **warnings**, which never fail validation or the hand-over: a fragment larger than **12 KB** (12,288 bytes of the file, front matter included). `trama proposal move <id> open` also warns of the switch between the two modes the Proposal would cause.
 - When a Proposal writes into a fragment that is or becomes larger than 12 KB, split it in the same Proposal before handing it over: cut where it suits the project (usually by Feature or by a group of nearby Machines), give every new fragment a name and a description that say when it is needed, and move the sections without changing their text. Mind the budget: prefer a few medium fragments to many tiny ones.
 
 ## Specs (`specs.yaml`)
 
-The Specs are the project's technologies and their constraints, in one file beside `model/` and `requirements/`: `.trama/specs.yaml` in the project, and `specs.yaml` in a Proposal folder. Write it with `trama proposal edit <id> specs.yaml`, which prints the path, filled with the current Specs (empty when there are none). Remove it with `trama proposal delete <id> specs.yaml`. `trama proposal show` lists its changes field by field.
+The Specs are the project's technologies and their constraints, in one file beside `model/` and `requirements/`: `.trama/specs.yaml` in the project, and `specs.yaml` in a Proposal folder. Write it with `trama proposal edit <id> --input -` and `{"edit":["specs.yaml"]}`, which prints the path, filled with the current Specs (empty when there are none). Remove it with `{"delete":["specs.yaml"]}`. `trama proposal show` lists its changes field by field.
 
 Every field is optional and is a list of entries, except `notes`, which is Markdown text. Fields, in this order: `languages`, `frameworks`, `data`, `testing`, `ci`, `repository`, `deployment`, `cloud`, `infrastructure`, `notes`.
 
@@ -155,9 +155,9 @@ notes: |
 - `chosenByAgent`: the reason when the agent picked the technology itself, not the developer. Leave it out for what the developer named or confirmed.
 - Write Specs only when the change alters the project's technologies (a language, framework, datastore, service, tool, or a version of them). Behaviour and screens stay in the Model and Requirements.
 - A change to a field is in the scope as `specs#<field>` (or `specs` for the whole Specs). A Requirement or Task refers to it the same way: `specs#frameworks`. A Task that covers a changed field names it in `refs`; a Task whose only references are Specs must be `technical: true`, because a non-technical Task must name a Model element.
-- `trama validate` reports each error with its field and entry; fix them in the Proposal before handing it over.
+- `trama proposal move <id> open` reports each error with its field and entry; fix them in the Proposal before handing it over.
 
 ## Tasks of a Proposal and Already present (`proposals/<id>-<slug>/`)
 
-- A Task is `tasks/<identity>-<slug>.md` in the Proposal folder, written with `trama proposal edit <id> tasks/<slug>.md`. Front matter: `technical` (default `false`) and `refs` (a list of element references and Requirement sections). No other field. H1: the title. Body: prose.
+- A Task is `tasks/<identity>-<slug>.md` in the Proposal folder, written with `trama proposal edit <id> --input -` and `{"edit":["tasks/<slug>.md"]}`. Front matter: `technical` (default `false`) and `refs` (a list of element references and Requirement sections). No other field. H1: the title. Body: prose.
 - `## Already present` in `proposal.md`: one line per element already implemented, ``- `<ref>` — <where in the code>``.

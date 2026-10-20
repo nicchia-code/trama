@@ -8,7 +8,7 @@ import { normalizeLf } from "./line-endings";
 import { type Project, readTextLf, sha256, writeFileEnsuringDir } from "./store";
 
 /*
- * The comparison registry: what a successful `trama compare file` archived, per code fingerprint. A reference counts as
+ * The comparison registry: what a successful `trama comparison move` archived, per code fingerprint. A reference counts as
  * compared when it, or an element it sits in, was archived on the same code and its text has not changed since.
  */
 
@@ -98,7 +98,7 @@ export function comparedRefs(p: Project, code: string): Record<string, string> {
   }
 }
 
-/** Records what a successful `trama compare file` archived under this code fingerprint, and forgets every other fingerprint. */
+/** Records what a successful `trama comparison move` archived under this code fingerprint, and forgets every other fingerprint. */
 export function recordComparison(p: Project, code: string, texts: Record<string, string>): void {
   const dir = comparedDir(p);
   // The folder ignores itself and everything in it, so the registry is never versioned.

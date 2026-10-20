@@ -15,7 +15,7 @@ const echo = join(import.meta.dir, "shell-argv-echo.mjs");
 // Empty is left out: Windows PowerShell 5.1 drops an empty argument passed to a program, and a prompt is never empty.
 const PROMPTS = [
   String.raw`{"name": "Task T3", "body": "C:\dir\", "q": "\"x\""}`,
-  String.raw`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"C:/Program Files/trama.exe agent-event idle"}]}]}}`,
+  String.raw`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"C:/Program Files/trama.exe hook idle"}]}]}}`,
   "it's $HOME `id` $(id) %PATH% & | < > ^ !!",
   "perché €uro 🙂 日本",
   "  leading and trailing  ",

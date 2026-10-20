@@ -51,9 +51,9 @@ interface ServerOptions {
   serves?: () => boolean;
   runtimeDir?: string;
   focusedAt?: number;
-  /** A hook of Cursor's chat, forwarded by `trama cursor-hook`; true when this window knows the conversation as Trama's (the question tool's check). */
+  /** A hook of Cursor's chat, forwarded by `trama hook cursor`; true when this window knows the conversation as Trama's (the question tool's check). */
   onCursorHook?: (hook: CursorHook) => boolean | void;
-  /** A hook of Copilot's chat, forwarded by `trama copilot-hook`; true when this window knows the conversation as Trama's (the question tool's check). */
+  /** A hook of Copilot's chat, forwarded by `trama hook copilot`; true when this window knows the conversation as Trama's (the question tool's check). */
   onCopilotHook?: (hook: CopilotHook) => boolean | void;
   /** A command of the agent changed something: where it ran, as Trama reports it. */
   onActivity?: (origin: AgentOrigin) => void;
@@ -723,7 +723,7 @@ export async function sendCopilotHook(hook: CopilotHook, options: { timeoutMs?: 
 }
 
 /**
- * Tells the editor of the project one thing a `trama` command of the agent knows, found as for `trama ask`; never
+ * Tells the editor of the project one thing a `trama` command of the agent knows, found as for `trama question new`; never
  * throws, waits at most `timeoutMs`. Without an editor nothing happens.
  */
 async function tellEditor(project: Project, message: object, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number }): Promise<void> {

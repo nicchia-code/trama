@@ -1,11 +1,10 @@
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
-import { parseArgs } from "node:util";
 import { TramaError } from "../core/errors";
 import { type DriftOption, driftOptions, getDrift } from "../core/work";
 import { cardName } from "../core/short-numbers";
-import { makeContext, type Values } from "./commands";
-import { pickCommand, splitGlobals } from "./main";
+import { makeContext } from "./context";
+import { splitCommon } from "./registry";
 
 export interface PromptIo {
   input: Readable;
@@ -13,30 +12,34 @@ export interface PromptIo {
 }
 
 /**
- * `trama drift resolve <id> --fix-code` run by the developer in an interactive terminal without `--option`: shows the
- * Drift's fix options as a numbered menu, the recommended (first) one the default taken by pressing Enter, then asks
- * for an optional note, empty for none. Returns the arguments with `--option` (and `--note`) added. Any other command
- * line is returned as it is, for `run` to carry out or refuse; the caller decides whether the terminal is interactive.
+ * `trama drift move <id> code-to-be-fixed` run by the developer in an interactive terminal without `option` in its
+ * `--input`: shows the Drift's fix options as a numbered menu, the recommended (first) one the default taken by pressing
+ * Enter, then asks for an optional note, empty for none. Returns the arguments with `option` (and `note`) added to the
+ * input. Any other command line, and one that reads its input from standard input, is returned as it is, for `run` to
+ * carry out or refuse; the caller decides whether the terminal is interactive.
  */
 export async function completeFixChoice(argv: string[], cwd: string, io: PromptIo): Promise<string[]> {
-  const { rest, root } = splitGlobals(argv);
-  if (rest[0] !== "drift" || rest[1] !== "resolve") return argv;
-  const { command, tail } = pickCommand(rest);
-  let values: Values;
-  let positionals: string[];
-  try {
-    ({ values, positionals } = parseArgs({ args: tail, options: command.options ?? {}, allowPositionals: true, strict: true }) as { values: Values; positionals: string[] });
-  } catch {
-    return argv;
+  const { rest, common } = splitCommon(argv);
+  const root = common.root;
+  if (rest[0] !== "drift" || rest[1] !== "move" || rest.length !== 4 || rest[3] !== "code-to-be-fixed" || common.input === "-") return argv;
+  let input: Record<string, unknown> = {};
+  if (common.input !== undefined) {
+    try {
+      const parsed: unknown = JSON.parse(common.input.replace(/^\uFEFF/, ""));
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return argv;
+      input = parsed as Record<string, unknown>;
+    } catch {
+      return argv;
+    }
   }
-  const only = values["fix-code"] === true && values["accept-proposal"] !== true && values["dismiss"] !== true;
-  if (!only || values["option"] !== undefined || positionals.length !== 1) return argv;
+  if (input["option"] !== undefined) return argv;
+  const driftArgument = rest[2] as string;
 
   let options: DriftOption[];
   let heading: string;
   try {
     const project = makeContext(cwd, root).project();
-    const drift = getDrift(project, positionals[0] as string, true);
+    const drift = getDrift(project, driftArgument, true);
     if (drift.data.status !== "open") return argv;
     options = driftOptions(drift);
     heading = `Drift ${cardName(project, "drift", drift.id)}: ${drift.title}`;
@@ -73,13 +76,24 @@ export async function completeFixChoice(argv: string[], cwd: string, io: PromptI
       if (n >= 1 && n <= options.length) option = n;
       else io.output.write(`Choose a number from 1 to ${options.length}, or press Enter for 1.\n`);
     }
-    const added = ["--option", String(option)];
-    if (values["note"] === undefined) {
+    const completed: Record<string, unknown> = { ...input, option };
+    if (input["note"] === undefined) {
       const note = await ask("Note (optional, Enter for none): ");
-      if (note) added.push("--note", note);
+      if (note) completed["note"] = note;
     }
-    return [...argv, ...added];
+    return [...withoutInput(argv), "--input", JSON.stringify(completed)];
   } finally {
     rl.close();
   }
+}
+
+/** The command line without its `--input` and the text after it. */
+function withoutInput(argv: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i] as string;
+    if (a === "--input") i++;
+    else if (!a.startsWith("--input=")) out.push(a);
+  }
+  return out;
 }

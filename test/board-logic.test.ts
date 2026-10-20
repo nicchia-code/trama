@@ -177,10 +177,10 @@ test("a Task alone from its Proposal, and a Task with no Proposal, stay cards of
   expect(board[1]?.cards[2]).toMatchObject({ kind: "task", proposal: null, proposalTag: null });
 });
 
-test("a tag's colour is stable for its label and is one of the six terminal colours", () => {
+test("a tag's colour is stable for its label and is one of the six Tailwind colours", () => {
   expect(tagColour("Proposal 0007")).toBe(tagColour("Proposal 0007"));
-  expect(tagColour("Proposal 0007")).toMatch(/^var\(--vscode-terminal-ansi(Blue|Green|Yellow|Magenta|Cyan|Red)\)$/);
-  for (const label of ["Proposal 0007", "Proposal a1b2c3d4", "Refunds"]) expect(tagColour(label)).toMatch(/^var\(--vscode-terminal-ansi/);
+  expect(tagColour("Proposal 0007")).toMatch(/^(blue|green|amber|fuchsia|cyan|red)$/);
+  for (const label of ["Proposal 0007", "Proposal a1b2c3d4", "Refunds"]) expect(tagColour(label)).toMatch(/^(blue|green|amber|fuchsia|cyan|red)$/);
 });
 
 test("Run all is unavailable while a Task is taken, when no Task is in To do, and when every Task in To do is blocked", () => {

@@ -18,12 +18,11 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const sides = { refs: ["order"], happens: "The code writes it off.", should: "Nothing writes it off.", options: FIX_OPTIONS };
-const CLI_OPTIONS = FIX_OPTIONS.flatMap((o) => ["--option", o.title, "--option-text", o.text]);
 
 test("a new Drift is refused without Where in the code, from core and command line", () => {
   expect(() => newDrift(p, { ...sides, title: "No where", where: "" })).toThrow(/"Where in the code"/);
   expect(() => newDrift(p, { ...sides, title: "No where", where: "   " })).toThrow(/"Where in the code"/);
-  expect(() => run(["--root", dir, "drift", "new", "No where", "--ref", "order", "--happens", "a", "--should", "b", ...CLI_OPTIONS], process.cwd())).toThrow(/"Where in the code"/);
+  expect(() => run(["--root", dir, "drift", "new", "--input", JSON.stringify({ title: "No where", refs: ["order"], happens: "a", should: "b", options: FIX_OPTIONS })], process.cwd())).toThrow(/where/);
   expect(listDrifts(p)).toHaveLength(0);
 });
 
@@ -41,7 +40,7 @@ test("a Drift dismissed by its fix Task shows the Task's note while it is Done, 
   expect(out).toContain("without changes");
   expect(out).toContain("## Check note");
   expect(out).toContain("Checked src/refund.ts");
-  expect(run(["--root", dir, "drift", "list", "--all"], process.cwd()).out).toContain("(dismissed, no changes)");
+  expect(run(["--root", dir, "drift", "list", "--input", '{"all":true}'], process.cwd()).out).toContain("(dismissed, no changes)");
 
   moveTask(p, fix, "todo", "developer");
   expect(closedUnchanged(p, getDrift(p, drift.id))).toEqual({ task: fix, note: null });

@@ -3,16 +3,16 @@ import { ASK_DEVELOPER_SENTENCE, buildAutomaticRunPrompt, buildPrompt, buildScan
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
-    "Use the trama-design skill on the design request in `.trama/requests/2026-10-04T19-05-12.md`. Bind the first Proposal you open to it with `--request 2026-10-04T19-05-12`.",
+    "Use the trama-design skill on the design request in `.trama/requests/2026-10-04T19-05-12.md`. Bind the first Proposal you open to it with the `request` field.",
   );
   expect(buildPrompt({ kind: "setup-request", request: "2026-10-04T19-05-12" })).toBe(
-    "Use the trama-setup skill on the project request in `.trama/requests/2026-10-04T19-05-12.md`. Bind the setup Proposal you open to it with `--request 2026-10-04T19-05-12`.",
+    "Use the trama-setup skill on the project request in `.trama/requests/2026-10-04T19-05-12.md`. Bind the setup Proposal you open to it with the `request` field.",
   );
   expect(buildPrompt({ kind: "scan" })).toBe("Use the trama-scan skill on the whole System.");
   expect(buildPrompt({ kind: "scan", feature: "checkout" })).toBe("Use the trama-scan skill on the Feature `checkout`.");
   expect(buildPrompt({ kind: "implement", task: "0012" })).toBe("Use the trama-implement skill on Task 0012.");
   expect(buildPrompt({ kind: "implement-all" })).toBe(
-    'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task next --batch --max {maxParallelAgents}`, handing them out as sub-agent places free up, until it says there is none.',
+    'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task list --input \'{"runnable":true,"max":{maxParallelAgents}}\'`, one group at a time, until it says there is none.',
   );
   expect(buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34", "ef56gh78"] })).toBe(
     "Use the trama-resolve-drifts skill on the open Drifts ab12cd34, ef56gh78: ask the developer what should happen for each one, then write one resolution Proposal.",
@@ -27,9 +27,16 @@ test("automatic resolution and Runs stay scoped to coordinator authorization", (
   expect(resolve).toContain("first Fix option");
   expect(resolve).toContain("Do not approve the Proposal or start a Run.");
   const run = buildAutomaticRunPrompt("collection");
-  expect(run).toContain("Before each Task, run `trama drift autopilot --json` and take the authorized Task IDs from its `tasks` field");
+  expect(run).toContain("Before each Task, run `trama autopilot show --json` and take the authorized Task IDs from its `tasks` field");
+  expect(run).toContain('`trama task list --input \'{"runnable":true,"tasks":["<id>",…],"max":{maxParallelAgents}}\'`');
+  expect(run).not.toContain("task next");
+  expect(resolve).toContain("Before each choice, run `trama autopilot show --json`");
+  expect(resolve).toContain("giving it the `automatic` field");
   expect(run).not.toContain("--task task-");
-  expect(run).toContain("trama announce done <check-id> --failed");
+  expect(run).toContain("trama announcement move <check-id> failed");
+  expect(run).toContain('`trama autopilot move <job> failed --input -` and `{"task":"<id>","reason":"<reason>"}`');
+  expect(resolve).toContain('`trama autopilot move <job> failed --input -` and `{"drift":"<id>","reason":"<reason>"}`');
+  expect(`${run} ${resolve}`).not.toContain("agent-event");
   expect(run).toContain("Do not use the general Task queue");
 });
 
@@ -65,15 +72,15 @@ test("a chosen language ends the instruction on the same line, trimmed; blank as
 });
 test("implementation batch commands receive the configured limit at send time", () => {
   const all = buildPrompt({ kind: "implement-all" }).replaceAll("{maxParallelAgents}", "7");
-  expect(all).toContain("trama task next --batch --max 7");
+  expect(all).toContain('trama task list --input \'{"runnable":true,"max":7}\'');
 });
 test("a Run all group cut by Proposal names its Proposals and the filter, and its terminal names its model", () => {
   const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
   expect(buildPrompt({ kind: "implement-all", group: { include: ["aaaa1111", "bbbb2222"] } })).toBe(
-    'Use the trama-implement skill on every Task in the "todo" column that belongs to the Proposals `aaaa1111`, `bbbb2222`. Take them from `trama task next --batch --proposal aaaa1111 --proposal bbbb2222 --max {maxParallelAgents}`, handing them out as sub-agent places free up, until it says there is none.',
+    'Use the trama-implement skill on every Task in the "todo" column that belongs to the Proposals `aaaa1111`, `bbbb2222`. Take them from `trama task list --input \'{"runnable":true,"proposals":["aaaa1111","bbbb2222"],"max":{maxParallelAgents}}\'`, one group at a time, until it says there is none.',
   );
   expect(buildPrompt({ kind: "implement-all", group: { exclude: ["aaaa1111"] } })).toBe(
-    'Use the trama-implement skill on every Task in the "todo" column except those of the Proposal `aaaa1111`. Take them from `trama task next --batch --not-proposal aaaa1111 --max {maxParallelAgents}`, handing them out as sub-agent places free up, until it says there is none.',
+    'Use the trama-implement skill on every Task in the "todo" column except those of the Proposal `aaaa1111`. Take them from `trama task list --input \'{"runnable":true,"notProposals":["aaaa1111"],"max":{maxParallelAgents}}\'`, one group at a time, until it says there is none.',
   );
   expect(buildPrompt({ kind: "implement-all", group: { include: [], exclude: [] } })).toBe(buildPrompt({ kind: "implement-all" }));
   expect(terminalName({ kind: "implement-all", group: { include: ["aaaa1111"], model: "  gpt-5  " } }, short)).toBe("All tasks · gpt-5");
@@ -96,5 +103,5 @@ test("the Drift blocker's sentence is added on the same line only when on, and o
 });
 
 test("every instruction carries the one ask sentence, whatever the job", () => {
-  expect(ASK_DEVELOPER_SENTENCE).toBe("Ask the developer only with `trama ask`, as the skill says, never with your own question tool.");
+  expect(ASK_DEVELOPER_SENTENCE).toBe("Ask the developer only with `trama question new`, as the skill says, never with your own question tool.");
 });

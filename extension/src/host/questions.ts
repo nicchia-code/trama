@@ -76,7 +76,7 @@ export function questionWindowId(root: string): Promise<string | undefined> {
   return windowQuestions?.windowId(root) ?? Promise.resolve(undefined);
 }
 
-/** The window-owned queue serves every local `trama ask` connection. */
+/** The window-owned queue serves every local `trama question new` connection. */
 export class EditorQuestions implements vscode.Disposable {
   private service: WindowRoundService | undefined;
   /** The window's one queue: its rounds are presented one at a time, in order, whichever service admitted them. */

@@ -4,7 +4,7 @@ import { TramaError } from "./errors";
 import { modelDir, projectAt, writeFileEnsuringDir } from "./store";
 
 /**
- * Cursor's hooks, as `trama cursor-hook` forwards them to the editor of the project: the hook, the conversation and the
+ * Cursor's hooks, as `trama hook cursor` forwards them to the editor of the project: the hook, the conversation and the
  * project folder. Never the prompt: only whether it starts with one of Trama's skills.
  */
 export interface CursorHook {
@@ -39,14 +39,17 @@ export const hookAnswer = (hookName: unknown): object => (hookName === "beforeSu
 
 const text = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-/** An entry `"<path of a trama program>" cursor-hook`, or its Windows form `& "<path>" cursor-hook`, is Trama's, whatever version's program it names. */
-const TRAMA_ENTRY = /^(& )?".+" cursor-hook$/;
+/**
+ * An entry `"<path of a trama program>" hook cursor`, or its Windows form `& "<path>" hook cursor`, is Trama's, whatever
+ * version's program it names; so is one with the old `cursor-hook`, which is rewritten.
+ */
+const TRAMA_ENTRY = /^(& )?".+" (hook cursor|cursor-hook)$/;
 
 /**
  * Writes Trama's entries into Cursor's user hooks file, one per hook, each running `program`: older Trama entries are
  * replaced, every other entry is kept, a missing file is created, and a file whose Trama entries already are these is
  * not written again. A file that is not valid JSON is left as it is. On Windows the command has the PowerShell form
- * `& "<program>" cursor-hook` (not tried on Cursor's shell). The shell-command hook runs only for command lines that
+ * `& "<program>" hook cursor` (not tried on Cursor's shell). The shell-command hook runs only for command lines that
  * contain `trama`.
  */
 export function writeCursorHooks(file: string, program: string, windows = process.platform === "win32"): void {
@@ -60,7 +63,7 @@ export function writeCursorHooks(file: string, program: string, windows = proces
     config = { version: 1, ...parsed };
   }
   const hooks: Record<string, unknown> = typeof config.hooks === "object" && config.hooks !== null && !Array.isArray(config.hooks) ? { ...config.hooks } : {};
-  const command = `${windows ? "& " : ""}"${program}" cursor-hook`;
+  const command = `${windows ? "& " : ""}"${program}" hook cursor`;
   for (const name of HOOKS) {
     const entries: unknown[] = Array.isArray(hooks[name]) ? hooks[name] : [];
     const others = entries.filter((e) => !(typeof e === "object" && e !== null && "command" in e && typeof e.command === "string" && TRAMA_ENTRY.test(e.command)));
@@ -97,8 +100,8 @@ const TRAMA_PROGRAM = /^(?:.*[\\/])?trama(?:\.exe)?$/i;
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
- * Whether a shell command line runs one of Trama's commands that register the agent's work: `announce` (of any kind),
- * `ask`, `compare brief`, `proposal new` or `task move <id> doing`. Reads such as `task next`, `search` or `proposal show` do not count,
+ * Whether a shell command line runs one of Trama's commands that register the agent's work: `announcement new`,
+ * `announcement move`, `comparison new`, `proposal new`, `task move <id> doing` or `question new`. Reads such as `task list`, `model list` or `proposal show` do not count,
  * nor does a `trama` word that is not the program of its command.
  */
 export function registersAgentWork(command: string): boolean {
@@ -110,8 +113,9 @@ export function registersAgentWork(command: string): boolean {
     if (args[0] === "--root") args.splice(0, 2);
     else if (args[0]?.startsWith("--root=")) args.shift();
     const [first, second, third, fourth] = args;
-    if (first === "announce" || first === "ask") return true;
-    if (first === "compare" && second === "brief") return true;
+    if (first === "announcement" && (second === "new" || second === "move")) return true;
+    if (first === "comparison" && second === "new") return true;
+    if (first === "question" && second === "new") return true;
     if (first === "proposal" && second === "new") return true;
     if (first === "task" && second === "move" && third !== undefined && fourth === "doing") return true;
   }

@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { helpFor, runCopilotHook } from "../src/cli/main";
+import { helpFor } from "../src/cli/main";
+import { runCopilotHook } from "../src/cli/commands/hook";
 import { parseCopilotHook, type CopilotHook } from "../src/core/copilot-chat";
 import { createQuestionServer } from "../src/core/question-channel";
 import { QUESTION_TOOL_REFUSAL } from "../src/core/questions";
@@ -31,10 +32,10 @@ test("Copilot hooks identify only Trama prompts and keep later prompts in the sa
   expect(parseCopilotHook(input("Stop"))).toEqual({ hook: "Stop", conversation: "session-1", root: project });
   expect(parseCopilotHook(input("Stop", undefined, join(root, "missing")))).toBeNull();
   expect(parseCopilotHook({ ...input("UserPromptSubmit"), session_id: undefined })).toBeNull();
-  expect(helpFor(["copilot-hook", "--help"])).toContain("Usage: trama copilot-hook");
+  expect(helpFor(["hook", "copilot", "--help"])).toContain("Usage: trama hook copilot");
 });
 
-test("trama copilot-hook forwards project hooks without leaking prompts and always answers with an object", async () => {
+test("trama hook copilot forwards project hooks without leaking prompts and always answers with an object", async () => {
   const received: CopilotHook[] = [];
   const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onCopilotHook: (hook) => { received.push(hook); } });
   try {
@@ -60,7 +61,7 @@ test("Copilot's question tool is read only for that tool", () => {
   expect(parseCopilotHook(questionTool("session-1", "run_in_terminal"))).toBeNull();
 });
 
-test("trama copilot-hook refuses Copilot's question tool only in a conversation an editor knows as Trama's", async () => {
+test("trama hook copilot refuses Copilot's question tool only in a conversation an editor knows as Trama's", async () => {
   const asked: CopilotHook[] = [];
   const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onCopilotHook: (h) => { asked.push(h); return h.conversation === "t"; } });
   try {

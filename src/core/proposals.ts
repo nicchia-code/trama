@@ -897,7 +897,7 @@ export function resolutionHolding(p: Project, driftId: string, exceptId?: string
 /** What is wrong with the Drift list of a resolution: empty, a Drift no longer open, or one also in another resolution being written or open. Empty for any other Proposal. */
 export function driftListProblems(p: Project, proposal: Proposal): string[] {
   if (proposal.data.kind !== "resolution") return [];
-  if (proposal.data.drifts.length === 0) return ["its Drift list is empty: list at least one Drift with \"trama proposal resolve-drift\""];
+  if (proposal.data.drifts.length === 0) return ["its Drift list is empty: list at least one Drift with \"drifts\" in \"trama proposal edit\""];
   const drifts = new Map(listDrifts(p).map((d) => [d.id, d]));
   const after = buildProject(applied(p, proposal));
   const problems: string[] = [];

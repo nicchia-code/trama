@@ -1,10 +1,10 @@
 import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
-import { rewrittenId } from "../src/core/rewrite-ids";
+import { listAnnouncements } from "../src/core/announcements";
 import { buildSnapshot } from "../src/core/snapshot";
 import { readDocument, type Project, projectAt, writeDocument } from "../src/core/store";
 import { blockedTasks, driftCandidates, freedTasks, getDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask, resolveDrift } from "../src/core/work";
@@ -144,44 +144,63 @@ describe("the command line", () => {
     const parsed: { id: string } = JSON.parse(out);
     return parsed.id;
   };
-  const filing = ["--ref", "order/Paid", "--happens", "The code does it one way.", "--should", "The Model says another.", "--option", "Change the code", "--option-text", "Make the code match.", "--option", "Drop it", "--option-text", "Remove the behaviour.", "--where", "src/refund.ts"];
+  const filing = { title: "A difference", refs: ["order/Paid"], happens: "The code does it one way.", should: "The Model says another.", options: [{ title: "Change the code", text: "Make the code match." }, { title: "Drop it", text: "Remove the behaviour." }], where: "src/refund.ts" };
+  const driftNew = (input: object, ...rest: string[]) => cli("drift", "new", "--input", JSON.stringify(input), ...rest);
 
-  test("drift candidates prints the Tasks, and drift show and list carry what is left free", () => {
-    const paid = idOf(cli("task", "new", "Pay", "--ref", "order/Paid", "--json").out);
-    const other = idOf(cli("task", "new", "Ship", "--ref", "order/Shipped", "--json").out);
-    const listed = cli("drift", "candidates", "--ref", "order/Paid");
+  test("drift new with dryRun prints the Tasks, and drift show and list carry what is left free", () => {
+    const paid = idOf(cli("task", "new", "--input", '{"title":"Pay","refs":["order/Paid"]}', "--json").out);
+    const other = idOf(cli("task", "new", "--input", '{"title":"Ship","refs":["order/Shipped"]}', "--json").out);
+    const listed = cli("drift", "new", "--input", '{"dryRun":true,"refs":["order/Paid"]}');
     expect(listed.exit).toBe(0);
     expect(listed.out).toMatch(/^- T\d+ Pay$/m);
     expect(listed.out).not.toContain("Ship");
-    expect(cli("drift", "candidates", "--ref", "order/Shipped", "--json").out).toContain(other);
-    expect(() => cli("drift", "candidates", "--ref", "order/Nothing-here")).toThrow();
-    expect(() => cli("drift", "candidates", "--ref", "order/Paid", "--task", "zzzzzzzz")).toThrow();
+    expect(cli("drift", "new", "--input", '{"dryRun":true,"refs":["order/Shipped"]}', "--json").out).toContain(other);
+    expect(() => cli("drift", "new", "--input", '{"dryRun":true,"refs":["order/Nothing-here"]}')).toThrow();
+    expect(() => cli("drift", "new", "--input", '{"dryRun":true,"refs":["order/Paid"],"task":"zzzzzzzz"}')).toThrow();
 
-    const filed = cli("drift", "new", "A difference", ...filing, "--not-blocking", paid, "--not-blocking-reason", "Only the wording differs.", "--json");
+    const filed = driftNew({ ...filing, notBlocking: [{ task: paid, reason: "Only the wording differs." }] }, "--json");
     expect(filed.exit).toBe(0);
     const drift = idOf(filed.out);
     const shown = cli("drift", "show", drift).out;
     expect(shown).toContain("## Not blocking");
     expect(shown).toMatch(/- (T\d+|[a-z0-9]{8}) Pay: Only the wording differs\./);
     expect(shown.indexOf("## Not blocking")).toBeGreaterThan(shown.indexOf("## Where in the code"));
-    const listedJson: { drifts: { id: string; notBlocking: { task: string; number: string; title: string; reason: string }[] }[] } = JSON.parse(cli("drift", "list", "--all", "--json").out);
+    const listedJson: { drifts: { id: string; notBlocking: { task: string; number: string; title: string; reason: string }[] }[] } = JSON.parse(cli("drift", "list", "--input", '{"all":true}', "--json").out);
     expect(listedJson.drifts.find((d) => d.id === drift)?.notBlocking).toEqual([{ task: paid, number: expect.any(String), title: "Pay", reason: "Only the wording differs." }]);
   });
 
   test("drift new refuses a Task the Drift would not block, naming it, and writes nothing", () => {
-    const shipped = idOf(cli("task", "new", "Ship", "--ref", "order/Shipped", "--json").out);
-    expect(() => cli("drift", "new", "A difference", ...filing, "--not-blocking", shipped, "--not-blocking-reason", "Not the same.")).toThrow(/would not block/);
+    const shipped = idOf(cli("task", "new", "--input", '{"title":"Ship","refs":["order/Shipped"]}', "--json").out);
+    expect(() => driftNew({ ...filing, notBlocking: [{ task: shipped, reason: "Not the same." }] })).toThrow(/would not block/);
     expect(listDrifts(p)).toEqual([]);
   });
 
-  test("ids rewrite carries the identities of the Tasks a Drift leaves free", () => {
-    mkdirSync(join(p.dir, "tasks"), { recursive: true });
-    mkdirSync(join(p.dir, "drifts"), { recursive: true });
-    writeFileSync(join(p.dir, "tasks", "0003-label.md"), "---\ncolumn: todo\ntechnical: false\nrefs: [order]\n---\n# Label\n\nPrint it.\n");
-    writeFileSync(join(p.dir, "drifts", "0004-late.md"), "---\nstatus: open\nrefs: [order]\norigin: null\nnotBlocking: [{ task: \"0003\", reason: \"Only the wording.\" }]\n---\n# Late\n\n## What happens\n\nCode.\n\n## What should happen\n\nModel.\n");
-    expect(cli("ids", "rewrite").exit).toBe(0);
-    const freed = getDrift(p, rewrittenId("drift", "0004")).data.notBlocking;
-    expect(freed).toEqual([{ task: rewrittenId("task", "0003"), reason: "Only the wording." }]);
-    expect(readFileSync(join(p.dir, "drifts", `${rewrittenId("drift", "0004")}-late.md`), "utf8")).toContain("notBlocking");
+  test("a dry run writes nothing, announces nothing and lists the Tasks that would be blocked", () => {
+    const paid = idOf(cli("task", "new", "--input", '{"title":"Pay","refs":["order/Paid"]}', "--json").out);
+    const before = listDrifts(p).length;
+    const out = cli("drift", "new", "--input", '{"dryRun":true,"refs":["order/Paid"]}', "--json").out;
+    const parsed: { tasks: { id: string; title: string }[] } = JSON.parse(out);
+    expect(parsed.tasks.map((t) => t.id)).toEqual([paid]);
+    expect(listDrifts(p)).toHaveLength(before);
+    expect(listAnnouncements(p)).toEqual([]);
+  });
+
+  test("a number of options out of bounds is refused and writes nothing", () => {
+    const one = [{ title: "Only", text: "One option." }];
+    const six = Array.from({ length: 6 }, (_, i) => ({ title: `Option ${i}`, text: "Text." }));
+    for (const options of [one, six, []]) expect(() => driftNew({ ...filing, options })).toThrow();
+    expect(listDrifts(p)).toEqual([]);
+  });
+
+  test("drift new without happens is a usage error naming it", () => {
+    const { happens: _, ...without } = filing;
+    expect(() => driftNew(without)).toThrow(/happens/);
+    expect(listDrifts(p)).toEqual([]);
+  });
+
+  test("drift move proposal-accepted with an option is refused", () => {
+    const d = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "A difference", refs: ["order/Paid"], happens: "The code does it one way.", should: "The Model says another." });
+    expect(() => cli("drift", "move", d.id, "proposal-accepted", "--input", '{"option":1}')).toThrow();
+    expect(getDrift(p, d.id).data.status).toBe("open");
   });
 });

@@ -73,10 +73,10 @@ describe("code fingerprint", () => {
   });
 });
 
-describe("trama compare brief", () => {
+describe("trama comparison new", () => {
   test("in git the announcement records the code fingerprint, the refs and each reference's text", () => {
     gitRepo();
-    run(["--root", dir, "compare", "brief", "order"], dir, {});
+    run(["--root", dir, "comparison", "new", "order"], dir, {});
     const [ghost] = listAnnouncements(p);
     expect(ghost?.code).toMatch(/^[0-9a-f]{64}$/);
     expect(ghost?.refs).toContain("order/Paid");
@@ -84,17 +84,17 @@ describe("trama compare brief", () => {
   });
 
   test("outside git the announcement records no code fingerprint", () => {
-    run(["--root", dir, "compare", "brief", "order"], dir, {});
+    run(["--root", dir, "comparison", "new", "order"], dir, {});
     const [ghost] = listAnnouncements(p);
     expect(ghost?.code).toBeNull();
     expect(ghost?.texts).toEqual({});
   });
 });
 
-describe("trama compare file and the registry", () => {
+describe("trama comparison move and the registry", () => {
   test("a successful comparison file records every reference it covered under the code fingerprint", () => {
     gitRepo();
-    run(["--root", dir, "compare", "brief", "order"], dir, {});
+    run(["--root", dir, "comparison", "new", "order"], dir, {});
     const [ghost] = listAnnouncements(p);
     archiveComparison(p, ghost?.id ?? "", validComparison);
     const recorded = comparedRefs(p, ghost?.code ?? "");
@@ -127,14 +127,14 @@ describe("trama compare file and the registry", () => {
   });
 });
 
-describe("trama task scope --pre-flight", () => {
+describe("trama task list with runnable and scope", () => {
   test("lists the references already compared, and leaves them out of the references to check", () => {
     gitRepo();
-    run(["--root", dir, "compare", "brief", "order"], dir, {});
+    run(["--root", dir, "comparison", "new", "order"], dir, {});
     const [ghost] = listAnnouncements(p);
     archiveComparison(p, ghost?.id ?? "", validComparison);
     newTask(p, { title: "Refund paid orders", refs: ["order/Paid"], technical: false });
-    const out = run(["--root", dir, "task", "scope", "--pre-flight"], dir, {}).out;
+    const out = run(["--root", dir, "task", "list", "--input", '{"runnable":true,"scope":true}'], dir, {}).out;
     expect(out).toContain("## Already compared\n\n- `order/Paid`");
     expect(out).toContain("## Pre-flight scope\n\n_Nothing to check._");
   });

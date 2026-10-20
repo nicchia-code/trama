@@ -1,14 +1,8 @@
 import { expect, test } from "bun:test";
 import { buildGraph } from "../extension/src/webview/diagram/levels";
 import { buildScene } from "../extension/src/webview/diagram/scene";
+import { layoutGraph, routeOf } from "../extension/src/webview/diagram/layout";
 import { shopSnapshot } from "./diagram-fixture";
-
-// elkjs takes Bun's global scope for a web worker unless a `document` exists while it loads.
-const scope = globalThis as { document?: unknown };
-const hadDocument = "document" in scope;
-scope.document = {};
-const { layoutGraph, routeOf } = await import("../extension/src/webview/diagram/layout");
-if (!hadDocument) delete scope.document;
 
 const scene = buildScene(shopSnapshot(), null);
 const open = new Map<string, ReadonlySet<string>>([["order", new Set(["Paid"])]]);

@@ -239,7 +239,7 @@ export function getTask(p: Project, id: string, asArgument = false): Task {
   return load(tasksDir(p), findCard(tasksDir(p), cited ?? id, "Task", "file", asArgument && cited === null), parseTask);
 }
 
-/** A Task checked and built but not written: what `newTask` writes, and what `trama compare file` checks for every card before it writes any. */
+/** A Task checked and built but not written: what `newTask` writes, and what `trama comparison move` checks for every card before it writes any. */
 export interface PlannedTask {
   title: string;
   data: TaskData;
@@ -338,7 +338,8 @@ export type Mover = "agent" | "developer";
 
 /**
  * Moves a Task. The agent takes it by moving it to In progress (and keeps it when it does so again); moving it to
- * To do or Done clears the mark. The developer never takes a Task and cannot move one the agent has taken.
+ * To do or Done clears the mark. The developer never takes a Task; moving one the agent has taken to In progress
+ * takes it back (the mark goes, the Task stays In progress and is the developer's), and any other move of it is refused.
  * The agent cannot start a blocked Task, from any column, nor keep one In progress; nothing changes then.
  *
  * `unchanged` closes a fix Task into Done without changes, with the note of what was checked: only from a Drift still
@@ -349,9 +350,14 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
   if (!COLUMNS.includes(column as Column))
     throw new TramaError(`Unknown column "${column}" (expected ${COLUMNS.join(", ")})`);
   const task = getTask(p, id);
-  if (by === "developer" && task.data.agent) {
+  const taken = by === "developer" && task.data.agent;
+  if (taken && column !== "doing") {
     const name = cardName(p, "task", task.id);
-    throw new TramaError(`The agent is working on Task ${name}, so it cannot be moved. Take it back first with "trama task take-back ${name}".`);
+    throw new TramaError(`The agent is working on Task ${name}, so it cannot be moved. Take it back with "trama task move ${name} doing".`);
+  }
+  if (taken) {
+    task.data.agent = false;
+    task.data.holder = null;
   }
   if (by === "agent" && column === "doing") {
     // Judged as if the Task had already left Done: a Done Task is never blocked, but one taken from Done may be.
@@ -417,6 +423,12 @@ export interface RunQueue {
   batch: Task[];
   /** Every Task in To do within the scope that the batch leaves out, blocked or not. */
   remaining: number;
+  /**
+   * The runnable Tasks the batch rule left out because they concern the same thing as a Task of the batch or as a Task
+   * In progress the agent has taken, each with those Tasks. A Task left out only for lack of places, a blocked Task and
+   * a Task that overlaps nothing chosen are not here.
+   */
+  heldBack: { task: Task; overlaps: Task[] }[];
   /** Every Task in To do within the scope that is blocked, in order. */
   waiting: { task: Task; blockers: Blocker[] }[];
 }
@@ -446,10 +458,17 @@ export function nextTask(p: Project, filter: ProposalFilter = {}, max = BATCH_DE
     if (taken.some((t) => concernSameThing(project, t.data.refs, task.data.refs))) continue;
     batch.push(task);
   }
+  const chosen = new Set(batch.map((t) => t.id));
+  const heldBack = todo.flatMap((task) => {
+    if (blocked.has(task.id) || chosen.has(task.id)) return [];
+    const overlaps = [...batch, ...taken].filter((other) => concernSameThing(project, other.data.refs, task.data.refs));
+    return overlaps.length === 0 ? [] : [{ task, overlaps }];
+  });
   return {
     next: batch[0] ?? null,
     batch,
     remaining: todo.length - batch.length,
+    heldBack,
     waiting: todo.flatMap((task) => (blocked.has(task.id) ? [{ task, blockers: blocked.get(task.id) as Blocker[] }] : [])),
   };
 }
@@ -478,16 +497,6 @@ function scopedTodo(p: Project, filter: ProposalFilter, taskIds?: string[]) {
   const todo = tasks.filter((t) => t.data.column === "todo" && inScope(t) && (selected === null || selected.has(t.id)));
   const taken = tasks.filter((t) => t.data.column === "doing" && t.data.agent);
   return { project, blocked, todo, taken };
-}
-
-/** The developer's decision to get a Task back from the agent: the mark is cleared and the Task stays In progress. */
-export function takeBackTask(p: Project, id: string): Task {
-  const task = getTask(p, id);
-  if (!task.data.agent) throw new TramaError(`The agent has not taken Task ${cardName(p, "task", task.id)}`);
-  task.data.agent = false;
-  task.data.holder = null;
-  saveItem(task.path, task.data, task.body);
-  return task;
 }
 
 /**
@@ -525,7 +534,7 @@ export function attachedDrift(p: Project, proposalId: string): Drift | null {
 /** Refuses a direct approval or rejection of a Proposal attached to an open Drift; the developer decides it through the Drift. */
 export function requireNotAttached(p: Project, proposalId: string): void {
   const drift = attachedDrift(p, proposalId);
-  if (drift) throw new TramaError(`Proposal ${cardName(p, "proposal", proposalId)} is attached to Drift ${cardName(p, "drift", drift.id)}: decide on the Drift with trama drift resolve`);
+  if (drift) throw new TramaError(`Proposal ${cardName(p, "proposal", proposalId)} is attached to Drift ${cardName(p, "drift", drift.id)}: decide on the Drift with trama drift move`);
 }
 
 /** The Drift `id` names. `asArgument` applies the command rules: digits cite only a numbered Drift, and a short number (`D3`) cites the live Drift that has it. */
@@ -645,7 +654,7 @@ function previousOf(p: Project, named: string | undefined, origin: string | null
   const fixed = origin ? getTask(p, origin).data.drift : null;
   const chosen = named === undefined ? null : getDrift(p, named).id;
   if (fixed !== null && chosen !== null && chosen !== fixed)
-    throw new TramaError(`The origin Task fixes Drift ${cardName(p, "drift", fixed)}, so that is the previous Drift: drop --previous or name that one`);
+    throw new TramaError(`The origin Task fixes Drift ${cardName(p, "drift", fixed)}, so that is the previous Drift: drop "previous" or name that one`);
   const id = fixed ?? chosen;
   if (id === null) return null;
   const previous = getDrift(p, id);
@@ -665,7 +674,7 @@ export function freedTasks(drift: Drift, tasks: Task[]): FreedTask[] {
   return drift.data.notBlocking.map((n) => ({ ...n, title: tasks.find((t) => t.id === n.task)?.title ?? null }));
 }
 
-/** The live Tasks a new Drift with these references and this origin would block: what `trama drift candidates` lists. Refuses references that do not resolve and an origin that is not a Task. */
+/** The live Tasks a new Drift with these references and this origin would block: what `trama drift new` with `dryRun` lists. Refuses references that do not resolve and an origin that is not a Task. */
 export function driftCandidates(p: Project, refs: string[], origin: string | null): Task[] {
   checkRefs(p, refs);
   if (origin !== null) getTask(p, origin);
@@ -681,10 +690,10 @@ function checkNotBlocking(p: Project, named: NotBlocking[], refs: string[], orig
   const wouldBlock = blockedByDrift(loadProject(p), existing, refs, origin);
   const seen = new Set<string>();
   return named.map(({ task, reason }) => {
-    if (task === "") throw new TramaError("A reason for a Task was given with no Task before it: each --not-blocking-reason follows its --not-blocking");
+    if (task === "") throw new TramaError("A reason for a Task was given with no Task before it: each `reason` of `notBlocking` goes with its `task`");
     if (!existing.some((t) => t.id === task)) throw new TramaError(`Task ${task} does not exist, so the Drift cannot leave it free`);
     const name = cardName(p, "task", task);
-    if (seen.has(task)) throw new TramaError(`Task ${name} is named more than once in --not-blocking`);
+    if (seen.has(task)) throw new TramaError(`Task ${name} is named more than once in notBlocking`);
     seen.add(task);
     const text = reason.trim();
     if (!text) throw new TramaError(`Task ${name} needs its reason, in one line: why the difference does not touch it`);
@@ -694,7 +703,7 @@ function checkNotBlocking(p: Project, named: NotBlocking[], refs: string[], orig
   });
 }
 
-/** A Drift checked and built but not written: what `newDrift` writes, and what `trama compare file` checks for every card before it writes any. */
+/** A Drift checked and built but not written: what `newDrift` writes, and what `trama comparison move` checks for every card before it writes any. */
 export interface PlannedDrift {
   title: string;
   data: DriftData;
@@ -705,7 +714,7 @@ export function planDrift(
   p: Project,
   input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; critical?: boolean; where: string; notBlocking?: NotBlocking[] },
 ): PlannedDrift {
-  if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with --ref");
+  if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with `refs`");
   const happens = input.happens.trim();
   const should = input.should.trim();
   const where = input.where.trim();
@@ -716,7 +725,7 @@ export function planDrift(
   checkRefs(p, input.refs);
   const attached = input.proposal ? getProposal(p, input.proposal) : null;
   if (attached) requireAttachable(p, attached);
-  if (options.length === 0 && attached === null) throw new TramaError("A Drift without Fix options needs an attached Proposal that fixes the Model or the Requirements: give --proposal with its Draft, or two to five fix options");
+  if (options.length === 0 && attached === null) throw new TramaError("A Drift without Fix options needs an attached Proposal that fixes the Model or the Requirements: give `proposal` with its Draft, or two to five fix options");
   const proposal = attached?.id ?? null;
   const origin = input.origin ? getTask(p, input.origin).id : null;
   const previous = previousOf(p, input.previous, origin);
@@ -828,7 +837,7 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
 export function fixCodeRefusal(p: Project, drift: Drift, project: ProjectModel = loadProject(p)): string | null {
   const isModel = (r: string) => parseRequirementRef(r) === null;
   if (!drift.data.refs.some(isModel) || liveRefs(p, drift.data.refs, project).some(isModel)) return null;
-  const close = drift.data.proposal === null ? "dismissing it (`drift resolve --dismiss`)" : "accepting its attached Proposal (`drift resolve --accept-proposal`)";
+  const close = drift.data.proposal === null ? "dismissing it (`drift move <id> dismissed`)" : "accepting its attached Proposal (`drift move <id> proposal-accepted`)";
   return `The Model elements of Drift ${cardName(p, "drift", drift.id)} no longer exist: its code cannot be fixed, the Drift can only be closed by ${close}`;
 }
 

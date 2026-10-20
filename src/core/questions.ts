@@ -69,15 +69,15 @@ export function parseQuestionRequest(value: unknown): QuestionRequest {
 }
 
 /** The message that refuses an agent's own question tool in Trama's work; the agent hooks reply with it. */
-export const QUESTION_TOOL_REFUSAL = "In Trama's work, ask the developer only with `trama ask --root <project>`, as the Trama skill says. This question tool is disabled here.";
+export const QUESTION_TOOL_REFUSAL = "In Trama's work, ask the developer only with `trama question new --root <project>`, as the Trama skill says. This question tool is disabled here.";
 
 /** The reason of an initial unavailability: the agent stops and asks the developer to open the editor; from Cursor's sandbox it first asks once more outside it. */
 export function unavailableQuestions(fromCursorSandbox = false): QuestionResult {
   return {
     status: "unavailable",
     reason: fromCursorSandbox
-      ? "Editor not reachable from Cursor's sandbox. Run the same trama ask once more outside the sandbox; if the editor is still unavailable, stop and tell the developer to open the project in the editor with Trama."
-      : "Editor not available for this project. Do not ask in any other way: stop, tell the developer to open the project in the editor with Trama, and run the same trama ask again when they say to continue.",
+      ? "Editor not reachable from Cursor's sandbox. Run the same trama question new once more outside the sandbox; if the editor is still unavailable, stop and tell the developer to open the project in the editor with Trama."
+      : "Editor not available for this project. Do not ask in any other way: stop, tell the developer to open the project in the editor with Trama, and run the same trama question new again when they say to continue.",
   };
 }
 
@@ -99,7 +99,7 @@ export interface QuestionFailure {
   error: { code: string; message: string };
 }
 
-/** One JSON error contract for the local channel and the `trama ask` command. */
+/** One JSON error contract for the local channel and the `trama question new` command. */
 export function questionFailure(error: unknown): QuestionFailure {
   const code = error instanceof QuestionInterruptedError ? error.code
     : error instanceof UsageError || error instanceof SyntaxError ? "invalid-input"

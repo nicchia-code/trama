@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, ut
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { reportActivity, runAgentEvent, runCursorHook } from "../src/cli/main";
+import { execute, reportActivity } from "../src/cli/main";
+import { runCursorHook } from "../src/cli/commands/hook";
 import type { AgentOrigin } from "../src/core/announcements";
 import { CursorConversations, type CursorHook, parseCursorHook, registersAgentWork, writeCursorHooks } from "../src/core/cursor-chat";
 import { createQuestionServer } from "../src/core/question-channel";
@@ -51,7 +52,7 @@ test("only Trama's conversations produce Events, from the Trama prompt until the
   expect(at({ hook: "stop", conversation: "t", status: "completed" })).toBeNull();
 });
 
-test("trama cursor-hook hands the hook, never the prompt, to the project's editor and always answers Cursor", async () => {
+test("trama hook cursor hands the hook, never the prompt, to the project's editor and always answers Cursor", async () => {
   const received: CursorHook[] = [];
   const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => { received.push(h); } });
   try {
@@ -77,9 +78,9 @@ test("Trama's hooks replace only Trama's earlier entries, keep the others, and l
   const file = join(root, ".cursor", "hooks.json");
   writeCursorHooks(file, "/old/bin/trama", false);
   const read = () => JSON.parse(readFileSync(file, "utf8"));
-  const mine = (program: string) => [{ command: `"${program}" cursor-hook` }];
-  const shell = (program: string) => [{ command: `"${program}" cursor-hook`, matcher: "trama" }];
-  const question = (program: string) => [{ command: `"${program}" cursor-hook`, matcher: "AskQuestion" }];
+  const mine = (program: string) => [{ command: `"${program}" hook cursor` }];
+  const shell = (program: string) => [{ command: `"${program}" hook cursor`, matcher: "trama" }];
+  const question = (program: string) => [{ command: `"${program}" hook cursor`, matcher: "AskQuestion" }];
   expect(read()).toEqual({ version: 1, hooks: { beforeSubmitPrompt: mine("/old/bin/trama"), stop: mine("/old/bin/trama"), sessionEnd: mine("/old/bin/trama"), afterShellExecution: shell("/old/bin/trama"), preToolUse: question("/old/bin/trama") } });
 
   writeFileSync(file, JSON.stringify({ version: 1, hooks: { stop: [{ command: "./mine.sh" }, ...mine("/old/bin/trama")], afterFileEdit: [{ command: "fmt" }] } }));
@@ -93,6 +94,15 @@ test("Trama's hooks replace only Trama's earlier entries, keep the others, and l
     preToolUse: question("/new/bin/trama"),
   });
 
+  // Entries with the old `cursor-hook` command are Trama's too and are rewritten; another tool's entry that merely mentions it is not.
+  const old = (program: string, matcher?: string) => ({ command: `"${program}" cursor-hook`, ...(matcher === undefined ? {} : { matcher }) });
+  writeFileSync(file, JSON.stringify({ version: 1, hooks: { stop: [{ command: "./mine.sh" }, old("/older/bin/trama")], afterShellExecution: [old("/older/bin/trama", "trama"), { command: "./other cursor-hook", matcher: "x" }], preToolUse: [old("/older/bin/trama", "AskQuestion")] } }));
+  writeCursorHooks(file, "/new/bin/trama", false);
+  expect(read().hooks.stop).toEqual([{ command: "./mine.sh" }, ...mine("/new/bin/trama")]);
+  expect(read().hooks.afterShellExecution).toEqual([{ command: "./other cursor-hook", matcher: "x" }, ...shell("/new/bin/trama")]);
+  expect(read().hooks.preToolUse).toEqual(question("/new/bin/trama"));
+  expect(JSON.stringify(read())).not.toContain('" cursor-hook');
+
   writeFileSync(file, "{ broken");
   expect(() => writeCursorHooks(file, "/new/bin/trama")).toThrow(/not valid JSON/);
   expect(readFileSync(file, "utf8")).toBe("{ broken");
@@ -103,9 +113,9 @@ test("on Windows Cursor's entries have the PowerShell form, and either form is r
   writeCursorHooks(file, "C:\\old\\trama.exe", false);
   writeCursorHooks(file, "C:\\new\\trama.exe", true);
   const read = () => JSON.parse(readFileSync(file, "utf8")).hooks;
-  expect(read().stop).toEqual([{ command: '& "C:\\new\\trama.exe" cursor-hook' }]);
+  expect(read().stop).toEqual([{ command: '& "C:\\new\\trama.exe" hook cursor' }]);
   writeCursorHooks(file, "C:\\newer\\trama.exe", false);
-  expect(read().stop).toEqual([{ command: '"C:\\newer\\trama.exe" cursor-hook' }]);
+  expect(read().stop).toEqual([{ command: '"C:\\newer\\trama.exe" hook cursor' }]);
 });
 
 test("only commands that change project state tell the editor; read-only commands do not", async () => {
@@ -115,9 +125,9 @@ test("only commands that change project state tell the editor; read-only command
     const tell = (argv: string[], env: Record<string, string>) => reportActivity(argv, project, { env, runtimeDir });
     await tell(["task", "move", "abcd1234", "doing"], { TRAMA_TERMINAL: "abc123" });
     await tell(["drift", "new", "x"], { CURSOR_AGENT: "1" });
-    await tell(["announce", "task", "x"], {});
+    await tell(["announcement", "new"], {});
     await tell(["task", "list"], { TRAMA_TERMINAL: "abc123" });
-    await tell(["proposal", "resolve-drift", "abcd1234", "efgh5678", "--remove"], { TRAMA_TERMINAL: "abc123" });
+    await tell(["proposal", "edit", "abcd1234"], { TRAMA_TERMINAL: "abc123" });
     expect(received).toEqual([
       { terminal: "abc123" },
       { chat: "cursor" },
@@ -136,27 +146,33 @@ test("the hook of an agent in a Trama terminal tells the project's editor it is 
   const received: [string, string][] = [];
   const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onAgentIdle: (terminal, root) => received.push([terminal, root]) });
   try {
-    await runAgentEvent(["agent-event", "idle"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir });
-    await runAgentEvent(["agent-event", "idle"], project, { env: {}, runtimeDir });
+    await execute(["hook", "idle"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir });
+    await execute(["hook", "idle"], project, { env: {}, runtimeDir });
     expect(received).toEqual([["abc123", project]]);
   } finally {
     await server.dispose();
   }
-  await runAgentEvent(["agent-event", "idle"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir });
-  await expect(runAgentEvent(["agent-event", "alive"], project, { env: {}, runtimeDir })).rejects.toThrow("Usage: trama agent-event idle");
-  await expect(runAgentEvent(["agent-event", "busy"], project, { env: {}, runtimeDir })).rejects.toThrow("Usage: trama agent-event idle");
+  await expect(execute(["hook", "idle"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir })).resolves.toEqual({ out: "", exit: 0 });
+  await expect(execute(["hook", "alive"], project, { env: {}, runtimeDir })).rejects.toThrow('Unknown command "hook alive"');
+  await expect(execute(["agent-event", "idle"], project, { env: {}, runtimeDir })).rejects.toThrow('Run "trama --help"');
 });
 
 test("a shell command that registers the agent's work makes its conversation Trama's, with no Event of its own", () => {
   const commands: [string, boolean][] = [
-    ['export PATH="/x/bin:$PATH" && trama announce task "Card"', true],
+    ['export PATH="/x/bin:$PATH" && trama announcement new --input -', true],
+    ["trama announcement move abcd1234 --input -", true],
+    ["trama announcement list", false],
     ['"/home/u/.cursor/extensions/trama/bin/trama" task move abcd1234 doing', true],
-    ['& "C:\\Users\\u\\trama.exe" ask', true],
+    ['& "C:\\Users\\u\\trama.exe" question new --input -', true],
+    ["trama --root /p question new --input -", true],
+    ["trama ask", false],
+    ["trama announce task x", false],
     ["trama --root /project proposal new Design --json", true],
-    ["trama compare brief order --candidates", true],
-    ["trama compare file j340jw58 comparison.json", false],
-    ["trama task next --batch --max 4", false],
-    ["trama search announce", false],
+    ["trama comparison new order --input -", true],
+    ["trama comparison move j340jw58 delivered --input -", false],
+    ["trama task list --input -", false],
+    ["trama model list --input -", false],
+    ["trama proposal show abcd1234", false],
     ["trama task move abcd1234 done", false],
     ["grep trama announce notes.md", false],
     ["echo trama announce", false],
@@ -165,12 +181,12 @@ test("a shell command that registers the agent's work makes its conversation Tra
 
   const conversations = new CursorConversations();
   const shell = (conversation: string, command: string) => parseCursorHook({ hook_event_name: "afterShellExecution", conversation_id: conversation, workspace_roots: [project], command, output: "Secret output" });
-  const work = shell("s1", 'trama announce task "Secret card"');
+  const work = shell("s1", 'trama announcement new --input - <<< \'{"kind":"task","title":"Secret card"}\'');
   expect(work).toEqual({ hook: "afterShellExecution", conversation: "s1", root: project, tramaWork: true });
   expect(JSON.stringify(work)).not.toContain("Secret");
   expect(conversations.translate(work!)).toBeNull();
   expect(conversations.translate({ hook: "stop", conversation: "s1", root: project, status: "completed" })?.event).toBe("AGENT_STOPPED");
-  const reads = shell("s2", "trama task next --batch --max 4");
+  const reads = shell("s2", "trama task list --input -");
   expect(conversations.translate(reads!)).toBeNull();
   expect(conversations.translate({ hook: "stop", conversation: "s2", root: project, status: "completed" })).toBeNull();
 });
@@ -222,10 +238,10 @@ test("the question tool's hook is read only for that tool, and its check produce
 test("Cursor's hooks file has the question tool's entry, matched to that tool only", () => {
   const file = join(root, ".cursor", "hooks.json");
   writeCursorHooks(file, "/bin/trama", false);
-  expect(JSON.parse(readFileSync(file, "utf8")).hooks.preToolUse).toEqual([{ command: `"/bin/trama" cursor-hook`, matcher: "AskQuestion" }]);
+  expect(JSON.parse(readFileSync(file, "utf8")).hooks.preToolUse).toEqual([{ command: `"/bin/trama" hook cursor`, matcher: "AskQuestion" }]);
 });
 
-test("trama cursor-hook refuses Cursor's question tool only in a conversation an editor knows as Trama's", async () => {
+test("trama hook cursor refuses Cursor's question tool only in a conversation an editor knows as Trama's", async () => {
   const asked: CursorHook[] = [];
   const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => { asked.push(h); return h.conversation === "t"; } });
   try {

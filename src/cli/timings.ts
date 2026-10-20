@@ -1,4 +1,5 @@
-import { type JobTiming, timingJobs } from "../core/timings";
+import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
+import { type JobTiming, PARALLEL_CHOICE_KINDS, timingJobs } from "../core/timings";
 import type { Project } from "../core/store";
 import type { Result } from "./result";
 
@@ -12,7 +13,17 @@ function formatDuration(ms: number | null): string {
   return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
-function jobMd(job: JobTiming): string {
+/** The `Parallel choices` section of a job: the count per kind, then one line per choice in time order. */
+function parallelChoicesMd(job: JobTiming, numbers: ShortNumbers): string[] {
+  const counts = PARALLEL_CHOICE_KINDS.map((kind) => `${job.parallelChoices.filter((c) => c.kind === kind).length} ${kind}`).join(", ");
+  return [
+    "- Parallel choices:",
+    `  - ${counts}`,
+    ...job.parallelChoices.map((c) => `  - ${c.kind}: ${c.tasks.map((t) => `${numbers.name("task", t.id)} ${t.title}`).join("; ")} - ${c.reason}`),
+  ];
+}
+
+function jobMd(job: JobTiming, numbers: ShortNumbers): string {
   const holder = job.terminal !== null ? `terminal ${job.terminal}` : `chat ${job.chat}`;
   const named = job.job === null ? "" : `, job ${job.job}`;
   const state = job.end === null ? "running" : `ended ${job.end}`;
@@ -32,12 +43,14 @@ function jobMd(job: JobTiming): string {
     "- Tasks:",
     ...(job.tasks.length === 0 ? ["  - none"] : job.tasks.map((t) => `  - ${t.task} ${t.title}: ${formatDuration(t.durationMs)}, ${t.outcome}`)),
     `- Queue: ${queue.waits === 0 ? "no waits" : `${queue.waits} waits, ${formatDuration(queue.totalMs)} in total, longest ${formatDuration(queue.longestMs)}`}.`,
+    ...(job.parallelChoices.length === 0 ? [] : parallelChoicesMd(job, numbers)),
   ].join("\n");
 }
 
-/** `trama timings`: the newest jobs, newest first, with the phases, comparisons, Tasks and queue waits of each. */
+/** `trama timing list`: the newest jobs, newest first, with the phases, comparisons, Tasks and queue waits of each. */
 export function timingsView(p: Project, last: number, now = new Date()): Result {
   const jobs = timingJobs(p, last, now);
   if (jobs.length === 0) return { md: "_No timings recorded yet._", json: { jobs } };
-  return { md: jobs.map(jobMd).join("\n\n"), json: { jobs } };
+  const numbers = syncShortNumbers(p);
+  return { md: jobs.map((job) => jobMd(job, numbers)).join("\n\n"), json: { jobs } };
 }

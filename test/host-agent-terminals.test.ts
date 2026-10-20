@@ -452,7 +452,7 @@ describe("Claude Code run hooks", () => {
         expect(terminal.line).toContain("SessionEnd");
         expect(terminal.line).not.toContain("SubagentStop");
         expect(terminal.line).toContain(`' --model 'haiku' `);
-        expect(terminal.line).toContain("agent-event idle");
+        expect(terminal.line).toContain("hook idle");
         expect(id).toMatch(/^[a-z0-9]{6}$/);
         expect(environments.find((env) => env["TRAMA_TERMINAL"] === id)?.["TRAMA_TERMINAL"]).toBe(id);
       }
@@ -701,6 +701,22 @@ describe("automatic terminal exit", () => {
       delete inspected.experimentalAdvisorScanner;
     }
   });
+  test("the parallel execution is on only from the user value true", async () => {
+    const { configuredParallelExecution } = await import("../extension/src/host/agent");
+    try {
+      expect(configuredParallelExecution()).toBe(false);
+      inspected.experimentalParallelExecution = { globalValue: true };
+      expect(configuredParallelExecution()).toBe(true);
+      inspected.experimentalParallelExecution = { globalValue: "true" };
+      expect(configuredParallelExecution()).toBe(false);
+      inspected.experimentalParallelExecution = { workspaceValue: true };
+      expect(configuredParallelExecution()).toBe(false);
+      inspected.experimentalParallelExecution = { globalValue: false, workspaceValue: true };
+      expect(configuredParallelExecution()).toBe(false);
+    } finally {
+      delete inspected.experimentalParallelExecution;
+    }
+  });
   test("chat instructions are built after newChat and not sent if delivery conditions change", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const previousHandler = commandHandler;
@@ -898,6 +914,36 @@ describe("agent instruction settings", () => {
     } finally {
       delete inspected["experimentalDriftBlocker"];
       delete settingValues["language"];
+    }
+  });
+  test("the parallel execution's sentence reaches only the runs over several Tasks, right after the sub-agent sentence, and only from the user setting", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const { buildAutomaticRunPrompt, PARALLEL_EXECUTION_SENTENCE } = await import("../extension/src/host/prompts");
+    const sentence = 'The experimental parallel execution is on: follow the "Experimental parallel execution" section of the trama-implement skill.';
+    expect(PARALLEL_EXECUTION_SENTENCE).toBe(sentence);
+    const all = "Use the trama-implement skill on every Task in the todo column.";
+    const send = async (instruction: string, name: string, severalTasks: boolean) => {
+      await launchAgent(dir, instruction, name, undefined, undefined, undefined, undefined, { filesDrifts: true, severalTasks });
+      return typed.at(-1) ?? "";
+    };
+    inspected["experimentalParallelExecution"] = { globalValue: true };
+    try {
+      expect(await send(all, "All tasks", true)).toBe(`omp '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
+      expect((await send(buildAutomaticRunPrompt("collection"), "All tasks", true)).includes(` Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`)).toBe(true);
+      expect(await send("Use the trama-implement skill on Task abc.", "T3", false)).not.toContain(sentence);
+      expect(await send("Use the trama-scan skill on the whole System.", "Scan", false)).not.toContain(sentence);
+      expect(await send("Use the trama-design skill. Add refunds.", "Design", false)).not.toContain(sentence);
+
+      inspected["experimentalParallelExecution"] = { globalValue: false };
+      expect(await send(all, "All tasks", true)).not.toContain(sentence);
+      inspected["experimentalParallelExecution"] = { globalValue: "true" };
+      expect(await send(all, "All tasks", true)).not.toContain(sentence);
+      inspected["experimentalParallelExecution"] = { workspaceValue: true };
+      expect(await send(all, "All tasks", true)).not.toContain(sentence);
+      delete inspected["experimentalParallelExecution"];
+      expect(await send(all, "All tasks", true)).toBe(`omp '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
+    } finally {
+      delete inspected["experimentalParallelExecution"];
     }
   });
   test("every instruction carries the ask sentence: on its line before the language in a terminal or Copilot's chat, on its own line in Cursor's chat", async () => {

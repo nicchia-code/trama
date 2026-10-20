@@ -81,16 +81,16 @@ describe("approving a Proposal applies it and starts no scan", () => {
 describe("an approval from the command line applies it and starts no scan", () => {
   const cli = (...args: string[]) => run(["--root", dir, ...args], dir, {});
 
-  test("trama proposal approve applies the Proposal", () => {
+  test("trama proposal move approved applies the Proposal", () => {
     const id = proposalEditing("checkout/order.md", orderChange);
-    expect(cli("proposal", "approve", id).out).toBe(`Approved Proposal ${cardName(p, "proposal", id)}`);
+    expect(cli("proposal", "move", id, "approved").out).toBe(`Approved Proposal ${cardName(p, "proposal", id)}`);
     expect(getProposal(p, id).data.status).toBe("approved");
   });
 
-  test("trama drift resolve --accept-proposal applies the attached Proposal", () => {
+  test("trama drift move proposal-accepted applies the attached Proposal", () => {
     const id = proposalEditing("checkout/order.md", orderChange, false);
     const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Code has Lost", refs: ["order"], proposal: id, happens: "The code does it one way.", should: "The Model says another." });
-    cli("drift", "resolve", drift.id, "--accept-proposal");
+    cli("drift", "move", drift.id, "proposal-accepted");
     expect(getProposal(p, id).data.status).toBe("approved");
   });
 
@@ -99,10 +99,10 @@ describe("an approval from the command line applies it and starts no scan", () =
     mkdirSync(leftover, { recursive: true });
     writeFileSync(join(leftover, "state"), "on\n");
     const id = proposalEditing("checkout/order.md", orderChange);
-    expect(cli("proposal", "approve", id).out).toBe(`Approved Proposal ${cardName(p, "proposal", id)}`);
+    expect(cli("proposal", "move", id, "approved").out).toBe(`Approved Proposal ${cardName(p, "proposal", id)}`);
     expect(getProposal(p, id).data.status).toBe("approved");
     expect(getProposal(p, id).data.scanScope).toBeNull();
     expect(readFileSync(join(leftover, "state"), "utf8")).toBe("on\n");
-    expect(() => cli("proposal", "withdraw", id)).toThrow();
+    expect(() => cli("proposal", "withdraw", id)).toThrow(/Unknown command|trama --help/);
   });
 });
