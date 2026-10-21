@@ -9,7 +9,7 @@ import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
 import { formatDiagnostic } from "../core/model";
 import { type Blocker, concernSameThing } from "../core/blocking";
 import { TramaError, UsageError } from "../core/errors";
-import { attachedDrift, BATCH_DEFAULT, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftCandidates, driftOptions, driftSides, freedTasks, type FreedTask, getTask, listDrifts, listTasks, nextTask, type ProposalFilter, type Task } from "../core/work";
+import { attachedDrift, BATCH_DEFAULT, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftCandidates, driftOptions, driftSides, freedTasks, type FreedTask, getTask, listDrifts, listTasks, nextTask, type ProposalFilter, type Task, taskProgress } from "../core/work";
 import { machineReceiverLines, outgoingLines, reactionLines, stateTreeLines } from "./explore";
 import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
 import type { AgentOrigin } from "../core/announcements";
@@ -128,14 +128,16 @@ export interface TaskSummary {
   proposal: string | null;
   /** True while the agent has taken the Task. */
   agent: boolean;
+  /** The percentage the agent declared for the Task it has taken; null when none. */
+  progress: number | null;
   /** The note of a fix Task closed without changes; null otherwise. */
   unchanged: string | null;
   /** Why the Task is blocked, if it is: the open Drifts, or the Task that fixes the code of its Drift. */
   blockedBy: Blocker[];
 }
 
-/** Appended to a Task's line in the textual views while the agent has taken it. */
-const WORKING = " (agent working)";
+/** Appended to a Task's line in the textual views while the agent has taken it, with the declared percentage when there is one. */
+const working = (progress: number | null) => ` (agent working${progress === null ? "" : `, ${progress}%`})`;
 
 /** Appended to a Task's line in the textual views when it was closed without changes. */
 const NO_CHANGES = " (no changes)";
@@ -144,7 +146,7 @@ const NO_CHANGES = " (no changes)";
 const blockedMarks = (blockers: Blocker[], numbers: ShortNumbers) =>
   blockers.map((b) => (b.kind === "drift" ? ` (blocked by Drift ${numbers.name("drift", b.drift)})` : ` (waiting for Task ${numbers.name("task", b.task)})`)).join("");
 
-export const taskSummary = (t: Task, blocked: Map<string, Blocker[]>, numbers: ShortNumbers): TaskSummary => ({ id: t.id, number: numbers.label("task", t.id), title: t.title, column: t.data.column, technical: t.data.technical, refs: t.data.refs, drift: t.data.drift, proposal: t.data.proposal, agent: t.data.agent, unchanged: t.data.unchanged, blockedBy: blocked.get(t.id) ?? [] });
+export const taskSummary = (p: Project, t: Task, blocked: Map<string, Blocker[]>, numbers: ShortNumbers): TaskSummary => ({ id: t.id, number: numbers.label("task", t.id), title: t.title, column: t.data.column, technical: t.data.technical, refs: t.data.refs, drift: t.data.drift, proposal: t.data.proposal, agent: t.data.agent, progress: taskProgress(p, t), unchanged: t.data.unchanged, blockedBy: blocked.get(t.id) ?? [] });
 
 /** The Task's text with, right after its title, the line that says it was closed without changes and its check note. */
 function withCheckNote(task: Task): string {
@@ -268,19 +270,19 @@ export function taskShowView(p: Project, task: Task): Result {
   const md = [
     `${withCheckNote(task)}`,
     "",
-    `Column: **${task.data.column}**${task.data.technical ? " · technical" : ""}${task.data.drift ? ` · from Drift ${numbers.name("drift", task.data.drift)}` : ""}${task.data.proposal ? ` · from Proposal ${numbers.name("proposal", task.data.proposal)}` : ""}${task.data.agent ? WORKING : ""}${blockedMarks(blockedBy, numbers)}`,
+    `Column: **${task.data.column}**${task.data.technical ? " · technical" : ""}${task.data.drift ? ` · from Drift ${numbers.name("drift", task.data.drift)}` : ""}${task.data.proposal ? ` · from Proposal ${numbers.name("proposal", task.data.proposal)}` : ""}${task.data.agent ? working(taskProgress(p, task)) : ""}${blockedMarks(blockedBy, numbers)}`,
     ...blockedBy.map((b) => (b.kind === "drift" ? `Blocked by Drift ${numbers.name("drift", b.drift)}: ${b.title}` : `Waiting for Task ${numbers.name("task", b.task)}: ${b.title} (fixes the code for Drift ${numbers.name("drift", b.drift)})`)),
     "",
     "## References",
     task.data.refs.length === 0 ? "_Technical Task: no references._" : refsBlock(project, task.data.refs, true),
     ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, task.data.refs, "text")] : []),
   ].join("\n");
-  return { md, json: { ...taskSummary(task, blocked, numbers), body: task.body } };
+  return { md, json: { ...taskSummary(p, task, blocked, numbers), body: task.body } };
 }
 
 /** A Task's line in the textual lists: its marks, and what blocks it. */
-const taskLine = (t: Task, blocked: Map<string, Blocker[]>, numbers: ShortNumbers) =>
-  `- ${numbers.name("task", t.id)} ${t.title}${t.data.technical ? " (technical)" : ""}${t.data.proposal ? ` (Proposal ${numbers.name("proposal", t.data.proposal)})` : ""}${t.data.agent ? WORKING : ""}${t.data.unchanged !== null ? NO_CHANGES : ""}${blockedMarks(blocked.get(t.id) ?? [], numbers)}`;
+const taskLine = (p: Project, t: Task, blocked: Map<string, Blocker[]>, numbers: ShortNumbers) =>
+  `- ${numbers.name("task", t.id)} ${t.title}${t.data.technical ? " (technical)" : ""}${t.data.proposal ? ` (Proposal ${numbers.name("proposal", t.data.proposal)})` : ""}${t.data.agent ? working(taskProgress(p, t)) : ""}${t.data.unchanged !== null ? NO_CHANGES : ""}${blockedMarks(blocked.get(t.id) ?? [], numbers)}`;
 
 /** The Tasks by column, flat, filtered by `column` and by the identities in `ids` when given. */
 export function taskListView(p: Project, column?: string, ids?: ReadonlySet<string>): Result {
@@ -288,9 +290,9 @@ export function taskListView(p: Project, column?: string, ids?: ReadonlySet<stri
   const numbers = syncShortNumbers(p);
   const tasks = listTasks(p).filter((t) => (!column || t.data.column === column) && (ids === undefined || ids.has(t.id)));
   const md = COLUMNS.filter((c) => !column || c === column)
-    .map((c) => `## ${c}\n${bullets(tasks.filter((t) => t.data.column === c).map((t) => taskLine(t, blocked, numbers)))}`)
+    .map((c) => `## ${c}\n${bullets(tasks.filter((t) => t.data.column === c).map((t) => taskLine(p, t, blocked, numbers)))}`)
     .join("\n\n");
-  return { md: `# Tasks\n\n${md}`, json: { tasks: tasks.map((t) => taskSummary(t, blocked, numbers)) } };
+  return { md: `# Tasks\n\n${md}`, json: { tasks: tasks.map((t) => taskSummary(p, t, blocked, numbers)) } };
 }
 
 /** The Proposals a `task list` answer with `runnable` is about, as its line names them: `in Proposal P3`, `outside Proposals P1, P2`, or nothing. */
@@ -312,7 +314,7 @@ export function taskNextView(p: Project, filter: ProposalFilter = {}, batch = fa
   const blocked = new Map(waiting.map((w) => [w.task.id, w.blockers]));
   const numbers = syncShortNumbers(p);
   const scope = proposalScope(p, numbers, filter);
-  const waitingJson = waiting.map((w) => taskSummary(w.task, blocked, numbers));
+  const waitingJson = waiting.map((w) => taskSummary(p, w.task, blocked, numbers));
   const brief = (t: Task) => ({ id: t.id, number: numbers.label("task", t.id), title: t.title });
   const held = {
     md: withHeldBack
@@ -322,7 +324,7 @@ export function taskNextView(p: Project, filter: ProposalFilter = {}, batch = fa
   };
   if (next && batch) return { md: queue.batch.map((t) => `${numbers.name("task", t.id)} ${t.title}`).join("\n") + held.md, json: { batch: queue.batch.map(brief), waiting: waitingJson, ...held.json } };
   if (next) return { md: `Next Task${scope}: ${numbers.name("task", next.id)} ${next.title}${held.md}`, json: { next: brief(next), waiting: waitingJson, ...held.json } };
-  const md = [`No Task is runnable${scope}.`, ...(waiting.length > 0 ? ["", "Still in To do:", ...waiting.map((w) => taskLine(w.task, blocked, numbers))] : [])].join("\n");
+  const md = [`No Task is runnable${scope}.`, ...(waiting.length > 0 ? ["", "Still in To do:", ...waiting.map((w) => taskLine(p, w.task, blocked, numbers))] : [])].join("\n");
   return { md: md + held.md, json: { next: null, waiting: waitingJson, ...held.json } };
 }
 
@@ -458,8 +460,8 @@ export function boardView(p: Project): Result {
       .join("");
   };
   const blocked = blockedTasks(p);
-  const tasks = listTasks(p).map((task) => taskSummary(task, blocked, numbers));
-  const line = (t: TaskSummary) => `${t.number ?? t.id} ${t.title}${t.technical ? " (technical)" : ""}${t.agent ? WORKING : ""}${t.unchanged !== null ? NO_CHANGES : ""}${blockedMarks(t.blockedBy, numbers)}`;
+  const tasks = listTasks(p).map((task) => taskSummary(p, task, blocked, numbers));
+  const line = (t: TaskSummary) => `${t.number ?? t.id} ${t.title}${t.technical ? " (technical)" : ""}${t.agent ? working(t.progress) : ""}${t.unchanged !== null ? NO_CHANGES : ""}${blockedMarks(t.blockedBy, numbers)}`;
   // A design of two or more Tasks is one group, in the column its Tasks add up to; every other Task stays a line of its own.
   const designs = new Map<string, TaskSummary[]>();
   for (const t of tasks) if (t.proposal !== null) designs.set(t.proposal, [...(designs.get(t.proposal) ?? []), t]);

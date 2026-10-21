@@ -8,6 +8,7 @@ import { cn } from "../lib/utils";
 import { Markdown } from "../markdown";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
+import { Progress } from "../ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { AGENT_NAMES, type AnnouncedCard, blockedReason, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
 import { BoardButton, Head, RefChips, StatusDot, Tip, TipBadge, TaskProposalTag, useBoardEnv } from "./parts";
@@ -357,6 +358,7 @@ function TaskCardView({ card }: { card: TaskCard }) {
         {card.waitingFor.map((fix) => (
           <WaitingBadge key={fix.id} fix={fix} />
         ))}
+        {card.progress !== null ? <span className="text-[11px] font-medium text-cyan-700 tabular-nums dark:text-cyan-400">{card.progress}%</span> : null}
       </Head>
       <h3 className="font-semibold break-words">{card.title}</h3>
       {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
@@ -384,6 +386,15 @@ function TaskCardView({ card }: { card: TaskCard }) {
         ) : null}
         <BoardButton icon={FileInput} label="Open" aria={`Open file of task ${card.name.text}`} variant="ghost" onClick={() => env.context.post({ type: "openFile", path: card.file })} />
       </Actions>
+      {card.progress !== null ? (
+        <Progress
+          value={card.progress}
+          aria-label="Agent progress"
+          aria-valuetext={`${card.progress}%`}
+          className="-mx-2.5 -mb-2.5 mt-1 w-[calc(100%+1.25rem)] rounded-b-md bg-cyan-500/20"
+          indicatorClassName="bg-cyan-500"
+        />
+      ) : null}
     </Shell>
   );
 }

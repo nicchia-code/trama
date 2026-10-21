@@ -18,6 +18,9 @@ The agent finishes a Task and moves it to Done.
 ### CLOSE_TASK_UNCHANGED
 L'agente chiude un Task di correzione senza cambiare il codice, perché rileggendolo ha trovato che fa già ciò che dicono il Model o il Requisito, e scrive una nota con ciò che ha verificato.
 
+### DECLARE_TASK_PROGRESS
+The agent, or the sub-agent working on a Task, says roughly how far along the Task it has taken is, as a percentage it judges by itself.
+
 ### START_PROPOSAL
 The agent starts writing a new Proposal, which begins as a Draft.
 

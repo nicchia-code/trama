@@ -12,7 +12,7 @@ import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
 import { readLastScan } from "./last-scan";
-import { attachedDrift, closedUnchanged, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, followedDrift, freedTasks, type FreedTask, listDrifts, listTasks } from "./work";
+import { attachedDrift, closedUnchanged, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, followedDrift, freedTasks, type FreedTask, listDrifts, listTasks, taskProgress } from "./work";
 import { type Specs, type SpecsChange, specsChange } from "./specs";
 import { type HistoryFault, readHistory } from "./history";
 
@@ -169,6 +169,8 @@ export interface TaskView {
   proposalTag: ProposalTag | null;
   /** True while the agent has taken the Task: the developer cannot move it. */
   agent: boolean;
+  /** The percentage the agent declared for the Task it has taken, a multiple of 10; null when none. */
+  progress: number | null;
   /** When the Task arrived in Done, UTC ISO 8601; null outside Done and on Tasks that reached Done before the instant was kept. */
   finished: string | null;
   /** When the Task was created, UTC ISO 8601; null on numbered Tasks written before the field existed. */
@@ -435,6 +437,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
       proposal: t.data.proposal,
       proposalTag: proposalTagOf(t.data.proposal, proposalById),
       agent: t.data.agent,
+      progress: taskProgress(p, t),
       finished: t.data.finished,
       created: t.data.created,
       unchanged: t.data.unchanged,

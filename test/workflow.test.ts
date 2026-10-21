@@ -9,7 +9,7 @@ import { handOver } from "./handover";
 import { approveProposal, discardProposal, editInProposal, getProposal, health, newProposal, rejectProposal, submitProposal, validateProposal } from "../src/core/proposals";
 import { loadModel, type Project, projectAt } from "../src/core/store";
 import { type CardKind, syncShortNumbers } from "../src/core/short-numbers";
-import { type Drift, driftOptions, driftSides, getDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask, releaseTasks, resolveDrift } from "../src/core/work";
+import { declareProgress, type Drift, driftOptions, driftSides, getDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask, releaseTasks, resolveDrift } from "../src/core/work";
 import { coverWithTask } from "./cover";
 
 /** The fields of a Drift filed from the command line, as its input takes them. */
@@ -343,6 +343,61 @@ describe("Tasks and Drifts", () => {
     expect(cli("task", "show", taken)).toContain("(agent working)");
     expect(cli("task", "show", free)).not.toContain("(agent working)");
     expect(JSON.parse(run(["--root", dir, "--json", "task", "list"], process.cwd(), {}).out).tasks.find((t: { id: string }) => t.id === taken).agent).toBe(true);
+  });
+
+  test("the agent that took a Task declares its progress; the file is ignored by git, replaced, and forgotten when the Task leaves Taken by the agent", () => {
+    const [id, other] = [1, 2].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string];
+    const file = (task: string) => join(p.dir, "progress", task);
+    expect(declareProgress(p, id, 40, "agent", { terminal: "aaa111" })).toMatchObject({ declared: false });
+    moveTask(p, id, "doing", "agent", { terminal: "aaa111" });
+    expect(declareProgress(p, id, 40, "agent", { terminal: "aaa111" })).toMatchObject({ declared: true, progress: 40 });
+    expect(readFileSync(file(id), "utf8").trim()).toBe("40");
+    expect(readFileSync(join(p.dir, "progress", ".gitignore"), "utf8")).toBe("*\n");
+    expect(declareProgress(p, id, 10, "agent", { terminal: "aaa111" })).toMatchObject({ declared: true, progress: 10 });
+    expect(readFileSync(file(id), "utf8").trim()).toBe("10");
+    // Another terminal, the developer and a Free Task change nothing.
+    expect(declareProgress(p, id, 90, "agent", { terminal: "bbb222" })).toMatchObject({ declared: false });
+    expect(declareProgress(p, id, 90, "developer")).toMatchObject({ declared: false });
+    expect(readFileSync(file(id), "utf8").trim()).toBe("10");
+    moveTask(p, other, "doing", "developer");
+    expect(declareProgress(p, other, 50, "agent", { terminal: "aaa111" })).toMatchObject({ declared: false });
+    expect(existsSync(file(other))).toBe(false);
+    // Any move forgets it, and so does the release of the Task.
+    moveTask(p, id, "todo", "agent");
+    expect(existsSync(file(id))).toBe(false);
+    moveTask(p, id, "doing", "agent", { terminal: "aaa111" });
+    declareProgress(p, id, 70, "agent", { terminal: "aaa111" });
+    releaseTasks(p, { terminal: "aaa111" });
+    expect(existsSync(file(id))).toBe(false);
+  });
+
+  test("a Task taken without a known terminal accepts a declaration from any agent", () => {
+    const id = newTask(p, { title: "T", refs: ["order"], technical: false }).id;
+    moveTask(p, id, "doing", "agent");
+    expect(declareProgress(p, id, 100, "agent", { terminal: "zzz999" })).toMatchObject({ declared: true, progress: 100 });
+  });
+
+  test("task move doing with progress only declares, shows in the views and JSON, and is a usage error with another column or unchanged", () => {
+    const id = newTask(p, { title: "Progressing", refs: ["order"], technical: false }).id;
+    const agent = { TRAMA_AGENT: "1" };
+    const cli = (env: Record<string, string>, ...args: string[]) => run(["--root", dir, ...args], process.cwd(), env).out;
+    cli(agent, "task", "move", id, "doing");
+    expect(cli(agent, "task", "move", id, "doing", "--input", '{"progress":40}')).toContain("40%");
+    expect(cli({}, "task", "list")).toContain(`Progressing (agent working, 40%)`);
+    expect(cli({}, "task", "show", id)).toContain("(agent working, 40%)");
+    expect(cli({}, "project", "show")).toContain("Progressing (agent working, 40%)");
+    const listed = JSON.parse(run(["--root", dir, "--json", "task", "list"], process.cwd(), {}).out).tasks.find((t: { id: string }) => t.id === id);
+    expect(listed.progress).toBe(40);
+    // The developer's declaration is ignored with a note, and the percentage stays.
+    expect(cli({}, "task", "move", id, "doing", "--input", '{"progress":90}')).toContain("Progress ignored");
+    expect(getTask(p, id).data.column).toBe("doing");
+    expect(getTask(p, id).data.agent).toBe(true);
+    expect(cli({}, "task", "show", id)).toContain("(agent working, 40%)");
+    for (const bad of [['{"progress":45}', "doing"], ['{"progress":110}', "doing"], ['{"progress":40}', "done"], ['{"progress":40,"unchanged":"x"}', "doing"]] as const)
+      expect(() => run(["--root", dir, "task", "move", id, bad[1], "--input", bad[0]], process.cwd(), agent)).toThrow(UsageError);
+    expect(JSON.parse(run(["--root", dir, "--json", "task", "list"], process.cwd(), {}).out).tasks.find((t: { id: string }) => t.id === id).progress).toBe(40);
+    cli(agent, "task", "move", id, "done");
+    expect(JSON.parse(run(["--root", dir, "--json", "task", "show", id], process.cwd(), {}).out).progress).toBeNull();
   });
 
   test("a blocked Task is marked in the board, the task list and task show, with every blocker; Drift views list no Tasks", async () => {

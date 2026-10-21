@@ -210,6 +210,8 @@ export interface TaskCard {
   proposalName: CardName | null;
   /** True while the agent has taken the Task. */
   agent: boolean;
+  /** The percentage the agent declared for the Task it has taken; null when none. */
+  progress: number | null;
   /** The open Drifts that block the Task, in creation order; empty when none does. */
   blockedByDrifts: DriftBlocker[];
   /** The fix Tasks the Task waits for; empty when it waits for none. */
@@ -371,6 +373,7 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, finishin
     proposalTag: t.proposalTag,
     proposalName: t.proposal === null ? null : cardNameOf(numbers, "proposal", t.proposal),
     agent: t.agent,
+    progress: t.progress,
     blockedByDrifts,
     waitingFor,
     blockedBy: t.blockedBy,

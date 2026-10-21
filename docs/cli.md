@@ -394,7 +394,7 @@ Runs at once; read-only.
 
 #### `trama task move <id> <column>`
 
-Run as the agent (in the terminal Trama started, or in Cursor's chat), a move to `doing` takes the Task and a move to `todo` or `done` clears that; it is refused, changing nothing, when the Task is blocked. Run as the developer, a move of a Task the agent has taken is refused, except to `doing`, which takes it back: the mark goes and the Task stays In progress. `unchanged` (a note saying what was checked) closes a fix Task into Done without changes when the code already does what the Drift's Model or Requirement says, and dismisses its Drift; it applies only to `done`.
+Run as the agent (in the terminal Trama started, or in Cursor's chat), a move to `doing` takes the Task and a move to `todo` or `done` clears that; it is refused, changing nothing, when the Task is blocked. Run as the developer, a move of a Task the agent has taken is refused, except to `doing`, which takes it back: the mark goes and the Task stays In progress. `unchanged` (a note saying what was checked) closes a fix Task into Done without changes when the code already does what the Drift's Model or Requirement says, and dismisses its Drift; it applies only to `done`. `progress` (0 to 100, in steps of 10) does not move anything: with `doing`, it only declares how far along the agent is on a Task it has taken, in place of the previous percentage. A declaration for a Task this agent has not taken changes nothing and prints a note, with exit 0.
 
 - `<id>`: The Task: its ID, a unique prefix or its short number.
 - `<column>`: Where the Task goes. One of `todo`, `doing`, `done`.
@@ -402,10 +402,11 @@ Run as the agent (in the terminal Trama started, or in Cursor's chat), a move to
 Input (`--input`):
 
 - `unchanged`: `string not empty`, optional. Only toward `done`: closes a fix Task without changes, with the note of what was checked.
+- `progress`: `integer ≥ 0, ≤ 100`, optional. Only toward `doing`: declares the percentage of the Task the agent has taken, 0 to 100 in steps of 10; the Task is not moved, taken or released. Not with `unchanged`.
 
 ```sh
-trama task move T3 done --input - <<'JSON'
-{"unchanged":"The code already cancels the order; checked in cart.ts."}
+trama task move T3 doing --input - <<'JSON'
+{"progress":40}
 JSON
 ```
 
@@ -416,6 +417,8 @@ Output (`--json`):
 - column: "todo" | "doing" | "done", required
 - unchanged: string | null, optional
 - drift: string | null, optional
+- progress: number | null, optional
+- note: string, optional
 
 Runs at once; writes in `.trama/`, counts as the agent's activity.
 

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { type AgentOrigin, deliverCard } from "./announcements";
 import { type Blocker, blockedByDrift, computeBlocked, concernSameThing, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
+import { clearProgress, readProgress, writeProgress } from "./progress";
 import { approveProposal, discardAttachedProposal, type DriftDecisionKind, getProposal, type Proposal, rejectProposal, resolutionHolding } from "./proposals";
 import type { RemovedElement } from "./scan-scope";
 import { loadProject, parseRequirementRef, type ProjectModel, resolveProjectRef } from "./requirements";
@@ -376,6 +377,7 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
     task.data.agent = column === "doing";
   }
   saveItem(task.path, task.data, task.body);
+  if (!task.data.agent) clearProgress(p, task.id);
   if (drift) {
     drift.data.status = "resolved";
     drift.data.resolution = "dismissed";
@@ -383,6 +385,28 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
   }
   return task;
 }
+
+/** The outcome of a declaration of progress: the percentage kept, or the note saying why nothing changed. */
+export type ProgressDeclaration = { declared: true; task: Task; progress: number } | { declared: false; task: Task; note: string };
+
+/**
+ * The agent declares how far along a Task it has taken is. Accepted only for a Task In progress and taken by the agent,
+ * from the agent that holds it (any agent when it was taken without a known terminal or chat); every other declaration
+ * changes nothing and says why. It never moves or takes the Task and does not touch its file.
+ */
+export function declareProgress(p: Project, id: string, value: number, by: Mover, origin: AgentOrigin = {}): ProgressDeclaration {
+  const task = getTask(p, id);
+  const name = cardName(p, "task", task.id);
+  const ignored = (why: string): ProgressDeclaration => ({ declared: false, task, note: `Progress ignored: Task ${name} ${why}` });
+  if (by !== "agent") return ignored("is not declared by the agent: only the agent that took a Task declares its progress");
+  if (task.data.column !== "doing" || !task.data.agent) return ignored("is not taken by the agent");
+  if (task.data.holder !== null && task.data.holder !== holderOf(origin)) return ignored("is taken by another agent");
+  writeProgress(p, task.id, value);
+  return { declared: true, task, progress: value };
+}
+
+/** The percentage declared for a Task, or null: only a Task In progress and taken by the agent has one. */
+export const taskProgress = (p: Project, task: Task): number | null => (task.data.column === "doing" && task.data.agent ? readProgress(p, task.id) : null);
 
 /**
  * The Drift a fix Task closed without changes dismisses, or a refusal saying why nothing may change: the Task must be
@@ -513,6 +537,7 @@ function releaseTaken(p: Project, matches: (task: Task) => boolean): Task[] {
     task.data.holder = null;
     task.data.column = "todo";
     saveItem(task.path, task.data, task.body);
+    clearProgress(p, task.id);
   }
   return released;
 }
@@ -869,6 +894,7 @@ function fixCode(p: Project, drift: Drift, optionNumber: number | undefined, not
     origin.data.agent = false;
     origin.data.holder = null;
     saveItem(origin.path, origin.data, origin.body);
+    clearProgress(p, origin.id);
   }
 }
 

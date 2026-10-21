@@ -30,5 +30,6 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Interfaccia generale e pannello** (`panel.md`): Usa sempre quando lavori sull'interfaccia: regole generali, pannello, Board e Requisiti. Sections: `General`, `panel`, `panel/Requirements`.
 - **Interfaccia dei round di domande** (`questions-notices.md`): Usa quando mostri i round di domande. Sections: `question-round`.
 - **Schede Settings e Specs** (`settings-specs.md`): Usa quando costruisci o cambi le schede Settings e Specs del pannello. Sections: `panel/Settings`, `panel/Specs`.
+- **Task progress interface** (`task-progress.md`): Use when showing the percentage the agent declared on a Task, on the Board or in the command line. Sections: `task/Taken by the agent`.
 - **Interfaccia di Proposal e Task** (`tasks.md`): Usa quando mostri Task, voci di History e Proposal di risoluzione o allegate a un Drift. Sections: `proposal`, `task`, `voce-history`.
 - **Interfaccia dei Drift** (`work.md`): Usa quando mostri Drift, Proposal di risoluzione e il pulsante Resolve Drifts. Sections: `drift`, `drift-resolution`.

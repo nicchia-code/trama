@@ -60,4 +60,5 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia di design request** (`requests.md`): Usa quando lavori su richieste di design scritte. Sections: `design-request`.
 - **Tecnologia dei confronti** (`scans.md`): Usa per registro dei confronti e tempi delle fasi. Sections: `work`.
 - **Tecnologia della scheda Settings** (`settings.md`): Usa per la tecnologia della scheda Settings e i suggerimenti dei modelli. Sections: `panel/Settings`.
+- **Task progress technology** (`task-progress.md`): Use when working on how the agent declares the percentage of a Task and how it is read. Sections: `task/Taken by the agent`.
 - **Tecnologia dei Task** (`work.md`): Usa quando lavori sui Task. Sections: `task`.

@@ -6,7 +6,7 @@ import { sendCoordinatorMessageSoon } from "../../core/question-channel";
 import { syncShortNumbers } from "../../core/short-numbers";
 import { preflightScope, taskScope } from "../../core/task-scope";
 import { recordTiming } from "../../core/timings";
-import { COLUMNS, getDrift, getTask, moveTask, newTask } from "../../core/work";
+import { COLUMNS, declareProgress, getDrift, getTask, moveTask, newTask } from "../../core/work";
 import { preflightCompared } from "../compare";
 import type { Context } from "../context";
 import { defineCommand } from "../registry";
@@ -160,18 +160,30 @@ const move = defineCommand({
   mode: "immediate",
   summary: "Move a Task to To do, In progress or Done.",
   description:
-    "Run as the agent (in the terminal Trama started, or in Cursor's chat), a move to `doing` takes the Task and a move to `todo` or `done` clears that; it is refused, changing nothing, when the Task is blocked. Run as the developer, a move of a Task the agent has taken is refused, except to `doing`, which takes it back: the mark goes and the Task stays In progress. `unchanged` (a note saying what was checked) closes a fix Task into Done without changes when the code already does what the Drift's Model or Requirement says, and dismisses its Drift; it applies only to `done`.",
+    "Run as the agent (in the terminal Trama started, or in Cursor's chat), a move to `doing` takes the Task and a move to `todo` or `done` clears that; it is refused, changing nothing, when the Task is blocked. Run as the developer, a move of a Task the agent has taken is refused, except to `doing`, which takes it back: the mark goes and the Task stays In progress. `unchanged` (a note saying what was checked) closes a fix Task into Done without changes when the code already does what the Drift's Model or Requirement says, and dismisses its Drift; it applies only to `done`. `progress` (0 to 100, in steps of 10) does not move anything: with `doing`, it only declares how far along the agent is on a Task it has taken, in place of the previous percentage. A declaration for a Task this agent has not taken changes nothing and prints a note, with exit 0.",
   positionals: [
     { name: "id", description: "The Task: its ID, a unique prefix or its short number." },
     { name: "column", description: "Where the Task goes.", choices: COLUMNS },
   ],
-  input: z.strictObject({ unchanged: z.string().min(1).optional().describe("Only toward `done`: closes a fix Task without changes, with the note of what was checked.") }),
-  output: summary.pick({ id: true, number: true, column: true }).extend({ unchanged: z.string().nullable().optional(), drift: z.string().nullable().optional() }),
-  example: { unchanged: "The code already cancels the order; checked in cart.ts." },
-  exampleArgs: ["T3", "done"],
+  input: z.strictObject({
+    unchanged: z.string().min(1).optional().describe("Only toward `done`: closes a fix Task without changes, with the note of what was checked."),
+    progress: z.number().int().min(0).max(100).multipleOf(10).optional().describe("Only toward `doing`: declares the percentage of the Task the agent has taken, 0 to 100 in steps of 10; the Task is not moved, taken or released. Not with `unchanged`."),
+  }),
+  output: summary.pick({ id: true, number: true, column: true }).extend({ unchanged: z.string().nullable().optional(), drift: z.string().nullable().optional(), progress: z.number().nullable().optional(), note: z.string().optional() }),
+  example: { progress: 40 },
+  exampleArgs: ["T3", "doing"],
   effects: { writes: true, activity: true },
   run(ctx, input, [id, column]) {
     const project = ctx.project();
+    if (input.progress !== undefined && column !== "doing") throw new UsageError(`progress applies only toward doing, not ${column as string}`);
+    if (input.progress !== undefined && input.unchanged !== undefined) throw new UsageError("progress and unchanged cannot go together");
+    if (input.progress !== undefined) {
+      const d = declareProgress(project, getTask(project, id as string, true).id, input.progress, ctx.byAgent ? "agent" : "developer", ctx.origin);
+      const n = syncShortNumbers(project);
+      const base = { id: d.task.id, number: n.label("task", d.task.id), column: d.task.data.column };
+      if (!d.declared) return text(d.note, { ...base, progress: null, note: d.note });
+      return text(`Task ${n.name("task", d.task.id)} progress declared: ${d.progress}%`, { ...base, progress: d.progress });
+    }
     const t = moveTask(project, getTask(project, id as string, true).id, column as string, ctx.byAgent ? "agent" : "developer", ctx.origin, input.unchanged);
     if (ctx.byAgent && t.data.column === "doing") recordTiming(project, ctx.origin, { event: "task-start", task: t.id, title: t.title }, { job: ctx.job });
     if (t.data.column === "done") recordTiming(project, ctx.origin, { event: "task-end", task: t.id, title: t.title, outcome: input.unchanged === undefined ? "done" : "unchanged" }, { job: ctx.job });
