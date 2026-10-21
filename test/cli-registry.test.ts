@@ -112,12 +112,9 @@ test("the commands that count as the agent's activity are the ones declared with
 test("a hook answers whatever happens and exits with 0, and a hook that fails prints what its agent expects", async () => {
   const nothing = { env: {}, stdin: async () => "" };
   expect(await execute(["hook", "cursor", "--root", join(dir, "none")], dir, { ...nothing, stdin: async () => "not json" })).toEqual({ out: "{}", exit: 0 });
-  expect(await execute(["hook", "copilot"], dir, { ...nothing, stdin: async () => "{}" })).toEqual({ out: "{}", exit: 0 });
-  expect(await execute(["hook", "copilot"], dir, { ...nothing, stdin: async () => { throw new Error("no stdin"); } })).toEqual({ out: "{}", exit: 0 });
   expect(await execute(["hook", "idle"], dir, nothing)).toEqual({ out: "", exit: 0 });
-  const denial = await execute(["hook", "claude-question-tool"], dir, nothing);
-  expect(denial.exit).toBe(0);
-  expect(JSON.parse(denial.out).hookSpecificOutput.permissionDecision).toBe("deny");
+  // Copilot's and Claude Code's hooks no longer exist: unknown commands are a usage error.
+  for (const gone of ["copilot", "claude-question-tool"]) await expect(execute(["hook", gone], dir, nothing)).rejects.toThrow(/Unknown command/);
 });
 
 test("a command that waits for the editor does not run through the synchronous entry point", () => {

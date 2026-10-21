@@ -1,4 +1,5 @@
 import { Registry } from "../registry";
+import { ADVISOR_COMMANDS } from "./advisor";
 import { ANNOUNCEMENT_COMMANDS } from "./announcement";
 import { AUTOPILOT_COMMANDS } from "./autopilot";
 import { COMPARISON_COMMANDS } from "./comparison";
@@ -13,4 +14,4 @@ import { TASK_COMMANDS } from "./task";
 import { TIMING_COMMANDS } from "./timing";
 
 /** Every command of the command line. Declare a command in its object's file and list its file here. */
-export const REGISTRY = new Registry([...MODEL_COMMANDS, ...PROPOSAL_COMMANDS, ...TASK_COMMANDS, ...DRIFT_COMMANDS, ...HISTORY_COMMANDS, ...ANNOUNCEMENT_COMMANDS, ...COMPARISON_COMMANDS, ...QUESTION_COMMANDS, ...AUTOPILOT_COMMANDS, ...PROJECT_COMMANDS, ...TIMING_COMMANDS, ...HOOK_COMMANDS]);
+export const REGISTRY = new Registry([...MODEL_COMMANDS, ...PROPOSAL_COMMANDS, ...TASK_COMMANDS, ...DRIFT_COMMANDS, ...HISTORY_COMMANDS, ...ANNOUNCEMENT_COMMANDS, ...COMPARISON_COMMANDS, ...QUESTION_COMMANDS, ...AUTOPILOT_COMMANDS, ...ADVISOR_COMMANDS, ...PROJECT_COMMANDS, ...TIMING_COMMANDS, ...HOOK_COMMANDS]);

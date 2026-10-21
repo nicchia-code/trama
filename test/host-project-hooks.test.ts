@@ -55,7 +55,7 @@ mock.module("../src/cli/main", () => ({
     args.includes("edit") ? { out: updateOutput } : { out: "", exit: 0 },
 }));
 
-const { installCopilotHooks, installEditorHooks, updateSkills } = await import("../extension/src/host/project");
+const { installEditorHooks, removeCopilotPieces, updateSkills } = await import("../extension/src/host/project");
 
 function setup(): void {
   storage = mkdtempSync(join(tmpdir(), "trama-hook-storage-"));
@@ -74,55 +74,73 @@ afterEach(() => {
   if (extensionPath) rmSync(extensionPath, { recursive: true, force: true });
 });
 
-test("Copilot hooks use the bundled program in extension storage and preserve user registrations", async () => {
+function copilotAgent(): string {
+  const file = join(home, ".copilot", "agents", "trama-analysis.agent.md");
+  mkdirSync(join(home, ".copilot", "agents"), { recursive: true });
+  writeFileSync(file, "old");
+  return file;
+}
+
+test("outside Cursor, removal deletes the Copilot hooks file and only its entry in chat.hookFilesLocations", async () => {
   setup();
   const file = join(storage, "copilot-hooks.json");
-  await installCopilotHooks({ fsPath: storage } as never, false);
-  expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
-    hooks: {
-      UserPromptSubmit: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" hook copilot` }],
-      Stop: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" hook copilot` }],
-      PreToolUse: [{ type: "command", command: `"${join(extensionPath, "bin", bundledName)}" hook copilot` }],
-    },
-  });
-  expect(registered).toEqual({ "/other/hooks.json": true, [file]: true });
+  writeFileSync(file, "{}");
+  registered = { "/other/hooks.json": true, [file]: true };
+  const removed = await removeCopilotPieces({ fsPath: storage } as never);
+  expect(existsSync(file)).toBe(false);
+  expect(registered).toEqual({ "/other/hooks.json": true });
   expect(updates).toHaveLength(1);
-  expect(errors).toEqual([]);
+  expect(removed).toHaveLength(2);
 });
 
-test("on Windows the Copilot hook file carries the PowerShell form next to the plain command", async () => {
+test("without a Copilot entry the setting is not touched", async () => {
   setup();
-  await installCopilotHooks({ fsPath: storage } as never, true);
-  const program = join(extensionPath, "bin", bundledName);
-  const entry = { type: "command", command: `"${program}" hook copilot`, windows: `& "${program}" hook copilot` };
-  expect(JSON.parse(readFileSync(join(storage, "copilot-hooks.json"), "utf8"))).toEqual({ hooks: { UserPromptSubmit: [entry], Stop: [entry], PreToolUse: [entry] } });
+  writeFileSync(join(storage, "copilot-hooks.json"), "{}");
+  const removed = await removeCopilotPieces({ fsPath: storage } as never);
+  expect(updates).toHaveLength(0);
+  expect(registered).toEqual({ "/other/hooks.json": true });
+  expect(removed).toHaveLength(1);
 });
 
-test("Copilot hook file write failures are reported", async () => {
+test("Copilot's agent file is removed in every editor, but the hooks file is kept in Cursor", async () => {
   setup();
-  writeError = new Error("disk full");
-  await installCopilotHooks({ fsPath: storage } as never);
-  expect(errors[0]).toContain("could not install Copilot's hooks");
-  expect(errors[0]).toContain("disk full");
+  const agent = copilotAgent();
+  const file = join(storage, "copilot-hooks.json");
+  writeFileSync(file, "{}");
+  editor.appName = "Cursor";
+  try {
+    const removed = await removeCopilotPieces({ fsPath: storage } as never);
+    expect(existsSync(agent)).toBe(false);
+    expect(existsSync(file)).toBe(true);
+    expect(updates).toHaveLength(0);
+    expect(removed).toHaveLength(1);
+  } finally {
+    editor.appName = "Visual Studio Code";
+  }
+});
+
+test("with nothing to remove it returns nothing", async () => {
+  setup();
+  expect(await removeCopilotPieces({ fsPath: storage } as never)).toEqual([]);
   expect(updates).toHaveLength(0);
 });
 
-test("Copilot hook registration failures are reported", async () => {
+test("updating skills reports retired omp definition and each Copilot piece removed", async () => {
   setup();
-  updateError = new Error("settings are read-only");
-  await installCopilotHooks({ fsPath: storage } as never);
-  expect(existsSync(join(storage, "copilot-hooks.json"))).toBe(true);
-  expect(errors[0]).toContain("could not install Copilot's hooks");
-  expect(errors[0]).toContain("settings are read-only");
-});
-
-test("updating skills reports retired omp definition in editor notification", async () => {
-  setup();
-  const file = join(storage, "copilot-hooks.json");
+  const agent = copilotAgent();
   updateOutput = "Updated skills\nDeleted the retired omp sub-agent definition: /project/.omp/agents/trama-triage.md";
   await updateSkills({ root: "/project" } as never, { fsPath: storage } as never);
   expect(errors.at(-1)).toContain("trama-triage.md");
-  expect(JSON.parse(readFileSync(file, "utf8")).hooks.UserPromptSubmit[0].command).toBe(`"${join(extensionPath, "bin", bundledName)}" hook copilot`);
+  expect(errors.at(-1)).toContain(`Removed Copilot's sub-agent definition ${agent}.`);
+  expect(existsSync(agent)).toBe(false);
+  expect(errors.at(-1)).not.toContain("Chat sub-agent definition written");
+});
+
+test("updating skills says nothing about Copilot when there was nothing to remove", async () => {
+  setup();
+  updateOutput = "Updated skills";
+  await updateSkills({ root: "/project" } as never, { fsPath: storage } as never);
+  expect(errors.at(-1)).not.toContain("Removed");
 });
 
 test("updating skills reports why the trama-specs skill was kept", async () => {
@@ -138,7 +156,7 @@ test("activation writes Cursor's hooks in the developer's own hooks file, rewrit
   const cursorDir = join(home, ".cursor");
   rmSync(cursorDir, { recursive: true, force: true });
   try {
-    await installEditorHooks({ fsPath: storage } as never);
+    await installEditorHooks();
     const program = join(extensionPath, "bin", bundledName);
     const hooks = JSON.parse(readFileSync(join(cursorDir, "hooks.json"), "utf8")).hooks;
     expect(hooks.stop).toEqual([{ command: `${process.platform === "win32" ? "& " : ""}"${program}" hook cursor` }]);
@@ -156,7 +174,7 @@ test("activation reports an invalid Cursor hooks file and leaves it untouched", 
   mkdirSync(cursorDir);
   writeFileSync(join(cursorDir, "hooks.json"), "{ broken");
   try {
-    await installEditorHooks({ fsPath: storage } as never);
+    await installEditorHooks();
     expect(errors[0]).toContain("could not write Cursor's hooks");
     expect(readFileSync(join(cursorDir, "hooks.json"), "utf8")).toBe("{ broken");
   } finally {

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { advisorScannerFromEnv } from "../core/advisors";
 import { CURSOR_AGENT_ENV, originFromEnv } from "../core/announcements";
 import { UsageError } from "../core/errors";
 import { sendActivity } from "../core/question-channel";
@@ -68,7 +69,7 @@ function plan(argv: string[], cwd: string, env: Record<string, string | undefine
   const found = lookup(rest);
   if (!found) throw unknownCommand(rest);
   const agent = agentVariable(env);
-  const ctx = makeContext(cwd, common.root, agent !== undefined, originFromEnv(env), jobFromEnv(env));
+  const ctx = makeContext(cwd, common.root, agent !== undefined, originFromEnv(env), jobFromEnv(env), advisorScannerFromEnv(env));
   return { kind: "new", command: found.command, ctx, args: checkPositionals(found.command, found.tail), common };
 }
 

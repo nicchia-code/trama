@@ -517,9 +517,17 @@ describe("Model window of a Proposal", () => {
   });
 
   test("a model chosen for another agent is shown struck, and the window says the Settings roles apply", () => {
-    page(snapshot({ proposals: [proposalView()] }), { models: { agent: "claude", proposals: { live: { name: "gpt-5", agent: "omp", applies: false } } } });
+    page(snapshot({ proposals: [proposalView()] }), { models: { agent: "cursor", proposals: { live: { name: "gpt-5", agent: "omp", applies: false } } } });
     expect(screen.getByRole("img", { name: "Chosen for omp: the Settings roles apply" }).className).toContain("line-through");
     fireEvent.click(screen.getByRole("button", { name: "Choose the model for P2" }));
-    expect(screen.getByRole("dialog").textContent).toContain("Chosen for omp: the Settings roles apply. Confirm a model to use it with Claude Code.");
+    expect(screen.getByRole("dialog").textContent).toContain("Chosen for omp: the Settings roles apply. Confirm a model to use it with Cursor's chat.");
+  });
+
+  test("a model chosen for Cursor's chat is shown struck while omp is the agent", () => {
+    page(snapshot({ proposals: [proposalView()] }), { models: { agent: "omp", proposals: { live: { name: "gpt-5", agent: "cursor", applies: false } } } });
+    const badge = screen.getByRole("img", { name: "Chosen for Cursor's chat: the Settings roles apply" });
+    expect(badge.className).toContain("line-through");
+    fireEvent.click(screen.getByRole("button", { name: "Choose the model for P2" }));
+    expect(screen.getByRole("dialog").textContent).toContain("Chosen for Cursor's chat: the Settings roles apply. Confirm a model to use it with omp.");
   });
 });

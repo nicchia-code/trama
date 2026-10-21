@@ -1,6 +1,6 @@
 import { TramaError } from "../../../src/core/errors";
 import { getProposal, listProposals, type Proposal } from "../../../src/core/proposals";
-import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
+import { cardName } from "../../../src/core/short-numbers";
 import type { Project } from "../../../src/core/store";
 import { attachedDrift, listTasks, type Task } from "../../../src/core/work";
 import type { AppliedModel } from "./run-groups";
@@ -10,7 +10,7 @@ import type { RunModel } from "./terminal-agent";
 export const PROPOSAL_MODELS_KEY = "trama.proposalModels";
 
 /** The agents `trama.agent` can be; a model is chosen for one of them. */
-export const PROPOSAL_AGENTS = ["chat", "omp", "claude"] as const;
+export const PROPOSAL_AGENTS = ["cursor", "omp"] as const;
 export type ProposalAgent = (typeof PROPOSAL_AGENTS)[number];
 
 /** The model chosen for a Proposal and the agent that was set in `trama.agent` when it was chosen. */
@@ -28,21 +28,21 @@ export interface ModelMemory {
   update(key: string, value: unknown): Thenable<void>;
 }
 
-/** Only an entry of exactly this shape counts: a non-empty model without spaces around it, and a known agent. */
-function validEntry(value: unknown): value is ProposalModel {
+/** Only an entry of exactly this shape counts: a non-empty model without spaces around it, and a known agent (`chat`, written by an earlier version, counts as `cursor`). */
+function validEntry(value: unknown): value is { model: string; agent: ProposalAgent | "chat" } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   if (Object.keys(value).sort().join(",") !== "agent,model") return false;
   const { model, agent } = value as Record<string, unknown>;
   return typeof model === "string" && model !== "" && model === model.trim()
-    && typeof agent === "string" && (PROPOSAL_AGENTS as readonly string[]).includes(agent);
+    && typeof agent === "string" && (agent === "chat" || (PROPOSAL_AGENTS as readonly string[]).includes(agent));
 }
 
-/** The models the developer chose, by Proposal identity. An entry of another shape is left out, and the next write drops it. */
+/** The models the developer chose, by Proposal identity. An entry of another shape is left out, and the next write drops it; an entry of agent `chat` is read as `cursor`, and the next write saves it so. */
 export function proposalModels(memory: ModelMemory): ProposalModels {
   const raw = memory.get(PROPOSAL_MODELS_KEY);
   const models: ProposalModels = {};
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return models;
-  for (const [id, value] of Object.entries(raw)) if (validEntry(value)) models[id] = value;
+  for (const [id, value] of Object.entries(raw)) if (validEntry(value)) models[id] = { model: value.model, agent: value.agent === "chat" ? "cursor" : value.agent };
   return models;
 }
 
@@ -130,8 +130,7 @@ export function appliedProposalModels(memory: ModelMemory, p: Project, agent: Pr
   for (const proposal of listProposals(p)) {
     const entry = chosen[proposal.id];
     if (entry === undefined || entry.agent !== agent) continue;
-    const label = syncShortNumbers(p).label("proposal", proposal.id) ?? proposal.title;
-    applied.push({ id: proposal.id, run: { model: entry.model, from: `Proposal ${label}` } });
+    applied.push({ id: proposal.id, run: { model: entry.model } });
   }
   return applied;
 }

@@ -11,9 +11,7 @@ import type { AnnouncementView } from "../../../src/core/snapshot";
 import { projectAt } from "../../../src/core/store";
 import type { Project } from "../../../src/core/store";
 import type { CursorChatEvent } from "../../../src/core/cursor-chat";
-import type { CopilotChatEvent } from "./copilot-chat";
 import { onCursorChatEvent } from "./cursor";
-import { onCopilotChatEvent } from "./copilot-chat";
 
 type Listener = (withdrawn: AnnouncementView[]) => void;
 const listeners = new Set<Listener>();
@@ -70,10 +68,6 @@ function onCursorChat(event: CursorChatEvent): void {
   else if (event.event === "CONVERSATION_CLOSED") withdrawWaiting(event.root, fromChat, false);
 }
 
-function onCopilotChat(event: CopilotChatEvent): void {
-  if (event.event === "AGENT_STOPPED") withdrawWaiting(event.root, (a) => a.chat !== null);
-}
-
 export function synchronizeAnnouncementTitles(p: Project): void {
   const waiting = listAnnouncements(p);
   for (const a of waiting) {
@@ -124,7 +118,5 @@ export function watchAnnouncements(root: () => string | undefined): vscode.Dispo
       withdrawAll(p);
     });
   }
-  const cursor = onCursorChatEvent(onCursorChat);
-  const copilot = onCopilotChatEvent(onCopilotChat);
-  return new vscode.Disposable(() => (cursor.dispose(), copilot.dispose()));
+  return onCursorChatEvent(onCursorChat);
 }

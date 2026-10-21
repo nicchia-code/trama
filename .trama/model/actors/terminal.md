@@ -1,6 +1,6 @@
 # Terminal
 
-Il terminale integrato dell'editor in cui Trama avvia il comando dell'agente del developer, omp o Claude Code: nell'area dei terminali o, con `trama.terminalLocation` su scheda, in una scheda dell'editor. Non esiste più un terminale esterno all'editor.
+Il terminale integrato dell'editor in cui Trama avvia omp, l'agente del developer: nell'area dei terminali o, con `trama.terminalLocation` su scheda, in una scheda dell'editor. Non esiste più un terminale esterno all'editor.
 
 ## Events
 

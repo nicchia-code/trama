@@ -107,10 +107,10 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 
 ## B. Diagram: levels and navigation
 
-### B1. System level
+### B1. Whole System level
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Open the Diagram at the System level, selector `None` | Four purple pill nodes on the left, top to bottom: `Courier · 1 event`, `Stripe · 3 events`, `User · 3 events`, `Warehouse · 1 event` | ☐ |
+| 1 | Open the Diagram, click `Whole System` (double click or ↗) on the root, selector `None` | Four purple pill nodes on the left, top to bottom: `Courier · 1 event`, `Stripe · 3 events`, `User · 3 events`, `Warehouse · 1 event` | ☐ |
 | 2 | Look at the box on the right | `Checkout` with the text `3 machines · ⚠ 2 drifts inside`, a **red** outline, and a small ↗ icon at its right edge | ☐ |
 | 3 | Look at the edges | Four grey edges Actor → Checkout, labelled `1` (Courier), `3` (Stripe), `3` (User), `1` (Warehouse) | ☐ |
 | 4 | Look under Checkout | Two red dashed pill nodes `Drift 0001` and `Drift 0002`, each with a dashed red edge going up to Checkout | ☐ |
@@ -416,7 +416,7 @@ Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `
 | 12 | Click **Close** on the notice, switch to the Diagram tab and back | The notice is gone; closing the Trama tab and opening it again shows none | ☐ |
 | 13 | `j proposal new "Never finished"`, read the ghost, then `j proposal discard <ID it printed>` | A `Writing` ghost titled `Never finished`; after the discard it disappears and **no** notice is shown | ☐ |
 | 14 | `j announcement new --input - <<<'{"kind":"task","title":"Before reload"}'`, then Developer: Reload Window and open the Board | The ghost is not there and no notice is shown: leftovers are withdrawn at startup | ☐ |
-| 15 | Set `"trama.agent": "chat"` in your **user** settings; reload, **Add Work Item…**, type any text and close the tab | The prompt goes to Copilot Chat and no terminal ghost appears | ☐ |
+| 15 | In Cursor, set `"trama.agent": "cursor"` in your **user** settings; reload, **Add Work Item…**, type any text and close the tab | The prompt goes to Cursor's chat and no terminal ghost appears | ☐ |
 | 16 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with chat, the ghost starts with the Draft | ☐ |
 | 17 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
 | 18 | Restore S2. ↻, then `j task move 1 doing` | The card moves to In progress without ever looking busy; no dashed copy of it appears in In progress at any moment | ☐ |
@@ -580,9 +580,9 @@ Each launch starts a new agent terminal named after its work (cwd = the demo fol
 | H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
 | H15 | Palette: type `Trama`, look at the list | No **Quick Design Request…** and no **Add Work Item…** command: design requests start only from the Board's **+ Add Work Item** button (and, with an empty Model, the Diagram's **Import from Code** and **Start from Scratch**) | ☐ |
 | H16 | After H1 to H15, open the terminal dropdown | Every launch has its own terminal, even when an earlier command with the same name has ended. Terminals are named for their work: `Scan`, `Design`, a Task's short number or `All tasks`; no terminal is reused | ☐ |
-| H17 | Set `"trama.agent": "claude"` in your **user** settings; click **Scan System** | A new terminal named `Scan` runs Claude Code; no choice prompt appears | ☐ |
-| H18 | Set `"trama.agent": "chat"` in your **user** settings; click **Scan System** | Copilot Chat receives the prompt; no terminal is created and no choice prompt appears | ☐ |
-| H19 | Leave `trama.agent` set to `chat`; add the legacy settings `"trama.agentLauncher": "terminal"`, `"trama.terminalAgent": "codex"` and `"trama.agentCommand": "fake {prompt}"` to user settings; click **Scan System** | The scan goes to Copilot Chat; legacy values are ignored and remain unchanged | ☐ |
+| H17 | In VS Code, set `"trama.agent": "cursor"` in your **user** settings; click **Scan System** | The instruction is copied to the clipboard and a notice invites you to choose omp; no terminal is created and no choice prompt appears | ☐ |
+| H18 | In Cursor, set `"trama.agent": "cursor"` in your **user** settings; click **Scan System** | Cursor's chat receives the prompt; no terminal is created and no choice prompt appears | ☐ |
+| H19 | Leave `trama.agent` set to `cursor`; add the legacy settings `"trama.agentLauncher": "terminal"`, `"trama.terminalAgent": "codex"` and `"trama.agentCommand": "fake {prompt}"` to user settings; click **Scan System** | The scan goes to Cursor's chat; legacy values are ignored and remain unchanged | ☐ |
 | H20 | Remove the legacy values; restore `"trama.agent": "omp"` | Future launches use omp without prompting | ☐ |
 | H21 | Set `"trama.language": " Italian "` in user settings; click **Scan System** | The instruction includes `Write everything you generate in Italian, except code, which always stays in English.`; the setting applies to scans, Runs, written design and imports | ☐ |
 | H22 | Change `trama.language` to `"   "`; click **Scan System** | The instruction has no language sentence | ☐ |
@@ -631,7 +631,7 @@ Set `trama.agent="omp"` and `trama.terminalLocation="editor"` in **user** settin
 | H74 | With S2u, close every agent tab and the group of H73, click **Scan System**, then close the group of the new tab while it runs and click **Scan System** again | Each time a new group opens beside the active one, since the previous tab's group is gone | ☐ |
 | H75 | With S2u, **Add Work Item…** `Tabbed request`, sent, then close the tab while the command runs | The `Tabbed request` ghost appears at once and is withdrawn when the tab closes, as when the integrated terminal closes; the next **Scan System** opens a new tab beside the active group | ☐ |
 | H76 | Drag the `Scan` tab of H71 into another group, then click **Scan System** twice with S2u | The second new tab opens in the group where Trama had opened the first one, not where you dragged it: Trama does not follow a moved tab | ☐ |
-| H77 | Set `trama.terminalLocation="panel"` and `trama.agent="omp"` in user settings, reload, close the terminal area, click in the panel's search box, then **Scan System**; then set `trama.agent="chat"` and try again in Cursor | omp: a `Scan` terminal is created in the terminal area but not shown; the area stays closed, focus stays in the search box, and `Scan` appears in the terminal list. Cursor with `chat`: the instruction goes to Cursor's chat | ☐ |
+| H77 | Set `trama.terminalLocation="panel"` and `trama.agent="omp"` in user settings, reload, close the terminal area, click in the panel's search box, then **Scan System**; then, in Cursor, set `trama.agent="cursor"` and try again | omp: a `Scan` terminal is created in the terminal area but not shown; the area stays closed, focus stays in the search box, and `Scan` appears in the terminal list. Cursor with `cursor`: the instruction goes to Cursor's chat | ☐ |
 
 After H71–H77, restore S2.
 
@@ -673,7 +673,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | J7 | Press Esc/Cancel | Nothing is created; `custom` is still in the file | ☐ |
 | J8 | Repeat J6 and click the button | `.trama/` is created and the skill file is overwritten | ☐ |
 | J9 | In the demo window open Get Started (it already has `.trama/`) | The panel shows the project, not Get Started | ☐ |
-| J10 | `mkdir -p /tmp/trama-empty2/.vscode && printf '{"trama.skillsDir": ".claude/skills"}\n' > /tmp/trama-empty2/.vscode/settings.json`, open that folder in a new window with the extension, **Trama: Open** → **Start from Scratch** | Skills land in `.claude/skills/trama-*/SKILL.md` and `.agents/` is not created | ☐ |
+| J10 | `mkdir -p /tmp/trama-empty2/.vscode && printf '{"trama.skillsDir": ".custom/skills"}\n' > /tmp/trama-empty2/.vscode/settings.json`, open that folder in a new window with the extension, **Trama: Open** → **Start from Scratch** | Skills land in `.custom/skills/trama-*/SKILL.md` and `.agents/` is not created | ☐ |
 
 ---
 
@@ -713,7 +713,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | M3 | In the panel, click **Interface** | The Requirements tab still shows both Areas; `order/Paid` has a cyan left border and light cyan background, the focus bar above the page reads `requirements/ui#order/Paid` and the page scrolled to the section. There is no "Showing …" row and no **Show all**; **Clear** (or Escape) removes the marks and the bar | ☐ |
 | M4 | Verification shell: `j model show order/Preparing` | Ends with `## Requirements`: `requirements/ui#order/Paid (via order/Paid)`, `requirements/data#order (via order)`, `requirements/ui#checkout (via checkout)` | ☐ |
 | M5 | `ls /tmp/trama-demo/shop/.agents/skills` after `j project edit` | `trama-req-data-main` and `trama-req-ui-main` next to the Trama skills; `trama-req-ui-main/SKILL.md` has `description: Use when building or changing screens…`. The output has the line `Requirement skills: one skill per fragment (budget <n>/4000 characters).` | ☐ |
-| M5b | `mkdir /tmp/trama-demo/shop/.agents/skills/trama-fix` with a file inside, and the same under `.claude/skills`, then `j project edit` | The output has a line `Deleted the retired trama-fix skill:` naming both folders; neither exists any more. Running it again prints no `Deleted` line. In the editor, **Trama: Update Agent Skills** shows the same line in its notification | ☐ |
+| M5b | `mkdir /tmp/trama-demo/shop/.agents/skills/trama-fix` with a file inside, then `j project edit` | The output has a line `Deleted the retired trama-fix skill:` naming the folder; it does not exist any more. Running it again prints no `Deleted` line. In the editor, **Trama: Update Agent Skills** shows the same line in its notification | ☐ |
 | M6 | Edit `.trama/requirements/ui/main.md` by hand: change "Mobile first" to "Mobile first, always" and save | Within a second `.agents/skills/trama-req-ui-main/SKILL.md` says "Mobile first, always". The Requirements tab shows the new text | ☐ |
 | M7 | Append `## order/Lost` and a line to `ui/main.md`, save | The yellow bar: "The Model or its Requirements have 1 validation error"; the link `requirements/ui/main.md:<line>` opens the fragment. Remove the section again: the bar disappears | ☐ |
 | M8 | `j proposal new "Blue badge"`, then `j proposal edit <id> requirements/ui/main.md`, change "green" to "blue" in the printed file and `j proposal submit <id>` | On the Board the submitted card lists `requirements/ui/main.md ~1` and has **View requirements**, not **View on diagram**. `j proposal show <id>` labels the file with Area `ui` and fragment `main` | ☐ |
@@ -783,7 +783,7 @@ Use the [question request contract](./cli.md#question-rounds) with `trama questi
 
 ## R. Cursor
 
-Run R1–R4 on **every new Cursor version** before declaring it supported (smoke test). Tested: 3.22.12 and 3.23.12. Open the demo with the packaged extension in Cursor's editor window (not the Agents Window), select `trama.agent="chat"` in user settings, and run **Trama: Update Agent Skills** once.
+Run R1–R4 on **every new Cursor version** before declaring it supported (smoke test). Tested: 3.22.12 and 3.23.12. Open the demo with the packaged extension in Cursor's editor window (not the Agents Window), select `trama.agent="cursor"` in user settings, and run **Trama: Update Agent Skills** once.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
@@ -844,13 +844,13 @@ Written from the Requirements; these settings only count in your **user** settin
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| X1 | Keep `"trama.agent": "omp"` in user settings; put `"trama.agent": "claude"` in the workspace settings, reload, click **Scan System** | omp is used; project settings cannot select the agent | ☐ |
+| X1 | Keep `"trama.agent": "omp"` in user settings; put `"trama.agent": "cursor"` in the workspace settings, reload, click **Scan System** | omp is used; project settings cannot select the agent | ☐ |
 | X2 | User settings: `"trama.agent": "omp"`, `"trama.scan": "my model"`. Click **Scan System** | The omp command uses `--model 'my model'` and the scan instruction | ☐ |
 | X3 | Remove `trama.scan`, click **Scan System** | omp receives no `--model` or `--slow` option | ☐ |
 | X4 | Set `"trama.analysis": "opus"`; click **Scan System**, then write `x` in an **Add Work Item…** request and send it | The scan uses `trama.scan`, not `trama.analysis`; the design instruction names the request file and uses `--model 'opus'`, with no sub-agent sentence | ☐ |
 | X5 | 🪙 With omp installed: set `"trama.scan": "sonnet"`; click **Scan System** | omp uses `--model 'sonnet' --slow 'sonnet'`, and the prompt ends with `Compare each Machine with the trama-analysis sub-agent.` | ☐ |
-| X6 | 🪙 With Claude Code: set `"trama.agent": "claude"` and `"trama.scan": "sonnet"`; click **Scan System** | Claude Code receives `--model 'sonnet'`, an analysis sub-agent with `"model":"sonnet"`, and the sub-agent sentence | ☐ |
-| X7 | Set `"trama.agent": "chat"` and `"trama.scan": "sonnet"` in user settings; click **Scan System**, then write `x` in an **Add Work Item…** request and send it | Cursor: the scan's new conversation runs on `sonnet` with Max mode off, and its prompt ends with `Compare each Machine with the trama-analysis sub-agent.`. Copilot: `sonnet` is selected in the chat picker, or the warning `Trama: no Copilot model is named "sonnet" (trama.scan). The instruction was sent with the model chosen in the chat.` appears. The design instruction has no sub-agent sentence and no model notice appears in either editor | ☐ |
+| X6 | 🪙 With omp, in Cursor and in VS Code: set `"trama.agent": "omp"` and `"trama.scan": "sonnet"`; click **Scan System** | omp is started with `--slow sonnet` and receives the sub-agent sentence | ☐ |
+| X7 | In Cursor, set `"trama.agent": "cursor"` and `"trama.scan": "sonnet"` in user settings; click **Scan System**, then write `x` in an **Add Work Item…** request and send it | The scan's new conversation runs on `sonnet` with Max mode off, and its prompt ends with `Compare each Machine with the trama-analysis sub-agent.`. The design instruction has no sub-agent sentence and no model notice appears | ☐ |
 | X8 | `trama project edit` (or **Trama: Update Agent Skills**), then inspect `/tmp/trama-demo/shop/.omp/agents/trama-analysis.md` and check for `trama-triage.md` | The `trama-analysis` definition has `model: "@slow"` and names `trama-scan`; the obsolete triage file is absent | ☐ |
 
 ---

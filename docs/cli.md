@@ -815,6 +815,18 @@ Output (`--json`):
 
 Runs and waits for the editor; sends messages to the editor's coordinator.
 
+### `advisor`
+
+#### `trama advisor show`
+
+Says whether this session belongs to a Run launched by Trama with the Advisor Scanner on: it reads only `TRAMA_ADVISOR_SCANNER`, which is `1` in that Run's terminal and absent elsewhere. Any other value counts as off. Trama's advisors ask it before anything else and stay silent when the answer is no. It does not read `.trama/`, does not contact the editor, does not count as the agent's activity and exits with 0 either way. Read-only.
+
+Output (`--json`):
+
+- advisorScanner: boolean, required. True when the Advisor Scanner is on for this session.
+
+Runs at once; read-only.
+
 ### `project`
 
 #### `trama project new`
@@ -823,7 +835,7 @@ Creates `.trama/` in `--root` (or the current directory; it never walks up) with
 
 Input (`--input`):
 
-- `skillsDir`: `string not empty`, optional. The folder of the agent skills, relative to the project root. Default `.agents/skills` (`.claude/skills` for Claude Code).
+- `skillsDir`: `string not empty`, optional. The folder of the agent skills, relative to the project root. Default `.agents/skills`.
 - `force`: `boolean`, optional. Overwrite skill files, sub-agent definitions and advisor instructions that differ from Trama's. Default false.
 
 ```sh
@@ -848,7 +860,7 @@ Writes this version's agent skills into the project's skill folder, replacing ol
 
 Input (`--input`):
 
-- `skillsDir`: `string not empty`, optional. The folder of the agent skills, relative to the project root. Default `.agents/skills` (`.claude/skills` for Claude Code).
+- `skillsDir`: `string not empty`, optional. The folder of the agent skills, relative to the project root. Default `.agents/skills`.
 
 ```sh
 trama project edit --input - <<'JSON'
@@ -863,6 +875,7 @@ Output (`--json`):
 - removed: string[], required. The retired skill folders deleted.
 - removedAgents: string[], required
 - agents: string[], required
+- agentsChanged: string[], required. The omp definitions and advisor instructions this run actually wrote.
 - areas: string[], required. The starting Areas created.
 - conversion: object, required. The Areas moved to the folder format and those left as they were.
 - generated: object, required. The regeneration of the Requirement skills.
@@ -940,27 +953,9 @@ Input: none. Reads the hook's JSON on standard input.
 
 Runs as an agent hook; read-only.
 
-#### `trama hook copilot`
-
-Run by VS Code's `UserPromptSubmit`, `Stop` and `PreToolUse` hooks. It hands the editor of the project the hook name, the session and whether a prompt starts a Trama skill, never the prompt, waits at most one second, prints `{}` (or the refusal of the question tool) and exits with 0 even without an editor, a project or valid input.
-
-Input: none. Reads the hook's JSON on standard input.
-
-Runs as an agent hook; read-only.
-
 #### `trama hook idle`
 
 Run by the hook Trama makes omp load when its main session settles or ends, not by people. It takes the terminal from `TRAMA_TERMINAL`, finds the editor of the project and tells it that the agent of that terminal is idle: the editor then ends the run, releases the Tasks the terminal had taken and withdraws its announcements. It waits at most one second, prints nothing and exits with 0 also without an editor, a project or `TRAMA_TERMINAL`.
-
-Runs as an agent hook; read-only.
-
-#### `trama hook claude-question-tool`
-
-Run by the `PreToolUse` hook Trama makes Claude Code load for its `AskUserQuestion` tool. It refuses the tool with the shared refusal, which says to ask only with `trama question new`, reads nothing, never contacts the editor and exits with 0.
-
-Output (`--json`):
-
-- hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: string }, required
 
 Runs as an agent hook; read-only.
 
@@ -970,11 +965,13 @@ Runs as an agent hook; read-only.
 
 `trama project new` creates `.trama/` in `--root` (or the current directory) with `model/system.md`, `model/actors/`, `requirements/` with five Areas (`ui`, `tech`, `quality`, `data`, `rules`), each a folder holding only its `area.md` and no fragment, `proposals/`, `tasks/` and `drifts/`, and installs the agent skills (embedded in the binary) into `skillsDir`, default `.agents/skills`. It never walks up. It fails, creating nothing, if `.trama/` already exists or if any skill file to install already exists with different content; `force: true` overwrites those. Identical files are not a conflict.
 
-`trama project edit` writes this version's agent skills into an existing project's `skillsDir` (default `.agents/skills`), replacing older or edited copies, and lists the files it changed. It deletes the folder of the retired `trama-fix` skill, whatever it holds, from `.agents/skills`, `.claude/skills`, `.github/skills` and `skillsDir`, and lists the folders it deleted. It creates the five starting Areas if the project has no `requirements/` folder, and converts every Area still written as one file, `requirements/<area>.md`, into `requirements/<area>/area.md` (description, title, introduction) and `requirements/<area>/main.md` (the same description and title with every section), deleting the old file; an Area whose folder already exists is left alone. It reports the Areas converted and those left, with why. Then it regenerates the `trama-req-*` skills and reports their mode (one skill per fragment, or one index skill per Area), the budget used out of 4,000 characters and any switch. The extension runs it from **Trama: Update Agent Skills**.
+`trama project edit` writes this version's agent skills into an existing project's `skillsDir` (default `.agents/skills`), replacing older or edited copies, and lists the files it changed. It deletes the folder of the retired `trama-fix` skill, whatever it holds, from `.agents/skills` and `skillsDir`, and lists the folders it deleted. It creates the five starting Areas if the project has no `requirements/` folder, and converts every Area still written as one file, `requirements/<area>.md`, into `requirements/<area>/area.md` (description, title, introduction) and `requirements/<area>/main.md` (the same description and title with every section), deleting the old file; an Area whose folder already exists is left alone. It reports the Areas converted and those left, with why. Then it regenerates the `trama-req-*` skills and reports their mode (one skill per fragment, or one index skill per Area), the budget used out of 4,000 characters and any switch. The extension runs it from **Trama: Update Agent Skills**.
 
 `project new` and `project edit` also write the definition of the scan's analysis sub-agent into the project's `.omp/agents/trama-analysis.md` with `model: "@slow"`. It names an omp role, never a concrete model, so it can be versioned; the editor passes the developer's model with `--slow` (see the [extension README](../extension/README.md#terminal-agents-and-model-roles)).
 
-`project new` and `project edit` also write `.omp/WATCHDOG.yml`, the advisor instructions of the Advisor Scanner: a shared `instructions` text and two `advisors` entries (`Trama turn reviewer` and `Trama final reviewer`), each with the tools `read`, `grep`, `glob`, `bash` and no model. It is written whatever `trama.agent` is and with the Advisor Scanner off, and it is handled like `trama-analysis.md`: `project new` lists it among the conflicting files and refuses to overwrite a different copy unless `force` is true, and `project edit` replaces a different copy and says so. Consequence: an omp session started by hand in the project with the advisor on does not create omp's default advisor, because the file lists advisors, and Trama's two advisors stay silent.
+`project edit` also reports, in `agentsChanged` of its `--json`, the omp definitions and advisor instructions it actually wrote (`agents` lists all of them, written or not). The extension's check when Trama opens (see the [extension README](../extension/README.md)) runs the same steps on the same files, but writes a file only when its content differs and neither creates the starting Areas nor converts single-file Areas.
+
+`project new` and `project edit` also write `.omp/WATCHDOG.yml`, the advisor instructions of the Advisor Scanner: a shared `instructions` text and two `advisors` entries (`Trama turn reviewer` and `Trama final reviewer`), each with the tools `read`, `grep`, `glob`, `bash` and no model. It is written whatever `trama.agent` is and with the Advisor Scanner off, and it is handled like `trama-analysis.md`: `project new` lists it among the conflicting files and refuses to overwrite a different copy unless `force` is true, and `project edit` replaces a different copy and says so. Consequence: an omp session started by hand in the project with the advisor on does not create omp's default advisor, because the file lists advisors, and Trama's two advisors run only `trama advisor show` and then stay silent: they know a Run from the `TRAMA_ADVISOR_SCANNER` sign that Trama puts in the terminal of every Run launched with the Advisor Scanner on, which also reaches its sub-agents.
 
 The extension initialises and updates the skills with these two commands, passing the folder it is configured with as `skillsDir` and `force: true` after the developer confirms.
 
@@ -1006,7 +1003,7 @@ The extension initialises and updates the skills with these two commands, passin
 | `proposal move <id> discarded` | Discards only a Draft, setting `status: discarded`; no feedback, no changes to dependents. A Draft attached to an open Drift is refused, changing nothing, as `approved` and `rejected` refuse it: the message names the Drift, and the Drift is decided with `drift move` (fixing its code sets the Draft aside). The agent may run it only when the developer explicitly asks in the conversation; otherwise it asks the developer to decide. |
 | `proposal show <id>` | Description; stale or not; for each touched file, what is added, removed or changed, and for a Requirement file its Area and fragment (or `area.md`); for an ordinary Proposal not yet approved: its **`## Tasks`** (identity, title, `(technical)`, references), its **`## Created on approval`** (each `Remove code of <ref>` with the reference it points at), and its **`## Scope`**, computed now: one reference per line in the form `refs` takes (`order/Paid`, `requirements/ui#order/Paid`), each with why it is there (`changed`, `removed, its container` or `leads into a change`) and what covers it (a Task's identity, `already present`, `removal`, or `not covered`). With `--json`: `tasks`, `removals` and `scope` (a list of `{ ref, reason, coveredBy }`). Once approved, an older Proposal shows its saved **`## Scan scope`** (`--json`, `scanScope`), as before. It makes the same checks as the hand-over. |
 | `proposal list` with `{ all? }` | Draft and open Proposals (all statuses with `all`), marking drafts `(draft)`, imports, stale ones and required Proposals not approved yet. |
-| `proposal move <id> approved` with `{ skillsDir? }` | Open Proposals only. Refuses Drafts as still being written. Fails if a required Proposal is not approved, or the Proposal is stale or invalid; otherwise applies it in this folder, sets `status: approved` and regenerates the `trama-req-*` skills in `.agents/skills`, `.claude/skills`, `.github/skills` and the `skillsDir` folder (relative to the project root) that holds `trama-design`. The extension passes its `trama.skillsDir` setting; from a terminal, pass the folder you configured. A Drift's attached Proposal is accepted with `drift move <id> proposal-accepted`, which also applies it in this folder. An agent may approve or reject a Proposal only when the developer explicitly asks for that decision in the conversation; otherwise it asks the developer to decide. |
+| `proposal move <id> approved` with `{ skillsDir? }` | Open Proposals only. Refuses Drafts as still being written. Fails if a required Proposal is not approved, or the Proposal is stale or invalid; otherwise applies it in this folder, sets `status: approved` and regenerates the `trama-req-*` skills in `.agents/skills` and the `skillsDir` folder (relative to the project root) that holds `trama-design`. The extension passes its `trama.skillsDir` setting; from a terminal, pass the folder you configured. A Drift's attached Proposal is accepted with `drift move <id> proposal-accepted`, which also applies it in this folder. An agent may approve or reject a Proposal only when the developer explicitly asks for that decision in the conversation; otherwise it asks the developer to decide. |
 | `proposal move <id> rejected` with `{ feedback? }` | Open Proposals only. Sets `status: rejected`. With non-blank feedback it is appended under `## Feedback`; without it, or with blank text, nothing is appended. Drafts are refused as still being written. An agent may reject a Proposal only when the developer explicitly asks for that decision in the conversation; otherwise it asks the developer to decide. |
 
 These are decisions for the developer: `proposal move … approved`, `proposal move … rejected`, `proposal move … discarded` and `drift move`. An agent may run any of them only when the developer explicitly asks for that decision in the conversation; otherwise it stops and asks the developer to decide. Requests to design, scan, implement Tasks or prepare a Drift resolution do not authorize the decision. Trama applies the same argument, state, reference, dependency, validity and conflict checks regardless of who runs the command; `TRAMA_AGENT` and `CURSOR_AGENT` do not block it.
@@ -1059,7 +1056,7 @@ A Drift leaves free only the Tasks named by `notBlocking`. `drift show` lists th
 
 The input of `comparison move <id> delivered` is a JSON object with a `tasks` list and a `drifts` list, and an optional `design`, the ID of a Proposal every Task of the file is linked to (as `proposal` in `task new`). A Task has `title`, `refs` (a list of strings), and optional `body` and `technical`. A Drift has `title`, `refs`, `happens`, `should`, `where`, and `options` (a list of `{"title", "text"}`), and optional `critical`, `previous` (the ID of a resolved Drift it recurs from), `proposal` (the ID of its own Proposal) and `notBlocking` (a list of `{"task", "reason"}`, naming the Tasks it does not block). Every card is checked before anything is written: when one fails, the output lists the problems, nothing is written and the comparison stays waiting. Tasks are written before Drifts. An agent filing cards sees the editor learn who holds each of them, as with `task new` and `drift new`.
 
-A successful `comparison move <id> delivered` records the comparison in the registry `.trama/compared/<fingerprint>.json`: for each reference of the comparison, and each element that contains it, it stores the text fingerprint of that element, under the code fingerprint of the moment. The folder has its own `.gitignore`, and the records of any other code fingerprint are deleted on that first write. The code fingerprint is the Git commit plus the content of the changed and untracked files, excluding `.trama`, the agents' skill folders (`.agents/skills`, `.claude/skills`, `.github/skills`), `.omp/agents` and `.omp/WATCHDOG.yml`; `comparison new` announces it with the comparison, together with its references. Outside a Git repository, or for a comparison with no code fingerprint, a comparison that is withdrawn or rejected, nothing is recorded. `task list` with `runnable` and `scope` uses these records: a reference is already compared when a recorded element still has the same text fingerprint under the same code fingerprint.
+A successful `comparison move <id> delivered` records the comparison in the registry `.trama/compared/<fingerprint>.json`: for each reference of the comparison, and each element that contains it, it stores the text fingerprint of that element, under the code fingerprint of the moment. The folder has its own `.gitignore`, and the records of any other code fingerprint are deleted on that first write. The code fingerprint is the Git commit plus the content of the changed and untracked files, excluding `.trama`, the agents' skill folders (`.agents/skills`), `.omp/agents` and `.omp/WATCHDOG.yml`; `comparison new` announces it with the comparison, together with its references. Outside a Git repository, or for a comparison with no code fingerprint, a comparison that is withdrawn or rejected, nothing is recorded. `task list` with `runnable` and `scope` uses these records: a reference is already compared when a recorded element still has the same text fingerprint under the same code fingerprint.
 
 `trama timing list` shows the phase timings that the agent's commands record in `.trama/timings/`. Each coordinator job has one job file, named by the UTC instant the job started and the holder that ran it (`<instant>-<terminal or chat>.jsonl`), with one JSON line per event: the check phases (`announcement new` and `announcement move`), the Tasks an agent moves to `doing` and to `done`, the machine comparisons (`comparison new` and `comparison move`), the Drifts filed on a Task, and the waits of `task list` with `runnable` and `max`. Only commands run from a Trama terminal or chat are recorded; the developer's own commands write nothing. The folder has its own `.gitignore` containing `*`; the newest 20 job files are kept, and a new job deletes the older ones. Failing to write a record never fails the command that records it. A job that has parallel choices also shows `Parallel choices`: the count per kind and one line per choice, with kind, Tasks and reason (`--json`: `parallelChoices`). `trama timing new` with `{ kind, tasks, reason }` records such a choice of the experimental parallel execution: `kind` is `release`, `order` or `conflict`, `tasks` holds at least two existing Tasks and `reason` is one non-empty line; invalid input is a usage error and writes nothing, and outside a Trama terminal or chat the command writes nothing, says so and exits with 0.
 
@@ -1153,15 +1150,9 @@ Routing uses private user-local sockets on Unix and a Node named pipe (`\\.\pipe
 
 The editor follows a conversation from its first prompt naming a Trama skill, or from its first shell command that registers the agent's work, whoever wrote it, and turns its hooks into the `cursor-chat` Events: every later prompt is `PROMPT_SUBMITTED`; `stop` with `completed` is `AGENT_STOPPED`, with `aborted` or `error` `AGENT_INTERRUPTED`; `sessionEnd` with `window_close` or `user_close` is `CONVERSATION_CLOSED` and ends the following, other reasons produce nothing. A shell command produces no Event of its own. Other conversations are ignored. The list lives only in the editor's memory and is lost when it restarts.
 
-## Copilot hooks
-
-`trama hook copilot` is run by VS Code's `UserPromptSubmit` and `Stop` hooks. It reads the hook JSON from stdin, uses `cwd` when it contains `.trama/model/system.md`, and hands the editor found through `trama question new`'s local discovery the hook name, session ID, project folder and only whether a prompt starts with `Use the trama-` or `/trama-`. It does not pass prompt text, waits at most one second, prints `{}` and exits `0` even without an editor, project or valid input.
-
-The editor identifies a conversation on its first Trama prompt and treats every subsequent prompt as `PROMPT_SUBMITTED`; `Stop` emits `AGENT_STOPPED` only for an identified conversation in that same project. The editor keeps this recognition in memory. Copilot chat commands do not identify themselves as agent commands, so this hook releases originless Tasks at turn end but does not mark Tasks taken.
-
 ## Agent hooks
 
 `trama hook idle [--root <dir>]` is run by the hook Trama makes omp load (`--hook`, see `extension/src/omp/trama-hook.ts`) when omp's main session settles (`session_stop`) or ends (`session_shutdown`), not by people. It takes the terminal's identity from `TRAMA_TERMINAL`, finds the editor of the project as `trama question new` does and tells it that the agent of that terminal is idle: the editor then ends the run, releases the Tasks that terminal had taken and withdraws its announcements. It waits at most one second, writes nothing to disk and exits with `0` also without an editor, a project or `TRAMA_TERMINAL`; only a wrong use exits with `2`.
 
-In the same terminals, `trama hook claude-question-tool` is run by the `PreToolUse` hook Trama makes Claude Code load for its `AskUserQuestion` tool, and omp refuses its `ask` tool in-process (`tool_call`). Both refuse the agent's own question tool with the shared refusal (`trama question new` instead), in every session, main and sub-agents, without contacting the editor: `claude-question-tool` reads nothing, writes one `hookSpecificOutput` JSON object with `permissionDecision: "deny"` to standard output and exits with `0`. Outside Trama's terminals no hook is installed, so nothing is refused.
+omp refuses its `ask` tool in-process (`tool_call`), in every session, main and sub-agents, with the shared refusal (`trama question new` instead), without contacting the editor. Outside Trama's terminals no hook is installed, so nothing is refused.
 

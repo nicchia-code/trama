@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { agentCommandLine, hookProgram, isSupportedShell, programName, quote, shellFamily } from "../extension/src/host/quote";
+import { agentCommandLine, isSupportedShell, programName, quote, shellFamily } from "../extension/src/host/quote";
 
 const NASTY = ["plain", "it's", "''", "a\nb", "$HOME `id` $(id) !! \\ \\n \"q\"", "  leading and trailing  ", "", "'; rm -rf / #", "%PATH% & | < > ^"];
 
@@ -56,13 +56,13 @@ test("on Windows only Git Bash is POSIX; PowerShell 7 and Windows PowerShell 5.1
 });
 
 test("{prompt} is replaced literally, every time, even when the prompt looks like a replacement pattern", () => {
-  expect(agentCommandLine("claude {prompt}", "a $& b $1", "posix")).toBe("claude 'a $& b $1'");
+  expect(agentCommandLine("omp {prompt}", "a $& b $1", "posix")).toBe("omp 'a $& b $1'");
   expect(agentCommandLine("agent --first {prompt} --again {prompt}", "x", "posix")).toBe("agent --first 'x' --again 'x'");
   expect(agentCommandLine("codex exec {prompt} --json", "x", "powershell5")).toBe(`codex exec '"x"' --json`);
 });
 
 test("the prompt is appended when the command has no {prompt}", () => {
-  expect(agentCommandLine("  claude --verbose  ", "hello", "posix")).toBe("claude --verbose 'hello'");
+  expect(agentCommandLine("  omp --verbose  ", "hello", "posix")).toBe("omp --verbose 'hello'");
 });
 
 test("the program name is the last path segment, as written", () => {
@@ -84,14 +84,3 @@ test("outside Windows every shell is supported", () => {
   expect(isSupportedShell("/bin/cmd", false)).toBe(true);
 });
 
-test("the Claude Code hook program is quoted for Git Bash with forward slashes on Windows, whatever the terminal's shell", () => {
-  expect(hookProgram(String.raw`C:\Users\Luca\ext\bin\trama.exe`, "powershell5", true)).toBe("'C:/Users/Luca/ext/bin/trama.exe'");
-  expect(hookProgram(String.raw`C:\Users\Luca\ext\bin\trama.exe`, "powershell", true)).toBe("'C:/Users/Luca/ext/bin/trama.exe'");
-  expect(hookProgram(String.raw`C:\Users\it's me\trama.exe`, "posix", true)).toBe("'C:/Users/it'\\''s me/trama.exe'");
-});
-
-test("outside Windows the hook program keeps the terminal shell's quoting", () => {
-  expect(hookProgram("/ext/bin/trama", "posix", false)).toBe("'/ext/bin/trama'");
-  expect(hookProgram("/ext/bin/it's/trama", "fish", false)).toBe(quote("fish", "/ext/bin/it's/trama"));
-  expect(hookProgram("/ext/bin/trama", "powershell", false)).toBe("'/ext/bin/trama'");
-});

@@ -83,7 +83,7 @@ const create = defineCommand({
       notBlocking: (input.notBlocking ?? []).map((n) => ({ task: getTask(project, n.task, true).id, reason: n.reason })),
     });
     if (origin !== undefined) recordTiming(project, ctx.origin, { event: "task-end", task: origin, title: getTask(project, origin, true).title, outcome: "drift", drift: d.id }, { job: ctx.job });
-    // The agent that files a Drift keeps «Dismiss Drift» from it until its turn ends: the editor learns who holds it here. Copilot chat gives its agent no identity, so its filings arrive as the editor's chat holder and only the window with an open Copilot turn holds them.
+    // The agent that files a Drift keeps «Dismiss Drift» from it until its turn ends: the editor learns who holds it here. An agent Trama did not start and that does not say where it comes from files as the `editor` holder.
     const holder = ctx.origin.terminal ?? ctx.origin.chat;
     if (holder !== undefined)
       sendCoordinatorMessageSoon(project, { type: "drift-filed", root: project.root, drift: d.id, holder }, (reason) => {

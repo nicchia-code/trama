@@ -111,7 +111,7 @@ The letters spell out what's inside:
 - **Requirements**: how your app must be built, written once and followed every time.
 - **Analysis**: the agent compares your code with the map and tells you where they disagree.
 - **Map**: every situation your app can be in, drawn for you as a diagram.
-- **Agents**: works with the one you already use: Copilot Chat, Cursor, Claude Code or omp.
+- **Agents**: Cursor's chat (in Cursor only) or omp, fully supported in Cursor and in every compatible editor, such as VS Code.
 
 ## Try it
 
@@ -123,36 +123,34 @@ Trama runs in VS Code and Cursor, on Linux (x64), macOS (Apple silicon) and Wind
    ```
    The `trama` command line comes inside the extension, so there's nothing else to install.
 2. **Pick your agent** in Settings (`trama.agent`), *before* you initialize a project:
-   - `chat` (default): Copilot Chat in VS Code, or the chat in Cursor.
-   - `claude`: Claude Code in a terminal. Also set `trama.skillsDir` to `.claude/skills`, so Claude Code finds Trama's skills.
-   - `omp`: omp in a terminal.
+   - `cursor` (default): the chat in Cursor, in Cursor only. Outside Cursor the instruction goes to the clipboard, with a notice that asks you to choose omp.
+   - `omp`: omp in a terminal, in Cursor or in any compatible editor, such as VS Code.
 
-   Terminal agents must already be installed and on your `PATH`.
+   omp must already be installed and on your `PATH`.
 3. **Open your project** and run **Trama: Open**.
 4. In **Get Started** (the panel shows it in any folder without a Trama project), choose **Import from Code** for an existing app, or **Start from Scratch** for an empty folder: it creates the project and opens an empty design request for your first feature, which the agent answers with the `trama-setup` skill.
 5. In the Board, click **Add Work Item…** and describe your first feature (with an empty Model, the Diagram offers **Import from Code** and **Start from Scratch** too).
 
-> **Windows is in preview.** The `win32-x64` build is not yet verified end to end on Windows 11 (VS Code and Cursor, omp and Claude Code, Windows PowerShell 5.1, PowerShell 7 and Git Bash); the manual check in [`docs/uat.md`](docs/uat.md) decides when the preview ends.
+> **Windows is in preview.** The `win32-x64` build is not yet verified end to end on Windows 11 (Cursor with its chat and omp, VS Code with omp, Windows PowerShell 5.1, PowerShell 7 and Git Bash); the manual check in [`docs/uat.md`](docs/uat.md) decides when the preview ends.
 >
 > **`trama.exe` is not signed.** Windows SmartScreen or an antivirus may warn the first time it runs. The command line is distributed only inside the `.vsix`, as on the other platforms.
 
 ### Settings
 
-For Claude Code, writing in Italian, a typical setup looks like this:
+For omp, writing in Italian, a typical setup looks like this:
 
 ```jsonc
 // settings.json
 {
-  "trama.agent": "claude",
-  "trama.skillsDir": ".claude/skills",
+  "trama.agent": "omp",
   "trama.language": "Italian"
 }
 ```
 
 | Setting | Default | What it does |
 |---|---|---|
-| `trama.agent` | `chat` | Where Trama sends its instructions: `chat`, `claude` or `omp`. |
-| `trama.skillsDir` | `.agents/skills` | Where Get Started installs the agent skills. Use `.claude/skills` for Claude Code. |
+| `trama.agent` | `cursor` | Where Trama sends its instructions: `cursor` (Cursor's chat, in Cursor only) or `omp`. |
+| `trama.skillsDir` | `.agents/skills` | Where Get Started installs the agent skills. |
 | `trama.language` | *empty* | Language for the prose the agent writes (descriptions, Proposals, Tasks, Drifts), e.g. `Italian`. Trama never fills it in: empty asks the agent nothing about language. Code, names, titles and IDs stay in English. |
 | `trama.terminalLocation` | `editor` | Where terminal agents open: `editor` (a tab in the active editor group, beside your code) or `panel` (terminal area, in the background). |
 | `trama.analysis` | *empty* | Model for design requests, Drift resolution, the preparation of automatic Drift resolution and import. |
@@ -162,10 +160,10 @@ For Claude Code, writing in Italian, a typical setup looks like this:
 | `trama.maxParallelAgents` | `20` | How many sub-agents the agent may run at once. |
 | `trama.submitWhileRunning` | `false` | `true` lets you start a run while another is in progress; `false` keeps Run buttons unavailable until it finishes. |
 | `trama.driftAutoPilot` | `disabled` | Drift autopilot: `disabled` (you decide on every Drift), `enabled` (the agent recommends, approves and fixes non-critical Drifts on its own) or `yolo` (also critical Drifts). |
-| `trama.experimentalAdvisorScanner` | `false` | Experimental, with omp as the agent only: `true` makes omp's advisor check each Run's code against the Model and the Requirements, and turns the scans off (Scan buttons, pre-flight and end-of-run scan). See the [extension README](./extension/README.md). |
+| `trama.experimentalAdvisorScanner` | `false` | Experimental, with omp as the agent only: `true` makes omp's advisor check each Run's code against the Model and the Requirements, and turns the scans off (Scan buttons, pre-flight and end-of-run scan); in an omp session you start yourself with the advisor on, Trama's advisors only run `trama advisor show` and then stay silent. See the [extension README](./extension/README.md). |
 | `trama.experimentalParallelExecution` | `false` | Experimental, for runs over several Tasks with an agent that has sub-agents: `true` lets the agent start together Tasks that Trama would keep apart because they concern the same thing, or hold a Task until another is done, giving a reason for each choice. See the [extension README](./extension/README.md). |
 
-For the three model settings, write the model name as your agent accepts it, or leave it empty for the agent's default. In the chat they pick the model of the new conversation: in Copilot, a model with that name; in Cursor, the conversation's starting model. Every setting except `trama.skillsDir`, `trama.language` and `trama.submitWhileRunning` lives in your user settings only, so it can't be overridden per workspace. You can change every setting in the Settings tab of the Trama panel, which always saves to your user settings. All the details are in the [extension README](./extension/README.md).
+For the three model settings, write the model name as your agent accepts it, or leave it empty for the agent's default. In Cursor's chat they pick the conversation's starting model. Every setting except `trama.skillsDir`, `trama.language` and `trama.submitWhileRunning` lives in your user settings only, so it can't be overridden per workspace. You can change every setting in the Settings tab of the Trama panel, which always saves to your user settings. All the details are in the [extension README](./extension/README.md).
 
 ## How it works
 

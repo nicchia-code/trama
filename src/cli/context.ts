@@ -15,13 +15,15 @@ export interface Context {
   origin: AgentOrigin;
   /** The autopilot job this agent terminal was started for (`TRAMA_JOB`), when there is one. */
   job?: string;
+  /** Whether the terminal carries the sign of a Run with the Advisor Scanner on (`TRAMA_ADVISOR_SCANNER` is `1`). */
+  advisorScanner: boolean;
   project(assignNumbers?: boolean): Project;
 }
 
 /** The autopilot job of the agent's terminal (`TRAMA_JOB`), when the environment names one. */
 export const jobFromEnv = (env: Record<string, string | undefined>): string | undefined => env["TRAMA_JOB"]?.trim() || undefined;
 
-export function makeContext(cwd: string, rootOption?: string, byAgent = false, origin: AgentOrigin = {}, job?: string): Context {
+export function makeContext(cwd: string, rootOption?: string, byAgent = false, origin: AgentOrigin = {}, job?: string, advisorScanner = false): Context {
   let numbered = false;
   return {
     cwd,
@@ -29,6 +31,7 @@ export function makeContext(cwd: string, rootOption?: string, byAgent = false, o
     byAgent,
     origin,
     job,
+    advisorScanner,
     project(assignNumbers = true) {
       const project = rootOption === undefined ? findProject(cwd) : projectAt(resolve(cwd, rootOption));
       if (rootOption !== undefined && !existsSync(project.dir)) throw new TramaError(`No ${TRAMA_DIR}/ in ${project.root}. Run "trama project new".`);

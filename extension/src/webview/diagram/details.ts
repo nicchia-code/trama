@@ -4,6 +4,7 @@ import { type CardName, type CardNumbers, cardLabel, cardNameOf, noNumbers } fro
 import { type UnresolvedRef, unresolvedRefs } from "./drifts";
 import { type Element, refResolves, resolveElement } from "./elements";
 import type { GEdge, GNode, GraphSpec, Level } from "./graph";
+import { drillTarget } from "./levels";
 import { flows, machineCount, stateCount } from "./overview";
 import { type Scene, type SceneActor, findMergedState, pathTo } from "./scene";
 
@@ -240,7 +241,14 @@ export function detailOfLevel(scene: Scene, level: Level): Detail {
   const proposal = scene.proposal;
   switch (level.kind) {
     case "system":
-      return detail({ kind: "System", title: scene.system.name, description: scene.system.description, sections: [{ heading: "Features", items: scene.features.map((f) => item(f.name, { note: machineCount(f.machines.length), change: f.change, ref: f.id })) }, ...extra], proposal });
+    case "whole":
+      return detail({ kind: level.kind === "whole" ? "Whole System" : "System", title: scene.system.name, description: scene.system.description, sections: [{ heading: "Features", items: scene.features.map((f) => item(f.name, { note: machineCount(f.machines.length), change: f.change, ref: f.id })) }, ...extra], proposal });
+    case "actor": {
+      const a = scene.actor.get(level.actor);
+      if (!a) return detail({ kind: "Actor", title: level.actor, sections: extra, proposal });
+      const base = actorDetail(scene, a, a.change);
+      return { ...base, sections: [...base.sections, ...extra], proposal };
+    }
     case "feature": {
       const f = scene.feature.get(level.feature);
       return detail({ kind: "Feature", title: f?.name ?? level.feature, description: f?.description ?? "", sections: extra, proposal });
@@ -316,13 +324,13 @@ export function detailOfSelection(scene: Scene, graph: GraphSpec, selected: stri
     if (drift) return { ...detailOfDrift(scene, drift), numbers: scene.numbers };
   }
   const element = n?.ref ? resolveElement(scene, n.ref) : null;
-  const found = element ? detailOfElement(scene, element, n ?? null, graph.level.kind === "machine") : edge ? detailOfEdge(scene, graph, edge) : null;
+  const found = n?.kind === "whole" ? detailOfLevel(scene, { kind: "whole" }) : element ? detailOfElement(scene, element, n ?? null, graph.level.kind === "machine") : edge ? detailOfEdge(scene, graph, edge) : null;
   if (!found) {
     const level = detailOfLevel(scene, graph.level);
     return { ...level, numbers: scene.numbers };
   }
   const proposal = scene.proposal && found.change !== "same" ? scene.proposal : null;
-  return { ...found, proposal, numbers: scene.numbers };
+  return { ...found, drill: (n ? drillTarget(scene, graph, n.id) : null) ?? found.drill, proposal, numbers: scene.numbers };
 }
 
 /** Plain text for the tooltip of a node or an edge. */

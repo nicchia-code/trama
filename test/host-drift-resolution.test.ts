@@ -6,7 +6,6 @@ import {
   activeProjectJobs,
   autopilotFailedCase,
   bindChatJob,
-  bindCopilotChatJob,
   chatJobSendStarted,
   clearAutopilotFailure,
   driftAutopilotStatus,
@@ -18,7 +17,6 @@ import {
   reserveSend,
   sendReserved,
   endChatJobs,
-  endCopilotChatJobs,
   isKnownSuccessfulScan,
   endHeldJob,
   endTerminalJobs,
@@ -46,8 +44,6 @@ const root = () => {
 };
 afterEach(() => {
   for (const value of roots.splice(0)) {
-    endCopilotChatJobs(value, "first");
-    endCopilotChatJobs(value, "second");
     endChatJobs(value, "cursor");
   }
 });
@@ -150,71 +146,32 @@ test("a skip forwarded from another window keeps its Drift out until its questio
   expect(autopilotFailedCase(project, "forwarded")).toBe(false);
 });
 
-test("Copilot sends bind in order and only their own conversation ends each job", () => {
-  const project = root();
-  startJob("run", project, { chat: "copilot" }, false);
-  startJob("run", project, { chat: "copilot" }, false);
-  bindCopilotChatJob(project, "first");
-  bindCopilotChatJob(project, "second");
-  expect(driftWork()).toEqual({ resolving: false, running: true });
-  endCopilotChatJobs(project, "unrelated");
-  endCopilotChatJobs(project, "first");
-  expect(driftWork()).toEqual({ resolving: false, running: true });
-  endCopilotChatJobs(project, "second");
-  expect(driftWork()).toEqual({ resolving: false, running: false });
-});
-
-test("a resolving Copilot conversation leaves concurrent Runs active until each conversation ends", () => {
-  const project = root();
-  startJob("run", project, { chat: "copilot" }, false);
-  startJob("resolve", project, { chat: "copilot" }, false);
-  bindCopilotChatJob(project, "first");
-  bindCopilotChatJob(project, "second");
-  expect(driftWork().resolving).toBe(true);
-  endCopilotChatJobs(project, "second");
-  expect(driftWork()).toEqual({ resolving: false, running: true });
-  endCopilotChatJobs(project, "first");
-  expect(driftWork()).toEqual({ resolving: false, running: false });
-});
-
-test("Cursor chat matching stays separate from Copilot conversations", () => {
-  const project = root();
-  startJob("run", project, { chat: "cursor" }, false);
-  bindCopilotChatJob(project, "same-id");
-  expect(driftWork()).toEqual({ resolving: false, running: true });
-  endCopilotChatJobs(project, "same-id");
-  expect(driftWork()).toEqual({ resolving: false, running: true });
-  bindChatJob(project, "cursor");
-  endChatJobs(project, "cursor");
-  expect(driftWork()).toEqual({ resolving: false, running: false });
-});
-
 test("prompts during preparation are ignored but prompts and ends during delivery are retained", () => {
   const project = root();
-  bindCopilotChatJob(project, "preparation");
-  endCopilotChatJobs(project, "preparation");
-  const sentAfter = chatJobSendStarted(project, "copilot");
-  startJob("run", project, { chat: "copilot" }, false, sentAfter);
+  bindChatJob(project, "preparation");
+  endChatJobs(project, "preparation");
+  const sentAfter = chatJobSendStarted(project, "cursor");
+  startJob("run", project, { chat: "cursor" }, false, sentAfter);
   expect(driftWork()).toEqual({ resolving: false, running: true });
-  endCopilotChatJobs(project, "preparation");
+  endChatJobs(project, "preparation");
   expect(driftWork()).toEqual({ resolving: false, running: true });
-  bindCopilotChatJob(project, "delivery");
-  endCopilotChatJobs(project, "delivery");
+  bindChatJob(project, "delivery");
+  endChatJobs(project, "delivery");
   expect(driftWork()).toEqual({ resolving: false, running: false });
 
   const finishedDuringDelivery = root();
-  const finishedAfter = chatJobSendStarted(finishedDuringDelivery, "copilot");
-  bindCopilotChatJob(finishedDuringDelivery, "finished");
-  endCopilotChatJobs(finishedDuringDelivery, "finished");
-  startJob("resolve", finishedDuringDelivery, { chat: "copilot" }, false, finishedAfter);
+  const finishedAfter = chatJobSendStarted(finishedDuringDelivery, "cursor");
+  bindChatJob(finishedDuringDelivery, "finished");
+  endChatJobs(finishedDuringDelivery, "finished");
+  startJob("resolve", finishedDuringDelivery, { chat: "cursor" }, false, finishedAfter);
   expect(driftWork()).toEqual({ resolving: false, running: false });
 
   const activeDuringDelivery = root();
-  const activeAfter = chatJobSendStarted(activeDuringDelivery, "copilot");
-  bindCopilotChatJob(activeDuringDelivery, "active");
-  startJob("run", activeDuringDelivery, { chat: "copilot" }, false, activeAfter);
+  const activeAfter = chatJobSendStarted(activeDuringDelivery, "cursor");
+  bindChatJob(activeDuringDelivery, "active");
+  startJob("run", activeDuringDelivery, { chat: "cursor" }, false, activeAfter);
   expect(driftWork()).toEqual({ resolving: false, running: true });
-  endCopilotChatJobs(activeDuringDelivery, "active");
+  endChatJobs(activeDuringDelivery, "active");
   expect(driftWork()).toEqual({ resolving: false, running: false });
 });
 
@@ -254,19 +211,19 @@ test("a manual Run is reported without authorized corrections, an automatic Run 
 
 test("only a received failure for a known automatic job excludes its authorized Drift", () => {
   const project = root();
-  startJob("resolve", project, { chat: "copilot" }, false, undefined, "auto-job", "automatic", "window");
-  bindCopilotChatJob(project, "autopilot-conversation");
+  startJob("resolve", project, { chat: "cursor" }, false, undefined, "auto-job", "automatic", "window");
+  bindChatJob(project, "autopilot-conversation");
   receiveCoordinatorMessage({ type: "autopilot-failure-recorded", root: project, job: "unknown", drift: "drift-1", reason: "no" });
   expect(autopilotFailedCase(project, "drift-1")).toBe(false);
-  receiveCoordinatorMessage({ type: "job", id: "auto-job", root: project, kind: "resolve", active: true, place: { chat: "copilot" }, origin: "automatic", windowId: "window" });
+  receiveCoordinatorMessage({ type: "job", id: "auto-job", root: project, kind: "resolve", active: true, place: { chat: "cursor" }, origin: "automatic", windowId: "window" });
   receiveCoordinatorMessage({ type: "autopilot-failure-recorded", root: project, job: "auto-job", drift: "drift-1", reason: "not applicable", signature: "unchanged" });
   expect(autopilotFailedCase(project, "drift-1")).toBe(true);
   clearAutopilotFailure(project, "drift-1", "unchanged");
   expect(autopilotFailedCase(project, "drift-1")).toBe(true);
   clearAutopilotFailure(project, "drift-1", "edited");
   expect(autopilotFailedCase(project, "drift-1")).toBe(false);
-  endCopilotChatJobs(project, "autopilot-conversation");
-  receiveCoordinatorMessage({ type: "job", id: "auto-job", root: project, kind: "resolve", active: false, place: { chat: "copilot" }, origin: "automatic", windowId: "window" });
+  endChatJobs(project, "autopilot-conversation");
+  receiveCoordinatorMessage({ type: "job", id: "auto-job", root: project, kind: "resolve", active: false, place: { chat: "cursor" }, origin: "automatic", windowId: "window" });
 });
 
 test("a developer scan makes failed cases eligible again when it starts; an automatic scan does not", () => {

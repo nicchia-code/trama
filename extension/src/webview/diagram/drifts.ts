@@ -26,7 +26,7 @@ const badge = (n: number) => `⚠ ${n} ${n === 1 ? "drift" : "drifts"} inside`;
  * Draws open Drifts over a graph: a red ghost node joined to the element the first resolvable reference shows at this
  * level, and a red outline on every element any reference shows. Elements that only contain the Drift get a badge.
  * A Drift with no such element (only Requirements, or nothing that exists) floats as a ghost without an edge on the
- * System level, so every open Drift has a node and its details there.
+ * root and on Whole System, so every open Drift has a node and its details there.
  */
 export function withDrifts(graph: GraphSpec, scene: Scene): GraphSpec {
   const nodes: GNode[] = graph.nodes.map((n) => ({ ...n, drifts: [] }));
@@ -53,7 +53,7 @@ export function withDrifts(graph: GraphSpec, scene: Scene): GraphSpec {
         edges.push({ id: `de:${drift.id}`, kind: "drift", source: `d:${drift.id}`, target: anchor.node, label: "", change: "same", refs: [], items: [] });
       }
     }
-    if (!placed && graph.level.kind === "system") ghosts.push(ghostOf(drift.id));
+    if (!placed && (graph.level.kind === "system" || graph.level.kind === "whole")) ghosts.push(ghostOf(drift.id));
   }
 
   for (const n of nodes) {

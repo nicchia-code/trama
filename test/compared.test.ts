@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { announce, listAnnouncements } from "../src/core/announcements";
@@ -70,6 +70,20 @@ describe("code fingerprint", () => {
     expect(changed).not.toBe(before);
     writeFileSync(join(dir, ".trama", "note.txt"), "not code");
     expect(codeFingerprint(dir)).toBe(changed);
+  });
+
+  test("leaves out the skill folder of Trama but counts the old agent folders as code", () => {
+    gitRepo();
+    const before = codeFingerprint(dir);
+    mkdirSync(join(dir, ".agents", "skills", "x"), { recursive: true });
+    writeFileSync(join(dir, ".agents", "skills", "x", "SKILL.md"), "skill");
+    expect(codeFingerprint(dir)).toBe(before);
+    for (const old of [".claude/skills", ".github/skills"]) {
+      const base = codeFingerprint(dir);
+      mkdirSync(join(dir, old), { recursive: true });
+      writeFileSync(join(dir, old, "note.md"), old);
+      expect(codeFingerprint(dir)).not.toBe(base);
+    }
   });
 });
 

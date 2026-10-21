@@ -14,7 +14,7 @@ import type { Result } from "./result";
  */
 
 /** The objects of the command line, in the order `trama --help` lists them. */
-export const OBJECTS = ["model", "proposal", "task", "drift", "history", "announcement", "comparison", "question", "autopilot", "project", "timing", "hook"] as const;
+export const OBJECTS = ["model", "proposal", "task", "drift", "history", "announcement", "comparison", "question", "autopilot", "advisor", "project", "timing", "hook"] as const;
 export type CommandObject = (typeof OBJECTS)[number];
 
 /** The verbs, with the one meaning they have for every object; `hook` is the only object that does not follow them. */

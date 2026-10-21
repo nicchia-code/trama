@@ -1,6 +1,6 @@
 import type { Change, MergedMachine } from "../../../../src/core/merge";
-import { type EdgeItem, type GEdge, type GNode, type GraphSpec, aggregateChange, node } from "./graph";
-import { type Scene, actorChange, featureChange, flattenMerged, machineChange } from "./scene";
+import { type EdgeItem, type GEdge, type GNode, type GraphSpec, type Level, aggregateChange, node } from "./graph";
+import { type Scene, type SceneActor, type SceneFeature, actorChange, featureChange, flattenMerged, machineChange } from "./scene";
 
 /** One Transition seen as an Event travelling from its owner to the Machine that reacts to it. */
 export interface Flow {
@@ -83,23 +83,60 @@ function flowEdge(id: string, pair: Pair, label: string): GEdge {
   return { id, kind: "flow", source: pair.source, target: pair.target, label, change: aggregateChange(items.map((i) => i.change)), refs: [], items };
 }
 
-/** Level 1: Features and Actors; an edge means Events travel that way, its label is how many. */
-export function systemGraph(scene: Scene): GraphSpec {
+const featureOfMachine = (scene: Scene, id: string) => scene.machine.get(id)?.feature as string;
+
+/** The Features that receive Events of an Actor, in Model order; empty when its Events reach no Machine. */
+export function actorReach(scene: Scene, actorId: string): string[] {
+  const reached = new Set(flows(scene).filter((f) => f.source.kind === "actor" && f.source.id === actorId).map((f) => featureOfMachine(scene, f.machine)));
+  return scene.features.filter((f) => reached.has(f.id)).map((f) => f.id);
+}
+
+/** The Features that some Actor's Events reach. */
+function reachedFeatures(scene: Scene): Set<string> {
+  return new Set(flows(scene).filter((f) => f.source.kind === "actor").map((f) => featureOfMachine(scene, f.machine)));
+}
+
+const featureNode = (scene: Scene, f: SceneFeature): GNode => node({ id: `f:${f.id}`, kind: "feature", label: f.name, sub: machineCount(f.machines.length), ref: f.id, change: featureChange(scene, f), children: 0 });
+
+/** The root: Whole System, the Actors in Model order and the Features no Actor reaches, as nodes with no arrows. */
+export function rootGraph(scene: Scene): GraphSpec {
   const nodes: GNode[] = [];
+  if (scene.features.length > 0 || scene.actors.length > 0) {
+    nodes.push(node({ id: "w:system", kind: "whole", label: "Whole System", sub: "All Actors and Features" }));
+  }
   for (const a of scene.actors) {
-    nodes.push(node({ id: `a:${a.id}`, kind: "actor", label: a.name, sub: `${a.events.length} ${a.events.length === 1 ? "event" : "events"}`, ref: a.id, change: actorChange(a), layer: "first" }));
+    const n = actorReach(scene, a.id).length;
+    nodes.push(node({ id: `a:${a.id}`, kind: "actor", label: a.name, sub: n === 0 ? "No events received" : `${n} ${n === 1 ? "feature" : "features"}`, ref: a.id, change: actorChange(a), inert: n === 0, opens: n > 0 }));
   }
-  for (const f of scene.features) {
-    nodes.push(node({ id: `f:${f.id}`, kind: "feature", label: f.name, sub: machineCount(f.machines.length), ref: f.id, change: featureChange(scene, f), children: 0 }));
-  }
+  const reached = reachedFeatures(scene);
+  for (const f of scene.features) if (!reached.has(f.id)) nodes.push(featureNode(scene, f));
+  return { level: { kind: "system" }, nodes, edges: [] };
+}
 
-  const featureOf = (id: string) => scene.machine.get(id)?.feature as string;
-  const edges = pairs(flows(scene), (f) => ({
-    source: f.source.kind === "actor" ? `a:${f.source.id}` : `f:${featureOf(f.source.id)}`,
-    target: `f:${featureOf(f.machine)}`,
-  })).map((p) => flowEdge(`e:${p.source}>${p.target}`, p, String(new Set(p.flows.map((f) => f.event)).size)));
+const actorNode = (a: SceneActor): GNode => node({ id: `a:${a.id}`, kind: "actor", label: a.name, sub: `${a.events.length} ${a.events.length === 1 ? "event" : "events"}`, ref: a.id, change: actorChange(a), layer: "first" });
 
-  return { level: { kind: "system" }, nodes, edges };
+/** The Features with the Actors that send Events into them and the Events between Features; an edge's label is how many Events. */
+function flowGraph(scene: Scene, level: Level, actors: SceneActor[], features: SceneFeature[]): GraphSpec {
+  const nodes: GNode[] = [...actors.map(actorNode), ...features.map((f) => featureNode(scene, f))];
+  const ids = new Set(nodes.map((n) => n.id));
+  const edges = pairs(flows(scene), (f) => {
+    const source = f.source.kind === "actor" ? `a:${f.source.id}` : `f:${featureOfMachine(scene, f.source.id)}`;
+    const target = `f:${featureOfMachine(scene, f.machine)}`;
+    return ids.has(source) && ids.has(target) ? { source, target } : null;
+  }).map((p) => flowEdge(`e:${p.source}>${p.target}`, p, String(new Set(p.flows.map((f) => f.event)).size)));
+  return { level, nodes, edges };
+}
+
+/** Whole System: every Actor and Feature, and the Events travelling between them. */
+export function wholeGraph(scene: Scene): GraphSpec {
+  return flowGraph(scene, { kind: "whole" }, scene.actors, scene.features);
+}
+
+/** One Actor, the Features that receive its Events and the Events those Features send each other. */
+export function actorGraph(scene: Scene, actorId: string): GraphSpec {
+  const actor = scene.actor.get(actorId);
+  const reach = new Set(actorReach(scene, actorId));
+  return flowGraph(scene, { kind: "actor", actor: actorId }, actor ? [actor] : [], scene.features.filter((f) => reach.has(f.id)));
 }
 
 /** `CANCEL, PICKED_UP +2`: the first two Event names and how many more there are. */

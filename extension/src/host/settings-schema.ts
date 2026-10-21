@@ -60,6 +60,18 @@ export const SETTING_GROUPS: readonly { title: string; keys: readonly string[] }
 /** The Drift autopilot setting: how much the agent does with Drifts on its own, one choice over three levels. */
 export const DRIFT_KEY = "trama.driftAutoPilot";
 
+/** The agent setting: the agents are Cursor's chat and omp. */
+export const AGENT_KEY = "trama.agent";
+
+/**
+ * The user value of `trama.agent` as the Settings tab shows it: a value that is neither `cursor` nor `omp` (a left-over `chat` or
+ * `claude`, or any other) shows as `cursor`. The stored value is not rewritten until the developer chooses. An unset value stays unset.
+ */
+export function shownAgentValue(user: unknown): unknown {
+  if (user === undefined) return undefined;
+  return user === "omp" ? "omp" : "cursor";
+}
+
 /** The three model roles: the Settings tab suggests the agent's model names for them. */
 export const MODEL_ROLE_KEYS: readonly string[] = ["trama.analysis", "trama.scan", "trama.execution"];
 

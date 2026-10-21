@@ -423,16 +423,16 @@ describe("the identity of an agent terminal", () => {
   });
 });
 
-describe("Claude Code run hooks", () => {
-  test("every job gets terminal-scoped Stop and SessionEnd hooks using the bundled CLI", async () => {
+describe("omp run hooks", () => {
+  test("every job loads the bundled omp hook module in its own terminal", async () => {
     // Dynamic import is intentional: the fake vscode extension registry must be in place before agent.ts loads.
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const testDir = mkdtempSync(join(tmpdir(), "trama-claude-hooks-"));
+    const testDir = mkdtempSync(join(tmpdir(), "trama-omp-hooks-"));
     projectAt(testDir);
     extensionPath = join(testDir, "extension");
-    mkdirSync(join(extensionPath, "bin"), { recursive: true });
-    writeFileSync(join(extensionPath, "bin", process.platform === "win32" ? "trama.exe" : "trama"), "");
-    settingValues.agent = "claude";
+    mkdirSync(join(extensionPath, "dist"), { recursive: true });
+    writeFileSync(join(extensionPath, "dist", "omp-hook.js"), "");
+    settingValues.agent = "omp";
     settingValues.execution = "haiku";
     watchAgentTerminal();
     try {
@@ -447,12 +447,7 @@ describe("Claude Code run hooks", () => {
       expect(secondId).not.toBe(firstId);
 
       for (const [terminal, id] of [[first, firstId], [second, secondId]] as const) {
-        expect(terminal.line).toContain("claude --settings");
-        expect(terminal.line).toContain("Stop");
-        expect(terminal.line).toContain("SessionEnd");
-        expect(terminal.line).not.toContain("SubagentStop");
-        expect(terminal.line).toContain(`' --model 'haiku' `);
-        expect(terminal.line).toContain("hook idle");
+        expect(terminal.line).toContain(`omp --hook '${join(extensionPath, "dist", "omp-hook.js")}' --model 'haiku' `);
         expect(id).toMatch(/^[a-z0-9]{6}$/);
         expect(environments.find((env) => env["TRAMA_TERMINAL"] === id)?.["TRAMA_TERMINAL"]).toBe(id);
       }
@@ -479,7 +474,7 @@ describe("the model a launch runs on", () => {
     settingValues.scan = "sonnet";
     watchAgentTerminal();
     try {
-      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, undefined, undefined, { model: { model: "gpt-5", from: "Proposal P3" } });
+      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, undefined, undefined, { model: { model: "gpt-5" } });
       const proposal = terminals.at(-1) as FakeTerminal;
       expect(proposal.line).toContain("--model 'gpt-5'");
       expect(proposal.line).toContain("--slow 'sonnet'");
@@ -619,7 +614,7 @@ describe("automatic terminal exit", () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const count = terminals.length;
     const appName = editor.appName;
-    settingValues.agent = "chat";
+    settingValues.agent = "cursor";
     editor.appName = "Cursor";
     try {
       expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan")).toBe("sent");
@@ -634,17 +629,16 @@ describe("automatic terminal exit", () => {
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
     let query = "";
-    settingValues.agent = "chat";
-    editor.appName = "Visual Studio Code";
+    settingValues.agent = "cursor";
+    editor.appName = "Cursor";
     settingValues.maxParallelAgents = 6;
     inspected.maxParallelAgents = { globalValue: 6, workspaceValue: 80 };
     commandHandler = (id, ...args) => {
-      const options = args[0];
-      if (id === "workbench.action.chat.open" && typeof options === "object" && options !== null && "query" in options && typeof options.query === "string") query = options.query;
+      if (id === "composer.createNew") query = (args[0] as { partialState: { text: string } }).partialState.text;
     };
     try {
       expect(await launchAgent(dir, "Use the trama-design skill. Add refunds.", "Design")).toBe("sent");
-      expect(query).toBe(`Use the trama-design skill. Add refunds. Run at most 6 sub-agents at once. ${ASK_DEVELOPER_SENTENCE}`);
+      expect(query).toBe(`Use the trama-design skill. Add refunds. Run at most 6 sub-agents at once.\n${ASK_DEVELOPER_SENTENCE}`);
     } finally {
       commandHandler = previousHandler;
       editor.appName = previousApp;
@@ -660,21 +654,20 @@ describe("automatic terminal exit", () => {
     const sentence = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
     const scan = "Use the trama-scan skill on the whole System.";
     let query = "";
-    settingValues.agent = "chat";
-    editor.appName = "Visual Studio Code";
+    settingValues.agent = "cursor";
+    editor.appName = "Cursor";
     inspected.experimentalDriftBlocker = { globalValue: true };
     commandHandler = (id, ...args) => {
-      const options = args[0];
-      if (id === "workbench.action.chat.open" && typeof options === "object" && options !== null && "query" in options && typeof options.query === "string") query = options.query;
+      if (id === "composer.createNew") query = (args[0] as { partialState: { text: string } }).partialState.text;
     };
     try {
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}`);
+      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence}\n${ASK_DEVELOPER_SENTENCE}`);
       expect(await launchAgent(dir, "Use the trama-design skill. Add refunds.", "Design", undefined, undefined, undefined, undefined, { filesDrifts: false })).toBe("sent");
       expect(query).not.toContain(sentence);
       inspected.experimentalDriftBlocker = { workspaceValue: true };
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}`);
+      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.\n${ASK_DEVELOPER_SENTENCE}`);
     } finally {
       commandHandler = previousHandler;
       editor.appName = previousApp;
@@ -694,7 +687,7 @@ describe("automatic terminal exit", () => {
       inspected.experimentalAdvisorScanner = { workspaceValue: true };
       expect(configuredAdvisorScanner()).toBe(false);
       inspected.experimentalAdvisorScanner = { globalValue: true };
-      settingValues.agent = "chat";
+      settingValues.agent = "cursor";
       expect(configuredAdvisorScanner()).toBe(false);
     } finally {
       settingValues.agent = "omp";
@@ -717,30 +710,29 @@ describe("automatic terminal exit", () => {
       delete inspected.experimentalParallelExecution;
     }
   });
-  test("chat instructions are built after newChat and not sent if delivery conditions change", async () => {
+  test("chat instructions are built when sent and not sent if delivery conditions change", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
     let scope = "the Drift open before preparation";
     let query = "";
     let canDeliver = true;
-    settingValues.agent = "chat";
-    editor.appName = "Visual Studio Code";
-    commandHandler = async (id, ...args) => {
-      if (id === "workbench.action.chat.newChat") scope = "the Drift open at send time";
-      if (id === "workbench.action.chat.open" && typeof args[0] === "object" && args[0] !== null && "query" in args[0] && typeof args[0].query === "string") query = args[0].query;
+    settingValues.agent = "cursor";
+    editor.appName = "Cursor";
+    commandHandler = (id, ...args) => {
+      if (id === "composer.createNew") query = (args[0] as { partialState: { text: string } }).partialState.text;
     };
     try {
+      scope = "the Drift open at send time";
       expect(await launchAgent(dir, () => `Resolve ${scope}.`, "Drifts")).toBe("sent");
-      expect(query).toBe(`Resolve the Drift open at send time. Run at most 20 sub-agents at once. ${ASK_DEVELOPER_SENTENCE}`);
+      expect(query).toBe(`Resolve the Drift open at send time. Run at most 20 sub-agents at once.\n${ASK_DEVELOPER_SENTENCE}`);
 
       editorCalls.length = 0;
       query = "";
-      commandHandler = (id) => {
-        if (id === "workbench.action.chat.newChat") canDeliver = false;
-      };
-      expect(await launchAgent(dir, () => `Resolve ${scope}.`, "Resolve Drifts", undefined, () => canDeliver)).toBe("not-sent");
-      expect(editorCalls).toEqual(["workbench.action.chat.newChat"]);
+      let checks = 0;
+      canDeliver = false;
+      expect(await launchAgent(dir, () => `Resolve ${scope}.`, "Resolve Drifts", undefined, () => checks++ < 2)).toBe("not-sent");
+      expect(editorCalls).toEqual([]);
       expect(query).toBe("");
     } finally {
       commandHandler = previousHandler;
@@ -946,7 +938,7 @@ describe("agent instruction settings", () => {
       delete inspected["experimentalParallelExecution"];
     }
   });
-  test("every instruction carries the ask sentence: on its line before the language in a terminal or Copilot's chat, on its own line in Cursor's chat", async () => {
+  test("every instruction carries the ask sentence: on its line before the language in a terminal, on its own line in Cursor's chat and on the clipboard outside Cursor", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const jobs: [string, string][] = [
       [buildPrompt({ kind: "written-design", request: "r" }), "Design"],
@@ -961,11 +953,6 @@ describe("agent instruction settings", () => {
     ];
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
-    let query = "";
-    commandHandler = (id, ...args) => {
-      const options = args[0];
-      if (id === "workbench.action.chat.open" && typeof options === "object" && options !== null && "query" in options && typeof options.query === "string") query = options.query;
-    };
     try {
       settingValues["language"] = "Italian";
       for (const [instruction, name] of jobs) {
@@ -974,21 +961,23 @@ describe("agent instruction settings", () => {
       }
       delete settingValues["language"];
 
-      settingValues.agent = "chat";
-      editor.appName = "Visual Studio Code";
-      for (const [instruction, name] of jobs) {
-        query = "";
-        await launchAgent(dir, instruction, name);
-        expect(query.endsWith(` ${ASK_DEVELOPER_SENTENCE}`)).toBe(true);
-      }
-
-      settingValues.agent = "chat";
+      settingValues.agent = "cursor";
       editor.appName = "Cursor";
       commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
       for (const [instruction, name] of jobs) {
         editorCalls.length = 0;
         expect(await launchAgent(dir, instruction, name)).toBe("confirm");
         expect(decodeURIComponent(String(editorCalls.at(-1)))).toContain(`\n${ASK_DEVELOPER_SENTENCE}`);
+      }
+
+      editor.appName = "Visual Studio Code";
+      for (const [instruction, name] of jobs) {
+        clipboard.length = 0;
+        editorCalls.length = 0;
+        expect(await launchAgent(dir, instruction, name)).toBe("clipboard");
+        expect(editorCalls).toEqual([]);
+        expect(clipboard.at(-1)).toContain(` ${ASK_DEVELOPER_SENTENCE}`);
+        expect(clipboard.at(-1)).not.toContain(`\n${ASK_DEVELOPER_SENTENCE}`);
       }
     } finally {
       delete settingValues["language"];
@@ -1000,25 +989,63 @@ describe("agent instruction settings", () => {
 });
 
 describe("choosing the agent", () => {
-  test("chat is the default and legacy settings cannot redirect or configure a launch", async () => {
-    const { agentName, launchAgent } = await import("../extension/src/host/agent");
+  test("Cursor's chat is the default and legacy settings cannot redirect or configure a launch", async () => {
+    const { agentName, configuredAgent, launchAgent } = await import("../extension/src/host/agent");
     const instruction = "Use the trama-scan skill on the whole System.";
     const createdBefore = created.length;
+    const previousApp = editor.appName;
     delete settingValues.agent;
     settingValues.agentLauncher = "terminal";
     settingValues.terminalAgent = "codex";
     settingValues.agentCommand = "custom-agent {prompt}";
     updates.length = 0;
     editorCalls.length = 0;
+    editor.appName = "Cursor";
     try {
+      expect(configuredAgent()).toBe("cursor");
       expect(await launchAgent(dir, instruction, "Scan")).toBe("sent");
-      expect(editorCalls).toEqual(["workbench.action.chat.newChat", "workbench.action.chat.open"]);
+      expect(editorCalls).toEqual(["composer.createNew"]);
       expect(created).toHaveLength(createdBefore);
       expect(updates).toEqual([]);
       expect(agentName({ fromTramaTerminal: true })).toBeNull();
+      for (const old of ["chat", "claude", "anything"]) {
+        settingValues.agent = old;
+        expect(configuredAgent()).toBe("cursor");
+        editorCalls.length = 0;
+        expect(await launchAgent(dir, instruction, "Scan")).toBe("sent");
+        expect(editorCalls).toEqual(["composer.createNew"]);
+        expect(updates).toEqual([]);
+      }
     } finally {
+      editor.appName = previousApp;
       settingValues.agent = "omp";
       for (const key of ["agentLauncher", "terminalAgent", "agentCommand"]) delete settingValues[key];
+    }
+  });
+
+  test("with cursor outside Cursor nothing is tried or started: the terminal's prompt goes to the clipboard with an Open Settings message", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const previousApp = editor.appName;
+    const count = terminals.length;
+    settingValues.agent = "cursor";
+    editor.appName = "Visual Studio Code";
+    clipboard.length = 0;
+    editorCalls.length = 0;
+    answerOffer.length = 0;
+    const p = projectAt(dir);
+    const announced = listAnnouncements(p).length;
+    try {
+      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scan" }, () => true, "scan")).toBe("clipboard");
+      expect(clipboard).toEqual([`Use the trama-scan skill on the whole System. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}`]);
+      expect(editorCalls).toEqual([]);
+      expect(terminals).toHaveLength(count);
+      expect(listAnnouncements(p)).toHaveLength(announced);
+      answerOffer.at(-1)?.("Open Settings");
+      for (let turn = 0; turn < 5; turn++) await Promise.resolve();
+      expect(editorCalls).toEqual(["trama.openSettings"]);
+    } finally {
+      settingValues.agent = "omp";
+      editor.appName = previousApp;
     }
   });
 
@@ -1058,7 +1085,7 @@ describe("announcing a design request", () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const p = projectAt(dir);
     const before = listAnnouncements(p).length;
-    settingValues.agent = "chat";
+    settingValues.agent = "cursor";
     editor.appName = "Cursor";
     commandHandler = (id) => (id === "composer.createNew" ? { composerId: "c" } : undefined);
     try {
@@ -1111,11 +1138,11 @@ describe("announcing every launch as its instruction starts", () => {
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
     const before = listAnnouncements(p).length;
-    settingValues.agent = "chat";
+    settingValues.agent = "cursor";
     try {
-      // Copilot's chat refuses the instruction: it goes to the clipboard and nothing is announced.
+      // Outside Cursor the instruction goes to the clipboard and nothing is announced.
       editor.appName = "Visual Studio Code";
-      commandHandler = (id) => { if (id === "workbench.action.chat.open") throw new Error("no chat"); };
+      commandHandler = () => undefined;
       expect(await launchAgent(dir, "Use the trama-resolve-drifts skill on the Drifts.", "Drifts", { kind: "resolve", drifts: () => ["cccc3333"] })).toBe("clipboard");
       expect(listAnnouncements(p)).toHaveLength(before);
 
@@ -1148,7 +1175,7 @@ describe("announcing every launch as its instruction starts", () => {
     const previousApp = editor.appName;
     const previousAgent = settingValues.agent;
     let seenDuringSend = -1;
-    settingValues.agent = "chat";
+    settingValues.agent = "cursor";
     try {
       editor.appName = "Cursor";
       commandHandler = (id) => {
@@ -1183,7 +1210,7 @@ describe("the selected chat in Cursor", () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const typedBefore = typed.length;
     editor.appName = "Cursor";
-    settingValues.agent = "chat";
+    settingValues.agent = "cursor";
     try {
       editorCalls.length = 0;
       commandHandler = (id) => (id === "composer.createNew" ? { composerId: "c" } : undefined);
@@ -1503,7 +1530,6 @@ describe("the ghosts of Cursor's chat agent", () => {
   test("normal and interrupted turns withdraw chat ghosts with notice, closing withdraws silently", async () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
     const { onAnnouncementsWithdrawn, watchAnnouncements } = await import("../extension/src/host/announcements");
-    const { receiveCopilotHook } = await import("../extension/src/host/copilot-chat");
     const { receiveCursorHook } = await import("../extension/src/host/cursor");
     const p = projectAt(dir);
     withdrawAll(p);
@@ -1532,11 +1558,6 @@ describe("the ghosts of Cursor's chat agent", () => {
       chatGhost("Closed");
       hook({ hook: "sessionEnd", reason: "user_close" });
       expect(titles()).toEqual(["Nobody's", "Terminal"]);
-      chatGhost("Copilot");
-      receiveCopilotHook({ hook: "UserPromptSubmit", root: dir, conversation: "copilot", tramaPrompt: true });
-      receiveCopilotHook({ hook: "Stop", root: dir, conversation: "copilot" });
-      expect(titles()).toEqual(["Nobody's", "Terminal"]);
-      expect(told).toEqual(["Chat", "Interrupted", "Copilot"]);
     } finally {
       subscription.dispose();
       watching.dispose();
@@ -1763,7 +1784,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     const watching = watchAgentTerminal();
     const queries: string[] = [];
     let open = ["d1"];
-    settingValues.agent = "chat";
+    settingValues.agent = "cursor";
     editor.appName = "Cursor";
     commandHandler = async (id, ...args) => {
       if (id === "composer.createNew") {
@@ -1813,7 +1834,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
   });
   test("a terminal Run waits for a pending chat Resolve Drifts delivery before checking its conditions", async () => {
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { bindCopilotChatJob, driftWork, endCopilotChatJobs } = await import("../extension/src/host/drift-resolution");
+    const { bindChatJob, driftWork, endChatJobs } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
@@ -1824,10 +1845,10 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     let run: Promise<unknown> | undefined;
     let terminalChecks = 0;
     const terminalCount = terminals.length;
-    settingValues.agent = "chat";
-    editor.appName = "Visual Studio Code";
+    settingValues.agent = "cursor";
+    editor.appName = "Cursor";
     commandHandler = async (id) => {
-      if (id === "workbench.action.chat.newChat") {
+      if (id === "composer.createNew") {
         newChatStarted.resolve();
         await preparing;
       }
@@ -1836,7 +1857,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     try {
       chat = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, () => true, "resolve");
       await newChatStarted.promise;
-      expect(editorCalls).toContain("workbench.action.chat.newChat");
+      expect(editorCalls).toContain("composer.createNew");
 
       settingValues.agent = "omp";
       run = launchAgent(dir, "Run", "Run", undefined, () => {
@@ -1857,8 +1878,8 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       await chat?.catch(() => undefined);
       await run?.catch(() => undefined);
       for (const terminal of terminals.slice(terminalCount)) listeners.close.forEach((fn) => fn(terminal));
-      bindCopilotChatJob(dir, "cross-destination");
-      endCopilotChatJobs(dir, "cross-destination");
+      bindChatJob(dir, "cross-destination");
+      endChatJobs(dir, "cross-destination");
       settingValues.agent = "omp";
       editor.appName = previousApp;
       commandHandler = previousHandler;
@@ -1887,17 +1908,17 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       run = launchAgent(dir, "Run", "Run", undefined, () => !driftWork().resolving, "run");
       await waiting.promise;
 
-      settingValues.agent = "chat";
-      editor.appName = "Visual Studio Code";
+      settingValues.agent = "cursor";
+      editor.appName = "Cursor";
       resolve = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, () => !driftWork().resolving && !driftWork().running, "resolve");
       await Promise.resolve();
-      expect(editorCalls).not.toContain("workbench.action.chat.newChat");
+      expect(editorCalls).not.toContain("composer.createNew");
 
       delivery.resolve("endpoint");
       expect(await run).toBe("terminal");
       expect(driftWork()).toEqual({ resolving: false, running: true });
       expect(await resolve).toBe("not-sent");
-      expect(editorCalls).not.toContain("workbench.action.chat.newChat");
+      expect(editorCalls).not.toContain("composer.createNew");
     } finally {
       delivery.resolve("endpoint");
       await run?.catch(() => undefined);
@@ -1921,7 +1942,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     let loops = 0;
     const hook = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ root: dir, conversation, ...h });
     editor.appName = "Cursor";
-    settingValues.agent = "chat";
+    settingValues.agent = "cursor";
     try {
       commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
       expect(await launchAgent(dir, "Run", "Run", undefined, () => true, "run")).toBe("confirm");
@@ -1956,7 +1977,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
     const run = () => launchAgent(dir, "Run", "Run", undefined, () => true, "run");
     const resolve = () => launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve");
-    settingValues.agent = "chat";
+    settingValues.agent = "cursor";
     editor.appName = "Cursor";
     let startComposer: () => void = () => {};
     let finishComposer: () => void = () => {};
@@ -2007,7 +2028,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     const run = () => launchAgent(dir, "Run", "Run", undefined, () => true, "run");
     const resolve = () => launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve");
     const conversations: string[] = [];
-    settingValues.agent = "chat";
+    settingValues.agent = "cursor";
     editor.appName = "Cursor";
     commandHandler = () => undefined;
     const ends = [{ hook: "stop", status: "completed" }, { hook: "stop", status: "aborted" }, { hook: "sessionEnd", reason: "user_close" }] as const;
@@ -2089,79 +2110,24 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     expect(driftWork()).toEqual({ resolving: false, running: false });
   });
 });
-  test("Copilot jobs bind after new-chat preparation and retain their own end before send returns", async () => {
-    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { receiveCopilotHook } = await import("../extension/src/host/copilot-chat");
-    const { driftWork } = await import("../extension/src/host/drift-resolution");
-    const previousHandler = commandHandler;
-    const previousApp = editor.appName;
-    let preparation = "copilot-preparation";
-    let owner = "copilot-owner";
-    let stopOwnerDuringDelivery = false;
-    const hook = (event: "UserPromptSubmit" | "Stop", conversation: string) => receiveCopilotHook({
-      hook: event, root: dir, conversation, ...(event === "UserPromptSubmit" ? { tramaPrompt: true } : {}),
-    });
-    const watching = watchAgentTerminal();
-    settingValues.agent = "chat";
-    editor.appName = "Visual Studio Code";
-    commandHandler = (id) => {
-      if (id === "workbench.action.chat.newChat") hook("UserPromptSubmit", preparation);
-      if (id === "workbench.action.chat.open") {
-        hook("UserPromptSubmit", owner);
-        if (stopOwnerDuringDelivery) hook("Stop", owner);
-      }
-    };
-    try {
-      expect(await launchAgent(dir, "Run", "Run", undefined, () => true, "run")).toBe("sent");
-      expect(driftWork()).toEqual({ resolving: false, running: true });
-      hook("Stop", preparation);
-      expect(driftWork()).toEqual({ resolving: false, running: true });
-      hook("Stop", owner);
-      expect(driftWork()).toEqual({ resolving: false, running: false });
-
-      preparation = "copilot-preparation-ended";
-      owner = "copilot-finished-during-delivery";
-      stopOwnerDuringDelivery = true;
-      expect(await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve")).toBe("sent");
-      expect(driftWork()).toEqual({ resolving: false, running: false });
-    } finally {
-      for (const conversation of [preparation, owner, "copilot-preparation", "copilot-owner"])
-        hook("Stop", conversation);
-      settingValues.agent = "omp";
-      editor.appName = previousApp;
-      commandHandler = previousHandler;
-      watching.dispose();
-    }
-  });
-test("Copilot chat releases only originless Tasks at each recognized turn end", async () => {
+test("a Cursor chat turn end also ends the filed work of an agent Trama did not start (holder editor)", async () => {
   const { watchAgentTerminal } = await import("../extension/src/host/agent");
-  const { receiveCopilotHook } = await import("../extension/src/host/copilot-chat");
-  const p = projectAt(dir);
+  const { receiveCursorHook } = await import("../extension/src/host/cursor");
+  const { driftsFinishing, proposalsFinishing, receiveCoordinatorMessage, releaseFiledWork } = await import("../extension/src/host/drift-resolution");
   const watching = watchAgentTerminal();
-  const hook = (event: "UserPromptSubmit" | "Stop", tramaPrompt?: boolean) => receiveCopilotHook({
-    hook: event, root: dir, conversation: "copilot-session",
-    ...(event === "UserPromptSubmit" ? { tramaPrompt: tramaPrompt === true } : {}),
-  });
-  const take = (title: string, origin = {}) => {
-    const task = newTask(p, { title, refs: ["order/Paid"], technical: false });
-    moveTask(p, task.id, "doing", "agent", origin);
-    return task.id;
-  };
-  const state = (id: string) => [getTask(p, id).data.column, getTask(p, id).data.agent];
+  const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ root: dir, conversation: "editor-work", ...h });
   try {
-    const unknown = take("Copilot unknown");
-    const cursor = take("Cursor holder", { chat: "cursor" });
-    const terminal = take("Terminal holder", { terminal: "known-terminal" });
-    hook("Stop");
-    expect([unknown, cursor, terminal].map(state)).toEqual([["doing", true], ["doing", true], ["doing", true]]);
-    hook("UserPromptSubmit", true);
-    hook("Stop");
-    expect([unknown, cursor, terminal].map(state)).toEqual([["todo", false], ["doing", true], ["doing", true]]);
-
-    const nextTurn = take("Next Copilot turn");
-    hook("UserPromptSubmit", false);
-    hook("Stop");
-    expect(state(nextTurn)).toEqual(["todo", false]);
+    for (const end of [{ hook: "stop", status: "completed" }, { hook: "stop", status: "aborted" }, { hook: "sessionEnd", reason: "user_close" }] as const) {
+      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true });
+      receiveCoordinatorMessage({ type: "drift-filed", root: dir, drift: "0a1b2c3d", holder: "editor" });
+      receiveCoordinatorMessage({ type: "proposal-delivered", root: dir, proposal: "iwham416", holder: "editor" });
+      receiveCoordinatorMessage({ type: "drift-filed", root: dir, drift: "4e5f6a7b", holder: "terminal-9" });
+      expect(driftsFinishing(dir).sort()).toEqual(["0a1b2c3d", "4e5f6a7b"]);
+      turn(end);
+      expect(driftsFinishing(dir)).toEqual(["4e5f6a7b"]);
+      expect(proposalsFinishing(dir)).toEqual([]);
+      releaseFiledWork(dir, "terminal-9");
+    }
   } finally {
     watching.dispose();
   }

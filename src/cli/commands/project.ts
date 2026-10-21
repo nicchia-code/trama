@@ -2,15 +2,16 @@ import { existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { z } from "zod";
 import { TramaError } from "../../core/errors";
-import { convertSingleFileAreas, createDefaultAreas } from "../../core/requirements";
+import { createDefaultAreas } from "../../core/requirements";
 import { describeRequirementSkillSync, syncRequirementSkills } from "../../core/requirement-skills";
 import { projectAt, requirementsDir, writeFileEnsuringDir } from "../../core/store";
 import { defineCommand } from "../registry";
 import { text } from "../result";
-import { installOmpAgents, installSkills, missingSkills, ompAgentConflicts, removeRetiredOmpAgents, removeRetiredSkills, skillConflicts } from "../skills";
+import { refreshProjectSkills } from "../skill-refresh";
+import { installOmpAgents, installSkills, ompAgentConflicts, skillConflicts } from "../skills";
 import { boardView } from "../work";
 
-const skillsDir = z.string().min(1).optional().describe("The folder of the agent skills, relative to the project root. Default `.agents/skills` (`.claude/skills` for Claude Code).");
+const skillsDir = z.string().min(1).optional().describe("The folder of the agent skills, relative to the project root. Default `.agents/skills`.");
 const stringList = z.array(z.string());
 
 const create = defineCommand({
@@ -43,7 +44,7 @@ const create = defineCommand({
     writeFileEnsuringDir(join(project.dir, "model", "system.md"), `# ${name}\n\nDescribe what this System is and who it is for.\n`);
     const areas = createDefaultAreas(project);
     const installed = installSkills(skills);
-    const agents = installOmpAgents(root);
+    const agents = installOmpAgents(root).paths;
     syncRequirementSkills(project, [skills]);
     return text(`Created ${project.dir} with ${areas.length} Requirement Areas\nInstalled ${installed.length} skill files in ${skills}\nInstalled omp's sub-agent definitions: ${agents.join(", ")}`, { path: project.dir, skillsDir: skills, skills: installed, agents, areas });
   },
@@ -63,6 +64,7 @@ const edit = defineCommand({
     removed: stringList.describe("The retired skill folders deleted."),
     removedAgents: stringList,
     agents: stringList,
+    agentsChanged: stringList.describe("The omp definitions and advisor instructions this run actually wrote."),
     areas: stringList.describe("The starting Areas created."),
     conversion: z.looseObject({}).describe("The Areas moved to the folder format and those left as they were."),
     generated: z.looseObject({}).describe("The regeneration of the Requirement skills."),
@@ -71,15 +73,7 @@ const edit = defineCommand({
   effects: { writes: true },
   run(ctx, input) {
     const project = ctx.project();
-    const skills = resolve(project.root, input.skillsDir ?? ".agents/skills");
-    const changed = skillConflicts(skills).concat(missingSkills(skills));
-    installSkills(skills);
-    const agents = installOmpAgents(project.root);
-    const removed = removeRetiredSkills(project.root, [skills]);
-    const removedAgents = removeRetiredOmpAgents(project.root);
-    const areas = existsSync(requirementsDir(project)) ? [] : createDefaultAreas(project);
-    const conversion = convertSingleFileAreas(project);
-    const generated = syncRequirementSkills(project, [skills]);
+    const { skillsDir: skills, changed, removed, removedAgents, agents, agentsChanged, areas, conversion, generated } = refreshProjectSkills(project, input.skillsDir, true);
     const lines = [
       changed.length === 0 ? `Skills in ${skills} are already up to date.` : `Updated ${changed.length} skill file(s) in ${skills}:\n${changed.map((c) => `- ${c}`).join("\n")}`,
       removed.length > 0 ? `Deleted the retired trama-fix skill: ${removed.join(", ")}` : "",
@@ -90,7 +84,7 @@ const edit = defineCommand({
       conversion.skipped.length > 0 ? `Left ${conversion.skipped.length} single-file Requirement Area(s) as they were: ${conversion.skipped.map((s) => `${s.id} (${s.reason})`).join(", ")}` : "",
       describeRequirementSkillSync(generated),
     ];
-    return text(lines.filter(Boolean).join("\n"), { skillsDir: skills, changed, removed, removedAgents, agents, areas, conversion, generated });
+    return text(lines.filter(Boolean).join("\n"), { skillsDir: skills, changed, removed, removedAgents, agents, agentsChanged, areas, conversion, generated });
   },
 });
 

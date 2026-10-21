@@ -13,8 +13,21 @@ export interface DiagramStep extends Step {
   elements: Element[];
 }
 
-const levelKey = (level: Level): string =>
-  level.kind === "system" ? "system" : level.kind === "feature" ? `feature:${level.feature}` : level.kind === "machine" ? `machine:${level.machine}` : `state:${level.machine}/${level.state}`;
+const levelKey = (level: Level): string => {
+  switch (level.kind) {
+    case "system":
+    case "whole":
+      return level.kind;
+    case "actor":
+      return `actor:${level.actor}`;
+    case "feature":
+      return `feature:${level.feature}`;
+    case "machine":
+      return `machine:${level.machine}`;
+    case "state":
+      return `state:${level.machine}/${level.state}`;
+  }
+};
 
 /** The element a focus reference stands for in the Diagram: a Model element, or the one a Requirement section is titled to. Null when it has none (an Area, `General`, Specs). */
 function elementRef(ref: string): string | null {
@@ -25,7 +38,7 @@ function elementRef(ref: string): string | null {
 }
 
 /**
- * The levels that show elements of the focus, in the order of the Model: the System, then each Feature followed by its
+ * The levels that show elements of the focus, in the order of the Model: the root, then each Actor level, then each Feature followed by its
  * Machines. A reference whose element is not in the drawn Model is missing; Areas, `General` sections and Specs entries are not
  * Diagram elements and are neither a step nor missing.
  */
@@ -36,15 +49,23 @@ export function diagramSteps(scene: Scene, refs: readonly string[]): Steps<Diagr
     const target = elementRef(ref);
     if (target === null) continue;
     const element = resolveElement(scene, target);
-    if (element) found.set(`${element.kind}:${element.ref}`, element);
-    else if (!missing.includes(ref)) missing.push(ref);
+    if (element) {
+      found.set(`${element.kind}:${element.ref}`, element);
+      // A Feature stands for its Machines too: its own level shows them all as elements of the focus.
+      if (element.kind === "feature") {
+        for (const id of element.feature.machines) {
+          const machine = scene.machine.get(id);
+          if (machine) found.set(`machine:${id}`, { kind: "machine", ref: id, machine });
+        }
+      }
+    } else if (!missing.includes(ref)) missing.push(ref);
   }
   const byLevel = new Map<string, Element[]>();
   for (const element of found.values()) {
-    const key = levelKey(homeLevel(element));
+    const key = levelKey(homeLevel(scene, element));
     byLevel.set(key, [...(byLevel.get(key) ?? []), element]);
   }
-  const order: Level[] = [{ kind: "system" }];
+  const order: Level[] = [{ kind: "system" }, ...scene.actors.map((actor): Level => ({ kind: "actor", actor: actor.id }))];
   for (const feature of scene.features) {
     order.push({ kind: "feature", feature: feature.id });
     for (const machine of feature.machines) order.push({ kind: "machine", machine });
@@ -53,7 +74,8 @@ export function diagramSteps(scene: Scene, refs: readonly string[]): Steps<Diagr
   for (const level of order) {
     const elements = byLevel.get(levelKey(level));
     if (!elements) continue;
-    steps.push({ key: levelKey(level), name: breadcrumb(scene, level).at(-1)?.label ?? "System", level, refs: elements.map((e) => e.ref), elements });
+    const trail = breadcrumb(scene, level);
+    steps.push({ key: levelKey(level), name: level.kind === "actor" ? trail.map((c) => c.label).join(" › ") : (trail.at(-1)?.label ?? "System"), level, refs: elements.map((e) => e.ref), elements });
   }
   return { steps, missing };
 }

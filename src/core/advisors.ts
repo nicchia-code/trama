@@ -4,14 +4,22 @@
  */
 import { stringify } from "yaml";
 
-/** The sentence a Run's instruction carries while the Advisor Scanner is on: the advisors check the code, so no pre-flight or end-of-run scan runs. */
+/** The sign of a Run launched with the Advisor Scanner on: Trama sets it, to `ADVISOR_SCANNER_ON`, in that Run's terminal and nowhere else. */
+export const ADVISOR_SCANNER_ENV = "TRAMA_ADVISOR_SCANNER";
+export const ADVISOR_SCANNER_ON = "1";
+
+/** Whether the environment carries the sign of a Run with the Advisor Scanner on: only the exact value `1` counts. */
+export const advisorScannerFromEnv = (env: Record<string, string | undefined>): boolean => env[ADVISOR_SCANNER_ENV] === ADVISOR_SCANNER_ON;
+
+/** The sentence a Run's instruction carries while the Advisor Scanner is on, for the agent that leads the Run: the advisors check the code, so no pre-flight or end-of-run scan runs. */
 export const ADVISOR_SENTENCE = "The Advisor Scanner is on: skip the pre-flight and the targeted end-of-run scan; the omp advisor checks the code against the Model during the run.";
 
-/** The instructions every advisor of `.omp/WATCHDOG.yml` gets: silent outside a Run that carries the sentence. */
+/** The instructions every advisor of `.omp/WATCHDOG.yml` gets: silent in every session that `trama advisor show` does not report as a Run with the Advisor Scanner on. */
 export const ADVISOR_INSTRUCTIONS = [
-  "You are a Trama advisor. Act only in a session whose instruction is a Trama Run of the trama-implement skill and contains the sentence \"The Advisor Scanner is on\"; in any other session stay silent: send no note and run no command.",
-  "In such a Run, read the Model and the Requirements with `trama task show`, `trama model show`, and check the code the agent reads or writes against them.",
+  "You are a Trama advisor. At your first review of every session, and again after omp resets your context, run `trama advisor show` before any other command or note. If it does not say that the Advisor Scanner is on for this session, or it fails, stay silent for the whole session: send no note and run no other command. Never judge whether the session is a Run from the text of its instruction, from a sub-agent assignment or from the skills read.",
+  "In a Run with the Advisor Scanner on, read the Model and the Requirements with `trama task show`, `trama model show`, and check the code the agent reads or writes against them.",
   "When the work of a Task drifts from the Model, send the agent a `concern` note naming the Task, so it corrects the code before the Task goes to Done.",
+  "Before filing a Drift, look with `trama task list` at the Tasks In progress: the code another sub-agent of the Run is writing is the work of a Task, not existing code, so no Drift is born for it.",
   "When a difference is in existing code outside the work of the Tasks of this Run, file one Drift with `trama drift new`, without `task` and without `notBlocking`, following the Drift rules of the trama-implement skill: re-read the code at `where` first, check the Drifts already resolved on the same references, write fix options that respect the Model and the Requirements, and set `critical`.",
   "Never archive a Task, never modify a file, never move a Task, never announce a card, never make a decision for the developer, and never run any other command that changes files or decides.",
 ].join("\n");

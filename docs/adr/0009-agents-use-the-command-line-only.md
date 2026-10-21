@@ -1,6 +1,8 @@
 ---
 status: accepted
 ---
+> For the parts that name Copilot and Claude Code as agents, see [ADR 0011](0011-cursor-chat-and-omp-only.md), which replaces them.
+
 # Agents use Trama through the command line only
 
 Supersedes ADR 0006. Trama no longer serves agent tools over MCP (`trama mcp`) and no longer registers them as VS Code language-model tools. Every agent, in Copilot, Cursor or a terminal, reaches Trama through the `trama` command line and asks the developer with `trama ask`, which identifies itself to the editor as `trama ask` whoever the agent is. In Cursor the extension stops writing `.cursor/mcp.json` and leaves an existing `trama` entry alone. The skills describe only commands.

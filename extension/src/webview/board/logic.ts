@@ -15,13 +15,12 @@ import type { BoardModels, BoardProposalModel, ProposalAgent } from "../../host/
 
 /** How each agent of `trama.agent` is named in the texts of the model window and of its badge. */
 export const AGENT_NAMES: Record<ProposalAgent, string> = {
-  chat: "the editor chat",
+  cursor: "Cursor's chat",
   omp: "omp",
-  claude: "Claude Code",
 };
 
 /** The models of no Proposal: the Board draws them as none chosen and none choosable. */
-export const NO_MODELS: BoardModels = { agent: "chat", proposals: {} };
+export const NO_MODELS: BoardModels = { agent: "cursor", proposals: {} };
 
 /** The columns that hold cards. */
 export type CardColumnId = "backlog" | "active" | "blocked";

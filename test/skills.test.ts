@@ -137,12 +137,13 @@ test("project new with force replaces customised skills, and identical existing 
   }
 });
 
-test("project edit deletes the retired trama-fix folder from every skill folder, reports it, and finds nothing the second time", () => {
+test("project edit deletes the retired trama-fix folder from the skill folders it looks at, reports it, and leaves .claude/skills and .github/skills alone", () => {
   const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
   try {
     run(["--root", root, "project", "new"], root);
-    const fixes = [".agents/skills", ".claude/skills", "tools/agent-skills"].map((d) => join(root, d, "trama-fix"));
-    for (const fix of fixes) {
+    const fixes = [".agents/skills", "tools/agent-skills"].map((d) => join(root, d, "trama-fix"));
+    const untouched = [".claude/skills", ".github/skills"].map((d) => join(root, d, "trama-fix"));
+    for (const fix of [...fixes, ...untouched]) {
       mkdirSync(join(fix, "notes"), { recursive: true });
       writeFileSync(join(fix, "SKILL.md"), "old fix skill\n");
       writeFileSync(join(fix, "notes/mine.md"), "customised\n");
@@ -150,6 +151,7 @@ test("project edit deletes the retired trama-fix folder from every skill folder,
 
     const first = run(["--root", root, "project", "edit", "--input", '{"skillsDir":"tools/agent-skills"}'], root).out;
     for (const fix of fixes) expect(existsSync(fix)).toBe(false);
+    for (const fix of untouched) expect(existsSync(join(fix, "notes/mine.md"))).toBe(true);
     expect(first).toContain("Deleted the retired trama-fix skill:");
     const second = run(["--root", root, "project", "edit", "--input", '{"skillsDir":"tools/agent-skills"}'], root).out;
     expect(second).not.toContain("Deleted the retired trama-fix skill:");

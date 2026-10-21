@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseToHost } from "../extension/src/host/messages";
-import { delegationOf, planDelegationChange, planSettingChange, raisesDelegation, settingsSchema, settingTitle, settingValueError, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
+import { delegationOf, planDelegationChange, planSettingChange, raisesDelegation, settingsSchema, settingTitle, settingValueError, shownAgentValue, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
 import { groupSettings, numberFromText, workspaceOverride } from "../extension/src/webview/settings/logic";
 
 const manifest: ManifestPackage = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
@@ -215,4 +215,13 @@ test("the host accepts a Drift autopilot level only as one of the three", () => 
   expect(parseToHost({ type: "setDelegation", mode: "yolo" }).ok).toBe(true);
   expect(parseToHost({ type: "setDelegation", mode: "on" }).ok).toBe(false);
   expect(parseToHost({ type: "setDelegation" }).ok).toBe(false);
+});
+
+test("a left-over chat or claude, or any other value, is shown as cursor; cursor and omp stay, unset stays unset", () => {
+  expect(shownAgentValue("chat")).toBe("cursor");
+  expect(shownAgentValue("claude")).toBe("cursor");
+  expect(shownAgentValue("nonsense")).toBe("cursor");
+  expect(shownAgentValue("cursor")).toBe("cursor");
+  expect(shownAgentValue("omp")).toBe("omp");
+  expect(shownAgentValue(undefined)).toBeUndefined();
 });

@@ -10,7 +10,6 @@ import { acquireCoordinatorLease, askEditor, createQuestionServer, QUESTION_ENDP
 import { QuestionRoundQueue, type CompletedQuestionRound } from "../src/core/question-rounds";
 import { QUESTION_TOOL_REFUSAL, QuestionInterruptedError, unavailableQuestions, type QuestionHandler, type QuestionRequest } from "../src/core/questions";
 import { projectAt } from "../src/core/store";
-import { questionToolDenial } from "../src/cli/commands/hook";
 
 let root: string;
 let projectRoot: string;
@@ -639,10 +638,4 @@ test("runtime files contain routing identities only, never pending questions or 
 
 test("the refusal of an agent's own question tool is one exact shared message", () => {
   expect(QUESTION_TOOL_REFUSAL).toBe("In Trama's work, ask the developer only with `trama question new --root <project>`, as the Trama skill says. This question tool is disabled here.");
-});
-
-test("Claude Code's question-tool hook answers with the shared refusal as a denied tool use", () => {
-  expect(JSON.parse(questionToolDenial())).toEqual({
-    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: QUESTION_TOOL_REFUSAL },
-  });
 });

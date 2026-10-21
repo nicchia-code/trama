@@ -125,10 +125,10 @@ test("Approve and Reject wait while the agent that delivered the Proposal is sti
 
 test("the model gear shows only on a Proposal that carries Tasks, and the chosen model is badged, struck when chosen for another agent", () => {
   const carries = proposal({ id: "0007", tasks: [{ id: "0012", title: "Refunds", technical: false, refs: [] } as never] });
-  const models = { agent: "omp" as const, proposals: { "0007": { name: "gpt-5", agent: "claude" as const, applies: false } } };
+  const models = { agent: "omp" as const, proposals: { "0007": { name: "gpt-5", agent: "cursor" as const, applies: false } } };
   const card = proposalCard(carries, NUMBERS, () => null, new Map(), [], models);
   expect(card.choosable).toBe(true);
-  expect(card.model).toEqual({ name: "gpt-5", agent: "claude", applies: false });
+  expect(card.model).toEqual({ name: "gpt-5", agent: "cursor", applies: false });
   const unchosen = proposalCard(carries, NUMBERS, () => null, new Map(), [], { agent: "omp", proposals: { "0007": null } });
   expect(unchosen.choosable).toBe(true);
   expect(unchosen.model).toBeNull();

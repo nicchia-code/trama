@@ -8,7 +8,6 @@ import { TramaError, UsageError } from "./errors";
 import { type AgentOrigin, CURSOR_AGENT_ENV } from "./announcements";
 import type { CursorHook } from "./cursor-chat";
 import { parseQuestionRequest, questionAborted, questionFailure, QuestionInterruptedError, unavailableQuestions, type QuestionContext, type QuestionHandler, type QuestionRequest, type QuestionResult } from "./questions";
-import type { CopilotHook } from "./copilot-chat";
 import { type Project, projectAt } from "./store";
 
 export const QUESTION_ENDPOINT_ENV = "TRAMA_QUESTION_ENDPOINT";
@@ -53,8 +52,6 @@ interface ServerOptions {
   focusedAt?: number;
   /** A hook of Cursor's chat, forwarded by `trama hook cursor`; true when this window knows the conversation as Trama's (the question tool's check). */
   onCursorHook?: (hook: CursorHook) => boolean | void;
-  /** A hook of Copilot's chat, forwarded by `trama hook copilot`; true when this window knows the conversation as Trama's (the question tool's check). */
-  onCopilotHook?: (hook: CopilotHook) => boolean | void;
   /** A command of the agent changed something: where it ran, as Trama reports it. */
   onActivity?: (origin: AgentOrigin) => void;
   /** The agent in the terminal `terminal` (the hook of its agent said so) has settled: nothing is left to do. `root` is this window's project. */
@@ -665,7 +662,7 @@ function saysTrama(chunk: unknown): boolean {
  * Hands `message` to every live editor window of the project, each window on its own, and says for each one whether it
  * answers that the conversation is Trama's; a window that fails, is slow or does not answer says no.
  */
-async function editorsSayTrama(projectId: string, message: { type: "cursor-hook" | "copilot-hook"; hook: CursorHook | CopilotHook }, signal: AbortSignal, sockets: Set<Socket>, runtimeDir?: string): Promise<boolean[]> {
+async function editorsSayTrama(projectId: string, message: { type: "cursor-hook"; hook: CursorHook }, signal: AbortSignal, sockets: Set<Socket>, runtimeDir?: string): Promise<boolean[]> {
   return Promise.all(records(runtimeDirectory(runtimeDir), projectId).map(async (record) => {
     try {
       const editor = await connectEditor(record, signal, sockets);
@@ -697,23 +694,6 @@ export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: nu
     const projectId = questionProjectId(projectAt(hook.root));
     if (!runtimeDirectoryReady(runtimeDirectory(options.runtimeDir), false)) return false;
     return (await editorsSayTrama(projectId, { type: "cursor-hook", hook }, controller.signal, sockets, options.runtimeDir)).some(Boolean);
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-    for (const socket of sockets) socket.destroy();
-  }
-}
-
-/** Hands a Copilot hook to every live editor window of its project without holding up Copilot; true when a window says the conversation is Trama's (the question tool's check only). */
-export async function sendCopilotHook(hook: CopilotHook, options: { timeoutMs?: number; runtimeDir?: string } = {}): Promise<boolean> {
-  const controller = new AbortController();
-  const sockets = new Set<Socket>();
-  const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, options.timeoutMs ?? 1000);
-  try {
-    const projectId = questionProjectId(projectAt(hook.root));
-    if (!runtimeDirectoryReady(runtimeDirectory(options.runtimeDir), false)) return false;
-    return (await editorsSayTrama(projectId, { type: "copilot-hook", hook }, controller.signal, sockets, options.runtimeDir)).some(Boolean);
   } catch {
     return false;
   } finally {
@@ -883,13 +863,6 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
           const hook = message.hook as CursorHook | undefined;
           if (!hook || typeof hook !== "object" || typeof hook.conversation !== "string" || typeof hook.root !== "string") throw new UsageError("A Cursor hook needs a conversation and a project folder");
           const trama = options.onCursorHook?.(hook) === true;
-          finish({ type: "taken", trama });
-          return;
-        }
-        if (phase === "ready" && message.type === "copilot-hook") {
-          const hook = message.hook as CopilotHook | undefined;
-          if (!hook || typeof hook !== "object" || typeof hook.conversation !== "string" || typeof hook.root !== "string") throw new UsageError("A Copilot hook needs a conversation and a project folder");
-          const trama = options.onCopilotHook?.(hook) === true;
           finish({ type: "taken", trama });
           return;
         }

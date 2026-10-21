@@ -1,6 +1,6 @@
 ---
 created: 2026-10-19T20:37:06.351Z
-updated: 2026-10-19T20:37:06.351Z
+updated: 2026-10-21T04:42:45.264Z
 summary: Con l'Advisor Scanner acceso, il Run lancia omp con l'advisor, i pulsanti Scan sono disattivati, il gruppo Experimental ha il flag dell'Advisor Scanner e la skill trama-implement salta pre-flight e scansione finale.
 tasks:
   - 9eac4hx1
@@ -8,6 +8,7 @@ tasks:
   - kvka01g6
   - rxrumqmh
   - w13n03na
+  - qudyah8g
 ---
 # Advisor Scanner nei Run
 

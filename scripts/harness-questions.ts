@@ -54,7 +54,7 @@ if (actions) {
     if (step.kind === "state") state = step.state;
   }
   // The editor serialises messages to the webview as JSON: `undefined` in arrays arrives as `null`.
-  const send = () => window.postMessage(JSON.parse(JSON.stringify({ type: "questions", round: { id: 1, agent: "claude", state } })), "*");
+  const send = () => window.postMessage(JSON.parse(JSON.stringify({ type: "questions", round: { id: 1, agent: "omp", state } })), "*");
   const original = (window as unknown as { acquireVsCodeApi: () => { postMessage(m: unknown): void } }).acquireVsCodeApi;
   (window as unknown as { acquireVsCodeApi: () => { postMessage(m: unknown): void } }).acquireVsCodeApi = () => {
     const api = original();

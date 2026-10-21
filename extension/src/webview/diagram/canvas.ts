@@ -72,6 +72,8 @@ function stylesheet(p: Palette): cytoscape.StylesheetJson {
     { selector: "node.kind-feature", style: { "corner-radius": 4, "border-width": 2 } },
     { selector: "node.kind-machine", style: { "corner-radius": 12 } },
     { selector: "node.kind-actor", style: { "corner-radius": 30, "border-color": p.purple, "border-width": 2, "background-color": mix(p.purple, p.node, 0.16) } },
+    { selector: "node.kind-whole", style: { "corner-radius": 4, "border-width": 2, "border-style": "double" } },
+    { selector: "node.inert", style: { "border-style": "dashed", color: p.muted } },
     { selector: "node.kind-marker", style: { shape: "ellipse", "background-color": p.fg, "border-width": 0, label: "" } },
     { selector: "node.final", style: { "border-style": "double", "border-width": 5 } },
     {
@@ -139,12 +141,12 @@ function stylesheet(p: Palette): cytoscape.StylesheetJson {
 }
 
 const nodeClasses = (n: GNode): string =>
-  [`kind-${n.kind}`, `change-${n.change}`, n.external && "external", n.final && "final", n.expanded && "container", hasHandles(n) && !n.expanded && "handled", n.drifts.length > 0 && "drifted"].filter(Boolean).join(" ");
+  [`kind-${n.kind}`, `change-${n.change}`, n.external && "external", n.inert && "inert", n.final && "final", n.expanded && "container", hasHandles(n) && !n.expanded && "handled", n.drifts.length > 0 && "drifted"].filter(Boolean).join(" ");
 
 /** What decides whether two graphs need different boxes. */
 function layoutKey(g: GraphSpec): string {
   return JSON.stringify([
-    g.nodes.map((n) => [n.id, n.kind, nodeLines(n), n.parent, n.children, n.expanded, n.layer]),
+    g.nodes.map((n) => [n.id, n.kind, nodeLines(n), n.parent, n.children, n.expanded, n.layer, n.opens]),
     g.edges.map((e) => [e.id, e.source, e.target, e.label]),
   ]);
 }

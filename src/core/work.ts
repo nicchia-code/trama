@@ -119,7 +119,7 @@ function agentField(raw: Raw, where: string): { agent: boolean; holder: string |
   return { agent: boolField(raw, "agent", false, where), holder: null };
 }
 
-/** Task ownership recognizes agent terminals and Cursor chat, not the editor's generic chat. */
+/** Task ownership recognizes agent terminals and Cursor chat. */
 const holderOf = (origin: AgentOrigin): string | null => origin.terminal ?? (origin.chat === "cursor" ? "cursor" : null);
 
 function parseDrift(raw: Raw, where: string): DriftData {

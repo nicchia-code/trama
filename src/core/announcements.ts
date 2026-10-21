@@ -41,7 +41,7 @@ export interface Announcement {
   announced: string;
   /** The agent terminal it belongs to (see `TERMINAL_ENV`), or null: made from a chat or by an agent Trama did not start, or written before this field existed. */
   terminal: string | null;
-  /** `cursor` or `editor` when a chat agent made it; null in announcements written before this field existed. Never set together with `terminal`. */
+  /** `cursor` for Cursor's chat, `editor` for an agent Trama did not start and that does not say where it comes from; null in announcements written before this field existed. Never set together with `terminal`. */
   chat: Chat | null;
   /** The phase of a check; null for every other kind. */
   phase: CheckPhase | null;
@@ -89,16 +89,16 @@ export function terminalFromEnv(env: Record<string, string | undefined>): string
 /** Set to `1` by Cursor in the shell of its chat agent, and not in the developer's terminals. */
 export const CURSOR_AGENT_ENV = "CURSOR_AGENT";
 
-/** The editor chat whose agent made an announcement. */
+/** The chat holder of an announcement: Cursor's chat, or an agent Trama did not start and that does not say where it comes from. */
 export type Chat = "cursor" | "editor";
 const CHATS: readonly Chat[] = ["cursor", "editor"];
-/** Where an agent's command runs: a Trama-started terminal, Cursor's chat, the editor chat, or neither. */
+/** Where an agent's command runs: a Trama-started terminal, Cursor's chat, an agent Trama did not start, or neither. */
 export interface AgentOrigin {
   terminal?: string;
   chat?: Chat;
 }
 
-/** A recognized terminal wins; otherwise chat announcements belong to Cursor or the editor. */
+/** A recognized terminal wins; otherwise chat announcements belong to Cursor or to an agent Trama did not start (`editor`). */
 export function originFromEnv(env: Record<string, string | undefined>): AgentOrigin {
   const terminal = terminalFromEnv(env);
   if (terminal) return { terminal };

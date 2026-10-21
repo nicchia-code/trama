@@ -1,9 +1,8 @@
 import { z } from "zod";
 import { terminalFromEnv } from "../../core/announcements";
 import { hookAnswer, parseCursorHook } from "../../core/cursor-chat";
-import { parseCopilotHook } from "../../core/copilot-chat";
 import { QUESTION_TOOL_REFUSAL } from "../../core/questions";
-import { sendAgentIdle, sendCopilotHook, sendCursorHook } from "../../core/question-channel";
+import { sendAgentIdle, sendCursorHook } from "../../core/question-channel";
 import { defineCommand } from "../registry";
 
 /** Standard input may start with a UTF-8 byte order mark (Windows PowerShell 5.1 adds one to a pipe); it is not part of the JSON. */
@@ -23,21 +22,6 @@ export async function runCursorHook(input: string, options: { runtimeDir?: strin
   }
   if (hook) await sendCursorHook(hook, options);
   return JSON.stringify(hookAnswer((raw as { hook_event_name?: unknown } | null)?.hook_event_name));
-}
-
-/** `trama hook copilot`: forwards Copilot events without blocking the chat, and refuses the question tool in Trama's conversations. */
-export async function runCopilotHook(input: string, options: { runtimeDir?: string } = {}): Promise<string> {
-  let raw: unknown;
-  try { raw = parseHookJson(input); } catch { return "{}"; }
-  const hook = parseCopilotHook(raw);
-  if (hook?.hook === "PreToolUse") return (await sendCopilotHook(hook, options)) ? questionToolDenial() : "{}";
-  if (hook) await sendCopilotHook(hook, options);
-  return "{}";
-}
-
-/** `trama hook claude-question-tool`: Claude Code's PreToolUse answer that refuses its own question tool in Trama's work. Reads nothing and never contacts the editor. */
-export function questionToolDenial(): string {
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: QUESTION_TOOL_REFUSAL } });
 }
 
 const answered = { out: "{}", exit: 0 };
@@ -62,24 +46,6 @@ const cursor = defineCommand({
   },
 });
 
-const copilot = defineCommand({
-  object: "hook",
-  verb: "copilot",
-  mode: "hook",
-  hidden: true,
-  summary: "Run by VS Code's hooks: tells the editor what Copilot chat does. It always exits with 0.",
-  description:
-    "Run by VS Code's `UserPromptSubmit`, `Stop` and `PreToolUse` hooks. It hands the editor of the project the hook name, the session and whether a prompt starts a Trama skill, never the prompt, waits at most one second, prints `{}` (or the refusal of the question tool) and exits with 0 even without an editor, a project or valid input.",
-  stdin: "Reads the hook's JSON on standard input.",
-  input: none,
-  output: hookAnswerShape,
-  failure: () => answered,
-  run: async (_ctx, _input, _args, runtime) => {
-    const md = await runCopilotHook(await runtime.stdin(), { runtimeDir: runtime.runtimeDir });
-    return { md, json: JSON.parse(md) };
-  },
-});
-
 const idle = defineCommand({
   object: "hook",
   verb: "idle",
@@ -98,20 +64,4 @@ const idle = defineCommand({
   },
 });
 
-const claudeQuestionTool = defineCommand({
-  object: "hook",
-  verb: "claude-question-tool",
-  mode: "hook",
-  hidden: true,
-  summary: "Run by Claude Code's hook before its own question tool: refuses it.",
-  description:
-    "Run by the `PreToolUse` hook Trama makes Claude Code load for its `AskUserQuestion` tool. It refuses the tool with the shared refusal, which says to ask only with `trama question new`, reads nothing, never contacts the editor and exits with 0.",
-  input: none,
-  output: z.object({ hookSpecificOutput: z.object({ hookEventName: z.literal("PreToolUse"), permissionDecision: z.literal("deny"), permissionDecisionReason: z.string() }) }),
-  run: async () => {
-    const md = questionToolDenial();
-    return { md, json: JSON.parse(md) };
-  },
-});
-
-export const HOOK_COMMANDS = [cursor, copilot, idle, claudeQuestionTool];
+export const HOOK_COMMANDS = [cursor, idle];

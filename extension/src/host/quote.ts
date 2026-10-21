@@ -47,14 +47,6 @@ export function quote(family: ShellFamily, text: string): string {
   }
 }
 
-/**
- * The program of a Claude Code hook command as the hook runs it. On Windows Claude Code runs hooks with Git Bash whatever
- * the terminal's shell, so the path is quoted for Git Bash with forward slashes; elsewhere it is quoted for the terminal's shell.
- */
-export function hookProgram(path: string, family: ShellFamily, windows = process.platform === "win32"): string {
-  return windows ? quote("posix", path.replaceAll("\\", "/")) : quote(family, path);
-}
-
 /** A PowerShell single-quoted string. PowerShell also treats the typographic single quotes as quote characters. */
 function psLiteral(text: string): string {
   return `'${text.replace(/['\u2018\u2019\u201a\u201b]/g, "$&$&")}'`;

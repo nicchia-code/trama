@@ -101,18 +101,16 @@
         "trama.agent": {
           "type": "string",
           "enum": [
-            "chat",
-            "omp",
-            "claude"
+            "cursor",
+            "omp"
           ],
           "enumDescriptions": [
-            "The editor's chat: Copilot in VS Code, Cursor in Cursor.",
-            "omp in the editor's integrated terminal.",
-            "Claude Code in the editor's integrated terminal."
+            "Cursor's chat, only in Cursor.",
+            "omp in the editor's integrated terminal, in every editor."
           ],
-          "default": "chat",
+          "default": "cursor",
           "scope": "application",
-          "markdownDescription": "Agent used for every project and instruction: `chat` (the editor's chat: Copilot in VS Code, Cursor in Cursor; the default), `omp` (omp in the editor's integrated terminal) or `claude` (Claude Code in the editor's integrated terminal). It applies only in your user settings."
+          "markdownDescription": "Agent used for every project and instruction: `cursor` (Cursor's chat, only in Cursor; the default; any other value counts as `cursor`) or `omp` (omp in the editor's integrated terminal, in every editor). It applies only in your user settings."
         },
         "trama.ompPath": {
           "type": "string",
@@ -132,7 +130,7 @@
           ],
           "default": "panel",
           "scope": "application",
-          "markdownDescription": "Where `omp` and Claude Code terminals open: `panel` (the terminal area; the default) or `editor` (a terminal tab in the active editor group). It applies only in your user settings."
+          "markdownDescription": "Where `omp` terminals open: `panel` (the terminal area; the default) or `editor` (a terminal tab in the active editor group). It applies only in your user settings."
         },
         "trama.driftAutoPilot": {
           "type": "string",
@@ -159,19 +157,19 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for design work: written design requests, Resolve Drifts, the preparation of automatic Drift resolution and import. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. It only applies in your user settings."
+          "markdownDescription": "Model for design work: written design requests, Resolve Drifts, the preparation of automatic Drift resolution and import. Write the name as omp or Cursor's chat accepts it. Empty (the default) leaves the agent's default model. It only applies in your user settings."
         },
         "trama.scan": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for scans: of the System, of Features, and for the sub-agents that compare Machines, including those of the pre-flight check at the start of each Run. With the Advisor Scanner on, the omp advisors that watch Runs use it too. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. The chats' sub-agents get it with Update skills. It only applies in your user settings."
+          "markdownDescription": "Model for scans: of the System, of Features, and for the sub-agents that compare Machines, including those of the pre-flight check at the start of each Run. With the Advisor Scanner on, the omp advisors that watch Runs use it too. Write the name as omp or Cursor's chat accepts it. Empty (the default) leaves the agent's default model. The sub-agent of Cursor's chat gets it with Update skills. It only applies in your user settings."
         },
         "trama.execution": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for implementing Tasks: implement, implement all and the automatic Run, including the pre-flight of each Run and the selective final scan of the run. Write the name as your agent accepts it: omp, Claude Code or Cursor's chat; for Copilot's chat, the name shown in the chat's model picker. Empty (the default) leaves the agent's default model. In Copilot the model also stays in the chat's picker. It only applies in your user settings."
+          "markdownDescription": "Model for implementing Tasks: implement, implement all and the automatic Run, including the pre-flight of each Run and the selective final scan of the run. Write the name as omp or Cursor's chat accepts it. Empty (the default) leaves the agent's default model. It only applies in your user settings."
         },
         "trama.autoExit": {
           "type": "boolean",
@@ -189,7 +187,7 @@
         "trama.skillsDir": {
           "type": "string",
           "default": ".agents/skills",
-          "markdownDescription": "Folder, relative to the project root, where Get Started and **Trama: Update Agent Skills** install the agent skills. Use `.claude/skills` for Claude Code."
+          "markdownDescription": "Folder, relative to the project root, where Get Started and **Trama: Update Agent Skills** install the agent skills."
         },
         "trama.language": {
           "type": "string",
@@ -206,7 +204,7 @@
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Experimental. Only with omp as the agent. On: during every Run, omp's advisor checks the code the agent reads and writes against the Model and the Requirements, tells the agent when its work drifts and files a Drift for a difference in existing code; every scan is off (Scan buttons, the pre-flight and the end-of-run scan). The advisor uses the Scan model. Off (the default), or with another agent: scans work as usual. Trama's advisors live in `.omp/WATCHDOG.yml`, installed in every project: in an omp session you start yourself with the advisor on, they replace omp's default advisor and stay silent."
+          "markdownDescription": "Experimental. Only with omp as the agent. On: during every Run, omp's advisor checks the code the agent reads and writes against the Model and the Requirements, tells the agent when its work drifts and files a Drift for a difference in existing code; every scan is off (Scan buttons, the pre-flight and the end-of-run scan). The advisor uses the Scan model. Off (the default), or with another agent: scans work as usual. Trama's advisors live in `.omp/WATCHDOG.yml`, installed in every project: in an omp session you start yourself with the advisor on, they replace omp's default advisor, run only `trama advisor show` and then stay silent."
         },
         "trama.experimentalParallelExecution": {
           "type": "boolean",

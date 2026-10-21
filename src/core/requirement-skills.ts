@@ -6,7 +6,7 @@ import { type Project, readTextLf, writeFileEnsuringDir } from "./store";
 import { SPEC_FIELD_TITLES, SPEC_LIST_FIELDS, SPECS_FILE, type Specs } from "./specs";
 
 /** Folders, relative to the project root, where agents look for skills and Trama may have installed its own. */
-export const SKILL_DIRS = [".agents/skills", ".claude/skills", ".github/skills"];
+export const SKILL_DIRS = [".agents/skills"];
 
 const PREFIX = "trama-req-";
 

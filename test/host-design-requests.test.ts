@@ -198,7 +198,8 @@ mock.module("vscode", () => ({
     if (id === "setContext") contexts.push([args[0] as string, args[1]]);
     else await command?.(id);
   } },
-  env: { appName: "Visual Studio Code" },
+  env: { appName: "Cursor" },
+  extensions: { getExtension: () => undefined },
 }));
 
 const { DesignRequests, SAVE_DELAY_MS, SENT_KEY, SETUP_KEY } = await import("../extension/src/host/design-requests");
@@ -600,7 +601,7 @@ describe("closing the tab of a request", () => {
       const waiting = new Promise<void>((resolve) => { resume = resolve; });
       const deliveries: string[] = [];
       command = async (id) => {
-        if (id === "workbench.action.chat.newChat") {
+        if (id === "composer.createNew") {
           ready();
           await waiting;
         } else deliveries.push(id);

@@ -21,13 +21,13 @@ import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { activeProjectJobs, autopilotFailedCase, autopilotReady, clearAutopilotFailure, driftAutopilotStatus, driftWork, driftsFinishing, excludeAutopilotDrift, forgetDeveloperScanCases, forgetWindow, holdAutopilot, jobAbnormalEnd, lastFailedScan, observeAutopilotMode, onDriftResolutionChange, projectWindowIds, proposalsFinishing, recordAutopilotFailure, releaseSend, reserveSend, resumeAutopilot, runCauseTask, runContinuationHeld, runFinalCheckFailed, sendReserved, setCoordinatorAvailable, shownAutopilotFailures, tasksFinishing, type DriftAutopilotMode, type JobKind } from "./drift-resolution";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
-import { appliedProposalModels, boardModels, chooseProposalModel, forgetProposalModels, proposalRunModel, type BoardModels, type ModelMemory } from "./proposal-models";
+import { appliedProposalModels, boardModels, chooseProposalModel, forgetProposalModels, proposalRunModel, type BoardModels, type ModelMemory, type ProposalAgent } from "./proposal-models";
 import type { RunModel } from "./terminal-agent";
 import { planRuns, runSequence, type AppliedModel, type PlannedRun } from "./run-groups";
-import { copilotSuggestions, cursorModels, ompModels, type ModelList } from "./model-lists";
-import { DRIFT_KEY, planDelegationChange, planSettingChange, settingsSchema, settingTitle, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
+import { cursorModels, ompModels, type ModelList } from "./model-lists";
+import { AGENT_KEY, DRIFT_KEY, planDelegationChange, planSettingChange, settingsSchema, settingTitle, shownAgentValue, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
 import { resolveMarkdownFile } from "./paths";
-import { findProject, initializeProject, type InitChoice, NO_PROJECT_WARNING, updateSkills } from "./project";
+import { checkSkills, findProject, initializeProject, type InitChoice, NO_PROJECT_WARNING, updateSkills } from "./project";
 import type { QuestionSession } from "./question-session";
 import type { DesignRequests } from "./design-requests";
 import type { EditorQuestions } from "./questions";
@@ -86,6 +86,9 @@ interface AutopilotCollection {
   hold?: string;
 }
 
+/** The agent a Proposal's model is chosen for and read against: the effective `trama.agent`, where every value other than `omp` counts as `cursor`. */
+const proposalAgent = (): ProposalAgent => (configuredAgent() === "omp" ? "omp" : "cursor");
+
 /** Owns the single Trama panel, feeds it snapshots and carries out what the developer asks of it. */
 export class Controller implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
@@ -105,6 +108,10 @@ export class Controller implements vscode.Disposable {
   private suggestionsRequest = 0;
   /** The agent of `trama.agent` the suggestions were prepared for: a change of it prepares them again. */
   private suggestedAgent: string | undefined;
+  /** Whether a check of the installed skills is under way: another opening does not start a second. */
+  private checkingSkills = false;
+  /** The tab a panel just created goes to once its webview is ready (`openSettings`). */
+  private pendingView: "settings" | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -120,6 +127,24 @@ export class Controller implements vscode.Disposable {
   }
 
   /**
+   * Opens the panel in front on the Settings tab, or brings it forward and puts it there. A panel just created is sent the
+   * `navigate` once its webview is ready, so the tab shows and asks for the model suggestions at once.
+   */
+  async openSettings(): Promise<void> {
+    if (!vscode.workspace.workspaceFolders?.length) {
+      void vscode.window.showInformationMessage("Trama: open a folder to use Trama.");
+      return;
+    }
+    this.questions?.restore();
+    if (this.revealPanel()) this.post({ type: "navigate", view: "settings" });
+    else {
+      this.pendingView = "settings";
+      this.create();
+    }
+    this.checkSkillsInBackground();
+  }
+
+  /**
    * A question round entered Asking: the panel opens in front, on the Diagram, or comes to the front keeping its tab.
    * Without a project the panel still opens and shows the round; it has no snapshot to draw until a project exists.
    */
@@ -131,15 +156,30 @@ export class Controller implements vscode.Disposable {
     this.create();
   }
 
-  /** Creates the panel, or reveals it. Without `.trama/` the panel shows Get Started, and an open question round shows as well. */
+  /**
+   * Creates the panel, or reveals it. Without `.trama/` the panel shows Get Started, and an open question round shows as
+   * well. Every call is an ordinary opening of Trama, so the check of the installed skills starts after the panel is shown.
+   */
   async open(): Promise<void> {
     if (!vscode.workspace.workspaceFolders?.length) {
       void vscode.window.showInformationMessage("Trama: open a folder to use Trama.");
       return;
     }
     this.questions?.restore();
-    if (this.revealPanel()) return;
-    this.create();
+    if (!this.revealPanel()) this.create();
+    this.checkSkillsInBackground();
+  }
+
+  /** Checks the installed skills of the project the panel opens, once at a time and without holding the panel back. */
+  private checkSkillsInBackground(): void {
+    const project = findProject();
+    if (!project || this.checkingSkills) return;
+    this.checkingSkills = true;
+    setTimeout(() => {
+      void checkSkills(project, this.globalStorageUri).finally(() => {
+        this.checkingSkills = false;
+      });
+    }, 0);
   }
 
   /** Brings the panel forward if there is one: there is at most one. */
@@ -158,7 +198,7 @@ export class Controller implements vscode.Disposable {
     }
     this.post({ type: "setup", busy: true, error: null });
     try {
-      const done = await initializeProject(choice, this.globalStorageUri);
+      const done = await initializeProject(choice);
       if (done) {
         this.refresh();
         if (done.choice === "import") await this.launchAction(done.project, { kind: "import" });
@@ -221,7 +261,7 @@ export class Controller implements vscode.Disposable {
     for (const setting of schema) {
       const inspected = config.inspect<unknown>(sectionKey(setting.key));
       values[setting.key] = setting.scope === "application"
-        ? { user: inspected?.globalValue }
+        ? { user: setting.key === AGENT_KEY ? shownAgentValue(inspected?.globalValue) : inspected?.globalValue }
         : { user: inspected?.globalValue, workspace: inspected?.workspaceValue };
     }
     this.post({ type: "settings", schema, values });
@@ -241,13 +281,8 @@ export class Controller implements vscode.Disposable {
   private async modelList(agent: string): Promise<ModelList> {
     // `trama.ompPath` is application-scoped: only the user value counts; empty means `omp` from the editor's PATH.
     if (agent === "omp") return ompModels((settings().inspect<string>("ompPath")?.globalValue ?? "").trim());
-    if (agent === "claude") return { models: [] };
     if (isCursor()) return { models: this.globalStorageUri === undefined ? [] : await cursorModels(this.globalStorageUri.fsPath) };
-    try {
-      return { models: copilotSuggestions(await vscode.lm.selectChatModels()) };
-    } catch {
-      return { models: [] };
-    }
+    return { models: [] };
   }
 
   /**
@@ -344,6 +379,7 @@ export class Controller implements vscode.Disposable {
       for (const subscription of subscriptions) subscription.dispose();
       clearTimeout(this.timer);
       this.panel = undefined;
+      this.pendingView = undefined;
       // The round stays open and the agent keeps waiting; the developer is offered a way back to it.
       this.questions?.panelClosed();
       if (!this.disposed && this.questions?.current()) this.offerReopen();
@@ -402,7 +438,7 @@ export class Controller implements vscode.Disposable {
       const work = driftWork(project.root, this.mode() !== "disabled");
       synchronizeAnnouncementTitles(project);
       const snapshot = buildSnapshot(project, driftsFinishing(project.root), proposalsFinishing(project.root), tasksFinishing(project.root));
-      const models: BoardModels = this.modelMemory ? boardModels(this.modelMemory, snapshot.proposals, configuredAgent()) : { agent: configuredAgent(), proposals: {} };
+      const models: BoardModels = this.modelMemory ? boardModels(this.modelMemory, snapshot.proposals, proposalAgent()) : { agent: proposalAgent(), proposals: {} };
       if (this.panel) this.panel.title = snapshot.system.name.trim() || this.projectTitle(project);
       const status = driftAutopilotStatus(project.root, this.mode(), this.coordinator?.currentWindowId(project.root));
       const failures = shownAutopilotFailures(status.failures, status.mode, (id) => {
@@ -949,7 +985,7 @@ export class Controller implements vscode.Disposable {
 
   /** The Proposals whose model applies to the agent of `trama.agent` now, read at the launch. */
   private appliedModels(project: Project): AppliedModel[] {
-    return this.modelMemory ? appliedProposalModels(this.modelMemory, project, configuredAgent()) : [];
+    return this.modelMemory ? appliedProposalModels(this.modelMemory, project, proposalAgent()) : [];
   }
 
   /**
@@ -1077,6 +1113,10 @@ export class Controller implements vscode.Disposable {
       this.refresh();
       this.postSettings();
       if (this.questions) this.post({ type: "questions", round: this.questions.current() });
+      if (this.pendingView !== undefined) {
+        this.post({ type: "navigate", view: this.pendingView });
+        this.pendingView = undefined;
+      }
       return;
     }
     if (message.type === "initialize") {
@@ -1124,7 +1164,7 @@ export class Controller implements vscode.Disposable {
         return;
       case "setProposalModel": {
         if (!this.modelMemory) throw new TramaError("Trama cannot keep the model of a Proposal: the workspace state is not available.");
-        await chooseProposalModel(this.modelMemory, project, message.proposal, message.model, configuredAgent());
+        await chooseProposalModel(this.modelMemory, project, message.proposal, message.model, proposalAgent());
         this.refresh();
         return;
       }
@@ -1197,7 +1237,7 @@ export class Controller implements vscode.Disposable {
   /** The model a run takes from the Proposal of Task `task` (null: none) in place of its role, read at the launch: none unless that model was chosen for `trama.agent` now. */
   private runModelOfTask(project: Project, task: string | null): RunModel | undefined {
     if (!this.modelMemory || task === null) return undefined;
-    return proposalRunModel(this.modelMemory, project, getTask(project, task).data.proposal, configuredAgent());
+    return proposalRunModel(this.modelMemory, project, getTask(project, task).data.proposal, proposalAgent());
   }
 
   private async launchAction(project: Project, action: AgentAction): Promise<void> {

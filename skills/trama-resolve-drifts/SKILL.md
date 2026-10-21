@@ -100,7 +100,7 @@ Run **`trama question new --root <project> --input -`** with the JSON request on
 - Only an initial `status: "unavailable"` result means the editor is unavailable. Then you ask in no other way: you stop, open no resolution, and tell the developer to open the project in the editor with Trama. When the developer says to continue, run the same `trama question new` again: it is a new round.
 - A usage error of `trama question new` (exit code 2, wrong arguments, unrecognised command) or an input error is **never** editor unavailability: correct the call and repeat it. A deliberate skip is not re-asked.
 
-- Never use your own question tool (`ask` in omp, `AskQuestion` in Cursor, `vscode_askQuestions` in VS Code, `AskUserQuestion` in Claude Code), and never write the questions in the conversation: `trama question new` is the only way to ask the developer.
+- Never use your own question tool (`ask` in omp, `AskQuestion` in Cursor), and never write the questions in the conversation: `trama question new` is the only way to ask the developer.
 
 ## PowerShell
 

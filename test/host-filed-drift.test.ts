@@ -1,19 +1,9 @@
 import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { activeProjectJobs, copilotTurnEnded, copilotTurnStarted, driftsFinishing, endTerminalJobs, followsAgent, proposalsFinishing, receiveCoordinatorMessage, releaseFiledWork, setHooked, startJob, tasksFinishing } from "../extension/src/host/drift-resolution";
+import { activeProjectJobs, driftsFinishing, endTerminalJobs, followsAgent, proposalsFinishing, receiveCoordinatorMessage, releaseFiledWork, setHooked, startJob, tasksFinishing } from "../extension/src/host/drift-resolution";
 
 const root = () => join(tmpdir(), `trama-filed-drift-${crypto.randomUUID()}`);
-
-test("a Copilot chat filing is followed only by the window where its Trama conversation has a turn in progress", () => {
-  const project = root();
-  expect(followsAgent(project, "editor")).toBe(false);
-  copilotTurnStarted(project, "conversation-1");
-  expect(followsAgent(project, "editor")).toBe(true);
-  expect(followsAgent(root(), "editor")).toBe(false);
-  copilotTurnEnded(project, "conversation-1");
-  expect(followsAgent(project, "editor")).toBe(false);
-});
 
 test("a Drift filed by an agent is held until the end of that agent's turn, and only there", () => {
   const project = root();

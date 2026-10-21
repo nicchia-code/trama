@@ -61,9 +61,16 @@ export function missingSkills(dir: string): string[] {
     .filter((path) => !existsSync(path));
 }
 
+/** Writes `content` to `path` unless the file already holds it; returns whether it wrote. */
+function writeChanged(path: string, content: string): boolean {
+  if (existsSync(path) && readTextLf(path) === content) return false;
+  writeFileEnsuringDir(path, content);
+  return true;
+}
+
 /** Writes `content` to `path` unless the file already holds it, so an install leaves unchanged files alone; returns `path`. */
 function writeIfChanged(path: string, content: string): string {
-  if (!existsSync(path) || readTextLf(path) !== content) writeFileEnsuringDir(path, content);
+  writeChanged(path, content);
   return path;
 }
 
@@ -93,7 +100,11 @@ export function ompAgentConflicts(root: string): string[] {
     .map(([path]) => path);
 }
 
-/** Writes omp's definitions of the scan's sub-agents into the project's `.omp/agents/`, replacing any previous copy whose content differs; returns every path. */
-export function installOmpAgents(root: string): string[] {
-  return Object.entries(ompAgentFiles(root)).map(([path, content]) => writeIfChanged(path, content));
+/**
+ * Writes omp's definitions of the scan's sub-agents and the advisor instructions into the project's `.omp/`, replacing
+ * any previous copy whose content differs. Returns every path, and the ones it actually wrote.
+ */
+export function installOmpAgents(root: string): { paths: string[]; changed: string[] } {
+  const files = Object.entries(ompAgentFiles(root));
+  return { paths: files.map(([path]) => path), changed: files.filter(([path, content]) => writeChanged(path, content)).map(([path]) => path) };
 }

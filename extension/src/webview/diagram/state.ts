@@ -1,7 +1,7 @@
 import type { Snapshot } from "../../../../src/core/snapshot";
 import type { FocusRequest, NavigateOptions } from "../../protocol";
 import { type Detail, containersOf, detailOfSelection, requirementItems } from "./details";
-import { type Element, homeLevel, resolveElement, selectionFor, showsElement } from "./elements";
+import { type Element, alwaysOpens, homeLevel, resolveElement, selectionFor, showsElement } from "./elements";
 import { type GraphSpec, type Level, sameLevel } from "./graph";
 import { buildGraph, drillTarget, validLevel } from "./levels";
 import { type Scene, buildScene, pathTo } from "./scene";
@@ -10,7 +10,7 @@ import { focusSpec } from "../focus/spec";
 
 /** The Model reference of what a level shows, for the Requirements attached to it. */
 const levelRef = (level: Level): string | null =>
-  level.kind === "feature" ? level.feature : level.kind === "machine" ? level.machine : level.kind === "state" ? `${level.machine}/${level.state}` : null;
+  level.kind === "actor" ? level.actor : level.kind === "feature" ? level.feature : level.kind === "machine" ? level.machine : level.kind === "state" ? `${level.machine}/${level.state}` : null;
 
 /** What the Diagram shows. A new object for every change, so React re-renders only when something did. */
 export interface DiagramState {
@@ -128,8 +128,10 @@ export function createDiagramStore(): DiagramStore {
     if (options.level) {
       level = options.level;
       for (const e of elements) expandAround(e);
-    } else if (!showsElement(now.graph, element)) {
-      level = homeLevel(element);
+    } else if (alwaysOpens(element) || !showsElement(now.graph, element)) {
+      // Staying on the level (with the origin it remembers) when it is the one the link leads to.
+      const home = homeLevel(scene, element);
+      level = sameLevel(now.level, home) ? now.level : home;
       expandAround(element);
     }
     const next = compute({ ...state, level });

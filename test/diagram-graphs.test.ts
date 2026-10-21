@@ -4,7 +4,7 @@ import { detailOfSelection, requirementItems } from "../extension/src/webview/di
 import type { GraphSpec } from "../extension/src/webview/diagram/graph";
 import { buildGraph } from "../extension/src/webview/diagram/levels";
 import { machineGraph, visibleState } from "../extension/src/webview/diagram/machine";
-import { featureGraph, flows, shortNames, systemGraph } from "../extension/src/webview/diagram/overview";
+import { actorGraph, actorReach, featureGraph, flows, rootGraph, shortNames, wholeGraph } from "../extension/src/webview/diagram/overview";
 import { buildScene } from "../extension/src/webview/diagram/scene";
 import type { AreaView, DriftView, FragmentView, SectionView } from "../src/core/snapshot";
 import type { FileMap } from "../src/core/types";
@@ -14,8 +14,8 @@ const scene = buildScene(shopSnapshot(), null);
 const edgeOf = (g: GraphSpec, id: string) => g.edges.find((e) => e.id === id);
 const nodeOf = (g: GraphSpec, id: string) => g.nodes.find((n) => n.id === id);
 
-test("System level: Features and Actors as nodes, Actor edges count their Events", () => {
-  const g = systemGraph(scene);
+test("Whole System level: Features and Actors as nodes, Actor edges count their Events", () => {
+  const g = wholeGraph(scene);
   expect(g.nodes.map((n) => [n.id, n.kind])).toEqual([["a:courier", "actor"], ["a:stripe", "actor"], ["a:user", "actor"], ["a:warehouse", "actor"], ["f:checkout", "feature"]]);
   expect(nodeOf(g, "f:checkout")?.sub).toBe("3 machines");
   expect(g.edges.map((e) => [e.source, e.target, e.label])).toEqual([
@@ -29,7 +29,7 @@ test("System level: Features and Actors as nodes, Actor edges count their Events
   expect(user?.items.find((i) => i.label === "user.CANCEL")?.text).toBe("received by order/Paid");
 });
 
-test("System level: Events between Machines of different Features join the Features, inside one Feature they are dropped", () => {
+test("Whole System level: Events between Machines of different Features join the Features, inside one Feature they are dropped", () => {
   const files: FileMap = new Map([
     ["system.md", "# S\n"],
     ["actors/u.md", "# U\n\n## Events\n\n### GO\nx\n"],
@@ -40,7 +40,7 @@ test("System level: Events between Machines of different Features join the Featu
     ["b/m3.md", "# M3\n\n## States\n\n### R (initial)\n- `m1.HELLO` → S\n- `u.GO` → S\n\n### S\n"],
   ]);
   const two = buildScene(snapshotOf(files), null);
-  const g = systemGraph(two);
+  const g = wholeGraph(two);
   expect(g.edges.map((e) => [e.source, e.target, e.label])).toEqual([
     ["a:u", "f:a", "1"],
     ["f:a", "f:b", "1"],
@@ -192,7 +192,7 @@ test("a Proposal tags Machines, States, Transitions and aggregated edges", () =>
   expect(edgeOf(feature, "e:a:user>m:cart")?.change).toBe("same");
   expect(nodeOf(feature, "a:user")?.change).toBe("changed");
 
-  const system = systemGraph(p);
+  const system = wholeGraph(p);
   expect(nodeOf(system, "f:checkout")?.change).toBe("changed");
   expect(edgeOf(system, "e:a:user>f:checkout")?.change).toBe("changed");
 
@@ -208,7 +208,7 @@ test("a Proposal tags Machines, States, Transitions and aggregated edges", () =>
 test("removed Machines, States and Transitions stay in the graph, tagged removed", () => {
   const snap = shopWithRemovals();
   const p = buildScene(snap, snap.proposals[0]?.id ?? "");
-  const system = systemGraph(p);
+  const system = wholeGraph(p);
   expect(nodeOf(system, "f:billing")).toMatchObject({ change: "added", sub: "1 machine" });
   expect(edgeOf(system, "e:f:checkout>f:billing")?.change).toBe("added");
   const feature = featureGraph(p, "checkout");
@@ -226,10 +226,17 @@ test("Drifts draw a red ghost joined to the element their first resolvable refer
   const writtenOff = snap.drifts[1]?.id ?? "";
   const sceneWithDrifts = buildScene(snap, null);
 
-  const system = buildGraph(sceneWithDrifts, { kind: "system" }, new Map());
+  const system = buildGraph(sceneWithDrifts, { kind: "whole" }, new Map());
   expect(system.nodes.filter((n) => n.kind === "drift").map((n) => n.id)).toEqual([`d:${shipped}`, `d:${writtenOff}`]);
   expect(system.edges.filter((e) => e.kind === "drift").map((e) => [e.source, e.target])).toEqual([[`d:${shipped}`, "f:checkout"], [`d:${writtenOff}`, "f:checkout"]]);
   expect(nodeOf(system, "f:checkout")).toMatchObject({ drifts: [shipped, writtenOff], sub: "3 machines · ⚠ 2 drifts inside" });
+
+  // Every Actor reaches checkout, so the root has no node for it: both Drifts float there. In an Actor level they join the Feature.
+  const root = buildGraph(sceneWithDrifts, { kind: "system" }, new Map());
+  expect(root.nodes.filter((n) => n.kind === "drift").map((n) => n.id)).toEqual([`d:${shipped}`, `d:${writtenOff}`]);
+  expect(root.edges).toEqual([]);
+  const actor = buildGraph(sceneWithDrifts, { kind: "actor", actor: "user" }, new Map());
+  expect(actor.edges.filter((e) => e.kind === "drift").map((e) => [e.source, e.target])).toEqual([[`d:${shipped}`, "f:checkout"], [`d:${writtenOff}`, "f:checkout"]]);
 
   const feature = buildGraph(sceneWithDrifts, { kind: "feature", feature: "checkout" }, new Map());
   expect(feature.edges.filter((e) => e.kind === "drift").map((e) => [e.source, e.target])).toEqual([[`d:${shipped}`, "m:order"], [`d:${writtenOff}`, "m:payment"]]);
@@ -345,4 +352,61 @@ test("Machine level: the panel lists the Events the Machine emits, each receivin
     ["REFUND_REQUESTED", null],
     ["payment/Paid", "payment/Paid"],
   ]);
+});
+
+test("root: Whole System, the Actors in Model order and the Features no Actor reaches, with no arrows", () => {
+  const g = rootGraph(scene);
+  expect(g.level).toEqual({ kind: "system" });
+  expect(g.edges).toEqual([]);
+  expect(g.nodes.map((n) => [n.id, n.kind, n.sub, n.opens])).toEqual([
+    ["w:system", "whole", "All Actors and Features", false],
+    ["a:courier", "actor", "1 feature", true],
+    ["a:stripe", "actor", "1 feature", true],
+    ["a:user", "actor", "1 feature", true],
+    ["a:warehouse", "actor", "1 feature", true],
+  ]);
+});
+
+test("root: an Actor whose Events reach no Machine is inert, the Features no Actor reaches are listed, an empty Model has no Whole System", () => {
+  const files: FileMap = new Map([
+    ["system.md", "# S\n"],
+    ["actors/u.md", "# U\n\n## Events\n\n### GO\nx\n"],
+    ["actors/idle.md", "# Idle\n\n## Events\n\n### NOPE\nx\n"],
+    ["a/feature.md", "# A\n"],
+    ["a/m1.md", "# M1\n\n## States\n\n### X (initial)\n- `u.GO` → Y\n\n### Y\n"],
+    ["b/feature.md", "# B\n"],
+    ["b/m2.md", "# M2\n\n## States\n\n### P (initial)\n"],
+  ]);
+  const two = buildScene(snapshotOf(files), null);
+  const g = rootGraph(two);
+  expect(g.nodes.map((n) => [n.id, n.sub, n.inert, n.opens])).toEqual([
+    ["w:system", "All Actors and Features", false, false],
+    ["a:idle", "No events received", true, false],
+    ["a:u", "1 feature", false, true],
+    ["f:b", "1 machine", false, false],
+  ]);
+  expect(actorReach(two, "idle")).toEqual([]);
+  expect(rootGraph(buildScene(snapshotOf(new Map([["system.md", "# S\n"]])), null)).nodes).toEqual([]);
+});
+
+test("Actor level: the Actor, the Features that receive its Events and the Events between those Features", () => {
+  const files: FileMap = new Map([
+    ["system.md", "# S\n"],
+    ["actors/u.md", "# U\n\n## Events\n\n### GO\nx\n"],
+    ["actors/v.md", "# V\n\n## Events\n\n### STOP\nx\n"],
+    ["a/feature.md", "# A\n"],
+    ["a/m1.md", "# M1\n\n## States\n\n### X (initial)\n- `u.GO` → Y\n- `m2.PING` → Y\n\n### Y\n\n## Events\n\n### HELLO\nx\n"],
+    ["b/feature.md", "# B\n"],
+    ["b/m2.md", "# M2\n\n## States\n\n### P (initial)\n- `m1.HELLO` → Q\n\n### Q\n\n## Events\n\n### PING\nx\n"],
+    ["c/feature.md", "# C\n"],
+    ["c/m3.md", "# M3\n\n## States\n\n### R (initial)\n- `v.STOP` → S\n\n### S\n"],
+  ]);
+  const three = buildScene(snapshotOf(files), null);
+  const g = actorGraph(three, "u");
+  expect(g.level).toEqual({ kind: "actor", actor: "u" });
+  expect(g.nodes.map((n) => [n.id, n.kind])).toEqual([["a:u", "actor"], ["f:a", "feature"]]);
+  expect(g.edges.map((e) => [e.source, e.target, e.label])).toEqual([["a:u", "f:a", "1"]]);
+  const v = actorGraph(three, "v");
+  expect(v.nodes.map((n) => n.id)).toEqual(["a:v", "f:c"]);
+  expect(v.edges.map((e) => e.id)).toEqual(["e:a:v>f:c"]);
 });

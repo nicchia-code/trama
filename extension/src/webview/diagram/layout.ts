@@ -59,9 +59,10 @@ export function nodeSize(n: GNode): { width: number; height: number } {
       return { width: text + 28, height: 30 };
     case "feature":
     case "machine":
+    case "whole":
       return { width: Math.max(150, text + 36 + 44), height: Math.max(56, height) };
     case "actor":
-      return { width: Math.max(110, text + 44), height: Math.max(40, height) };
+      return { width: Math.max(110, text + 44 + (hasHandles(n) ? 44 : 0)), height: Math.max(40, height) };
     case "state":
       return { width: Math.max(96, text + 30 + (hasHandles(n) ? 44 : 0)), height: Math.max(38, height) };
   }
@@ -89,8 +90,33 @@ const OPTIONS = {
   "elk.json.shapeCoords": "ROOT",
 };
 
-/** Lays the graph out left to right. Deterministic: the same graph always gives the same boxes. */
+const GRID_GAP = 32;
+
+/** The root: nodes in rows, as many columns as the square root of their number, each cell as large as the largest node; Drift links are straight lines. */
+function gridLayout(graph: GraphSpec): Layout {
+  const sizes = graph.nodes.map(nodeSize);
+  const columns = Math.max(1, Math.ceil(Math.sqrt(graph.nodes.length)));
+  const cellWidth = Math.max(0, ...sizes.map((s) => s.width));
+  const cellHeight = Math.max(0, ...sizes.map((s) => s.height));
+  const nodes = new Map<string, Box>();
+  graph.nodes.forEach((n, i) => {
+    const size = sizes[i] as { width: number; height: number };
+    const x = (i % columns) * (cellWidth + GRID_GAP) + (cellWidth - size.width) / 2;
+    const y = Math.floor(i / columns) * (cellHeight + GRID_GAP) + (cellHeight - size.height) / 2;
+    nodes.set(n.id, { x, y, ...size });
+  });
+  const edges = new Map<string, EdgeLayout>();
+  for (const e of graph.edges) {
+    const from = nodes.get(e.source);
+    const to = nodes.get(e.target);
+    if (from && to) edges.set(e.id, { points: [centre(from), centre(to)], label: null });
+  }
+  return { nodes, edges };
+}
+
+/** Lays the graph out left to right; the root is a grid. Deterministic: the same graph always gives the same boxes. */
 export async function layoutGraph(graph: GraphSpec): Promise<Layout> {
+  if (graph.level.kind === "system") return gridLayout(graph);
   // Edges spread along the side of a node: give every one of them room for its arrowhead.
   const sides = new Map<string, number>();
   for (const e of graph.edges) {

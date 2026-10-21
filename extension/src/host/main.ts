@@ -7,7 +7,7 @@ import { agentName, watchAgentTerminal, configuredSkillsDir } from "./agent";
 import { Controller, describeError } from "./controller";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./cursor";
-import { findProject, installEditorHooks } from "./project";
+import { findProject, installEditorHooks, removeCopilotPieces } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
 
@@ -53,6 +53,7 @@ export function activate(context: vscode.ExtensionContext): void {
     tramaFiles,
     statusBarItem(),
     vscode.commands.registerCommand("trama.open", guarded(() => trama.open())),
+    vscode.commands.registerCommand("trama.openSettings", guarded(() => trama.openSettings())),
     vscode.commands.registerCommand("trama.sendDesignRequest", guarded((uri?: vscode.Uri) => requests.send(uri))),
     vscode.commands.registerCommand("trama.scan", guarded(() => trama.pickAndScan())),
     vscode.commands.registerCommand("trama.import", guarded(() => trama.launch({ kind: "import" }))),
@@ -69,7 +70,9 @@ export function activate(context: vscode.ExtensionContext): void {
     ...(vscode.lm === undefined ? [] : [vscode.lm.onDidChangeChatModels(() => void trama.postModelSuggestions())]),
   );
   exposeBundledCli(context);
-  void guarded(() => installEditorHooks(context.globalStorageUri))();
+  void guarded(() => installEditorHooks())();
+  // Earlier versions installed Copilot's hooks outside Cursor: an error in removing them shows nothing.
+  void removeCopilotPieces(context.globalStorageUri).catch(() => undefined);
 }
 
 /**

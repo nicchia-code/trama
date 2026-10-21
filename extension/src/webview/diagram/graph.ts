@@ -1,14 +1,31 @@
 import type { Change } from "../../../../src/core/merge";
 
+/** Where a Feature was opened from, when not from the root or a link: Whole System or an Actor's level. */
+export type Origin = { kind: "whole" } | { kind: "actor"; actor: string };
+
 /** Which part of the Model the Diagram shows. */
 export type Level =
+  /** The root: Whole System, the Actors and the Features no Actor reaches. */
   | { kind: "system" }
-  | { kind: "feature"; feature: string }
-  | { kind: "machine"; machine: string }
+  /** Every Actor, every Feature and the Events between them. */
+  | { kind: "whole" }
+  /** One Actor, the Features that receive its Events and the Events between them. */
+  | { kind: "actor"; actor: string }
+  | { kind: "feature"; feature: string; from?: Origin }
+  | { kind: "machine"; machine: string; from?: Origin }
   /** The sub-Machine inside one State. */
-  | { kind: "state"; machine: string; state: string };
+  | { kind: "state"; machine: string; state: string; from?: Origin };
 
-export type NodeKind = "feature" | "actor" | "machine" | "state" | "marker" | "drift";
+/** The origin a Feature, Machine or State level remembers; undefined for the other levels. */
+export const originOf = (level: Level): Origin | undefined => (level.kind === "feature" || level.kind === "machine" || level.kind === "state" ? level.from : undefined);
+
+/** The level with `from` set, or without the key when there is no origin. */
+export function withOrigin<T extends Level>(level: T, from: Origin | undefined): T {
+  const { from: _drop, ...rest } = level as T & { from?: Origin };
+  return (from ? { ...rest, from } : rest) as T;
+}
+
+export type NodeKind = "feature" | "actor" | "machine" | "state" | "marker" | "drift" | "whole";
 
 export interface GNode {
   /** Unique within one graph: `f:checkout`, `a:user`, `m:order`, `s:Paid`, `i:root`, `d:0003`. */
@@ -35,6 +52,10 @@ export interface GNode {
   drifts: string[];
   /** ID of the Drift a ghost node stands for. */
   drift: string | null;
+  /** An Actor of the root whose Events reach no Machine: drawn dimmed, with no drill button. */
+  inert: boolean;
+  /** An Actor of the root that can be opened. */
+  opens: boolean;
 }
 
 export type EdgeKind = "flow" | "transition" | "initial" | "drift";
@@ -71,6 +92,8 @@ export interface GraphSpec {
 export const sameLevel = (a: Level, b: Level): boolean =>
   a.kind === b.kind &&
   (a.kind === "system" ||
+    a.kind === "whole" ||
+    (a.kind === "actor" && b.kind === "actor" && a.actor === b.actor) ||
     (a.kind === "feature" && b.kind === "feature" && a.feature === b.feature) ||
     (a.kind === "machine" && b.kind === "machine" && a.machine === b.machine) ||
     (a.kind === "state" && b.kind === "state" && a.machine === b.machine && a.state === b.state));
@@ -89,6 +112,8 @@ export function node(init: Partial<GNode> & Pick<GNode, "id" | "kind" | "label">
     expanded: false,
     drifts: [],
     drift: null,
+    inert: false,
+    opens: false,
     ...init,
   };
 }
@@ -102,7 +127,7 @@ export function aggregateChange(changes: Iterable<Change>): Change {
 }
 
 /** Nodes that carry the drill-in button (and, for States with sub-States, the expand button) on their right. */
-export const hasHandles = (n: GNode): boolean => n.kind === "feature" || n.kind === "machine" || (n.kind === "state" && n.children > 0 && !n.external);
+export const hasHandles = (n: GNode): boolean => n.kind === "feature" || n.kind === "machine" || n.kind === "whole" || (n.kind === "actor" && n.opens) || (n.kind === "state" && n.children > 0 && !n.external);
 
 /** States get the expand button only where they can be drawn in place: at Machine level. */
 export const canExpand = (graph: GraphSpec, n: GNode): boolean => graph.level.kind === "machine" && n.kind === "state" && n.children > 0 && !n.external;

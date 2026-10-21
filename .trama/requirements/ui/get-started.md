@@ -20,4 +20,5 @@ description: "Usa quando mostri Get Started, Start from Scratch, Import from Cod
 - Il dialogo modale delle skill personalizzate dice «Trama did not initialize this project.», con il dettaglio che elenca i file in conflitto, e ha un solo pulsante, «Overwrite and Initialize», più l'annullamento dell'editor.
 - Senza nessuna cartella aperta, aprire Trama mostra il messaggio informativo «Trama: open a folder to use Trama.»; l'inizializzazione mostra l'errore «Trama: open a folder first, then initialize it.».
 - Ogni altra azione in un'area di lavoro senza progetto mostra «Trama: this workspace has no .trama/ project. Open Trama to set it up.».
+- Quando il controllo all'apertura di Trama ha aggiornato qualcosa compare il messaggio informativo «Trama: updated the agent skills to this version.», senza pulsanti e senza elenco dei file; quando non ha cambiato nulla non compare niente. Se fallisce compare il messaggio di errore «Trama: could not update the agent skills: <motivo>.», senza pulsanti. Il comando `Trama: Update Agent Skills` mantiene il suo resoconto, anche quando non cambia nulla.
 - Tutti questi testi sono in inglese e non seguono `trama.language`.

@@ -12,7 +12,6 @@ import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
 import type { QuestionSession } from "./question-session";
 import { receiveCursorHook } from "./cursor";
-import { receiveCopilotHook } from "./copilot-chat";
 import { awaitAutopilotResume, clearAutopilotFailure, clearSendReservations, followsAgent, localProjectJobs, receiveCoordinatorMessage, receiveAgentIdle, recordSkippedDrift, setJobsVerified } from "./drift-resolution";
 import { noteCommandSeen } from "./terminal-activity";
 interface WindowRoundService {
@@ -212,7 +211,6 @@ export class EditorQuestions implements vscode.Disposable {
           }
         },
         onCursorHook: receiveCursorHook,
-        onCopilotHook: receiveCopilotHook,
         onActivity: (origin) => {
           noteCommandSeen(origin);
         },

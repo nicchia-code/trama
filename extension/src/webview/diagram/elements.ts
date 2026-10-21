@@ -1,6 +1,7 @@
 import type { Change, MergedMachine, MergedState, MergedTransition } from "../../../../src/core/merge";
 import type { GraphSpec, Level } from "./graph";
 import { REQUIREMENTS_PREFIX, parseTarget, sectionMatches } from "../requirements/logic";
+import { actorReach } from "./overview";
 import { type Scene, type SceneActor, type SceneFeature, findMergedState, pathTo } from "./scene";
 
 export type EventOwner = { kind: "machine"; machine: MergedMachine } | { kind: "actor"; actor: SceneActor };
@@ -65,21 +66,28 @@ export function resolveElement(scene: Scene, ref: string): Element | null {
   return { kind: "transition", ref: `${machine.id}/${state.name}/${owner}.${event}`, machine, state, owner, event, transitions };
 }
 
+/** An Actor opens at its own level when its Events reach a Machine; otherwise a link to it goes to the root. */
+const actorHome = (scene: Scene, actor: string): Level => (actorReach(scene, actor).length > 0 ? { kind: "actor", actor } : { kind: "system" });
+
 /** The level a reference is reached at when nothing else says otherwise. */
-export function homeLevel(element: Element): Level {
+export function homeLevel(scene: Scene, element: Element): Level {
   switch (element.kind) {
     case "feature":
+      return { kind: "feature", feature: element.feature.id };
     case "actor":
-      return { kind: "system" };
+      return actorHome(scene, element.actor.id);
     case "machine":
       return { kind: "feature", feature: element.machine.feature };
     case "state":
     case "transition":
       return { kind: "machine", machine: element.machine.id };
     case "event":
-      return element.owner.kind === "actor" ? { kind: "system" } : { kind: "feature", feature: element.owner.machine.feature };
+      return element.owner.kind === "actor" ? actorHome(scene, element.owner.actor.id) : { kind: "feature", feature: element.owner.machine.feature };
   }
 }
+
+/** Whether a link to the element always goes to its level, even when the level drawn has a node for it. */
+export const alwaysOpens = (element: Element): boolean => element.kind === "feature" || element.kind === "actor" || (element.kind === "event" && element.owner.kind === "actor");
 
 /** Where an element is found in a graph: a node, the whole level (it is what the level shows), or nowhere. */
 export type Anchor = { node: string } | "self" | null;
@@ -106,7 +114,9 @@ export function anchorIn(graph: GraphSpec, element: Element): Anchor {
   const owner = element.kind === "event" ? element.owner : null;
 
   switch (level.kind) {
-    case "system": {
+    case "system":
+    case "whole":
+    case "actor": {
       if (element.kind === "actor") return has(`a:${element.actor.id}`);
       if (owner?.kind === "actor") return has(`a:${owner.actor.id}`);
       if (element.kind === "feature") return has(`f:${element.feature.id}`);

@@ -45,8 +45,28 @@ test("an expanded State is a box around its sub-States, and edges start and end 
   }
 });
 
-test("Actors sit in the first layer of the System level", async () => {
+test("the root is a grid of nodes with no arrows: Whole System first, then the Actors in Model order", async () => {
   const graph = buildGraph(scene, { kind: "system" }, new Map());
+  const layout = await layoutGraph(graph);
+  expect(graph.edges).toEqual([]);
+  const ids = graph.nodes.map((n) => n.id);
+  expect(ids).toEqual(["w:system", "a:courier", "a:stripe", "a:user", "a:warehouse"]);
+  const boxes = ids.map((id) => layout.nodes.get(id) as { x: number; y: number; width: number; height: number });
+  // Three columns for five nodes: the first row holds the first three in order, the second row the others.
+  const middle = (b: (typeof boxes)[number] | undefined) => (b?.y ?? 0) + (b?.height ?? 0) / 2;
+  expect(middle(boxes[0])).toBe(middle(boxes[1]));
+  expect(middle(boxes[1])).toBe(middle(boxes[2]));
+  expect(middle(boxes[3])).toBeGreaterThan(middle(boxes[0]));
+  expect(boxes[0]?.x).toBeLessThan(boxes[1]?.x ?? 0);
+  expect(boxes[1]?.x).toBeLessThan(boxes[2]?.x ?? 0);
+  expect((boxes[3]?.x ?? 0) + (boxes[3]?.width ?? 0) / 2).toBeCloseTo((boxes[0]?.x ?? 0) + (boxes[0]?.width ?? 0) / 2, 5);
+  for (const [i, a] of boxes.entries()) for (const b of boxes.slice(i + 1)) expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true);
+});
+
+test("Actors sit in the first layer of Whole System and of an Actor level", async () => {
+  const actorLevel = await layoutGraph(buildGraph(scene, { kind: "actor", actor: "user" }, new Map()));
+  expect(actorLevel.nodes.get("a:user")?.x).toBeLessThan(actorLevel.nodes.get("f:checkout")?.x as number);
+  const graph = buildGraph(scene, { kind: "whole" }, new Map());
   const layout = await layoutGraph(graph);
   const feature = layout.nodes.get("f:checkout")?.x as number;
   for (const id of ["a:user", "a:stripe", "a:courier", "a:warehouse"]) expect(layout.nodes.get(id)?.x).toBeLessThan(feature);

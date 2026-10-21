@@ -10,7 +10,7 @@ export type JobKind = "run" | "resolve" | "scan";
  * Where a job runs: a terminal or a chat. A held job has none: it keeps the project in its state between two steps (a
  * sequence of Runs between its Runs, or an automatic collection from its start until its Run is created), until `endHeldJob`.
  */
-export type JobPlace = { terminal: string } | { chat: "cursor" | "copilot" | "other" } | { held: true };
+export type JobPlace = { terminal: string } | { chat: "cursor" } | { held: true };
 
 export type JobOrigin = "manual" | "automatic";
 export type DriftAutopilotMode = DelegationMode;
@@ -38,7 +38,7 @@ const jobKinds = new Map<string, JobKind>();
 const knownJobOrigins = new Map<string, JobOrigin>();
 const pendingChecks = new Map<string, Record<string, unknown>>();
 const listeners = new Set<() => void>();
-/** The open Drifts an agent filed and the Proposals it delivered in a turn it has not finished, by project and then by `drift:<id>` or `proposal:<id>`, with the holder of that turn: its terminal, or "cursor" or "editor" for chat. Only in memory: a window that opens later forgets them. */
+/** The open Drifts an agent filed and the Proposals it delivered in a turn it has not finished, by project and then by `drift:<id>` or `proposal:<id>`, with the holder of that turn: its terminal, or "cursor" for Cursor's chat. Only in memory: a window that opens later forgets them. */
 const filedWork = new Map<string, Map<string, string>>();
 
 const changed = () => {
@@ -119,27 +119,9 @@ export function releaseFiledWork(root: string, holder: string): void {
   if (released) changed();
 }
 
-/** Copilot Trama conversations with a turn in progress in this window, by project: a prompt opens a turn, its Stop closes it. Only in memory. */
-const copilotTurns = new Map<string, Set<string>>();
-
-/** A Copilot Trama conversation started a turn in the project at `root` in this window. */
-export function copilotTurnStarted(root: string, conversation: string): void {
-  const key = projectRootKey(root);
-  const open = copilotTurns.get(key) ?? new Set<string>();
-  open.add(conversation);
-  copilotTurns.set(key, open);
-}
-
-/** The turn of a Copilot Trama conversation in the project at `root` ended in this window. */
-export function copilotTurnEnded(root: string, conversation: string): void {
-  copilotTurns.get(projectRootKey(root))?.delete(conversation);
-}
-
-/** Whether a filing message's holder is an agent this window follows: a Trama terminal it started with hooks, a chat with a Trama job in progress here, or a Copilot Trama conversation in progress here for "editor". Copilot gives its agent no identity, so an open Copilot turn is what makes a Drift filed from Copilot chat held here. Only such a window holds the Drift, Proposal or Task. */
+/** Whether a filing message's holder is an agent this window follows: a Trama terminal it started with hooks, or Cursor's chat with a Trama job in progress here. Only such a window holds the Drift, Proposal or Task. */
 export function followsAgent(root: string, holder: string): boolean {
-  if (holder === "editor" && (copilotTurns.get(projectRootKey(root))?.size ?? 0) > 0) return true;
-  if (holder === "cursor" || holder === "editor")
-    return localProjectJobs(root).some((job) => "chat" in job.place && (holder === "cursor") === (job.place.chat === "cursor"));
+  if (holder === "cursor") return localProjectJobs(root).some((job) => "chat" in job.place && job.place.chat === "cursor");
   return isHooked(holder);
 }
 
@@ -214,8 +196,8 @@ export function receiveCoordinatorMessage(message: Record<string, unknown>): voi
   const location = place as Record<string, unknown>;
   const jobPlace: JobPlace | undefined = typeof location["terminal"] === "string" && location["terminal"] !== ""
     ? { terminal: location["terminal"] }
-    : location["chat"] === "cursor" || location["chat"] === "copilot" || location["chat"] === "other"
-      ? { chat: location["chat"] }
+    : location["chat"] === "cursor"
+      ? { chat: "cursor" }
       : location["held"] === true ? { held: true } : undefined;
   if (!jobPlace) return;
   knownJobs.add(key);
@@ -638,7 +620,7 @@ export function startJob(
   advisor = false,
 ): string | undefined {
   const job: Job = { id, kind, root, place, origin, windowId, ...(advisor ? { advisor } : {}) };
-  if ("chat" in place && place.chat !== "other") {
+  if ("chat" in place) {
     const pending = takePendingChat(root, place.chat, sentAfter);
     if (pending?.ended) return undefined;
     job.conversation = pending?.conversation;
@@ -659,7 +641,7 @@ export function startJob(
 
 let chatEventSequence = 0;
 
-export function chatJobSendStarted(root: string, chat: "cursor" | "copilot"): number {
+export function chatJobSendStarted(root: string, chat: "cursor"): number {
   for (let i = pendingChats.length - 1; i >= 0; i--) {
     const pending = pendingChats[i];
     if (pending !== undefined && pending.root === root && pending.chat === chat && pending.sequence <= chatEventSequence)
@@ -706,17 +688,17 @@ export const endUnsentJob = (root: string, id: string): Job[] =>
 const seenChats = new Set<string>();
 
 /** A conversation event that arrived while its send was still being registered, oldest first. */
-const pendingChats: { root: string; chat: "cursor" | "copilot"; conversation: string; sequence: number; ended: boolean }[] = [];
+const pendingChats: { root: string; chat: "cursor"; conversation: string; sequence: number; ended: boolean }[] = [];
 
 /** Takes the oldest pending conversation for this chat and project that started after its send. */
-function takePendingChat(root: string, chat: "cursor" | "copilot", sentAfter: number): { conversation: string; ended: boolean } | undefined {
+function takePendingChat(root: string, chat: "cursor", sentAfter: number): { conversation: string; ended: boolean } | undefined {
   const taken = pendingChats.find((p) => p.root === root && p.chat === chat && p.sequence > sentAfter);
   if (taken !== undefined) pendingChats.splice(pendingChats.indexOf(taken), 1);
   return taken;
 }
 
 /** A chat conversation's first Trama prompt binds the oldest unbound job for that chat and project. */
-function bindChatJobFor(chat: "cursor" | "copilot", root: string, conversation: string): void {
+function bindChatJobFor(chat: "cursor", root: string, conversation: string): void {
   const key = `${chat}\n${root}\n${conversation}`;
   if (seenChats.has(key)) return;
   seenChats.add(key);
@@ -734,13 +716,9 @@ function bindChatJobFor(chat: "cursor" | "copilot", root: string, conversation: 
 /** A new Cursor chat conversation belongs to the oldest Cursor chat job not yet bound. */
 export const bindChatJob = (root: string, conversation: string): void => bindChatJobFor("cursor", root, conversation);
 
-/** A new Copilot conversation belongs to the oldest Copilot chat job not yet bound. */
-export const bindCopilotChatJob = (root: string, conversation: string): void => bindChatJobFor("copilot", root, conversation);
-
 export const endChatJobs = (root: string, conversation: string, abnormal?: string): Job[] => endChatJobsFor("cursor", root, conversation, abnormal);
-export const endCopilotChatJobs = (root: string, conversation: string): Job[] => endChatJobsFor("copilot", root, conversation);
-/** The end of one Cursor or Copilot conversation ends only its own bound job; `abnormal` says why it was not a normal end. */
-function endChatJobsFor(chat: "cursor" | "copilot", root: string, conversation: string, abnormal?: string): Job[] {
+/** The end of one Cursor conversation ends only its own bound job; `abnormal` says why it was not a normal end. */
+function endChatJobsFor(chat: "cursor", root: string, conversation: string, abnormal?: string): Job[] {
   const pending = pendingChats.find((p) => p.chat === chat && p.root === root && p.conversation === conversation);
   if (pending !== undefined) pending.ended = true;
   return endWhere((j) => j.root === root && j.conversation === conversation && "chat" in j.place && j.place.chat === chat, abnormal);

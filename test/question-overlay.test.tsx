@@ -25,7 +25,7 @@ function setup(questions: Question[]) {
   let state: QuestionRoundState = startRound(questions);
   const delivered: unknown[] = [];
   const actions: string[] = [];
-  const view = (): QuestionRoundView => ({ id: 1, agent: "Claude", state });
+  const view = (): QuestionRoundView => ({ id: 1, agent: "omp", state });
   const ui = render(<QuestionOverlay round={view()} openLink={() => {}} post={onPost} />);
   function onPost(message: ToHost) {
     if (message.type !== "questionAction") return;
@@ -47,7 +47,7 @@ const click = (name: string | RegExp) => act(() => void fireEvent.click(screen.g
 test("the dialog has its title, the agent and the position, and the focus is on the text of the question", () => {
   setup([q("one"), q("two")]);
   expect(screen.getByRole("dialog", { name: "Questions from the agent" })).not.toBeNull();
-  expect(screen.getByText("Claude")).not.toBeNull();
+  expect(screen.getByText("omp")).not.toBeNull();
   expect(screen.getByText("Question 1 of 2")).not.toBeNull();
   expect(document.activeElement).toBe(screen.getByRole("heading", { name: "one?" }));
 });

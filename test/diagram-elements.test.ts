@@ -45,10 +45,10 @@ test("references that point at nothing resolve to null", () => {
 });
 
 test("each kind of element is reached at the level that shows it", () => {
-  const home = (ref: string) => homeLevel(resolveElement(scene, ref) as never);
-  expect(home("checkout")).toEqual({ kind: "system" });
-  expect(home("user")).toEqual({ kind: "system" });
-  expect(home("user.CANCEL")).toEqual({ kind: "system" });
+  const home = (ref: string) => homeLevel(scene, resolveElement(scene, ref) as never);
+  expect(home("checkout")).toEqual({ kind: "feature", feature: "checkout" });
+  expect(home("user")).toEqual({ kind: "actor", actor: "user" });
+  expect(home("user.CANCEL")).toEqual({ kind: "actor", actor: "user" });
   expect(home("order")).toEqual({ kind: "feature", feature: "checkout" });
   expect(home("order.CONFIRMED")).toEqual({ kind: "feature", feature: "checkout" });
   expect(home("order/Paid")).toEqual({ kind: "machine", machine: "order" });
@@ -81,7 +81,8 @@ test("a Transition is selected through its edge, from the State that declares it
 });
 
 test("elements are anchored at every level that shows them, or the level itself", () => {
-  const system = graphAt({ kind: "system" });
+  const system = graphAt({ kind: "whole" });
+  const actor = graphAt({ kind: "actor", actor: "user" });
   const feature = graphAt({ kind: "feature", feature: "checkout" });
   const machine = graphAt({ kind: "machine", machine: "payment" });
   const state = graphAt({ kind: "state", machine: "order", state: "Paid" });
@@ -89,6 +90,10 @@ test("elements are anchored at every level that shows them, or the level itself"
 
   expect(anchorIn(system, el("order/Paid/user.CANCEL"))).toEqual({ node: "f:checkout" });
   expect(anchorIn(system, el("user.CANCEL"))).toEqual({ node: "a:user" });
+  expect(anchorIn(actor, el("user"))).toEqual({ node: "a:user" });
+  expect(anchorIn(actor, el("checkout"))).toEqual({ node: "f:checkout" });
+  expect(anchorIn(actor, el("order/Paid"))).toEqual({ node: "f:checkout" });
+  expect(anchorIn(actor, el("stripe"))).toBeNull();
   expect(anchorIn(feature, el("order/Paid"))).toEqual({ node: "m:order" });
   expect(anchorIn(feature, el("checkout"))).toBe("self");
   expect(anchorIn(feature, el("user"))).toEqual({ node: "a:user" });
@@ -107,6 +112,27 @@ test("the breadcrumb leads from System down to the State, each part to its own l
   expect(breadcrumb(scene, { kind: "system" }).map((c) => c.label)).toEqual(["System"]);
 });
 
+test("the breadcrumb of a Feature remembers the Actor or Whole System it was opened from, down to the State", () => {
+  const fromActor = breadcrumb(scene, { kind: "state", machine: "order", state: "Paid", from: { kind: "actor", actor: "user" } });
+  expect(fromActor.map((c) => c.label)).toEqual(["System", "user", "checkout", "order", "Paid"]);
+  expect(fromActor.map((c) => c.level.kind)).toEqual(["system", "actor", "feature", "machine", "state"]);
+  expect(fromActor[2]?.level).toEqual({ kind: "feature", feature: "checkout", from: { kind: "actor", actor: "user" } });
+  const fromWhole = breadcrumb(scene, { kind: "feature", feature: "checkout", from: { kind: "whole" } });
+  expect(fromWhole.map((c) => c.label)).toEqual(["System", "Whole System", "checkout"]);
+  expect(fromWhole[1]?.level).toEqual({ kind: "whole" });
+  expect(breadcrumb(scene, { kind: "actor", actor: "user" }).map((c) => c.label)).toEqual(["System", "user"]);
+  expect(breadcrumb(scene, { kind: "whole" }).map((c) => c.label)).toEqual(["System", "Whole System"]);
+});
+
+test("an Actor level falls back to the root when the Actor is gone or reaches no Machine; a Feature opened from it stays without the Actor", () => {
+  expect(validLevel(scene, { kind: "actor", actor: "user" })).toEqual({ kind: "actor", actor: "user" });
+  expect(validLevel(scene, { kind: "actor", actor: "gone" })).toEqual({ kind: "system" });
+  expect(validLevel(scene, { kind: "feature", feature: "checkout", from: { kind: "actor", actor: "gone" } })).toEqual({ kind: "feature", feature: "checkout" });
+  expect(validLevel(scene, { kind: "machine", machine: "order", from: { kind: "actor", actor: "gone" } })).toEqual({ kind: "machine", machine: "order" });
+  expect(validLevel(scene, { kind: "feature", feature: "checkout", from: { kind: "whole" } })).toEqual({ kind: "feature", feature: "checkout", from: { kind: "whole" } });
+  expect(validLevel(scene, { kind: "whole" })).toEqual({ kind: "whole" });
+});
+
 test("levels the Scene no longer has fall back to the closest one that exists", () => {
   expect(validLevel(scene, { kind: "feature", feature: "gone" })).toEqual({ kind: "system" });
   expect(validLevel(scene, { kind: "machine", machine: "gone" })).toEqual({ kind: "system" });
@@ -120,14 +146,17 @@ test("levels the Scene no longer has fall back to the closest one that exists", 
 
 test("a Scan started at Feature or Machine level is limited to that Feature", () => {
   expect(scanFeature(scene, { kind: "system" })).toBeUndefined();
+  expect(scanFeature(scene, { kind: "whole" })).toBeUndefined();
+  expect(scanFeature(scene, { kind: "actor", actor: "user" })).toBeUndefined();
   expect(scanFeature(scene, { kind: "feature", feature: "checkout" })).toBe("checkout");
   expect(scanFeature(scene, { kind: "machine", machine: "order" })).toBe("checkout");
   expect(scanFeature(scene, { kind: "state", machine: "order", state: "Paid" })).toBe("checkout");
 });
 
 test("only Features, Machines and States with sub-States lead further down", () => {
-  expect(drillTarget(scene, graphAt({ kind: "system" }), "f:checkout")).toEqual({ kind: "feature", feature: "checkout" });
-  expect(drillTarget(scene, graphAt({ kind: "system" }), "a:user")).toBeNull();
+  expect(drillTarget(scene, graphAt({ kind: "whole" }), "f:checkout")).toEqual({ kind: "feature", feature: "checkout", from: { kind: "whole" } });
+  expect(drillTarget(scene, graphAt({ kind: "actor", actor: "user" }), "f:checkout")).toEqual({ kind: "feature", feature: "checkout", from: { kind: "actor", actor: "user" } });
+  expect(drillTarget(scene, graphAt({ kind: "whole" }), "a:user")).toBeNull();
   expect(drillTarget(scene, graphAt({ kind: "feature", feature: "checkout" }), "m:order")).toEqual({ kind: "machine", machine: "order" });
   const order = graphAt({ kind: "machine", machine: "order" });
   expect(drillTarget(scene, order, "s:Paid")).toEqual({ kind: "state", machine: "order", state: "Paid" });
@@ -151,7 +180,7 @@ test("from a Feature level a Machine of another Feature opens that Feature, and 
   expect(drillTarget(two, atB, "m:m2")).toEqual({ kind: "machine", machine: "m2" });
   const m1 = resolveElement(two, "m1") as never;
   expect(showsElement(atB, m1)).toBe(false);
-  expect(homeLevel(m1)).toEqual({ kind: "feature", feature: "a" });
+  expect(homeLevel(two, m1)).toEqual({ kind: "feature", feature: "a" });
   expect(selectionFor(buildGraph(two, { kind: "feature", feature: "a" }, none), m1)).toBe("m:m1");
 });
 
@@ -183,7 +212,7 @@ test("a State of another Machine, reached from a Machine's level, opens that Mac
   expect(idle).not.toBeNull();
   if (!idle) return;
   expect(showsElement(order, idle)).toBe(false);
-  const level = homeLevel(idle);
+  const level = homeLevel(scene, idle);
   expect(level).toEqual({ kind: "machine", machine: "payment" });
   const payment = buildGraph(scene, level, none);
   expect(showsElement(payment, idle)).toBe(true);

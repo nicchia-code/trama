@@ -1,11 +1,12 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { run } from "../../../src/cli/main";
+import { refreshProjectSkills } from "../../../src/cli/skill-refresh";
 import { writeCursorHooks } from "../../../src/core/cursor-chat";
 import { TramaError, UsageError } from "../../../src/core/errors";
-import { TRAMA_DIR, type Project, projectAt, writeFileEnsuringDir } from "../../../src/core/store";
+import { TRAMA_DIR, type Project, projectAt, readTextLf, writeFileEnsuringDir } from "../../../src/core/store";
 import { configuredModels, configuredSkillsDir } from "./agent";
 import { chatSubAgentFile } from "./chat-sub-agent";
 import { bundledTrama, cursorHooksFile, isCursor } from "./cursor";
@@ -15,6 +16,9 @@ const fileFolders = () => (vscode.workspace.workspaceFolders ?? []).filter((f) =
 
 /** What every action other than setting a project up says in a workspace without `.trama/`. */
 export const NO_PROJECT_WARNING = "Trama: this workspace has no .trama/ project. Open Trama to set it up.";
+
+/** What the check when Trama opens says when it brought the skills in line with this version. */
+const SKILLS_UPDATED = "Trama: updated the agent skills to this version.";
 
 /** The project containing a file, or the first Trama workspace folder when no file is given. */
 export function findProject(uri?: vscode.Uri): Project | undefined {
@@ -37,44 +41,53 @@ function installCursorHooks(): void {
   }
 }
 
-/** Writes Copilot hooks to extension user storage and registers the file in user settings. */
-export async function installCopilotHooks(storageUri: vscode.Uri, windows = process.platform === "win32"): Promise<void> {
-  if (isCursor()) return;
-  const program = bundledTrama();
-  if (!program) return;
-  const file = vscode.Uri.joinPath(storageUri, COPILOT_HOOKS_FILE);
-  const command = `"${program}" hook copilot`;
-  const entry = { type: "command", command, ...(windows ? { windows: `& "${program}" hook copilot` } : {}) };
-  const contents = JSON.stringify({ hooks: { UserPromptSubmit: [entry], Stop: [entry], PreToolUse: [entry] } });
-  const storagePath = storageUri.fsPath;
-  try {
-    await vscode.workspace.fs.createDirectory(storageUri);
-    await vscode.workspace.fs.writeFile(file, Buffer.from(`${contents}\n`));
-    const config = vscode.workspace.getConfiguration("chat");
-    const existing = config.inspect<Record<string, boolean>>("hookFilesLocations")?.globalValue ?? {};
-    await config.update("hookFilesLocations", { ...existing, [file.fsPath]: true }, vscode.ConfigurationTarget.Global);
-  } catch (err) {
-    void vscode.window.showErrorMessage(`Trama: could not install Copilot's hooks in ${storagePath}: ${err instanceof Error ? err.message : String(err)}`);
+/**
+ * Removes what earlier versions installed for Copilot's chat and returns what it took out: the user definition of
+ * trama-analysis (in every editor) and, outside Cursor, the hooks file in the extension's global storage with only its
+ * entry in `chat.hookFilesLocations` (other entries stay; an absent entry leaves the setting alone).
+ */
+export async function removeCopilotPieces(storageUri?: vscode.Uri): Promise<string[]> {
+  const removed: string[] = [];
+  const agent = join(homedir(), ".copilot", "agents", "trama-analysis.agent.md");
+  if (existsSync(agent)) {
+    rmSync(agent);
+    removed.push(`Copilot's sub-agent definition ${agent}`);
   }
+  if (isCursor() || !storageUri) return removed;
+  const file = join(storageUri.fsPath, COPILOT_HOOKS_FILE);
+  if (existsSync(file)) {
+    rmSync(file);
+    removed.push(`Copilot's hooks file ${file}`);
+  }
+  const config = vscode.workspace.getConfiguration("chat");
+  const existing = config.inspect<Record<string, boolean>>("hookFilesLocations")?.globalValue;
+  if (existing && Object.hasOwn(existing, file)) {
+    const { [file]: _entry, ...others } = existing;
+    await config.update("hookFilesLocations", others, vscode.ConfigurationTarget.Global);
+    removed.push(`the Copilot hooks entry ${file} from chat.hookFilesLocations`);
+  }
+  return removed;
 }
 
-/** Installs the hooks for the active editor. */
-export async function installEditorHooks(storageUri: vscode.Uri): Promise<void> {
+/** Installs Cursor's hooks; other editors have none. */
+export async function installEditorHooks(): Promise<void> {
   if (isCursor()) installCursorHooks();
-  else await installCopilotHooks(storageUri);
 }
 
 /**
- * Writes the user definition of trama-analysis for the active editor's chat, whatever `trama.agent` is. It is always
- * rewritten. Returns the file and, when it could not be written, why: the caller reports it, and the rest goes on.
+ * Writes the user definition of trama-analysis for Cursor's chat, whatever `trama.agent` is; nothing outside Cursor. With
+ * `always` it is rewritten; without, only when its content differs. Returns the file, whether it was written and, when it
+ * could not be written, why: the caller reports it, and the rest goes on.
  */
-function installChatSubAgent(): { path: string; error?: string } {
-  const { path, contents } = chatSubAgentFile(isCursor(), configuredModels().scan, homedir());
+function installChatSubAgent(always = true): { path: string; written: boolean; error?: string } | undefined {
+  if (!isCursor()) return undefined;
+  const { path, contents } = chatSubAgentFile(configuredModels().scan, homedir());
   try {
+    if (!always && existsSync(path) && readTextLf(path) === contents) return { path, written: false };
     writeFileEnsuringDir(path, contents);
-    return { path };
+    return { path, written: true };
   } catch (err) {
-    return { path, error: err instanceof Error ? err.message : String(err) };
+    return { path, written: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -114,7 +127,7 @@ async function confirmScratch(root: string): Promise<InitChoice | undefined> {
  * an explicit modal confirmation. Installs editor hooks after initialization. Returns the new Project and the choice
  * carried out, or undefined when nothing was created.
  */
-export async function initializeProject(choice: InitChoice, storageUri?: vscode.Uri): Promise<{ project: Project; choice: InitChoice } | undefined> {
+export async function initializeProject(choice: InitChoice): Promise<{ project: Project; choice: InitChoice } | undefined> {
   const root = await pickFolder();
   if (root === undefined) return undefined;
   // A folder that is already a project keeps its Model, Requirements and skills: no warning and no initialization, only the choice's next step remains.
@@ -126,8 +139,8 @@ export async function initializeProject(choice: InitChoice, storageUri?: vscode.
     try {
       run(["--root", root, "project", "new", "--input", JSON.stringify({ skillsDir, ...(force ? { force: true } : {}) })], root);
       const subAgent = installChatSubAgent();
-      if (subAgent.error !== undefined) void vscode.window.showErrorMessage(`Trama: could not write the trama-analysis sub-agent in ${subAgent.path}: ${subAgent.error}`);
-      if (storageUri) await installEditorHooks(storageUri);
+      if (subAgent?.error !== undefined) void vscode.window.showErrorMessage(`Trama: could not write the trama-analysis sub-agent in ${subAgent.path}: ${subAgent.error}`);
+      await installEditorHooks();
       return { project: projectAt(root), choice: carried };
     } catch (err) {
       if (!(err instanceof TramaError || err instanceof UsageError)) throw err;
@@ -144,14 +157,33 @@ export async function initializeProject(choice: InitChoice, storageUri?: vscode.
   }
 }
 
-/** Replaces the project's skills and rewrites the active editor's hooks for this version's program. */
+/** Replaces the project's skills, rewrites Cursor's sub-agent and hooks for this version's program, and removes what Trama installed for Copilot. */
 export async function updateSkills(project: Project, storageUri?: vscode.Uri): Promise<void> {
   const skillsDir = configuredSkillsDir();
   const { out } = run(["--root", project.root, "project", "edit", "--input", JSON.stringify({ skillsDir })], project.root);
   const subAgent = installChatSubAgent();
   const shown = ["Deleted ", "Created ", "Converted ", "Left ", "Requirement skills: ", "Switched ", "Installed omp", "Updated ", "The trama-specs skill was not updated"];
   const report = out.split("\n").filter((line, i) => i === 0 || shown.some((start) => line.startsWith(start)));
-  report.push(subAgent.error === undefined ? `Chat sub-agent definition written in ${subAgent.path}.` : `Could not write the chat sub-agent definition in ${subAgent.path}: ${subAgent.error}.`);
+  if (subAgent) report.push(subAgent.error === undefined ? `Chat sub-agent definition written in ${subAgent.path}.` : `Could not write the chat sub-agent definition in ${subAgent.path}: ${subAgent.error}.`);
+  for (const piece of await removeCopilotPieces(storageUri)) report.push(`Removed ${piece}.`);
   void vscode.window.showInformationMessage(`Trama: ${report.join(" ")}`);
-  if (storageUri) await installEditorHooks(storageUri);
+  await installEditorHooks();
+}
+
+/**
+ * The check when Trama opens: the same steps as Update skills on the same files, without moving single-file Areas to
+ * Area folders or creating the starting Areas, and without Cursor's hooks. A file is written only when its content
+ * differs. Says so only when it wrote or deleted something (a Copilot piece removed counts); a failure is shown, and
+ * the next opening checks again.
+ */
+export async function checkSkills(project: Project, storageUri?: vscode.Uri): Promise<void> {
+  try {
+    const refresh = refreshProjectSkills(project, configuredSkillsDir(), false);
+    const subAgent = installChatSubAgent(false);
+    if (subAgent?.error !== undefined) throw new Error(`could not write ${subAgent.path}: ${subAgent.error}`);
+    const removed = await removeCopilotPieces(storageUri);
+    if (refresh.updated || subAgent?.written || removed.length > 0) void vscode.window.showInformationMessage(SKILLS_UPDATED);
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Trama: could not update the agent skills: ${err instanceof Error ? err.message : String(err)}.`);
+  }
 }

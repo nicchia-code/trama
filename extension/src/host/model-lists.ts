@@ -122,13 +122,3 @@ export function ompModels(ompPath: string, timeoutMs = 15_000, env: NodeJS.Proce
   });
   return promise;
 }
-
-/** The names Copilot's chat takes for a model role: the plain name for the `copilot` vendor, else `name (vendor)`. */
-export function copilotSuggestions(models: readonly { name: string; vendor: string }[]): ModelSuggestion[] {
-  return uniqueSuggestions(
-    models.map((model) => {
-      const value = model.vendor === "copilot" ? model.name : `${model.name} (${model.vendor})`;
-      return { value, label: value };
-    }),
-  );
-}

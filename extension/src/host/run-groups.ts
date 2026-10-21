@@ -42,7 +42,7 @@ export function planRuns(tasks: readonly PlanTask[], applied: readonly AppliedMo
   return [...groups].map(([model, group]) => {
     if (group.onRole || group.proposal === undefined) {
       const exclude = applied.filter((entry) => entry.run.model !== role).map((entry) => entry.id);
-      return { run: { model: role, from: "trama.execution" }, group: exclude.length > 0 ? { exclude } : {}, tasks: group.tasks };
+      return { run: { model: role }, group: exclude.length > 0 ? { exclude } : {}, tasks: group.tasks };
     }
     const include = applied.filter((entry) => entry.run.model === model).map((entry) => entry.id);
     return { run: group.proposal, group: { include, model }, tasks: group.tasks };

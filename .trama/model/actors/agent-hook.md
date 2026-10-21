@@ -1,6 +1,6 @@
 # Agent hook
 
-L'hook che un agente del terminale carica per dire a Trama quando ha finito, invece di lasciarglielo indovinare dal suo comando. Ce l'hanno entrambi gli agenti del terminale: omp carica il modulo di Trama con `--hook` nel comando che Trama scrive nel terminale, Claude Code riceve i suoi hook nello stesso comando di avvio. In entrambi i casi l'hook avvisa l'editor con `trama hook idle`. Riguarda solo i terminali che Trama ha avviato: un agente avviato a mano dal developer non ha l'hook di Trama.
+L'hook che l'agente del terminale carica per dire a Trama quando ha finito, invece di lasciarglielo indovinare dal suo comando. L'agente del terminale è omp: carica il modulo di Trama con `--hook` nel comando che Trama scrive nel terminale, e l'hook avvisa l'editor con `trama hook idle`. Riguarda solo i terminali che Trama ha avviato: un agente avviato a mano dal developer non ha l'hook di Trama.
 
 L'agente carica l'hook anche in ogni suo sotto-agente, ma solo l'agente principale dice di aver finito: un sotto-agente che finisce non dice nulla. L'hook non manda segnali di vita: non c'è più una quiete da far ripartire.
 

@@ -1,7 +1,9 @@
-import { SUB_AGENTS } from "../../../src/core/sub-agents";
-import { hookProgram, quote, type ShellFamily } from "./quote";
+import { ADVISOR_SCANNER_ENV, ADVISOR_SCANNER_ON } from "../../../src/core/advisors";
+import { TERMINAL_ENV } from "../../../src/core/announcements";
+import { QUESTION_ENDPOINT_ENV } from "../../../src/core/question-channel";
+import { quote, type ShellFamily } from "./quote";
 
-export type TerminalAgent = "omp" | "claude";
+export type TerminalAgent = "omp";
 
 /** The model roles (`trama.analysis`, `trama.scan`, `trama.execution`), trimmed; empty leaves the agent's default. */
 export interface Models {
@@ -11,10 +13,9 @@ export interface Models {
 }
 export type Role = keyof Models;
 
-/** The model a run uses and where it comes from: `trama.<role>`, or `Proposal <label>` for the model of a Proposal. */
+/** The model a run uses: `trama.<role>`, or the model of a Proposal; empty leaves the agent's default. */
 export interface RunModel {
   model: string;
-  from: string;
 }
 
 
@@ -30,35 +31,15 @@ export const roleOf = (name: string): Role => (name === "Design" || name === "Se
 export const canScan = (role: Role): boolean => role !== "analysis";
 
 /**
- * The template of the command line, with `{prompt}` where the quoted prompt goes: an agent's own line with the run's
- * `model`; for instructions that can scan, the comparison sub-agent and `--slow` use `scan`, the scan model.
- * `ompHook` tells omp when it is idle and `tramaPath` is the bundled CLI Claude Code uses for its session hooks.
- * `advisorConfig` is the overlay of an omp Run with the Advisor Scanner on: omp then runs its advisors with that overlay
- * instead of `--slow`, which the caller leaves out for such a Run.
+ * The template of omp's command line, with `{prompt}` where the quoted prompt goes: `--model` is the run's model; for
+ * instructions that can scan, `--slow` is `scan`, the scan model. `ompHook` tells omp when it is idle. `advisorConfig` is
+ * the overlay of a Run with the Advisor Scanner on: omp then runs its advisors with that overlay instead of `--slow`,
+ * which the caller leaves out for such a Run.
  */
-export function agentTemplate(agent: TerminalAgent, scanning: boolean, models: { model: string; scan: string }, family: ShellFamily, ompHook?: string, tramaPath?: string, advisorConfig?: string): string {
+export function agentTemplate(scanning: boolean, models: { model: string; scan: string }, family: ShellFamily, ompHook?: string, advisorConfig?: string): string {
   const option = (flag: string, value: string) => (value === "" ? [] : [flag, quote(family, value)]);
-  const words: string[] = (() => {
-    switch (agent) {
-      case "omp":
-        return ["omp", ...(ompHook === undefined ? [] : ["--hook", quote(family, ompHook)]), ...(advisorConfig === undefined ? [] : ["--advisor", "--config", quote(family, advisorConfig)]), ...option("--model", models.model), ...(scanning ? option("--slow", models.scan) : [])];
-      case "claude": {
-        const hooks: string[] = [];
-        if (tramaPath !== undefined) {
-          const hook = [{ hooks: [{ type: "command", command: `${hookProgram(tramaPath, family)} hook idle`, timeout: 3 }] }];
-          const refuse = [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: `${hookProgram(tramaPath, family)} hook claude-question-tool`, timeout: 3 }] }];
-          hooks.push("--settings", quote(family, JSON.stringify({ hooks: { Stop: hook, SessionEnd: hook, PreToolUse: refuse } })));
-        }
-        return ["claude", ...hooks, ...option("--model", models.model), ...(scanning ? ["--agents", quote(family, claudeAgents(models.scan))] : [])];
-      }
-    }
-  })();
+  const words = ["omp", ...(ompHook === undefined ? [] : ["--hook", quote(family, ompHook)]), ...(advisorConfig === undefined ? [] : ["--advisor", "--config", quote(family, advisorConfig)]), ...option("--model", models.model), ...(scanning ? option("--slow", models.scan) : [])];
   return [...words, "{prompt}"].join(" ");
-}
-
-/** Claude Code's Machine-comparison sub-agent, with the scan model only when it is set. */
-function claudeAgents(scan: string): string {
-  return JSON.stringify({ "trama-analysis": { ...SUB_AGENTS["trama-analysis"], ...(scan === "" ? {} : { model: scan }) } });
 }
 
 /**
@@ -73,5 +54,20 @@ export function advisorOverlay(scan: string): string {
     '    task: "on"',
     "",
   ].join("\n");
+}
+
+/**
+ * The environment of an agent's terminal: the marks of an agent Trama started, the editor's question endpoint and the
+ * terminal's ID, the autopilot job when there is one and, only for a Run launched with the Advisor Scanner on (`advisorConfig`
+ * is its overlay), `TRAMA_ADVISOR_SCANNER=1`, which Trama's advisors read through `trama advisor show`.
+ */
+export function terminalEnv(endpoint: string, terminalId: string, jobId?: string, advisorConfig?: string): Record<string, string> {
+  return {
+    TRAMA_AGENT: "1",
+    [QUESTION_ENDPOINT_ENV]: endpoint,
+    [TERMINAL_ENV]: terminalId,
+    ...(jobId === undefined ? {} : { TRAMA_JOB: jobId }),
+    ...(advisorConfig === undefined ? {} : { [ADVISOR_SCANNER_ENV]: ADVISOR_SCANNER_ON }),
+  };
 }
 

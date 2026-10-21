@@ -2,21 +2,20 @@ import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { basename, join, win32 } from "node:path";
-import { announce, newTerminalId, TERMINAL_ENV, type AgentOrigin, withdrawAll } from "../../../src/core/announcements";
+import { announce, newTerminalId, type AgentOrigin, withdrawAll } from "../../../src/core/announcements";
 import { ADVISOR_SENTENCE } from "../../../src/core/advisors";
 import { writeFileAtomic } from "../../../src/core/atomic-write";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
-import { QUESTION_ENDPOINT_ENV, requestCoordinatorMessage, sendCoordinatorMessage, type CoordinatorMessage } from "../../../src/core/question-channel";
-import { bundledOmpHook, bundledTrama, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, toClipboard, withAskLine, withTramaPath } from "./cursor";
-import { onCopilotChatEvent } from "./copilot-chat";
+import { requestCoordinatorMessage, sendCoordinatorMessage, type CoordinatorMessage } from "../../../src/core/question-channel";
+import { bundledOmpHook, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, withAskLine, withTramaPath } from "./cursor";
 import { withdrawWaiting } from "./announcements";
-import { bindChatJob, bindCopilotChatJob, chatJobSendStarted, endChatJobs, endCopilotChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnsentJob, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
+import { bindChatJob, chatJobSendStarted, endChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnsentJob, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint, questionWindowId } from "./questions";
 import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withDriftBlocker, withLanguage } from "./prompts";
-import { advisorOverlay, agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent } from "./terminal-agent";
+import { advisorOverlay, agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent, terminalEnv } from "./terminal-agent";
 import { delegationOf } from "./settings-schema";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
@@ -24,10 +23,8 @@ export const settings = () => vscode.workspace.getConfiguration("trama");
 /** The delegation the user's Drift autopilot setting gives: the only reader of it, and only the user value counts. */
 export const userDelegation = (): DriftAutopilotMode => delegationOf(settings().inspect<unknown>("driftAutoPilot")?.globalValue);
 
-export const configuredAgent = (): "chat" | TerminalAgent => {
-  const agent = settings().inspect<string>("agent")?.globalValue;
-  return agent === "omp" || agent === "claude" ? agent : "chat";
-};
+/** The agent `trama.agent` names in user settings: `omp`, or `cursor` for every other value (the old `chat` and `claude` too) and when unset. */
+export const configuredAgent = (): "cursor" | TerminalAgent => (settings().inspect<string>("agent")?.globalValue === "omp" ? "omp" : "cursor");
 
 
 /** The folder the developer chose for Trama's skills (`trama.skillsDir`), relative to the project root unless absolute. */
@@ -57,47 +54,17 @@ export function agentName(context: { fromTramaTerminal?: boolean; fromCursorChat
   if (context.fromCursorChat === true) return "Cursor";
   if (context.fromTramaTerminal !== true) return null;
   const agent = configuredAgent();
-  return agent === "chat" ? null : basename(agent);
+  return agent === "cursor" ? null : basename(agent);
 }
 
 /**
- * The Copilot model that the run's model names, as `workbench.action.chat.open` takes it: the first model named
- * `<name> (<vendor>)`, or `<name>` for Copilot's own models. Not found: the warning names where the model comes from
- * (`trama.<role>` or the Proposal), and the chat keeps its model.
+ * Starts a new conversation in Cursor's chat with `prompt` (`openCursorChat`, which sends the model of the run with
+ * `composer.createNew`). `announce` runs right before the step that sends the prompt by itself and returns how to take its
+ * announcement back when the prompt is not sent.
  */
-async function copilotModelSelector(run: RunModel): Promise<{ vendor: string; id: string } | undefined> {
-  const name = run.model;
-  if (name === "") return undefined;
-  const found = (await vscode.lm.selectChatModels()).find((model) => name === `${model.name} (${model.vendor})` || (model.vendor === "copilot" && name === model.name));
-  if (found) return { vendor: found.vendor, id: found.id };
-  void vscode.window.showWarningMessage(`Trama: no Copilot model is named "${name}" (${run.from}). The instruction was sent with the model chosen in the chat.`);
-  return undefined;
-}
-
-/**
- * Starts a new agent-mode conversation in the editor's chat with `prompt`. Cursor has its own chain of steps. Elsewhere
- * `workbench.action.chat.open` with `{ query, mode }` is how VS Code's own actions do it, but it is not a documented
- * API: if it fails, the prompt goes to the clipboard instead. `announce` runs right before the step that sends the
- * prompt by itself and returns how to take its announcement back when the prompt is not sent.
- */
-async function openChat(root: string, prompt: () => string, canSend: () => boolean, run: RunModel, announce: () => () => void): Promise<ChatDelivery> {
+async function openChat(root: string, prompt: () => string, canSend: () => boolean, model: string, announce: () => () => void): Promise<ChatDelivery> {
   if (!canSend()) return "not-sent";
-  if (isCursor()) return openCursorChat(root, withAskLine(withTramaPath(prompt())), canSend, run.model, announce);
-  let takeBack: (() => void) | undefined;
-  try {
-    const modelSelector = await copilotModelSelector(run);
-    await vscode.commands.executeCommand("workbench.action.chat.newChat");
-    if (!canSend()) return "not-sent";
-    const query = prompt();
-    takeBack = announce();
-    await vscode.commands.executeCommand("workbench.action.chat.open", { query, mode: "agent", ...(modelSelector === undefined ? {} : { modelSelector }) });
-    return "sent";
-  } catch {
-    // Chat missing or disabled in this editor, or the send failed: the developer must paste the prompt from the clipboard.
-    takeBack?.();
-    if (!canSend()) return "not-sent";
-    return toClipboard(prompt());
-  }
+  return openCursorChat(root, withAskLine(withTramaPath(prompt())), canSend, model, announce);
 }
 
 /** Whether this window has already been told its default shell is replaced; the flag lives as long as the window's extension host. */
@@ -132,7 +99,7 @@ function endFiledWork(root: string, holder: string): void {
 }
 
 /**
- * Follows terminal command lifecycles and Trama conversations in Cursor and Copilot chat. A matching conversation stop
+ * Follows terminal command lifecycles and Trama conversations in Cursor chat. A matching conversation stop
  * releases only the Tasks taken by that chat agent.
  */
 export function watchAgentTerminal(): vscode.Disposable {
@@ -149,18 +116,10 @@ export function watchAgentTerminal(): vscode.Disposable {
       }
       releaseTakenTasks(e.root, { chat: "cursor" });
       endFiledWork(e.root, "cursor");
+      endFiledWork(e.root, "editor");
       // Only a completed turn is a normal end: an interrupted or closed conversation never starts the Run that follows it.
       const abnormal = e.event === "AGENT_STOPPED" ? undefined : e.event === "AGENT_INTERRUPTED" ? "its conversation was interrupted" : "its conversation was closed";
       for (const job of endChatJobs(e.root, e.conversation, abnormal)) void broadcastJob(e.root, job, false);
-    }),
-    onCopilotChatEvent((e) => {
-      if (e.event === "PROMPT_SUBMITTED") {
-        bindCopilotChatJob(e.root, e.conversation);
-        return;
-      }
-      releaseTakenTasks(e.root, { chat: "editor" });
-      endFiledWork(e.root, "editor");
-      for (const job of endCopilotChatJobs(e.root, e.conversation)) void broadcastJob(e.root, job, false);
     }),
     onAgentIdle((terminal) => {
       for (const [tracked, info] of agentTerminals) {
@@ -312,16 +271,15 @@ export const configuredModels = (): Models => ({
   execution: settings().get<string>("execution", "").trim(),
 });
 
-function terminalRun(agent: TerminalAgent, instruction: Instruction, name: string, filesDrifts: boolean, severalTasks: boolean, run: RunModel, advisorConfig?: string): TerminalRun {
+function terminalRun(instruction: Instruction, name: string, filesDrifts: boolean, severalTasks: boolean, model: string, advisorConfig?: string): TerminalRun {
   const role = roleOf(name);
-  const hook = agent === "omp" ? bundledOmpHook() : undefined;
-  const tramaPath = agent === "claude" ? bundledTrama() : undefined;
-  const models = { model: run.model, scan: configuredModels().scan };
+  const hook = bundledOmpHook();
+  const models = { model, scan: configuredModels().scan };
   const advisor = advisorConfig !== undefined;
   return {
-    template: (family) => agentTemplate(agent, canScan(role) && !advisor, models, family, hook, tramaPath, advisorConfig),
+    template: (family) => agentTemplate(canScan(role) && !advisor, models, family, hook, advisorConfig),
     prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, undefined, false, advisor),
-    hooked: hook !== undefined || tramaPath !== undefined,
+    hooked: hook !== undefined,
   };
 }
 
@@ -420,22 +378,31 @@ export async function launchAgent(
   const filesDrifts = jobOptions.filesDrifts === true;
   const severalTasks = jobOptions.severalTasks === true;
   const role = roleOf(name);
-  const runModel = jobOptions.model ?? { model: configuredModels()[role], from: `trama.${role}` };
+  const runModel = jobOptions.model?.model ?? configuredModels()[role];
   const windowId = job === undefined ? "" : await questionWindowId(root) ?? "";
   const agent = configuredAgent();
   // Under `disabled` the window reserves no send and announces no job start to the other windows: it knows only its own work.
   const shared = userDelegation() !== "disabled";
-  if ((agent === "chat" || job === undefined) && !canSend()) return undefined;
+  if ((agent === "cursor" || job === undefined) && !canSend()) return undefined;
+  // Cursor's chat only exists in Cursor: elsewhere nothing is tried, announced, reserved or started, and the prompt the terminal would get goes to the clipboard.
+  if (agent === "cursor" && !isCursor()) {
+    await vscode.env.clipboard.writeText(agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, undefined, false));
+    void Promise.resolve(vscode.window.showInformationMessage(
+      "Trama: Cursor's chat is only available in Cursor. The prompt is on the clipboard; choose omp in Trama's Settings to run the agent in a terminal.",
+      "Open Settings",
+    )).then((choice) => (choice === "Open Settings" ? vscode.commands.executeCommand("trama.openSettings") : undefined));
+    return "clipboard";
+  }
   const launch = async (): Promise<Launch | undefined> => {
-    if (!canSend()) return agent === "chat" ? "not-sent" : undefined;
-    if (agent === "chat") {
-      const chat = isCursor() ? "cursor" : "copilot";
-      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, jobId, isCursor());
+    if (!canSend()) return agent === "cursor" ? "not-sent" : undefined;
+    if (agent === "cursor") {
+      const chat = "cursor";
+      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, jobId, true);
       const sent: { job?: string } = {};
       // Runs right before the step that sends the prompt by itself: the card and the job begin now. The take-back, run when
       // that step fails, ends both: the prompt is not sent, so the job never began.
       const sendStarted = (): (() => void) => {
-        const takeBackCard = announceSend(root, announceProposal, { chat: isCursor() ? "cursor" : "editor" });
+        const takeBackCard = announceSend(root, announceProposal, { chat: "cursor" });
         const sentAfter = chatJobSendStarted(root, chat);
         if (job === undefined || jobId === undefined) return takeBackCard;
         const started = startJob(job, root, { chat }, false, sentAfter, jobId, jobOrigin, windowId);
@@ -459,7 +426,7 @@ export async function launchAgent(
       return delivery;
     }
     const advisorConfig = job === "run" && configuredAdvisorScanner() ? writeAdvisorOverlay(jobOptions.advisorStorage) : undefined;
-    const run = terminalRun(agent, instruction, name, filesDrifts, severalTasks, runModel, advisorConfig);
+    const run = terminalRun(instruction, name, filesDrifts, severalTasks, runModel, advisorConfig);
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
@@ -473,7 +440,7 @@ export async function launchAgent(
       name,
       cwd: root,
       shellPath,
-      env: { TRAMA_AGENT: "1", [QUESTION_ENDPOINT_ENV]: endpoint, [TERMINAL_ENV]: terminalId, ...(jobId === undefined ? {} : { TRAMA_JOB: jobId }) },
+      env: terminalEnv(endpoint, terminalId, jobId, advisorConfig),
       ...(asTab ? { location: { viewColumn: vscode.ViewColumn.Active, preserveFocus: true } } : {}),
     });
     if (replaced) warnShellReplaced(defaultShell);
@@ -504,7 +471,7 @@ export async function launchAgent(
   }
   let result: Launch | undefined;
   try {
-    result = await (agent === "chat" || job !== undefined ? inSendTurn(launch) : launch());
+    result = await (agent === "cursor" || job !== undefined ? inSendTurn(launch) : launch());
   } finally {
     if (reservation !== undefined) await releaseSendWithCoordinator(root, reservation);
   }

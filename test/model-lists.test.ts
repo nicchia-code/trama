@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { bunBinDir, copilotSuggestions, cursorModels, ompModels, ompPathVariable, parseCursorModels, parseOmpModels } from "../extension/src/host/model-lists";
+import { bunBinDir, cursorModels, ompModels, ompPathVariable, parseCursorModels, parseOmpModels } from "../extension/src/host/model-lists";
 
 const CURSOR_KEY = "src.vs.platform.reactivestorage.browser.reactiveStorageServiceImpl.persistentStorage.applicationUser";
 
@@ -64,15 +64,6 @@ test("cursorModels reads the list from Cursor's state database, and gives none w
   } finally {
     rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
   }
-});
-
-test("Copilot names a model as the chat takes it: plain for the copilot vendor, otherwise with the vendor", () => {
-  expect(
-    copilotSuggestions([
-      { name: "GPT-4.1", vendor: "copilot" },
-      { name: "Claude Sonnet 4.5", vendor: "anthropic" },
-    ]),
-  ).toEqual([{ value: "GPT-4.1" }, { value: "Claude Sonnet 4.5 (anthropic)" }]);
 });
 
 // Windows has no `#!/bin/sh` programs, so the tests that run a fake omp are skipped there.

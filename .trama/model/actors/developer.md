@@ -88,16 +88,22 @@ The developer switches to the Requirements tab, or follows a link to a Requireme
 Il developer passa alla scheda Specs del pannello.
 
 ### SHOW_SETTINGS
-Il developer passa alla scheda Settings del pannello.
+Il developer passa alla scheda Settings del pannello, dalla sua barra delle schede o con Open Settings nell'avviso che la chat di Cursor esiste solo in Cursor, che apre il pannello se è chiuso.
 
 ### CHANGE_SETTING
 Il developer cambia un'impostazione di Trama dalla scheda Settings: sceglie un valore in un menu, spunta o toglie una casella, oppure conferma un campo di testo o numerico.
 
 ### OPEN_SYSTEM_LEVEL
-The developer zooms the Diagram out to the whole System, with the breadcrumb or by following a link to a Feature or an Actor.
+Il developer riporta il Diagramma alla sua radice, il livello del Sistema da cui si sceglie cosa guardare: con il breadcrumb, o seguendo un link a un Actor i cui Eventi non arrivano a nessuna Machine, che la radice mostra selezionato.
+
+### OPEN_WHOLE_SYSTEM_LEVEL
+Il developer mostra nel Diagramma tutto il Sistema, con tutti gli Actor, tutte le Feature e gli Eventi fra loro: aprendo la voce Whole System dalla radice, o con il breadcrumb da una Feature aperta da lì.
+
+### OPEN_ACTOR_LEVEL
+Il developer mostra nel Diagramma un Actor con le Feature che ricevono i suoi Eventi: aprendolo dalla radice, con il breadcrumb da una Feature aperta dal suo livello, o seguendo un link a lui o a uno dei suoi Eventi.
 
 ### OPEN_FEATURE_LEVEL
-The developer shows one Feature in the Diagram, by opening it, with the breadcrumb or by following a link to one of its Machines.
+The developer shows one Feature in the Diagram, by opening it, with the breadcrumb or by following a link to it or to one of its Machines.
 
 ### OPEN_MACHINE_LEVEL
 The developer shows one Machine in the Diagram, by opening it, with the breadcrumb or by following a link to one of its States or Transitions.
