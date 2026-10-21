@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { folderChildren, folderInside, gitIgnored, isSafeRelativePath, listedEntries, type RawEntry } from "../extension/src/host/folder-tree";
 
 const FILE = 1;
@@ -15,10 +15,11 @@ test("a path is safe when it stays inside the folder and cannot break a quoted i
 });
 
 test("a folder outside the root is refused", () => {
-  expect(folderInside("/work/app", "")).toBe("/work/app");
-  expect(folderInside("/work/app", "src/core")).toBe(join("/work/app", "src", "core"));
-  expect(folderInside("/work/app", "../other")).toBeUndefined();
-  expect(folderInside("/work/app", "/etc")).toBeUndefined();
+  const root = resolve("/work/app");
+  expect(folderInside(root, "")).toBe(root);
+  expect(folderInside(root, "src/core")).toBe(join(root, "src", "core"));
+  expect(folderInside(root, "../other")).toBeUndefined();
+  expect(folderInside(root, "/etc")).toBeUndefined();
 });
 
 test("the tree lists folders first, then files, without the names that start with a dot; a link counts as a file and is not followed", () => {
