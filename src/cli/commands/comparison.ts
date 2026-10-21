@@ -63,7 +63,7 @@ const move = defineCommand({
   effects: { writes: true, activity: true, editor: true },
   run(ctx, input, [id]) {
     const project = ctx.project();
-    const result = archiveComparison(project, id as string, JSON.stringify(input));
+    const result = archiveComparison(project, id as string, JSON.stringify(input), ctx.job);
     recordTiming(project, ctx.origin, { event: "compare-end", comparison: id as string, tasks: result.tasks.length, drifts: result.drifts.length }, { job: ctx.job });
     // As with `task new` and `drift new`: the editor learns who holds each card filed by an agent, so it waits for that agent's turn.
     const holder = ctx.origin.terminal ?? ctx.origin.chat;

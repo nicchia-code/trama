@@ -12,7 +12,8 @@ import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
 import { readLastScan } from "./last-scan";
-import { attachedDrift, closedUnchanged, type Column, type DriftOption, type DriftSides, driftOptions, driftSides, followedDrift, freedTasks, type FreedTask, listDrifts, listTasks, taskProgress } from "./work";
+import { attachedDrift, closedUnchanged, type Column, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, followedDrift, freedTasks, type FreedTask, listDrifts, listTasks, taskProgress } from "./work";
+import { preparedFlag, preparedStatus } from "./prepared";
 import { type Specs, type SpecsChange, specsChange } from "./specs";
 import { type HistoryFault, readHistory } from "./history";
 
@@ -86,6 +87,8 @@ export interface ProposalView {
   kind: ProposalKind;
   /** A resolution the experimental Drift blocker filed: its Drifts block no Task. Approving it changes nothing else. */
   nonBlocking: boolean;
+  /** A resolution born from the answer to a Drift's prepared question: it does not stop Resolve while it awaits a decision. */
+  prepared: boolean;
   /** The Drifts a resolution resolves, in creation order, each with what approving does to it; empty for any other Proposal. */
   resolves: ResolvedDrift[];
   /** Required Proposals not approved yet; Approve stays disabled while any is listed. */
@@ -135,6 +138,10 @@ export interface DriftView {
   /** The Tasks this Drift leaves free, in the order named, each with its reason; the title is null for a Task that no longer exists. */
   notBlocking: FreedTask[];
   body: string;
+  /** The job of the agent terminal that filed the Drift; null when none. */
+  job: string | null;
+  /** The Drift's prepared question: whether it still holds. Null without a readable one. */
+  prepared: { valid: boolean } | null;
   sides: DriftSides | null;
   options: DriftOption[];
   option: number | null;
@@ -347,6 +354,7 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     body: stripTitle(proposal.body),
     kind: proposal.data.kind,
     nonBlocking: proposal.data.nonBlocking,
+    prepared: proposal.data.prepared,
     tasks: coverage === null ? [] : proposal.tasks.map((t) => ({ id: t.id, title: t.title, body: stripTitle(t.body), technical: t.technical, refs: t.refs })),
     removals: coverage?.removals ?? [],
     creates: coverage === null ? 0 : proposal.tasks.length + coverage.removals.length,
@@ -413,7 +421,9 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
       previous: followedDrift(p, d),
       closedUnchanged: closedUnchanged(p, d),
       notBlocking: freedTasks(d, tasks),
-      body: stripTitle(d.body),
+      body: driftBody(d),
+      job: d.data.job,
+      prepared: preparedFlag(preparedStatus(p, d, project)),
       sides: driftSides(d),
       options: driftOptions(d),
       option: d.data.option,

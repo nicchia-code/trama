@@ -1,10 +1,11 @@
+import { bullets, dash, eventKey, firstLine, marker, prose, reactionLines, machineReceiverLines, outgoingLines, stateTreeLines } from "../core/describe";
 import { TramaError } from "../core/errors";
 import { analyze, findPaths, lineage, type Warning } from "../core/graph";
 import { flattenStates, formatDiagnostic } from "../core/model";
 import { type Element, receivers, resolveRef } from "../core/refs";
 import type { ProjectModel } from "../core/requirements";
-import type { Actor, Diagnostic, Machine, Model, State } from "../core/types";
-import { bullets, dash, eventKey, firstLine, marker, modelNote, prose, type Result } from "./result";
+import type { Diagnostic, Machine, Model, State } from "../core/types";
+import { modelNote, type Result } from "./result";
 
 function machineOf(model: Model, id: string): Machine {
   const machine = model.machines.get(id);
@@ -60,40 +61,6 @@ export function featureView(model: Model, id: string): Result {
     modelNote(model),
   ].join("\n");
   return { md, json: { id, name: feature.name, description: feature.description, machines: machines.map((m) => ({ id: m.id, description: m.description })), flows: sorted } };
-}
-
-function renderStates(states: State[], depth: number): string[] {
-  const pad = "  ".repeat(depth);
-  return states.flatMap((s) => [
-    `${pad}- **${s.name}**${marker(s)}${dash(firstLine(s.description))}`,
-    ...s.transitions.map((t) => `${pad}  - \`${eventKey(t)}\` → ${t.target}${prose(t)}`),
-    ...renderStates(s.children, depth + 1),
-  ]);
-}
-
-/** The State tree of a Machine, the same lines `trama model show <machine>` prints under States. */
-export function stateTreeLines(states: State[]): string[] {
-  return renderStates(states, 0);
-}
-
-/** One line per Event of a Machine or an Actor, with the States that receive it. */
-export function machineReceiverLines(model: Model, machine: Machine | Actor): string[] {
-  return machine.events.map((e) => {
-    const received = receivers(model, machine.id, e.name);
-    const who = received.map((r) => `${r.machine.id}/${r.state.name} → ${r.transition.target}`).join("; ") || "_nobody_";
-    return `- \`${machine.id}.${e.name}\`${dash(firstLine(e.description))}\n  - Received by: ${who}`;
-  });
-}
-
-/** Outgoing Transitions of a State, including those inherited from the States that contain it. */
-export function outgoingLines(machine: Machine, state: State): string[] {
-  const own = lineage(machine, state).flatMap((source) => source.transitions.map((t) => ({ from: source.name, t })));
-  return own.map((o) => `- \`${eventKey(o.t)}\` → ${o.t.target}${prose(o.t)}${o.from === state.name ? "" : ` _(inherited from ${o.from})_`}`);
-}
-
-/** The Transitions that react to an Event, the same lines `trama model show <owner.EVENT>` prints. */
-export function reactionLines(model: Model, ownerId: string, eventName: string): string[] {
-  return receivers(model, ownerId, eventName).map((r) => `- ${r.machine.id}/${r.state.name} → ${r.transition.target}${prose(r.transition)}`);
 }
 
 export function machineView(model: Model, id: string): Result {

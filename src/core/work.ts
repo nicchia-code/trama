@@ -81,6 +81,8 @@ interface DriftData {
   created: string | null;
   /** The Tasks this Drift leaves free, in the order they were named: not blocked by it. Empty when it blocks as always. */
   notBlocking: NotBlocking[];
+  /** The job (`TRAMA_JOB`) of the agent terminal that filed the Drift; set at creation and never changed. Null when none, and on Drifts written before the field. */
+  job: string | null;
 }
 
 export type Task = Item<TaskData>;
@@ -135,6 +137,7 @@ function parseDrift(raw: Raw, where: string): DriftData {
     resolvedBy: idField(raw, "resolvedBy", where),
     created: createdField(raw, where),
     notBlocking: notBlockingField(raw, where),
+    job: textOrNull(raw, "job", where),
   };
 }
 
@@ -167,6 +170,7 @@ function saveItem(path: string, data: object, body: string) {
   if (copy["unchanged"] === null) delete copy["unchanged"];
   if (copy["previous"] === null) delete copy["previous"];
   if (Array.isArray(copy["notBlocking"]) && copy["notBlocking"].length === 0) delete copy["notBlocking"];
+  if (copy["job"] === null) delete copy["job"];
   if (copy["resolvedBy"] === null) delete copy["resolvedBy"];
   if ("holder" in copy) {
     if (copy["agent"] === true && typeof copy["holder"] === "string") copy["agent"] = copy["holder"];
@@ -600,18 +604,48 @@ export interface DriftOption {
   text: string;
 }
 
+const PREPARED_HEADING = "Prepared question";
+const SECTION_HEADINGS: readonly string[] = [HAPPENS_HEADING, SHOULD_HEADING, OPTIONS_HEADING, WHERE_HEADING, PREPARED_HEADING];
+
 /** The body split at the known `## ` headings; any other line, `## ` ones included, belongs to the section it is in. */
 function driftSections(drift: Drift): Map<string, string[]> {
   const sections = new Map<string, string[]>();
   let current: string[] | null = null;
   for (const line of drift.body.split("\n")) {
     const heading = /^## (.+?)\s*$/.exec(line)?.[1];
-    if (heading === HAPPENS_HEADING || heading === SHOULD_HEADING || heading === OPTIONS_HEADING || heading === WHERE_HEADING) {
+    if (heading !== undefined && SECTION_HEADINGS.includes(heading)) {
       current = [];
       sections.set(heading, current);
     } else current?.push(line);
   }
   return sections;
+}
+
+/** The text of the Prepared question section of a Drift, heading excluded; null when it has none. */
+export function preparedSectionText(drift: Drift): string | null {
+  return driftSections(drift).get(PREPARED_HEADING)?.join("\n") ?? null;
+}
+
+/** The body without its Prepared question section, that section being everything up to the next known heading. */
+export function withoutPrepared(body: string): string {
+  const kept: string[] = [];
+  let inPrepared = false;
+  for (const line of body.split("\n")) {
+    const heading = /^## (.+?)\s*$/.exec(line)?.[1];
+    if (heading !== undefined && SECTION_HEADINGS.includes(heading)) inPrepared = heading === PREPARED_HEADING;
+    if (!inPrepared) kept.push(line);
+  }
+  return kept.join("\n");
+}
+
+/** The body of a Drift with its Prepared question section, if any, replaced by one holding `json` (a JSON text), after all the other sections. */
+export function withPreparedSection(drift: Drift, json: string): string {
+  return `${withoutPrepared(drift.body).trimEnd()}\n\n## ${PREPARED_HEADING}\n\n\`\`\`json\n${json}\n\`\`\`\n`;
+}
+
+/** The free text of a Drift without its title and without the Prepared question section: what a Drift written before the sides existed says. */
+export function driftBody(drift: Drift): string {
+  return withoutPrepared(drift.body).replace(/^#\s+.+\n+/, "").trim();
 }
 
 /** The sides of a Drift: what the code does and what the Model or Requirement says, and where in the code it was seen. Null for a Drift written before the two sections existed. */
@@ -734,7 +768,7 @@ export interface PlannedDrift {
 
 export function planDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; notBlocking?: NotBlocking[] },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; notBlocking?: NotBlocking[]; job?: string },
 ): PlannedDrift {
   if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with `refs`");
   const happens = input.happens.trim();
@@ -752,7 +786,7 @@ export function planDrift(
   const origin = input.origin ? getTask(p, input.origin).id : null;
   const previous = previousOf(p, input.previous, origin);
   const notBlocking = checkNotBlocking(p, input.notBlocking ?? [], input.refs, origin);
-  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, option: null, note: null, resolvedBy: null, created: createdNow(), notBlocking };
+  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, option: null, note: null, resolvedBy: null, created: createdNow(), notBlocking, job: input.job?.trim() || null };
   const sections = [
     `## ${HAPPENS_HEADING}\n\n${happens}`,
     `## ${SHOULD_HEADING}\n\n${should}`,
@@ -770,9 +804,26 @@ export function writeDrift(p: Project, plan: PlannedDrift, announcement?: string
 
 export function newDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; notBlocking?: NotBlocking[] },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; notBlocking?: NotBlocking[]; job?: string },
 ): Drift {
   return writeDrift(p, planDrift(p, input), input.announcement);
+}
+
+/**
+ * The Proposal a developer-side command may attach to an open Drift after its creation: a Draft or open one that no other open Drift holds,
+ * for a Drift that has none. Refuses otherwise, saying why; writes nothing.
+ */
+export function checkAttachment(p: Project, drift: Drift, proposalId: string): Proposal {
+  if (drift.data.status !== "open") throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is already resolved: a Proposal is attached only to an open Drift`);
+  if (drift.data.proposal !== null) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} already has the attached Proposal ${cardName(p, "proposal", drift.data.proposal)}`);
+  const proposal = getProposal(p, proposalId, true);
+  requireAttachable(p, proposal, drift.id);
+  return proposal;
+}
+
+/** Writes a Drift as it now stands: its data and its body. */
+export function saveDrift(drift: Drift): void {
+  saveItem(drift.path, drift.data, drift.body);
 }
 
 /** What the developer adds when fixing the code of a Drift: the number of the chosen fix option (from 1) and a free note. */
@@ -786,7 +837,7 @@ function fixTaskBody(drift: Drift, option: DriftOption | null, note: string | nu
   const sides = driftSides(drift);
   const chosen = option ? [`## Chosen option\n\n**${option.title}**\n\n${option.text}`] : [];
   const noted = note ? [`## Note\n\n${note}`] : [];
-  if (!sides) return [drift.body.replace(/^#\s+.+\n+/, "").trim(), ...chosen, ...noted].join("\n\n");
+  if (!sides) return [driftBody(drift), ...chosen, ...noted].join("\n\n");
   const where = sides.where ? [`## ${WHERE_HEADING}\n\n${sides.where}`] : [];
   return [`## ${HAPPENS_HEADING}\n\n${sides.happens}`, `## ${SHOULD_HEADING}\n\n${sides.should}`, ...chosen, ...noted, ...where].join("\n\n");
 }

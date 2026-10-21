@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { createQuestionServer, questionProjectId, type CoordinatorMessage, type QuestionServer } from "../../../src/core/question-channel";
 import { QuestionRoundQueue } from "../../../src/core/question-rounds";
-import { unavailableQuestions } from "../../../src/core/questions";
+import { type QuestionRequest, type QuestionResult, unavailableQuestions } from "../../../src/core/questions";
 import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
 import type { QuestionSession } from "./question-session";
@@ -36,6 +36,15 @@ export async function questionEndpoint(root: string): Promise<string | undefined
   return windowQuestions?.endpoint(root);
 }
 
+
+/**
+ * Asks the question round `request` of the project at `root` in this window, with no agent waiting, in the same queue as the
+ * rounds of the sockets, behind any round still in progress. Rejects when the window is lost or `signal` aborts; undefined
+ * when this window has no project at `root`.
+ */
+export async function askPreparedRound(root: string, request: QuestionRequest, signal?: AbortSignal): Promise<QuestionResult | undefined> {
+  return windowQuestions?.askHostRound(root, request, signal);
+}
 
 /** The window-owned queue serves every local `trama question new` connection. */
 export class EditorQuestions implements vscode.Disposable {
@@ -72,6 +81,14 @@ export class EditorQuestions implements vscode.Disposable {
     if (!service || service.identity !== questionProjectId(projectAt(root))) return undefined;
     const server = await service.server;
     return this.closed || this.service !== service ? undefined : server.endpoint;
+  }
+
+  /** A round asked by the host itself: it joins the window's queue like the rounds of the sockets and the host receives its result. */
+  askHostRound(root: string, request: QuestionRequest, signal?: AbortSignal): Promise<QuestionResult> | undefined {
+    this.refresh();
+    const service = this.service;
+    if (this.closed || !service || service.identity !== questionProjectId(projectAt(root))) return undefined;
+    return this.queue.ask(request, { signal, prepared: true }, trackRound(this.session.presentFor(service.identity)));
   }
 
   dispose(): void {

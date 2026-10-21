@@ -5,7 +5,7 @@ import { driftComparison } from "../extension/src/webview/drift-compare";
 const drift = (over: Partial<DriftView> = {}): DriftView => ({
   id: "0003",
   created: null,
-  title: "Code refunds late",
+  job: null, prepared: null, title: "Code refunds late",
   body: "",
   previous: null,
   sides: { happens: "Refunds go through after pickup.", should: "No refund after pickup.", where: "`src/refund.ts`" },

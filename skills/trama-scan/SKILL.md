@@ -123,6 +123,16 @@ When the scan is over (after its last step and the end-of-Run scan, if there is 
 
 Never approve or reject this resolution, and never start a Run because of it: the developer decides it, as any manual resolution.
 
+## Async Drift Resolver
+
+This section applies only when the instruction says "The Async Drift Resolver is on: …". Without that sentence, skip it.
+
+With it, at the very end of the work (after the last archiving and the `nonBlocking` resolution of the experimental Drift blocker, if any, and before the final report), you prepare the question of every Drift this work filed, so Resolve opens at once. You alone do this, never a sub-agent that compares or implements.
+
+1. **Find the Drifts.** In a terminal, run `trama drift list --input -` with `{"job":"<value of TRAMA_JOB>","unprepared":true}`, where you first read the value of the `TRAMA_JOB` environment variable (for example `echo "$TRAMA_JOB"`) and write that literal value in the JSON: a quoted heredoc never expands `$TRAMA_JOB`: the open Drifts of this work, the advisor's included, with no valid prepared question and outside every resolution. In Cursor's chat, where `TRAMA_JOB` is not set and no advisor works, use the permanent identities of the Drifts you and your sub-agents filed. A Drift already in a resolution (the `nonBlocking` one) is left out.
+2. **Prepare each.** Follow "Writing a prepared question" in the `trama-resolve-drifts` skill (read it first) for each Drift, with the sub-agents you have: hand the exploration to at most `trama.maxParallelAgents` of them at once (the number the instruction gives, 20 when it gives none), one Drift (or a few that concern the same thing) each, and have each record its questions with `trama drift edit`. Without sub-agents, one Drift at a time. A sub-agent asks the developer nothing and registers no other card.
+3. **Report.** The final report says how many Drifts were prepared and which were not (with the reason).
+
 ## Announcing the scan
 
 - A standalone scan is a tracked check: announce it with `trama announcement new --input -` with `{"kind":"check","title":"<title>","phase":"scanning"}` before reading code, then report its outcome with `trama announcement move <id> delivered` on success or `trama announcement move <id> failed` on failure/interruption, before the report.

@@ -44,7 +44,7 @@ test("the groups and their keys keep the order of the Settings tab", () => {
     ["Agent", ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.autoExit", "trama.language"]],
     ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Experimental", ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution"]],
+    ["Experimental", ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution", "trama.experimentalAsyncDriftResolver"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["Agent", ["trama.autoExit", "trama.language"]],
@@ -85,6 +85,17 @@ test("the Experimental Parallel Execution is a checkbox right after the Advisor 
   const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
   expect(keys.indexOf("trama.experimentalParallelExecution")).toBe(keys.indexOf("trama.experimentalAdvisorScanner") + 1);
   expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalParallelExecution")?.control).toBe("boolean");
+});
+
+test("the Experimental Async Drift Resolver is a checkbox right after the Parallel Execution, off by default and application-scoped", () => {
+  const resolver = properties["trama.experimentalAsyncDriftResolver"];
+  expect(resolver?.type).toBe("boolean");
+  expect(resolver?.default).toBe(false);
+  expect(resolver?.scope).toBe("application");
+  expect(settingTitle("trama.experimentalAsyncDriftResolver")).toBe("Experimental Async Drift Resolver");
+  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
+  expect(keys.indexOf("trama.experimentalAsyncDriftResolver")).toBe(keys.indexOf("trama.experimentalParallelExecution") + 1);
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalAsyncDriftResolver")?.control).toBe("boolean");
 });
 
 test("controls follow the manifest type; maxParallelAgents is a whole number of at least 1", () => {

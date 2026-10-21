@@ -10,6 +10,8 @@ Il round di Trama è l'unico modo in cui l'agente fa una domanda al developer in
 
 If the editor is lost after accepting the round, the round is interrupted and all its answers are discarded. The agent is told that the editor was lost and stops the workflow awaiting these decisions, without a fallback, automatic recommendation or automatic resumption. Initial editor unavailability remains a separate case.
 
+Con l'Async Drift Resolver (vedi Drift resolution) un round può anche essere chiesto da Trama stessa, senza nessun agente in attesa: quando il developer clicca Resolve su un Drift con una domanda pronta valida, Trama presenta quella domanda come un round di una sola domanda, nella finestra in cui il developer ha cliccato, con lo stesso overlay, la stessa raccomandazione già selezionata e lo stesso spazio per la risposta libera. Dove questo round dice che l'agente aspetta o riceve le risposte, per una domanda pronta è Trama ad aspettarle e riceverle; nessuno smette di aspettarla, quindi non finisce mai abbandonata. Saltarla non applica nessuna raccomandazione: il Drift resta aperto con la sua domanda pronta. Se l'editor si perde, la risposta è scartata e non si scrive nulla.
+
 ## States
 
 ### Not asked (initial)
@@ -18,6 +20,8 @@ The round has not been requested yet.
 - `agent.ASK_QUESTIONS` → Unanswered: l'editor non è raggiungibile e la richiesta viene dalla sandbox di Cursor. Dice all'agente che l'editor non è raggiungibile dalla sandbox e di chiedere lo stesso round una volta fuori dalla sandbox; se anche lì non è disponibile, di fermarsi e di chiedere al developer di aprire l'editor.
 - `agent.ASK_QUESTIONS` → Queued: the editor is reachable but another round is being presented in the same window.
 - `agent.ASK_QUESTIONS` → Asking: the editor is reachable and no other round is being presented in the same window. Apre subito la prima domanda sopra il pannello, che si apre o torna in primo piano da solo.
+- `developer.ASK_AGENT` → Queued: Resolve su un Drift con una domanda pronta valida, con l'Async Drift Resolver acceso, mentre un altro round è presentato nella stessa finestra. Trama chiede da sé il round della domanda pronta, senza agente.
+- `developer.ASK_AGENT` → Asking: Resolve su un Drift con una domanda pronta valida, con l'Async Drift Resolver acceso, e nessun altro round è presentato nella stessa finestra. Trama chiede da sé il round della domanda pronta, senza agente, e apre subito la domanda sopra il pannello, che si apre o torna in primo piano da solo.
 - `agent.TOOL_DOMANDE_CHIAMATO` → Not asked: la conversazione o il terminale è di Trama. L'hook di Trama rifiuta lo strumento di domande dell'agente, nessuna domanda compare, e l'agente riceve un messaggio che gli dice di chiedere solo con il round di Trama, come dice la sua skill.
 
 ### Queued

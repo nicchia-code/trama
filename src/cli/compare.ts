@@ -1,20 +1,15 @@
 import type { ArchiveResult, Briefing } from "../core/compare";
 import { extent } from "../core/blocking";
-import { codeFingerprint, splitCompared, textFingerprint } from "../core/compared";
-import { loadProject, type ProjectModel } from "../core/requirements";
+import { codeFingerprint, splitCompared } from "../core/compared";
+import { describeRef, referenceFingerprint, requirementsBlock } from "../core/describe";
+import { loadProject } from "../core/requirements";
 import { syncShortNumbers } from "../core/short-numbers";
 import type { Project } from "../core/store";
 import type { Drift, Task } from "../core/work";
 import { analyzeView } from "./explore";
 import type { Result } from "./result";
-import { describeRef, requirementsBlock } from "./work";
 
 const quoteLines = (text: string) => text.split("\n").map((l) => `  > ${l}`).join("\n");
-
-/** The fingerprint of the text the briefing gives for one reference: what a comparison records and the pre-flight checks. */
-export function referenceFingerprint(project: ProjectModel, ref: string): string {
-  return textFingerprint(`${describeRef(project, ref, true)}\n${requirementsBlock(project, [ref], "none")}`);
-}
 
 /** The text fingerprint of every reference a briefing covers, by the element each is recorded under. */
 export function briefedTexts(b: Briefing): Record<string, string> {

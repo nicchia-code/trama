@@ -92,6 +92,12 @@ export function withLanguage(prompt: string, language: string): string {
 /** The sentence the experimental Drift blocker adds to an instruction whose agent may file Drifts (`trama.experimentalDriftBlocker`). */
 export const DRIFT_BLOCKER_SENTENCE = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
 
+/** The sentence the Async Drift Resolver adds to the instructions that may file Drifts (`trama.experimentalAsyncDriftResolver`). */
+export const ASYNC_DRIFT_RESOLVER_SENTENCE = "The Async Drift Resolver is on: before finishing, prepare the resolution question of every Drift filed in this job, as your skill says.";
+
+/** The sentence that hands the resolution agent the developer's answer to a Drift's prepared question, followed by the answer as JSON and a full stop. */
+export const PREPARED_ANSWER_SENTENCE = "The developer already answered this Drift's prepared question; do not ask again. Answer:";
+
 /** The sentence the experimental parallel execution adds to the instruction of a run over several Tasks (`trama.experimentalParallelExecution`). */
 export const PARALLEL_EXECUTION_SENTENCE = 'The experimental parallel execution is on: follow the "Experimental parallel execution" section of the trama-implement skill.';
 
@@ -116,4 +122,9 @@ export function mayFileDrifts(action: ResolvedAction): boolean {
 /** Ends an instruction with the Drift blocker's sentence, on the same line, when `on`; otherwise the instruction is exactly as built. */
 export function withDriftBlocker(prompt: string, on: boolean): string {
   return on ? `${prompt} ${DRIFT_BLOCKER_SENTENCE}` : prompt;
+}
+
+/** Ends an instruction with the Async Drift Resolver's sentence, on the same line, when `on`; otherwise the instruction is exactly as built. */
+export function withAsyncDriftResolver(prompt: string, on: boolean): string {
+  return on ? `${prompt} ${ASYNC_DRIFT_RESOLVER_SENTENCE}` : prompt;
 }

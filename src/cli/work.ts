@@ -1,24 +1,23 @@
 import { approvalBlock, changes, coversScope, getProposal, health, listProposals, proposalCoverage, type Proposal, resolutionHolding, unfixableDrifts, validateProposal } from "../core/proposals";
 import { decisionText } from "../core/resolution";
 import { requiredReasons } from "../core/required";
-import { hasContent, loadProject, parseRequirementRef, type Area, type ProjectModel, requirementsFor, resolveProjectRef } from "../core/requirements";
-import { requirementSkillNames } from "../core/requirement-skills";
-import { SPEC_FIELDS, type SpecEntry, type SpecField } from "../core/specs";
+import { bullets, describeRef, requirementsBlock } from "../core/describe";
+import { hasContent, loadProject, type ProjectModel, resolveProjectRef } from "../core/requirements";
 import type { Project } from "../core/store";
 import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
 import { formatDiagnostic } from "../core/model";
 import { type Blocker, concernSameThing } from "../core/blocking";
 import { TramaError, UsageError } from "../core/errors";
-import { attachedDrift, BATCH_DEFAULT, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftCandidates, driftOptions, driftSides, freedTasks, type FreedTask, getTask, listDrifts, listTasks, nextTask, type ProposalFilter, type Task, taskProgress } from "../core/work";
-import { machineReceiverLines, outgoingLines, reactionLines, stateTreeLines } from "./explore";
-import { bullets, dash, eventKey, marker, prose, type Result } from "./result";
+import { attachedDrift, BATCH_DEFAULT, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftBody, driftCandidates, driftOptions, driftSides, freedTasks, type FreedTask, getTask, listDrifts, listTasks, nextTask, type ProposalFilter, type Task, taskProgress, withoutPrepared } from "../core/work";
+import { type PreparedDecision, preparedFlag, type PreparedStatus, preparedStatus, preparedStatusText, unpreparedDrifts } from "../core/prepared";
+import type { Result } from "./result";
 import type { AgentOrigin } from "../core/announcements";
 import { recordTiming } from "../core/timings";
 
 /** One-line summary of a Proposal for lists and the board. `number` is its short number (`P3`) while it is live, otherwise null. */
 export function proposalSummary(p: Project, proposal: Proposal, numbers: ShortNumbers) {
   const h = proposal.data.status === "draft" || proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
-  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, nonBlocking: proposal.data.nonBlocking, stale: h.stale.length > 0, requires: h.requires.map((r) => r.id), attachedTo: attachedDrift(p, proposal.id)?.id ?? null, resolves: proposal.data.kind === "resolution" ? proposal.data.drifts.length : null };
+  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, nonBlocking: proposal.data.nonBlocking, prepared: proposal.data.prepared, stale: h.stale.length > 0, requires: h.requires.map((r) => r.id), attachedTo: attachedDrift(p, proposal.id)?.id ?? null, resolves: proposal.data.kind === "resolution" ? proposal.data.drifts.length : null };
 }
 
 const resolvesMark = (i: { resolves: number | null; nonBlocking: boolean }) => (i.resolves === null ? "" : ` (resolves ${i.resolves} Drift${i.resolves === 1 ? "" : "s"})${i.nonBlocking ? " (blocks nothing)" : ""}`);
@@ -99,6 +98,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
       status: proposal.data.status,
       kind: proposal.data.kind,
       nonBlocking: proposal.data.nonBlocking,
+      prepared: proposal.data.prepared,
       drifts: proposal.data.drifts,
       tasks: proposal.tasks.map((t) => ({ id: t.id, title: t.title, technical: t.technical, refs: t.refs })),
       ...(proposal.data.kind === "resolution" ? { resolvesDrifts: resolvedDrifts } : {}),
@@ -156,108 +156,10 @@ function withCheckNote(task: Task): string {
   return [...lines.slice(0, title + 1), "", "Closed without changes.", "", "## Check note", "", task.data.unchanged, ...lines.slice(title + 1)].join("\n");
 }
 
-const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null, freed: FreedTask[]) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, closedUnchanged: closed, notBlocking: freed.map((f) => ({ task: f.task, number: numbers.label("task", f.task), title: f.title, reason: f.reason })) });
-
-/** The current text of a Model element or Requirement, for inlining into a Task or Drift. */
-export function describeRef(project: ProjectModel, ref: string, full = false): string {
-  let el;
-  try {
-    el = resolveProjectRef(project, ref);
-  } catch {
-    return `_\`${ref}\` no longer resolves in the Model or its Requirements._`;
-  }
-  switch (el.kind) {
-    case "feature":
-      return `${el.feature.name}${dash(el.feature.description)}\nMachines: ${el.feature.machines.join(", ") || "_none_"}`;
-    case "actor":
-      return `${el.actor.name}${dash(el.actor.description)}\nEvents: ${el.actor.events.map((e) => e.name).join(", ") || "_none_"}`;
-    case "machine":
-      if (!full) return `${el.machine.name}${dash(el.machine.description)}\nUse \`trama model show ${el.machine.id}\` for the full State tree.`;
-      return [
-        `${el.machine.name} (machine \`${el.machine.id}\`, feature \`${el.machine.feature}\`)`,
-        el.machine.description,
-        "States:",
-        bullets(stateTreeLines(el.machine.states)),
-        "Events:",
-        bullets(machineReceiverLines(project.model, el.machine)),
-      ]
-        .filter((part) => part !== "")
-        .join("\n");
-    case "state":
-      return [
-        `${el.state.name}${marker(el.state)}${dash(el.state.description)}`,
-        ...(full ? outgoingLines(el.machine, el.state) : el.state.transitions.map((t) => `- \`${eventKey(t)}\` → ${t.target}${prose(t)}`)),
-      ].join("\n");
-    case "transition":
-      return el.transitions.map((t) => `- ${el.state.name}: \`${eventKey(t)}\` → ${t.target}${prose(t)}`).join("\n");
-    case "event":
-      if (!full) return `${ref}${dash(el.event.description)}`;
-      return [
-        `\`${ref}\` (emitted by ${project.model.machines.has(el.owner.id) ? "Machine" : "Actor"} \`${el.owner.id}\`)${dash(el.event.description)}`,
-        "Transitions that react to it:",
-        bullets(reactionLines(project.model, el.owner.id, el.event.name)),
-      ].join("\n");
-    case "requirement": {
-      if (el.section) return `${el.area.title}, ${el.section.ref ?? "General"}:\n${el.section.text || "_empty_"}`;
-      if (full) return areaText(el.area);
-      const skills = requirementSkillNames(project, el.area);
-      const pointer = skills.length === 0 ? "" : ` Load ${skills.map((s) => `the ${s}`).join(", ")} skill${skills.length > 1 ? "s" : ""} for the full text.`;
-      return `${el.area.title}: ${el.area.sections.filter((s) => s.text !== "").map((s) => s.ref ?? "General").join(", ") || "_empty_"}.${pointer}`;
-    }
-    case "specs": {
-      const entry = (e: SpecEntry) => `${e.name}${e.version ? ` ${e.version}` : ""}${e.chosenByAgent ? " (chosen by agent)" : ""}`;
-      const fields: readonly SpecField[] = el.field === null ? SPEC_FIELDS : [el.field];
-      return fields.map((f) => (f === "notes" ? `Notes: ${project.specs.notes || "_empty_"}` : `${f}: ${project.specs.lists[f].map(entry).join("; ") || "_empty_"}`)).join("\n");
-    }
-  }
-}
-
-/** Title, introduction and every section of an Area, so a Task can be carried out without opening the Area's skill. */
-function areaText(area: Area): string {
-  const sections = area.sections.map((s) => `## ${s.ref ?? "General"}\n${s.text || "_empty_"}`);
-  return [area.title, area.description, area.intro, ...sections].filter((part) => part !== "").join("\n\n");
-}
+const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null, freed: FreedTask[]) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, job: d.data.job, closedUnchanged: closed, notBlocking: freed.map((f) => ({ task: f.task, number: numbers.label("task", f.task), title: f.title, reason: f.reason })) });
 
 function refsBlock(project: ProjectModel, refs: string[], full = false): string {
   return bullets(refs.map((r) => `- \`${r}\`\n${describeRef(project, r, full).split("\n").map((l) => `  > ${l}`).join("\n")}`), "_No references._");
-}
-
-const quoteBlock = (key: string, text: string) => `- \`${key}\`\n${text.split("\n").map((l) => `  > ${l}`).join("\n")}`;
-
-/**
- * Requirements attached to the referenced Model elements or to what contains them, except those referenced
- * directly, plus a pointer to the Areas' General Requirements, which apply to everything.
- */
-export function requirementsBlock(project: ProjectModel, refs: string[], general: "pointer" | "text" | "none" = "pointer"): string {
-  const explicit = new Set(refs.filter((r) => parseRequirementRef(r) !== null));
-  const seen = new Set<string>();
-  const lines: string[] = [];
-  for (const ref of refs) {
-    if (parseRequirementRef(ref) !== null) continue;
-    for (const r of requirementsFor(project, ref)) {
-      const key = `requirements/${r.area.id}#${r.section.ref}`;
-      if (seen.has(key) || explicit.has(key) || explicit.has(`requirements/${r.area.id}`)) continue;
-      seen.add(key);
-      lines.push(quoteBlock(key, r.section.text));
-    }
-  }
-  if (general === "text") {
-    for (const area of project.areas) {
-      const section = area.sections.find((s) => s.ref === null && s.text !== "");
-      const key = `requirements/${area.id}#General`;
-      if (!section || explicit.has(key)) continue;
-      lines.push(quoteBlock(key, section.text));
-    }
-  } else if (general === "pointer") {
-    const areas = project.areas.filter((a) => a.sections.some((s) => s.ref === null && s.text !== "") || a.intro !== "");
-    const named = (a: Area) => {
-      const general = a.sections.find((s) => s.ref === null && s.text !== "") ?? null;
-      const skills = requirementSkillNames(project, a, general).concat(general ? [] : requirementSkillNames(project, a));
-      return skills.length === 0 ? a.title : `${a.title} (skill${skills.length > 1 ? "s" : ""} ${skills.map((s) => `\`${s}\``).join(", ")})`;
-    };
-    if (areas.length > 0) lines.push(`- General Requirements apply too: ${areas.map(named).join(", ")}.`);
-  }
-  return bullets(lines, "_No Requirements apply._");
 }
 
 const hasRequirements = (project: ProjectModel) => project.areas.some(hasContent);
@@ -328,13 +230,29 @@ export function taskNextView(p: Project, filter: ProposalFilter = {}, batch = fa
   return { md: md + held.md, json: { next: null, waiting: waitingJson, ...held.json } };
 }
 
+/**
+ * The "Prepared question" block of `drift show` and its JSON: the status, the question and each option with its decision, the recommended one marked.
+ * No block without the section. An unreadable section shows only its status and counts as absent in the JSON.
+ */
+function preparedBlock(status: PreparedStatus | null, fixOptions: { title: string }[]): { md: string[]; json: { valid: boolean; question: unknown; decisions: unknown } | null } {
+  if (status === null) return { md: [], json: null };
+  if (status.state === "unreadable") return { md: ["", "## Prepared question", "", `Status: **${preparedStatusText(status)}**`], json: null };
+  const { question, decisions } = status.value;
+  const decided = (d: PreparedDecision) => (d.decision === "fix-code" ? `fix the code, option ${d.option}${fixOptions[d.option - 1] ? ` (${fixOptions[d.option - 1]?.title})` : ""}` : d.decision === "proposal" ? "accept the attached Proposal" : "close without changes");
+  const options = question.options.flatMap((o, i) => ["", `${i + 1}. **${o.label}**${i === question.recommended ? " (recommended)" : ""} → ${decided(decisions[i] as PreparedDecision)}`, "", `   ${o.description}`]);
+  const md = ["", "## Prepared question", "", `Status: **${preparedStatusText(status)}**`, "", question.question, ...(question.context === undefined ? [] : ["", question.context]), ...options];
+  return { md, json: { valid: status.state === "valid", question, decisions } };
+}
+
 export function driftShowView(p: Project, drift: Drift): Result {
   const project = loadProject(p);
   const numbers = syncShortNumbers(p);
   const sides = driftSides(drift);
   const closed = closedUnchanged(p, drift);
   const freed = freedTasks(drift, listTasks(p));
-  const bodyText = drift.body.replace(/^#\s+.+\n+/, "").trim();
+  const bodyText = driftBody(drift);
+  const status = preparedStatus(p, drift, project);
+  const prepared = preparedBlock(status, driftOptions(drift));
   const options = driftOptions(drift);
   const numbered = options.flatMap((o, i) => ["", `${i + 1}. **${o.title}**${i === 0 ? " (recommended)" : ""}`, "", ...o.text.split("\n").map((l) => (l ? `   ${l}` : l))]);
   const chosen = drift.data.option === null ? undefined : options[drift.data.option - 1];
@@ -386,15 +304,16 @@ export function driftShowView(p: Project, drift: Drift): Result {
     attachedLine,
     resolutionLine,
     drift.data.task ? `Task: ${numbers.name("task", drift.data.task)}` : "",
+    ...prepared.md,
     "",
     "## References",
     refsBlock(project, drift.data.refs),
     ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, drift.data.refs)] : []),
   ].join("\n");
-  return { md, json: { ...driftSummary(drift, numbers, closed, freed), body: drift.body, happens: sides?.happens ?? null, should: sides?.should ?? null, where: sides?.where ?? null, options, option: drift.data.option, note: drift.data.note, proposalBlock: block, ...resolutionJson } };
+  return { md, json: { ...driftSummary(drift, numbers, closed, freed), prepared: prepared.json, preparedStatus: status === null ? null : preparedStatusText(status), body: withoutPrepared(drift.body).trim(), happens: sides?.happens ?? null, should: sides?.should ?? null, where: sides?.where ?? null, options, option: drift.data.option, note: drift.data.note, proposalBlock: block, ...resolutionJson } };
 }
 
-export function driftListView(p: Project, all: boolean, refs: string[] = []): Result {
+export function driftListView(p: Project, all: boolean, refs: string[] = [], filter: { job?: string; unprepared?: boolean } = {}): Result {
   const numbers = syncShortNumbers(p);
   const model = loadProject(p);
   // A reference that does not resolve is a usage error, not an empty list.
@@ -406,13 +325,14 @@ export function driftListView(p: Project, all: boolean, refs: string[] = []): Re
     }
   }
   // The same test that decides which Tasks a Drift blocks: the same element, or one inside the other.
-  const drifts = listDrifts(p).filter((d) => (all || d.data.status === "open") && (refs.length === 0 || concernSameThing(model, d.data.refs, refs)));
+  const concerned = listDrifts(p).filter((d) => (all || d.data.status === "open") && (refs.length === 0 || concernSameThing(model, d.data.refs, refs)) && (filter.job === undefined || d.data.job === filter.job));
+  const drifts = filter.unprepared === true ? unpreparedDrifts(p, concerned) : concerned;
   const tasks = listTasks(p);
   const md = bullets(
     drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}] ${d.title}${d.data.previous === null ? "" : " (recurring)"}${closedUnchanged(p, d, tasks) ? " (dismissed, no changes)" : ""}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
     "_No Drifts._",
   );
-  return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map((d) => driftSummary(d, numbers, closedUnchanged(p, d, tasks), freedTasks(d, tasks))) } };
+  return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map((d) => ({ ...driftSummary(d, numbers, closedUnchanged(p, d, tasks), freedTasks(d, tasks)), prepared: preparedFlag(preparedStatus(p, d, model)) })) } };
 }
 
 /** The Tasks a new Drift with these references and this origin would block, by number or identity and title; writes nothing. */

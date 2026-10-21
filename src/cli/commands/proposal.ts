@@ -45,7 +45,7 @@ const create = defineCommand({
   mode: "immediate",
   summary: "Create a Draft Proposal.",
   description:
-    "Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `nonBlocking` applies only to a resolution whose Drifts block no Task. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from.",
+    "Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `nonBlocking` applies only to a resolution whose Drifts block no Task. `prepared` applies only to a resolution born from the answer to a Drift's prepared question. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from.",
   input: z
     .strictObject({
       title: z.string().min(1).describe("A short title: at most five words."),
@@ -54,12 +54,14 @@ const create = defineCommand({
       label: z.string().optional().describe("The short label of the Proposal: 1 to 30 characters, one line."),
       requires: stringList.optional().describe("The Proposals this one requires: IDs or short numbers."),
       nonBlocking: z.boolean().optional().describe("A resolution whose Drifts block no Task. Only with kind `resolution`."),
+      prepared: z.boolean().optional().describe("A resolution born from the answer to a Drift's prepared question. Only with kind `resolution`."),
       announcement: z.string().min(1).optional().describe("The announcement of this Proposal."),
       request: z.string().min(1).optional().describe("The written design request this Proposal comes from."),
     })
     .superRefine((input, ctx) => {
       const fail = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });
       if (input.nonBlocking === true && input.kind !== "resolution") fail("nonBlocking", "applies only with kind resolution");
+      if (input.prepared === true && input.kind !== "resolution") fail("prepared", "applies only with kind resolution");
     }),
   output: card.extend({ path: z.string(), request: z.string().nullable(), note: z.string().optional().describe("About the announcement, when it was not known."), requestNote: z.string().optional().describe("About the design request, when it was not bound.") }),
   example: { title: "Order cancel", body: "# Order cancel\n\nA paid order can be cancelled.", label: "Order cancel", announcement: "a1b2c3d4" },
@@ -76,6 +78,7 @@ const create = defineCommand({
       requires: (input.requires ?? []).map((id) => getProposal(project, id, true).id),
       kind,
       nonBlocking: input.nonBlocking === true,
+      prepared: input.prepared === true,
       announcement: input.announcement,
       origin: ctx.origin,
       request: input.request,

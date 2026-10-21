@@ -1,6 +1,6 @@
 import { TramaError } from "./errors";
 import { joinReasons } from "./design";
-import { type DriftDecision, type DriftDecisionKind, getProposal, listProposals, type Proposal, requireEditable, resolutionHolding, save, touch, withProposalLock } from "./proposals";
+import { copyProposalFiles, type DriftDecision, type DriftDecisionKind, discardProposal, getProposal, listProposals, newProposal, type Proposal, requireEditable, resolutionHolding, save, submitProposal, touch, withProposalLock } from "./proposals";
 import { cardName } from "./short-numbers";
 import type { Project } from "./store";
 import { chosenOption, driftOptions, fixCodeRefusal, followedDrift, type FreedTask, freedTasks, getDrift, listDrifts, listTasks } from "./work";
@@ -63,9 +63,12 @@ function commit(p: Project, proposal: Proposal, drifts: DriftDecision[]) {
   return { proposal, returnedToDraft };
 }
 
-/** The resolution Proposal still being written or open, the oldest, or null. Always computed from the files, never remembered. */
+/**
+ * The resolution Proposal still being written or open, the oldest, or null. Always computed from the files, never remembered.
+ * A resolution born from a prepared question (`prepared: true`) never stops Resolve, so it is not counted here.
+ */
 export function awaitingResolution(p: Project): Proposal | null {
-  return listProposals(p).find((r) => r.data.kind === "resolution" && (r.data.status === "draft" || r.data.status === "open")) ?? null;
+  return listProposals(p).find((r) => r.data.kind === "resolution" && !r.data.prepared && (r.data.status === "draft" || r.data.status === "open")) ?? null;
 }
 
 /** Why Resolve Drifts cannot be launched now: every reason that holds, in order (Drifts are being resolved, a run in progress, the resolution Proposal awaiting a decision, no open Drifts), or null. `work` is what holds in this window. */
@@ -82,14 +85,53 @@ export function resolveDriftsBlocker(p: Project, work: WindowWork): string | nul
 /**
  * Why Resolve on one open Drift cannot be launched now, or null: the reasons of `resolveDriftsBlocker` that hold for it,
  * in the same order, without «No open Drifts». `agentOnIt` tells whether the agent resolving Drifts works on this one.
+ * `preparedQuestion` is true when Resolve opens the Drift's valid prepared question: no resolution awaiting a decision stops it.
  */
-export function resolveDriftBlocker(p: Project, work: WindowWork, agentOnIt: boolean): string | null {
-  const awaiting = awaitingResolution(p);
+export function resolveDriftBlocker(p: Project, work: WindowWork, agentOnIt: boolean, preparedQuestion = false): string | null {
+  const awaiting = preparedQuestion ? null : awaitingResolution(p);
   return joinReasons([
     work.resolving ? (agentOnIt ? "An agent is resolving this Drift" : "Drifts are being resolved") : null,
     work.running ? "A run is in progress" : null,
     awaiting ? `Proposal ${cardName(p, "proposal", awaiting.id)} resolving Drifts awaits a decision` : null,
   ]);
+}
+
+/** The answer to a Drift's prepared question, as the host reads it: the decision it comes to. */
+export interface PreparedAnswer {
+  decision: DriftDecisionKind;
+  /** Only with `fix-code`: the number of the chosen fix option, from 1. */
+  option?: number;
+  /** Only with `fix-code`: a free note for the fix Task. */
+  note?: string;
+}
+
+/** The outcome of `writePreparedResolution`: the open resolution, or why it was refused (the Draft is then Discarded). */
+export type PreparedResolution = { proposal: Proposal; refusal: null } | { proposal: null; refusal: string };
+
+/**
+ * Trama's own path from the answer to a Drift's prepared question to an open resolution, with no agent: creates a Draft
+ * resolution marked `prepared`, titled `Resolve: <Drift title>`, records the one decision of the answer (for `proposal`, the
+ * files of the Proposal attached to the Drift are copied into it), and hands it over with the same checks as the agent's hand-over.
+ * When any step is refused, the Draft is Discarded with no feedback, so it never shows on the Board, and the refusal is returned
+ * for the caller to pass the answer to the Drift resolution agent.
+ */
+export function writePreparedResolution(p: Project, driftId: string, answer: PreparedAnswer, skillsDirs: string[] = []): PreparedResolution {
+  const drift = getDrift(p, driftId);
+  const optionTitle = answer.option === undefined ? undefined : driftOptions(drift)[answer.option - 1]?.title;
+  const body = `Resolves Drift ${drift.id} (${drift.title}): ${decisionText(answer.decision, optionTitle).toLowerCase()}.`;
+  const proposal = newProposal(p, `Resolve: ${drift.title}`, body, { kind: "resolution", prepared: true });
+  try {
+    resolveDriftInProposal(p, proposal.id, drift.id, answer);
+    if (answer.decision === "proposal") {
+      if (drift.data.proposal === null) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has no attached Proposal to copy`);
+      copyProposalFiles(p, proposal.id, drift.data.proposal);
+    }
+    return { proposal: submitProposal(p, proposal.id, skillsDirs), refusal: null };
+  } catch (err) {
+    if (!(err instanceof TramaError)) throw err;
+    discardProposal(p, proposal.id);
+    return { proposal: null, refusal: err.message };
+  }
 }
 
 /** What holds in this window: Drift resolution and a run may both be going. */

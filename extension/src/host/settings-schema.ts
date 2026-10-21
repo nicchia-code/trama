@@ -54,7 +54,7 @@ export const SETTING_GROUPS: readonly { title: string; keys: readonly string[] }
   { title: "Agent", keys: ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.autoExit", "trama.language"] },
   { title: "Models", keys: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"] },
   { title: "Project", keys: ["trama.skillsDir"] },
-  { title: "Experimental", keys: ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution"] },
+  { title: "Experimental", keys: ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution", "trama.experimentalAsyncDriftResolver"] },
 ];
 
 /** The agent setting: the agents are Cursor's chat and omp. */

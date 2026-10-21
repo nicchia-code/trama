@@ -5,6 +5,7 @@ import { getProposal } from "../../core/proposals";
 import { sendCoordinatorMessageSoon } from "../../core/question-channel";
 import { syncShortNumbers } from "../../core/short-numbers";
 import { recordTiming } from "../../core/timings";
+import { editDrift, preparedFlag, preparedStatus } from "../../core/prepared";
 import { getDrift, getTask, newDrift, resolveDrift } from "../../core/work";
 import type { Context } from "../context";
 import { defineCommand } from "../registry";
@@ -79,6 +80,7 @@ const create = defineCommand({
       announcement: input.announcement,
       where: input.where as string,
       notBlocking: (input.notBlocking ?? []).map((n) => ({ task: getTask(project, n.task, true).id, reason: n.reason })),
+      job: ctx.job,
     });
     if (origin !== undefined) recordTiming(project, ctx.origin, { event: "task-end", task: origin, title: getTask(project, origin, true).title, outcome: "drift", drift: d.id }, { job: ctx.job });
     // The agent that files a Drift keeps «Dismiss Drift» from it until its turn ends: the editor learns who holds it here. An agent Trama did not start and that does not say where it comes from files as the `editor` holder.
@@ -98,10 +100,10 @@ const show = defineCommand({
   verb: "show",
   mode: "immediate",
   summary: "A Drift with its references and attached Proposal.",
-  description: "Both sides, the fix options, where in the code, the references with the Requirements that apply, and the attached Proposal. Read-only.",
+  description: "Both sides, the fix options, where in the code, the references with the Requirements that apply, the attached Proposal and, when the Drift has a prepared question, its status (`valid`, `stale: <reason>` or `unreadable`), the question, each option with its decision and the recommended one. Read-only.",
   positionals: [{ name: "id", description: "The Drift: its ID, a unique prefix or its short number." }],
   input: z.strictObject({}),
-  output: card.extend({ title: z.string(), status: z.string() }),
+  output: card.extend({ title: z.string(), status: z.string(), job: z.string().nullable(), prepared: z.looseObject({ valid: z.boolean() }).nullable() }),
   exampleArgs: ["D3"],
   run: (ctx, _input, [id]) => driftShowView(ctx.project(), getDrift(ctx.project(), id as string, true)),
 });
@@ -111,14 +113,68 @@ const list = defineCommand({
   verb: "list",
   mode: "immediate",
   summary: "The open Drifts, or every Drift.",
-  description: "With `all: true`, every Drift. `refs` keeps only the Drifts that concern the same thing as one of the given references, as the Task blocks do; a reference that does not resolve is refused. Read-only.",
+  description: "With `all: true`, every Drift. `refs` keeps only the Drifts that concern the same thing as one of the given references, as the Task blocks do; a reference that does not resolve is refused. `job` keeps the Drifts filed by that job (`TRAMA_JOB`). `unprepared: true` keeps the open Drifts that have no valid prepared question and are in no resolution being written or open. The filters combine. Read-only.",
   input: z.strictObject({
     all: z.boolean().optional().describe("Every Drift, not only the open ones."),
     refs: z.array(z.string().min(1)).optional().describe("Only the Drifts that concern the same thing as one of these references."),
+    job: z.string().min(1).optional().describe("Only the Drifts filed by this job."),
+    unprepared: z.boolean().optional().describe("Only the open Drifts without a valid prepared question, outside every resolution being written or open."),
   }),
-  output: z.object({ drifts: z.array(card.extend({ title: z.string(), status: z.string() })) }),
-  example: { all: true, refs: ["order/Paid"] },
-  run: (ctx, input) => driftListView(ctx.project(), input.all === true, input.refs ?? []),
+  output: z.object({ drifts: z.array(card.extend({ title: z.string(), status: z.string(), job: z.string().nullable(), prepared: z.object({ valid: z.boolean() }).nullable() })) }),
+  example: { all: true, refs: ["order/Paid"], unprepared: true },
+  run: (ctx, input) => driftListView(ctx.project(), input.all === true, input.refs ?? [], { job: input.job, unprepared: input.unprepared === true }),
+});
+
+const edit = defineCommand({
+  object: "drift",
+  verb: "edit",
+  mode: "immediate",
+  summary: "Prepare the question of an open Drift, or attach a Proposal to it.",
+  description:
+    "At least one of `prepared` and `proposal`. `proposal` attaches a Draft or open Proposal that no other open Drift holds to an open Drift that has none (the rules of `drift new`); a Drift that already has one refuses it. `prepared` writes the Drift's **prepared question**, the one Resolve Drifts would ask the developer, replacing the earlier one: `question` is one question of `trama question new` (its `id` is the Drift's permanent identity, `multi` is `false`) and `decisions` has one decision for each of its options, in the same order. The `fix-code` decisions (`option` counted from 1) name every fix option of the Drift once, plus exactly one `proposal` or `dismissed`; a Drift without fix options has exactly one `proposal` and one `dismissed`. A `proposal` decision needs an attached Proposal, also one given in the same command. Trama records the fingerprint of the Model and Requirements text the Drift's references have now and the instant, so a later change of that text makes the question stale. A wrong input is a usage error naming the field, and nothing is written.",
+  positionals: [{ name: "id", description: "The Drift: its ID, a unique prefix or its short number." }],
+  input: z.strictObject({
+    prepared: z
+      .strictObject({
+        question: z.looseObject({}).describe("The question, as in `trama question new`: `id` (the Drift's permanent identity), `question`, `context`, `options`, `recommended`, `multi: false`."),
+        decisions: z
+          .array(z.strictObject({ decision: z.enum(["fix-code", "proposal", "dismissed"]).describe("What picking the option does."), option: z.number().int().min(1).optional().describe("With `fix-code`: the number of the fix option, from 1.") }))
+          .describe("One decision for each option of the question, in the same order."),
+      })
+      .optional()
+      .describe("The prepared question and what each option does."),
+    proposal: z.string().min(1).optional().describe("The Draft or open Proposal to attach: its ID or short number."),
+  }),
+  output: card.extend({ proposal: z.string().nullable(), prepared: z.object({ valid: z.boolean() }).nullable() }),
+  example: {
+    prepared: {
+      question: {
+        id: "a1b2c3d4",
+        question: "A paid order cannot be refunded after a day. What should change?",
+        context: "The Model says a paid order can be refunded at any time.",
+        options: [
+          { label: "Remove the limit", description: "Refunds work at any time.", details: "Fix the code to match the Model." },
+          { label: "Keep the code", description: "Late refunds stay refused." },
+        ],
+        recommended: 0,
+        multi: false,
+      },
+      decisions: [{ decision: "fix-code", option: 1 }, { decision: "dismissed" }],
+    },
+  },
+  exampleArgs: ["D3"],
+  effects: { writes: true },
+  run(ctx, input, [id]) {
+    const project = ctx.project();
+    const d = editDrift(project, id as string, {
+      ...(input.prepared === undefined ? {} : { prepared: input.prepared }),
+      ...(input.proposal === undefined ? {} : { proposal: input.proposal }),
+    });
+    const n = numbersOf(ctx);
+    const prepared = preparedFlag(preparedStatus(project, d));
+    const did = [input.proposal === undefined ? "" : "Proposal attached", input.prepared === undefined ? "" : "prepared question written"].filter(Boolean).join(" and ");
+    return text(`Drift ${n.name("drift", d.id)} edited: ${did}`, { id: d.id, number: n.label("drift", d.id), proposal: d.data.proposal, prepared });
+  },
 });
 
 const move = defineCommand({
@@ -166,4 +222,4 @@ const move = defineCommand({
   },
 });
 
-export const DRIFT_COMMANDS = [create, show, list, move];
+export const DRIFT_COMMANDS = [create, show, list, edit, move];

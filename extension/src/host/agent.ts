@@ -14,7 +14,7 @@ import { withdrawWaiting } from "./announcements";
 import { bindChatJob, chatJobSendStarted, endChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnsentJob, isHooked, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint } from "./questions";
-import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withDriftBlocker, withLanguage } from "./prompts";
+import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withDriftBlocker, withLanguage } from "./prompts";
 import { advisorOverlay, agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent, terminalEnv } from "./terminal-agent";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
@@ -34,6 +34,8 @@ export const configuredDriftBlocker = (): boolean => settings().inspect<unknown>
 export const configuredAdvisorScanner = (): boolean => settings().inspect<unknown>("experimentalAdvisorScanner")?.globalValue === true && configuredAgent() === "omp";
 /** Whether `trama.experimentalParallelExecution` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a run over several Tasks is about to start. */
 export const configuredParallelExecution = (): boolean => settings().inspect<unknown>("experimentalParallelExecution")?.globalValue === true;
+/** Whether `trama.experimentalAsyncDriftResolver` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a job is about to start. */
+export const configuredAsyncDriftResolver = (): boolean => settings().inspect<unknown>("experimentalAsyncDriftResolver")?.globalValue === true;
 /** The configured concurrent sub-agent limit, from user settings only; invalid values use the default. */
 export const configuredMaxParallelAgents = (): number => {
   const value: unknown = settings().inspect<number>("maxParallelAgents")?.globalValue ?? 20;
@@ -43,10 +45,11 @@ const withAgentLimit = (instruction: string, limit = configuredMaxParallelAgents
   instruction.replaceAll("{maxParallelAgents}", String(limit)) + ` Run at most ${limit} sub-agents at once.`;
 
 /**
- * The agent that asked a question round, when it can be told: Cursor's chat agent, or the program of the agent command
+ * The agent that asked a question round, when it can be told: `Prepared question` for a round Trama asks itself, Cursor's chat agent, or the program of the agent command
  * for one started in a terminal of Trama.
  */
-export function agentName(context: { fromTramaTerminal?: boolean; fromCursorChat?: boolean }): string | null {
+export function agentName(context: { fromTramaTerminal?: boolean; fromCursorChat?: boolean; prepared?: boolean }): string | null {
+  if (context.prepared === true) return "Prepared question";
   if (context.fromCursorChat === true) return "Cursor";
   if (context.fromTramaTerminal !== true) return null;
   const agent = configuredAgent();
@@ -253,7 +256,8 @@ function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, seve
   const withParallel = severalTasks && configuredParallelExecution() ? `${withSubAgent} ${PARALLEL_EXECUTION_SENTENCE}` : withSubAgent;
   const withAdvisor = advisor ? `${withParallel} ${ADVISOR_SENTENCE}` : withParallel;
   const withBlocker = withDriftBlocker(withAdvisor, filesDrifts && configuredDriftBlocker());
-  return withLanguage(askOwnLine ? withBlocker : `${withBlocker} ${ASK_DEVELOPER_SENTENCE}`, configuredLanguage());
+  const withResolver = withAsyncDriftResolver(withBlocker, filesDrifts && configuredAsyncDriftResolver());
+  return withLanguage(askOwnLine ? withResolver : `${withResolver} ${ASK_DEVELOPER_SENTENCE}`, configuredLanguage());
 }
 
 /** The model roles, trimmed (`trama.analysis`, `trama.scan`, `trama.execution`). Application scope: only the user's settings count. */

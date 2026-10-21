@@ -3,7 +3,9 @@ import { randomBytes, randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { approveProposal, rejectProposal } from "../../../src/core/proposals";
-import { resolveDriftBlocker, resolveDriftsBlocker, runWindowBlocker } from "../../../src/core/resolution";
+import { type PreparedQuestion, preparedOutcome, preparedStatus } from "../../../src/core/prepared";
+import { resolveDriftBlocker, resolveDriftsBlocker, runWindowBlocker, writePreparedResolution } from "../../../src/core/resolution";
+import type { QuestionAnswer } from "../../../src/core/questions";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { namerOf } from "../../../src/core/card-names";
@@ -12,10 +14,11 @@ import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { blockedTasks, dismissDrift, getDrift, getTask, listDrifts, listTasks, requireNotAttached } from "../../../src/core/work";
 import type { AgentAction, ToHost, ToWebview } from "../protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAdvisorScanner, configuredAgent, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, endHeldJob, launchAgent, launched, settings, startHeldJob } from "./agent";
+import { configuredAdvisorScanner, configuredAgent, configuredAsyncDriftResolver, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, endHeldJob, launchAgent, launched, settings, startHeldJob } from "./agent";
 import { isCursor } from "./cursor";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
-import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, proposalsFinishing, tasksFinishing } from "./drift-resolution";
+import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing } from "./drift-resolution";
+import { askPreparedRound } from "./questions";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { appliedProposalModels, boardModels, chooseProposalModel, forgetProposalModels, proposalRunModel, type BoardModels, type ModelMemory, type ProposalAgent } from "./proposal-models";
@@ -29,7 +32,7 @@ import type { QuestionSession } from "./question-session";
 import type { DesignRequests } from "./design-requests";
 
 import { writeLastScan } from "../../../src/core/last-scan";
-import { buildPrompt, mayFileDrifts, terminalName, type ResolvedAction } from "./prompts";
+import { buildPrompt, mayFileDrifts, PREPARED_ANSWER_SENTENCE, terminalName, type ResolvedAction } from "./prompts";
 
 const DEBOUNCE_MS = 150;
 
@@ -72,6 +75,8 @@ export class Controller implements vscode.Disposable {
   private disposed = false;
   /** The open Drifts the resolution launched from this window was asked to resolve; cleared once no resolution runs. */
   private readonly namedByResolution = new Set<string>();
+  /** How a prepared question is asked in this window; a test replaces it. */
+  private askPrepared: typeof askPreparedRound = askPreparedRound;
 
   /** The newest request for model suggestions: an answer that arrives after a newer request is dropped. */
   private suggestionsRequest = 0;
@@ -367,7 +372,8 @@ export class Controller implements vscode.Disposable {
       if (this.panel) this.panel.title = snapshot.system.name.trim() || this.projectTitle(project);
       // The Drifts an agent was asked to resolve are forgotten once no resolution runs, so a later Resolve is not held by them.
       if (!work.resolving) this.namedByResolution.clear();
-      const drifts = Object.fromEntries(listDrifts(project).filter((d) => d.data.status === "open").map((d) => [d.id, resolveDriftBlocker(project, work, this.namedByResolution.has(d.id))]));
+      const asyncResolver = configuredAsyncDriftResolver();
+      const drifts = Object.fromEntries(listDrifts(project).filter((d) => d.data.status === "open").map((d) => [d.id, resolveDriftBlocker(project, work, this.namedByResolution.has(d.id), asyncResolver && snapshot.drifts.find((x) => x.id === d.id)?.prepared?.valid === true)]));
       // The open Drifts the running resolution is working on: those this window asked an agent to resolve.
       const resolving = work.resolving ? Object.keys(drifts).filter((id) => this.namedByResolution.has(id)) : [];
       this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }, settings().get<boolean>("submitWhileRunning", false) === true), drifts, resolving }, models, scans: { advisorScanner: configuredAdvisorScanner() } });
@@ -561,7 +567,50 @@ export class Controller implements vscode.Disposable {
     return proposalRunModel(this.modelMemory, project, getTask(project, task).data.proposal, proposalAgent());
   }
 
-  private async launchAction(project: Project, action: AgentAction): Promise<void> {
+  /** The valid prepared question of an open Drift when the Async Drift Resolver is on (read now, from user settings), null otherwise. */
+  private preparedQuestionOf(project: Project, drift: string): PreparedQuestion | null {
+    if (!configuredAsyncDriftResolver()) return null;
+    const status = preparedStatus(project, getDrift(project, drift));
+    return status?.state === "valid" ? status.value : null;
+  }
+
+  /**
+   * Resolve on a Drift with a valid prepared question: no agent starts, the question opens as a round of this window. A Fix
+   * option, or the choice to close the Drift or adopt its attached Proposal, is written and handed over by Trama as a resolution
+   * born from the prepared question. Free text with another option, or a refused hand-over, launches the resolution agent with the
+   * answer. A skip or a lost editor writes nothing: the Drift stays open with its question prepared.
+   */
+  private async resolvePrepared(project: Project, drift: string, value: PreparedQuestion): Promise<void> {
+    const job = randomUUID();
+    startHeldJob(project.root, "prepared", job);
+    let answer: QuestionAnswer | undefined;
+    try {
+      const result = await this.askPrepared(project.root, { questions: [value.question] });
+      if (result?.status === "answered") answer = result.answers[value.question.id];
+    } catch {
+      return;
+    } finally {
+      endHeldJob(project.root, job);
+    }
+    const outcome = preparedOutcome(value, answer);
+    if (outcome.kind === "none") return;
+    let given = outcome.kind === "agent" ? outcome.answer : undefined;
+    if (outcome.kind === "write") {
+      const written = writePreparedResolution(project, drift, outcome.answer, [configuredSkillsDir()]);
+      if (written.proposal !== null) {
+        // In-process commands do not send the notice the command line sends after a hand-over. No agent turn follows, so nothing holds the Proposal.
+        const holder = `prepared:${job}`;
+        receiveNotice({ type: "proposal-delivered", root: project.root, proposal: written.proposal.id, holder });
+        releaseFiledWork(project.root, holder);
+        this.refresh();
+        return;
+      }
+      if (answer?.status === "answered") given = { selected: answer.selected, ...(answer.text?.trim() ? { text: answer.text } : {}) };
+    }
+    if (given !== undefined) await this.launchAction(project, { kind: "resolve-drifts", drift }, given);
+  }
+
+  private async launchAction(project: Project, action: AgentAction, answered?: { selected: string[]; text?: string }): Promise<void> {
     // Resolve Drifts and Runs are checked from current state at the request and at each delivery checkpoint.
     const refusal = (): string | null => {
       if (action.kind === "resolve-drifts" && driftsFinishing(project.root).includes(action.drift)) return "Resolve this Drift is unavailable: the agent is still finishing.";
@@ -569,7 +618,7 @@ export class Controller implements vscode.Disposable {
       if (action.kind === "resolve-drifts") {
         const drift = getDrift(project, action.drift);
         if (drift.data.status !== "open") return `Resolve this Drift is unavailable: Drift ${cardName(project, "drift", drift.id)} is ${drift.data.status}`;
-        const blocker = resolveDriftBlocker(project, driftWork(project.root), this.namedByResolution.has(action.drift));
+        const blocker = resolveDriftBlocker(project, driftWork(project.root), this.namedByResolution.has(action.drift), answered === undefined && this.preparedQuestionOf(project, action.drift) !== null);
         return blocker === null ? null : `Resolve this Drift is unavailable: ${blocker}.`;
       }
       if (action.kind === "scan" && configuredAdvisorScanner()) return "Scan is unavailable: the Advisor Scanner is on.";
@@ -599,7 +648,13 @@ export class Controller implements vscode.Disposable {
       case "resolve-drifts": {
         // Resolve Drifts is always a request on the one Drift the developer chose.
         const drift = action.drift;
-        const result = await send({ kind: "resolve-drifts", drift }, { kind: "resolve", drifts: () => [drift] }, undefined, undefined, this.runModelOfTask(project, getDrift(project, drift).data.origin));
+        const prepared = answered === undefined ? this.preparedQuestionOf(project, drift) : null;
+        if (prepared !== null) {
+          await this.resolvePrepared(project, drift, prepared);
+          return;
+        }
+        const instruction = answered === undefined ? undefined : `${buildPrompt({ kind: "resolve-drifts", drift })} ${PREPARED_ANSWER_SENTENCE} ${JSON.stringify(answered)}.`;
+        const result = await send({ kind: "resolve-drifts", drift }, { kind: "resolve", drifts: () => [drift] }, instruction, undefined, this.runModelOfTask(project, getDrift(project, drift).data.origin));
         if (launched(result)) this.namedByResolution.add(drift);
         return;
       }

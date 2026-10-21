@@ -195,6 +195,12 @@
           "default": false,
           "scope": "application",
           "markdownDescription": "Experimental. Only for runs over several Tasks, with an agent that has sub-agents. On: the agent reads the Tasks before the run and may start together Tasks that Trama would keep apart because they concern the same thing, or hold a Task until another is done, giving a reason for each choice; a sub-agent that finds its Task touching the same things as another stops, and the agent resumes it later. Off (the default): Trama never gives two Tasks that concern the same thing at once. Only agents started by Trama follow it."
+        },
+        "trama.experimentalAsyncDriftResolver": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Experimental. On: before a scan, a run or an import finishes, the agent prepares the resolution question of every Drift it filed, so `Resolve` opens that question at once and Trama writes the resolution from your answer, without starting an agent; you still approve or reject the resolution. Resolutions written this way do not hold back other `Resolve`s. Off (the default): `Resolve` always starts the resolving agent. Only agents started by Trama follow it."
         }
       }
     }

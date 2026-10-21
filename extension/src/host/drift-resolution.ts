@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 /** Trama-launched jobs, retained only in memory for their live editor windows. */
-export type JobKind = "run" | "resolve" | "scan";
+export type JobKind = "run" | "resolve" | "scan" | "prepared";
 
 /**
  * Where a job runs: a terminal or a chat. A held job has none: it keeps the project in its state between the Runs of a
@@ -44,7 +44,7 @@ export function localProjectJobs(root: string): Job[] {
 /** Which of Drift resolution and a run are going in this window; both may hold at once. Resolve Drifts and Runs are exclusive; scans do not block manual actions. Only this window's own jobs count: it does not see the jobs of other editor windows or of agents started outside Trama. */
 export function driftWork(root?: string): { resolving: boolean; running: boolean } {
   const all = root === undefined ? [...jobs] : localProjectJobs(root);
-  return { resolving: all.some((j) => j.kind === "resolve"), running: all.some((j) => j.kind === "run") };
+  return { resolving: all.some((j) => j.kind === "resolve" || j.kind === "prepared"), running: all.some((j) => j.kind === "run") };
 }
 
 /** The panel and the launches hear of every change of `driftWork()`. */

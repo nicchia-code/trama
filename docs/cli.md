@@ -171,7 +171,7 @@ Runs at once; read-only.
 
 #### `trama proposal new`
 
-Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `nonBlocking` applies only to a resolution whose Drifts block no Task. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from.
+Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `nonBlocking` applies only to a resolution whose Drifts block no Task. `prepared` applies only to a resolution born from the answer to a Drift's prepared question. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from.
 
 Input (`--input`):
 
@@ -181,6 +181,7 @@ Input (`--input`):
 - `label`: `string`, optional. The short label of the Proposal: 1 to 30 characters, one line.
 - `requires`: `string not empty[]`, optional. The Proposals this one requires: IDs or short numbers.
 - `nonBlocking`: `boolean`, optional. A resolution whose Drifts block no Task. Only with kind `resolution`.
+- `prepared`: `boolean`, optional. A resolution born from the answer to a Drift's prepared question. Only with kind `resolution`.
 - `announcement`: `string not empty`, optional. The announcement of this Proposal.
 - `request`: `string not empty`, optional. The written design request this Proposal comes from.
 
@@ -467,7 +468,7 @@ Runs at once; writes in `.trama/`, counts as the agent's activity, sends message
 
 #### `trama drift show <id>`
 
-Both sides, the fix options, where in the code, the references with the Requirements that apply, and the attached Proposal. Read-only.
+Both sides, the fix options, where in the code, the references with the Requirements that apply, the attached Proposal and, when the Drift has a prepared question, its status (`valid`, `stale: <reason>` or `unreadable`), the question, each option with its decision and the recommended one. Read-only.
 
 - `<id>`: The Drift: its ID, a unique prefix or its short number.
 
@@ -477,29 +478,59 @@ Output (`--json`):
 - number: string | null, required
 - title: string, required
 - status: string, required
+- job: string | null, required
+- prepared: { valid: boolean } | null, required
 
 Runs at once; read-only.
 
 #### `trama drift list`
 
-With `all: true`, every Drift. `refs` keeps only the Drifts that concern the same thing as one of the given references, as the Task blocks do; a reference that does not resolve is refused. Read-only.
+With `all: true`, every Drift. `refs` keeps only the Drifts that concern the same thing as one of the given references, as the Task blocks do; a reference that does not resolve is refused. `job` keeps the Drifts filed by that job (`TRAMA_JOB`). `unprepared: true` keeps the open Drifts that have no valid prepared question and are in no resolution being written or open. The filters combine. Read-only.
 
 Input (`--input`):
 
 - `all`: `boolean`, optional. Every Drift, not only the open ones.
 - `refs`: `string not empty[]`, optional. Only the Drifts that concern the same thing as one of these references.
+- `job`: `string not empty`, optional. Only the Drifts filed by this job.
+- `unprepared`: `boolean`, optional. Only the open Drifts without a valid prepared question, outside every resolution being written or open.
 
 ```sh
 trama drift list --input - <<'JSON'
-{"all":true,"refs":["order/Paid"]}
+{"all":true,"refs":["order/Paid"],"unprepared":true}
 JSON
 ```
 
 Output (`--json`):
 
-- drifts: { id: string, number: string | null, title: string, status: string }[], required
+- drifts: { id: string, number: string | null, title: string, status: string, job: string | null, prepared: { valid: boolean } | null }[], required
 
 Runs at once; read-only.
+
+#### `trama drift edit <id>`
+
+At least one of `prepared` and `proposal`. `proposal` attaches a Draft or open Proposal that no other open Drift holds to an open Drift that has none (the rules of `drift new`); a Drift that already has one refuses it. `prepared` writes the Drift's **prepared question**, the one Resolve Drifts would ask the developer, replacing the earlier one: `question` is one question of `trama question new` (its `id` is the Drift's permanent identity, `multi` is `false`) and `decisions` has one decision for each of its options, in the same order. The `fix-code` decisions (`option` counted from 1) name every fix option of the Drift once, plus exactly one `proposal` or `dismissed`; a Drift without fix options has exactly one `proposal` and one `dismissed`. A `proposal` decision needs an attached Proposal, also one given in the same command. Trama records the fingerprint of the Model and Requirements text the Drift's references have now and the instant, so a later change of that text makes the question stale. A wrong input is a usage error naming the field, and nothing is written.
+
+- `<id>`: The Drift: its ID, a unique prefix or its short number.
+
+Input (`--input`):
+
+- `prepared`: `{ question: object, decisions: { decision: "fix-code" | "proposal" | "dismissed", option?: integer ≥ 1 }[] }`, optional. The prepared question and what each option does.
+- `proposal`: `string not empty`, optional. The Draft or open Proposal to attach: its ID or short number.
+
+```sh
+trama drift edit D3 --input - <<'JSON'
+{"prepared":{"question":{"id":"a1b2c3d4","question":"A paid order cannot be refunded after a day. What should change?","context":"The Model says a paid order can be refunded at any time.","options":[{"label":"Remove the limit","description":"Refunds work at any time.","details":"Fix the code to match the Model."},{"label":"Keep the code","description":"Late refunds stay refused."}],"recommended":0,"multi":false},"decisions":[{"decision":"fix-code","option":1},{"decision":"dismissed"}]}}
+JSON
+```
+
+Output (`--json`):
+
+- id: string, required
+- number: string | null, required
+- proposal: string | null, required
+- prepared: { valid: boolean } | null, required
+
+Runs at once; writes in `.trama/`.
 
 #### `trama drift move <id> <state>`
 
@@ -936,6 +967,7 @@ The extension initialises and updates the skills with these two commands, passin
 |---|---|
 | `proposal new` with `{ title, body?, kind?, label?, requires?, nonBlocking?, announcement?, request? }` | Creates `proposals/<id>-<slug>/proposal.md` with `status: draft` and `created`, the UTC creation instant in ISO 8601. The id is eight random lowercase letters and digits, unique among Proposals; a Task or a Drift may use the same string. A card still named `NNNN-<slug>` (at least four digits) stays addressable by that number and has no `created`. An id argument may be the whole identity, a prefix that only one card of that kind has, or the whole file or folder name; digits alone cite only a numbered card. `kind` is `change` (default), `import` (ADR 0008), `resolution` or `setup`: one value, so a Proposal is of one kind only. `requires` writes it on top of those draft, open or approved Proposals (refused for a rejected or discarded one). `request` binds it to the written design request `.trama/requests/<id>.md` it comes from, recorded as `request`; when that file does not exist the Proposal is created unbound and the output says the request was not found. `label` is the short label, 1 to 30 characters on one line, trimmed, refused before anything is created when invalid; a Draft with Tasks must have one before the hand-over accepts it, and open Proposals written before the label existed are not blocked. It shows as `Label:` under the title of `proposal show`, and as `label` in its `--json`. A Proposal is never an automatic resolution: `automatic` and `job` are unknown fields, a usage error, and an old file with `automatic: true` is read without error, the field ignored. |
 | `proposal new` with `kind: "resolution"` and `nonBlocking` | Creates a resolution Proposal marked `nonBlocking: true`, whose Drifts block no Task: the experimental Drift blocker files it at the end of a scan, a Run or an import. `nonBlocking` is valid only with `kind: "resolution"`: any other combination is a usage error that creates nothing. Validation refuses `nonBlocking` on any other kind. The flag changes neither approval nor rejection, so the developer decides it like any resolution. `proposal list` and `project show` mark it `(blocks nothing)`, the Board shows a `blocks nothing` badge on its card, and `list`, `show`, `project show` and their `--json` carry it as `nonBlocking`. |
+| `proposal new` with `kind: "resolution"` and `prepared` | Creates a resolution Proposal marked `prepared: true`: it was born from the answer to a Drift's prepared question (Async Drift Resolver), written by Trama or by the agent launched with the answer. `prepared` is valid only with `kind: "resolution"`: any other combination is a usage error that creates nothing, and validation refuses it on any other kind. It is written at creation and stays as history after the decision. It changes neither approval nor rejection; it only changes who it stops: a prepared resolution awaiting a decision does not stop Resolve (`Proposal <id> resolving Drifts awaits a decision` names the oldest resolution in writing or open without it), so several can wait together. `proposal list`, `proposal show`, `project show`, the Snapshot and their `--json` carry it as `prepared`. |
 | `proposal new` with `kind: "setup"` | The first Proposal of an empty Model; a usage error, creating nothing, when the Model has a Feature or an Actor. |
 | `proposal edit <id>` with `{ label?, edit?, delete?, drifts?, removeDrifts? }` | Every use returns an open Proposal to Draft, with a notice, so the agent registers before every change; without input it only does that, touching no file. `edit` lists paths: each is a Model file relative to `.trama/model/`, `specs.yaml`, a Requirement file `requirements/<area>/area.md` or `requirements/<area>/<fragment>.md`, new or existing, or a Task `tasks/<slug>.md`. `requirements/<area>.md` and deeper paths are refused, saying why. For each it copies the current file into the Proposal and records its hash in `base`, or creates an empty file marked `new` if it does not exist, and prints the path to write (one per line; `--json`: `paths`, a list of `{ path, edit }`). Re-registering keeps the original hash and contents. `delete` lists paths to mark for deletion: each is added to `delete` and its hash recorded in `base`. `label` writes or changes the short label, with the rules of `proposal new`. `drifts` records or replaces, in a resolution, the decision on open Drifts (`{ drift, decision, option?, note? }`, `decision` being `proposal`, `dismissed` or `fix-code`; `option` and `note` only with `fix-code`), and `removeDrifts` takes Drifts out of the list. All of it runs under the Proposal's lock, in that order. |
 | `proposal move <id> open` | The only hand-over command: sets a Draft to `status: open` after the checks of the Model and Requirements with the Proposal applied, unregistered files, the Drift list of a resolution, including each `fix-code` Drift whose code can no longer be fixed. A refusal leaves it Draft and names every problem. A success prints, after its outcome, the warnings of the validation (none when there are none) and then the same text as `proposal show <id>`; with `--json` that text is the `show` field. Staleness or waiting for required approvals do not prevent the hand-over. A `setup` Proposal handed over while the Model has no Feature and no Actor is approved at once, as `approved` would do, and prints the same text after the outcome of that approval; when that approval refuses it (stale, requiring Proposals not approved yet, a Task that cannot be created), it stays Open and the output says why. `skillsDir` as in `approved`. When the Proposal is bound to a written design request, a successful hand-over deletes `.trama/requests/<id>.md` and says so; a file already gone does not make it fail, and a refused hand-over deletes nothing. |
@@ -990,6 +1022,8 @@ A Drift whose fix Task is closed without changes (`task move <id> done` with `{"
 
 A Drift leaves free only the Tasks named by `notBlocking`. `drift show` lists them after **Where in the code**, under **Not blocking**, each with its number or identity, its title (`(no longer exists)` for a Task that is gone) and its reason; `drift list`, `project show` and the `--json` of Drifts carry the same as `notBlocking`. A Task that no longer exists stays in the list and counts for nothing.
 
+With the experimental Async Drift Resolver (`trama.experimentalAsyncDriftResolver`, off by default, read from the user settings only), the main agent of a scan, a Run or an import prepares, before it finishes, the question Resolve would ask about each Drift the work filed. It finds them with `trama drift list` with `job` (from `TRAMA_JOB`) and `unprepared: true`, and records each question with `trama drift edit <id>` and `{ prepared?, proposal? }` (`prepared` is `{ question, decisions }`, one decision per option: `fix-code` with `option`, `proposal` or `dismissed`). `drift show` has a **Prepared question** block (`valid`, `stale: Model or Requirements changed` or `unreadable`), and `drift list`, `show`, the Snapshot and `--json` carry `job` and `prepared`. `trama proposal new` accepts `prepared: true` with `kind: resolution`: the resolution written from an answer already given to a prepared question. The skills `trama-resolve-drifts` ("Prepared question"), `trama-scan`, `trama-implement` and `trama-import` ("Async Drift Resolver") teach the agent both parts.
+
 
 ## Comparisons
 
@@ -1002,7 +1036,7 @@ A successful `comparison move <id> delivered` records the comparison in the regi
 
 ## Resolving Drifts
 
-No Drift resolves itself: there is no delegation, no automatic approval and no automatic Run. Resolve on one Drift (its card in the Board) takes only that Drift: the agent asks the developer the decisions and hands over a resolution to review; the Tasks that come out of it start by hand. A refused start keeps that scope until it really starts, so no other open Drift is taken with it.
+No Drift resolves itself: there is no delegation, no automatic approval and no automatic Run. Resolve on one Drift (its card in the Board) takes only that Drift: the agent asks the developer the decisions and hands over a resolution to review; the Tasks that come out of it start by hand. A refused start keeps that scope until it really starts, so no other open Drift is taken with it. With the Async Drift Resolver on (read at the click from the user settings only), Resolve on a Drift with a valid prepared question starts no agent and announces no ghost: it opens that question at once as a one-question round labelled `Prepared question`, with the recommendation selected. A Fix option (its free text is the note), or closing the Drift or adopting its attached Proposal with no free text, is written and handed over by Trama as a resolution Proposal marked `prepared`, and its yellow card appears in the Backlog; free text with another option, or a refused hand-over, launches the usual agent with the answer. A skip or a lost editor writes nothing and the question stays prepared. While the question is open Run, Run all, the Resolve of other Drifts and Dismiss Drift are unavailable; a resolution awaiting a decision never stops Resolve on a Drift with a valid prepared question.
 
 ## Announcements
 

@@ -1,7 +1,8 @@
 import { TramaError } from "../core/errors";
 import { requirementSkillNames } from "../core/requirement-skills";
 import { type Area, type ProjectModel, type RequirementSection, requirementsFor, resolveProjectRef } from "../core/requirements";
-import { bullets, dash, type Result } from "./result";
+import { bullets, dash } from "../core/describe";
+import type { Result } from "./result";
 
 const sectionTitle = (ref: string | null) => ref ?? "General";
 

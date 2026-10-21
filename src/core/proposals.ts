@@ -65,6 +65,8 @@ interface ProposalData {
   kind: ProposalKind;
   /** A resolution born from the experimental Drift blocker: its Drifts block no Task. Only a marker for the Board and the command line; it changes nothing else. */
   nonBlocking: boolean;
+  /** A resolution born from the answer to a Drift's prepared question: it does not stop Resolve while it awaits a decision. Only valid with `kind: resolution`. */
+  prepared: boolean;
   /** The Drifts a resolution resolves, in the order they were registered; always empty for other kinds. */
   drifts: DriftDecision[];
   /** IDs of Proposals that must be approved before this one; it is written and validated on top of them. */
@@ -136,6 +138,7 @@ function parseData(raw: Raw, where: string): ProposalData {
     status: enumField(raw, "status", STATUSES, "open", where),
     kind: enumField(raw, "kind", KINDS, "change", where),
     nonBlocking: boolField(raw, "nonBlocking", false, where),
+    prepared: boolField(raw, "prepared", false, where),
     drifts: [],
     requires: stringList(raw, "requires", where),
     base: stringMap(raw, "base", where),
@@ -233,13 +236,14 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
 
 /** Writes `proposal.md` from the Proposal's data, leaving defaults out of the file. */
 export function save(proposal: Proposal) {
-  const { kind, nonBlocking, drifts, requires, request, created, scanScope, label, ...rest } = proposal.data;
+  const { kind, nonBlocking, prepared, drifts, requires, request, created, scanScope, label, ...rest } = proposal.data;
   // Defaults stay out of the file, so Proposals without dependencies look as they always did.
   // Numbered Proposals have no `created`; writing it would pretend they remember an instant they do not.
   const data = {
     status: rest.status,
     ...(kind === "change" ? {} : { kind }),
     ...(nonBlocking ? { nonBlocking: true } : {}),
+    ...(prepared ? { prepared: true } : {}),
     ...(kind === "resolution" ? { drifts } : {}),
     ...(requires.length === 0 ? {} : { requires }),
     base: rest.base,
@@ -272,10 +276,12 @@ export function newProposal(
   p: Project,
   title: string,
   body = "",
-  options: { requires?: string[]; kind?: ProposalKind; nonBlocking?: boolean; announcement?: string; origin?: AgentOrigin; request?: string; label?: string } = {},
+  options: { requires?: string[]; kind?: ProposalKind; nonBlocking?: boolean; prepared?: boolean; announcement?: string; origin?: AgentOrigin; request?: string; label?: string } = {},
 ): Proposal {
   if (options.nonBlocking && (options.kind ?? "change") !== "resolution")
     throw new TramaError("--non-blocking needs --resolution");
+  if (options.prepared && (options.kind ?? "change") !== "resolution")
+    throw new TramaError("prepared needs a resolution");
   const label = options.label === undefined ? null : checkedLabel(options.label);
   const requires = (options.requires ?? []).map((r) => {
     const required = getProposal(p, r);
@@ -294,6 +300,7 @@ export function newProposal(
       status: "draft",
       kind: options.kind ?? "change",
       nonBlocking: options.nonBlocking ?? false,
+      prepared: options.prepared ?? false,
       drifts: [],
       requires: [...new Set(requires)],
       base: {},
@@ -479,6 +486,38 @@ export function deleteInProposal(p: Project, id: string, modelPath: string) {
   });
 }
 
+/**
+ * Copies the files of Proposal `sourceId` (Model, Requirements, Specs and the paths it deletes) into Proposal `id`, recording
+ * each starting version as `editInProposal` and `deleteInProposal` do, and returns an open Proposal to Draft. Refused, changing
+ * nothing, when the source no longer applies to the files as they are now (a file it touches changed since it recorded it).
+ */
+export function copyProposalFiles(p: Project, id: string, sourceId: string): Proposal {
+  return withProposalLock(p, id, () => {
+    const proposal = getProposal(p, id);
+    requireEditable(p, proposal);
+    const source = getProposal(p, sourceId);
+    const sourceName = cardName(p, "proposal", source.id);
+    const { stale } = health(p, source);
+    if (stale.length > 0) throw new TramaError(`Proposal ${sourceName} no longer applies: the Model changed since it touched ${stale.join(", ")}`);
+    const files = baseFiles(p, proposal);
+    for (const path of source.data.delete)
+      if (!files.has(path)) throw new TramaError(`Proposal ${sourceName} deletes ${path}, which does not exist any more`);
+    touch(proposal);
+    for (const [path, content] of newFiles(source)) {
+      const current = files.get(path);
+      proposal.data.base[path] ??= current !== undefined ? sha256(current) : "new";
+      writeFileEnsuringDir(trackedLocation(proposal.dir, path), content);
+    }
+    for (const path of source.data.delete) {
+      const current = files.get(path) as string;
+      proposal.data.base[path] ??= sha256(current);
+      if (!proposal.data.delete.includes(path)) proposal.data.delete.push(path);
+    }
+    save(proposal);
+    return proposal;
+  });
+}
+
 /** Whether a Proposal of this kind has a scope: its Tasks, its removal Tasks and its Scan scope are computed. */
 export const coversScope = (kind: ProposalKind): boolean => kind === "change" || kind === "setup";
 
@@ -571,7 +610,7 @@ export function applied(p: Project, proposal: Proposal): FileMap {
 export function validateProposal(p: Project, proposal: Proposal): Diagnostic[] {
   const taskErrors = proposal.tasks.flatMap((t) => t.problems.map((message) => ({ file: `tasks/${t.name}`, line: 0, message })));
   const project = buildProject(applied(p, proposal));
-  return [...taskErrors, ...project.diagnostics, ...taskRules(p, proposal, project), ...labelRule(p, proposal), ...nonBlockingRule(proposal)];
+  return [...taskErrors, ...project.diagnostics, ...taskRules(p, proposal, project), ...labelRule(p, proposal), ...nonBlockingRule(proposal), ...preparedRule(proposal)];
 }
 
 /** `nonBlocking` marks a resolution whose Drifts block no Task: the Board and the command line read the marker from there. */
@@ -585,6 +624,12 @@ function nonBlockingRule(proposal: Proposal): Diagnostic[] {
  * A Proposal with Tasks needs a valid label to be handed over. An open Proposal without a label was handed over before
  * labels existed, so only a label that is present but invalid blocks it.
  */
+/** `prepared` marks a resolution born from the answer to a prepared question; any other kind is a mistake. */
+function preparedRule(proposal: Proposal): Diagnostic[] {
+  if (!proposal.data.prepared || proposal.data.kind === "resolution") return [];
+  return [{ file: "proposal.md", line: 0, message: "prepared is only valid for a resolution Proposal" }];
+}
+
 function labelRule(p: Project, proposal: Proposal): Diagnostic[] {
   if (proposal.tasks.length === 0 || !coversScope(proposal.data.kind)) return [];
   const { label, status } = proposal.data;

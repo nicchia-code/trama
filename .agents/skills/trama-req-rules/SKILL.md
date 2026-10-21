@@ -28,7 +28,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole degli annunci** (`announcements.md`): Usa per annunci, ghost, controlli e confronti. Sections: `announcement`.
 - **Regole dell'approvazione** (`approvals.md`): Usa quando implementi ciò che succede all'approvazione di una Proposal. Sections: `proposal/Approved`.
 - **Regole delle Proposal** (`decisions.md`): Usa quando implementi le regole delle Proposal, dalla scrittura all'approvazione. Sections: `proposal`.
-- **Regole della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts, decidi quando una risoluzione o un Run sono in corso o scrivi una risoluzione `nonBlocking`. Sections: `drift-resolution`.
+- **Regole della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts, decidi quando una risoluzione o un Run sono in corso, scrivi una risoluzione `nonBlocking` o prepari e usi le domande pronte dell'Async Drift Resolver. Sections: `drift-resolution`.
 - **Regole dei Drift** (`drifts.md`): Usa quando implementi le regole dei Drift, della loro risoluzione e del pulsante Resolve Drifts. Sections: `drift`.
 - **Regole del focus** (`focus.md`): Usa quando calcoli cosa evidenzia il focus di una scheda del pannello: elementi, sezioni, passi e riferimenti mancanti. Sections: `focus`.
 - **Regole generali** (`general.md`): Usa sempre quando implementi regole di business: valgono per tutto il Sistema. Sections: `General`.

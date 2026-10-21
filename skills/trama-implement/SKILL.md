@@ -164,6 +164,16 @@ With it, the rule of the free places (`trama task list` with `max` never gives t
 - **Conflicts.** Tell each sub-agent: if, while working, it sees that its Task changes the same files or the same behaviour as another Task In progress, it stops; it does not undo its changes, leaves its Task In progress and comes back with what it did and the Task it clashes with. It never corrects files that belong to another Task's work and runs only its own tests. When a sub-agent comes back this way, record a `conflict`, take its place as free, and when the other Task is Done give the stopped Task to a new sub-agent, with the report of the first one.
 - **Report.** The report of the run (step 9) has a section "Parallel choices" that lists every free path, order and conflict, each with its Tasks and its reason.
 
+## Async Drift Resolver
+
+This section applies only when the instruction says "The Async Drift Resolver is on: …". Without that sentence, skip it.
+
+With it, at the very end of the work (after the last archiving, the end-of-Run scan and the `nonBlocking` resolution of the experimental Drift blocker, if any, and before the final report and the History entries), you prepare the question of every Drift this work filed, so Resolve opens at once. You alone do this, never a sub-agent that compares or implements.
+
+1. **Find the Drifts.** In a terminal, run `trama drift list --input -` with `{"job":"<value of TRAMA_JOB>","unprepared":true}`, where you first read the value of the `TRAMA_JOB` environment variable (for example `echo "$TRAMA_JOB"`) and write that literal value in the JSON: a quoted heredoc never expands `$TRAMA_JOB`: the open Drifts of this work, the advisor's included, with no valid prepared question and outside every resolution. In Cursor's chat, where `TRAMA_JOB` is not set and no advisor works, use the permanent identities of the Drifts you and your sub-agents filed. A Drift already in a resolution (the `nonBlocking` one) is left out.
+2. **Prepare each.** Follow "Writing a prepared question" in the `trama-resolve-drifts` skill (read it first) for each Drift, with the sub-agents you have: hand the exploration to at most `trama.maxParallelAgents` of them at once (the number the instruction gives, 20 when it gives none), one Drift (or a few that concern the same thing) each, and have each record its questions with `trama drift edit`. Without sub-agents, one Drift at a time. A sub-agent asks the developer nothing and registers no other card.
+3. **Report.** The final report says how many Drifts were prepared and which were not (with the reason).
+
 ## PowerShell
 
 The examples use POSIX syntax. In PowerShell, pass JSON with a pipe and `--input -`, for example `Get-Content -Raw round.json | trama question new --input -`, instead of `<` or a heredoc. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Never pass the JSON as the text of `--input`: Windows PowerShell 5.1 strips the inner quotes of arguments to external programs.

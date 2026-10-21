@@ -74,6 +74,30 @@ Run **`trama question new --root <project> --input -`** with the JSON request on
 
 - Never use your own question tool (`ask` in omp, `AskQuestion` in Cursor), and never write the questions in the conversation: `trama question new` is the only way to ask the developer.
 
+## Prepared question
+
+The Async Drift Resolver prepares in advance the question the developer would be asked about a Drift, so Resolve opens at once. This section has two parts: how a prepared question is written (the other skills point here), and how you work when the instruction brings the answer already given.
+
+### Writing a prepared question
+
+Explore the Drift as step 2 of "Steps" says (read the Drift with `trama drift show <id>`, its attached Proposal with `trama proposal show <id>`, the Model and the code it concerns), but **ask the developer nothing and write no resolution**: you only record the question. Write one single-choice question (`multi: false`) for the Drift, in the language of the instruction, with these parts:
+
+- `id`: the permanent identity of the Drift. `question`: one short sentence that reads on its own. `context`: the background of the Drift in the words of the domain; for a recurring Drift (`previous` in `trama drift show <id> --json`) the chain of its predecessors, from the nearest to the farthest, each with its permanent identity, title and decision taken.
+- `options`, as `{label, description}` (and `details` when useful), all written the same way, without saying which one is what the code does today: one for each Fix option of the Drift, in their order, and one for the behaviour the code already has. A Drift **without Fix options** has exactly two options instead: adopting the changes of its attached Proposal (the recommended one) and closing without changing anything.
+- `recommended`: your own choice, except for a Drift without Fix options, where it is adopting the attached Proposal.
+
+Each option carries its decision, in `decisions`, one entry per option in the same order: `{"decision":"fix-code","option":<n>}` with the number of the Fix option (from 1, as `trama drift show` lists them), `{"decision":"proposal"}` or `{"decision":"dismissed"}`. The option for the behaviour the code already has is `proposal` when the Model or the Requirements must change to say it, and `dismissed` when they already say it and nothing needs to change. A `proposal` decision needs a Proposal attached to the Drift: when the Drift has none and the behaviour of the code needs one, write a Draft with `trama-design` (without its interview, `trama proposal new --input -` with the changes to the Model and the Requirements, not handed over) and pass its identity as `proposal` in the command below. Without Fix options, the options are `proposal` (the attached Proposal) and `dismissed`.
+
+Record it with `trama drift edit <id> --input -` and `{"prepared":{"question":{…},"decisions":[…]},"proposal":"<id>"}` in a heredoc (`proposal` only when you attach a Draft in this command). The command checks the Drift is open, the question and the decisions, and computes the fingerprint of the Model and Requirements it was written against; a refusal names each problem: fix it and run the command again. The question is valid only while the Model and the Requirements of the Drift's references do not change.
+
+### The answer is already given
+
+This applies only when the instruction carries the sentence "The developer already answered this Drift's prepared question; do not ask again. Answer: <JSON>.". Then:
+
+- Do not open a round and never run `trama question new`: the JSON after "Answer:" is the answer of the round for this Drift (`selected` labels and optional free `text`).
+- Do steps 1, 2, 4 and 5 of "Steps" for that Drift only, with that answer as the answer of the round: decide from it as step 4 says and write the resolution as step 5 says, with one difference: create the Proposal with `"prepared":true` in `trama proposal new --input -` (`kind` `resolution`).
+- Hand it over as step 7 says and report.
+
 ## PowerShell
 
 The examples use POSIX syntax. In PowerShell, pass JSON with a pipe and `--input -`, for example `Get-Content -Raw round.json | trama question new --input -`, instead of `<` or a heredoc. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Never pass the JSON as the text of `--input`: Windows PowerShell 5.1 strips the inner quotes of arguments to external programs.

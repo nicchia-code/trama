@@ -1,6 +1,6 @@
 # Requirements: Dati, Dati del lavoro dell'agente
 
-Usa quando tocchi i dati di richieste di design, risoluzione dei Drift e round di domande.
+Usa quando tocchi i dati di richieste di design, risoluzione dei Drift, domande pronte e round di domande.
 
 ## design-request
 
@@ -13,7 +13,11 @@ Usa quando tocchi i dati di richieste di design, risoluzione dei Drift e round d
 ## drift-resolution
 
 - I lavori (Run, scan, risoluzioni) mantengono lo stato in memoria, per finestra: identità del lavoro, terminale o conversazione e Drift raccolto per una risoluzione. Non si scrive questo stato sotto `.trama/` né in `workspaceState`, e nessuna finestra conosce i lavori delle altre.
-- Che una Proposal di risoluzione aspetti una decisione non è tenuto in memoria: si calcola dalle Proposal con `kind: resolution` e `status` `draft` o `open`.
+- Che una Proposal di risoluzione aspetti una decisione non è tenuto in memoria: si calcola dalle Proposal con `kind: resolution` e `status` `draft` o `open`; quelle con `prepared: true` (`data#proposal`) non fermano `Resolve` (`rules#drift-resolution`).
+- La domanda pronta dell'Async Drift Resolver sta nel file del Drift, versionata con lui, in una sezione `## Prepared question` dopo tutte le altre: un solo blocco di codice `json` con un oggetto `{ question, decisions, fingerprint, prepared }`. `question` è una domanda nella forma di `data#question-round`, con `id` uguale all'identità permanente del Drift e `multi: false`. `decisions` è una lista con una voce per opzione, nello stesso ordine: `{ "decision": "fix-code", "option": <numero contato da 1> }`, `{ "decision": "proposal" }` o `{ "decision": "dismissed" }`. `fingerprint` è l'impronta del testo di Modello e Requisiti sui riferimenti del Drift al momento della scrittura (`tech#drift-resolution`); `prepared` è l'istante della scrittura, UTC, ISO 8601. La sezione non fa parte di ciò che il Drift dice: non entra nei due lati, nelle Fix options né nel Task di correzione.
+- Una sezione `## Prepared question` illeggibile (JSON non valido, forma diversa, opzioni e decisioni di numero diverso) non è un errore di lettura del Drift: la domanda vale come assente e `trama drift show` lo dice. Che una domanda pronta sia valida non è scritto: si calcola (`rules#drift-resolution`). I Drift scritti prima non hanno la sezione e non si riscrivono.
+- Il front matter di un Drift nuovo contiene anche `job`: l'identità del lavoro di Trama in cui è stato archiviato, presa da `TRAMA_JOB` quando c'è, altrimenti assente. Si scrive alla creazione e non cambia più; i Drift scritti prima non lo hanno.
+- Che la domanda pronta di un Drift sia aperta nella finestra è stato in memoria del lavoro di quella finestra, come gli altri lavori: non si scrive sotto `.trama/` e la risposta, finché il round è aperto, segue `data#question-round`.
 
 ## question-round
 

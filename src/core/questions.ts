@@ -14,6 +14,8 @@ export interface QuestionContext {
   fromTramaTerminal?: boolean;
   /** The round comes from Cursor's chat agent (`CURSOR_AGENT=1`); it reached the most recently active window of the project. */
   fromCursorChat?: boolean;
+  /** The round is asked by Trama itself, with no agent waiting: a Drift's prepared question opened by Resolve. */
+  prepared?: boolean;
 }
 export type QuestionHandler = (project: Project, request: QuestionRequest, context: QuestionContext) => Promise<QuestionResult>;
 

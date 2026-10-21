@@ -179,7 +179,7 @@ mock.module("vscode", () => ({
   ConfigurationTarget: { Global: 1 },
   extensions: { getExtension: () => extensionPath === "" ? undefined : { extensionPath } },
 }));
-mock.module("../extension/src/host/questions", () => ({ questionEndpoint: () => questionEndpoint(), questionWindowId: async () => "window-id", EditorQuestions: class {} }));
+mock.module("../extension/src/host/questions", () => ({ questionEndpoint: () => questionEndpoint(), questionWindowId: async () => "window-id", EditorQuestions: class {}, askPreparedRound: async () => undefined }));
 
 let dir: string;
 beforeAll(() => {
@@ -710,6 +710,50 @@ describe("automatic terminal exit", () => {
       expect(configuredParallelExecution()).toBe(false);
     } finally {
       delete inspected.experimentalParallelExecution;
+    }
+  });
+  test("the Async Drift Resolver is on only from the user value true, and its sentence follows the Drift blocker's", async () => {
+    const { configuredAsyncDriftResolver, launchAgent } = await import("../extension/src/host/agent");
+    const previousHandler = commandHandler;
+    const previousApp = editor.appName;
+    const blocker = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+    const resolver = "The Async Drift Resolver is on: before finishing, prepare the resolution question of every Drift filed in this job, as your skill says.";
+    const scan = "Use the trama-scan skill on the whole System.";
+    const base = `${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.`;
+    let query = "";
+    settingValues.agent = "cursor";
+    editor.appName = "Cursor";
+    commandHandler = (id, ...args) => {
+      const [chat] = args;
+      if (id === "composer.createNew" && typeof chat === "object" && chat !== null && "partialState" in chat) {
+        const state = chat.partialState;
+        if (typeof state === "object" && state !== null && "text" in state && typeof state.text === "string") query = state.text;
+      }
+    };
+    try {
+      expect(configuredAsyncDriftResolver()).toBe(false);
+      inspected.experimentalAsyncDriftResolver = { globalValue: "true" };
+      expect(configuredAsyncDriftResolver()).toBe(false);
+      inspected.experimentalAsyncDriftResolver = { workspaceValue: true };
+      expect(configuredAsyncDriftResolver()).toBe(false);
+      inspected.experimentalAsyncDriftResolver = { globalValue: true };
+      expect(configuredAsyncDriftResolver()).toBe(true);
+      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
+      expect(query).toBe(`${base} ${resolver}\n${ASK_DEVELOPER_SENTENCE}`);
+      inspected.experimentalDriftBlocker = { globalValue: true };
+      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
+      expect(query).toBe(`${base} ${blocker} ${resolver}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(await launchAgent(dir, "Use the trama-design skill. Add refunds.", "Design", undefined, undefined, undefined, undefined, { filesDrifts: false })).toBe("sent");
+      expect(query).not.toContain(resolver);
+      delete inspected.experimentalAsyncDriftResolver;
+      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
+      expect(query).toBe(`${base} ${blocker}\n${ASK_DEVELOPER_SENTENCE}`);
+    } finally {
+      commandHandler = previousHandler;
+      editor.appName = previousApp;
+      settingValues.agent = "omp";
+      delete inspected.experimentalAsyncDriftResolver;
+      delete inspected.experimentalDriftBlocker;
     }
   });
   test("chat instructions are built when sent and not sent if delivery conditions change", async () => {

@@ -147,7 +147,7 @@ export function parseComparisonFile(raw: string): ComparisonFile {
 const titleOf = (c: unknown, fallback: string) => (isObject(c) && typeof c["title"] === "string" ? c["title"] : fallback);
 
 /** Checks every card of a comparison file and writes them only when all pass; a comparison waiting for `comparisonId` is delivered. */
-export function archiveComparison(p: Project, comparisonId: string, raw: string): ArchiveResult {
+export function archiveComparison(p: Project, comparisonId: string, raw: string, job?: string): ArchiveResult {
   const file = parseComparisonFile(raw);
   const problems: string[] = [];
   let design: string | undefined;
@@ -193,6 +193,7 @@ export function archiveComparison(p: Project, comparisonId: string, raw: string)
         options: c["options"] as DriftOption[],
         where: c["where"] as string,
         notBlocking,
+        job,
       }));
     } catch (err) {
       problems.push(`${label}: ${(err as Error).message}`);
