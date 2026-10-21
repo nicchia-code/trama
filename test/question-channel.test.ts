@@ -6,6 +6,7 @@ import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { execute } from "../src/cli/main";
 import { askEditor, createQuestionServer, QUESTION_ENDPOINT_ENV, questionProjectId, sendCoordinatorMessage, type CoordinatorMessage, type QuestionServer } from "../src/core/question-channel";
 import { QuestionRoundQueue, type CompletedQuestionRound } from "../src/core/question-rounds";
 import { QUESTION_TOOL_REFUSAL, QuestionInterruptedError, unavailableQuestions, type QuestionHandler, type QuestionRequest } from "../src/core/questions";
@@ -57,7 +58,7 @@ async function server(handler: QuestionHandler, options: {
   focusedAt?: number;
   windowId?: string;
   onClose?: () => void;
-  onCoordinatorMessage?: (message: CoordinatorMessage) => void | Promise<void>;
+  onCoordinatorMessage?: (message: CoordinatorMessage) => boolean | void | Promise<boolean | void>;
 } = {}) {
   const created = await createQuestionServer({ project: projectAt(options.projectRoot ?? projectRoot), runtimeDir, handler, windowId: options.windowId, focusedAt: options.focusedAt, onClose: options.onClose, onCoordinatorMessage: options.onCoordinatorMessage });
   servers.push(created);
@@ -577,4 +578,39 @@ test("runtime files contain routing identities only, never pending questions or 
 
 test("the refusal of an agent's own question tool is one exact shared message", () => {
   expect(QUESTION_TOOL_REFUSAL).toBe("In Trama's work, ask the developer only with `trama question new --root <project>`, as the Trama skill says. This question tool is disabled here.");
+});
+
+test("a window that does not expect a coordinator message says so, and the sender counts it as unexpected", async () => {
+  await server(async () => answer("choice"), { onCoordinatorMessage: () => false });
+  await server(async () => answer("choice"), { onCoordinatorMessage: () => undefined });
+  expect(await sendCoordinatorMessage(projectAt(projectRoot), { type: "advisor-reviewed" }, { runtimeDir })).toEqual({ delivered: 2, live: 2, unexpected: 1 });
+});
+
+test("trama advisor review sends the result to the editor and says whether a window expected it", async () => {
+  mkdirSync(join(projectRoot, ".trama"));
+  const received: CoordinatorMessage[] = [];
+  let expected = true;
+  await server(async () => answer("choice"), { onCoordinatorMessage: (message) => { received.push(message); return expected; } });
+  const review = (input: unknown) => execute(["--root", projectRoot, "advisor", "review", "--input", "-"], projectRoot, { env: {}, runtimeDir, stdin: async () => JSON.stringify(input) });
+
+  expect(await review({ review: "r1", clean: false, notes: "The Task asks for X; the code does Y." })).toEqual({ out: "Review r1 reached the editor.", exit: 0 });
+  expect(received).toEqual([{ type: "advisor-reviewed", review: "r1", clean: false, notes: "The Task asks for X; the code does Y." }]);
+  expect(await review({ review: "r2", clean: true })).toEqual({ out: "Review r2 reached the editor.", exit: 0 });
+  expect(received[1]).toEqual({ type: "advisor-reviewed", review: "r2", clean: true });
+  expected = false;
+  expect(await review({ review: "r3", clean: true })).toEqual({ out: "Review r3 reached no editor that expects it.", exit: 0 });
+});
+
+test("trama advisor review without an editor says so and exits 0; an invalid result is a usage error that sends nothing", async () => {
+  mkdirSync(join(projectRoot, ".trama"));
+  const received: CoordinatorMessage[] = [];
+  const review = (input: unknown, json = false) => execute(["--root", projectRoot, "advisor", "review", "--input", "-", ...(json ? ["--json"] : [])], projectRoot, { env: {}, runtimeDir, stdin: async () => JSON.stringify(input) });
+  const json = await review({ review: "r1", clean: true }, true);
+  expect([JSON.parse(json.out), json.exit]).toEqual([{ delivered: false }, 0]);
+  expect((await review({ review: "r1", clean: true })).out).toBe("Review r1 reached no editor that expects it.");
+  await server(async () => answer("choice"), { onCoordinatorMessage: (message) => { received.push(message); } });
+  for (const invalid of [{ review: "r1", clean: false }, { review: "r1", clean: false, notes: "  " }, { review: "r1", clean: true, notes: "x" }, { clean: true }, { review: "", clean: true }, { review: "r1", clean: "yes" }, { review: "r1", clean: true, extra: 1 }])
+    await expect(review(invalid)).rejects.toThrow();
+  expect(received).toEqual([]);
+  expect(readdirSync(join(projectRoot, ".trama"))).toEqual([]);
 });

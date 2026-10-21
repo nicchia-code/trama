@@ -13,7 +13,7 @@ import { type Project, readTextLf, sha256, writeFileEnsuringDir } from "./store"
  */
 
 /** Paths of the working tree the code fingerprint leaves out: Trama's own, the skill folders, the agent definitions and `.omp/WATCHDOG.yml`. */
-const LEFT_OUT = [".trama", ".agents/skills", ".omp/agents", ".omp/WATCHDOG.yml"];
+export const LEFT_OUT = [".trama", ".agents/skills", ".omp/agents", ".omp/WATCHDOG.yml"];
 
 const GIT_TIMEOUT_MS = 20_000;
 

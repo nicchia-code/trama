@@ -117,6 +117,23 @@ If the developer rejected it, the reason, when they gave one, is under `## Feedb
 - Data fields and formulas go in `data` and `rules`, attached to the Machine or State they concern, never in the Model.
 - A new Area is a new folder `requirements/<area>/` with a kebab-case name, an `area.md` and at least one fragment, for example to split `ui` into `ui-web` and `ui-mobile`.
 
+## Experimental context sharing
+
+This section applies only when the instruction says "The experimental context sharing is on: …". Without that sentence, skip it and work as written above.
+
+With it, when you hand a part of the work to a sub-agent, in whatever way your agent starts sub-agents, you pass it what you have already read that concerns its part, so it does not look for it again and does not read it again.
+
+- **What you pass.** Of what you have already read, only what concerns that sub-agent's part, plus a short common part (the request and the decisions, when there are any): Trama's texts quoted as they are (the written request with its images put in words, the output of `trama model show`, `trama task show`, `trama drift show`, `trama proposal show`, the decisions of the interview) and the places in the code already known, one line per reference, ``- `<ref>` — <where in the code>``. Never code, never everything you gathered, and nothing you read only to pass it on.
+- **What the sub-agent does.** It does not reread the Trama texts it received and reads on its own only the ones that are missing. It always reads the code, also at the places it received, always runs the commands that register (`trama task move <id> doing`, `trama comparison new`, `trama drift new`) and loads its skill as without this feature. A received place that no longer matches the code is ignored: it searches by itself. Context Sharing never stops a job.
+- **What comes back.** Each sub-agent reports where it found the code of what it saw, one line per reference as above; you reuse those lines in `## Already present`, in your own work and for the sub-agents that follow.
+- **Limits.** No sub-agent runs again a read-only Trama command for a text it received, and what you pass to each one concerns only its part: never copy into every sub-agent all that you gathered.
+
+In this skill:
+
+- **Exploration (step 1).** Each sub-agent receives the request and the parts of `trama model show` you already read about its part.
+- **Writing the Tasks (step 5).** The sub-agent of a Machine group receives the decisions of the interview, the new text of the Model and of the Requirements for its references, and the places in the code the exploration found.
+- **Light code scan (step 7).** Each sub-agent receives the places in the code that are near its entries.
+
 ## PowerShell
 
 The examples use POSIX syntax. In PowerShell, pass JSON with a pipe and `--input -`, for example `Get-Content -Raw round.json | trama question new --input -`, instead of `<` or a heredoc. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Never pass the JSON as the text of `--input`: Windows PowerShell 5.1 strips the inner quotes of arguments to external programs.

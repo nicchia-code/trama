@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { terminalFromEnv } from "../../core/announcements";
-import { hookAnswer, parseCursorHook } from "../../core/cursor-chat";
+import { completedCommandAnswer, conversationIdentity, type CursorHook, hookAnswer, parseCursorHook, parseShellHook, windowsConcerned, workingTreeSnapshot } from "../../core/cursor-chat";
 import { QUESTION_TOOL_REFUSAL } from "../../core/questions";
-import { sendAgentIdle, sendCursorHook } from "../../core/question-channel";
+import { projectAt } from "../../core/store";
+import { questionProjectId, readChatStates, sendAgentIdle, sendCursorHook } from "../../core/question-channel";
 import { defineCommand } from "../registry";
 
 /** Standard input may start with a UTF-8 byte order mark (Windows PowerShell 5.1 adds one to a pipe); it is not part of the JSON. */
@@ -11,17 +12,52 @@ const parseHookJson = (input: string): unknown => JSON.parse(input.replace(/^\uF
 /**
  * `trama hook cursor`: forwards one of Cursor's hooks to the editor of its project and answers Cursor. It never holds
  * Cursor up and never fails: without an editor, a Trama project or valid input it still answers and exits with 0.
+ * The frequent hooks (`afterFileEdit`, `postToolUse`, `subagentStart`, `afterShellExecution`, `subagentStop`) first read
+ * the editor's state file and contact a window only when it names the conversation or the agent.
  */
 export async function runCursorHook(input: string, options: { runtimeDir?: string } = {}): Promise<string> {
   let raw: unknown;
   try { raw = parseHookJson(input); } catch { return "{}"; }
-  const hook = parseCursorHook(raw);
-  if (hook?.hook === "preToolUse") {
-    const refused = await sendCursorHook(hook, options);
-    return JSON.stringify(refused ? { permission: "deny", agent_message: QUESTION_TOOL_REFUSAL } : {});
+  const shell = parseShellHook(raw);
+  if (shell) {
+    // A line that runs `trama` is completed from the state file alone; any trouble leaves it as it is.
+    try {
+      const states = readChatStates(questionProjectId(projectAt(shell.root)), options.runtimeDir);
+      return JSON.stringify(completedCommandAnswer(shell.toolInput, conversationIdentity(states, shell.conversation, shell.parentCall)));
+    } catch { return "{}"; }
   }
-  if (hook) await sendCursorHook(hook, options);
-  return JSON.stringify(hookAnswer((raw as { hook_event_name?: unknown } | null)?.hook_event_name));
+  const hook = parseCursorHook(raw);
+  const name = raw !== null && typeof raw === "object" && "hook_event_name" in raw ? raw.hook_event_name : undefined;
+  if (!hook) return JSON.stringify(hookAnswer(name));
+  if (hook.hook === "preToolUse") {
+    const refused = await sendCursorHook(hook, options);
+    return JSON.stringify(refused.trama ? { permission: "deny", agent_message: QUESTION_TOOL_REFUSAL } : {});
+  }
+  if (hook.hook === "afterFileEdit" || hook.hook === "postToolUse" || hook.hook === "subagentStart" || hook.hook === "subagentStop" || hook.hook === "afterShellExecution") {
+    return JSON.stringify(hookAnswer(name, await sendWatched(hook, options)));
+  }
+  const reply = await sendCursorHook(hook, options);
+  return JSON.stringify(hookAnswer(name, reply.text));
+}
+
+/**
+ * The hooks that concern only some agents. Returns the text a window gives for the agent, if any. An agent no state file
+ * names costs nothing but the read of the file: no window is contacted and no `git status` runs.
+ */
+async function sendWatched(hook: CursorHook, options: { runtimeDir?: string }): Promise<string | undefined> {
+  let windows: string[];
+  try {
+    windows = windowsConcerned(readChatStates(questionProjectId(projectAt(hook.root)), options.runtimeDir), hook);
+  } catch { return undefined; }
+  if (hook.hook === "afterShellExecution") {
+    // The snapshot is taken only for a watched agent; a command that registers the agent's work reaches every window, as before.
+    const snapshot = windows.length > 0 ? workingTreeSnapshot(hook.root) : null;
+    if (snapshot === null && hook.tramaWork !== true) return undefined;
+    const sent: CursorHook = snapshot === null ? hook : { ...hook, snapshot };
+    return (await sendCursorHook(sent, hook.tramaWork === true ? options : { ...options, windows, timeoutMs: 1000 })).text;
+  }
+  if (windows.length === 0) return undefined;
+  return (await sendCursorHook(hook, { ...options, windows })).text;
 }
 
 const answered = { out: "{}", exit: 0 };
@@ -35,7 +71,7 @@ const cursor = defineCommand({
   hidden: true,
   summary: "Run by Cursor's hooks: tells the editor what Cursor does. It always exits with 0.",
   description:
-    "Run by Cursor's `beforeSubmitPrompt`, `stop`, `sessionEnd`, `preToolUse` and `afterShellExecution` hooks, not by people or agents. It hands every live editor window of the project the hook name, the conversation and the project folder, and answers Cursor with `{}`, `{\"continue\":true}` or the refusal of Cursor's question tool. Whatever happens, even without an editor or a project, it answers and exits with 0.",
+    "Run by Cursor's `beforeSubmitPrompt`, `stop`, `sessionEnd`, `preToolUse` and `afterShellExecution` hooks, not by people or agents. It hands every live editor window of the project the hook name, the conversation and the project folder, and answers Cursor with `{}`, `{\"continue\":true}`, the refusal of Cursor's question tool or, for a shell line that runs `trama` in a conversation of Trama, the line with `TRAMA_CHAT` and `TRAMA_JOB` written before every `trama` invocation of the line (so a compound line such as `cd x && trama model show` completes only its `trama` part and leaves no variable in the shell; on Windows the line starts with the `$env:` assignments instead). Whatever happens, even without an editor or a project, it answers and exits with 0.",
   stdin: "Reads the hook's JSON on standard input.",
   input: none,
   output: hookAnswerShape,

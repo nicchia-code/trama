@@ -32,7 +32,7 @@ export type TimingEvent =
   | { event: "choice"; kind: ParallelChoiceKind; tasks: { id: string; title: string }[]; reason: string };
 
 /** One line of a job file. */
-export type TimingRecord = TimingEvent & { at: string; terminal?: string; chat?: Chat; job?: string };
+export type TimingRecord = TimingEvent & { at: string; terminal?: string; chat?: Chat; conversation?: string; job?: string };
 
 export interface RecordOptions {
   /** The job the event belongs to, when the agent runs one. */
@@ -41,7 +41,7 @@ export interface RecordOptions {
   startsJob?: boolean;
 }
 
-const JOB_FILE = /^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z)-([a-z0-9]+)\.jsonl$/;
+const JOB_FILE = /^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z)-([A-Za-z0-9_-]+)\.jsonl$/;
 
 interface JobFile {
   name: string;
@@ -65,14 +65,15 @@ function jobFiles(dir: string): JobFile[] {
  * must not change the command that records it.
  */
 export function recordTiming(p: Project, origin: AgentOrigin, event: TimingEvent, options: RecordOptions = {}, now = new Date()): void {
-  const holder = origin.terminal ?? origin.chat;
+  // The holder of a job is the terminal, the Cursor conversation or, without one, the project's chat.
+  const holder = origin.terminal ?? (origin.chat === "cursor" && origin.conversation !== undefined ? `cursor-${origin.conversation.replace(/[^A-Za-z0-9-]/g, "_")}` : origin.chat);
   if (holder === undefined) return;
   try {
     const dir = join(p.dir, "timings");
     const current = jobFiles(dir).filter((f) => f.holder === holder).at(-1);
     const record: TimingRecord = {
       at: now.toISOString(),
-      ...(origin.terminal !== undefined ? { terminal: origin.terminal } : { chat: origin.chat }),
+      ...(origin.terminal !== undefined ? { terminal: origin.terminal } : { chat: origin.chat, ...(origin.conversation === undefined ? {} : { conversation: origin.conversation }) }),
       ...(options.job ? { job: options.job } : {}),
       ...event,
     };

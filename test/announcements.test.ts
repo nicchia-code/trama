@@ -15,6 +15,7 @@ import {
   resolutionTitle,
   newTerminalId,
   terminalFromEnv,
+  bindConversation,
   originFromEnv,
   checkOutcome,
   forgetCheck,
@@ -504,5 +505,62 @@ describe("a Draft attached to an open Drift", () => {
     resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
     expect(listAnnouncements(p).map((x) => x.id)).toEqual([a.id]);
     expect(readFileSync(file, "utf8")).toContain("drift:");
+  });
+});
+
+describe("announcements with the conversation", () => {
+  const scanningRequest = (extra: Record<string, unknown>, minutes: number) =>
+    announce(p, { kind: "check", title: "Scanning System", phase: "scanning", source: "request", ...extra }, t(minutes));
+
+  test("TRAMA_CHAT gives a Cursor chat announcement its conversation, and the file keeps it", () => {
+    expect(originFromEnv({ CURSOR_AGENT: "1", TRAMA_CHAT: "conv-1" })).toEqual({ chat: "cursor", conversation: "conv-1" });
+    expect(originFromEnv({ TRAMA_CHAT: "conv-1" })).toEqual({ chat: "editor" });
+    expect(originFromEnv({ TRAMA_TERMINAL: "abc123", CURSOR_AGENT: "1", TRAMA_CHAT: "conv-1" })).toEqual({ terminal: "abc123" });
+    const id = announcementNew({ kind: "task", title: "From chat" }, { CURSOR_AGENT: "1", TRAMA_CHAT: "conv-1" }).out.trim();
+    expect(getAnnouncement(p, id)).toMatchObject({ chat: "cursor", conversation: "conv-1", terminal: null });
+    expect(readFileSync(join(dir, ".trama/announcements", `${id}.md`), "utf8")).toContain("conversation: conv-1");
+    const plain = announcementNew({ kind: "task", title: "No conversation" }, { CURSOR_AGENT: "1" }).out.trim();
+    expect(getAnnouncement(p, plain)?.conversation).toBeNull();
+    expect(readFileSync(join(dir, ".trama/announcements", `${plain}.md`), "utf8")).not.toContain("\nconversation:");
+  });
+
+  test("a conversation takes its own scan check, or a Trama one with no conversation yet, never another conversation's", () => {
+    const other = scanningRequest({ chat: "cursor", conversation: "conv-2" }, 1);
+    const unbound = scanningRequest({ chat: "cursor" }, 2);
+    const mine = scanningRequest({ chat: "cursor", conversation: "conv-1" }, 3);
+    // The oldest of its own or of the chat with no conversation: the unbound one, which learns the conversation.
+    const first = announce(p, { kind: "check", title: "Scan", phase: "scanning", chat: "cursor", conversation: "conv-1" }, t(4));
+    expect(first.id).toBe(unbound.id);
+    expect(getAnnouncement(p, unbound.id)).toMatchObject({ conversation: "conv-1", title: "Scanning System", touched: t(4).toISOString() });
+    expect(getAnnouncement(p, other.id)?.touched).toBe(t(1).toISOString());
+    expect(getAnnouncement(p, mine.id)?.touched).toBe(t(3).toISOString());
+    expect(listAnnouncements(p)).toHaveLength(3);
+  });
+
+  test("a conversation never takes another conversation's check, and creates its own check instead", () => {
+    const other = scanningRequest({ chat: "cursor", conversation: "conv-2" }, 1);
+    const own = announce(p, { kind: "check", title: "Scan", phase: "scanning", chat: "cursor", conversation: "conv-1" }, t(2));
+    expect(own.id).not.toBe(other.id);
+    expect(own.conversation).toBe("conv-1");
+    expect(getAnnouncement(p, other.id)?.touched).toBe(t(1).toISOString());
+  });
+
+  test("a chat command without conversation takes only a Trama check with no conversation", () => {
+    const other = scanningRequest({ chat: "cursor", conversation: "conv-2" }, 1);
+    const unbound = scanningRequest({ chat: "cursor" }, 2);
+    const taken = announce(p, { kind: "check", title: "Scan", phase: "scanning", chat: "cursor" }, t(3));
+    expect(taken.id).toBe(unbound.id);
+    expect(getAnnouncement(p, unbound.id)?.conversation).toBeNull();
+    expect(getAnnouncement(p, other.id)?.touched).toBe(t(1).toISOString());
+  });
+
+  test("bindConversation writes the conversation only into a waiting Cursor announcement that has none", () => {
+    const a = announce(p, { kind: "proposal", title: "Design", source: "request", chat: "cursor" });
+    expect(bindConversation(p, a.id, "conv-1")).toBe(true);
+    expect(getAnnouncement(p, a.id)).toMatchObject({ conversation: "conv-1", title: "Design" });
+    expect(bindConversation(p, a.id, "conv-2")).toBe(false);
+    expect(bindConversation(p, "zzzzzz", "conv-1")).toBe(false);
+    const terminal = announce(p, { kind: "work", title: "Import", source: "request", terminal: "ab12cd" });
+    expect(bindConversation(p, terminal.id, "conv-1")).toBe(false);
   });
 });

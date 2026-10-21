@@ -84,22 +84,28 @@ test("removing a Copilot piece counts as an update", async () => {
   expect(existsSync(hooks)).toBe(false);
 });
 
-test("the sub-agent definition is written and rewritten only in Cursor", async () => {
+test("both sub-agent definitions are written and rewritten only in Cursor", async () => {
   const agent = join(home, ".cursor/agents/trama-analysis.md");
+  const advisor = join(home, ".cursor/agents/trama-advisor.md");
   await checkSkills(projectAt(root), storageUri());
   expect(existsSync(agent)).toBe(false);
+  expect(existsSync(advisor)).toBe(false);
   expect(messages).toEqual([]);
 
   editor.appName = "Cursor";
   await checkSkills(projectAt(root), storageUri());
   expect(messages.map((m) => m.text)).toEqual([UPDATED]);
   expect(readFileSync(agent, "utf8")).toContain("name: trama-analysis");
+  expect(readFileSync(advisor, "utf8")).toContain("name: trama-advisor");
+  expect(readFileSync(advisor, "utf8")).toContain("trama advisor review");
 
-  messages.length = 0;
-  writeFileSync(agent, "edited by hand");
-  await checkSkills(projectAt(root), storageUri());
-  expect(messages.map((m) => m.text)).toEqual([UPDATED]);
-  expect(readFileSync(agent, "utf8")).not.toBe("edited by hand");
+  for (const file of [agent, advisor]) {
+    messages.length = 0;
+    writeFileSync(file, "edited by hand");
+    await checkSkills(projectAt(root), storageUri());
+    expect(messages.map((m) => m.text)).toEqual([UPDATED]);
+    expect(readFileSync(file, "utf8")).not.toBe("edited by hand");
+  }
 
   messages.length = 0;
   await checkSkills(projectAt(root), storageUri());

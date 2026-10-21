@@ -54,13 +54,14 @@ export function withdrawWaiting(root: string, which?: (a: Announcement) => boole
 }
 
 /**
- * A conversation ending withdraws the project's chat announcements: a stopped or interrupted turn gives the usual
- * notice, while closing the conversation is silent.
+ * A conversation ending withdraws the chat announcements it owns, and those of the project's chat that name no
+ * conversation; another conversation's announcements stay. A stopped or interrupted turn gives the usual notice, while
+ * closing the conversation is silent. Events that do not end a turn (such as a final Advisor review) withdraw nothing.
  */
 function onCursorChat(event: CursorChatEvent): void {
-  const fromChat = (a: Announcement) => a.chat !== null;
-  if (event.event === "AGENT_STOPPED" || event.event === "AGENT_INTERRUPTED") withdrawWaiting(event.root, fromChat);
-  else if (event.event === "CONVERSATION_CLOSED") withdrawWaiting(event.root, fromChat, false);
+  const ofConversation = (a: Announcement) => a.chat !== null && (a.conversation === null || a.conversation === event.conversation);
+  if (event.event === "AGENT_STOPPED" || event.event === "AGENT_INTERRUPTED") withdrawWaiting(event.root, ofConversation);
+  else if (event.event === "CONVERSATION_CLOSED") withdrawWaiting(event.root, ofConversation, false);
 }
 
 export function synchronizeAnnouncementTitles(p: Project): void {

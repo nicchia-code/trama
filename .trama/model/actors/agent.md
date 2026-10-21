@@ -59,3 +59,6 @@ L'agente scrive una nuova voce di History alla fine di una corsa che ha realizza
 
 ### VOCE_HISTORY_AGGIORNATA
 L'agente aggiorna una voce di History esistente, perché i Task realizzati da una corsa fanno parte della stessa macro-funzionalità che la voce racconta.
+
+### ADVISOR_REVIEWED
+Il sotto-agente `trama-advisor` consegna a Trama l'esito di una revisione dell'Advisor della chat: pulita, oppure con le note su ciò che il codice scritto dal Task fa diversamente da quanto chiedono il Task, il Modello o i Requisiti. Le differenze nel codice che c'era già non sono note: le ha già archiviate come Drift.

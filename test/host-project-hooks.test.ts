@@ -159,7 +159,7 @@ test("activation writes Cursor's hooks in the developer's own hooks file, rewrit
     await installEditorHooks();
     const program = join(extensionPath, "bin", bundledName);
     const hooks = JSON.parse(readFileSync(join(cursorDir, "hooks.json"), "utf8")).hooks;
-    expect(hooks.stop).toEqual([{ command: `${process.platform === "win32" ? "& " : ""}"${program}" hook cursor` }]);
+    expect(hooks.stop).toEqual([{ command: `${process.platform === "win32" ? "& " : ""}"${program}" hook cursor`, loop_limit: null }]);
     expect(existsSync(join(storage, "copilot-hooks.json"))).toBe(false);
   } finally {
     editor.appName = "Visual Studio Code";

@@ -24,9 +24,13 @@ import type { Project } from "../src/core/store";
 type Listener<T> = (event: T) => void;
 interface FakeTerminal {
   exitStatus: number | undefined;
-  shellIntegration: object;
+  /** Absent until the shell integration activates; `executeCommand` types the line like `sendText` does. */
+  shellIntegration: { executeCommand(line: string): void } | undefined;
   /** The last command line typed into it. */
   line: string;
+  /** How each line reached it, in order. */
+  writes: ("executeCommand" | "sendText")[];
+  recordWrite(how: "executeCommand" | "sendText", text: string): void;
   /** Whether each `show` kept the focus where it was. */
   shown: (boolean | undefined)[];
   disposals: number;
@@ -43,7 +47,11 @@ interface ShellEvent {
 interface TabChange {
   opened: { input: unknown; label: string; group: { viewColumn: number } }[];
 }
-const listeners: { start: Listener<ShellEvent>[]; end: Listener<ShellEvent>[]; close: Listener<FakeTerminal>[]; tabs: Listener<TabChange>[] } = { start: [], end: [], close: [], tabs: [] };
+interface IntegrationEvent {
+  terminal: FakeTerminal;
+  shellIntegration: NonNullable<FakeTerminal["shellIntegration"]>;
+}
+const listeners: { start: Listener<ShellEvent>[]; end: Listener<ShellEvent>[]; close: Listener<FakeTerminal>[]; tabs: Listener<TabChange>[]; integration: Listener<IntegrationEvent>[] } = { start: [], end: [], close: [], tabs: [], integration: [] };
 class TabInputTerminal {}
 /** What the editor reports about a command in `terminal`: by default the line Trama typed into it. */
 const shell = (terminal: FakeTerminal, commandLine = terminal.line, exitCode?: number): ShellEvent => ({ terminal, execution: { commandLine: { value: commandLine } }, exitCode });
@@ -54,6 +62,14 @@ const subscribe = <T>(list: Listener<T>[]) => (fn: Listener<T>) => {
 const terminals: FakeTerminal[] = [];
 /** Every command line typed into any fake terminal, in order. */
 const typed: string[] = [];
+/** Whether a new fake terminal starts with its shell integration already active. */
+let integrationAtCreation = true;
+/** Activates the shell integration of `terminal` and tells the listeners, as the editor does. */
+const activateIntegration = (terminal: FakeTerminal): void => {
+  const integration = { executeCommand: (line: string) => terminal.recordWrite("executeCommand", line) };
+  terminal.shellIntegration = integration;
+  listeners.integration.forEach((fn) => fn({ terminal, shellIntegration: integration }));
+};
 /** The environment each fake terminal was created with, in the order created. */
 const environments: Record<string, string>[] = [];
 /** Every terminal Trama created, in order, including the folder, the name and where it opened. */
@@ -93,28 +109,35 @@ mock.module("vscode", () => ({
   window: {
     onDidStartTerminalShellExecution: subscribe(listeners.start),
     onDidEndTerminalShellExecution: subscribe(listeners.end),
+    onDidChangeTerminalShellIntegration: subscribe(listeners.integration),
     onDidCloseTerminal: subscribe(listeners.close),
     createTerminal: (options: { name?: string; cwd?: string; env: Record<string, string>; location?: unknown }) => {
       environments.push(options.env);
       created.push(options);
       const terminal: FakeTerminal = {
         exitStatus: undefined,
-        shellIntegration: {},
+        shellIntegration: undefined,
         line: "",
+        writes: [],
+        recordWrite(how: "executeCommand" | "sendText", text: string) {
+          this.writes.push(how);
+          this.line = text;
+          typed.push(text);
+        },
         shown: [],
         disposals: 0,
         show(preserveFocus?: boolean) {
           this.shown.push(preserveFocus);
         },
         sendText(text: string) {
-          this.line = text;
-          typed.push(text);
+          this.recordWrite("sendText", text);
         },
         dispose() {
           this.disposals++;
         },
       };
       terminals.push(terminal);
+      if (integrationAtCreation) terminal.shellIntegration = { executeCommand: (line: string) => terminal.recordWrite("executeCommand", line) };
       return terminal;
     },
     showErrorMessage: (message: string) => void errorMessages.push(message),
@@ -677,7 +700,36 @@ describe("automatic terminal exit", () => {
       delete inspected.experimentalDriftBlocker;
     }
   });
-  test("the Advisor Scanner is on only from the user value true, with omp as the agent", async () => {
+  test("a Run sent to Cursor's chat with the Advisor Scanner on carries the chat advisor sentence after the limit and no comparison sentence, also on the clipboard", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const { ADVISOR_CHAT_SENTENCE } = await import("../src/core/advisors");
+    const previousHandler = commandHandler;
+    const previousApp = editor.appName;
+    const run = "Use the trama-implement skill on task abc12345.";
+    let query = "";
+    settingValues.agent = "cursor";
+    editor.appName = "Cursor";
+    inspected.experimentalAdvisorScanner = { globalValue: true };
+    commandHandler = (id, ...args) => {
+      if (id === "composer.createNew") query = (args[0] as { partialState: { text: string } }).partialState.text;
+    };
+    try {
+      expect(await launchAgent(dir, run, "Implement", undefined, undefined, "run")).toBe("sent");
+      expect(query).toBe(`${run} Run at most 20 sub-agents at once. ${ADVISOR_CHAT_SENTENCE}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(query).not.toContain("Compare each Machine");
+      expect(await launchAgent(dir, run, "Implement")).toBe("sent");
+      expect(query).not.toContain(ADVISOR_CHAT_SENTENCE);
+    } finally {
+      // The Run's job never saw its conversation: end it, or the next conversation of the file would be watched by its Advisor.
+      const { endUnsentJob, localProjectJobs } = await import("../extension/src/host/drift-resolution");
+      for (const job of localProjectJobs(dir)) endUnsentJob(dir, job.id);
+      commandHandler = previousHandler;
+      editor.appName = previousApp;
+      settingValues.agent = "omp";
+      delete inspected.experimentalAdvisorScanner;
+    }
+  });
+  test("the Advisor Scanner is on only from the user value true, with every agent", async () => {
     // Loaded after the editor and home mocks above are in place: a static import would run before them.
     const { configuredAdvisorScanner } = await import("../extension/src/host/agent");
     try {
@@ -690,7 +742,7 @@ describe("automatic terminal exit", () => {
       expect(configuredAdvisorScanner()).toBe(false);
       inspected.experimentalAdvisorScanner = { globalValue: true };
       settingValues.agent = "cursor";
-      expect(configuredAdvisorScanner()).toBe(false);
+      expect(configuredAdvisorScanner()).toBe(true);
     } finally {
       settingValues.agent = "omp";
       delete inspected.experimentalAdvisorScanner;
@@ -710,6 +762,20 @@ describe("automatic terminal exit", () => {
       expect(configuredParallelExecution()).toBe(false);
     } finally {
       delete inspected.experimentalParallelExecution;
+    }
+  });
+  test("Context Sharing is on only from the user value true", async () => {
+    const { configuredContextSharing } = await import("../extension/src/host/agent");
+    try {
+      expect(configuredContextSharing()).toBe(false);
+      inspected.experimentalContextSharing = { globalValue: true };
+      expect(configuredContextSharing()).toBe(true);
+      inspected.experimentalContextSharing = { globalValue: "true" };
+      expect(configuredContextSharing()).toBe(false);
+      inspected.experimentalContextSharing = { workspaceValue: true };
+      expect(configuredContextSharing()).toBe(false);
+    } finally {
+      delete inspected.experimentalContextSharing;
     }
   });
   test("the Async Drift Resolver is on only from the user value true, and its sentence follows the Drift blocker's", async () => {
@@ -752,6 +818,56 @@ describe("automatic terminal exit", () => {
       commandHandler = previousHandler;
       editor.appName = previousApp;
       settingValues.agent = "omp";
+      delete inspected.experimentalAsyncDriftResolver;
+      delete inspected.experimentalDriftBlocker;
+    }
+  });
+  test("the Context Sharing sentence follows the Async Drift Resolver's, or the limit and blocker sentences, on every instruction with the limit", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const previousHandler = commandHandler;
+    const previousApp = editor.appName;
+    const sharing = 'The experimental context sharing is on: pass each sub-agent what you have already read that concerns its part, as the "Experimental context sharing" section of your skill says.';
+    const blocker = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+    const resolver = "The Async Drift Resolver is on: before finishing, prepare the resolution question of every Drift filed in this job, as your skill says.";
+    const scan = "Use the trama-scan skill on the whole System.";
+    const design = "Use the trama-design skill. Add refunds.";
+    const scanBase = `${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.`;
+    const designBase = `${design} Run at most 20 sub-agents at once.`;
+    let query = "";
+    settingValues.agent = "cursor";
+    editor.appName = "Cursor";
+    commandHandler = (id, ...args) => {
+      const [chat] = args;
+      if (id === "composer.createNew" && typeof chat === "object" && chat !== null && "partialState" in chat) {
+        const state = chat.partialState;
+        if (typeof state === "object" && state !== null && "text" in state && typeof state.text === "string") query = state.text;
+      }
+    };
+    try {
+      inspected.experimentalContextSharing = { globalValue: "true" };
+      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
+      expect(query).toBe(`${scanBase}\n${ASK_DEVELOPER_SENTENCE}`);
+      inspected.experimentalContextSharing = { workspaceValue: true };
+      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
+      expect(query).toBe(`${scanBase}\n${ASK_DEVELOPER_SENTENCE}`);
+      inspected.experimentalContextSharing = { globalValue: true };
+      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
+      expect(query).toBe(`${scanBase} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(await launchAgent(dir, design, "Design", undefined, undefined, undefined, undefined, { filesDrifts: false })).toBe("sent");
+      expect(query).toBe(`${designBase} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(await launchAgent(dir, "Resolve the Drift.", "Resolve Drifts")).toBe("sent");
+      expect(query).toBe(`Resolve the Drift. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
+      inspected.experimentalDriftBlocker = { globalValue: true };
+      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
+      expect(query).toBe(`${scanBase} ${blocker} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
+      inspected.experimentalAsyncDriftResolver = { globalValue: true };
+      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
+      expect(query).toBe(`${scanBase} ${blocker} ${resolver} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
+    } finally {
+      commandHandler = previousHandler;
+      editor.appName = previousApp;
+      settingValues.agent = "omp";
+      delete inspected.experimentalContextSharing;
       delete inspected.experimentalAsyncDriftResolver;
       delete inspected.experimentalDriftBlocker;
     }
@@ -1612,6 +1728,39 @@ describe("the ghosts of Cursor's chat agent", () => {
       withdrawAll(p);
     }
   });
+
+  test("a conversation's end withdraws only its own ghosts and those without a conversation", async () => {
+    const { onAnnouncementsWithdrawn, watchAnnouncements } = await import("../extension/src/host/announcements");
+    const { receiveCursorHook } = await import("../extension/src/host/cursor");
+    const p = projectAt(dir);
+    withdrawAll(p);
+    const watching = watchAnnouncements(() => undefined);
+    const told: string[] = [];
+    const subscription = onAnnouncementsWithdrawn((views) => told.push(...views.map((v) => v.title)));
+    const hook = (conversation: string, h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ conversation, root: dir, ...h });
+    try {
+      hook("a", { hook: "beforeSubmitPrompt", tramaPrompt: true });
+      hook("b", { hook: "beforeSubmitPrompt", tramaPrompt: true });
+      announce(p, { kind: "task", title: "Of A", chat: "cursor", conversation: "a" });
+      announce(p, { kind: "task", title: "Of B", chat: "cursor", conversation: "b" });
+      announce(p, { kind: "task", title: "No conversation", chat: "editor" });
+      const titles = () => listAnnouncements(p).map((a) => a.title).sort();
+
+      hook("a", { hook: "stop", status: "completed" });
+      expect(titles()).toEqual(["Of B"]);
+      expect(told.sort()).toEqual(["No conversation", "Of A"]);
+
+      hook("a", { hook: "stop", status: "error" });
+      expect(titles()).toEqual(["Of B"]);
+      hook("b", { hook: "sessionEnd", reason: "user_close" });
+      expect(titles()).toEqual([]);
+      expect(told.sort()).toEqual(["No conversation", "Of A"]);
+    } finally {
+      subscription.dispose();
+      watching.dispose();
+      withdrawAll(p);
+    }
+  });
 });
 
 
@@ -2179,4 +2328,131 @@ test("a Cursor chat turn end also ends the filed work of an agent Trama did not 
   } finally {
     watching.dispose();
   }
+});
+
+test("a chat turn that starts without a skill prompt is followed from its first prompt until its stop", async () => {
+  const { receiveCursorHook } = await import("../extension/src/host/cursor");
+  const { followsAgent } = await import("../extension/src/host/drift-resolution");
+  const conversation = "plain-" + crypto.randomUUID();
+  receiveCursorHook({ root: dir, conversation, hook: "beforeSubmitPrompt", tramaPrompt: false });
+  expect(followsAgent(dir, "cursor", conversation)).toBe(true);
+  receiveCursorHook({ root: dir, conversation, hook: "stop", status: "completed" });
+  expect(followsAgent(dir, "cursor", conversation)).toBe(false);
+});
+
+describe("the agent command waits for the shell", () => {
+  // The imports below are dynamic, as in the rest of this file: agent.ts must load after mock.module replaced "vscode".
+  const longInstruction = `Use the trama-implement skill on Task abcd1234. ${"x".repeat(5000)}`;
+  const open = async (name: string, onSent?: (startedAt: number) => void) => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const { localProjectJobs } = await import("../extension/src/host/drift-resolution");
+    const before = localProjectJobs(dir).length;
+    expect(await launchAgent(dir, longInstruction, name, "Waiting for the shell", () => true, "run", onSent)).toBe("terminal");
+    return { terminal: terminals.at(-1) as FakeTerminal, started: localProjectJobs(dir).length - before };
+  };
+
+  test("the line is typed whole, once, with executeCommand when the shell integration activates, and the work, the announcement and the sent instant start when the terminal opens", async () => {
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const p = projectAt(dir);
+    withdrawAll(p);
+    const watching = watchAgentTerminal();
+    integrationAtCreation = false;
+    vi.useFakeTimers();
+    try {
+      const sent: number[] = [];
+      const typedBefore = typed.length;
+      const { terminal, started } = await open("T7", (startedAt) => sent.push(startedAt));
+      expect(terminal.writes).toEqual([]);
+      expect(typed).toHaveLength(typedBefore);
+      expect(started).toBe(1);
+      expect(sent).toHaveLength(1);
+      expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Waiting for the shell"]);
+      expect(terminal.shown).toEqual([]);
+
+      vi.advanceTimersByTime(9_000);
+      expect(terminal.writes).toEqual([]);
+      activateIntegration(terminal);
+      expect(terminal.writes).toEqual(["executeCommand"]);
+      expect(terminal.line).toStartWith("omp '");
+      expect(terminal.line).toContain("x".repeat(5000));
+      expect(terminal.line.split("\n")).toHaveLength(1);
+
+      vi.advanceTimersByTime(60_000); // the 10 seconds pass: nothing is typed a second time
+      activateIntegration(terminal);
+      expect(terminal.writes).toEqual(["executeCommand"]);
+      listeners.end.forEach((fn) => fn(shell(terminal))); // the end is recognised from the line executeCommand wrote
+      expect(listAnnouncements(p)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      integrationAtCreation = true;
+      watching.dispose();
+      withdrawAll(p);
+    }
+  });
+
+  test("without a shell integration the line is typed with sendText only after 10 seconds, and a shell that reports itself later gets nothing more", async () => {
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    integrationAtCreation = false;
+    vi.useFakeTimers();
+    try {
+      const { terminal } = await open("T8");
+      vi.advanceTimersByTime(9_999);
+      expect(terminal.writes).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(terminal.writes).toEqual(["sendText"]);
+      expect(terminal.line).toContain("x".repeat(5000));
+
+      activateIntegration(terminal);
+      vi.advanceTimersByTime(60_000);
+      expect(terminal.writes).toEqual(["sendText"]);
+      listeners.close.forEach((fn) => fn(terminal));
+    } finally {
+      vi.useRealTimers();
+      integrationAtCreation = true;
+      watching.dispose();
+    }
+  });
+
+  test("a terminal closed before its shell is ready receives nothing and its work ends with the closing", async () => {
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { localProjectJobs, jobAbnormalEnd } = await import("../extension/src/host/drift-resolution");
+    const p = projectAt(dir);
+    withdrawAll(p);
+    const watching = watchAgentTerminal();
+    integrationAtCreation = false;
+    vi.useFakeTimers();
+    try {
+      const typedBefore = typed.length;
+      const { terminal } = await open("T9");
+      const job = localProjectJobs(dir).at(-1)?.id ?? "";
+      expect(job).not.toBe("");
+      listeners.close.forEach((fn) => fn(terminal));
+      expect(jobAbnormalEnd(dir, job)).toBe("its terminal was closed");
+      expect(listAnnouncements(p)).toEqual([]);
+
+      activateIntegration(terminal);
+      vi.advanceTimersByTime(60_000);
+      expect(terminal.writes).toEqual([]);
+      expect(typed).toHaveLength(typedBefore);
+    } finally {
+      vi.useRealTimers();
+      integrationAtCreation = true;
+      watching.dispose();
+      withdrawAll(p);
+    }
+  });
+
+  test("with the terminal in the panel, neither executeCommand nor sendText shows the terminal", async () => {
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    try {
+      const { terminal } = await open("T10");
+      expect(terminal.writes).toEqual(["executeCommand"]);
+      expect(terminal.shown).toEqual([]);
+      listeners.close.forEach((fn) => fn(terminal));
+    } finally {
+      watching.dispose();
+    }
+  });
 });

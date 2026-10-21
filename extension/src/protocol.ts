@@ -78,6 +78,8 @@ export type ToWebview =
   | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; drifts: Record<string, string | null>; resolving: string[] }; models: BoardModels; scans: { advisorScanner: boolean } }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
+  /** A Run of the chat ended without the Advisor's final review: the Board shows a notice with the reason (`ui#chat-advisor`). */
+  | { type: "finalReviewMissing"; reason: string }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */
   | { type: "error"; message: string }
   /** Whether the folder has a Trama project: without one only Get Started and Settings are shown. */

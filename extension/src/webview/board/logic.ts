@@ -563,6 +563,9 @@ export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCa
 export const withdrawnNotice = (a: AnnouncementView): string =>
   a.kind === "check" || a.kind === "scan" ? `The agent stopped before finishing ${a.title}.` : `The agent finished without delivering ${a.kind === "resolve" ? "Proposal" : ANNOUNCED_KIND_LABELS[a.kind]} ${a.title}.`;
 
+/** The sentence the notice of a Run that ended without the Advisor's final review shows; the reason is English whatever `trama.language` says. */
+export const finalReviewMissingNotice = (reason: string): string => `The Run finished without the Advisor's final review: ${reason}.`;
+
 export interface PlacedGhost {
   card: AnnouncedCard;
   /** Among the column's real cards: the ghost stands before the real card at this position, or last when it is past the end. */

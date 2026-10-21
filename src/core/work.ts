@@ -120,8 +120,9 @@ function agentField(raw: Raw, where: string): { agent: boolean; holder: string |
   return { agent: boolField(raw, "agent", false, where), holder: null };
 }
 
-/** Task ownership recognizes agent terminals and Cursor chat. */
-const holderOf = (origin: AgentOrigin): string | null => origin.terminal ?? (origin.chat === "cursor" ? "cursor" : null);
+/** Task ownership recognizes agent terminals and Cursor's chat: `cursor:<conversation>`, or `cursor` for the project's chat without a known conversation. */
+const holderOf = (origin: AgentOrigin): string | null =>
+  origin.terminal ?? (origin.chat === "cursor" ? (origin.conversation ? `cursor:${origin.conversation}` : "cursor") : null);
 
 function parseDrift(raw: Raw, where: string): DriftData {
   return {
@@ -530,7 +531,9 @@ function scopedTodo(p: Project, filter: ProposalFilter, taskIds?: string[]) {
  */
 export function releaseTasks(p: Project, origin: AgentOrigin): Task[] {
   const holder = holderOf(origin);
-  return releaseTaken(p, (task) => task.data.holder === null || task.data.holder === holder);
+  // The project's chat holder (`cursor`) is released by any conversation's end.
+  const chatHolder = origin.chat === "cursor" && origin.terminal === undefined ? "cursor" : null;
+  return releaseTaken(p, (task) => task.data.holder === null || task.data.holder === holder || task.data.holder === chatHolder);
 }
 
 /** Sends back to To do the Tasks marked as taken that `matches` selects, and returns them. */

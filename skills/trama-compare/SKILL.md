@@ -87,6 +87,17 @@ Never approve, reject, discard or resolve any card, and never choose a resolutio
 
 Name each card by short number and title, as `Task T3 – title` or `Drift D2 – title`, but write only permanent identities in files and commands. Report: the comparison ID; the cards created with their identities; references you found no code for; any doubt you could not settle.
 
+## Experimental context sharing
+
+This section applies only when your instruction says "The experimental context sharing is on: …". Without that sentence, skip it and work as written above.
+
+With it, the agent that gave you the Machine may also pass you, besides the Machine and its `refs`, the places in the code it already knows for those references, one line per reference, ``- `<ref>` — <where in the code>``, and the reason each entry of the scope is there (`changed`, `leads into a change`, `removed, its container`).
+
+- **Use the places** as a starting point to find the code: read the code at them, always, and never trust a place for what the code does. A place that no longer matches the code is ignored: search by yourself. The reasons tell you what to look for in each reference.
+- **Take nothing from the briefing.** The briefing of `trama comparison new` is still the whole of your comparison, and you still run `trama comparison new` and `trama comparison move`, and `trama drift new` when the instruction needs it, exactly as written above.
+- **Do not run again** a read-only Trama command for a text you received.
+- **Report back**, in your reply, where you found the code of what you saw, one line per reference as above, so that the agent that gave you the Machine can pass them on.
+
 ## PowerShell
 
 The examples use POSIX syntax. In PowerShell, pass JSON with a pipe and `--input -`, for example `Get-Content -Raw round.json | trama question new --input -`, instead of `<` or a heredoc. On Windows PowerShell 5.1, set `$OutputEncoding` and `[Console]::OutputEncoding` to UTF-8 first, or non-ASCII characters arrive as `?`. Never pass the JSON as the text of `--input`: Windows PowerShell 5.1 strips the inner quotes of arguments to external programs. Write the `body` and `happens` values in single quotes, because PowerShell expands `$` and the backtick inside double quotes.

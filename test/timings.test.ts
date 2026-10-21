@@ -29,6 +29,21 @@ describe("recording timings", () => {
     expect(existsSync(join(p.dir, "timings"))).toBe(false);
   });
 
+  test("two Cursor conversations never write in the same job, and the project's chat has its own", () => {
+    const a = { chat: "cursor" as const, conversation: "conv-a" };
+    const b = { chat: "cursor" as const, conversation: "conv-b" };
+    recordTiming(p, a, { event: "task-start", task: "t1", title: "A" }, {}, at(0));
+    recordTiming(p, b, { event: "task-start", task: "t2", title: "B" }, {}, at(1));
+    recordTiming(p, a, { event: "task-end", task: "t1", title: "A", outcome: "done" }, {}, at(2));
+    recordTiming(p, { chat: "cursor" }, { event: "task-start", task: "t3", title: "C" }, {}, at(3));
+    const lines = (suffix: string) => readFileSync(join(p.dir, "timings", jobFiles().find((f) => f.endsWith(`-${suffix}.jsonl`))!), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(jobFiles()).toHaveLength(3);
+    expect(lines("cursor-conv-a").map((r) => r.task)).toEqual(["t1", "t1"]);
+    expect(lines("cursor-conv-a")[0].conversation).toBe("conv-a");
+    expect(lines("cursor-conv-b").map((r) => r.task)).toEqual(["t2"]);
+    expect(lines("cursor").map((r) => r.task)).toEqual(["t3"]);
+  });
+
   test("starts a job file with its own .gitignore, and appends the events of the job to it", () => {
     recordTiming(p, origin, { event: "task-start", task: "t1", title: "Refund" }, { job: "j1", startsJob: true }, at(1));
     recordTiming(p, origin, { event: "task-end", task: "t1", title: "Refund", outcome: "done" }, { job: "j1" }, at(2));

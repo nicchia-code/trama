@@ -6,7 +6,8 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError, UsageError } from "./errors";
 import { type AgentOrigin, CURSOR_AGENT_ENV } from "./announcements";
-import type { CursorHook } from "./cursor-chat";
+import type { ChatState, CursorHook, CursorHookReply, WindowChatState } from "./cursor-chat";
+import { chatStateValue } from "./cursor-chat";
 import { parseQuestionRequest, questionAborted, questionFailure, QuestionInterruptedError, unavailableQuestions, type QuestionContext, type QuestionHandler, type QuestionRequest, type QuestionResult } from "./questions";
 import { type Project, projectAt } from "./store";
 
@@ -20,10 +21,22 @@ const CURSOR_ORIG_UID_ENV = "CURSOR_ORIG_UID";
 export type CoordinatorJson = null | boolean | number | string | CoordinatorJson[] | { [key: string]: CoordinatorJson };
 export type CoordinatorMessage = { [key: string]: CoordinatorJson };
 
+/**
+ * The provenance of a card an agent files, as the editor learns it: the `holder` (the terminal when there is one,
+ * otherwise the chat) and, for a chat that names its conversation, that `conversation`. Empty without a holder.
+ */
+export function filingOrigin(origin: AgentOrigin): { holder?: string; conversation?: string } {
+  if (origin.terminal !== undefined) return { holder: origin.terminal };
+  if (origin.chat === undefined) return {};
+  return origin.conversation === undefined ? { holder: origin.chat } : { holder: origin.chat, conversation: origin.conversation };
+}
+
 export interface QuestionServer {
   endpoint: string;
   focus(focusedAt?: number): Promise<void>;
   dispose(): Promise<void>;
+  /** Writes this window's chat state file (replaced atomically, deleted by `dispose`), or deletes it with `undefined`; the hooks read it without contacting the window. */
+  setChatState(state: ChatState | undefined): void;
 }
 
 interface EditorRecord {
@@ -44,13 +57,13 @@ interface ServerOptions {
   runtimeDir?: string;
   focusedAt?: number;
   /** A hook of Cursor's chat, forwarded by `trama hook cursor`; true when this window knows the conversation as Trama's (the question tool's check). */
-  onCursorHook?: (hook: CursorHook) => boolean | void;
+  onCursorHook?: (hook: CursorHook) => CursorHookReply | boolean | void | Promise<CursorHookReply | boolean | void>;
   /** A command of the agent changed something: where it ran, as Trama reports it. */
   onActivity?: (origin: AgentOrigin) => void;
   /** The agent in the terminal `terminal` (the hook of its agent said so) has settled: nothing is left to do. `root` is this window's project. */
   onAgentIdle?: (terminal: string, root: string) => void;
-  /** A project-scoped notice from a command or another window, independent of question rounds. */
-  onCoordinatorMessage?: (message: CoordinatorMessage) => void | Promise<void>;
+  /** A project-scoped notice from a command or another window, independent of question rounds. `false` says this window does not expect the notice (for example the result of a review it never asked for). */
+  onCoordinatorMessage?: (message: CoordinatorMessage) => boolean | void | Promise<boolean | void>;
   onClose?: () => void;
 }
 
@@ -334,7 +347,7 @@ export async function sendCoordinatorMessage(
   project: Project,
   message: CoordinatorMessage,
   options: { runtimeDir?: string } = {},
-): Promise<{ delivered: number; live: number; error?: "no-live-receiver" }> {
+): Promise<{ delivered: number; live: number; unexpected?: number; error?: "no-live-receiver" }> {
   const payload = coordinatorMessage(message);
   if (!payload) throw new UsageError("Coordinator message must be a JSON object");
   const projectId = questionProjectId(project);
@@ -354,9 +367,9 @@ export async function sendCoordinatorMessage(
   });
   const delivered = await Promise.all(connections.map((connection) => {
     const messageId = randomUUID();
-    return new Promise<boolean>((resolve) => {
+    return new Promise<"lost" | "expected" | "unexpected">((resolve) => {
       let done = false;
-      const finish = (ok: boolean) => {
+      const finish = (ok: "lost" | "expected" | "unexpected") => {
         if (done) return;
         done = true;
         stopLines();
@@ -366,14 +379,14 @@ export async function sendCoordinatorMessage(
         connection.socket.destroy();
         resolve(ok);
       };
-      const lost = () => finish(false);
+      const lost = () => finish("lost");
       const stopLines = lines(connection.socket, (line) => {
         try {
           const reply: unknown = JSON.parse(line);
-          if (!reply || typeof reply !== "object" || Array.isArray(reply)) { finish(false); return; }
+          if (!reply || typeof reply !== "object" || Array.isArray(reply)) { finish("lost"); return; }
           const value = reply as Record<string, unknown>;
-          finish(value.type === "coordinator-received" && value.messageId === messageId);
-        } catch { finish(false); }
+          finish(value.type === "coordinator-received" && value.messageId === messageId ? (value.expected === false ? "unexpected" : "expected") : "lost");
+        } catch { finish("lost"); }
       });
       connection.socket.on("error", lost);
       connection.socket.on("end", lost);
@@ -381,8 +394,9 @@ export async function sendCoordinatorMessage(
       connection.socket.write(requestLine(connection.record, { type: "coordinator-message", projectId, messageId, message: payload }));
     });
   }));
-  const count = delivered.filter(Boolean).length;
-  return { delivered: count, live: connections.length, ...(count === 0 ? { error: "no-live-receiver" as const } : {}) };
+  const count = delivered.filter((d) => d !== "lost").length;
+  const unexpected = delivered.filter((d) => d === "unexpected").length;
+  return { delivered: count, live: connections.length, ...(unexpected > 0 ? { unexpected } : {}), ...(count === 0 ? { error: "no-live-receiver" as const } : {}) };
 }
 
 const commandMessages = new Set<Promise<unknown>>();
@@ -431,58 +445,93 @@ export async function askEditor(project: Project, request: QuestionRequest, cont
   }
 }
 
-/** Whether an editor's answer to a hook says that its conversation is Trama's; a cut or other answer does not. */
-function saysTrama(chunk: unknown): boolean {
+/** A window's answer to a hook: a cut or other answer says nothing. */
+function hookReply(line: string): CursorHookReply {
   try {
-    const answer: unknown = JSON.parse(String(chunk).trim());
-    return typeof answer === "object" && answer !== null && "trama" in answer && answer.trama === true;
+    const answer: unknown = JSON.parse(line.trim());
+    if (typeof answer !== "object" || answer === null) return {};
+    return {
+      ...("trama" in answer && answer.trama === true ? { trama: true } : {}),
+      ...("text" in answer && typeof answer.text === "string" && answer.text !== "" ? { text: answer.text } : {}),
+    };
   } catch {
-    return false;
+    return {};
   }
 }
 
 /**
- * Hands `message` to every live editor window of the project, each window on its own, and says for each one whether it
- * answers that the conversation is Trama's; a window that fails, is slow or does not answer says no.
+ * Hands `message` to every live editor window of the project (only to those named in `windows`, when given), each window
+ * on its own, and returns what each one answers; a window that fails, is slow or does not answer says nothing.
  */
-async function editorsSayTrama(projectId: string, message: { type: "cursor-hook"; hook: CursorHook }, signal: AbortSignal, sockets: Set<Socket>, runtimeDir?: string): Promise<boolean[]> {
-  return Promise.all(records(runtimeDirectory(runtimeDir), projectId).map(async (record) => {
+async function editorsReply(projectId: string, message: { type: "cursor-hook"; hook: CursorHook }, signal: AbortSignal, sockets: Set<Socket>, runtimeDir?: string, windows?: string[]): Promise<CursorHookReply[]> {
+  return Promise.all(records(runtimeDirectory(runtimeDir), projectId).filter((record) => windows === undefined || windows.includes(record.windowId)).map(async (record) => {
     try {
       const editor = await connectEditor(record, signal, sockets);
-      if (!editor || signal.aborted) return false;
-      return await new Promise<boolean>((done) => {
+      if (!editor || signal.aborted) return {};
+      return await new Promise<CursorHookReply>((done) => {
         const { socket } = editor;
-        socket.once("data", (chunk) => done(saysTrama(chunk)));
-        socket.once("close", () => done(false));
+        const stop = lines(socket, (line) => { stop(); done(hookReply(line)); });
+        socket.once("close", () => done({}));
         socket.write(requestLine(editor.record, { ...message, projectId }));
       });
     } catch {
-      return false;
+      return {};
     }
   }));
 }
 
+/** How long each hook waits for the editor: a prompt, the question tool's check and the frequent hooks one second, the ones that can continue an agent or end a turn five. */
+const hookWaitMs = (hook: CursorHook["hook"]): number =>
+  hook === "stop" || hook === "subagentStop" || hook === "sessionEnd" || hook === "afterShellExecution" ? 5000 : 1000;
+
 /**
- * Hands a hook of Cursor's chat to every live editor window of its project, each window on its own, and waits until they
- * have taken it, for at most `timeoutMs` (1 second for a prompt or the question tool's check, 5 for the other hooks). A
- * window that is slow or does not answer holds back none of the others. Returns whether a window says the conversation is
- * Trama's, which only the question tool's check asks; never throws, since Cursor must not be held up.
+ * Hands a hook of Cursor's chat to the live editor windows of its project (all of them, or only `windows`), each window on
+ * its own, and waits until they have taken it, for at most `timeoutMs` (by default `hookWaitMs`). A window that is slow
+ * or does not answer holds back none of the others. Returns whether a window says the conversation is Trama's, which
+ * only the question tool's check asks, and the first text a window gives for the agent; never throws, since Cursor must
+ * not be held up.
  */
-export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: number; runtimeDir?: string } = {}): Promise<boolean> {
+export async function sendCursorHook(hook: CursorHook, options: { timeoutMs?: number; runtimeDir?: string; windows?: string[] } = {}): Promise<CursorHookReply> {
   const controller = new AbortController();
   const sockets = new Set<Socket>();
-  const timeoutMs = options.timeoutMs ?? (hook.hook === "beforeSubmitPrompt" || hook.hook === "preToolUse" ? 1000 : 5000);
-  const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, timeoutMs);
+  const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, options.timeoutMs ?? hookWaitMs(hook.hook));
   try {
     const projectId = questionProjectId(projectAt(hook.root));
-    if (!runtimeDirectoryReady(runtimeDirectory(options.runtimeDir), false)) return false;
-    return (await editorsSayTrama(projectId, { type: "cursor-hook", hook }, controller.signal, sockets, options.runtimeDir)).some(Boolean);
+    if (!runtimeDirectoryReady(runtimeDirectory(options.runtimeDir), false)) return {};
+    const replies = await editorsReply(projectId, { type: "cursor-hook", hook }, controller.signal, sockets, options.runtimeDir, options.windows);
+    const text = replies.find((r) => r.text !== undefined)?.text;
+    return { trama: replies.some((r) => r.trama === true), ...(text === undefined ? {} : { text }) };
   } catch {
-    return false;
+    return {};
   } finally {
     clearTimeout(timer);
     for (const socket of sockets) socket.destroy();
   }
+}
+
+/**
+ * The state files of the live editor windows of the project, read without contacting any window; a file that is not the
+ * user's, is not private or is unreadable is ignored, and so is any value that is not an identity. Empty when there are none.
+ */
+export function readChatStates(projectId: string, runtimeDir?: string): WindowChatState[] {
+  const directory = runtimeDirectory(runtimeDir);
+  const found: WindowChatState[] = [];
+  if (!runtimeDirectoryReady(directory, false)) return found;
+  let names: string[];
+  try { names = readdirSync(directory); } catch { return found; }
+  for (const name of names) {
+    if (!name.endsWith(".state")) continue;
+    try {
+      const path = join(directory, name);
+      const stat = lstatSync(path);
+      if (!stat.isFile() || stat.isSymbolicLink()) continue;
+      if (process.platform !== "win32" && (stat.uid !== process.getuid!() || (stat.mode & 0o077) !== 0)) continue;
+      const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+      const state = chatStateValue(parsed);
+      if (state && typeof parsed === "object" && parsed !== null && "projectId" in parsed && parsed.projectId === projectId) found.push(state);
+    } catch { /* A file being replaced or damaged names no window. */ }
+  }
+  return found;
 }
 
 /**
@@ -553,6 +602,7 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
   const endpoint = process.platform === "win32" ? `\\\\.\\pipe\\trama-question-${id}` : join(directory, `${id}.sock`);
   if (process.platform !== "win32" && Buffer.byteLength(endpoint) > (process.platform === "darwin" ? 103 : 107)) throw new TramaError("Question runtime socket path is too long");
   const recordPath = join(directory, `${id}.json`);
+  const statePath = join(directory, `${id}.state`);
   const record: EditorRecord = { projectId: questionProjectId(options.project), windowId: options.windowId ?? id, endpoint, focusedAt: options.focusedAt ?? Date.now(), secret: randomBytes(32).toString("hex") };
   const connections = new Set<ChannelConnection>();
   let native: Server | undefined;
@@ -561,6 +611,7 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
   let closing: Promise<void> | undefined;
 
   const publish = () => writeFileAtomic(recordPath, JSON.stringify(record), { mode: 0o600 });
+  let lastState: string | undefined;
   const dispose = (): Promise<void> => {
     if (closed) return closing ?? Promise.resolve();
     closed = true;
@@ -571,7 +622,7 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         connections.clear();
         try {
           if (native?.listening) await new Promise<void>((done, fail) => native!.close((error) => error ? fail(error) : done()));
-        } finally { rmSync(recordPath, { force: true }); }
+        } finally { rmSync(recordPath, { force: true }); rmSync(statePath, { force: true }); }
       }
     })();
     return closing;
@@ -612,8 +663,8 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
           const payload = coordinatorMessage(message.message);
           if (!payload || typeof message.messageId !== "string") throw new UsageError("A coordinator message needs a JSON object and message identity");
           if (!options.onCoordinatorMessage) { finish({ type: "coordinator-unavailable", messageId: message.messageId }); return; }
-          void Promise.resolve(options.onCoordinatorMessage(payload)).then(() => {
-            finish({ type: "coordinator-received", messageId: message.messageId });
+          void Promise.resolve(options.onCoordinatorMessage(payload)).then((expected) => {
+            finish({ type: "coordinator-received", messageId: message.messageId, ...(expected === false ? { expected: false } : {}) });
           }).catch((error: unknown) => finish({
             type: "coordinator-received",
             messageId: message.messageId,
@@ -643,8 +694,11 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         if (phase === "ready" && message.type === "cursor-hook") {
           const hook = message.hook as CursorHook | undefined;
           if (!hook || typeof hook !== "object" || typeof hook.conversation !== "string" || typeof hook.root !== "string") throw new UsageError("A Cursor hook needs a conversation and a project folder");
-          const trama = options.onCursorHook?.(hook) === true;
-          finish({ type: "taken", trama });
+          phase = "waiting";
+          void Promise.resolve().then(() => options.onCursorHook?.(hook)).then((answer) => {
+            const reply: CursorHookReply = typeof answer === "object" && answer !== null ? answer : { trama: answer === true };
+            finish({ type: "taken", trama: reply.trama === true, ...(typeof reply.text === "string" && reply.text !== "" ? { text: reply.text } : {}) });
+          }, (error) => finish(questionFailure(error)));
           return;
         }
         if (phase !== "ready" || message.type !== "ask") throw new UsageError("Identify the editor before submitting a question round");
@@ -684,6 +738,15 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
       if (!Number.isFinite(focusedAt)) throw new UsageError("Editor focus recency must be finite");
       record.focusedAt = focusedAt;
       publish();
+    },
+    setChatState(state) {
+      if (closed) return;
+      if (state === undefined) { lastState = undefined; rmSync(statePath, { force: true }); return; }
+      // Only the fields of the state go to disk, whatever the caller holds.
+      const text = JSON.stringify({ version: 1, projectId: record.projectId, windowId: record.windowId, root: state.root, conversations: state.conversations, subagents: state.subagents, agents: state.agents });
+      if (text === lastState) return;
+      lastState = text;
+      writeFileAtomic(statePath, text, { mode: 0o600 });
     },
     dispose,
   };

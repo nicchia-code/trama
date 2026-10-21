@@ -6,8 +6,8 @@ import { type QuestionRequest, type QuestionResult, unavailableQuestions } from 
 import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
 import type { QuestionSession } from "./question-session";
-import { receiveCursorHook } from "./cursor";
-import { followsAgent, receiveNotice, receiveAgentIdle } from "./drift-resolution";
+import { onChatState, receiveCursorHook } from "./cursor";
+import { followsAgent, receiveAdvisorReview, receiveNotice, receiveAgentIdle } from "./drift-resolution";
 import { noteCommandSeen } from "./terminal-activity";
 interface WindowRoundService {
   identity: string;
@@ -18,6 +18,7 @@ interface WindowRoundService {
   server: Promise<QuestionServer>;
   /** The window no longer has this project: it admits no new round, while the rounds already admitted run to their end. */
   detached?: boolean;
+  stateSubscription?: vscode.Disposable;
 }
 
 /** A filing message is held only by the window that follows its agent: other windows ignore it. */
@@ -26,7 +27,8 @@ function notFollowedFiling(message: Record<string, unknown>): boolean {
   if (type !== "drift-filed" && type !== "proposal-delivered" && type !== "task-filed") return false;
   const root = message["root"];
   const holder = message["holder"];
-  return typeof root === "string" && typeof holder === "string" && !followsAgent(root, holder);
+  const conversation = message["conversation"];
+  return typeof root === "string" && typeof holder === "string" && !followsAgent(root, holder, typeof conversation === "string" ? conversation : undefined);
 }
 
 let windowQuestions: EditorQuestions | undefined;
@@ -142,6 +144,8 @@ export class EditorQuestions implements vscode.Disposable {
         onAgentIdle: receiveAgentIdle,
         onCoordinatorMessage: (message) => {
           const rooted: CoordinatorMessage = { ...message, root: project.root };
+          // The result of a review answers only to the window that asked for it: any other window says it does not expect it.
+          if (rooted["type"] === "advisor-reviewed") return receiveAdvisorReview(rooted);
           if (!notFollowedFiling(rooted)) receiveNotice(rooted);
         },
         onClose: () => {
@@ -156,6 +160,10 @@ export class EditorQuestions implements vscode.Disposable {
     };
     this.service = service;
     void service.server.catch((error: unknown) => this.report(error));
+    // The window's chat state file follows the state the host publishes, for as long as this service lives.
+    service.stateSubscription = onChatState((state) => {
+      void service.server.then((server) => server.setChatState(state?.root === project.root ? state : undefined)).catch((error: unknown) => this.report(error));
+    });
     return service;
   }
 
@@ -187,6 +195,7 @@ export class EditorQuestions implements vscode.Disposable {
   }
 
   private disposeService(service: WindowRoundService): void {
+    service.stateSubscription?.dispose();
     void service.server.then((server) => server.dispose()).catch((error: unknown) => this.report(error));
   }
 

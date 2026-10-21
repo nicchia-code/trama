@@ -325,6 +325,24 @@ describe("Tasks and Drifts", () => {
     expect(releaseTasks(p, {})).toEqual([]);
   });
 
+  test("a Task taken by a Cursor conversation is held and released by that conversation only", () => {
+    const [x, y, z] = [1, 2, 3].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string];
+    moveTask(p, x, "doing", "agent", { chat: "cursor", conversation: "c1" });
+    moveTask(p, y, "doing", "agent", { chat: "cursor", conversation: "c2" });
+    moveTask(p, z, "doing", "agent", { chat: "cursor" });
+    expect([x, y, z].map((id) => getTask(p, id).data.holder)).toEqual(["cursor:c1", "cursor:c2", "cursor"]);
+    // Progress: only the same conversation, or the project's chat for a `cursor` Task.
+    expect(declareProgress(p, x, 30, "agent", { chat: "cursor", conversation: "c2" })).toMatchObject({ declared: false });
+    expect(declareProgress(p, x, 30, "agent", { chat: "cursor" })).toMatchObject({ declared: false });
+    expect(declareProgress(p, x, 30, "agent", { chat: "cursor", conversation: "c1" })).toMatchObject({ declared: true });
+    expect(declareProgress(p, z, 30, "agent", { chat: "cursor", conversation: "c1" })).toMatchObject({ declared: false });
+    expect(declareProgress(p, z, 30, "agent", { chat: "cursor" })).toMatchObject({ declared: true });
+    // The end of c1 releases its Task and the project chat's, not c2's.
+    expect(releaseTasks(p, { chat: "cursor", conversation: "c1" }).map((t) => t.id)).toEqual([x, z]);
+    expect(getTask(p, y).data).toMatchObject({ agent: true, holder: "cursor:c2" });
+    expect(releaseTasks(p, { chat: "cursor", conversation: "c2" }).map((t) => t.id)).toEqual([y]);
+  });
+
   test("a taken Task is marked (agent working) in the board, the task list and task show", async () => {
     const prop = newProposal(p, "Returns");
     const mk = (title: string, proposal?: string) => newTask(p, { title, refs: ["order"], technical: false, proposal }).id;

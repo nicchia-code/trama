@@ -24,6 +24,7 @@ test("every command is declared with its object and verb, and an input that refu
   for (const command of REGISTRY.commands) {
     expect(OBJECTS).toContain(command.object);
     if (command.object !== "hook") expect(VERBS as readonly string[]).toContain(command.verb);
+    if (command.verb === "review") expect(command.object).toBe("advisor");
     expect(command.summary.length).toBeGreaterThan(0);
     const probe = command.input.safeParse({ __unknown__: true });
     expect(probe.success).toBe(false);

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { basename, join, win32 } from "node:path";
 import { announce, newTerminalId, type AgentOrigin, withdrawAll } from "../../../src/core/announcements";
-import { ADVISOR_SENTENCE } from "../../../src/core/advisors";
+import { ADVISOR_CHAT_SENTENCE, ADVISOR_SENTENCE } from "../../../src/core/advisors";
 import { writeFileAtomic } from "../../../src/core/atomic-write";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
@@ -11,10 +11,10 @@ import { releaseTasks } from "../../../src/core/work";
 import { sendCoordinatorMessage } from "../../../src/core/question-channel";
 import { bundledOmpHook, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, withAskLine, withTramaPath } from "./cursor";
 import { withdrawWaiting } from "./announcements";
-import { bindChatJob, chatJobSendStarted, endChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnsentJob, isHooked, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
+import { bindChatJob, chatJobSendStarted, chatTurnEnded, endChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnsentJob, isHooked, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint } from "./questions";
-import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withDriftBlocker, withLanguage } from "./prompts";
+import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
 import { advisorOverlay, agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent, terminalEnv } from "./terminal-agent";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
@@ -30,12 +30,14 @@ export const configuredSkillsDir = (): string => settings().get<string>("skillsD
 export const configuredLanguage = (): string => settings().get<string>("language", "").trim();
 /** Whether `trama.experimentalDriftBlocker` is on, from user settings only: a workspace value does not turn it on. Read at every launch. */
 export const configuredDriftBlocker = (): boolean => settings().inspect<unknown>("experimentalDriftBlocker")?.globalValue === true;
-/** Whether the Advisor Scanner is on (`trama.experimentalAdvisorScanner`), from user settings only, with omp as the agent. Read at every launch. */
-export const configuredAdvisorScanner = (): boolean => settings().inspect<unknown>("experimentalAdvisorScanner")?.globalValue === true && configuredAgent() === "omp";
+/** Whether the Advisor Scanner is on (`trama.experimentalAdvisorScanner`), from user settings only, with every agent (omp and Cursor's chat). Read at every launch. */
+export const configuredAdvisorScanner = (): boolean => settings().inspect<unknown>("experimentalAdvisorScanner")?.globalValue === true;
 /** Whether `trama.experimentalParallelExecution` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a run over several Tasks is about to start. */
 export const configuredParallelExecution = (): boolean => settings().inspect<unknown>("experimentalParallelExecution")?.globalValue === true;
 /** Whether `trama.experimentalAsyncDriftResolver` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a job is about to start. */
 export const configuredAsyncDriftResolver = (): boolean => settings().inspect<unknown>("experimentalAsyncDriftResolver")?.globalValue === true;
+/** Whether `trama.experimentalContextSharing` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
+export const configuredContextSharing = (): boolean => settings().inspect<unknown>("experimentalContextSharing")?.globalValue === true;
 /** The configured concurrent sub-agent limit, from user settings only; invalid values use the default. */
 export const configuredMaxParallelAgents = (): number => {
   const value: unknown = settings().inspect<number>("maxParallelAgents")?.globalValue ?? 20;
@@ -91,10 +93,10 @@ function releaseTakenTasks(root: string, origin: AgentOrigin): void {
   }
 }
 
-/** The turn of `holder` ended: the Drifts it filed and the Proposals it delivered are released here and in every other window that hears of it. */
-function endFiledWork(root: string, holder: string): void {
-  releaseFiledWork(root, holder);
-  void sendCoordinatorMessage(projectAt(root), { type: "turn-ended", root, holder }).catch(() => undefined);
+/** The turn of `holder` (of `conversation`, for a chat) ended: the Drifts it filed and the Proposals it delivered are released here and in every other window that hears of it. */
+function endFiledWork(root: string, holder: string, conversation?: string): void {
+  releaseFiledWork(root, holder, conversation);
+  void sendCoordinatorMessage(projectAt(root), { type: "turn-ended", root, holder, ...(conversation === undefined ? {} : { conversation }) }).catch(() => undefined);
 }
 
 /**
@@ -113,9 +115,16 @@ export function watchAgentTerminal(): vscode.Disposable {
         bindChatJob(e.root, e.conversation);
         return;
       }
-      releaseTakenTasks(e.root, { chat: "cursor" });
-      endFiledWork(e.root, "cursor");
-      endFiledWork(e.root, "editor");
+      // Only these three end a turn; TURN_FINISHING may still be continued by the Advisor, and the other events say nothing about it.
+      const ends = e.event === "AGENT_STOPPED" || e.event === "AGENT_INTERRUPTED" || e.event === "CONVERSATION_CLOSED";
+      if (ends) chatTurnEnded(e.root, e.conversation);
+      if (ends) {
+        releaseTakenTasks(e.root, { chat: "cursor", conversation: e.conversation });
+        endFiledWork(e.root, "cursor", e.conversation);
+        endFiledWork(e.root, "editor", e.conversation);
+      }
+      // The other Events (files changed, a finished tool, a sub-agent's end, a turn still open to the Advisor) end nothing.
+      if (!ends) return;
       // Only a completed turn is a normal end: an interrupted or closed conversation never starts the Run that follows it.
       const abnormal = e.event === "AGENT_STOPPED" ? undefined : e.event === "AGENT_INTERRUPTED" ? "its conversation was interrupted" : "its conversation was closed";
       for (const job of endChatJobs(e.root, e.conversation, abnormal)) finishJob(e.root, job);
@@ -171,6 +180,47 @@ function finishAgentTerminal(terminal: vscode.Terminal, info: { id: string; jobI
   }
 }
 
+/** How long after its creation a terminal waits for its shell integration before the command is typed anyway. */
+export const SHELL_READY_WAIT_MS = 10_000;
+
+/**
+ * Writes the agent's command once the terminal's shell is ready to receive it, exactly once and never into a closed terminal.
+ * Before the shell is ready the terminal is in canonical mode, which keeps at most 1024 bytes a line on macOS (4096 on Linux):
+ * a longer line loses its tail and its Enter and stays typed at the prompt. Ready means the shell integration is active
+ * (already present, or reported by `onDidChangeTerminalShellIntegration` for this terminal): the line then goes with
+ * `shellIntegration.executeCommand`. A shell that does not report it within `SHELL_READY_WAIT_MS` gets `sendText`.
+ * Neither call shows the terminal or moves the focus.
+ */
+function writeWhenShellReady(terminal: vscode.Terminal, line: string): void {
+  if (terminal.shellIntegration !== undefined) {
+    terminal.shellIntegration.executeCommand(line);
+    return;
+  }
+  let done = false;
+  const subscriptions: vscode.Disposable[] = [];
+  const settle = (): boolean => {
+    if (done) return false;
+    done = true;
+    clearTimeout(timer);
+    for (const subscription of subscriptions) subscription.dispose();
+    return true;
+  };
+  const write = (integration: vscode.TerminalShellIntegration | undefined): void => {
+    if (!settle() || !agentTerminals.has(terminal)) return;
+    if (integration === undefined) terminal.sendText(line);
+    else integration.executeCommand(line);
+  };
+  const timer = setTimeout(() => write(undefined), SHELL_READY_WAIT_MS);
+  subscriptions.push(
+    vscode.window.onDidChangeTerminalShellIntegration((e) => {
+      if (e.terminal === terminal) write(e.shellIntegration);
+    }),
+    vscode.window.onDidCloseTerminal((closed) => {
+      if (closed === terminal) settle();
+    }),
+  );
+}
+
 /** Whether `commandLine`, as the terminal reported it, is the line Trama last typed into `terminal`, compared after trimming. */
 function isTypedCommand(terminal: vscode.Terminal, commandLine: string | undefined): boolean {
   const typed = agentTerminals.get(terminal)?.line;
@@ -207,11 +257,14 @@ function announceLaunch(root: string, announcement: DesignAnnouncement | LaunchA
  * Announces a chat launch's card right before its instruction is sent by itself. The returned function takes the card
  * back, silently, when the instruction ends up on the deeplink or the clipboard instead of being sent.
  */
-function announceSend(root: string, announcement: DesignAnnouncement | LaunchAnnouncement | undefined, origin: AgentOrigin): () => void {
-  if (announcement === undefined) return () => undefined;
+function announceSend(root: string, announcement: DesignAnnouncement | LaunchAnnouncement | undefined, origin: AgentOrigin): { id: string | undefined; takeBack: () => void } {
+  if (announcement === undefined) return { id: undefined, takeBack: () => undefined };
   const id = announceLaunch(root, announcement, origin);
-  return () => {
-    if (id !== undefined) withdrawAll(projectAt(root), [id]);
+  return {
+    id,
+    takeBack: () => {
+      if (id !== undefined) withdrawAll(projectAt(root), [id]);
+    },
   };
 }
 
@@ -243,21 +296,22 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
 }
 
 /**
- * The instruction with its limit, sub-agent, parallel execution, advisor, Drift blocker, ask and language sentences. The
+ * The instruction with its limit, sub-agent, parallel execution, advisor, Drift blocker, Async Drift Resolver, context sharing, ask and language sentences. The
  * parallel execution sentence goes right after the sub-agent sentence (or the limit one, when there is none), only to a
  * run over several Tasks and only when `trama.experimentalParallelExecution` is on, read now. The ask sentence stays on the
  * instruction's line unless `askOwnLine` is set, which Cursor's chat needs: it gets the ask sentence on a line of its own,
  * after the PATH line.
  */
-function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, severalTasks: boolean, askOwnLine: boolean, advisor = false): string {
+function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, severalTasks: boolean, askOwnLine: boolean, advisor?: string): string {
   const limit = configuredMaxParallelAgents();
   const withLimit = withAgentLimit(instruction, limit);
-  const withSubAgent = canScan(role) && !advisor ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
+  const withSubAgent = canScan(role) && advisor === undefined ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
   const withParallel = severalTasks && configuredParallelExecution() ? `${withSubAgent} ${PARALLEL_EXECUTION_SENTENCE}` : withSubAgent;
-  const withAdvisor = advisor ? `${withParallel} ${ADVISOR_SENTENCE}` : withParallel;
+  const withAdvisor = advisor !== undefined ? `${withParallel} ${advisor}` : withParallel;
   const withBlocker = withDriftBlocker(withAdvisor, filesDrifts && configuredDriftBlocker());
   const withResolver = withAsyncDriftResolver(withBlocker, filesDrifts && configuredAsyncDriftResolver());
-  return withLanguage(askOwnLine ? withResolver : `${withResolver} ${ASK_DEVELOPER_SENTENCE}`, configuredLanguage());
+  const withSharing = withContextSharing(withResolver, configuredContextSharing());
+  return withLanguage(askOwnLine ? withSharing : `${withSharing} ${ASK_DEVELOPER_SENTENCE}`, configuredLanguage());
 }
 
 /** The model roles, trimmed (`trama.analysis`, `trama.scan`, `trama.execution`). Application scope: only the user's settings count. */
@@ -274,7 +328,7 @@ function terminalRun(instruction: Instruction, name: string, filesDrifts: boolea
   const advisor = advisorConfig !== undefined;
   return {
     template: (family) => agentTemplate(canScan(role) && !advisor, models, family, hook, advisorConfig),
-    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, false, advisor),
+    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, false, advisor ? ADVISOR_SENTENCE : undefined),
     hooked: hook !== undefined,
   };
 }
@@ -345,7 +399,7 @@ export async function launchAgent(
   if ((agent === "cursor" || job === undefined) && !canSend()) return undefined;
   // Cursor's chat only exists in Cursor: elsewhere nothing is tried, announced, reserved or started, and the prompt the terminal would get goes to the clipboard.
   if (agent === "cursor" && !isCursor()) {
-    await vscode.env.clipboard.writeText(agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, false));
+    await vscode.env.clipboard.writeText(agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, false, job === "run" && configuredAdvisorScanner() ? ADVISOR_CHAT_SENTENCE : undefined));
     void Promise.resolve(vscode.window.showInformationMessage(
       "Trama: Cursor's chat is only available in Cursor. The prompt is on the clipboard; choose omp in Trama's Settings to run the agent in a terminal.",
       "Open Settings",
@@ -356,15 +410,16 @@ export async function launchAgent(
     if (!canSend()) return agent === "cursor" ? "not-sent" : undefined;
     if (agent === "cursor") {
       const chat = "cursor";
-      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, true);
+      const advisor = job === "run" && configuredAdvisorScanner() ? ADVISOR_CHAT_SENTENCE : undefined;
+      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, true, advisor);
       const sent: { job?: string } = {};
       // Runs right before the step that sends the prompt by itself: the card and the job begin now. The take-back, run when
       // that step fails, ends both: the prompt is not sent, so the job never began.
       const sendStarted = (): (() => void) => {
-        const takeBackCard = announceSend(root, announceProposal, { chat: "cursor" });
+        const { id: cardId, takeBack: takeBackCard } = announceSend(root, announceProposal, { chat: "cursor" });
         const sentAfter = chatJobSendStarted(root, chat);
         if (job === undefined || jobId === undefined) return takeBackCard;
-        const started = startJob(job, root, { chat }, sentAfter, jobId);
+        const started = startJob(job, root, { chat }, sentAfter, jobId, cardId, advisor !== undefined);
         sent.job = started;
         if (started === undefined) return takeBackCard;
         if (jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
@@ -407,13 +462,14 @@ export async function launchAgent(
     setHooked(terminalId, run.hooked);
     if (asTab) terminal.show(true);
     const startedAt = Date.now();
-    terminal.sendText(line);
     if (announceProposal !== undefined) announceLaunch(root, announceProposal, { terminal: terminalId });
     onSent?.(startedAt);
     if (job !== undefined && jobId !== undefined) {
       const started = startJob(job, root, { terminal: terminalId }, undefined, jobId);
       if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
     }
+    // Last step: the job, the announcement and the sent instant already stand when the command is written.
+    writeWhenShellReady(terminal, line);
     return "terminal";
   };
   return agent === "cursor" || job !== undefined ? inSendTurn(launch) : launch();

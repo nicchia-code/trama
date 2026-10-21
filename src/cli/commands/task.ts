@@ -2,7 +2,7 @@ import { z } from "zod";
 import { announcementNote, deliverCard } from "../../core/announcements";
 import { TramaError, UsageError } from "../../core/errors";
 import { getProposal } from "../../core/proposals";
-import { sendCoordinatorMessageSoon } from "../../core/question-channel";
+import { filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
 import { syncShortNumbers } from "../../core/short-numbers";
 import { preflightScope, taskScope } from "../../core/task-scope";
 import { recordTiming } from "../../core/timings";
@@ -66,9 +66,9 @@ const create = defineCommand({
     });
     deliverCard(project, input.announcement, "task");
     // The agent that files a Task keeps Run and Resolve of it waiting until its turn ends: the editor learns who holds it here.
-    const holder = ctx.origin.terminal ?? ctx.origin.chat;
-    if (ctx.byAgent && holder !== undefined)
-      sendCoordinatorMessageSoon(project, { type: "task-filed", root: project.root, task: t.id, holder }, (reason) => {
+    const filed = filingOrigin(ctx.origin);
+    if (ctx.byAgent && filed.holder !== undefined)
+      sendCoordinatorMessageSoon(project, { type: "task-filed", root: project.root, task: t.id, ...filed }, (reason) => {
         process.stderr.write(`The editor did not learn that Task ${t.id} was filed by an agent (${reason}); Run and Resolve are not held for that agent's turn.\n`);
       });
     const n = syncShortNumbers(ctx.project());

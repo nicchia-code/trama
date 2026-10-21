@@ -19,7 +19,7 @@ import {
   withProposalLock,
   type DriftDecisionKind,
 } from "../../core/proposals";
-import { sendCoordinatorMessageSoon } from "../../core/question-channel";
+import { filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
 import { resolveDriftInProposal } from "../../core/resolution";
 import { syncShortNumbers } from "../../core/short-numbers";
 import { loadModel } from "../../core/store";
@@ -208,9 +208,9 @@ const move = defineCommand({
     if (state === "open") {
       const p = submitProposal(project, proposalId, skillsDirs);
       // Approve and Reject wait for the end of the turn of the agent that delivered the Proposal; a Proposal approved at hand-over has nothing to wait for.
-      const holder = ctx.origin.terminal ?? ctx.origin.chat;
-      if (ctx.byAgent && holder !== undefined && !p.approvedAtHandOver)
-        sendCoordinatorMessageSoon(project, { type: "proposal-delivered", root: project.root, proposal: p.id, holder }, (reason) => {
+      const filed = filingOrigin(ctx.origin);
+      if (ctx.byAgent && filed.holder !== undefined && !p.approvedAtHandOver)
+        sendCoordinatorMessageSoon(project, { type: "proposal-delivered", root: project.root, proposal: p.id, ...filed }, (reason) => {
           process.stderr.write(`The editor did not learn that Proposal ${p.id} was delivered by an agent (${reason}); Approve and Reject are not held for that agent's turn.\n`);
         });
       const consumed = p.requestConsumed ? `\nDeleted design request ${p.data.request}: it is now consumed.` : "";

@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import * as vscode from "vscode";
-import { type CursorChatEvent, CursorConversations, type CursorHook } from "../../../src/core/cursor-chat";
+import { type ChatState, type CursorChatEvent, CursorConversations, type CursorHook, type CursorHookReply } from "../../../src/core/cursor-chat";
+import { chatAdvisorEvent, chatAdvisorSubagentStarted, chatAdvisorTaskTaken, chatTurnEnded, chatTurnStarted, setChatStatePublisher } from "./drift-resolution";
 import { ASK_DEVELOPER_SENTENCE } from "./prompts";
 
 /** Whether the editor running the extension is Cursor. */
@@ -40,20 +41,62 @@ export function withTramaPath(prompt: string, program = bundledTrama()): string 
 export const withAskLine = (prompt: string): string => `${prompt}\n${ASK_DEVELOPER_SENTENCE}`;
 
 const conversations = new CursorConversations();
-const listeners = new Set<(event: CursorChatEvent) => void>();
+/** A listener may answer with the text the hook gives back to the agent (`postToolUse`'s context, a follow-up message), also later. */
+type ChatEventListener = (event: CursorChatEvent) => string | undefined | void | Promise<string | undefined | void>;
+const listeners = new Set<ChatEventListener>();
+let chatState: ChatState | undefined;
+const stateListeners = new Set<(state: ChatState | undefined) => void>();
 
 /** Listens to the `cursor-chat` Events of Trama's conversations in Cursor's chat, for the project of this window. */
-export function onCursorChatEvent(listener: (event: CursorChatEvent) => void): vscode.Disposable {
+export function onCursorChatEvent(listener: ChatEventListener): vscode.Disposable {
   listeners.add(listener);
   return { dispose: () => listeners.delete(listener) };
 }
 
+/**
+ * Publishes what this window knows for Cursor's hooks (`ChatState`): the window's state file follows it, so the hooks
+ * read it without contacting the editor. `undefined` deletes the file.
+ */
+export function publishChatState(state: ChatState | undefined): void {
+  chatState = state;
+  for (const listener of stateListeners) listener(state);
+}
+
+// The job registry feeds the state file: every change of its conversations, sub-agent calls and watched agents is published.
+setChatStatePublisher(publishChatState);
+
+/** Follows the published chat state, starting with the current one. */
+export function onChatState(listener: (state: ChatState | undefined) => void): vscode.Disposable {
+  stateListeners.add(listener);
+  listener(chatState);
+  return { dispose: () => stateListeners.delete(listener) };
+}
+
 /** A hook forwarded by `trama hook cursor`. Hooks of conversations that are not Trama's produce nothing; the question tool's check only answers whether this window knows the conversation as Trama's. */
-export function receiveCursorHook(hook: CursorHook): boolean {
-  if (hook.hook === "preToolUse") return conversations.isTrama(hook.conversation);
-  const event = conversations.translate(hook);
-  if (event) for (const listener of listeners) listener(event);
-  return false;
+export async function receiveCursorHook(hook: CursorHook): Promise<CursorHookReply> {
+  if (hook.hook === "preToolUse") return { trama: conversations.isTrama(hook.conversation) };
+  // Every prompt starts a turn, also of a conversation that becomes Trama's only with its first registering command.
+  if (hook.hook === "beforeSubmitPrompt") chatTurnStarted(hook.root, hook.conversation);
+  if (hook.hook === "subagentStart") chatAdvisorSubagentStarted(hook.root, hook.parent ?? hook.conversation, hook.call, hook.subagentType);
+  if (hook.takenTask !== undefined) chatAdvisorTaskTaken(hook.root, hook.conversation, hook.takenTask);
+  const advisor = (conversation: string): boolean => chatState?.conversations.some((c) => c.conversation === conversation && c.advisor) === true;
+  const event = conversations.translate(hook, advisor);
+  // A conversation that is not Trama's produces no end Event: its turn ends here.
+  if (event === null && (hook.hook === "stop" || hook.hook === "sessionEnd")) chatTurnEnded(hook.root, hook.conversation);
+  if (!event) return {};
+  // The Advisor of the chat answers first: its transitions (a Task's review, a finished turn) come before the jobs end.
+  // Everything up to the first `await` runs at once, so a caller that does not wait still sees the Event applied.
+  const advisorText = chatAdvisorEvent(event);
+  const pending = [...listeners].map(async (listener) => listener(event));
+  // A turn Trama does not continue ends: the end Event follows the one that gave it a last chance.
+  if (event.event === "TURN_FINISHING" && advisorText === undefined) {
+    const stopped: CursorChatEvent = { ...event, event: "AGENT_STOPPED" };
+    chatAdvisorEvent(stopped);
+    pending.push(...[...listeners].map(async (listener) => listener(stopped)));
+  }
+  const answers = [advisorText, ...await Promise.all(pending)];
+  const text = answers.find((a): a is string => typeof a === "string" && a !== "");
+  return text === undefined ? {} : { text };
 }
 
 /**

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { localProjectJobs, driftsFinishing, endTerminalJobs, followsAgent, proposalsFinishing, receiveNotice, releaseFiledWork, setHooked, startJob, tasksFinishing } from "../extension/src/host/drift-resolution";
+import { localProjectJobs, driftsFinishing, chatTurnEnded, chatTurnStarted, endTerminalJobs, followsAgent, proposalsFinishing, receiveNotice, releaseFiledWork, setHooked, startJob, tasksFinishing } from "../extension/src/host/drift-resolution";
 
 const root = () => join(tmpdir(), `trama-filed-drift-${crypto.randomUUID()}`);
 
@@ -67,4 +67,34 @@ test("a window follows its agent only for a hooked Trama terminal or a chat with
   expect(followsAgent(root(), "terminal-plain")).toBe(false);
   expect(followsAgent(root(), "terminal-unknown")).toBe(false);
   expect(followsAgent(root(), "cursor")).toBe(false);
+});
+
+test("a card filed by a conversation waits only for that conversation's turn to end", () => {
+  const project = root();
+  receiveNotice({ type: "drift-filed", root: project, drift: "0a1b2c3d", holder: "cursor", conversation: "conv-a" });
+  receiveNotice({ type: "task-filed", root: project, task: "weg568kv", holder: "cursor", conversation: "conv-b" });
+  receiveNotice({ type: "proposal-delivered", root: project, proposal: "iwham416", holder: "cursor" });
+  receiveNotice({ type: "turn-ended", root: project, holder: "cursor", conversation: "conv-a" });
+  expect(driftsFinishing(project)).toEqual([]);
+  expect(tasksFinishing(project)).toEqual(["weg568kv"]);
+  // A card of a chat without conversation waits for any conversation's end.
+  expect(proposalsFinishing(project)).toEqual([]);
+  receiveNotice({ type: "turn-ended", root: project, holder: "cursor", conversation: "conv-a" });
+  expect(tasksFinishing(project)).toEqual(["weg568kv"]);
+  receiveNotice({ type: "turn-ended", root: project, holder: "cursor", conversation: "conv-b" });
+  expect(tasksFinishing(project)).toEqual([]);
+});
+
+test("a chat card is followed only while its conversation (or any Trama conversation) has a turn in progress", () => {
+  const project = root();
+  expect(followsAgent(project, "cursor", "conv-a")).toBe(false);
+  expect(followsAgent(project, "cursor")).toBe(false);
+  chatTurnStarted(project, "conv-a");
+  expect(followsAgent(project, "cursor", "conv-a")).toBe(true);
+  expect(followsAgent(project, "cursor", "conv-b")).toBe(false);
+  expect(followsAgent(project, "cursor")).toBe(true);
+  chatTurnEnded(project, "conv-a");
+  chatTurnEnded(project, "conv-a");
+  expect(followsAgent(project, "cursor", "conv-a")).toBe(false);
+  expect(followsAgent(project, "cursor")).toBe(false);
 });

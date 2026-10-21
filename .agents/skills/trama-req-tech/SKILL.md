@@ -49,6 +49,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia dell'hook dell'agente del terminale** (`agent-hooks.md`): Usa quando lavori sull'hook di omp e su `trama hook idle`. Sections: `agent-hook`.
 - **Tecnologia di avvio dell'agente** (`agent-terminal.md`): Usa quando lavori sul terminale dell'agente. Sections: `agent-terminal`.
 - **Tecnologia degli annunci** (`announcements.md`): Usa per annunci, ghost della Board, attesa di fine turno e voci di History. Sections: `announcement`, `voce-history`, `panel/Board`.
+- **Tecnologia dell'Advisor della chat** (`chat-advisor.md`): Usa quando lavori sull'Advisor della chat di Cursor: hook, file di stato, sotto-agente trama-advisor. Sections: `chat-advisor`.
 - **Tecnica della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts dall'estensione, costruisci l'Async Drift Resolver o togli codice della vecchia delega dei Drift. Sections: `drift-resolution`.
 - **Tecnologia dei Drift** (`drifts.md`): Usa quando lavori sui Drift. Sections: `drift`.
 - **Tecnologia della chat dell'editor** (`editor-chat.md`): Usa quando lavori sugli hook della chat di Cursor. Sections: `editor-chat`.

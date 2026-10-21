@@ -27,6 +27,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole di avvio dell'agente** (`agent-terminal.md`): Usa quando implementi come Trama avvia l'agente e gestisce le richieste di design. Sections: `agent-terminal`.
 - **Regole degli annunci** (`announcements.md`): Usa per annunci, ghost, controlli e confronti. Sections: `announcement`.
 - **Regole dell'approvazione** (`approvals.md`): Usa quando implementi ciò che succede all'approvazione di una Proposal. Sections: `proposal/Approved`.
+- **Regole dell'Advisor della chat** (`chat-advisor.md`): Usa per l'Advisor della chat di Cursor: quando rivede, i testi per l'agente, le note e l'avviso della revisione finale mancata. Sections: `chat-advisor`.
 - **Regole delle Proposal** (`decisions.md`): Usa quando implementi le regole delle Proposal, dalla scrittura all'approvazione. Sections: `proposal`.
 - **Regole della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts, decidi quando una risoluzione o un Run sono in corso, scrivi una risoluzione `nonBlocking` o prepari e usi le domande pronte dell'Async Drift Resolver. Sections: `drift-resolution`.
 - **Regole dei Drift** (`drifts.md`): Usa quando implementi le regole dei Drift, della loro risoluzione e del pulsante Resolve Drifts. Sections: `drift`.
@@ -37,6 +38,6 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole dei round di domande** (`questions-notices.md`): Usa quando implementi i round di domande. Sections: `question-round`.
 - **Regole delle richieste di design** (`requests.md`): Usa per invio, contenuto e consumo delle richieste di design scritte. Sections: `design-request`.
 - **Regole di scan, confronti e Advisor Scanner** (`scans.md`): Usa per scan, confronto delle Machine e Advisor Scanner. Sections: `work`.
-- **Task progress rules** (`task-progress.md`): Use when implementing the percentage the agent declares on a Task it has taken. Sections: `task/Taken by the agent`.
+- **Task progress rules** (`task-progress.md`): Use when implementing the percentage the agent declares on a Task it has taken, or which chat conversation holds and releases a taken Task. Sections: `task/Taken by the agent`.
 - **Regole dei Task** (`tasks.md`): Usa quando implementi le regole dei Task. Sections: `task`.
 - **Regole dell'attesa del turno e della History** (`turn-history.md`): Usa per l'attesa del turno sulle schede e le voci di History. Sections: `voce-history`, `panel/Board`.

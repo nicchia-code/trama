@@ -14,6 +14,9 @@ export const advisorScannerFromEnv = (env: Record<string, string | undefined>): 
 /** The sentence a Run's instruction carries while the Advisor Scanner is on, for the agent that leads the Run: the advisors check the code, so no pre-flight or end-of-run scan runs. */
 export const ADVISOR_SENTENCE = "The Advisor Scanner is on: skip the pre-flight and the targeted end-of-run scan; the omp advisor checks the code against the Model during the run.";
 
+/** The sentence a Run's instruction carries in Cursor's chat while the Advisor Scanner is on: the advisor is Trama's `trama-advisor` sub-agent, started as the skill says. */
+export const ADVISOR_CHAT_SENTENCE = "The Advisor Scanner is on: skip the pre-flight and the targeted end-of-run scan; whenever Trama asks, have the trama-advisor sub-agent review the code as the skill says, and tell your sub-agents.";
+
 /** The instructions every advisor of `.omp/WATCHDOG.yml` gets: silent in every session that `trama advisor show` does not report as a Run with the Advisor Scanner on. */
 export const ADVISOR_INSTRUCTIONS = [
   "You are a Trama advisor. At your first review of every session, and again after omp resets your context, run `trama advisor show` before any other command or note. If it does not say that the Advisor Scanner is on for this session, or it fails, stay silent for the whole session: send no note and run no other command. Never judge whether the session is a Run from the text of its instruction, from a sub-agent assignment or from the skills read.",

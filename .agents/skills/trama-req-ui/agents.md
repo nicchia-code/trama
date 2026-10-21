@@ -1,6 +1,6 @@
 # Requirements: Interfaccia, Interfaccia del lavoro dell'agente
 
-Usa quando mostri richieste di design, terminale dell'agente, agente e modelli.
+Usa quando mostri richieste di design, terminale dell'agente, agente e modelli, e gli avvisi dell'Advisor della chat.
 
 ## design-request
 
@@ -27,8 +27,15 @@ Usa quando mostri richieste di design, terminale dell'agente, agente e modelli.
 ## agent-launching
 
 - Non c'è nessuna scelta dell'agente alla prima corsa: senza un valore in `trama.agent` vale `cursor`.
-- Le descrizioni delle impostazioni, in inglese: `trama.analysis`, `trama.scan` e `trama.execution` dicono quali lavori usano quel modello (`trama.scan` anche i sotto-agenti che confrontano le Machine, compresi quelli del pre-flight dei Run, e, con l'Advisor Scanner, gli advisor di omp che guardano i Run; nessuna descrizione nomina una scansione dopo l'approvazione), che il nome va scritto come lo accetta l'agente scelto in `trama.agent` (omp o la chat di Cursor), che vuoto lascia il modello predefinito dell'agente e che al sotto-agente della chat di Cursor `trama.scan` arriva con Update skills; `trama.maxParallelAgents` dice: how many sub-agents the agent may run at once, in a scan, in the exploration of a design and in a run of Tasks (default 20; agents without sub-agents ignore it). La descrizione di `trama.skillsDir` non nomina altre cartelle oltre al predefinito `.agents/skills`.
+- Le descrizioni delle impostazioni, in inglese: `trama.analysis`, `trama.scan` e `trama.execution` dicono quali lavori usano quel modello (`trama.scan` anche i sotto-agenti che confrontano le Machine, compresi quelli del pre-flight dei Run, e, con l'Advisor Scanner, gli advisor di omp che guardano i Run; nessuna descrizione nomina una scansione dopo l'approvazione), che il nome va scritto come lo accetta l'agente scelto in `trama.agent` (omp o la chat di Cursor), che vuoto lascia il modello predefinito dell'agente e che al sotto-agente della chat di Cursor `trama.scan` arriva con Update skills; `trama.maxParallelAgents` dice: how many sub-agents the agent may run at once, in a scan, in the exploration of a design or of a Drift resolution and in a run of Tasks (default 20; agents without sub-agents ignore it). La descrizione di `trama.skillsDir` non nomina altre cartelle oltre al predefinito `.agents/skills`.
+- `trama.experimentalContextSharing` ha il titolo `Experimental Context Sharing`, una `Checkbox` nel gruppo `Experimental` (`ui#panel/Settings`), e la descrizione: «Experimental. Only with an agent that has sub-agents. On: when the agent hands work to its sub-agents, it passes each one the part of what it has already read that concerns that work (Trama's texts quoted as they are, and where the code is), so sub-agents do not read it again; they still read the code themselves. Off (the default): each sub-agent reads what it needs on its own. Only agents started by Trama follow it.»
 - L'impostazione `trama.driftAutoPilot` non c'è più: né nelle impostazioni dell'editor né nella scheda Settings.
 - Non ci sono più i comandi `Trama: Set System 1 API Key` e `Trama: Clear System 1 API Key`, né l'impostazione `trama.system1`.
 - Non c'è più l'avviso del modello non trovato di Copilot né l'avviso dei ruoli in chat.
 - Tutti questi testi sono in inglese e non seguono `trama.language`.
+
+## chat-advisor
+
+- Un Run della chat finito senza l'esito della revisione finale (`rules#chat-advisor`) mostra in cima alla Board, con gli avvisi dei ghost e nello stesso stile, `The Run finished without the Advisor's final review: <motivo>.`, con il motivo in inglese di `rules#chat-advisor`, e il pulsante `Close` con l'icona `X`. Un avviso per Run; resta fino alla chiusura manuale o del pannello, come gli avvisi dei ghost. Il testo non segue `trama.language`.
+- Le revisioni dell'Advisor della chat non hanno ghost, badge né altri segni sulla Board: si vedono solo nella conversazione dell'agente.
+- I testi che Trama aggiunge alla conversazione (`rules#chat-advisor`) sono per l'agente e restano in inglese, qualunque sia `trama.language`.

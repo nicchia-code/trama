@@ -43,6 +43,8 @@ export interface Announcement {
   terminal: string | null;
   /** `cursor` for Cursor's chat, `editor` for an agent Trama did not start and that does not say where it comes from; null in announcements written before this field existed. Never set together with `terminal`. */
   chat: Chat | null;
+  /** The Cursor conversation an announcement with `chat: cursor` belongs to; null when it is not known, for every other announcement and in files written before this field existed. */
+  conversation: string | null;
   /** The phase of a check; null for every other kind. */
   phase: CheckPhase | null;
   /** The Drifts a Proposal of Resolve Drifts names, in creation order; empty for every other announcement. */
@@ -94,13 +96,20 @@ const CHATS: readonly Chat[] = ["cursor", "editor"];
 export interface AgentOrigin {
   terminal?: string;
   chat?: Chat;
+  /** The Cursor conversation, only together with `chat: "cursor"`. */
+  conversation?: string;
 }
+
+/** Set in the environment of Cursor's chat agent to the ID of its conversation. */
+export const CHAT_ENV = "TRAMA_CHAT";
 
 /** A recognized terminal wins; otherwise chat announcements belong to Cursor or to an agent Trama did not start (`editor`). */
 export function originFromEnv(env: Record<string, string | undefined>): AgentOrigin {
   const terminal = terminalFromEnv(env);
   if (terminal) return { terminal };
-  return { chat: env[CURSOR_AGENT_ENV] === "1" ? "cursor" : "editor" };
+  if (env[CURSOR_AGENT_ENV] !== "1") return { chat: "editor" };
+  const conversation = env[CHAT_ENV]?.trim();
+  return conversation ? { chat: "cursor", conversation } : { chat: "cursor" };
 }
 
 function newId(dir: string): string {
@@ -127,6 +136,7 @@ function parse(raw: Raw, body: string, id: string, where: string): Announcement 
     terminal: terminalField(raw, where),
     chat: raw["chat"] === undefined || raw["chat"] === null ? null : enumField(raw, "chat", CHATS, "cursor", where),
     phase: raw["phase"] === undefined || raw["phase"] === null ? null : enumField(raw, "phase", CHECK_PHASES, "verifying", where),
+    conversation: conversationField(raw, where),
     drifts: idListField(raw, "drifts", where),
     proposals: idListField(raw, "proposals", where),
     machine: machineField(raw, where),
@@ -165,6 +175,13 @@ function terminalField(raw: Raw, where: string): string | null {
   throw new TramaError(`${where}: "terminal" must be an ID of six lowercase letters and digits, or none`);
 }
 
+function conversationField(raw: Raw, where: string): string | null {
+  const v = raw["conversation"];
+  if (v === undefined || v === null) return null;
+  if (typeof v === "string" && v.trim() !== "") return v;
+  throw new TramaError(`${where}: "conversation" must be a conversation ID, or none`);
+}
+
 function idListField(raw: Raw, key: string, where: string): string[] {
   const v = raw[key];
   if (v === undefined || v === null) return [];
@@ -188,9 +205,9 @@ function write(p: Project, a: Announcement) {
   // The folder ignores itself and everything in it, so announcements are never versioned.
   const ignore = join(dir, ".gitignore");
   if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
-  const { id, title, chat, phase, drifts, machine, refs, code, texts, proposals, ...data } = a;
-  // `chat`, `phase`, `drifts`, `machine`, `refs`, `code`, `texts` and `proposals` are written only when set, so the other announcements look as before.
-  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}), ...(drifts.length > 0 ? { drifts } : {}), ...(machine ? { machine } : {}), ...(refs.length > 0 ? { refs } : {}), ...(code ? { code } : {}), ...(Object.keys(texts).length > 0 ? { texts } : {}), ...(proposals.length > 0 ? { proposals } : {}) }, `# ${title}\n`);
+  const { id, title, chat, conversation, phase, drifts, machine, refs, code, texts, proposals, ...data } = a;
+  // `chat`, `conversation`, `phase`, `drifts`, `machine`, `refs`, `code`, `texts` and `proposals` are written only when set, so the other announcements look as before.
+  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(conversation ? { conversation } : {}), ...(phase ? { phase } : {}), ...(drifts.length > 0 ? { drifts } : {}), ...(machine ? { machine } : {}), ...(refs.length > 0 ? { refs } : {}), ...(code ? { code } : {}), ...(Object.keys(texts).length > 0 ? { texts } : {}), ...(proposals.length > 0 ? { proposals } : {}) }, `# ${title}\n`);
 }
 
 function remove(p: Project, id: string) {
@@ -243,9 +260,16 @@ export function announce(
   if (input.kind !== "comparison" && (input.refs !== undefined || input.code !== undefined || input.texts !== undefined)) throw new TramaError("Only a comparison has references and a code fingerprint");
   // A scan the agent announces is the check of a scan Trama announced at launch, if one still waits in the same terminal or chat: it takes that one over.
   if (input.kind === "check" && input.phase === "scanning" && input.source === undefined) {
-    const waiting = listAnnouncements(p).find((a) => a.kind === "check" && a.source === "request" && (input.terminal !== undefined ? a.terminal === input.terminal : a.terminal === null && a.chat === (input.chat ?? "editor")));
+    // The oldest one of the same terminal or conversation wins; a conversation also takes a Trama check of the chat with no conversation yet and writes its own into it. Another conversation's check is never taken.
+    const holder = input.terminal === undefined ? (input.chat ?? "editor") : undefined;
+    const waiting = listAnnouncements(p).find((a) => {
+      if (a.kind !== "check" || a.source !== "request") return false;
+      if (input.terminal !== undefined) return a.terminal === input.terminal;
+      if (a.terminal !== null || a.chat !== holder) return false;
+      return input.conversation !== undefined ? a.conversation === null || a.conversation === input.conversation : a.conversation === null;
+    });
     if (waiting) {
-      const taken: Announcement = { ...waiting, phase: "scanning", touched: now.toISOString() };
+      const taken: Announcement = { ...waiting, phase: "scanning", touched: now.toISOString(), ...(waiting.conversation === null && input.conversation !== undefined ? { conversation: input.conversation } : {}) };
       write(p, taken);
       return taken;
     }
@@ -260,6 +284,7 @@ export function announce(
     touched: stamp,
     terminal: input.terminal ?? null,
     chat: input.terminal ? null : (input.chat ?? (input.source === "request" ? null : "editor")),
+    conversation: !input.terminal && input.chat === "cursor" && input.conversation ? input.conversation : null,
     phase: input.phase ?? null,
     drifts: input.drifts ?? [],
     machine: input.machine ?? null,
@@ -417,3 +442,14 @@ export function withdrawAll(p: Project, ids?: readonly string[]): Announcement[]
   return gone;
 }
 
+
+/**
+ * Writes `conversation` into the Cursor-chat announcement `id` when it still waits and has none yet: the host learned
+ * which conversation the launch opened. Returns whether it wrote.
+ */
+export function bindConversation(p: Project, id: string, conversation: string): boolean {
+  const a = getAnnouncement(p, id);
+  if (!a || a.chat !== "cursor" || a.conversation !== null) return false;
+  write(p, { ...a, conversation });
+  return true;
+}

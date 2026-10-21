@@ -2,7 +2,7 @@ import { z } from "zod";
 import { announcementNote } from "../../core/announcements";
 import { UsageError } from "../../core/errors";
 import { getProposal } from "../../core/proposals";
-import { sendCoordinatorMessageSoon } from "../../core/question-channel";
+import { filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
 import { syncShortNumbers } from "../../core/short-numbers";
 import { recordTiming } from "../../core/timings";
 import { editDrift, preparedFlag, preparedStatus } from "../../core/prepared";
@@ -84,9 +84,9 @@ const create = defineCommand({
     });
     if (origin !== undefined) recordTiming(project, ctx.origin, { event: "task-end", task: origin, title: getTask(project, origin, true).title, outcome: "drift", drift: d.id }, { job: ctx.job });
     // The agent that files a Drift keeps «Dismiss Drift» from it until its turn ends: the editor learns who holds it here. An agent Trama did not start and that does not say where it comes from files as the `editor` holder.
-    const holder = ctx.origin.terminal ?? ctx.origin.chat;
-    if (holder !== undefined)
-      sendCoordinatorMessageSoon(project, { type: "drift-filed", root: project.root, drift: d.id, holder }, (reason) => {
+    const filed = filingOrigin(ctx.origin);
+    if (filed.holder !== undefined)
+      sendCoordinatorMessageSoon(project, { type: "drift-filed", root: project.root, drift: d.id, ...filed }, (reason) => {
         if (ctx.byAgent) process.stderr.write(`The editor did not learn that Drift ${d.id} was filed by an agent (${reason}); «Dismiss Drift» is not held for that agent's turn.\n`);
       });
     const n = numbersOf(ctx);
@@ -113,16 +113,22 @@ const list = defineCommand({
   verb: "list",
   mode: "immediate",
   summary: "The open Drifts, or every Drift.",
-  description: "With `all: true`, every Drift. `refs` keeps only the Drifts that concern the same thing as one of the given references, as the Task blocks do; a reference that does not resolve is refused. `job` keeps the Drifts filed by that job (`TRAMA_JOB`). `unprepared: true` keeps the open Drifts that have no valid prepared question and are in no resolution being written or open. The filters combine. Read-only.",
+  description: "With `all: true`, every Drift. `refs` keeps only the Drifts that concern the same thing as one of the given references, as the Task blocks do; a reference that does not resolve is refused. `job` keeps the Drifts filed by that job (`TRAMA_JOB`). `currentJob: true` keeps the Drifts filed by the job of this command (its `TRAMA_JOB`, in a terminal and in Cursor's chat alike); without `TRAMA_JOB` it lists nothing, says so and exits with 0, and together with `job` it is a usage error. `unprepared: true` keeps the open Drifts that have no valid prepared question and are in no resolution being written or open. The filters combine. Read-only.",
   input: z.strictObject({
     all: z.boolean().optional().describe("Every Drift, not only the open ones."),
     refs: z.array(z.string().min(1)).optional().describe("Only the Drifts that concern the same thing as one of these references."),
     job: z.string().min(1).optional().describe("Only the Drifts filed by this job."),
+    currentJob: z.boolean().optional().describe("Only the Drifts filed by the job of this command (`TRAMA_JOB`); nothing when there is none. Not together with `job`."),
     unprepared: z.boolean().optional().describe("Only the open Drifts without a valid prepared question, outside every resolution being written or open."),
   }),
   output: z.object({ drifts: z.array(card.extend({ title: z.string(), status: z.string(), job: z.string().nullable(), prepared: z.object({ valid: z.boolean() }).nullable() })) }),
   example: { all: true, refs: ["order/Paid"], unprepared: true },
-  run: (ctx, input) => driftListView(ctx.project(), input.all === true, input.refs ?? [], { job: input.job, unprepared: input.unprepared === true }),
+  run(ctx, input) {
+    if (input.currentJob === true && input.job !== undefined) throw new UsageError("`currentJob` and `job` cannot be used together");
+    if (input.currentJob === true && ctx.job === undefined) return text("No TRAMA_JOB is set for this command, so no Drift can be listed as the current job's.", { drifts: [] });
+    const job = input.currentJob === true ? ctx.job : input.job;
+    return driftListView(ctx.project(), input.all === true, input.refs ?? [], { job, unprepared: input.unprepared === true });
+  },
 });
 
 const edit = defineCommand({

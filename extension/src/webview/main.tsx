@@ -94,6 +94,8 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     store.set({ error: null, diagnostics: snapshot.diagnostics, decisions: boardDecisionCount(buildBoard(snapshot)) });
   } else if (message.type === "withdrawn") {
     board.withdrawn?.(message.announcements);
+  } else if (message.type === "finalReviewMissing") {
+    board.finalReviewMissing?.(message.reason);
   } else if (message.type === "error") {
     store.set({ error: message.message });
   } else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal });

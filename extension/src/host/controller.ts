@@ -17,7 +17,7 @@ import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./annou
 import { configuredAdvisorScanner, configuredAgent, configuredAsyncDriftResolver, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, endHeldJob, launchAgent, launched, settings, startHeldJob } from "./agent";
 import { isCursor } from "./cursor";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
-import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing } from "./drift-resolution";
+import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onFinalReviewMissing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing } from "./drift-resolution";
 import { askPreparedRound } from "./questions";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
@@ -300,6 +300,7 @@ export class Controller implements vscode.Disposable {
     const subscriptions = [
       ...(this.tramaFiles ? this.watchChanges(this.tramaFiles) : []),
       onAnnouncementsWithdrawn((announcements) => this.post({ type: "withdrawn", announcements })),
+      onFinalReviewMissing((reason) => this.post({ type: "finalReviewMissing", reason })),
       onQuestionRoundChange(() => this.refresh()),
       onDriftResolutionChange(() => this.refresh()),
       ...(this.questions ? [this.questions.onChange((round) => this.post({ type: "questions", round }))] : []),

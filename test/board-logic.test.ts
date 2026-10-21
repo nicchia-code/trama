@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { DriftCard, TaskCard } from "../extension/src/webview/board/logic";
 import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockedReason, boardDecisionCount, buildBoard, createsText, finishingBlocker, formatCounts, GHOST_COLUMN, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockedReason, boardDecisionCount, buildBoard, createsText, finalReviewMissingNotice, finishingBlocker, formatCounts, GHOST_COLUMN, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
 import { runBlocker } from "../src/core/design";
 import { namerOf } from "../src/core/card-names";
@@ -470,4 +470,8 @@ test("a card has a View button only for the tab that would show a step of its fo
   const withProposal = shopWithProposals();
   const [card] = buildBoard(withProposal)[0]?.cards ?? [];
   expect(card).toMatchObject({ kind: "proposal", views: { diagram: true } });
+});
+
+test("the notice of a Run without the Advisor's final review carries its English reason", () => {
+  expect(finalReviewMissingNotice("the run was interrupted")).toBe("The Run finished without the Advisor's final review: the run was interrupted.");
 });

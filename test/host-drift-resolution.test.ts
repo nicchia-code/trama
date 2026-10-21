@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,6 +15,8 @@ import {
   receiveNotice,
   startJob,
 } from "../extension/src/host/drift-resolution";
+import { announce, getAnnouncement } from "../src/core/announcements";
+import { projectAt } from "../src/core/store";
 
 const roots: string[] = [];
 const root = () => {
@@ -118,4 +121,31 @@ test("a stopped sequence ends with its reason", () => {
   endHeldJob(project, "stopped-sequence", "its command exited with code 1");
   expect(jobAbnormalEnd(project, "stopped-sequence")).toBe("its command exited with code 1");
   expect(driftWork(project).running).toBe(false);
+});
+
+const shop = () => {
+  const dir = mkdtempSync(join(tmpdir(), "trama-chat-announce-"));
+  cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
+  roots.push(dir);
+  return dir;
+};
+
+test("a chat job writes its conversation into its launch announcement when it is bound later", () => {
+  const dir = shop();
+  const card = announce(projectAt(dir), { kind: "work", title: "Import", source: "request", chat: "cursor" });
+  startJob("run", dir, { chat: "cursor" }, undefined, "later-job", card.id);
+  expect(getAnnouncement(projectAt(dir), card.id)?.conversation).toBeNull();
+  bindChatJob(dir, "conv-later");
+  expect(getAnnouncement(projectAt(dir), card.id)?.conversation).toBe("conv-later");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("a chat job whose conversation was already pending writes it at start", () => {
+  const dir = shop();
+  const card = announce(projectAt(dir), { kind: "work", title: "Import", source: "request", chat: "cursor" });
+  const sentAfter = chatJobSendStarted(dir, "cursor");
+  bindChatJob(dir, "conv-pending");
+  startJob("run", dir, { chat: "cursor" }, sentAfter, "pending-job", card.id);
+  expect(getAnnouncement(projectAt(dir), card.id)?.conversation).toBe("conv-pending");
+  rmSync(dir, { recursive: true, force: true });
 });

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { announce } from "../../core/announcements";
 import { archiveComparison, briefing } from "../../core/compare";
 import { codeFingerprint } from "../../core/compared";
-import { sendCoordinatorMessageSoon } from "../../core/question-channel";
+import { filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
 import { recordTiming } from "../../core/timings";
 import { archiveView, briefedTexts, briefingView } from "../compare";
 import { defineCommand } from "../registry";
@@ -66,15 +66,15 @@ const move = defineCommand({
     const result = archiveComparison(project, id as string, JSON.stringify(input), ctx.job);
     recordTiming(project, ctx.origin, { event: "compare-end", comparison: id as string, tasks: result.tasks.length, drifts: result.drifts.length }, { job: ctx.job });
     // As with `task new` and `drift new`: the editor learns who holds each card filed by an agent, so it waits for that agent's turn.
-    const holder = ctx.origin.terminal ?? ctx.origin.chat;
+    const filed = filingOrigin(ctx.origin);
     for (const t of result.tasks)
-      if (ctx.byAgent && holder !== undefined)
-        sendCoordinatorMessageSoon(project, { type: "task-filed", root: project.root, task: t.id, holder }, (reason) => {
+      if (ctx.byAgent && filed.holder !== undefined)
+        sendCoordinatorMessageSoon(project, { type: "task-filed", root: project.root, task: t.id, ...filed }, (reason) => {
           process.stderr.write(`The editor did not learn that Task ${t.id} was filed by an agent (${reason}); Run and Resolve are not held for that agent's turn.\n`);
         });
     for (const d of result.drifts)
-      if (holder !== undefined)
-        sendCoordinatorMessageSoon(project, { type: "drift-filed", root: project.root, drift: d.id, holder }, (reason) => {
+      if (filed.holder !== undefined)
+        sendCoordinatorMessageSoon(project, { type: "drift-filed", root: project.root, drift: d.id, ...filed }, (reason) => {
           if (ctx.byAgent) process.stderr.write(`The editor did not learn that Drift ${d.id} was filed by an agent (${reason}); «Dismiss Drift» is not held for that agent's turn.\n`);
         });
     return archiveView(project, id as string, result);

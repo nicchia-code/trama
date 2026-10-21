@@ -8,7 +8,7 @@ import { writeCursorHooks } from "../../../src/core/cursor-chat";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { TRAMA_DIR, type Project, projectAt, readTextLf, writeFileEnsuringDir } from "../../../src/core/store";
 import { configuredModels, configuredSkillsDir } from "./agent";
-import { chatSubAgentFile } from "./chat-sub-agent";
+import { chatSubAgentFiles } from "./chat-sub-agent";
 import { bundledTrama, cursorHooksFile, isCursor } from "./cursor";
 
 const COPILOT_HOOKS_FILE = "copilot-hooks.json";
@@ -75,20 +75,22 @@ export async function installEditorHooks(): Promise<void> {
 }
 
 /**
- * Writes the user definition of trama-analysis for Cursor's chat, whatever `trama.agent` is; nothing outside Cursor. With
- * `always` it is rewritten; without, only when its content differs. Returns the file, whether it was written and, when it
- * could not be written, why: the caller reports it, and the rest goes on.
+ * Writes the user definitions of Trama's sub-agents (trama-analysis and trama-advisor) for Cursor's chat, whatever
+ * `trama.agent` is; nothing outside Cursor. With `always` they are rewritten; without, each only when its content differs.
+ * Returns one entry per file with whether it was written and, when it could not be written, why: the caller reports it,
+ * and the rest goes on.
  */
-function installChatSubAgent(always = true): { path: string; written: boolean; error?: string } | undefined {
-  if (!isCursor()) return undefined;
-  const { path, contents } = chatSubAgentFile(configuredModels().scan, homedir());
-  try {
-    if (!always && existsSync(path) && readTextLf(path) === contents) return { path, written: false };
-    writeFileEnsuringDir(path, contents);
-    return { path, written: true };
-  } catch (err) {
-    return { path, written: false, error: err instanceof Error ? err.message : String(err) };
-  }
+function installChatSubAgent(always = true): { path: string; written: boolean; error?: string }[] {
+  if (!isCursor()) return [];
+  return chatSubAgentFiles(configuredModels().scan, homedir()).map(({ path, contents }) => {
+    try {
+      if (!always && existsSync(path) && readTextLf(path) === contents) return { path, written: false };
+      writeFileEnsuringDir(path, contents);
+      return { path, written: true };
+    } catch (err) {
+      return { path, written: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 }
 
 /** What the developer chose on Get Started. */
@@ -138,8 +140,9 @@ export async function initializeProject(choice: InitChoice): Promise<{ project: 
   for (let force = false; ; force = true) {
     try {
       run(["--root", root, "project", "new", "--input", JSON.stringify({ skillsDir, ...(force ? { force: true } : {}) })], root);
-      const subAgent = installChatSubAgent();
-      if (subAgent?.error !== undefined) void vscode.window.showErrorMessage(`Trama: could not write the trama-analysis sub-agent in ${subAgent.path}: ${subAgent.error}`);
+      for (const subAgent of installChatSubAgent()) {
+        if (subAgent.error !== undefined) void vscode.window.showErrorMessage(`Trama: could not write the sub-agent definition in ${subAgent.path}: ${subAgent.error}`);
+      }
       await installEditorHooks();
       return { project: projectAt(root), choice: carried };
     } catch (err) {
@@ -161,10 +164,10 @@ export async function initializeProject(choice: InitChoice): Promise<{ project: 
 export async function updateSkills(project: Project, storageUri?: vscode.Uri): Promise<void> {
   const skillsDir = configuredSkillsDir();
   const { out } = run(["--root", project.root, "project", "edit", "--input", JSON.stringify({ skillsDir })], project.root);
-  const subAgent = installChatSubAgent();
+  const subAgents = installChatSubAgent();
   const shown = ["Deleted ", "Created ", "Converted ", "Left ", "Requirement skills: ", "Switched ", "Installed omp", "Updated ", "The trama-specs skill was not updated"];
   const report = out.split("\n").filter((line, i) => i === 0 || shown.some((start) => line.startsWith(start)));
-  if (subAgent) report.push(subAgent.error === undefined ? `Chat sub-agent definition written in ${subAgent.path}.` : `Could not write the chat sub-agent definition in ${subAgent.path}: ${subAgent.error}.`);
+  for (const subAgent of subAgents) report.push(subAgent.error === undefined ? `Chat sub-agent definition written in ${subAgent.path}.` : `Could not write the chat sub-agent definition in ${subAgent.path}: ${subAgent.error}.`);
   for (const piece of await removeCopilotPieces(storageUri)) report.push(`Removed ${piece}.`);
   void vscode.window.showInformationMessage(`Trama: ${report.join(" ")}`);
   await installEditorHooks();
@@ -179,10 +182,11 @@ export async function updateSkills(project: Project, storageUri?: vscode.Uri): P
 export async function checkSkills(project: Project, storageUri?: vscode.Uri): Promise<void> {
   try {
     const refresh = refreshProjectSkills(project, configuredSkillsDir(), false);
-    const subAgent = installChatSubAgent(false);
-    if (subAgent?.error !== undefined) throw new Error(`could not write ${subAgent.path}: ${subAgent.error}`);
+    const subAgents = installChatSubAgent(false);
+    const failed = subAgents.find((subAgent) => subAgent.error !== undefined);
+    if (failed !== undefined) throw new Error(`could not write ${failed.path}: ${failed.error}`);
     const removed = await removeCopilotPieces(storageUri);
-    if (refresh.updated || subAgent?.written || removed.length > 0) void vscode.window.showInformationMessage(SKILLS_UPDATED);
+    if (refresh.updated || subAgents.some((subAgent) => subAgent.written) || removed.length > 0) void vscode.window.showInformationMessage(SKILLS_UPDATED);
   } catch (err) {
     void vscode.window.showErrorMessage(`Trama: could not update the agent skills: ${err instanceof Error ? err.message : String(err)}.`);
   }

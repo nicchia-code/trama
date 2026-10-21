@@ -44,7 +44,7 @@ test("the groups and their keys keep the order of the Settings tab", () => {
     ["Agent", ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.autoExit", "trama.language"]],
     ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Experimental", ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution", "trama.experimentalAsyncDriftResolver"]],
+    ["Experimental", ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution", "trama.experimentalAsyncDriftResolver", "trama.experimentalContextSharing"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["Agent", ["trama.autoExit", "trama.language"]],
@@ -96,6 +96,17 @@ test("the Experimental Async Drift Resolver is a checkbox right after the Parall
   const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
   expect(keys.indexOf("trama.experimentalAsyncDriftResolver")).toBe(keys.indexOf("trama.experimentalParallelExecution") + 1);
   expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalAsyncDriftResolver")?.control).toBe("boolean");
+});
+
+test("the Experimental Context Sharing is a checkbox right after the Async Drift Resolver, off by default and application-scoped", () => {
+  const sharing = properties["trama.experimentalContextSharing"];
+  expect(sharing?.type).toBe("boolean");
+  expect(sharing?.default).toBe(false);
+  expect(sharing?.scope).toBe("application");
+  expect(settingTitle("trama.experimentalContextSharing")).toBe("Experimental Context Sharing");
+  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
+  expect(keys.indexOf("trama.experimentalContextSharing")).toBe(keys.indexOf("trama.experimentalAsyncDriftResolver") + 1);
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalContextSharing")?.control).toBe("boolean");
 });
 
 test("controls follow the manifest type; maxParallelAgents is a whole number of at least 1", () => {

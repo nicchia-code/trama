@@ -5,7 +5,7 @@ import type { CardNumbers } from "../src/core/card-names";
 import type { AnnouncementView, DriftView, HistoryTaskView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
 import { EMPTY_SPECS } from "../src/core/specs";
 import type { ToHost } from "../extension/src/protocol";
-import { BoardPage, type BoardPageProps } from "../extension/src/webview/board";
+import { BoardPage, type BoardPageProps, mountBoard } from "../extension/src/webview/board";
 import { CardView, GhostCard } from "../extension/src/webview/board/cards";
 import { HistoryEntryView } from "../extension/src/webview/board/history";
 import { type BoardEnv, BoardEnvContext } from "../extension/src/webview/board/parts";
@@ -497,6 +497,18 @@ describe("The Board page", () => {
     expect(screen.getByRole("status").textContent).toContain("The agent finished without delivering Proposal Returns.");
     fireEvent.click(screen.getByRole("button", { name: "Close the notice: The agent finished without delivering Proposal Returns." }));
     expect(closed).toEqual([1]);
+  });
+
+  test("a Run without the Advisor's final review shows its notice and closes it", () => {
+    let slotted: ReactNode = null;
+    const board = mountBoard((node) => { slotted = node; }, { post: () => {}, navigate: () => {}, openLink: () => {} });
+    board.update(snapshot());
+    board.finalReviewMissing?.("the run was interrupted");
+    const text = "The Run finished without the Advisor's final review: the run was interrupted.";
+    const view = render(<TooltipProvider>{slotted}</TooltipProvider>);
+    expect(screen.getByRole("status").textContent).toContain(text);
+    expect(screen.getByRole("button", { name: `Close the notice: ${text}` }).textContent).toContain("Close");
+    view.unmount();
   });
 
   test("History is collapsed first; the chevron opens it, with its period menu and its count, and closes it again", () => {

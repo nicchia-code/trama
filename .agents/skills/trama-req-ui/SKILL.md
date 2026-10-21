@@ -21,7 +21,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 
 ## Fragments
 
-- **Interfaccia del lavoro dell'agente** (`agents.md`): Usa quando mostri richieste di design, terminale dell'agente, agente e modelli. Sections: `design-request`, `agent-terminal`, `agent-launching`.
+- **Interfaccia del lavoro dell'agente** (`agents.md`): Usa quando mostri richieste di design, terminale dell'agente, agente e modelli, e gli avvisi dell'Advisor della chat. Sections: `design-request`, `agent-terminal`, `agent-launching`, `chat-advisor`.
 - **Board interface** (`board.md`): Usa quando mostri le colonne, le schede e i pulsanti della Board. Sections: `panel/Board`.
 - **Livelli del Diagramma** (`diagram.md`): Usa quando costruisci o cambi i livelli del Diagramma: la radice, Whole System, il livello di un Actor e il breadcrumb. Sections: `diagram`, `diagram/System level`, `diagram/Whole System level`, `diagram/Actor level`.
 - **Interfaccia del focus** (`focus.md`): Usa quando mostri il focus nel Diagramma, nei Requisiti o nelle Specs, o i pulsanti View e i chip che lo aprono. Sections: `focus`.

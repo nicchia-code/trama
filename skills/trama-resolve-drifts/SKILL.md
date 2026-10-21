@@ -41,7 +41,7 @@ When the instruction asks you to write in a language, everything you generate fo
 
 1. **Read the Drifts.** For each Drift the instruction names (and only those), run `trama drift show <id>` (add `--json` for structured data; `trama drift list --json` gives the creation order). It shows the two sides, the **Fix options**, the Model references and the attached Proposal with what it changes. Read that Proposal too, with `trama proposal show <id>`. A recurring Drift, one with `previous` in `trama drift show <id> --json`, has a chain of predecessors: run `trama drift show <previous-id> --json` on each of them in turn, from the nearest to the farthest, to get its identity, title and decision taken. A named Drift that is no longer open is left out; say so in the report. Stop, without asking anything, if none is left.
 2. **Explore.** Read the Model and the code each Drift concerns: `trama model show <ref>` (a Machine `<id>`, a State `<machine/State>`, an Event `<owner.EVENT>`), `trama model list --input -` with `{"text":"<word>"}` in a heredoc, and the code that implements them. Facts are your job: never ask the developer what the Model, the Requirements or the code can tell you.
-   **With sub-agents**, hand this exploration to them, at most four at once, in whatever way your agent starts sub-agents: one Drift (or a few that concern the same thing) each, with the commands above and the instruction to come back with a short account of what the Model says, what the code does, which Fix option fits and what the attached Proposal would change. A sub-agent asks the developer nothing and writes no Proposal. You alone ask and write. **Without sub-agents**, explore yourself, one Drift after the other.
+   **With sub-agents**, hand this exploration to them, at most N at once, where N is the limit in Trama's instruction (`20` if it gives none), whether Context Sharing is on or off, in whatever way your agent starts sub-agents: one Drift (or a few that concern the same thing) each, with the commands above and the instruction to come back with a short account of what the Model says, what the code does, which Fix option fits and what the attached Proposal would change. A sub-agent asks the developer nothing and writes no Proposal. You alone ask and write. **Without sub-agents**, explore yourself, one Drift after the other.
 3. **Ask once**, as described in "Asking" below: one single-choice question per Drift, in creation order.
 4. **Decide from the answers.** Per Drift, from the chosen option:
    - a **Fix option** → `fix-code`, with that option's number (from 1, as listed by `trama drift show`) and the answer's free text as the note, if any;
@@ -80,7 +80,7 @@ The Async Drift Resolver prepares in advance the question the developer would be
 
 ### Writing a prepared question
 
-Explore the Drift as step 2 of "Steps" says (read the Drift with `trama drift show <id>`, its attached Proposal with `trama proposal show <id>`, the Model and the code it concerns), but **ask the developer nothing and write no resolution**: you only record the question. Write one single-choice question (`multi: false`) for the Drift, in the language of the instruction, with these parts:
+Explore the Drift as step 2 of "Steps" says, with the same limit of sub-agents (read the Drift with `trama drift show <id>`, its attached Proposal with `trama proposal show <id>`, the Model and the code it concerns), but **ask the developer nothing and write no resolution**: you only record the question. Write one single-choice question (`multi: false`) for the Drift, in the language of the instruction, with these parts:
 
 - `id`: the permanent identity of the Drift. `question`: one short sentence that reads on its own. `context`: the background of the Drift in the words of the domain; for a recurring Drift (`previous` in `trama drift show <id> --json`) the chain of its predecessors, from the nearest to the farthest, each with its permanent identity, title and decision taken.
 - `options`, as `{label, description}` (and `details` when useful), all written the same way, without saying which one is what the code does today: one for each Fix option of the Drift, in their order, and one for the behaviour the code already has. A Drift **without Fix options** has exactly two options instead: adopting the changes of its attached Proposal (the recommended one) and closing without changing anything.
@@ -97,6 +97,19 @@ This applies only when the instruction carries the sentence "The developer alrea
 - Do not open a round and never run `trama question new`: the JSON after "Answer:" is the answer of the round for this Drift (`selected` labels and optional free `text`).
 - Do steps 1, 2, 4 and 5 of "Steps" for that Drift only, with that answer as the answer of the round: decide from it as step 4 says and write the resolution as step 5 says, with one difference: create the Proposal with `"prepared":true` in `trama proposal new --input -` (`kind` `resolution`).
 - Hand it over as step 7 says and report.
+
+## Experimental context sharing
+
+This section applies only when the instruction says "The experimental context sharing is on: …". Without that sentence, skip it and work as written above.
+
+With it, when you hand a part of the work to a sub-agent, in whatever way your agent starts sub-agents, you pass it what you have already read that concerns its part, so it does not look for it again and does not read it again.
+
+- **What you pass.** Of what you have already read, only what concerns that sub-agent's part, plus a short common part (the request and the decisions, when there are any): Trama's texts quoted as they are (the written request with its images put in words, the output of `trama model show`, `trama task show`, `trama drift show`, `trama proposal show`, the decisions of the interview) and the places in the code already known, one line per reference, ``- `<ref>` — <where in the code>``. Never code, never everything you gathered, and nothing you read only to pass it on.
+- **What the sub-agent does.** It does not reread the Trama texts it received and reads on its own only the ones that are missing. It always reads the code, also at the places it received, always runs the commands that register (`trama task move <id> doing`, `trama comparison new`, `trama drift new`) and loads its skill as without this feature. A received place that no longer matches the code is ignored: it searches by itself. Context Sharing never stops a job.
+- **What comes back.** Each sub-agent reports where it found the code of what it saw, one line per reference as above; you reuse those lines in your own work and for the sub-agents that follow.
+- **Limits.** No sub-agent runs again a read-only Trama command for a text it received, and what you pass to each one concerns only its part: never copy into every sub-agent all that you gathered.
+
+In this skill, the exploration of step 2 and the preparation of a question ("Writing a prepared question") give each sub-agent, for each of its Drifts, the output of `trama drift show`, the Proposal attached to it (`trama proposal show`), the chain of its `previous` Drifts and where the code is. The code at its Where in the code is read again before deciding.
 
 ## PowerShell
 

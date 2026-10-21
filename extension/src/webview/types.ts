@@ -21,6 +21,8 @@ export interface View {
   show(options: NavigateOptions): void;
   /** Called when announced cards were withdrawn without being delivered, so the view tells the developer. */
   withdrawn?(announcements: AnnouncementView[]): void;
+  /** Called when a Run of the chat ended without the Advisor's final review, so the view tells the developer why. */
+  finalReviewMissing?(reason: string): void;
 }
 
 /** Where a view puts what it draws: the panel has one React root, and each view gives it the element of its tab. */

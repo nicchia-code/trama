@@ -171,6 +171,23 @@ describe("drift list, show and the Snapshot", () => {
     expect(listDrifts(p).find((x) => x.id === a.id)?.data.job).toBe("job-1");
   });
 
+  test("list with currentJob keeps the Drifts of the command's TRAMA_JOB, none without it, and refuses job together with it", async () => {
+    const a = file("Prepared", { job: "job-1" });
+    const b = file("Not prepared", { job: "job-2", refs: ["order"] });
+    editDrift(p, a.id, { prepared: prepared(a.id) });
+    const run = async (input: object, env: Record<string, string | undefined>) =>
+      (await execute(["drift", "list", "--json", "--input", JSON.stringify(input), "--root", dir], dir, { env })).out;
+    const ids = async (input: object, env: Record<string, string | undefined>) => (JSON.parse(await run(input, env)).drifts as { id: string }[]).map((x) => x.id);
+    expect(await ids({ currentJob: true }, { TRAMA_JOB: "job-2" })).toEqual([b.id]);
+    expect(await ids({ currentJob: true, unprepared: true }, { TRAMA_JOB: "job-1" })).toEqual([]);
+    expect(await ids({ currentJob: true, unprepared: true }, { TRAMA_JOB: "job-2" })).toEqual([b.id]);
+    expect(await ids({ currentJob: true }, {})).toEqual([]);
+    const none = await execute(["drift", "list", "--input", JSON.stringify({ currentJob: true }), "--root", dir], dir, { env: {} });
+    expect(none.exit).toBe(0);
+    expect(none.out).toContain("TRAMA_JOB");
+    await expect(run({ currentJob: true, job: "job-1" }, { TRAMA_JOB: "job-1" })).rejects.toThrow(UsageError);
+  });
+
   test("show gives the status block with the question, each option's decision and the recommended one; none without a section", () => {
     const d = file("Late refund");
     expect(driftShowView(p, d).md).not.toContain("Prepared question");

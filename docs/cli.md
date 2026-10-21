@@ -485,13 +485,14 @@ Runs at once; read-only.
 
 #### `trama drift list`
 
-With `all: true`, every Drift. `refs` keeps only the Drifts that concern the same thing as one of the given references, as the Task blocks do; a reference that does not resolve is refused. `job` keeps the Drifts filed by that job (`TRAMA_JOB`). `unprepared: true` keeps the open Drifts that have no valid prepared question and are in no resolution being written or open. The filters combine. Read-only.
+With `all: true`, every Drift. `refs` keeps only the Drifts that concern the same thing as one of the given references, as the Task blocks do; a reference that does not resolve is refused. `job` keeps the Drifts filed by that job (`TRAMA_JOB`). `currentJob: true` keeps the Drifts filed by the job of this command (its `TRAMA_JOB`, in a terminal and in Cursor's chat alike); without `TRAMA_JOB` it lists nothing, says so and exits with 0, and together with `job` it is a usage error. `unprepared: true` keeps the open Drifts that have no valid prepared question and are in no resolution being written or open. The filters combine. Read-only.
 
 Input (`--input`):
 
 - `all`: `boolean`, optional. Every Drift, not only the open ones.
 - `refs`: `string not empty[]`, optional. Only the Drifts that concern the same thing as one of these references.
 - `job`: `string not empty`, optional. Only the Drifts filed by this job.
+- `currentJob`: `boolean`, optional. Only the Drifts filed by the job of this command (`TRAMA_JOB`); nothing when there is none. Not together with `job`.
 - `unprepared`: `boolean`, optional. Only the open Drifts without a valid prepared question, outside every resolution being written or open.
 
 ```sh
@@ -798,6 +799,24 @@ Output (`--json`):
 
 Runs at once; read-only.
 
+#### `trama advisor review`
+
+Run by Trama's `trama-advisor` sub-agent in Cursor's chat to end every review: `review` is the identity the request carried, `clean` says whether the code matches the Task, the Model and the Requirements, and `notes` (required when `clean` is `false`, refused when it is `true`) says what the code of the Task does differently. It sends the result to the editor window of the project on the local question channel and prints one line saying that it arrived or that the editor no longer expects it (an editor without that review, or none at all). It exits with 0 in both cases; an invalid input is a usage error (exit 2) and sends nothing. It writes nothing under `.trama/`.
+
+Input: none. Reads the JSON result on standard input.
+
+```sh
+trama advisor review --input - <<'JSON'
+{"review":"r7k2","clean":false,"notes":"The Task asks for X; the code does Y."}
+JSON
+```
+
+Output (`--json`):
+
+- delivered: boolean, required. True when an editor window of the project was waiting for this review.
+
+Runs and waits for the editor; read-only.
+
 ### `project`
 
 #### `trama project new`
@@ -918,7 +937,7 @@ Runs at once; writes in `.trama/`.
 
 #### `trama hook cursor`
 
-Run by Cursor's `beforeSubmitPrompt`, `stop`, `sessionEnd`, `preToolUse` and `afterShellExecution` hooks, not by people or agents. It hands every live editor window of the project the hook name, the conversation and the project folder, and answers Cursor with `{}`, `{"continue":true}` or the refusal of Cursor's question tool. Whatever happens, even without an editor or a project, it answers and exits with 0.
+Run by Cursor's `beforeSubmitPrompt`, `stop`, `sessionEnd`, `preToolUse` and `afterShellExecution` hooks, not by people or agents. It hands every live editor window of the project the hook name, the conversation and the project folder, and answers Cursor with `{}`, `{"continue":true}`, the refusal of Cursor's question tool or, for a shell line that runs `trama` in a conversation of Trama, the line with `TRAMA_CHAT` and `TRAMA_JOB` written before every `trama` invocation of the line (so a compound line such as `cd x && trama model show` completes only its `trama` part and leaves no variable in the shell; on Windows the line starts with the `$env:` assignments instead). Whatever happens, even without an editor or a project, it answers and exits with 0.
 
 Input: none. Reads the hook's JSON on standard input.
 
