@@ -35,6 +35,9 @@ function gitRepo(): void {
   gitCmd("-c", "user.name=Trama", "-c", "user.email=trama@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init");
 }
 
+/** The bound of a test that builds a git repository: above the bound of each git command, since a slow Windows runner takes seconds for one. */
+const GIT_TEST_MS = 60_000;
+
 describe("text fingerprint", () => {
   test("a text saved with CRLF line endings fingerprints like its LF version", () => {
     const lf = "# Order\n\nThe customer pays.\n";
@@ -70,7 +73,7 @@ describe("code fingerprint", () => {
     expect(changed).not.toBe(before);
     writeFileSync(join(dir, ".trama", "note.txt"), "not code");
     expect(codeFingerprint(dir)).toBe(changed);
-  });
+  }, GIT_TEST_MS);
 
   test("leaves out the skill folder of Trama but counts the old agent folders as code", () => {
     gitRepo();
@@ -84,7 +87,7 @@ describe("code fingerprint", () => {
       writeFileSync(join(dir, old, "note.md"), old);
       expect(codeFingerprint(dir)).not.toBe(base);
     }
-  });
+  }, GIT_TEST_MS);
 });
 
 describe("trama comparison new", () => {
@@ -95,7 +98,7 @@ describe("trama comparison new", () => {
     expect(ghost?.code).toMatch(/^[0-9a-f]{64}$/);
     expect(ghost?.refs).toContain("order/Paid");
     expect(Object.keys(ghost?.texts ?? {})).toContain("order/Paid");
-  });
+  }, GIT_TEST_MS);
 
   test("outside git the announcement records no code fingerprint", () => {
     run(["--root", dir, "comparison", "new", "order"], dir, {});
@@ -114,7 +117,7 @@ describe("trama comparison move and the registry", () => {
     const recorded = comparedRefs(p, ghost?.code ?? "");
     expect(Object.keys(recorded)).toEqual(expect.arrayContaining(["order", "order/Paid"]));
     expect(existsSync(join(p.dir, "compared", ".gitignore"))).toBe(true);
-  });
+  }, GIT_TEST_MS);
 
   test("a comparison without a code fingerprint, or not waiting, records nothing", () => {
     const plain = announce(p, { kind: "comparison", title: "Comparing order", machine: "order" });
@@ -151,5 +154,5 @@ describe("trama task list with runnable and scope", () => {
     const out = run(["--root", dir, "task", "list", "--input", '{"runnable":true,"scope":true}'], dir, {}).out;
     expect(out).toContain("## Already compared\n\n- `order/Paid`");
     expect(out).toContain("## Pre-flight scope\n\n_Nothing to check._");
-  });
+  }, GIT_TEST_MS);
 });
