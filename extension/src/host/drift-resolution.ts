@@ -19,6 +19,8 @@ export type JobPlace = { terminal: string } | { chat: "cursor" } | { held: true 
 export interface Job {
   id: string;
   kind: JobKind;
+  /** The instant the job began (`Date.now()`), in memory only: the execution check of a chat job waits a minute from it for the job to bind a conversation. */
+  started: number;
   root: string;
   place: JobPlace;
   /** The conversation that owns this chat job once its first Trama prompt binds it. */
@@ -189,6 +191,18 @@ export function onAgentIdle(listener: (terminal: string, root: string) => void):
   return { dispose: () => void idleListeners.delete(listener) };
 }
 
+const startedListeners = new Set<(terminal: string, pid: number, root: string) => void>();
+
+/** The hook of the agent in `terminal`, in the project at `root`, said which process the agent is (`agent-hook.STARTED`). */
+export function receiveAgentStarted(terminal: string, pid: number, root: string): void {
+  for (const listener of [...startedListeners]) listener(terminal, pid, root);
+}
+
+export function onAgentStarted(listener: (terminal: string, pid: number, root: string) => void): { dispose(): void } {
+  startedListeners.add(listener);
+  return { dispose: () => void startedListeners.delete(listener) };
+}
+
 /**
  * A job begins when its instruction is really written in the terminal or sent by the chat by itself; never for one left
  * ready in the chat or copied to the clipboard.
@@ -202,7 +216,7 @@ export function startJob(
   announcement?: string,
   advisor = false,
 ): string | undefined {
-  const job: Job = { id, kind, root, place, ...(announcement !== undefined ? { announcement } : {}), ...(advisor ? { advisor } : {}) };
+  const job: Job = { id, kind, root, place, started: Date.now(), ...(announcement !== undefined ? { announcement } : {}), ...(advisor ? { advisor } : {}) };
   if ("chat" in place) {
     const pending = takePendingChat(root, place.chat, sentAfter);
     if (pending?.ended) return undefined;
@@ -257,6 +271,20 @@ export const endHeldJob = (root: string, id: string, abnormal?: string): Job[] =
 /** The job `id` in the project at `root` ends without an abnormal outcome: its instruction never reached the agent. */
 export const endUnsentJob = (root: string, id: string): Job[] =>
   endWhere((j) => j.id === id && j.root === root);
+
+/** How long after its start a chat job may wait for its conversation before the execution check closes it. */
+export const CHAT_BIND_WAIT_MS = 60_000;
+
+/** Whether this window has any job in its registry: the execution check has something to look at. */
+export const hasJobs = (): boolean => jobs.size > 0;
+
+/**
+ * `time.CHECK_DUE` for the chat jobs of this window: every chat job started at least `CHAT_BIND_WAIT_MS` before `now` that
+ * no conversation has bound is closed as an abnormal end, as if it had never started (a conversation arriving later
+ * cannot bind it: the job is gone). A job already bound is never touched: its end follows its conversation.
+ */
+export const endUnboundChatJobs = (now: number = Date.now()): Job[] =>
+  endWhere((j) => "chat" in j.place && j.conversation === undefined && now - j.started >= CHAT_BIND_WAIT_MS, "its chat never bound a conversation");
 
 /** Trama chat conversations already seen in this window, by project, service and conversation. */
 const seenChats = new Set<string>();
@@ -369,6 +397,18 @@ const missingListeners = new Set<(reason: FinalReviewMissing) => void>();
 export function onFinalReviewMissing(listener: (reason: FinalReviewMissing) => void): { dispose(): void } {
   missingListeners.add(listener);
   return { dispose: () => void missingListeners.delete(listener) };
+}
+
+const followingListeners = new Set<(subject: string, reason: string) => void>();
+
+/** The Board hears when the run control stops following a job (its terminal name or the one a chat job would have) or releases a Task (`T3 Title`), with the reason (`ui#agents`). Only the window that made the check reports it. */
+export function onStoppedFollowing(listener: (subject: string, reason: string) => void): { dispose(): void } {
+  followingListeners.add(listener);
+  return { dispose: () => void followingListeners.delete(listener) };
+}
+
+export function reportStoppedFollowing(subject: string, reason: string): void {
+  for (const listener of [...followingListeners]) listener(subject, reason);
 }
 
 /** The photograph of the working tree the Advisor starts every watched agent from (replaced in tests). */

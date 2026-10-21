@@ -64,6 +64,21 @@ function onCursorChat(event: CursorChatEvent): void {
   else if (event.event === "CONVERSATION_CLOSED") withdrawWaiting(event.root, ofConversation, false);
 }
 
+/**
+ * The execution check closed a Cursor chat job (`time.CHECK_DUE`). A job bound to its conversation withdraws that
+ * conversation's announcements and the project chat's, with the usual notice. A job never bound to a conversation never
+ * started: only the announcement Trama made at its launch goes, silently; announcements others made in the project's
+ * chat stay. Terminals need nothing here: their abnormal end already withdraws their announcements.
+ */
+export function withdrawForCheck(root: string, job: { announcement?: string; conversation?: string }): void {
+  const { announcement, conversation } = job;
+  if (conversation === undefined) {
+    if (announcement !== undefined) withdrawWaiting(root, (a) => a.id === announcement, false);
+    return;
+  }
+  withdrawWaiting(root, (a) => a.chat !== null && (a.conversation === null || a.conversation === conversation));
+}
+
 export function synchronizeAnnouncementTitles(p: Project): void {
   const waiting = listAnnouncements(p);
   for (const a of waiting) {

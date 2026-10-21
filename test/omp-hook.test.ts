@@ -21,15 +21,14 @@ const setup = () => {
   };
   const ctx = { cwd: "/project", agent: { kind: "main" as const } };
   tramaHook(pi);
-  const fire = (event: string, agent: "main" | "sub" | undefined = "main") => {
-    handlers.get(event)?.({}, { cwd: ctx.cwd, ...(agent === undefined ? {} : { agent: { kind: agent } }) });
+  const fire = (event: string, agent: "main" | "sub" | "none" = "main") => {
+    handlers.get(event)?.({}, { cwd: ctx.cwd, ...(agent === "none" ? {} : { agent: { kind: agent } }) });
   };
   return { fire, execs };
 };
 
-test("only main session completion emits idle; starts, ends and timers emit nothing", () => {
+test("only main session completion emits idle; ends and timers emit nothing", () => {
   const { fire, execs } = setup();
-  fire("agent_start");
   fire("agent_end");
   expect(execs).toEqual([]);
   fire("session_stop", "sub");
@@ -37,6 +36,22 @@ test("only main session completion emits idle; starts, ends and timers emit noth
   fire("session_stop");
   fire("session_shutdown");
   expect(execs).toEqual([["hook", "idle"], ["hook", "idle"]]);
+});
+test("the main session says once which process is the agent, at session_start or else agent_start; sub-agents and sessions without agent say nothing", () => {
+  const sub = setup();
+  sub.fire("session_start", "sub");
+  sub.fire("agent_start", "sub");
+  sub.fire("session_start", "none");
+  expect(sub.execs).toEqual([]);
+  const first = setup();
+  first.fire("session_start");
+  first.fire("agent_start");
+  first.fire("session_start");
+  expect(first.execs).toEqual([["hook", "start", String(process.pid)]]);
+  const fallback = setup();
+  fallback.fire("agent_start");
+  fallback.fire("agent_start");
+  expect(fallback.execs).toEqual([["hook", "start", String(process.pid)]]);
 });
 test("session shutdown reports only an explicitly main agent", () => {
   const { fire, execs } = setup();

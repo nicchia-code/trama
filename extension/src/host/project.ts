@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
@@ -12,7 +12,8 @@ import { chatSubAgentFiles } from "./chat-sub-agent";
 import { bundledTrama, cursorHooksFile, isCursor } from "./cursor";
 
 const COPILOT_HOOKS_FILE = "copilot-hooks.json";
-const fileFolders = () => (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file");
+/** The workspace folders on disk. */
+export const fileFolders = () => (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file");
 
 /** What every action other than setting a project up says in a workspace without `.trama/`. */
 export const NO_PROJECT_WARNING = "Trama: this workspace has no .trama/ project. Open Trama to set it up.";
@@ -93,49 +94,14 @@ function installChatSubAgent(always = true): { path: string; written: boolean; e
   });
 }
 
-/** What the developer chose on Get Started. */
-export type InitChoice = "import" | "scratch";
-
-/** Asks which workspace folder to initialize when there are several. */
-async function pickFolder(): Promise<string | undefined> {
-  const folders = fileFolders();
-  if (folders.length === 0) {
-    void vscode.window.showErrorMessage("Trama: open a folder first, then initialize it.");
-    return undefined;
-  }
-  if (folders.length === 1) return (folders[0] as vscode.WorkspaceFolder).uri.fsPath;
-  return (await vscode.window.showWorkspaceFolderPick({ placeHolder: "Folder to initialize as a Trama project" }))?.uri.fsPath;
-}
-
 /**
- * Start from Scratch in a folder with visible files: a modal warning says so and suggests Import from Code. Returns the
- * choice to carry out, or undefined when the developer cancels.
+ * Runs `trama project new` in the workspace folder `root`, the one the developer chose in the setup wizard, with the same code and skills folder as
+ * the command line (`trama.skillsDir`, as the wizard has just saved it). When it refuses to overwrite customised skill files, shows why and retries
+ * with `force: true` only after an explicit modal confirmation. Installs editor hooks after initialization. Returns the new Project, or undefined
+ * when nothing was created because the developer declined the overwrite. A folder that is already a project keeps its Model, Requirements and skills.
  */
-async function confirmScratch(root: string): Promise<InitChoice | undefined> {
-  if (!readdirSync(root).some((name) => !name.startsWith("."))) return "scratch";
-  const choice = await vscode.window.showWarningMessage(
-    "This folder already contains files. Start from Scratch ignores them unless your request mentions them; Import from Code describes them instead.",
-    { modal: true },
-    "Start from Scratch",
-    "Import from Code",
-  );
-  if (choice === "Import from Code") return "import";
-  return choice === "Start from Scratch" ? "scratch" : undefined;
-}
-
-/**
- * Runs `trama project new` in a workspace folder for the developer's Get Started choice, with the same code and skills folder as
- * the command line. When it refuses to overwrite customised skill files, shows why and retries with `force: true` only after
- * an explicit modal confirmation. Installs editor hooks after initialization. Returns the new Project and the choice
- * carried out, or undefined when nothing was created.
- */
-export async function initializeProject(choice: InitChoice): Promise<{ project: Project; choice: InitChoice } | undefined> {
-  const root = await pickFolder();
-  if (root === undefined) return undefined;
-  // A folder that is already a project keeps its Model, Requirements and skills: no warning and no initialization, only the choice's next step remains.
-  if (existsSync(join(root, TRAMA_DIR))) return { project: projectAt(root), choice };
-  const carried = choice === "scratch" ? await confirmScratch(root) : choice;
-  if (carried === undefined) return undefined;
+export async function initializeProject(root: string): Promise<Project | undefined> {
+  if (existsSync(join(root, TRAMA_DIR))) return projectAt(root);
   const skillsDir = configuredSkillsDir();
   for (let force = false; ; force = true) {
     try {
@@ -144,7 +110,7 @@ export async function initializeProject(choice: InitChoice): Promise<{ project: 
         if (subAgent.error !== undefined) void vscode.window.showErrorMessage(`Trama: could not write the sub-agent definition in ${subAgent.path}: ${subAgent.error}`);
       }
       await installEditorHooks();
-      return { project: projectAt(root), choice: carried };
+      return projectAt(root);
     } catch (err) {
       if (!(err instanceof TramaError || err instanceof UsageError)) throw err;
       if (force || !err.message.includes('"force": true')) {

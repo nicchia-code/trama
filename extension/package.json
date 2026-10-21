@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "publisher": "trama-dev",
   "license": "AGPL-3.0-only",
   "private": true,
@@ -96,7 +96,7 @@
           ],
           "default": "auto",
           "scope": "application",
-          "markdownDescription": "The colours of the Trama panel. Auto (the default) follows the editor: light with a light theme, dark with a dark one, high contrast included. Light and Dark keep the panel in that theme."
+          "markdownDescription": "Colours of the Trama panel. Auto (the default) follows the editor's theme; Light and Dark fix it."
         },
         "trama.agent": {
           "type": "string",
@@ -110,13 +110,13 @@
           ],
           "default": "cursor",
           "scope": "application",
-          "markdownDescription": "Agent used for every project and instruction: `cursor` (Cursor's chat, only in Cursor; the default; any other value counts as `cursor`) or `omp` (omp in the editor's integrated terminal, in every editor). It applies only in your user settings."
+          "markdownDescription": "The agent Trama starts: `cursor` (Cursor's chat, only in Cursor; the default) or `omp` (in the editor's terminal, in any editor)."
         },
         "trama.ompPath": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Path of the `omp` program the Settings tab runs (`omp models --json`) to suggest model names. Empty uses `omp` from the editor's PATH. It applies only in your user settings."
+          "markdownDescription": "Path of the `omp` program used to suggest model names. Empty uses `omp` from the editor's PATH."
         },
         "trama.terminalLocation": {
           "type": "string",
@@ -130,83 +130,83 @@
           ],
           "default": "panel",
           "scope": "application",
-          "markdownDescription": "Where `omp` terminals open: `panel` (the terminal area; the default) or `editor` (a terminal tab in the active editor group). It applies only in your user settings."
+          "markdownDescription": "Where `omp` terminals open: `panel` (the terminal area; the default) or `editor` (a tab in the active editor group)."
         },
         "trama.submitWhileRunning": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Let a run start while another run started by Trama is in progress. Off (the default): Run and Run all are unavailable while a run started by Trama is in progress. On: a run can start while another one is in progress."
+          "markdownDescription": "Let a run start while another run started by Trama is in progress. Off by default."
         },
         "trama.analysis": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for design work: written design requests, Resolve Drifts, the preparation of automatic Drift resolution and import. Write the name as omp or Cursor's chat accepts it. Empty (the default) leaves the agent's default model. It only applies in your user settings."
+          "markdownDescription": "Model for design work: design requests, Resolve Drifts and import. Empty (the default) keeps the agent's default model."
         },
         "trama.scan": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for scans: of the System, of Features, and for the sub-agents that compare Machines, including those of the pre-flight check at the start of each Run. With the Advisor Scanner on, the omp advisors that watch Runs use it too. Write the name as omp or Cursor's chat accepts it. Empty (the default) leaves the agent's default model. The sub-agent of Cursor's chat gets it with Update skills. It only applies in your user settings."
+          "markdownDescription": "Model for scans and the sub-agents that compare Machines, also in each Run's pre-flight. Empty (the default) keeps the agent's default model."
         },
         "trama.execution": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Model for implementing Tasks: implement, implement all and the automatic Run, including the pre-flight of each Run and the selective final scan of the run. Write the name as omp or Cursor's chat accepts it. Empty (the default) leaves the agent's default model. It only applies in your user settings."
+          "markdownDescription": "Model for implementing Tasks, in single runs and Run all. Empty (the default) keeps the agent's default model."
         },
         "trama.autoExit": {
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "markdownDescription": "Close the agent's terminal as soon as the agent is idle or its command ends (default on). With it off, idle terminals stay open and every instruction still opens a new one. It only applies in your user settings."
+          "markdownDescription": "Close the agent's terminal as soon as the agent is idle or its command ends (default on)."
         },
         "trama.maxParallelAgents": {
           "type": "integer",
           "default": 20,
           "minimum": 1,
           "scope": "application",
-          "markdownDescription": "How many sub-agents the agent may run at once, in a scan, in the exploration of a design or of a Drift resolution and in a run of Tasks (default 20; agents without sub-agents ignore it)."
+          "markdownDescription": "How many sub-agents the agent may run at once (default 20). Agents without sub-agents ignore it."
         },
         "trama.skillsDir": {
           "type": "string",
           "default": ".agents/skills",
-          "markdownDescription": "Folder, relative to the project root, where Get Started and **Trama: Update Agent Skills** install the agent skills."
+          "markdownDescription": "Folder, relative to the project root, where Trama installs the agent skills."
         },
         "trama.language": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Language the agent writes in, for example `Italian` or `Deutsch`. Empty by default: Trama never fills it in. When set, every instruction Trama sends to the agent asks it to write everything it generates in that language, except code, which always stays in English. Empty asks nothing about language. It only reaches agents that Trama starts, changes nothing already written, and the Trama interface stays in English."
+          "markdownDescription": "Language the agent writes in, for example `Italian`; code stays in English. Empty (the default) asks nothing about language."
         },
         "trama.experimentalDriftBlocker": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Experimental. On: the agent that files a Drift checks which of the Tasks it would block are really affected, blocks only those and says why it leaves each other one free; a Drift that blocks no Task is filed inside a resolution Proposal for you to approve. Off (the default): a Drift blocks every Task that concerns the same thing. Only agents started by Trama follow it."
+          "markdownDescription": "Experimental. On: a new Drift blocks only the Tasks it really affects; one that blocks none arrives as a resolution Proposal."
         },
         "trama.experimentalAdvisorScanner": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Experimental. On: during every Run an advisor checks the code the agent reads and writes against the Model and the Requirements, tells the agent when its work drifts and files a Drift for a difference in existing code; every scan is off (Scan buttons, the pre-flight and the end-of-run scan). The advisor uses the Scan model. With omp it is omp's advisor: Trama's advisors live in `.omp/WATCHDOG.yml`, installed in every project; in an omp session you start yourself with the advisor on, they replace omp's default advisor, run only `trama advisor show` and then stay silent. With Cursor's chat it is Trama's `trama-advisor` sub-agent, which reviews changes in the background, each Task when it ends and the whole Run before it finishes. Off (the default): scans work as usual."
+          "markdownDescription": "Experimental. On: during every Run an advisor, using the Scan model, checks the code against the Model and files Drifts; all scans are off."
         },
         "trama.experimentalParallelExecution": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Experimental. Only for runs over several Tasks, with an agent that has sub-agents. On: the agent reads the Tasks before the run and may start together Tasks that Trama would keep apart because they concern the same thing, or hold a Task until another is done, giving a reason for each choice; a sub-agent that finds its Task touching the same things as another stops, and the agent resumes it later. Off (the default): Trama never gives two Tasks that concern the same thing at once. Only agents started by Trama follow it."
+          "markdownDescription": "Experimental. On: in a run of several Tasks the agent may start together Tasks that concern the same thing, giving a reason."
         },
         "trama.experimentalAsyncDriftResolver": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Experimental. On: before a scan, a run or an import finishes, the agent prepares the resolution question of every Drift it filed, so `Resolve` opens that question at once and Trama writes the resolution from your answer, without starting an agent; you still approve or reject the resolution. Resolutions written this way do not hold back other `Resolve`s. Off (the default): `Resolve` always starts the resolving agent. Only agents started by Trama follow it."
+          "markdownDescription": "Experimental. On: the agent prepares each Drift's resolution question, so `Resolve` asks it at once without starting an agent."
         },
         "trama.experimentalContextSharing": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Experimental. Only with an agent that has sub-agents. On: when the agent hands work to its sub-agents, it passes each one the part of what it has already read that concerns that work (Trama's texts quoted as they are, and where the code is), so sub-agents do not read it again; they still read the code themselves. Off (the default): each sub-agent reads what it needs on its own. Only agents started by Trama follow it."
+          "markdownDescription": "Experimental. On: the agent passes its sub-agents what it has already read about their work, so they do not read it again."
         }
       }
     }

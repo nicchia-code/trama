@@ -32,6 +32,15 @@ const setting = (key: string): SettingSchema => {
   return found;
 };
 
+test("every manifest description is at most two short sentences of about 160 characters", () => {
+  for (const [key, entry] of Object.entries(properties)) {
+    const text = entry.markdownDescription ?? "";
+    expect(text.length, key).toBeGreaterThan(0);
+    expect(text.length, key).toBeLessThanOrEqual(170);
+  }
+  expect(properties["trama.theme"]?.markdownDescription).toBe("Colours of the Trama panel. Auto (the default) follows the editor's theme; Light and Dark fix it.");
+});
+
 test("every key the manifest declares belongs to exactly one group, and every grouped key is declared", () => {
   const grouped = SETTING_GROUPS.flatMap((group) => group.keys);
   expect(new Set(grouped).size).toBe(grouped.length);

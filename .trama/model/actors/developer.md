@@ -50,11 +50,13 @@ The developer asks the coding agent to work, from a button or a command: design 
 
 Una richiesta di design arriva in un solo modo: come richiesta scritta, un documento Markdown che il developer apre con + Add Work Item in fondo alla colonna Backlog, compone in una scheda dell'editor e invia con il pulsante Send to agent della scheda o chiudendo la scheda (vedi la Design request). Non c'è più una richiesta rapida di una riga.
 
+L'import dal comando Import from Code è questo Event solo con un Modello che non è vuoto; con il Modello vuoto il comando apre invece il wizard di setup (OPEN_GUIDED_SETUP). L'import che segue la conferma del wizard fa parte di quella conferma (INITIALIZE_PROJECT o CONFIRM_SETUP).
+
 ### CLOSE_REQUEST
 Il developer chiude la scheda di una richiesta di design scritta che non ha mai inviato, quando nessun'altra scheda mostra più quella richiesta. Chiudere la finestra dell'editor con la scheda aperta non è questo Event, né lo è chiudere la scheda di una richiesta già inviata.
 
 ### INITIALIZE_PROJECT
-The developer asks to set up Trama in a workspace folder. Dall'editor lo chiede scegliendo Import from Code o Start from Scratch in Get Started, la scheda che il pannello mostra in una cartella senza progetto; dalla riga di comando con l'inizializzazione.
+The developer asks to set up Trama in a workspace folder. Dall'editor lo chiede confermando il riepilogo del wizard di setup in Get Started, la scheda che il pannello mostra in una cartella senza progetto (vedi il Setup wizard); dalla riga di comando con l'inizializzazione.
 
 ### UPDATE_SKILLS
 The developer asks to refresh the agent skills of the project with the ones shipped with this version of Trama.
@@ -89,6 +91,27 @@ Il developer passa alla scheda Settings del pannello, dalla sua barra delle sche
 
 ### CHANGE_SETTING
 Il developer cambia un'impostazione di Trama dalla scheda Settings: sceglie un valore in un menu, spunta o toglie una casella, oppure conferma un campo di testo o numerico.
+
+### OPEN_GUIDED_SETUP
+Il developer apre il wizard di setup in un progetto: con il pulsante Guided setup in cima alla scheda Settings, per rivedere le impostazioni; oppure, con il Modello vuoto, con Import from Code o Start from Scratch nel Diagramma o con il comando Import from Code, per proseguire con quel percorso (vedi il Setup wizard). In una cartella senza progetto il wizard è già Get Started e questo Event non c'è.
+
+### NEXT_SETUP_STEP
+Il developer passa al passo successivo del wizard di setup con Next.
+
+### PREVIOUS_SETUP_STEP
+Il developer torna al passo precedente del wizard di setup con Back.
+
+### SKIP_SETUP_STEP
+Il developer salta il passo Advanced del wizard di setup con Skip.
+
+### OPEN_SETUP_STEP
+Il developer sceglie una riga del riepilogo del wizard di setup per tornare al passo da cui viene.
+
+### CONFIRM_SETUP
+Il developer conferma il riepilogo del wizard di setup aperto in un progetto, dalla scheda Settings. In una cartella senza progetto la conferma è INITIALIZE_PROJECT.
+
+### CANCEL_SETUP
+Il developer annulla il wizard di setup aperto in un progetto, con Cancel. In Get Started il wizard non ha Cancel.
 
 ### OPEN_SYSTEM_LEVEL
 Il developer riporta il Diagramma alla sua radice, il livello del Sistema da cui si sceglie cosa guardare: con il breadcrumb, o seguendo un link a un Actor i cui Eventi non arrivano a nessuna Machine, che la radice mostra selezionato.

@@ -4,7 +4,7 @@ La risoluzione porta un Drift aperto a una decisione del developer. Il developer
 
 I Drift sono raccolti quando l'istruzione parte davvero. Un'approvazione non avvia nessuno scan e nessun Run.
 
-I Run e la preparazione delle risoluzioni si escludono a vicenda. Una risoluzione ancora in scrittura o aperta impedisce un altro Resolve, tranne una risoluzione nata da una domanda pronta, che non ne impedisce nessuno. Design, import e nuove scansioni possono partire come prima; una nuova scansione non sospende il lavoro già avviato. La fine di un lavoro segue il suo terminale o la sua conversazione, mai una quiete o un timer.
+I Run e la preparazione delle risoluzioni si escludono a vicenda. Una risoluzione ancora in scrittura o aperta impedisce un altro Resolve, tranne una risoluzione nata da una domanda pronta, che non ne impedisce nessuno. Design, import e nuove scansioni possono partire come prima; una nuova scansione non sospende il lavoro già avviato. La fine di un lavoro segue il suo terminale o la sua conversazione, oppure il controllo di esecuzione quando trova un fatto certo (vedi l'Actor time); mai una quiete o un timer di inattività.
 
 Con l'Async Drift Resolver, una funzione sperimentale che il developer accende per tutti i progetti, un Drift può avere una domanda pronta (vedi il Drift): la domanda che Resolve Drifts gli farebbe, preparata alla fine del lavoro che lo ha archiviato. Resolve su un Drift con una domanda pronta ancora valida non lancia nessun agente: Trama apre subito quella domanda, come un round di una sola domanda (vedi il Question round), e dalla risposta scrive e consegna da sé la risoluzione, una Proposal da approvare o rifiutare come ogni risoluzione. Una risoluzione così non impedisce nessun altro Resolve, e nessuna risoluzione in attesa impedisce il Resolve di un Drift con domanda pronta: il developer può rispondere a più Drift di fila e decidere le schede gialle dopo. Solo quando la risposta va interpretata, o quando la risoluzione scritta da Trama non passa i controlli della consegna, Trama lancia l'agente di risoluzione con la risposta già data, che non rifà la domanda. Con la funzione spenta, o senza una domanda pronta valida, Resolve lancia l'agente come sempre.
 
@@ -26,6 +26,7 @@ Almeno un Run è in corso. Resolve aspetta, anche su un Drift con una domanda pr
 - `editor-chat.AGENT_STOPPED` → Free: termina il turno dell'ultimo Run.
 - `editor-chat.AGENT_INTERRUPTED` → Free: viene interrotto l'ultimo Run.
 - `editor-chat.CONVERSATION_CLOSED` → Free: viene chiusa la conversazione dell'ultimo Run.
+- `time.CHECK_DUE` → Free: il controllo di esecuzione chiude l'ultimo Run: il suo agente di omp non c'è più (vedi l'Agent terminal), oppure nella chat il Run non si è legato a nessuna conversazione entro il primo controllo fatto almeno un minuto dopo l'invio, e finisce come se non fosse mai partito. È una fine anomala: una sequenza di Run all si ferma senza lanciare altri Run. In cima alla Board l'avviso dice che Trama ha smesso di seguire quel Run e perché.
 
 ### Answering a prepared question
 Il developer risponde alla domanda pronta del Drift scelto; nessun agente lavora. Conta come una risoluzione in corso: nessun Run parte, nessun altro Resolve parte e Dismiss Drift è indisponibile finché la domanda è aperta.
@@ -43,6 +44,7 @@ Un solo agente prepara la risoluzione del Drift raccolto. Nessun Run parte prima
 - `editor-chat.AGENT_STOPPED` → Free: è finito il turno della risoluzione.
 - `editor-chat.AGENT_INTERRUPTED` → Free: è stato interrotto il turno della risoluzione; nessun Run parte dall'interruzione.
 - `editor-chat.CONVERSATION_CLOSED` → Free: è stata chiusa la conversazione della risoluzione.
+- `time.CHECK_DUE` → Free: il controllo di esecuzione chiude il lavoro della risoluzione, alle stesse condizioni dei Run; nessun Run parte da questa fine, e l'avviso compare come per un Run.
 
 ## Events
 

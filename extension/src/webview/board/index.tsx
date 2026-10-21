@@ -15,7 +15,7 @@ import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
 import { type ModelList, ModelDialog, ProposalBodyDialog } from "./dialogs";
 import { HistoryEntryView } from "./history";
-import { announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, finalReviewMissingNotice, GHOST_COLUMN, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, NO_MODELS, type ProposalCard, withdrawnNotice } from "./logic";
+import { announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, finalReviewMissingNotice, GHOST_COLUMN, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, NO_MODELS, type ProposalCard, stoppedFollowingNotice, withdrawnNotice } from "./logic";
 import { BoardButton, BoardEnvContext, type BoardEnv, Tip } from "./parts";
 
 /** The state of Resolve Drifts and of the Runs the host gives with each picture. */
@@ -307,6 +307,10 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
     },
     finalReviewMissing(reason: string) {
       page = { ...page, notices: [...page.notices, { id: nextNotice++, text: finalReviewMissingNotice(reason) }] };
+      render();
+    },
+    stoppedFollowing(subject: string, reason: string) {
+      page = { ...page, notices: [...page.notices, { id: nextNotice++, text: stoppedFollowingNotice(subject, reason) }] };
       render();
     },
     show() {},

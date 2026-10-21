@@ -1,11 +1,12 @@
 ---
-description: "Usa quando costruisci o cambi i livelli del Diagramma: la radice, Whole System, il livello di un Actor e il breadcrumb."
+description: "Usa quando costruisci o cambi i livelli del Diagramma: la radice, Whole System, il livello di un Actor, il breadcrumb e il riquadro al passaggio del puntatore."
 ---
 # Livelli del Diagramma
 
 ## diagram
 - Il breadcrumb di una Feature aperta dal livello di un Actor è `System › <actor> › <feature> › …`; aperta da Whole System è `System › Whole System › <feature> › …`; aperta da un link è `System › <feature> › …`. Il segmento dell'Actor o di Whole System resta anche ai livelli di Machine e di Stato sotto quella Feature, ed è cliccabile come gli altri.
 - Il nome di un passo del focus su un livello di Actor è il suo breadcrumb, `System › <actor>`.
+- Il riquadro che compare al passaggio del puntatore su un nodo o su un arco mostra solo il titolo dell'elemento e, sotto, la prima frase della sua descrizione (per un arco, della prosa della Transizione), senza elenchi di Transizioni, condizioni o altre righe. La frase si mostra intera, anche quando supera il limite dei tooltip di `ui#General`; senza descrizione il riquadro mostra solo il titolo. Tutto il resto si legge nei dettagli, al clic.
 
 ## diagram/System level
 - La radice disegna, sul canvas del Diagramma, solo nodi senza frecce, disposti a griglia in quest'ordine: il nodo `Whole System`, gli Actor nell'ordine del Modello, le Feature che nessun Actor raggiunge nel loro ordine.

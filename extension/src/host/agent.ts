@@ -8,16 +8,22 @@ import { writeFileAtomic } from "../../../src/core/atomic-write";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
-import { sendCoordinatorMessage } from "../../../src/core/question-channel";
+import { questionProjectId, sendCoordinatorMessage } from "../../../src/core/question-channel";
+import { processAlive, readAgentProcess, removeAgentProcess, writeAgentProcess } from "../../../src/core/agent-processes";
+import { terminalVerdict } from "../../../src/core/terminal-check";
 import { bundledOmpHook, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, withAskLine, withTramaPath } from "./cursor";
-import { withdrawWaiting } from "./announcements";
-import { bindChatJob, chatJobSendStarted, chatTurnEnded, endChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnsentJob, isHooked, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
+import { withdrawForCheck, withdrawWaiting } from "./announcements";
+import { bindChatJob, chatJobSendStarted, chatTurnEnded, endChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnboundChatJobs, endUnsentJob, followsAgent, isHooked, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, onAgentStarted, releaseFiledWork, reportStoppedFollowing, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint } from "./questions";
+import { pruneAgentProcesses, releaseUnfollowedTasks } from "./task-release";
 import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
 import { advisorOverlay, agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent, terminalEnv } from "./terminal-agent";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
+
+/** The name each chat job's terminal would have (`T3`, `Design`, …), by job: what a "stopped following" notice calls the work. */
+const chatJobNames = new Map<string, string>();
 
 /** The agent `trama.agent` names in user settings: `omp`, or `cursor` for every other value (the old `chat` and `claude` too) and when unset. */
 export const configuredAgent = (): "cursor" | TerminalAgent => (settings().inspect<string>("agent")?.globalValue === "omp" ? "omp" : "cursor");
@@ -117,6 +123,8 @@ export function watchAgentTerminal(): vscode.Disposable {
       }
       // Only these three end a turn; TURN_FINISHING may still be continued by the Advisor, and the other events say nothing about it.
       const ends = e.event === "AGENT_STOPPED" || e.event === "AGENT_INTERRUPTED" || e.event === "CONVERSATION_CLOSED";
+      // A `stop` that arrived already ended the turn here: only a turn still open is ended by `sessionEnd` alone.
+      const endedBySessionOnly = e.event === "AGENT_INTERRUPTED" && e.sessionReason !== undefined && followsAgent(e.root, "cursor", e.conversation);
       if (ends) chatTurnEnded(e.root, e.conversation);
       if (ends) {
         releaseTakenTasks(e.root, { chat: "cursor", conversation: e.conversation });
@@ -127,7 +135,12 @@ export function watchAgentTerminal(): vscode.Disposable {
       if (!ends) return;
       // Only a completed turn is a normal end: an interrupted or closed conversation never starts the Run that follows it.
       const abnormal = e.event === "AGENT_STOPPED" ? undefined : e.event === "AGENT_INTERRUPTED" ? "its conversation was interrupted" : "its conversation was closed";
-      for (const job of endChatJobs(e.root, e.conversation, abnormal)) finishJob(e.root, job);
+      for (const job of endChatJobs(e.root, e.conversation, abnormal)) {
+        finishJob(e.root, job);
+        const name = chatJobNames.get(job.id);
+        chatJobNames.delete(job.id);
+        if (endedBySessionOnly && name !== undefined) reportStoppedFollowing(name, `Cursor ended the session (${e.sessionReason})`);
+      }
     }),
     onAgentIdle((terminal) => {
       for (const [tracked, info] of agentTerminals) {
@@ -136,11 +149,17 @@ export function watchAgentTerminal(): vscode.Disposable {
         break;
       }
     }),
+    onAgentStarted((terminal, pid, root) => {
+      // Only a terminal followed in Agent running registers its agent's process; nothing else changes.
+      for (const info of agentTerminals.values()) {
+        if (info.id === terminal && info.root === root) writeAgentProcess(questionProjectId(projectAt(root)), terminal, pid);
+      }
+    }),
     vscode.window.onDidCloseTerminal((terminal) => {
       const info = agentTerminals.get(terminal);
       if (info !== undefined) {
         endAgentWork(info, "its terminal was closed");
-        agentTerminals.delete(terminal);
+        unfollowTerminal(terminal);
       }
       const idle = idleTerminals.get(terminal);
       if (idle !== undefined) {
@@ -157,6 +176,8 @@ export function watchAgentTerminal(): vscode.Disposable {
 function endAgentWork(info: { id: string; jobId?: string; root: string; line: string; since: number }, abnormal?: string): void {
   setHooked(info.id, false);
   releaseTakenTasks(info.root, { terminal: info.id });
+  // No Task holds this terminal any more and this window stops following it: its registered process is forgotten.
+  removeAgentProcess(questionProjectId(projectAt(info.root)), info.id);
   endFiledWork(info.root, info.id);
   for (const job of endTerminalJobs(info.id, abnormal)) finishJob(info.root, job);
   withdrawWaiting(info.root, (announcement) => announcement.terminal === info.id);
@@ -171,12 +192,95 @@ function abnormalCommandEnd(exitCode: number | undefined): string | undefined {
 function finishAgentTerminal(terminal: vscode.Terminal, info: { id: string; jobId?: string; root: string; line: string; since: number }, abnormal?: string): void {
   if (agentTerminals.get(terminal) !== info) return;
   // An idle or ended terminal is no longer followed: later signals and its close change nothing.
-  agentTerminals.delete(terminal);
+  unfollowTerminal(terminal);
   endAgentWork(info, abnormal);
   if (settings().get<boolean>("autoExit", true)) {
     terminal.dispose();
   } else {
     idleTerminals.set(terminal, info);
+  }
+}
+
+/** The shell process of each followed terminal, read once and kept with it (`time.CHECK_DUE`, when the hook named no process). */
+const shellPids = new WeakMap<vscode.Terminal, number | undefined>();
+
+/**
+ * `time.CHECK_DUE` for the agent terminals this window follows in Agent running: a terminal the editor no longer lists
+ * (or that already has an exit status) without Trama having seen it close ends as a closure; one whose agent process is
+ * gone (the one the hook reported or, without it, the terminal's shell) ends as an abnormal end of its command. Both
+ * release the Tasks, withdraw the announcements and report `Trama stopped following <name>: <reason>.` once; with
+ * `trama.autoExit` on an agent that is gone has its terminal disposed. A live process, however still, changes nothing.
+ */
+export async function checkAgentTerminals(only?: string): Promise<{ id: string; name: string; reason?: string }[]> {
+  const listed = new Set(vscode.window.terminals);
+  const checked: { id: string; name: string; reason?: string }[] = [];
+  for (const [terminal, info] of [...agentTerminals]) {
+    if (agentTerminals.get(terminal) !== info || (only !== undefined && info.id !== only)) continue;
+    const projectId = questionProjectId(projectAt(info.root));
+    const registered = readAgentProcess(projectId, info.id);
+    const terminalGone = !listed.has(terminal) || terminal.exitStatus !== undefined;
+    if (!terminalGone && registered === undefined && !shellPids.has(terminal)) shellPids.set(terminal, await terminal.processId);
+    const verdict = terminalVerdict({ terminalGone, ...(registered === undefined ? {} : { hookPid: registered.pid }), ...(shellPids.get(terminal) === undefined ? {} : { shellPid: shellPids.get(terminal) }) }, processAlive);
+    // The await may have let a signal end this terminal first: then nothing is ended or reported twice.
+    if (agentTerminals.get(terminal) !== info) continue;
+    if (verdict === undefined) { checked.push({ id: info.id, name: terminal.name }); continue; }
+    reportStoppedFollowing(terminal.name, verdict);
+    checked.push({ id: info.id, name: terminal.name, reason: verdict });
+    if (verdict === "the terminal is gone") {
+      unfollowTerminal(terminal);
+      endAgentWork(info, "its terminal was closed");
+    } else {
+      finishAgentTerminal(terminal, info, "the agent's process is gone");
+    }
+  }
+  return checked;
+}
+
+/**
+ * `time.CHECK_DUE` for the chat jobs of this window: a chat job (Run, scan or resolution) that no conversation bound
+ * within the first check made a minute or more after its send ends as if it had never started. Its sequence of Runs
+ * stops (the end is abnormal), its launch announcement is withdrawn silently and the Board reports
+ * `Trama stopped following <name>: <reason>.` once. Returns the names of the jobs closed. Terminal jobs are closed by
+ * `checkAgentTerminals`; a job bound to a conversation ends only with it.
+ */
+export function checkChatJobs(now: number = Date.now()): string[] {
+  const closed: string[] = [];
+  for (const job of endUnboundChatJobs(now)) {
+    const name = chatJobNames.get(job.id) ?? "Cursor chat";
+    chatJobNames.delete(job.id);
+    withdrawForCheck(job.root, job);
+    const reason = jobAbnormalEnd(job.root, job.id) ?? "its chat never bound a conversation";
+    finishJob(job.root, job);
+    reportStoppedFollowing(name, reason);
+    closed.push(name);
+  }
+  return closed;
+}
+
+/** The projects this window launched work in, whose agent registry the check prunes. */
+const launchedRoots = new Set<string>();
+
+/** Whether this window follows an agent terminal, whether or not a job is registered for it: the check has it to look at. */
+export const hasFollowedTerminals = (): boolean => agentTerminals.size > 0;
+
+/** This window stops following `terminal`. */
+function unfollowTerminal(terminal: vscode.Terminal): void {
+  agentTerminals.delete(terminal);
+}
+
+/**
+ * One execution check (`time.CHECK_DUE`): unbound chat jobs, agent terminals, then, for the project open in the window and
+ * every project this window launched work in, the Tasks no window follows and the agent registry. The scheduler
+ * (`execution-check.ts`) decides when it runs.
+ */
+export async function runExecutionCheck(openRoot?: string): Promise<void> {
+  checkChatJobs();
+  await checkAgentTerminals();
+  const roots = new Set(launchedRoots);
+  if (openRoot !== undefined) roots.add(openRoot);
+  for (const root of roots) {
+    await releaseUnfollowedTasks(root);
+    await pruneAgentProcesses(root);
   }
 }
 
@@ -420,6 +524,10 @@ export async function launchAgent(
         const sentAfter = chatJobSendStarted(root, chat);
         if (job === undefined || jobId === undefined) return takeBackCard;
         const started = startJob(job, root, { chat }, sentAfter, jobId, cardId, advisor !== undefined);
+        if (started !== undefined) {
+          chatJobNames.set(jobId, name);
+          launchedRoots.add(root);
+        }
         sent.job = started;
         if (started === undefined) return takeBackCard;
         if (jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
@@ -459,6 +567,7 @@ export async function launchAgent(
     const family = shellFamily(shellPath ?? defaultShell);
     const line = agentCommandLine(run.template(family), run.prompt(), family);
     agentTerminals.set(terminal, { id: terminalId, ...(jobId === undefined ? {} : { jobId }), root, line, since: Date.now() });
+    launchedRoots.add(root);
     setHooked(terminalId, run.hooked);
     if (asTab) terminal.show(true);
     const startedAt = Date.now();

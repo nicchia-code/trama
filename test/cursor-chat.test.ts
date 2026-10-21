@@ -48,6 +48,8 @@ test("only Trama's conversations produce Events, from the Trama prompt until the
   expect(at({ hook: "stop", conversation: "t", status: "aborted" })).toBe("AGENT_INTERRUPTED");
   expect(at({ hook: "stop", conversation: "t", status: "error" })).toBe("AGENT_INTERRUPTED");
   expect(at({ hook: "sessionEnd", conversation: "t", reason: "completed" })).toBeNull();
+  expect(at({ hook: "sessionEnd", conversation: "t", reason: "aborted" })).toBe("AGENT_INTERRUPTED");
+  expect(at({ hook: "sessionEnd", conversation: "t", reason: "error" })).toBe("AGENT_INTERRUPTED");
   expect(at({ hook: "sessionEnd", conversation: "t", reason: "user_close" })).toBe("CONVERSATION_CLOSED");
   expect(at({ hook: "stop", conversation: "t", status: "completed" })).toBeNull();
 });
@@ -153,6 +155,21 @@ test("the hook of an agent in a Trama terminal tells the project's editor it is 
   await expect(execute(["hook", "idle"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir })).resolves.toEqual({ out: "", exit: 0 });
   await expect(execute(["hook", "alive"], project, { env: {}, runtimeDir })).rejects.toThrow('Unknown command "hook alive"');
   await expect(execute(["agent-event", "idle"], project, { env: {}, runtimeDir })).rejects.toThrow('Run "trama --help"');
+});
+
+test("the start hook tells the project's editor the process of the agent; a bad pid, no terminal or no editor tells nothing and never fails", async () => {
+  const received: [string, number, string][] = [];
+  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, handler: async () => ({ status: "unavailable" }) as never, onAgentStarted: (terminal, pid, root) => received.push([terminal, pid, root]) });
+  try {
+    await execute(["hook", "start", "4242"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir });
+    await execute(["hook", "start", "4242"], project, { env: {}, runtimeDir });
+    for (const bad of ["0", "-3", "abc", "1.5", "99999999999999999999"]) await expect(execute(["hook", "start", bad], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir })).resolves.toEqual({ out: "", exit: 0 });
+    expect(received).toEqual([["abc123", 4242, project]]);
+  } finally {
+    await server.dispose();
+  }
+  await expect(execute(["hook", "start", "4242"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir })).resolves.toEqual({ out: "", exit: 0 });
+  await expect(execute(["hook", "start"], project, { env: { TRAMA_TERMINAL: "abc123" }, runtimeDir })).rejects.toThrow("Usage");
 });
 
 test("a shell command that registers the agent's work makes its conversation Trama's, with no Event of its own", () => {

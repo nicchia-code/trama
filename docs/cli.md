@@ -423,6 +423,21 @@ Output (`--json`):
 
 Runs at once; writes in `.trama/`, counts as the agent's activity.
 
+#### `trama task check <id>`
+
+Reads the Task. If the agent has not taken it, answers `not-taken`; if it was taken with no known holder (`agent: true` or `cursor`), answers `unknown-holder`; in both cases without contacting the editor and changing nothing. Otherwise it asks an open editor window of the project, found as `trama question new` does, to run at once the execution check of that Task and waits up to 5 seconds: the window answers `alive`, with the holder, or `released`, with the reason, after putting the Task back in To do with the notice on its Board. Without a reachable editor, or without an answer in time, it answers `unavailable`. It does not take or move the Task, writes no file, does not count as the agent's activity and anyone can run it. Exits with 0 for every outcome; a Task that does not exist is an error as in `task show`.
+
+- `<id>`: The Task: its ID, a unique prefix or its short number.
+
+Output (`--json`):
+
+- task: string, required. The permanent identity of the Task.
+- result: "alive" | "released" | "not-taken" | "unknown-holder" | "unavailable", required
+- holder: string, optional. Who holds the Task, with `alive`.
+- reason: string, optional. Why the Task was put back in To do, with `released`.
+
+Runs and waits for the editor; read-only.
+
 ### `drift`
 
 #### `trama drift new`
@@ -949,6 +964,14 @@ Run by the hook Trama makes omp load when its main session settles or ends, not 
 
 Runs as an agent hook; read-only.
 
+#### `trama hook start <pid>`
+
+Run by the hook Trama makes omp load, once, at the first start of its main session, not by people. It takes the terminal from `TRAMA_TERMINAL`, finds the editor of the project and tells it the process of the agent of that terminal, so the run check can watch it. It is not a sign of life and is never repeated. It waits at most one second, prints nothing and exits with 0 also without an editor, a project or `TRAMA_TERMINAL`, or with a process that is not a positive integer (then it sends nothing); only a wrong use exits with 2.
+
+- `<pid>`: The process of the agent (omp), a positive integer.
+
+Runs as an agent hook; read-only.
+
 <!-- commands:end -->
 
 ## Project
@@ -1133,6 +1156,8 @@ The editor follows a conversation from its first prompt naming a Trama skill, or
 ## Agent hooks
 
 `trama hook idle [--root <dir>]` is run by the hook Trama makes omp load (`--hook`, see `extension/src/omp/trama-hook.ts`) when omp's main session settles (`session_stop`) or ends (`session_shutdown`), not by people. It takes the terminal's identity from `TRAMA_TERMINAL`, finds the editor of the project as `trama question new` does and tells it that the agent of that terminal is idle: the editor then ends the run, releases the Tasks that terminal had taken and withdraws its announcements. It waits at most one second, writes nothing to disk and exits with `0` also without an editor, a project or `TRAMA_TERMINAL`; only a wrong use exits with `2`.
+
+`trama hook start <pid>` is run by the same hook once, at the first `session_start` of omp's main session (or its first `agent_start` if omp gives no `session_start` before the first turn); sub-agents send nothing. It takes the terminal from `TRAMA_TERMINAL`, finds the editor as `hook idle` does and tells it the process `<pid>` of the agent (`agent-started`). It is not a sign of life and is never repeated. It exits with `0` also without an editor, a project or `TRAMA_TERMINAL`, or with a `<pid>` that is not a positive integer (then it sends nothing); only a wrong use exits with `2`.
 
 omp refuses its `ask` tool in-process (`tool_call`), in every session, main and sub-agents, with the shared refusal (`trama question new` instead), without contacting the editor. Outside Trama's terminals no hook is installed, so nothing is refused.
 

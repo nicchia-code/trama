@@ -9,6 +9,7 @@ import {
   endChatJobs,
   endHeldJob,
   endTerminalJobs,
+  endUnboundChatJobs,
   endUnsentJob,
   jobAbnormalEnd,
   localProjectJobs,
@@ -27,6 +28,8 @@ const root = () => {
 afterEach(() => {
   for (const value of roots.splice(0)) {
     endChatJobs(value, "cursor");
+    // Jobs live in module state shared with the other test files: none may outlive its test.
+    for (const job of localProjectJobs(value)) endUnsentJob(value, job.id);
   }
 });
 
@@ -59,6 +62,31 @@ test("a chat job whose send was not made by the chat ends at once, without an ab
   endUnsentJob(project, "unsent-job");
   expect(localProjectJobs(project).some((job) => job.id === "unsent-job")).toBe(false);
   expect(jobAbnormalEnd(project, "unsent-job")).toBeUndefined();
+});
+
+test("the execution check closes an unbound chat job only from a minute after its start, and a late conversation cannot bind it", () => {
+  const project = root();
+  startJob("run", project, { chat: "cursor" }, undefined, "unbound-job");
+  startJob("resolve", project, { chat: "cursor" }, undefined, "unbound-resolve");
+  expect(endUnboundChatJobs(Date.now() + 59_000)).toEqual([]);
+  const closed = endUnboundChatJobs(Date.now() + 60_000);
+  expect(closed.map((job) => job.id).sort()).toEqual(["unbound-job", "unbound-resolve"]);
+  expect(jobAbnormalEnd(project, "unbound-job")).toBe("its chat never bound a conversation");
+  expect(localProjectJobs(project)).toEqual([]);
+  bindChatJob(project, "late");
+  expect(localProjectJobs(project)).toEqual([]);
+  expect(endUnboundChatJobs(Date.now() + 120_000)).toEqual([]);
+});
+
+test("the execution check leaves a bound chat job and a terminal job alone", () => {
+  const project = root();
+  startJob("run", project, { chat: "cursor" }, undefined, "bound-job");
+  bindChatJob(project, "bound");
+  startJob("run", project, { terminal: "kept-terminal" }, undefined, "kept-run");
+  expect(endUnboundChatJobs(Date.now() + 600_000)).toEqual([]);
+  expect(localProjectJobs(project).map((job) => job.id).sort()).toEqual(["bound-job", "kept-run"]);
+  endTerminalJobs("kept-terminal");
+  endChatJobs(project, "bound");
 });
 
 test("prompts during preparation are ignored but prompts and ends during delivery are retained", () => {

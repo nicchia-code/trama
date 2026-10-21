@@ -31,6 +31,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole delle Proposal** (`decisions.md`): Usa quando implementi le regole delle Proposal, dalla scrittura all'approvazione. Sections: `proposal`.
 - **Regole della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts, decidi quando una risoluzione o un Run sono in corso, scrivi una risoluzione `nonBlocking` o prepari e usi le domande pronte dell'Async Drift Resolver. Sections: `drift-resolution`.
 - **Regole dei Drift** (`drifts.md`): Usa quando implementi le regole dei Drift, della loro risoluzione e del pulsante Resolve Drifts. Sections: `drift`.
+- **Regole del controllo di esecuzione** (`execution-check.md`): Usa quando lavori sul controllo di esecuzione che chiude i lavori il cui agente è scomparso e libera i Task che nessuna finestra segue, o su `trama task check`. Sections: `time`, `agent.CHECK_TASK`.
 - **Regole del focus** (`focus.md`): Usa quando calcoli cosa evidenzia il focus di una scheda del pannello: elementi, sezioni, passi e riferimenti mancanti. Sections: `focus`.
 - **Regole generali** (`general.md`): Usa sempre quando implementi regole di business: valgono per tutto il Sistema. Sections: `General`.
 - **Regole di agenti e modelli** (`models.md`): Usa per scelta dell'agente, ruoli dei modelli e istruzioni all'agente. Sections: `agent-launching`.
@@ -38,6 +39,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole dei round di domande** (`questions-notices.md`): Usa quando implementi i round di domande. Sections: `question-round`.
 - **Regole delle richieste di design** (`requests.md`): Usa per invio, contenuto e consumo delle richieste di design scritte. Sections: `design-request`.
 - **Regole di scan, confronti e Advisor Scanner** (`scans.md`): Usa per scan, confronto delle Machine e Advisor Scanner. Sections: `work`.
+- **Regole del wizard di setup** (`setup-wizard.md`): Usa quando implementi i passi, i salvataggi, le cartelle escluse e la conferma del wizard di setup. Sections: `setup-wizard`.
 - **Task progress rules** (`task-progress.md`): Use when implementing the percentage the agent declares on a Task it has taken, or which chat conversation holds and releases a taken Task. Sections: `task/Taken by the agent`.
 - **Regole dei Task** (`tasks.md`): Usa quando implementi le regole dei Task. Sections: `task`.
 - **Regole dell'attesa del turno e della History** (`turn-history.md`): Usa per l'attesa del turno sulle schede e le voci di History. Sections: `voce-history`, `panel/Board`.

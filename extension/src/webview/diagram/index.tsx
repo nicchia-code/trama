@@ -271,8 +271,8 @@ export function DiagramView({ store, context }: { store: DiagramStore; context: 
                   .
                 </p>
                 <div className="pointer-events-auto flex justify-center gap-2">
-                  <ActionButton label="Import from Code" tooltip="Ask an agent to describe the existing code as Proposals" onClick={() => context.post({ type: "launch", action: { kind: "import" } })} />
-                  <ActionButton label="Start from Scratch" tooltip="Set up Trama and describe the project you want to build" onClick={() => context.post({ type: "initialize", choice: "scratch" })} />
+                  <ActionButton label="Import from Code" tooltip="Open the guided setup to describe the existing code as Proposals" onClick={() => context.post({ type: "openGuidedSetup", choice: "import" })} />
+                  <ActionButton label="Start from Scratch" tooltip="Open the guided setup to describe the project you want to build" onClick={() => context.post({ type: "openGuidedSetup", choice: "scratch" })} />
                 </div>
               </div>
             ) : null}

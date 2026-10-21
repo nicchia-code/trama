@@ -55,6 +55,8 @@ export interface CursorChatEvent {
   root: string;
   /** FILES_CHANGED: the edited file (afterFileEdit), or the photograph of the working tree after a shell command: the host counts only the paths that are new or whose hash differs from its last photograph of that agent. */
   files?: string[];
+  /** AGENT_INTERRUPTED from `sessionEnd`: why Cursor ended the session (`aborted` or `error`), as Cursor gave it. A `stop` interruption carries none. */
+  sessionReason?: "aborted" | "error";
   snapshot?: ChangedFile[];
   /** SUBAGENT_STOPPED and SUBAGENT_INTERRUPTED: the sub-agent that ended. */
   subagent?: { type?: string; call?: string; child?: string; modifiedFiles: string[] };
@@ -558,7 +560,9 @@ export class CursorConversations {
         if (h.status === "completed") return event(advisor(h.conversation) ? "TURN_FINISHING" : "AGENT_STOPPED");
         return h.status === "aborted" || h.status === "error" ? event("AGENT_INTERRUPTED") : null;
       case "sessionEnd":
-        // Other reasons produce nothing: the `stop` already reported the end of the turn.
+        // `completed` and other reasons produce nothing: the `stop` already reported the end of the turn.
+        // aborted/error is an interruption too, a second chance for a lost `stop`; repeated signals are idempotent.
+        if (h.reason === "aborted" || h.reason === "error") return { ...event("AGENT_INTERRUPTED"), sessionReason: h.reason };
         if (h.reason !== "window_close" && h.reason !== "user_close") return null;
         this.trama.delete(h.conversation);
         return event("CONVERSATION_CLOSED");

@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs";
 import { basename } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import * as vscode from "vscode";
@@ -12,12 +13,12 @@ import { namerOf } from "../../../src/core/card-names";
 import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { blockedTasks, dismissDrift, getDrift, getTask, listDrifts, listTasks, requireNotAttached } from "../../../src/core/work";
-import type { AgentAction, ToHost, ToWebview } from "../protocol";
+import type { AgentAction, SetupChoice, ToHost, ToWebview, WorkspaceFolderView } from "../protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
 import { configuredAdvisorScanner, configuredAgent, configuredAsyncDriftResolver, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, endHeldJob, launchAgent, launched, settings, startHeldJob } from "./agent";
 import { isCursor } from "./cursor";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
-import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onFinalReviewMissing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing } from "./drift-resolution";
+import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onFinalReviewMissing, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing } from "./drift-resolution";
 import { askPreparedRound } from "./questions";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
@@ -27,7 +28,8 @@ import { planRuns, runSequence, type AppliedModel, type PlannedRun } from "./run
 import { cursorModels, ompModels, type ModelList } from "./model-lists";
 import { AGENT_KEY, planSettingChange, settingsSchema, settingTitle, shownAgentValue, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
 import { resolveMarkdownFile } from "./paths";
-import { checkSkills, findProject, initializeProject, type InitChoice, NO_PROJECT_WARNING, updateSkills } from "./project";
+import { checkSkills, fileFolders, findProject, initializeProject, NO_PROJECT_WARNING, updateSkills } from "./project";
+import { folderChildren, folderInside, gitIgnored, type RawEntry } from "./folder-tree";
 import type { QuestionSession } from "./question-session";
 import type { DesignRequests } from "./design-requests";
 
@@ -65,6 +67,12 @@ const REOPEN = "Reopen";
 
 const notBlank = (message: string) => (value: string) => (value.trim() === "" ? message : undefined);
 
+/** Whether the Model has no Feature and no Actor: the Drifts, open or not, do not count. */
+function modelIsEmpty(project: Project): boolean {
+  const model = loadModel(project);
+  return model.features.size === 0 && model.actors.size === 0;
+}
+
 /** The agent a Proposal's model is chosen for and read against: the effective `trama.agent`, where every value other than `omp` counts as `cursor`. */
 const proposalAgent = (): ProposalAgent => (configuredAgent() === "omp" ? "omp" : "cursor");
 
@@ -86,6 +94,10 @@ export class Controller implements vscode.Disposable {
   private checkingSkills = false;
   /** The tab a panel just created goes to once its webview is ready (`openSettings`). */
   private pendingView: "settings" | undefined;
+  /** The wizard a panel just created opens in its Settings tab once its webview is ready. */
+  private pendingGuided: Extract<ToWebview, { type: "guidedSetup" }> | undefined;
+  /** The newest request of model suggestions made by the wizard: an answer that arrives after a newer one is dropped. */
+  private wizardSuggestionsRequest = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -101,18 +113,48 @@ export class Controller implements vscode.Disposable {
    * Opens the panel in front on the Settings tab, or brings it forward and puts it there. A panel just created is sent the
    * `navigate` once its webview is ready, so the tab shows and asks for the model suggestions at once.
    */
-  async openSettings(): Promise<void> {
+  async openSettings(guided?: Extract<ToWebview, { type: "guidedSetup" }>): Promise<void> {
     if (!vscode.workspace.workspaceFolders?.length) {
       void vscode.window.showInformationMessage("Trama: open a folder to use Trama.");
       return;
     }
     this.questions?.restore();
-    if (this.revealPanel()) this.post({ type: "navigate", view: "settings" });
-    else {
+    if (this.revealPanel()) {
+      this.post({ type: "navigate", view: "settings" });
+      if (guided) this.post(guided);
+    } else {
       this.pendingView = "settings";
+      this.pendingGuided = guided;
       this.create();
     }
     this.checkSkillsInBackground();
+  }
+
+  /** The command Import from Code: with an empty Model the wizard opens on the Settings tab with Import from Code chosen; with a Model it launches the import as before, leaving no folder out. */
+  async importFromCode(): Promise<void> {
+    const project = this.requireProject();
+    if (!project) return;
+    if (modelIsEmpty(project)) await this.openSettings({ type: "guidedSetup", mode: "empty-model", choice: "import", root: project.root });
+    else await this.launchAction(project, { kind: "import" });
+  }
+
+  /** The workspace folders a first setup can initialize. */
+  private workspaceFolderViews(): WorkspaceFolderView[] {
+    return fileFolders().map((folder) => {
+      const root = folder.uri.fsPath;
+      let hasFiles = false;
+      try {
+        hasFiles = readdirSync(root).some((name) => !name.startsWith("."));
+      } catch {
+        // A folder that cannot be read counts as empty.
+      }
+      return { name: folder.name, root, hasFiles };
+    });
+  }
+
+  /** The workspace folders changed: the first setup lists them again, and the panel follows a folder that is now (or no longer) a project. */
+  workspaceFoldersChanged(): void {
+    this.refresh();
   }
 
   /**
@@ -160,25 +202,117 @@ export class Controller implements vscode.Disposable {
     return true;
   }
 
-  /** Get Started: sets the workspace up with the developer's choice, then starts what that choice starts. Failures are shown on the screen. */
-  private async setUp(choice: InitChoice): Promise<void> {
-    // Start from Scratch on the Diagram of an open project: the project is there already, so the setup request opens at once, with no folder to choose and nothing initialized.
-    if (choice === "scratch" && findProject()) {
-      await this.designRequests?.writeSetup();
+  /**
+   * The confirmation of the setup wizard. Saves the changed keys one at a time in the user settings and stops at the first failure, keeping what was
+   * already saved; then, in the first setup, initializes the chosen folder (the developer may decline the overwrite of customised skills, which ends
+   * quietly); then carries on with the path. The first setup answers with `setup`, the other modes with `guidedSetupResult`.
+   */
+  private async confirmSetup(message: Extract<ToHost, { type: "confirmSetup" }>): Promise<void> {
+    const first = message.mode === "first";
+    const finish = (error: string | null, ok = false) => this.post(first ? { type: "setup", busy: false, error } : { type: "guidedSetupResult", ok, error });
+    if (first) this.post({ type: "setup", busy: true, error: null });
+    let project: Project | undefined;
+    try {
+      const schema = this.manifestSettings();
+      for (const { key, value } of message.values) {
+        const plan = planSettingChange(schema, key, value);
+        if (!plan.ok) {
+          this.postSettings();
+          finish(plan.reason);
+          return;
+        }
+        for (const write of plan.writes) {
+          try {
+            await settings().update(sectionKey(write.key), write.value, vscode.ConfigurationTarget.Global);
+          } catch (error) {
+            this.postSettings();
+            finish(`Could not save ${settingTitle(write.key)}: ${error instanceof Error ? error.message : String(error)}.`);
+            return;
+          }
+        }
+      }
+      this.postSettings();
+      if (first) {
+        const root = fileFolders().find((folder) => folder.uri.fsPath === message.root)?.uri.fsPath;
+        if (root === undefined) {
+          void vscode.window.showErrorMessage("Trama: open a folder first, then initialize it.");
+          finish("The folder to initialize is not in the workspace any more.");
+          return;
+        }
+        project = await initializeProject(root);
+        if (project === undefined) {
+          finish(null);
+          return;
+        }
+        this.refresh();
+      } else {
+        project = findProject();
+        if (project === undefined && message.mode === "empty-model") {
+          finish("This workspace has no Trama project.");
+          return;
+        }
+      }
+    } catch (err) {
+      finish(describeError(err));
       return;
     }
-    this.post({ type: "setup", busy: true, error: null });
+    finish(null, true);
     try {
-      const done = await initializeProject(choice);
-      if (done) {
-        this.refresh();
-        if (done.choice === "import") await this.launchAction(done.project, { kind: "import" });
-        else await this.designRequests?.writeSetup();
-      }
-      this.post({ type: "setup", busy: false, error: null });
+      if (project === undefined) return;
+      if (message.choice === "import") await this.launchAction(project, { kind: "import", excluded: message.excluded });
+      else if (message.choice === "scratch") await this.designRequests?.writeSetup();
     } catch (err) {
-      this.post({ type: "setup", busy: false, error: describeError(err) });
+      this.post({ type: "error", message: describeError(err) });
     }
+  }
+
+  /** The check of the Agent step: omp by `omp models`, the chat of Cursor by the editor's name. */
+  private async checkAgent(agent: "cursor" | "omp", ompPath: string): Promise<void> {
+    if (agent === "omp") {
+      const list = await ompModels(ompPath.trim());
+      this.post({ type: "agentCheck", agent, ompPath, ok: list.error === undefined, models: list.models.length, ...(list.error === undefined ? {} : { error: list.error }) });
+    } else {
+      this.post({ type: "agentCheck", agent, ompPath, ok: isCursor() });
+    }
+  }
+
+  /** The model names of `agent` (and `ompPath`, for omp) for the wizard's Models step, which suggests them before the agent is saved. */
+  private async postWizardSuggestions(agent: "cursor" | "omp", ompPath: string): Promise<void> {
+    const request = ++this.wizardSuggestionsRequest;
+    const list = await this.modelList(agent, ompPath.trim());
+    if (request === this.wizardSuggestionsRequest) this.post({ type: "modelSuggestions", ...list, agent, ompPath });
+  }
+
+  /** One folder of the wizard's tree: `root` must be a workspace folder and `path` inside it. */
+  private async postFolderChildren(root: string, path: string): Promise<void> {
+    const known = fileFolders().find((folder) => folder.uri.fsPath === root);
+    if (known === undefined || folderInside(root, path) === undefined) {
+      this.post({ type: "error", message: "Ignored a request for a folder outside the workspace." });
+      return;
+    }
+    const read = async (relative: string): Promise<RawEntry[]> => {
+      const target = folderInside(root, relative);
+      if (target === undefined) return [];
+      return vscode.workspace.fs.readDirectory(vscode.Uri.file(target));
+    };
+    let entries: Awaited<ReturnType<typeof folderChildren>> = [];
+    try {
+      entries = await folderChildren(path, read, (paths) => gitIgnored(root, paths));
+    } catch {
+      // A folder that cannot be read shows as empty.
+    }
+    this.post({ type: "folderChildren", root, path, entries });
+  }
+
+  /** Import from Code or Start from Scratch on the Diagram: with an empty Model the wizard opens in the Settings tab with that path chosen; otherwise the choice carries out as before. */
+  private async openGuidedSetup(project: Project, choice: SetupChoice): Promise<void> {
+    if (!modelIsEmpty(project)) {
+      if (choice === "import") await this.launchAction(project, { kind: "import" });
+      else await this.designRequests?.writeSetup();
+      return;
+    }
+    this.post({ type: "navigate", view: "settings" });
+    this.post({ type: "guidedSetup", mode: "empty-model", choice, root: project.root });
   }
 
   /** Command entry point: launches an agent without needing the panel. */
@@ -248,9 +382,9 @@ export class Controller implements vscode.Disposable {
     if (request === this.suggestionsRequest) this.post({ type: "modelSuggestions", ...list });
   }
 
-  private async modelList(agent: string): Promise<ModelList> {
+  private async modelList(agent: string, ompPath?: string): Promise<ModelList> {
     // `trama.ompPath` is application-scoped: only the user value counts; empty means `omp` from the editor's PATH.
-    if (agent === "omp") return ompModels((settings().inspect<string>("ompPath")?.globalValue ?? "").trim());
+    if (agent === "omp") return ompModels(ompPath ?? (settings().inspect<string>("ompPath")?.globalValue ?? "").trim());
     if (isCursor()) return { models: this.globalStorageUri === undefined ? [] : await cursorModels(this.globalStorageUri.fsPath) };
     return { models: [] };
   }
@@ -301,6 +435,7 @@ export class Controller implements vscode.Disposable {
       ...(this.tramaFiles ? this.watchChanges(this.tramaFiles) : []),
       onAnnouncementsWithdrawn((announcements) => this.post({ type: "withdrawn", announcements })),
       onFinalReviewMissing((reason) => this.post({ type: "finalReviewMissing", reason })),
+      onStoppedFollowing((subject, reason) => this.post({ type: "stoppedFollowing", subject, reason })),
       onQuestionRoundChange(() => this.refresh()),
       onDriftResolutionChange(() => this.refresh()),
       ...(this.questions ? [this.questions.onChange((round) => this.post({ type: "questions", round }))] : []),
@@ -311,6 +446,7 @@ export class Controller implements vscode.Disposable {
       clearTimeout(this.timer);
       this.panel = undefined;
       this.pendingView = undefined;
+      this.pendingGuided = undefined;
       // The round stays open and the agent keeps waiting; the developer is offered a way back to it.
       this.questions?.panelClosed();
       if (!this.disposed && this.questions?.current()) this.offerReopen();
@@ -360,6 +496,7 @@ export class Controller implements vscode.Disposable {
     const project = findProject();
     this.post({ type: "project", present: project !== undefined });
     if (!project) {
+      this.post({ type: "workspaceFolders", folders: this.workspaceFolderViews() });
       if (this.panel) this.panel.title = this.projectTitle(undefined);
       return;
     }
@@ -438,7 +575,20 @@ export class Controller implements vscode.Disposable {
       return;
     }
     if (message.type === "modelSuggestionsWanted") {
-      await this.postModelSuggestions();
+      if (message.agent === undefined) await this.postModelSuggestions();
+      else await this.postWizardSuggestions(message.agent, message.ompPath ?? "");
+      return;
+    }
+    if (message.type === "agentCheckWanted") {
+      await this.checkAgent(message.agent, message.ompPath);
+      return;
+    }
+    if (message.type === "folderChildrenWanted") {
+      await this.postFolderChildren(message.root, message.path);
+      return;
+    }
+    if (message.type === "confirmSetup") {
+      await this.confirmSetup(message);
       return;
     }
     if (message.type === "ready") {
@@ -449,10 +599,10 @@ export class Controller implements vscode.Disposable {
         this.post({ type: "navigate", view: this.pendingView });
         this.pendingView = undefined;
       }
-      return;
-    }
-    if (message.type === "initialize") {
-      await this.setUp(message.choice);
+      if (this.pendingGuided !== undefined) {
+        this.post(this.pendingGuided);
+        this.pendingGuided = undefined;
+      }
       return;
     }
     if (message.type === "setSetting") {
@@ -468,6 +618,9 @@ export class Controller implements vscode.Disposable {
     switch (message.type) {
       case "launch":
         await this.launchAction(project, message.action);
+        return;
+      case "openGuidedSetup":
+        await this.openGuidedSetup(project, message.choice);
         return;
       case "openModelFile": {
         const req = message.path.startsWith(REQUIREMENTS_PREFIX);

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { announcementNote, deliverCard } from "../../core/announcements";
 import { TramaError, UsageError } from "../../core/errors";
 import { getProposal } from "../../core/proposals";
-import { filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
+import { checkTaskInEditor, filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
 import { syncShortNumbers } from "../../core/short-numbers";
 import { preflightScope, taskScope } from "../../core/task-scope";
 import { recordTiming } from "../../core/timings";
@@ -193,4 +193,34 @@ const move = defineCommand({
   },
 });
 
-export const TASK_COMMANDS = [create, show, list, move];
+const check = defineCommand({
+  object: "task",
+  verb: "check",
+  mode: "blocking",
+  summary: "Ask about the health of whoever holds a Task the agent has taken.",
+  description:
+    "Reads the Task. If the agent has not taken it, answers `not-taken`; if it was taken with no known holder (`agent: true` or `cursor`), answers `unknown-holder`; in both cases without contacting the editor and changing nothing. Otherwise it asks an open editor window of the project, found as `trama question new` does, to run at once the execution check of that Task and waits up to 5 seconds: the window answers `alive`, with the holder, or `released`, with the reason, after putting the Task back in To do with the notice on its Board. Without a reachable editor, or without an answer in time, it answers `unavailable`. It does not take or move the Task, writes no file, does not count as the agent's activity and anyone can run it. Exits with 0 for every outcome; a Task that does not exist is an error as in `task show`.",
+  positionals: [{ name: "id", description: "The Task: its ID, a unique prefix or its short number." }],
+  input: z.strictObject({}),
+  output: z.object({
+    task: z.string().describe("The permanent identity of the Task."),
+    result: z.enum(["alive", "released", "not-taken", "unknown-holder", "unavailable"]),
+    holder: z.string().optional().describe("Who holds the Task, with `alive`."),
+    reason: z.string().optional().describe("Why the Task was put back in To do, with `released`."),
+  }),
+  exampleArgs: ["T3"],
+  async run(ctx, _input, [id], runtime) {
+    const project = ctx.project();
+    const t = getTask(project, id as string, true);
+    const n = syncShortNumbers(project);
+    const name = n.name("task", t.id);
+    if (t.data.column !== "doing" || !t.data.agent) return text(`Task ${name} is not taken by the agent.`, { task: t.id, result: "not-taken" });
+    if (t.data.holder === null || t.data.holder === "cursor") return text(`Task ${name} is taken by the agent, but who holds it is not known.`, { task: t.id, result: "unknown-holder" });
+    const reply = await checkTaskInEditor(project, t.id, { env: runtime.env, ...(runtime.runtimeDir === undefined ? {} : { runtimeDir: runtime.runtimeDir }) });
+    if (reply.result === "alive") return text(`Task ${name} is alive, held by ${reply.holder}.`, { task: t.id, result: "alive", holder: reply.holder });
+    if (reply.result === "released") return text(`Task ${name} was released and is back in To do: ${reply.reason}`, { task: t.id, result: "released", reason: reply.reason });
+    return text(`Task ${name} cannot be verified: no editor of the project answered in time.`, { task: t.id, result: "unavailable" });
+  },
+});
+
+export const TASK_COMMANDS = [create, show, list, move, check];

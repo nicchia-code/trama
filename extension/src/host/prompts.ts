@@ -26,8 +26,21 @@ export function buildPrompt(action: ResolvedAction): string {
     case "implement-all":
       return runAllPrompt(action.group);
     case "import":
-      return "Use the trama-import skill on this repository.";
+      return importPrompt(action.excluded);
   }
+}
+
+/**
+ * The import instruction. With `excluded` (the paths the developer left out in the setup wizard, empty for none) it ends with the sentence that
+ * tells the agent which paths to leave out, or that every folder is imported, and not to ask which folders to import; without it the instruction
+ * says nothing about folders and the skill asks.
+ */
+export function importPrompt(excluded?: readonly string[]): string {
+  const base = "Use the trama-import skill on this repository.";
+  if (excluded === undefined) return base;
+  return excluded.length === 0
+    ? `${base} Import every folder and do not ask which folders to import.`
+    : `${base} Do not import these paths and do not ask which folders to import: ${excluded.map((path) => `\`${path}\``).join(", ")}.`;
 }
 
 /** The scan prompt for one Feature, or the whole System when there is none, as the developer starts it by hand. It names no Proposal. */
@@ -106,7 +119,7 @@ export const PREPARED_ANSWER_SENTENCE = "The developer already answered this Dri
 export const PARALLEL_EXECUTION_SENTENCE = 'The experimental parallel execution is on: follow the "Experimental parallel execution" section of the trama-implement skill.';
 
 /** The sentence every instruction carries: the agent asks the developer only through `trama question new`, never with its own question tool. */
-export const ASK_DEVELOPER_SENTENCE = "Ask the developer only with `trama question new`, as the skill says, never with your own question tool.";
+export const ASK_DEVELOPER_SENTENCE = "Ask the developer only with `trama question new`, as the skill says, never with your own question tool; run it with no time limit and wait until it ends.";
 
 /** Whether the instruction for `action` lets the agent file Drifts: scans, implementations and imports do; designs and Resolve Drifts do not. */
 export function mayFileDrifts(action: ResolvedAction): boolean {

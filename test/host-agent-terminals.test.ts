@@ -13,7 +13,7 @@ import { newProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { announcedGhosts, GHOST_COLUMN } from "../extension/src/webview/board/logic";
 import { projectAt } from "../src/core/store";
-import { dismissDrift, getTask, moveTask, newDrift, newTask } from "../src/core/work";
+import { dismissDrift, getTask, listTasks, moveTask, newDrift, newTask } from "../src/core/work";
 import { FIX_OPTIONS } from "./fix-options";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
 import type { AgentAction } from "../extension/src/protocol";
@@ -24,6 +24,9 @@ import type { Project } from "../src/core/store";
 type Listener<T> = (event: T) => void;
 interface FakeTerminal {
   exitStatus: number | undefined;
+  name: string;
+  /** The shell's process, as the editor reports it. */
+  processId: Promise<number | undefined>;
   /** Absent until the shell integration activates; `executeCommand` types the line like `sendText` does. */
   shellIntegration: { executeCommand(line: string): void } | undefined;
   /** The last command line typed into it. */
@@ -60,6 +63,8 @@ const subscribe = <T>(list: Listener<T>[]) => (fn: Listener<T>) => {
   return { dispose() {} };
 };
 const terminals: FakeTerminal[] = [];
+/** Terminals the editor no longer lists (`vscode.window.terminals`), without a close event having reached Trama. */
+const unlisted = new Set<FakeTerminal>();
 /** Every command line typed into any fake terminal, in order. */
 const typed: string[] = [];
 /** Whether a new fake terminal starts with its shell integration already active. */
@@ -107,6 +112,9 @@ let questionEndpoint: () => Promise<string> = async () => "endpoint";
 
 mock.module("vscode", () => ({
   window: {
+    get terminals() {
+      return terminals.filter((listed) => !unlisted.has(listed));
+    },
     onDidStartTerminalShellExecution: subscribe(listeners.start),
     onDidEndTerminalShellExecution: subscribe(listeners.end),
     onDidChangeTerminalShellIntegration: subscribe(listeners.integration),
@@ -116,6 +124,8 @@ mock.module("vscode", () => ({
       created.push(options);
       const terminal: FakeTerminal = {
         exitStatus: undefined,
+        processId: Promise.resolve(undefined),
+        name: options.name ?? "",
         shellIntegration: undefined,
         line: "",
         writes: [],
@@ -203,7 +213,7 @@ mock.module("vscode", () => ({
   ConfigurationTarget: { Global: 1 },
   extensions: { getExtension: () => extensionPath === "" ? undefined : { extensionPath } },
 }));
-mock.module("../extension/src/host/questions", () => ({ questionEndpoint: () => questionEndpoint(), questionWindowId: async () => "window-id", EditorQuestions: class {}, askPreparedRound: async () => undefined }));
+mock.module("../extension/src/host/questions", () => ({ questionEndpoint: () => questionEndpoint(), questionWindowId: async () => "window-id", ownWindowId: () => undefined, EditorQuestions: class {}, askPreparedRound: async () => undefined }));
 
 let dir: string;
 beforeAll(() => {
@@ -1488,6 +1498,30 @@ describe("withdrawing the ghosts", () => {
     withdrawAll(p);
   });
 
+  test("the execution check closing a chat job withdraws only what belongs to it: a never-bound job gives up its launch announcement silently, a bound one its conversation's with the notice", async () => {
+    // Dynamic, as above: the module must load after mock.module replaced "vscode".
+    const { onAnnouncementsWithdrawn, withdrawForCheck } = await import("../extension/src/host/announcements");
+    const p = projectAt(dir);
+    const told: string[][] = [];
+    const subscription = onAnnouncementsWithdrawn((views) => told.push(views.map((v) => `${v.kind}:${v.title}`)));
+    withdrawAll(p);
+
+    const launch = announce(p, { kind: "proposal", title: "Launched", source: "request", chat: "cursor" });
+    announce(p, { kind: "drift", title: "Project chat", chat: "editor" });
+    announce(p, { kind: "task", title: "Other conversation", chat: "cursor", conversation: "other" });
+    announce(p, { kind: "task", title: "Terminal", terminal: "abc123" });
+    withdrawForCheck(dir, { announcement: launch.id });
+    expect(told).toEqual([]);
+    expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Project chat", "Other conversation", "Terminal"]);
+
+    announce(p, { kind: "task", title: "Mine", chat: "cursor", conversation: "mine" });
+    withdrawForCheck(dir, { conversation: "mine" });
+    expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Other conversation", "Terminal"]);
+    expect(told).toEqual([["drift:Project chat", "task:Mine"]]);
+    subscription.dispose();
+    withdrawAll(p);
+  });
+
   test("an import's work ends silently with its terminal's command: no notice, and a design request on the same terminal still gets one", async () => {
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const { onAnnouncementsWithdrawn } = await import("../extension/src/host/announcements");
@@ -1723,6 +1757,13 @@ describe("the ghosts of Cursor's chat agent", () => {
       chatGhost("Closed");
       hook({ hook: "sessionEnd", reason: "user_close" });
       expect(titles()).toEqual(["Nobody's", "Terminal"]);
+
+      // A `sessionEnd` that reports an abort or an error interrupts the turn like a `stop` would.
+      hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
+      chatGhost("Session aborted");
+      hook({ hook: "sessionEnd", reason: "aborted" });
+      expect(titles()).toEqual(["Nobody's", "Terminal"]);
+      expect(told).toEqual(["Chat", "Interrupted", "Session aborted"]);
     } finally {
       subscription.dispose();
       watching.dispose();
@@ -2453,6 +2494,287 @@ describe("the agent command waits for the shell", () => {
       expect(terminal.shown).toEqual([]);
       listeners.close.forEach((fn) => fn(terminal));
     } finally {
+      watching.dispose();
+    }
+  });
+});
+
+describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
+  const dead = () => 2_000_000_000;
+  /** Launches a Run in omp, registers `pid` as its agent through the hook, and takes a Task for it. */
+  const start = async (pid: number | undefined) => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const { receiveAgentStarted } = await import("../extension/src/host/drift-resolution");
+    const p = projectAt(dir);
+    await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
+    const terminal = terminals.at(-1) as FakeTerminal;
+    const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+    if (pid !== undefined) receiveAgentStarted(id, pid, dir);
+    const task = moveTask(p, newTask(p, { title: "Checked", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: id }).id;
+    return { terminal, id, task, p };
+  };
+
+  test("an agent killed without a signal ends the Run, releases the Task, reports once and closes the terminal with autoExit on", async () => {
+    const { watchAgentTerminal, checkAgentTerminals } = await import("../extension/src/host/agent");
+    const { driftWork, onStoppedFollowing } = await import("../extension/src/host/drift-resolution");
+    const { readAgentProcess } = await import("../src/core/agent-processes");
+    const { questionProjectId } = await import("../src/core/question-channel");
+    const notices: string[] = [];
+    const noticing = onStoppedFollowing((subject, reason) => notices.push(`${subject}: ${reason}`));
+    const watching = watchAgentTerminal();
+    try {
+      const { terminal, id, task, p } = await start(dead());
+      expect(readAgentProcess(questionProjectId(p), id)?.pid).toBe(dead());
+      expect(driftWork().running).toBe(true);
+      await checkAgentTerminals();
+      expect(notices).toEqual(["T3: the agent's process is gone"]);
+      expect(driftWork().running).toBe(false);
+      expect(getTask(p, task).data.column).toBe("todo");
+      expect(terminal.disposals).toBe(1);
+      expect(readAgentProcess(questionProjectId(p), id)).toBeUndefined();
+      await checkAgentTerminals();
+      listeners.close.forEach((listener) => listener(terminal));
+      expect(notices).toHaveLength(1);
+      expect(terminal.disposals).toBe(1);
+    } finally {
+      noticing.dispose();
+      watching.dispose();
+    }
+  });
+
+  test("a live agent that does nothing stays in progress, however many checks pass", async () => {
+    const { watchAgentTerminal, checkAgentTerminals } = await import("../extension/src/host/agent");
+    const { driftWork } = await import("../extension/src/host/drift-resolution");
+    const watching = watchAgentTerminal();
+    try {
+      const { terminal, task, p } = await start(process.pid);
+      await checkAgentTerminals();
+      await checkAgentTerminals();
+      expect(driftWork().running).toBe(true);
+      expect(getTask(p, task).data.column).toBe("doing");
+      expect(terminal.disposals).toBe(0);
+      listeners.close.forEach((listener) => listener(terminal));
+    } finally {
+      watching.dispose();
+    }
+  });
+
+  test("without a hook process the terminal's shell decides; with autoExit off the terminal stays open at rest", async () => {
+    settingValues.autoExit = false;
+    const { watchAgentTerminal, checkAgentTerminals } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    try {
+      const { terminal, task, p } = await start(undefined);
+      terminal.processId = Promise.resolve(dead());
+      await checkAgentTerminals();
+      expect(getTask(p, task).data.column).toBe("todo");
+      expect(terminal.disposals).toBe(0);
+      listeners.end.forEach((listener) => listener(shell(terminal)));
+      listeners.close.forEach((listener) => listener(terminal));
+    } finally {
+      watching.dispose();
+      delete settingValues.autoExit;
+    }
+  });
+
+  test("a terminal the editor no longer lists ends as a closure, with the notice", async () => {
+    const { watchAgentTerminal, checkAgentTerminals } = await import("../extension/src/host/agent");
+    const { driftWork, onStoppedFollowing } = await import("../extension/src/host/drift-resolution");
+    const notices: string[] = [];
+    const noticing = onStoppedFollowing((subject, reason) => notices.push(`${subject}: ${reason}`));
+    const watching = watchAgentTerminal();
+    try {
+      const { terminal, task, p } = await start(process.pid);
+      unlisted.add(terminal);
+      await checkAgentTerminals();
+      expect(notices).toEqual(["T3: the terminal is gone"]);
+      expect(driftWork().running).toBe(false);
+      expect(getTask(p, task).data.column).toBe("todo");
+    } finally {
+      unlisted.clear();
+      noticing.dispose();
+      watching.dispose();
+    }
+  });
+
+  test("a terminal the check closes withdraws its waiting announcements with the notice, delivers its work silently and leaves other terminals alone", async () => {
+    // Dynamic: static imports would load these modules before mock.module replaced "vscode".
+    const { watchAgentTerminal, checkAgentTerminals } = await import("../extension/src/host/agent");
+    const { onAnnouncementsWithdrawn } = await import("../extension/src/host/announcements");
+    const watching = watchAgentTerminal();
+    const told: string[][] = [];
+    const subscription = onAnnouncementsWithdrawn((views) => told.push(views.map((v) => `${v.kind}:${v.title}`)));
+    try {
+      const { terminal, id, p } = await start(dead());
+      withdrawAll(p);
+      announce(p, { kind: "drift", title: "Ghost", terminal: id });
+      announce(p, { kind: "check", title: "Final check", phase: "verifying", terminal: id });
+      announce(p, { kind: "work", title: "Importing from code", terminal: id });
+      announce(p, { kind: "task", title: "Elsewhere", terminal: "other1" });
+      announce(p, { kind: "task", title: "Chat", chat: "cursor", conversation: "c1" });
+      await checkAgentTerminals();
+      expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Elsewhere", "Chat"]);
+      expect(told).toEqual([["drift:Ghost", "check:Final check"]]);
+      expect(terminal.disposals).toBe(1);
+    } finally {
+      subscription.dispose();
+      watching.dispose();
+      withdrawAll(projectAt(dir));
+    }
+  });
+});
+
+describe("the execution check of chat jobs", () => {
+  test("a chat Run no conversation binds is closed by the minute check, abnormally and with a notice; a bound one is left", async () => {
+    const { watchAgentTerminal, launchAgent } = await import("../extension/src/host/agent");
+    const { localProjectJobs, onStoppedFollowing, bindChatJob, endChatJobs } = await import("../extension/src/host/drift-resolution");
+    const watching = watchAgentTerminal();
+    const previousApp = editor.appName;
+    const previousAgent = settingValues["agent"];
+    editor.appName = "Cursor";
+    settingValues["agent"] = "cursor";
+    const notices: string[] = [];
+    const noticing = onStoppedFollowing((subject, reason) => notices.push(`${subject}: ${reason}`));
+    let clock: { mockRestore(): void } | undefined;
+    // Terminals of earlier tests may still be followed, with their real timer armed: closing them leaves the window with none.
+    for (const earlier of terminals) listeners.close.forEach((listener) => listener(earlier));
+    // Tasks left taken by earlier tests would be released (and reported) by the check: they are given back first.
+    for (const left of listTasks(projectAt(dir))) if (left.data.agent) moveTask(projectAt(dir), left.id, "todo", "agent");
+    vi.useFakeTimers();
+    const { startExecutionCheck } = await import("../extension/src/host/execution-check");
+    const scheduler = startExecutionCheck(() => dir, fakeFiles().watcher);
+    await flush();
+    try {
+      const ended: (string | undefined)[] = [];
+      const before = new Set(listAnnouncements(projectAt(dir)).map((a) => a.id));
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan", undefined, { onEnd: (abnormal) => ended.push(abnormal) });
+      expect(listAnnouncements(projectAt(dir)).some((a) => !before.has(a.id))).toBe(true);
+      expect(localProjectJobs(dir)).toHaveLength(1);
+      vi.advanceTimersByTime(59_000);
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      expect(localProjectJobs(dir)).toHaveLength(1);
+      const real = Date.now();
+      clock = spyOn(Date, "now").mockReturnValue(real + 61_000);
+      vi.advanceTimersByTime(2_000);
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      expect(localProjectJobs(dir)).toHaveLength(0);
+      expect(ended).toEqual(["its chat never bound a conversation"]);
+      expect(notices).toEqual(["Scan: its chat never bound a conversation"]);
+      // The check withdrew the launch announcement of the job that never started, without telling the panel.
+      expect(listAnnouncements(projectAt(dir)).some((a) => !before.has(a.id))).toBe(false);
+      // A conversation that arrives after the close binds nothing.
+      bindChatJob(dir, "late-conversation");
+      expect(localProjectJobs(dir)).toHaveLength(0);
+      endChatJobs(dir, "late-conversation");
+    } finally {
+      clock?.mockRestore();
+      scheduler.dispose();
+      vi.useRealTimers();
+      noticing.dispose();
+      watching.dispose();
+      editor.appName = previousApp;
+      if (previousAgent === undefined) delete settingValues["agent"];
+      else settingValues["agent"] = previousAgent;
+    }
+  });
+});
+
+/** A fake `.trama` watcher whose events the test fires. */
+const fakeFiles = () => {
+  const created: Listener<FileUri>[] = [];
+  return {
+    watcher: { onDidCreate: subscribe(created), onDidChange: () => ({ dispose() {} }) } as never,
+    fire: (fsPath: string) => created.forEach((listener) => listener({ scheme: "file", fsPath })),
+  };
+};
+const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+
+describe("the minute timer of the execution check", () => {
+  /** Starts the window's scheduler, with the fake timers already installed, and lets its startup check settle. */
+  const startScheduler = async () => {
+    const { startExecutionCheck } = await import("../extension/src/host/execution-check");
+    const files = fakeFiles();
+    const scheduler = startExecutionCheck(() => dir, files.watcher);
+    await flush();
+    return { scheduler, files };
+  };
+
+  test("a minute after a launch the check finds the vanished agent without any other signal", async () => {
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { driftWork, receiveAgentStarted } = await import("../extension/src/host/drift-resolution");
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    // Terminals of earlier tests may still be followed: closing them leaves the window with none.
+    for (const earlier of terminals) listeners.close.forEach((listener) => listener(earlier));
+    vi.useFakeTimers();
+    const { scheduler } = await startScheduler();
+    try {
+      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
+      receiveAgentStarted(environments.at(-1)?.["TRAMA_TERMINAL"] as string, 2_000_000_000, dir);
+      expect(driftWork().running).toBe(true);
+      vi.advanceTimersByTime(59_000);
+      await flush();
+      expect(driftWork().running).toBe(true);
+      vi.advanceTimersByTime(2_000);
+      await flush();
+      expect(driftWork().running).toBe(false);
+    } finally {
+      scheduler.dispose();
+      vi.useRealTimers();
+      watching.dispose();
+    }
+  });
+
+  test("at rest nothing is armed, a Task taken by the agent arms the check, and the check releases it when no window follows its terminal", async () => {
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { onStoppedFollowing } = await import("../extension/src/host/drift-resolution");
+    const watching = watchAgentTerminal();
+    for (const earlier of terminals) listeners.close.forEach((listener) => listener(earlier));
+    const p = projectAt(dir);
+    // Tasks left taken by earlier tests would arm the check at rest: they are given back first.
+    for (const left of listTasks(p)) if (left.data.agent) moveTask(p, left.id, "todo", "agent");
+    const notices: string[] = [];
+    const noticing = onStoppedFollowing((subject, reason) => notices.push(`${subject}: ${reason}`));
+    vi.useFakeTimers();
+    const { scheduler, files } = await startScheduler();
+    try {
+      expect(vi.getTimerCount()).toBe(0);
+      const task = moveTask(p, newTask(p, { title: "Orphan", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: "gone-terminal" }).id;
+      files.fire(join(dir, ".trama", "tasks", "orphan.md"));
+      expect(vi.getTimerCount()).toBe(1);
+      vi.advanceTimersByTime(61_000);
+      await flush();
+      expect(getTask(p, task).data.column).toBe("todo");
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain("no window follows its agent");
+      // Nothing left to follow: the timer is not re-armed.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      scheduler.dispose();
+      vi.useRealTimers();
+      noticing.dispose();
+      watching.dispose();
+    }
+  });
+
+  test("disposing the scheduler cancels its timer: a vanished agent is no longer looked for", async () => {
+    const { watchAgentTerminal, launchAgent } = await import("../extension/src/host/agent");
+    const { driftWork, receiveAgentStarted } = await import("../extension/src/host/drift-resolution");
+    const watching = watchAgentTerminal();
+    for (const earlier of terminals) listeners.close.forEach((listener) => listener(earlier));
+    vi.useFakeTimers();
+    const { scheduler } = await startScheduler();
+    try {
+      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
+      receiveAgentStarted(environments.at(-1)?.["TRAMA_TERMINAL"] as string, 2_000_000_000, dir);
+      scheduler.dispose();
+      vi.advanceTimersByTime(120_000);
+      await flush();
+      expect(driftWork().running).toBe(true);
+    } finally {
+      scheduler.dispose();
+      vi.useRealTimers();
+      for (const earlier of terminals) listeners.close.forEach((listener) => listener(earlier));
       watching.dispose();
     }
   });

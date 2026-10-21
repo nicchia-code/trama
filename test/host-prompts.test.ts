@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ASK_DEVELOPER_SENTENCE, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, importPrompt, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
@@ -29,6 +29,14 @@ test("no instruction mentions the delegation: Resolve Drifts is manual and nothi
 test("several Features are listed in backticks, comma separated", () => {
   expect(buildScanPrompt(["checkout", "shipping"])).toBe("Use the trama-scan skill on the Features `checkout`, `shipping`.");
   expect(buildScanPrompt([])).toBe("Use the trama-scan skill on the whole System.");
+});
+
+test("the import instruction names the excluded paths, or says every folder is imported, only when the wizard decided", () => {
+  const base = "Use the trama-import skill on this repository.";
+  expect(buildPrompt({ kind: "import" })).toBe(base);
+  expect(importPrompt()).toBe(base);
+  expect(buildPrompt({ kind: "import", excluded: [] })).toBe(`${base} Import every folder and do not ask which folders to import.`);
+  expect(buildPrompt({ kind: "import", excluded: ["a", "b/c"] })).toBe(`${base} Do not import these paths and do not ask which folders to import: \`a\`, \`b/c\`.`);
 });
 
 test("the agent terminal is named after the work: the card's short number, or a fixed word", () => {
@@ -84,5 +92,5 @@ test("the Drift blocker's sentence is added on the same line only when on, and o
 });
 
 test("every instruction carries the one ask sentence, whatever the job", () => {
-  expect(ASK_DEVELOPER_SENTENCE).toBe("Ask the developer only with `trama question new`, as the skill says, never with your own question tool.");
+  expect(ASK_DEVELOPER_SENTENCE).toBe("Ask the developer only with `trama question new`, as the skill says, never with your own question tool; run it with no time limit and wait until it ends.");
 });

@@ -48,6 +48,8 @@ function navigate(view: ViewName, options: NavigateOptions = {}) {
 function setProject(present: boolean) {
   if (present === store.get().hasProject) return;
   store.set({ hasProject: present });
+  getStarted.projectPresent(present);
+  settings.projectPresent(present);
   navigate(present ? "diagram" : "getstarted");
 }
 
@@ -96,14 +98,33 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     board.withdrawn?.(message.announcements);
   } else if (message.type === "finalReviewMissing") {
     board.finalReviewMissing?.(message.reason);
+  } else if (message.type === "stoppedFollowing") {
+    board.stoppedFollowing?.(message.subject, message.reason);
   } else if (message.type === "error") {
     store.set({ error: message.message });
   } else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal });
   else if (message.type === "questions") questions.update(message.round);
-  else if (message.type === "settings") settings.receive(message);
-  else if (message.type === "modelSuggestions") {
-    settings.receiveModels(message);
-    board.receiveModels(message);
+  else if (message.type === "settings") {
+    settings.receive(message);
+    getStarted.receiveSettings(message);
+  } else if (message.type === "modelSuggestions") {
+    // An answer for an agent the wizard asked about is the wizard's alone; the Settings tab and the Board take the ones for the saved agent.
+    if (message.agent !== undefined) {
+      settings.receiveWizardModels(message);
+      getStarted.receiveModels(message);
+    } else {
+      settings.receiveModels(message);
+      board.receiveModels(message);
+    }
+  } else if (message.type === "workspaceFolders") getStarted.receiveFolders(message);
+  else if (message.type === "guidedSetup") settings.openGuidedSetup(message);
+  else if (message.type === "guidedSetupResult") settings.receiveResult(message);
+  else if (message.type === "agentCheck") {
+    settings.receiveAgentCheck(message);
+    getStarted.receiveAgentCheck(message);
+  } else if (message.type === "folderChildren") {
+    settings.receiveFolderChildren(message);
+    getStarted.receiveFolderChildren(message);
   }
 });
 

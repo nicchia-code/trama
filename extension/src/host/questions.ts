@@ -7,7 +7,8 @@ import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
 import type { QuestionSession } from "./question-session";
 import { onChatState, receiveCursorHook } from "./cursor";
-import { followsAgent, receiveAdvisorReview, receiveNotice, receiveAgentIdle } from "./drift-resolution";
+import { checkTaskHolder } from "./task-check";
+import { followsAgent, receiveAdvisorReview, receiveNotice, receiveAgentIdle, receiveAgentStarted } from "./drift-resolution";
 import { noteCommandSeen } from "./terminal-activity";
 interface WindowRoundService {
   identity: string;
@@ -36,6 +37,17 @@ let windowQuestions: EditorQuestions | undefined;
 /** Wait for the launching window's endpoint rather than discovering another window. */
 export async function questionEndpoint(root: string): Promise<string | undefined> {
   return windowQuestions?.endpoint(root);
+}
+
+/** The identity this window's channel server has, so a question to the other windows leaves it out; undefined without a project. */
+export function ownWindowId(root: string): string | undefined {
+  const service = windowQuestions?.currentService();
+  return service !== undefined && service.project.root === root ? service.windowId : undefined;
+}
+
+/** Which of `holders` this window follows: a Trama terminal in Agent running, a conversation of Trama's chat with a job. */
+function followedHere(root: string, holders: string[]): string[] {
+  return holders.filter((holder) => holder.startsWith("cursor:") ? followsAgent(root, "cursor", holder.slice("cursor:".length)) : followsAgent(root, holder));
 }
 
 
@@ -75,6 +87,11 @@ export class EditorQuestions implements vscode.Disposable {
       }),
     ];
     this.refresh();
+  }
+
+  /** The service answering for the window now, if any. */
+  currentService(): WindowRoundService | undefined {
+    return this.service;
   }
 
   async endpoint(root: string): Promise<string | undefined> {
@@ -142,6 +159,9 @@ export class EditorQuestions implements vscode.Disposable {
           noteCommandSeen(origin);
         },
         onAgentIdle: receiveAgentIdle,
+        onAgentStarted: receiveAgentStarted,
+        onFollowedHolders: (holders) => followedHere(project.root, holders),
+        onCheckTask: (task) => checkTaskHolder(project.root, task),
         onCoordinatorMessage: (message) => {
           const rooted: CoordinatorMessage = { ...message, root: project.root };
           // The result of a review answers only to the window that asked for it: any other window says it does not expect it.

@@ -46,13 +46,14 @@ This is the index of the Area's Requirements. The General Requirements are below
 
 ## Fragments
 
-- **Tecnologia dell'hook dell'agente del terminale** (`agent-hooks.md`): Usa quando lavori sull'hook di omp e su `trama hook idle`. Sections: `agent-hook`.
+- **Tecnologia dell'hook dell'agente del terminale** (`agent-hooks.md`): Usa quando lavori sull'hook di omp, su `trama hook start` e su `trama hook idle`. Sections: `agent-hook`.
 - **Tecnologia di avvio dell'agente** (`agent-terminal.md`): Usa quando lavori sul terminale dell'agente. Sections: `agent-terminal`.
 - **Tecnologia degli annunci** (`announcements.md`): Usa per annunci, ghost della Board, attesa di fine turno e voci di History. Sections: `announcement`, `voce-history`, `panel/Board`.
 - **Tecnologia dell'Advisor della chat** (`chat-advisor.md`): Usa quando lavori sull'Advisor della chat di Cursor: hook, file di stato, sotto-agente trama-advisor. Sections: `chat-advisor`.
 - **Tecnica della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts dall'estensione, costruisci l'Async Drift Resolver o togli codice della vecchia delega dei Drift. Sections: `drift-resolution`.
 - **Tecnologia dei Drift** (`drifts.md`): Usa quando lavori sui Drift. Sections: `drift`.
 - **Tecnologia della chat dell'editor** (`editor-chat.md`): Usa quando lavori sugli hook della chat di Cursor. Sections: `editor-chat`.
+- **Tecnica del controllo di esecuzione** (`execution-check.md`): Usa quando costruisci nell'estensione il controllo di esecuzione, la registrazione del processo di omp, la domanda fra finestre su chi segue un Task o `trama task check`. Sections: `time`, `agent.CHECK_TASK`.
 - **Tecnologia generale** (`general.md`): Usa sempre quando lavori sulla tecnologia: vincoli generali e piattaforme. Sections: `General`.
 - **Tecnologia di agenti e modelli** (`models.md`): Usa per agenti del terminale, ruoli dei modelli, limite dei sotto-agenti e advisor di omp. Sections: `agent-launching`.
 - **Tecnologia del progetto e del pannello** (`project-panel.md`): Usa per setup del progetto, skill dei Requisiti e tecnologia del pannello. Sections: `project`, `panel`.
@@ -61,5 +62,6 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia di design request** (`requests.md`): Usa quando lavori su richieste di design scritte. Sections: `design-request`.
 - **Tecnologia dei confronti** (`scans.md`): Usa per registro dei confronti e tempi delle fasi. Sections: `work`.
 - **Tecnologia della scheda Settings** (`settings.md`): Usa per la tecnologia della scheda Settings e i suggerimenti dei modelli. Sections: `panel/Settings`.
+- **Tecnologia del wizard di setup** (`setup-wizard.md`): Usa quando lavori al codice del wizard di setup: modulo del webview, messaggi con l'host, albero delle cartelle, conferma e skill di import. Sections: `setup-wizard`.
 - **Task progress technology** (`task-progress.md`): Use when working on how the agent declares the percentage of a Task and how it is read. Sections: `task/Taken by the agent`.
 - **Tecnologia dei Task** (`work.md`): Usa quando lavori sui Task. Sections: `task`.

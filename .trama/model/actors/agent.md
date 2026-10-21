@@ -15,6 +15,9 @@ The agent starts working on a Task and moves it to In progress.
 ### MOVE_TASK_TO_DONE
 The agent finishes a Task and moves it to Done.
 
+### CHECK_TASK
+L'agente chiede a Trama della salute di chi tiene un Task In progress preso dall'agente: per esempio l'agente principale di una corsa che, prima di chiuderla, trova nel suo ambito Task presi da altri. Trama fa subito, in una finestra aperta del progetto, il controllo di esecuzione su chi tiene quel Task e risponde se è vivo o se il Task è stato liberato, con il motivo. Senza un editor del progetto raggiungibile risponde che non può verificare e non cambia nulla. Domandare non prende il Task.
+
 ### CLOSE_TASK_UNCHANGED
 L'agente chiude un Task di correzione senza cambiare il codice, perché rileggendolo ha trovato che fa già ciò che dicono il Model o il Requisito, e scrive una nota con ciò che ha verificato.
 
@@ -52,7 +55,7 @@ The agent asks the developer a round of related questions and waits for the answ
 L'agente prova a fare una domanda al developer con il proprio strumento di domande invece che con un round di Trama. In una conversazione o in un terminale di Trama l'hook di Trama lo rifiuta prima che la domanda compaia; altrove lo strumento funziona e Trama non lo vede.
 
 ### STOP_WAITING
-The agent's wait for a question round ends without an answer because the caller stops waiting: the agent is stopped, its terminal closes, its question call is cancelled or times out, or the caller disconnects. Loss of the editor while the caller is still waiting is reported by `editor.DISCONNECTED` instead.
+The agent's wait for a question round ends without an answer because the caller stops waiting: the agent is stopped, its terminal closes, its question call is cancelled, or the caller disconnects. L'agente non mette nessun limite di tempo alla sua attesa, quindi l'attesa non scade mai da sola. Loss of the editor while the caller is still waiting is reported by `editor.DISCONNECTED` instead.
 
 ### VOCE_HISTORY_SCRITTA
 L'agente scrive una nuova voce di History alla fine di una corsa che ha realizzato dei Task: una macro-funzionalità che quei Task hanno realizzato, che nessuna voce raccontava ancora.

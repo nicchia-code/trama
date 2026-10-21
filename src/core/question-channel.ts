@@ -62,8 +62,14 @@ interface ServerOptions {
   onActivity?: (origin: AgentOrigin) => void;
   /** The agent in the terminal `terminal` (the hook of its agent said so) has settled: nothing is left to do. `root` is this window's project. */
   onAgentIdle?: (terminal: string, root: string) => void;
+  /** The agent in the terminal `terminal` (the hook of its agent said so) runs as the process `pid`. `root` is this window's project. */
+  onAgentStarted?: (terminal: string, pid: number, root: string) => void;
+  /** Which of `holders` (Trama terminals and `cursor:<conversation>`) this window follows, asked by another window's execution check. */
+  onFollowedHolders?: (holders: string[]) => string[];
   /** A project-scoped notice from a command or another window, independent of question rounds. `false` says this window does not expect the notice (for example the result of a review it never asked for). */
   onCoordinatorMessage?: (message: CoordinatorMessage) => boolean | void | Promise<boolean | void>;
+  /** `trama task check`: runs this window's execution check for the Task `task` (its permanent identity) and says who holds it or why it was released. Without it the window answers that it cannot verify. */
+  onCheckTask?: (task: string) => TaskCheckReply | Promise<TaskCheckReply>;
   onClose?: () => void;
 }
 
@@ -82,7 +88,7 @@ function runtimeUid(): number | string {
   return process.getuid!();
 }
 
-function runtimeDirectory(override?: string): string {
+export function runtimeDirectory(override?: string): string {
   if (override) return resolve(override);
   if (process.platform === "win32") return join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "Trama", "questions");
   return join(process.env.XDG_RUNTIME_DIR ?? tmpdir(), `trama-q-${runtimeUid()}`);
@@ -119,7 +125,7 @@ function privateUnixDirectory(directory: string, create: boolean): boolean {
 }
 
 /** Linux and macOS keep the runtime folder private to the user; Windows trusts the default permissions of `%LOCALAPPDATA%`. */
-function runtimeDirectoryReady(directory: string, create: boolean): boolean {
+export function runtimeDirectoryReady(directory: string, create: boolean): boolean {
   if (process.platform !== "win32") return privateUnixDirectory(directory, create);
   if (create) mkdirSync(directory, { recursive: true });
   return existsSync(directory);
@@ -419,6 +425,47 @@ export async function settleCoordinatorMessages(): Promise<void> {
   await Promise.all(commandMessages);
 }
 
+/**
+ * Asks every other live window of the project (all but `ownWindow`) which of `holders` it follows, and returns the ones
+ * some window follows. A window whose record does not connect follows nothing; a window that connects but does not
+ * answer within `timeoutMs` counts as following every holder asked.
+ */
+export async function askFollowedHolders(
+  project: Project,
+  holders: string[],
+  options: { ownWindow?: string; timeoutMs?: number; runtimeDir?: string } = {},
+): Promise<Set<string>> {
+  const followed = new Set<string>();
+  if (holders.length === 0) return followed;
+  const directory = runtimeDirectory(options.runtimeDir);
+  if (!runtimeDirectoryReady(directory, false)) return followed;
+  const projectId = questionProjectId(project);
+  const others = records(directory, projectId).filter((record) => record.windowId !== options.ownWindow);
+  const answers = await Promise.all(others.map(async (record): Promise<string[]> => {
+    const sockets = new Set<Socket>();
+    try {
+      const editor = await connectEditor(record, undefined, sockets);
+      if (!editor) return [];
+      return await new Promise<string[]>((done) => {
+        const timer = setTimeout(() => finish(holders), options.timeoutMs ?? 1000);
+        const finish = (value: string[]) => { clearTimeout(timer); stop(); editor.socket.destroy(); done(value); };
+        const stop = lines(editor.socket, (line) => {
+          try {
+            const reply: unknown = JSON.parse(line);
+            const list = reply !== null && typeof reply === "object" && "holders" in reply ? reply.holders : undefined;
+            finish(Array.isArray(list) ? list.filter((h): h is string => typeof h === "string") : holders);
+          } catch { finish(holders); }
+        });
+        editor.socket.once("close", () => finish(holders));
+        editor.socket.write(requestLine(editor.record, { type: "followed-holders", projectId, holders }));
+      });
+    } catch { return []; }
+    finally { for (const socket of sockets) socket.destroy(); }
+  }));
+  for (const answer of answers) for (const holder of answer) followed.add(holder);
+  return followed;
+}
+
 
 
 /** Connect and identify editors before sending the validated round to exactly one window. */
@@ -569,6 +616,61 @@ export const sendActivity = (project: Project, origin: AgentOrigin, options: { e
 /** Tells the editor of the project that the agent in `terminal` has settled. */
 export const sendAgentIdle = (project: Project, terminal: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<void> =>
   tellEditor(project, { type: "agent-idle", terminal }, options);
+/** Tells the editor of the project which process is the agent in `terminal` (`agent-hook.STARTED`). */
+export const sendAgentStarted = (project: Project, terminal: string, pid: number, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<void> =>
+  tellEditor(project, { type: "agent-started", terminal, pid }, options);
+
+/** What a window answers to `check-task`: who holds the Task and is alive, or why the Task was released; `unavailable` when the window cannot tell. */
+export type TaskCheckReply =
+  | { result: "alive"; holder: string }
+  | { result: "released"; reason: string }
+  | { result: "unavailable" };
+
+/** How long `trama task check` waits for the window, the question to the other windows included. */
+const TASK_CHECK_WAIT_MS = 5000;
+
+function taskCheckReply(value: unknown): TaskCheckReply | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const reply = value as Record<string, unknown>;
+  if (reply.type !== "task-checked") return null;
+  if (reply.result === "alive" && typeof reply.holder === "string" && reply.holder !== "") return { result: "alive", holder: reply.holder };
+  if (reply.result === "released" && typeof reply.reason === "string" && reply.reason !== "") return { result: "released", reason: reply.reason };
+  return reply.result === "unavailable" ? { result: "unavailable" } : null;
+}
+
+/**
+ * Asks an editor window of the project, found as for `trama question new`, to run the execution check of `task` at once
+ * and waits for its answer for at most `timeoutMs` (5 seconds). Without a reachable window, or without an answer in
+ * time, the answer is `unavailable`; never throws.
+ */
+export async function checkTaskInEditor(project: Project, task: string, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<TaskCheckReply> {
+  const controller = new AbortController();
+  const sockets = new Set<Socket>();
+  const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, options.timeoutMs ?? TASK_CHECK_WAIT_MS);
+  try {
+    const projectId = questionProjectId(project);
+    const endpoint = (options.env ?? process.env)[QUESTION_ENDPOINT_ENV];
+    const editor = endpoint !== undefined
+      ? await connectEndpoint(runtimeDirectory(options.runtimeDir), projectId, endpoint, controller.signal, sockets)
+      : await liveEditor(projectId, controller.signal, sockets, options.runtimeDir);
+    if (!editor || controller.signal.aborted) return { result: "unavailable" };
+    return await new Promise<TaskCheckReply>((done) => {
+      const { socket } = editor;
+      const stop = lines(socket, (line) => {
+        stop();
+        try { done(taskCheckReply(JSON.parse(line)) ?? { result: "unavailable" }); } catch { done({ result: "unavailable" }); }
+      });
+      socket.once("close", () => done({ result: "unavailable" }));
+      socket.once("error", () => done({ result: "unavailable" }));
+      socket.write(requestLine(editor.record, { type: "check-task", projectId, task }));
+    });
+  } catch {
+    return { result: "unavailable" };
+  } finally {
+    clearTimeout(timer);
+    for (const socket of sockets) socket.destroy();
+  }
+}
 
 
 
@@ -684,6 +786,28 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
           if (typeof message.terminal !== "string" || message.terminal === "") throw new UsageError("An idle agent needs its terminal");
           options.onAgentIdle?.(message.terminal, options.project.root);
           finish({ type: "taken" });
+          return;
+        }
+        if (phase === "ready" && message.type === "agent-started") {
+          if (typeof message.terminal !== "string" || message.terminal === "") throw new UsageError("A started agent needs its terminal");
+          if (typeof message.pid !== "number" || !Number.isSafeInteger(message.pid) || message.pid <= 0) throw new UsageError("A started agent needs its process");
+          options.onAgentStarted?.(message.terminal, message.pid, options.project.root);
+          finish({ type: "taken" });
+          return;
+        }
+        if (phase === "ready" && message.type === "check-task") {
+          if (typeof message.task !== "string" || message.task === "") throw new UsageError("A task check needs the Task identity");
+          const task = message.task;
+          phase = "waiting";
+          void Promise.resolve().then(() => options.onCheckTask?.(task) ?? { result: "unavailable" as const }).then(
+            (reply) => finish({ type: "task-checked", ...reply }),
+            () => finish({ type: "task-checked", result: "unavailable" }),
+          );
+          return;
+        }
+        if (phase === "ready" && message.type === "followed-holders") {
+          const asked = Array.isArray(message.holders) ? message.holders.filter((h): h is string => typeof h === "string") : [];
+          finish({ type: "followed", holders: options.onFollowedHolders?.(asked) ?? [] });
           return;
         }
         // Hooks from older versions may still send this message; consume it without changing editor state.

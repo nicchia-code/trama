@@ -1,0 +1,280 @@
+import { afterEach, beforeAll, expect, test } from "bun:test";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { type ManifestPackage, type SettingsValues, settingsSchema } from "../extension/src/host/settings-schema";
+import type { ToHost } from "../extension/src/protocol";
+import { mountGetStarted } from "../extension/src/webview/getstarted";
+import { Wizard } from "../extension/src/webview/wizard";
+import { WizardController } from "../extension/src/webview/wizard/controller";
+
+const manifest: ManifestPackage = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
+const schema = settingsSchema(manifest);
+
+// Radix and cmdk use browser APIs that happy-dom does not have.
+beforeAll(() => {
+  const proto = globalThis.Element.prototype as unknown as Record<string, unknown>;
+  proto.hasPointerCapture ??= () => false;
+  proto.setPointerCapture ??= () => {};
+  proto.releasePointerCapture ??= () => {};
+  proto.scrollIntoView ??= () => {};
+  (globalThis as unknown as Record<string, unknown>).ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+});
+
+afterEach(cleanup);
+
+const FOLDER = { name: "app", root: "/work/app", hasFiles: true };
+
+function setup(options: { mode?: "first" | "settings" | "empty-model"; choice?: "import" | "scratch"; values?: Record<string, SettingsValues>; folders?: (typeof FOLDER)[] } = {}) {
+  const posted: ToHost[] = [];
+  const closed: string[] = [];
+  const controller = new WizardController({ post: (message) => posted.push(message), onClose: (reason, mode) => closed.push(`${reason}:${mode}`) });
+  const utils = render(<Wizard controller={controller} openLink={() => {}} notice={<p>The notice</p>} />);
+  const mode = options.mode ?? "first";
+  act(() => {
+    controller.receiveSettings({ type: "settings", schema, values: options.values ?? {} });
+    controller.receiveFolders(options.folders ?? [FOLDER]);
+    controller.open(mode, options.choice ?? null, mode === "first" ? null : "/work/app");
+  });
+  return { posted, closed, controller, ...utils };
+}
+
+const press = (name: string | RegExp) => fireEvent.click(screen.getByRole("button", { name }));
+const heading = () => screen.getByRole("heading", { level: 2 }).textContent;
+
+test("the first setup opens on Path with the notice on top, the step indicator and no Back", () => {
+  setup();
+  expect(screen.getByText("The notice")).not.toBeNull();
+  expect(heading()).toBe("Path");
+  expect(screen.getByText("Choose how Trama starts in this folder.")).not.toBeNull();
+  const steps = screen.getByRole("list", { name: "Steps" });
+  expect(within(steps).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Path", "Agent", "Models", "Project", "Advanced", "Summary"]);
+  expect(steps.querySelector('[aria-current="step"]')?.textContent).toBe("Path");
+  expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+});
+
+test("Next on Path needs a way chosen and says why; Import from Code adds the Folders step", () => {
+  setup();
+  const next = screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
+  expect(next.disabled).toBe(true);
+  expect(next.getAttribute("aria-describedby")).not.toBeNull();
+  expect(document.getElementById(next.getAttribute("aria-describedby") as string)?.textContent).toBe("Choose how to start");
+  expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-checked"))).toEqual(["false", "false"]);
+  fireEvent.click(screen.getByRole("radio", { name: /Import from Code/ }));
+  expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false);
+  expect(within(screen.getByRole("list", { name: "Steps" })).getAllByRole("listitem").map((item) => item.textContent)).toContain("Folders");
+  fireEvent.click(screen.getByRole("radio", { name: /Start from Scratch/ }));
+  expect(within(screen.getByRole("list", { name: "Steps" })).getAllByRole("listitem").map((item) => item.textContent)).not.toContain("Folders");
+});
+
+test("the arrows move the choice of the way as in a radio group", () => {
+  setup();
+  const first = screen.getAllByRole("radio")[0] as HTMLElement;
+  first.focus();
+  fireEvent.keyDown(first, { key: "ArrowRight" });
+  expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-checked"))).toEqual(["false", "true"]);
+});
+
+test("Start from Scratch on a folder with files shows the warning in the step; Import from Code does not; an empty folder never", () => {
+  const { controller } = setup();
+  fireEvent.click(screen.getByRole("radio", { name: /Start from Scratch/ }));
+  expect(screen.getByText(/This folder already contains files\. Start from Scratch ignores them/)).not.toBeNull();
+  fireEvent.click(screen.getByRole("radio", { name: /Import from Code/ }));
+  expect(screen.queryByText(/already contains files/)).toBeNull();
+  act(() => controller.receiveFolders([{ ...FOLDER, hasFiles: false }]));
+  fireEvent.click(screen.getByRole("radio", { name: /Start from Scratch/ }));
+  expect(screen.queryByText(/already contains files/)).toBeNull();
+});
+
+test("with several folders Path offers a select with the name of each, the first chosen", () => {
+  setup({ folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false }] });
+  const select = screen.getByRole("combobox", { name: "Folder to initialize as a Trama project" });
+  expect(select.textContent).toBe("app");
+});
+
+test("the Agent step moves the focus to its title, checks the agent and shows the answer without blocking", () => {
+  const { posted } = setup();
+  fireEvent.click(screen.getByRole("radio", { name: /Start from Scratch/ }));
+  press("Next");
+  expect(heading()).toBe("Agent");
+  expect(document.activeElement).toBe(screen.getByRole("heading", { level: 2 }));
+  expect(posted).toContainEqual({ type: "agentCheckWanted", agent: "cursor", ompPath: "" });
+  expect(screen.getByText("Checking the agent…")).not.toBeNull();
+});
+
+test("an answer of the check for another agent is ignored; with omp the failure is a warning and Next stays available", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.agent": { user: "omp" }, "trama.ompPath": { user: "/x/omp" } } });
+  expect(heading()).toBe("Agent");
+  expect(posted).toContainEqual({ type: "agentCheckWanted", agent: "omp", ompPath: "/x/omp" });
+  act(() => controller.receiveAgentCheck({ type: "agentCheck", agent: "cursor", ompPath: "", ok: true }));
+  expect(screen.getByText("Checking the agent…")).not.toBeNull();
+  act(() => controller.receiveAgentCheck({ type: "agentCheck", agent: "omp", ompPath: "/x/omp", ok: false, error: "omp not found at /x/omp" }));
+  expect(screen.getByText("omp not found at /x/omp. You can go on and fix it later.")).not.toBeNull();
+  expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false);
+  // Only with omp the path and the terminal show.
+  expect(screen.getByLabelText("Omp Path")).not.toBeNull();
+  expect(screen.getByLabelText("Terminal Location")).not.toBeNull();
+});
+
+test("the Models step suggests the models of the agent chosen in the wizard before it is saved, and blocks Next with an invalid number of sub-agents", () => {
+  const { controller, posted } = setup({ mode: "settings" });
+  fireEvent.click(screen.getByRole("combobox", { name: "Agent" }));
+  fireEvent.click(screen.getByRole("option", { name: "omp" }));
+  press("Next");
+  expect(heading()).toBe("Models");
+  expect(posted).toContainEqual({ type: "modelSuggestionsWanted", agent: "omp", ompPath: "" });
+  // An answer for the saved agent (without `agent`) is not the wizard's; the one for omp is.
+  act(() => controller.receiveModels({ type: "modelSuggestions", models: [{ value: "x" }] }));
+  expect(controller.getSnapshot().models).toBeNull();
+  act(() => controller.receiveModels({ type: "modelSuggestions", agent: "omp", ompPath: "", models: [{ value: "openai/gpt-5" }] }));
+  expect(controller.getSnapshot().models?.list).toEqual([{ value: "openai/gpt-5" }]);
+
+  const input = screen.getByLabelText("Max Parallel Agents") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "0" } });
+  expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(input, { target: { value: "3" } });
+  expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+test("Skip on Advanced goes back to the values of the start and shows the summary; Back keeps the choices", () => {
+  const { controller } = setup({ mode: "settings", values: { "trama.theme": { user: "dark" } } });
+  act(() => controller.openStep("Advanced"));
+  expect(heading()).toBe("Advanced");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Submit While Running" }));
+  press("Skip");
+  expect(heading()).toBe("Summary");
+  expect(screen.getByText("Check your choices, then confirm.")).not.toBeNull();
+  expect(screen.queryByText("changed")).toBeNull();
+  press("Back");
+  expect(heading()).toBe("Advanced");
+  expect((screen.getByRole("checkbox", { name: "Submit While Running" }) as HTMLElement).getAttribute("aria-checked")).toBe("false");
+});
+
+test("the summary shows every value with the changed ones marked, and each row goes back to its step", () => {
+  const { controller } = setup({ mode: "settings", values: { "trama.scan": { user: "gpt-5" } } });
+  act(() => controller.openStep("Advanced"));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Submit While Running" }));
+  press("Next");
+  expect(heading()).toBe("Summary");
+  const row = screen.getByRole("button", { name: "Edit Submit While Running" });
+  expect(row.textContent).toContain("On");
+  expect(row.textContent).toContain("changed");
+  expect(row.textContent).toContain("was Off");
+  expect(screen.getByRole("button", { name: "Edit Scan" }).textContent).toContain("gpt-5");
+  expect(screen.getByRole("button", { name: "Edit Scan" }).textContent).not.toContain("changed");
+  expect(screen.getByRole("button", { name: "Edit Theme" }).textContent).toContain("(default)");
+  fireEvent.click(screen.getByRole("button", { name: "Edit Scan" }));
+  expect(heading()).toBe("Models");
+});
+
+test("the confirmation sends only the changed keys, disables every button while it runs and, when it fails, shows the reason and keeps its text", () => {
+  const { controller, posted } = setup({ mode: "settings" });
+  act(() => controller.openStep("Advanced"));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Submit While Running" }));
+  press("Next");
+  press("Save settings");
+  expect(posted.at(-1)).toEqual({ type: "confirmSetup", mode: "settings", values: [{ key: "trama.submitWhileRunning", value: true }], excluded: [] });
+  for (const button of screen.getAllByRole("button") as HTMLButtonElement[]) expect(button.disabled).toBe(true);
+  act(() => controller.receiveResult({ type: "guidedSetupResult", ok: false, error: "Could not save Theme: boom." }));
+  expect(screen.getByRole("alert").textContent).toBe("Could not save Theme: boom.");
+  expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+test("a successful confirmation closes the wizard of the settings; Cancel forgets everything and sends nothing", () => {
+  const first = setup({ mode: "settings" });
+  press("Cancel");
+  expect(first.closed).toEqual(["cancel:settings"]);
+  expect(first.controller.isOpen()).toBe(false);
+  expect(first.posted.some((message) => message.type === "confirmSetup")).toBe(false);
+  cleanup();
+
+  const second = setup({ mode: "empty-model", choice: "scratch" });
+  act(() => second.controller.openStep("Summary"));
+  press("Save and start");
+  act(() => second.controller.receiveResult({ type: "guidedSetupResult", ok: true, error: null }));
+  expect(second.closed).toEqual(["done:empty-model"]);
+  expect(second.controller.isOpen()).toBe(false);
+});
+
+test("the first setup confirms with the folder, the path and the excluded folders; a refusal of the overwrite shows nothing and keeps the summary", () => {
+  const { controller, posted } = setup({ choice: undefined });
+  fireEvent.click(screen.getByRole("radio", { name: /Import from Code/ }));
+  press("Next");
+  act(() => controller.openStep("Folders"));
+  expect(posted).toContainEqual({ type: "folderChildrenWanted", root: "/work/app", path: "" });
+  expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
+  act(() =>
+    controller.receiveFolderChildren({
+      type: "folderChildren",
+      root: "/work/app",
+      path: "",
+      entries: [{ name: "docs", kind: "folder", hasChildren: true }, { name: "src", kind: "folder", hasChildren: true }],
+    }),
+  );
+  expect(screen.getByText("Everything is included")).not.toBeNull();
+  const tree = screen.getByRole("tree");
+  expect(within(tree).getAllByRole("treeitem").map((item) => item.getAttribute("aria-label"))).toEqual(["docs", "src"]);
+  // Space turns the box of the entry in focus.
+  fireEvent.keyDown(tree, { key: "ArrowDown" });
+  fireEvent.keyDown(tree, { key: " " });
+  expect(screen.getByText("1 excluded")).not.toBeNull();
+  expect(within(tree).getByRole("treeitem", { name: "src" }).getAttribute("aria-checked")).toBe("false");
+  expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false);
+  // The right arrow opens a folder, which the host reads once.
+  fireEvent.keyDown(tree, { key: "ArrowUp" });
+  fireEvent.keyDown(tree, { key: "ArrowRight" });
+  expect(posted).toContainEqual({ type: "folderChildrenWanted", root: "/work/app", path: "docs" });
+  expect(within(tree).getByRole("treeitem", { name: "docs" }).getAttribute("aria-expanded")).toBe("true");
+
+  press("Next");
+  expect(heading()).toBe("Advanced");
+  press("Next");
+  expect(screen.getByRole("button", { name: "Edit Excluded folders" }).textContent).toContain("src");
+  press("Set up Trama");
+  expect(posted.at(-1)).toEqual({ type: "confirmSetup", mode: "first", choice: "import", root: "/work/app", values: [], excluded: ["src"] });
+  act(() => controller.receiveSetup({ type: "setup", busy: false, error: null }));
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(heading()).toBe("Summary");
+  expect((screen.getByRole("button", { name: "Set up Trama" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+test("a value changed from outside while the wizard is open does not change what the wizard holds", () => {
+  const { controller } = setup({ mode: "settings", values: { "trama.scan": { user: "gpt-5" } } });
+  act(() => controller.receiveSettings({ type: "settings", schema, values: { "trama.scan": { user: "other" } } }));
+  act(() => controller.openStep("Models"));
+  expect((screen.getByLabelText("Scan") as HTMLInputElement).value).toBe("gpt-5");
+});
+
+test("a new folder to initialize forgets the folders chosen to leave out", () => {
+  const { controller } = setup({ folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false }] });
+  act(() => controller.chooseWay("import"));
+  act(() => controller.chooseFolder("/work/app"));
+  act(() => controller.openStep("Path"));
+  act(() => controller.toggle("docs"));
+  expect(controller.getSnapshot().state?.excluded).toEqual(["docs"]);
+  act(() => controller.chooseFolder("/work/lib"));
+  expect(controller.getSnapshot().state?.excluded).toEqual([]);
+  expect(controller.getSnapshot().state?.root).toBe("/work/lib");
+});
+
+test("Get Started mounts the wizard in the first-setup mode only without a project, and forgets it when the project exists", () => {
+  const posted: ToHost[] = [];
+  const page = render(<></>);
+  const view = mountGetStarted((node) => page.rerender(<>{node}</>), { post: (message) => posted.push(message), navigate: () => {}, openLink: () => {} });
+  act(() => {
+    view.projectPresent(false);
+    view.receiveSettings({ type: "settings", schema, values: {} });
+    view.receiveFolders({ type: "workspaceFolders", folders: [FOLDER] });
+  });
+  expect(screen.getByText(/Trama will create a/)).not.toBeNull();
+  expect(heading()).toBe("Path");
+  act(() => view.projectPresent(true));
+  expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
+  act(() => view.projectPresent(false));
+  expect(heading()).toBe("Path");
+});

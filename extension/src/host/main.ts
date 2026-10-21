@@ -5,6 +5,7 @@ import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { watchAnnouncements } from "./announcements";
 import { agentName, watchAgentTerminal, configuredSkillsDir } from "./agent";
 import { Controller, describeError } from "./controller";
+import { startExecutionCheck } from "./execution-check";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./cursor";
 import { findProject, installEditorHooks, removeCopilotPieces } from "./project";
@@ -51,13 +52,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("trama.openSettings", guarded(() => trama.openSettings())),
     vscode.commands.registerCommand("trama.sendDesignRequest", guarded((uri?: vscode.Uri) => requests.send(uri))),
     vscode.commands.registerCommand("trama.scan", guarded(() => trama.pickAndScan())),
-    vscode.commands.registerCommand("trama.import", guarded(() => trama.launch({ kind: "import" }))),
+    vscode.commands.registerCommand("trama.import", guarded(() => trama.importFromCode())),
     vscode.commands.registerCommand("trama.updateSkills", guarded(async () => trama.updateSkills())),
     watchAgentTerminal(),
     watchAnnouncements(() => findProject()?.root),
+    startExecutionCheck(() => findProject()?.root, tramaFiles),
     questions,
     requests,
     watchRequirements(),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => trama.workspaceFoldersChanged()),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("trama")) trama.settingsChanged(event.affectsConfiguration("trama.ompPath"));
     }),

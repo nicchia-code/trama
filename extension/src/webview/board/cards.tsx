@@ -10,7 +10,7 @@ import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Progress } from "../ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { AGENT_NAMES, type AnnouncedCard, blockedReason, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
+import { AGENT_NAMES, type AnnouncedCard, blockedReason, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
 import { BoardButton, Head, RefChips, StatusDot, Tip, TipBadge, TaskProposalTag, useBoardEnv } from "./parts";
 
 /** The shell of a card of the Board: its key, so a link can find it, and its accessible name. */
@@ -91,7 +91,7 @@ function BlockPopup({ tooltip, title, badge, children }: { tooltip: string; titl
 /** `blocked`: the open Drifts that block a Task, in creation order; each row goes to its red card in Backlog, or to its row in the yellow card. */
 function BlockedBadge({ drifts }: { drifts: DriftBlocker[] }) {
   if (drifts.length === 0) return null;
-  const tooltip = `Blocked by Drift ${drifts.map((d) => d.name.text).join(", ")}`;
+  const tooltip = `Blocked by Drift ${namesList(drifts.map((d) => d.name.text))}`;
   return (
     <BlockPopup tooltip={tooltip} title="Blocked by" badge="blocked">
       {(follow) =>

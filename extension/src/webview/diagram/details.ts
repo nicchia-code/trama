@@ -333,9 +333,16 @@ export function detailOfSelection(scene: Scene, graph: GraphSpec, selected: stri
   return { ...found, drill: (n ? drillTarget(scene, graph, n.id) : null) ?? found.drill, proposal, numbers: scene.numbers };
 }
 
-/** Plain text for the tooltip of a node or an edge. */
+/** First sentence of a description: up to the first ., ! or ? followed by whitespace (or the end). */
+function firstSentence(text: string): string {
+  const flat = text.trim().replace(/\s+/g, " ");
+  const m = /^.*?[.!?](?=\s|$)/.exec(flat);
+  return m ? m[0] : flat;
+}
+
+/** Plain text for the tooltip of a node or an edge: the title and, below it, the first sentence of the description (for an edge, of the Transition's prose). */
 export function tooltipOf(d: Detail): string {
-  const lines = [d.title, ...(d.description ? [d.description] : [])];
-  for (const s of d.sections) for (const i of s.items) lines.push(`• ${i.text}${i.note ? `: ${i.note}` : ""}`);
-  return lines.slice(0, 12).join("\n");
+  const prose = d.description || (d.kind === "Transition" ? (d.sections[0]?.items[0]?.note ?? "") : "");
+  const sentence = firstSentence(prose);
+  return sentence ? `${d.title}\n${sentence}` : d.title;
 }

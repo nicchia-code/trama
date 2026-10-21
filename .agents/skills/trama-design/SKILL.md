@@ -78,7 +78,7 @@ Run **`trama question new --root <project> --input -`** with the JSON request on
 - A result with `status: "answered"` contains `answers` keyed by question id. An answered entry has the original `selected` labels and optional free-form `text`; a `status: "skipped"` entry is an explicit developer skip. Use the recommendation for that skipped decision, report it as an assumption for review, and do not ask it again.
 - An `invalid-input` error means the request was refused before opening a round: correct the identified field and submit the corrected request.
 - An **`editor-interrupted` error stops this workflow immediately**. Do not use partial answers or recommendations, fall back, retry, reroute, resume the round, or create or submit a Proposal from its unanswered decisions. Report that the editor was lost.
-- **Wait for `trama question new` to finish**: it blocks until the developer answers. Run it with the default wait. If Cursor moves it to the background, wait only for the end of that command with Cursor's background-wait tool (`AwaitShell` on the command's id), which returns as soon as the command ends, then read its result at once. If that wait times out before the command ends, because the developer is still answering, wait again on the same command. Never use a timer or a fixed-duration wait, `sleep`, periodic reads of the terminal output or interval checks; never end the turn to be woken up; never treat `trama question new` as failed and never run it again.
+- **Wait for `trama question new` to finish**: it blocks until the developer answers, however long that takes. Run it with no time limit: with omp pass `timeout: 0` to the bash tool, never a fixed value; with Cursor use the default wait. If Cursor moves it to the background, wait only for the end of that command with Cursor's background-wait tool (`AwaitShell` on the command's id), which returns as soon as the command ends, then read its result at once. If that wait times out before the command ends, because the developer is still answering, wait again on the same command. These waiting rules hold in Cursor and in omp alike: never use a timer or a fixed-duration wait, `sleep`, periodic reads of the terminal output or interval checks; never end the turn to be woken up; never treat `trama question new` as failed and never run it again.
 - In Cursor's sandbox (`CURSOR_SANDBOX` is set), an initial `status: "unavailable"` may only mean the sandbox hides the editor: run the same `trama question new` once more outside the sandbox, asking Cursor for permission, and treat that result as the real one.
 - Only an initial `status: "unavailable"` result means the editor is unavailable. Then you ask in no other way: you stop, open no Proposal, and tell the developer to open the project in the editor with Trama. When the developer says to continue, run the same `trama question new` again: it is a new round.
 - A usage error of `trama question new` (exit code 2, wrong arguments, unrecognised command) or an input error is **never** editor unavailability: correct the call and repeat it. A deliberate skip is not re-asked.
@@ -116,6 +116,23 @@ If the developer rejected it, the reason, when they gave one, is under `## Feedb
 - Write Requirements as short, checkable statements ("Amounts show two decimals and the currency symbol"), not wishes ("nice formatting").
 - Data fields and formulas go in `data` and `rules`, attached to the Machine or State they concern, never in the Model.
 - A new Area is a new folder `requirements/<area>/` with a kebab-case name, an `area.md` and at least one fragment, for example to split `ui` into `ui-web` and `ui-mobile`.
+
+## Experimental context sharing
+
+This section applies only when the instruction says "The experimental context sharing is on: …". Without that sentence, skip it and work as written above.
+
+With it, when you hand a part of the work to a sub-agent, in whatever way your agent starts sub-agents, you pass it what you have already read that concerns its part, so it does not look for it again and does not read it again.
+
+- **What you pass.** Of what you have already read, only what concerns that sub-agent's part, plus a short common part (the request and the decisions, when there are any): Trama's texts quoted as they are (the written request with its images put in words, the output of `trama model show`, `trama task show`, `trama drift show`, `trama proposal show`, the decisions of the interview) and the places in the code already known, one line per reference, ``- `<ref>` — <where in the code>``. Never code, never everything you gathered, and nothing you read only to pass it on.
+- **What the sub-agent does.** It does not reread the Trama texts it received and reads on its own only the ones that are missing. It always reads the code, also at the places it received, always runs the commands that register (`trama task move <id> doing`, `trama comparison new`, `trama drift new`) and loads its skill as without this feature. A received place that no longer matches the code is ignored: it searches by itself. Context Sharing never stops a job.
+- **What comes back.** Each sub-agent reports where it found the code of what it saw, one line per reference as above; you reuse those lines in `## Already present`, in your own work and for the sub-agents that follow.
+- **Limits.** No sub-agent runs again a read-only Trama command for a text it received, and what you pass to each one concerns only its part: never copy into every sub-agent all that you gathered.
+
+In this skill:
+
+- **Exploration (step 1).** Each sub-agent receives the request and the parts of `trama model show` you already read about its part.
+- **Writing the Tasks (step 5).** The sub-agent of a Machine group receives the decisions of the interview, the new text of the Model and of the Requirements for its references, and the places in the code the exploration found.
+- **Light code scan (step 7).** Each sub-agent receives the places in the code that are near its entries.
 
 ## PowerShell
 

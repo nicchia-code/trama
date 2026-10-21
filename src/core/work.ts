@@ -536,6 +536,15 @@ export function releaseTasks(p: Project, origin: AgentOrigin): Task[] {
   return releaseTaken(p, (task) => task.data.holder === null || task.data.holder === holder || task.data.holder === chatHolder);
 }
 
+/**
+ * Sends back to To do the Tasks of `held` (identity and holder) that are still taken by that very holder when the files
+ * are written, and returns them: a Task someone else took meanwhile, or took back, stays as it is.
+ */
+export function releaseHeldTasks(p: Project, held: readonly { id: string; holder: string }[]): Task[] {
+  const holders = new Map(held.map((h) => [h.id, h.holder]));
+  return releaseTaken(p, (task) => task.data.holder !== null && holders.get(task.id) === task.data.holder);
+}
+
 /** Sends back to To do the Tasks marked as taken that `matches` selects, and returns them. */
 function releaseTaken(p: Project, matches: (task: Task) => boolean): Task[] {
   const released = listTasks(p).filter((task) => task.data.agent && matches(task));

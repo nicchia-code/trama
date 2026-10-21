@@ -88,6 +88,19 @@ test("the model Combobox filters while typing and confirms a chosen entry at onc
   expect((field as HTMLInputElement).value).toBe("anthropic/claude-opus-5-5");
 });
 
+test("the model suggestion list is sized by the whole list, so filtering never narrows it, and no entry is truncated", () => {
+  setup({}, MODELS);
+  const field = screen.getByRole("combobox", { name: "Analysis" });
+  fireEvent.change(field, { target: { value: "gpt" } });
+  const content = document.querySelector("[data-slot=popover-content]") as HTMLElement;
+  const sizer = content.querySelector("[aria-hidden=true]") as HTMLElement;
+  expect(sizer.textContent).toContain("anthropic/claude-opus-5-5");
+  expect(sizer.textContent).toContain("Claude Opus 5.5");
+  expect(sizer.textContent).toContain("openai/gpt-5");
+  expect(screen.getAllByRole("option")).toHaveLength(1);
+  expect(content.querySelector(".truncate")).toBeNull();
+});
+
 test("a free text in the model Combobox is confirmed with Enter or when the field is left, never swapped for a suggestion", () => {
   const { posted } = setup({}, MODELS);
   const field = screen.getByRole("combobox", { name: "Scan" });
@@ -154,4 +167,22 @@ test("trama.theme is declared in the manifest as the only setting of Appearance"
   expect(theme?.scope).toBe("application");
   expect(theme?.enumDescriptions).toHaveLength(3);
   expect(schema.filter((setting) => setting.group === "Appearance").map((setting) => setting.key)).toEqual(["trama.theme"]);
+});
+
+test("with a project the Settings tab has «Guided setup» at the top right, with its tooltip in the name; without one there is none", () => {
+  const opened: string[] = [];
+  const page = render(<SettingsPage schema={schema} values={{}} generation={1} models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => opened.push("open")} />);
+  const button = screen.getByRole("button", { name: "Guided setup. Review the main settings step by step" });
+  fireEvent.click(button);
+  expect(opened).toEqual(["open"]);
+  page.unmount();
+  setup();
+  expect(screen.queryByRole("button", { name: /Guided setup/ })).toBeNull();
+});
+
+test("while the wizard is open it takes the place of the button and of the form", () => {
+  render(<SettingsPage schema={schema} values={{}} generation={1} models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => {}} wizard={<p>The wizard</p>} />);
+  expect(screen.getByText("The wizard")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: /Guided setup/ })).toBeNull();
+  expect(screen.queryByRole("combobox", { name: "Theme" })).toBeNull();
 });

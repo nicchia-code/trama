@@ -66,11 +66,15 @@ export interface FixWait {
   drift: { id: string; name: CardName; title: string };
 }
 
+/** Card names in a sentence: the first few, then `and N more`. */
+export const namesList = (names: string[]): string =>
+  names.length > MAX_TOOLTIP_ITEMS ? `${names.slice(0, MAX_TOOLTIP_ITEMS).join(", ")} and ${names.length - MAX_TOOLTIP_ITEMS} more` : names.join(", ");
+
 /** "Blocked by Drift D3, D7" / "Waiting for Task T4": the Run reason of a blocked Task; null when it is free. */
 export function blockedReason(blockedByDrifts: readonly DriftBlocker[], waitingFor: readonly FixWait[]): string | null {
   const reasons = [
-    blockedByDrifts.length === 0 ? null : `Blocked by Drift ${blockedByDrifts.map((d) => d.name.text).join(", ")}`,
-    waitingFor.length === 0 ? null : `Waiting for Task ${waitingFor.map((t) => t.name.text).join(", ")}`,
+    blockedByDrifts.length === 0 ? null : `Blocked by Drift ${namesList(blockedByDrifts.map((d) => d.name.text))}`,
+    waitingFor.length === 0 ? null : `Waiting for Task ${namesList(waitingFor.map((t) => t.name.text))}`,
   ];
   return joinReasons(reasons);
 }
@@ -269,7 +273,7 @@ export function finishingBlocker(id: string, finishing: readonly string[]): stri
 
 /** The reason a Proposal cannot be approved, or null. Mirrors what the host refuses. */
 export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires">, numbers: CardNumbers = noNumbers): string | null {
-  if (p.requires.length > 0) return `Approve the required Proposals first:\n${requiredReasons(p.requires, (id) => namerOf(numbers)("proposal", id)).join("\n")}`;
+  if (p.requires.length > 0) return `Approve the required Proposals first:\n${listed(requiredReasons(p.requires, (id) => namerOf(numbers)("proposal", id)))}`;
   if (p.stale.length > 0) return "Stale: the Model changed since this Proposal touched it. Ask the agent for a new Proposal.";
   if (p.unbased.length > 0) return "Some files were never registered with the Proposal.";
   if (p.errors.length > 0) return "Applying this Proposal would leave the Model or its Requirements invalid.";
@@ -565,6 +569,9 @@ export const withdrawnNotice = (a: AnnouncementView): string =>
 
 /** The sentence the notice of a Run that ended without the Advisor's final review shows; the reason is English whatever `trama.language` says. */
 export const finalReviewMissingNotice = (reason: string): string => `The Run finished without the Advisor's final review: ${reason}.`;
+
+/** The sentence the notice of a job or Task the run control stopped following shows; English whatever `trama.language` says. */
+export const stoppedFollowingNotice = (subject: string, reason: string): string => `Trama stopped following ${subject}: ${reason}.`;
 
 export interface PlacedGhost {
   card: AnnouncedCard;

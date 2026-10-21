@@ -3,6 +3,13 @@ import type { AgentAction, ToHost } from "../protocol";
 import type { QuestionAction } from "./question-state";
 import { type SettingSchema, type SettingValue, settingValueError } from "./settings-schema";
 import { safeLink } from "../../../src/core/links";
+import { isSafeRelativePath } from "./folder-tree";
+import { STEP_KEYS } from "../webview/wizard/logic";
+
+/** The settings the wizard may write: the keys of its steps. */
+const WIZARD_KEYS: readonly string[] = Object.values(STEP_KEYS).flat();
+const MAX_EXCLUDED = 10_000;
+const MAX_PATH_TEXT = 4096;
 
 export type Parsed = { ok: true; message: ToHost } | { ok: false; reason: string };
 
@@ -54,6 +61,40 @@ function parseQuestionAction(value: unknown): QuestionAction | string {
   }
 }
 
+const isAgent = (value: unknown): value is "cursor" | "omp" => value === "cursor" || value === "omp";
+
+/** `confirmSetup`: the mode, the path (always but in the mode Settings), the folder (only the first setup), the changed keys of the wizard's steps and the excluded paths. */
+function parseConfirmSetup(raw: Raw, settings: readonly SettingSchema[]): Parsed {
+  const mode = raw["mode"];
+  if (mode !== "first" && mode !== "settings" && mode !== "empty-model") return bad("confirmSetup needs a mode: first, settings or empty-model");
+  const choice = raw["choice"];
+  if (mode !== "settings" && choice !== "import" && choice !== "scratch") return bad("confirmSetup needs a choice: import or scratch");
+  if (mode === "first" && (typeof raw["root"] !== "string" || raw["root"] === "")) return bad("confirmSetup needs the folder to initialize");
+  if (!Array.isArray(raw["values"])) return bad("confirmSetup needs the values");
+  const values: { key: string; value: SettingValue }[] = [];
+  for (const entry of raw["values"] as unknown[]) {
+    const item = typeof entry === "object" && entry !== null ? (entry as Raw) : {};
+    const setting = settings.find((s) => s.key === item["key"]);
+    if (setting === undefined || !WIZARD_KEYS.includes(setting.key)) return bad("confirmSetup has a key that is not a setting of the wizard");
+    const reason = settingValueError(setting, item["value"]);
+    if (reason !== null) return bad(`${setting.key}: ${reason}`);
+    values.push({ key: setting.key, value: item["value"] as SettingValue });
+  }
+  const excluded = raw["excluded"];
+  if (!Array.isArray(excluded) || excluded.length > MAX_EXCLUDED || !excluded.every((path) => typeof path === "string" && isSafeRelativePath(path))) return bad("confirmSetup needs the excluded paths, each inside the folder");
+  return {
+    ok: true,
+    message: {
+      type: "confirmSetup",
+      mode,
+      ...(mode === "settings" ? {} : { choice: choice as "import" | "scratch" }),
+      ...(mode === "first" ? { root: raw["root"] as string } : {}),
+      values,
+      excluded: excluded as string[],
+    },
+  };
+}
+
 /** Checks a message from the webview, which is untrusted input, against the `ToHost` contract. `settings` is the manifest's schema: only its keys can be set. */
 export function parseToHost(value: unknown, settings: readonly SettingSchema[] = []): Parsed {
   if (typeof value !== "object" || value === null) return bad("not a message");
@@ -64,8 +105,24 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
   switch (type) {
     case "ready":
     case "writeDesignRequest":
-    case "modelSuggestionsWanted":
       return { ok: true, message: { type } };
+    case "modelSuggestionsWanted": {
+      if (raw["agent"] === undefined && raw["ompPath"] === undefined) return { ok: true, message: { type } };
+      if (!isAgent(raw["agent"]) || typeof raw["ompPath"] !== "string" || raw["ompPath"].length > MAX_PATH_TEXT) return bad("modelSuggestionsWanted needs both an agent (cursor or omp) and an omp path, or neither");
+      return { ok: true, message: { type, agent: raw["agent"], ompPath: raw["ompPath"] } };
+    }
+    case "agentCheckWanted":
+      return isAgent(raw["agent"]) && typeof raw["ompPath"] === "string" && raw["ompPath"].length <= MAX_PATH_TEXT
+        ? { ok: true, message: { type, agent: raw["agent"], ompPath: raw["ompPath"] } }
+        : bad("agentCheckWanted needs an agent (cursor or omp) and an omp path");
+    case "openGuidedSetup":
+      return raw["choice"] === "import" || raw["choice"] === "scratch" ? { ok: true, message: { type, choice: raw["choice"] } } : bad("openGuidedSetup needs a choice: import or scratch");
+    case "folderChildrenWanted":
+      return typeof raw["root"] === "string" && raw["root"] !== "" && typeof raw["path"] === "string" && (raw["path"] === "" || isSafeRelativePath(raw["path"]))
+        ? { ok: true, message: { type, root: raw["root"], path: raw["path"] } }
+        : bad("folderChildrenWanted needs a folder and a path inside it");
+    case "confirmSetup":
+      return parseConfirmSetup(raw, settings);
     case "launch": {
       const action = parseAction(raw["action"]);
       return typeof action === "string" ? bad(action) : { ok: true, message: { type, action } };
@@ -96,8 +153,6 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       const url = typeof raw["url"] === "string" ? safeLink(raw["url"]) : null;
       return url === null ? bad("openLink needs an http or https address") : { ok: true, message: { type, url } };
     }
-    case "initialize":
-      return raw["choice"] === "import" || raw["choice"] === "scratch" ? { ok: true, message: { type, choice: raw["choice"] } } : bad("initialize needs a choice: import or scratch");
     case "setSetting": {
       const setting = settings.find((s) => s.key === raw["key"]);
       if (setting === undefined) return bad("setSetting needs a key of the Trama settings");

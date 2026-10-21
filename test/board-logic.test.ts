@@ -3,9 +3,10 @@ import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { DriftCard, TaskCard } from "../extension/src/webview/board/logic";
 import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockedReason, boardDecisionCount, buildBoard, createsText, finalReviewMissingNotice, finishingBlocker, formatCounts, GHOST_COLUMN, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockedReason, boardDecisionCount, buildBoard, createsText, finalReviewMissingNotice, finishingBlocker, stoppedFollowingNotice, formatCounts, GHOST_COLUMN, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
 import { runBlocker } from "../src/core/design";
+import { dismissBlocker } from "../extension/src/webview/dismiss";
 import { namerOf } from "../src/core/card-names";
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
@@ -157,6 +158,24 @@ test("badges name each problem and list the files or the first messages in the t
   expect(badges[1]?.tooltip).toContain("f.md:3: problem 3");
   expect(badges[1]?.tooltip).not.toContain("problem 4");
   expect(badges[1]?.tooltip).toContain("and 2 more");
+});
+
+test("every written tooltip and disabling reason of a Proposal stays within about 160 characters, the list apart", () => {
+  const LIMIT = 160;
+  // A list tooltip counts its introductory sentence and any closing sentence, not the short list between them.
+  const outside = (text: string) => {
+    const lines = text.split("\n");
+    return lines.length > 2 ? [lines[0], lines[lines.length - 1]].join(" ") : text;
+  };
+  const problems = proposal({ stale: ["a.md"], unbased: ["b.md"], errors: [{ file: "a.md", line: 1, message: "bad" }], unfixable: ["Drift D3 no longer exists"], kind: "import", nonBlocking: true });
+  for (const badge of proposalBadges(problems)) expect(outside(badge.tooltip).length).toBeLessThanOrEqual(LIMIT);
+  for (const part of [{ stale: ["a.md"] }, { unbased: ["a.md"] }, { errors: [{ file: "a.md", line: 1, message: "bad" }] }, { unfixable: ["Drift D3 no longer exists"] }]) {
+    const text = approveBlocker(proposal(part));
+    expect(text).not.toBeNull();
+    expect(outside(text as string).length).toBeLessThanOrEqual(LIMIT);
+  }
+  const waiting = proposalCard(proposal({ id: "iwham416", stale: ["a.md"] }), NUMBERS, new Map(), ["iwham416"]);
+  expect((waiting.blocker as string).length).toBeLessThanOrEqual(LIMIT);
 });
 
 const design = (id: string, column: TaskView["column"], proposal: string | null = "0007") => task({ id, column, proposal, proposalTag: proposal === null ? null : { text: "Returns", proposal, title: "Returns" } });
@@ -474,4 +493,29 @@ test("a card has a View button only for the tab that would show a step of its fo
 
 test("the notice of a Run without the Advisor's final review carries its English reason", () => {
   expect(finalReviewMissingNotice("the run was interrupted")).toBe("The Run finished without the Advisor's final review: the run was interrupted.");
+});
+
+test("the notice of a job the run control stopped following names the job and why", () => {
+  expect(stoppedFollowingNotice("T3", "the terminal is gone")).toBe("Trama stopped following T3: the terminal is gone.");
+});
+
+test("the Run, Resolve and Dismiss reasons and the Blocked and Waiting lists stay within 160 characters even with many names", () => {
+  const drifts = [1, 2, 3, 4, 5].map((n) => ({ id: `d${n}`, key: `k${n}`, name: { text: `D${n}`, isNumber: true }, title: "t" }));
+  const waits = [1, 2, 3, 4, 5].map((n) => ({ name: { text: `T${n}`, isNumber: true } }));
+  const text = blockedReason(drifts as never, waits as never) as string;
+  expect(text).toContain("and 2 more");
+  expect(`Drifts are being resolved. A run is in progress. ${text}. The agent is still finishing`.length).toBeLessThanOrEqual(160);
+  const required = [1, 2, 3, 4, 5].map((n) => ({ id: `p${n}`, title: "Base", status: "open" as const }));
+  const approve = approveBlocker(proposal({ requires: required as never }), NUMBERS) as string;
+  expect(approve.split("\n")[0]?.length).toBeLessThanOrEqual(160);
+  expect(approve).toContain("and 2 more");
+  expect(approve.split("\n").length).toBe(5);
+});
+
+test("the worst Resolve and Dismiss disabling reasons of a Drift card stay within about 160 characters", () => {
+  const host = "Drifts are being resolved. A run is in progress. Proposal P12 resolving Drifts awaits a decision";
+  const resolve = resolveBlocker("d1", ["d1"], { drifts: { d1: host } });
+  const dismiss = dismissBlocker("d1", ["d1"], resolve, ["d1"]);
+  expect((resolve as string).length).toBeLessThanOrEqual(160);
+  expect((dismiss as string).length).toBeLessThanOrEqual(160);
 });

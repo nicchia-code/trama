@@ -122,14 +122,9 @@ Trama runs in VS Code and Cursor, on Linux (x64), macOS (Apple silicon) and Wind
    code --install-extension trama-<platform>-<version>.vsix
    ```
    The `trama` command line comes inside the extension, so there's nothing else to install.
-2. **Pick your agent** in Settings (`trama.agent`), *before* you initialize a project:
-   - `cursor` (default): the chat in Cursor, in Cursor only. Outside Cursor the instruction goes to the clipboard, with a notice that asks you to choose omp.
-   - `omp`: omp in a terminal, in Cursor or in any compatible editor, such as VS Code.
-
-   omp must already be installed and on your `PATH`.
-3. **Open your project** and run **Trama: Open**.
-4. In **Get Started** (the panel shows it in any folder without a Trama project), choose **Import from Code** for an existing app, or **Start from Scratch** for an empty folder: it creates the project and opens an empty design request for your first feature, which the agent answers with the `trama-setup` skill.
-5. In the Board, click **Add Work Item…** and describe your first feature (with an empty Model, the Diagram offers **Import from Code** and **Start from Scratch** too).
+2. **Open your project** and run **Trama: Open**.
+3. In **Get Started** (the panel shows it in any folder without a Trama project) the setup wizard guides you, step by step: **Path** (**Import from Code** for an existing app, or **Start from Scratch** for an application still to be built, and which folder to initialize when the workspace has several), **Agent** (`cursor`, the chat in Cursor and only in Cursor, or `omp`, in a terminal in any compatible editor, which must already be installed and on your `PATH`; the step checks the agent and tells you whether it answers, without stopping you), **Models**, **Project** (where the agent skills are installed), **Folders** (with Import from Code: the folders and files the agent should not import) and **Advanced** (the panel theme and the experimental features, a step you can skip). Each step starts from your current user settings, Back and Next keep your choices, and nothing is saved or created until you confirm the **Summary**, which lists every value, marks the ones that change (`changed`, with `was <value>`) and takes you back to the step of any row. **Set up Trama** saves only the settings that changed, initializes the folder, and goes on with your path: Import from Code asks the agent to describe the code without the paths you excluded (the exclusions apply to that import only; they are not saved), and Start from Scratch opens an empty design request for your first feature, which the agent answers with the `trama-setup` skill. Closing the panel forgets everything.
+4. In the Board, click **Add Work Item…** and describe your first feature. With an empty Model the Diagram offers **Import from Code** and **Start from Scratch** too, and so does the command **Trama: Import from Code**: they open the same wizard in the Settings tab, with that path already chosen and without the Path step. In any project the Settings tab has **Guided setup**, which reviews the main settings step by step with the same wizard.
 
 > **Windows is in preview.** The `win32-x64` build is not yet verified end to end on Windows 11 (Cursor with its chat and omp, VS Code with omp, Windows PowerShell 5.1, PowerShell 7 and Git Bash); the manual check in [`docs/uat.md`](docs/uat.md) decides when the preview ends.
 >
@@ -150,7 +145,7 @@ For omp, writing in Italian, a typical setup looks like this:
 | Setting | Default | What it does |
 |---|---|---|
 | `trama.agent` | `cursor` | Where Trama sends its instructions: `cursor` (Cursor's chat, in Cursor only) or `omp`. |
-| `trama.skillsDir` | `.agents/skills` | Where Get Started installs the agent skills. |
+| `trama.skillsDir` | `.agents/skills` | Where the setup wizard installs the agent skills. |
 | `trama.language` | *empty* | Language for the prose the agent writes (descriptions, Proposals, Tasks, Drifts), e.g. `Italian`. Trama never fills it in: empty asks the agent nothing about language. Code, names, titles and IDs stay in English. |
 | `trama.terminalLocation` | `editor` | Where terminal agents open: `editor` (a tab in the active editor group, beside your code) or `panel` (terminal area, in the background). |
 | `trama.analysis` | *empty* | Model for design requests, Drift resolution and import. |

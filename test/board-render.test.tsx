@@ -499,6 +499,19 @@ describe("The Board page", () => {
     expect(closed).toEqual([1]);
   });
 
+  test("a job or Task the run control stopped following shows its notice and closes it", () => {
+    let slotted: ReactNode = null;
+    const board = mountBoard((node) => { slotted = node; }, { post: () => {}, navigate: () => {}, openLink: () => {} });
+    board.update(snapshot());
+    board.stoppedFollowing?.("T3", "the agent's process is gone");
+    board.stoppedFollowing?.("T4 Some title", "no window follows its agent");
+    const text = "Trama stopped following T3: the agent's process is gone.";
+    const view = render(<TooltipProvider>{slotted}</TooltipProvider>);
+    expect(screen.getAllByRole("status").map((n) => n.textContent)).toEqual(expect.arrayContaining([expect.stringContaining(text), expect.stringContaining("Trama stopped following T4 Some title: no window follows its agent.")]));
+    expect(screen.getByRole("button", { name: `Close the notice: ${text}` }).textContent).toContain("Close");
+    view.unmount();
+  });
+
   test("a Run without the Advisor's final review shows its notice and closes it", () => {
     let slotted: ReactNode = null;
     const board = mountBoard((node) => { slotted = node; }, { post: () => {}, navigate: () => {}, openLink: () => {} });

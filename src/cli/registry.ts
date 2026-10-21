@@ -209,8 +209,9 @@ export function splitCommon(argv: string[]): { rest: string[]; common: CommonOpt
 
 /** The positional arguments of a command, checked: how many, and the values `move` accepts. Every other token starting with `-` is an unknown option. */
 export function checkPositionals(command: Command, tail: string[]): string[] {
-  for (const token of tail)
-    if (token.startsWith("-") && token !== "-")
+  for (const [i, token] of tail.entries())
+    // A process number is a plain value: a wrong one (`-3`) is the command's own business, not an unknown option.
+    if (token.startsWith("-") && token !== "-" && command.positionals[i]?.name !== "pid")
       throw new UsageError(`trama ${commandName(command)} has no option ${token.split("=")[0]}: its fields go in --input, as a JSON object. Run "trama ${commandName(command)} --help".`);
   const min = command.positionals.filter((p) => !p.optional).length;
   if (tail.length < min || tail.length > command.positionals.length) throw new UsageError(`Usage: ${usageOf(command)} ${COMMON_OPTIONS}`);
