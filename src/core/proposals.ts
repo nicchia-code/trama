@@ -63,8 +63,6 @@ const DECISIONS: readonly DriftDecisionKind[] = ["proposal", "dismissed", "fix-c
 interface ProposalData {
   status: ProposalStatus;
   kind: ProposalKind;
-  /** Automatic authorization marker; not itself permission to approve. */
-  automatic: boolean;
   /** A resolution born from the experimental Drift blocker: its Drifts block no Task. Only a marker for the Board and the command line; it changes nothing else. */
   nonBlocking: boolean;
   /** The Drifts a resolution resolves, in the order they were registered; always empty for other kinds. */
@@ -137,7 +135,6 @@ function parseData(raw: Raw, where: string): ProposalData {
   const data: ProposalData = {
     status: enumField(raw, "status", STATUSES, "open", where),
     kind: enumField(raw, "kind", KINDS, "change", where),
-    automatic: boolField(raw, "automatic", false, where),
     nonBlocking: boolField(raw, "nonBlocking", false, where),
     drifts: [],
     requires: stringList(raw, "requires", where),
@@ -148,7 +145,6 @@ function parseData(raw: Raw, where: string): ProposalData {
     scanScope: scanScopeField(raw, where),
     label: textOrNull(raw, "label", where),
   };
-  if (data.automatic && data.kind !== "resolution") throw new TramaError(`${where}: "automatic" is only valid for a resolution Proposal`);
   data.drifts = driftsField(raw, data.kind, where);
   for (const id of data.requires)
     if (!/^[a-z0-9]{8}$/.test(id) && !/^\d+$/.test(id)) throw new TramaError(`${where}: "requires" lists Proposal IDs, not "${id}"`);
@@ -237,13 +233,12 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
 
 /** Writes `proposal.md` from the Proposal's data, leaving defaults out of the file. */
 export function save(proposal: Proposal) {
-  const { kind, automatic, nonBlocking, drifts, requires, request, created, scanScope, label, ...rest } = proposal.data;
+  const { kind, nonBlocking, drifts, requires, request, created, scanScope, label, ...rest } = proposal.data;
   // Defaults stay out of the file, so Proposals without dependencies look as they always did.
   // Numbered Proposals have no `created`; writing it would pretend they remember an instant they do not.
   const data = {
     status: rest.status,
     ...(kind === "change" ? {} : { kind }),
-    ...(automatic ? { automatic: true } : {}),
     ...(nonBlocking ? { nonBlocking: true } : {}),
     ...(kind === "resolution" ? { drifts } : {}),
     ...(requires.length === 0 ? {} : { requires }),
@@ -277,12 +272,10 @@ export function newProposal(
   p: Project,
   title: string,
   body = "",
-  options: { requires?: string[]; kind?: ProposalKind; automatic?: boolean; nonBlocking?: boolean; announcement?: string; origin?: AgentOrigin; request?: string; label?: string } = {},
+  options: { requires?: string[]; kind?: ProposalKind; nonBlocking?: boolean; announcement?: string; origin?: AgentOrigin; request?: string; label?: string } = {},
 ): Proposal {
-  if (options.automatic && (options.kind ?? "change") !== "resolution")
-    throw new TramaError("--automatic can only be used with --resolution");
-  if (options.nonBlocking && ((options.kind ?? "change") !== "resolution" || options.automatic))
-    throw new TramaError("--non-blocking needs --resolution and cannot go with --automatic");
+  if (options.nonBlocking && (options.kind ?? "change") !== "resolution")
+    throw new TramaError("--non-blocking needs --resolution");
   const label = options.label === undefined ? null : checkedLabel(options.label);
   const requires = (options.requires ?? []).map((r) => {
     const required = getProposal(p, r);
@@ -301,7 +294,6 @@ export function newProposal(
       status: "draft",
       kind: options.kind ?? "change",
       nonBlocking: options.nonBlocking ?? false,
-      automatic: options.automatic ?? false,
       drifts: [],
       requires: [...new Set(requires)],
       base: {},
@@ -579,23 +571,13 @@ export function applied(p: Project, proposal: Proposal): FileMap {
 export function validateProposal(p: Project, proposal: Proposal): Diagnostic[] {
   const taskErrors = proposal.tasks.flatMap((t) => t.problems.map((message) => ({ file: `tasks/${t.name}`, line: 0, message })));
   const project = buildProject(applied(p, proposal));
-  const errors = [...taskErrors, ...project.diagnostics, ...taskRules(p, proposal, project), ...labelRule(p, proposal), ...nonBlockingRule(proposal)];
-  if (!proposal.data.automatic) return errors;
-  const problems = [
-    ...(Object.keys(proposal.data.base).length > 0 || proposal.data.delete.length > 0 || newFiles(proposal).size > 0 ? ["an automatic resolution cannot touch or delete Model or Requirements files"] : []),
-    ...proposal.data.drifts.flatMap((d) => [
-      ...(d.decision !== "fix-code" ? [`Drift ${d.drift} must use fix-code`] : []),
-      ...(d.option !== 1 ? [`Drift ${d.drift} must use fix option 1`] : []),
-      ...(d.note !== undefined ? [`Drift ${d.drift} cannot have a note`] : []),
-    ]),
-  ];
-  return [...errors, ...problems.map((message) => ({ file: "proposal.md", line: 0, message }))];
+  return [...taskErrors, ...project.diagnostics, ...taskRules(p, proposal, project), ...labelRule(p, proposal), ...nonBlockingRule(proposal)];
 }
 
-/** `nonBlocking` marks only a resolution that is not automatic: the Board and the command line read the marker from there. */
+/** `nonBlocking` marks a resolution whose Drifts block no Task: the Board and the command line read the marker from there. */
 function nonBlockingRule(proposal: Proposal): Diagnostic[] {
   if (!proposal.data.nonBlocking) return [];
-  const problem = proposal.data.kind !== "resolution" ? "nonBlocking is only valid for a resolution Proposal" : proposal.data.automatic ? "a resolution cannot be both nonBlocking and automatic" : null;
+  const problem = proposal.data.kind !== "resolution" ? "nonBlocking is only valid for a resolution Proposal" : null;
   return problem === null ? [] : [{ file: "proposal.md", line: 0, message: problem }];
 }
 

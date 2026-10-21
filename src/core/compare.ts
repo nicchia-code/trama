@@ -85,7 +85,6 @@ export interface ComparisonDrift {
   should: string;
   where: string;
   options: DriftOption[];
-  critical?: boolean;
   previous?: string;
   proposal?: string;
   notBlocking?: NotBlocking[];
@@ -118,12 +117,14 @@ function taskShape(c: Record<string, unknown>): string[] {
   return out;
 }
 
+const DRIFT_FIELDS = new Set(["title", "refs", "happens", "should", "where", "options", "previous", "proposal", "notBlocking"]);
+
 function driftShape(c: Record<string, unknown>): string[] {
   const out: string[] = [];
   for (const field of ["title", "happens", "should", "where"]) if (typeof c[field] !== "string") out.push(`${field} must be a string`);
   if (!isStrings(c["refs"])) out.push("refs must be a list of strings");
   if (!Array.isArray(c["options"]) || !c["options"].every((o) => isObject(o) && typeof o["title"] === "string" && typeof o["text"] === "string")) out.push("options must be a list of {title, text} strings");
-  if (!optional(c["critical"], (x) => typeof x === "boolean")) out.push("critical must be true or false");
+  for (const field of Object.keys(c)) if (!DRIFT_FIELDS.has(field)) out.push(`unknown field ${field}`);
   for (const field of ["previous", "proposal"]) if (!optional(c[field], (x) => typeof x === "string")) out.push(`${field} must be a string`);
   if (!optional(c["notBlocking"], (x) => Array.isArray(x) && x.every((n) => isObject(n) && typeof n["task"] === "string" && typeof n["reason"] === "string"))) out.push("notBlocking must be a list of {task, reason} strings");
   return out;
@@ -190,7 +191,6 @@ export function archiveComparison(p: Project, comparisonId: string, raw: string)
         happens: c["happens"] as string,
         should: c["should"] as string,
         options: c["options"] as DriftOption[],
-        critical: c["critical"] === true,
         where: c["where"] as string,
         notBlocking,
       }));

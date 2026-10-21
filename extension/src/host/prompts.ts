@@ -7,8 +7,8 @@ export type ResolvedAction =
   | { kind: "written-design"; request: string }
   /** A written design request that starts a project from scratch: the `trama-setup` skill, named `Setup`. */
   | { kind: "setup-request"; request: string }
-  /** `automaticCollection` names the authorized snapshot; absent means the ordinary developer-question workflow. */
-  | { kind: "resolve-drifts"; drifts: string[]; automaticCollection?: string; scoped?: boolean };
+  /** Resolve Drifts on the one Drift the developer chose: always a manual request, answered with a round of questions. */
+  | { kind: "resolve-drifts"; drift: string };
 
 /** The one-line instruction that makes the external agent use the right Trama skill. */
 export function buildPrompt(action: ResolvedAction): string {
@@ -18,9 +18,7 @@ export function buildPrompt(action: ResolvedAction): string {
     case "written-design":
       return `Use the trama-design skill on the design request in \`.trama/requests/${action.request}.md\`. Bind the first Proposal you open to it with the \`request\` field.`;
     case "resolve-drifts":
-      return action.automaticCollection === undefined
-        ? `Use the trama-resolve-drifts skill on the open Drifts ${action.drifts.join(", ")}${action.scoped ? ", and on no other open Drift" : ""}: ask the developer what should happen for each one, then write one resolution Proposal.`
-        : `Use the trama-resolve-drifts skill for automatic collection ${action.automaticCollection}, on only the named Drifts ${action.drifts.join(", ")}. Before each choice, run \`trama autopilot show --json\` and use only Drifts still authorized for this collection. Choose only each Drift's first Fix option; never ask questions, edit the Model or Requirements, or implement code. If an authorized Drift cannot be resolved with that first Fix option, report it with \`trama autopilot move <job> failed --input -\` and \`{"drift":"<id>","reason":"<reason>"}\`, where \`<job>\` is the value of \`TRAMA_JOB\`, and omit it. Create a resolution with \`trama proposal new\`, giving it the \`automatic\` field, record the decisions with \`trama proposal edit\` and hand it over with \`trama proposal move <id> open\`, then hand control back to the host. Do not approve the Proposal or start a Run.`;
+      return `Use the trama-resolve-drifts skill on the open Drift ${action.drift}, and on no other open Drift: ask the developer what should happen for it, then write one resolution Proposal.`;
     case "scan":
       return buildScanPrompt(action.feature === undefined ? [] : [action.feature]);
     case "implement":
@@ -30,12 +28,6 @@ export function buildPrompt(action: ResolvedAction): string {
     case "import":
       return "Use the trama-import skill on this repository.";
   }
-}
-
-/** A restricted implementation Run: the agent reads the coordinator's current authorization before each Task. `tasks` are the Tasks of this Run's model group, which is all it takes. */
-export function buildAutomaticRunPrompt(collection: string, tasks?: readonly string[]): string {
-  const scope = tasks === undefined ? "" : ` This Run takes only the Tasks ${tasks.map((id) => `\`${id}\``).join(", ")} among the authorized ones; no other authorized Task belongs to it.`;
-  return `Use the trama-implement skill for automatic collection ${collection}.${scope} Before each Task, run \`trama autopilot show --json\` and take the authorized Task IDs from its \`tasks\` field, then select only those using \`trama task list --input '{"runnable":true,"tasks":["<id>",…],"max":{maxParallelAgents}}'\`, passing every authorized ID in \`tasks\`. Do not use the general Task queue or start any other Task. If a Task cannot be started/completed or its check fails, report it with \`trama autopilot move <job> failed --input -\` and \`{"task":"<id>","reason":"<reason>"}\`, where \`<job>\` is the value of \`TRAMA_JOB\`; if a Trama check was announced, also complete it with \`trama announcement move <check-id> failed\`. If the final check fails and you can tell which Task broke it, report that Task the same way after the failed check: the other authorized Tasks still go on. Stop when the authorized set has no runnable Tasks.`;
 }
 
 /** The scan prompt for one Feature, or the whole System when there is none, as the developer starts it by hand. It names no Proposal. */

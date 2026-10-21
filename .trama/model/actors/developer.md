@@ -46,12 +46,9 @@ Il developer chiude, dalla riga di comando, un Task di correzione senza cambiare
 The developer takes back a Task that the agent has taken, with the command of the same name; the Board has no button for it. The Task stays In progress and is the developer's again.
 
 ### ASK_AGENT
-The developer asks the coding agent to work, from a button or a command: design a change (with a written request), scan the whole System or one Feature, implement one Task, implement every Task in To do, resolve every open Drift with Resolve all or a single one with Resolve, or import the existing code as Proposals.
+The developer asks the coding agent to work, from a button or a command: design a change (with a written request), scan the whole System or one Feature, implement one Task, implement every Task in To do, resolve one open Drift with Resolve, or import the existing code as Proposals.
 
 Una richiesta di design arriva in un solo modo: come richiesta scritta, un documento Markdown che il developer apre con + Add Work Item in fondo alla colonna Backlog, compone in una scheda dell'editor e invia con il pulsante Send to agent della scheda o chiudendo la scheda (vedi la Design request). Non c'è più una richiesta rapida di una riga.
-
-### SET_DRIFT_AUTOPILOT
-Il developer cambia la propria delega per i Drift: nessuna, soltanto i non critici oppure tutti. Il cambiamento vale prima della prossima scelta, approvazione e avvio automatico; ritirare la delega non annulla decisioni già applicate né interrompe forzatamente un Task già iniziato. La cambia nelle impostazioni dell'editor o dalla scheda Settings del pannello, dove aumentarla chiede prima conferma.
 
 ### CLOSE_REQUEST
 Il developer chiude la scheda di una richiesta di design scritta che non ha mai inviato, quando nessun'altra scheda mostra più quella richiesta. Chiudere la finestra dell'editor con la scheda aperta non è questo Event, né lo è chiudere la scheda di una richiesta già inviata.

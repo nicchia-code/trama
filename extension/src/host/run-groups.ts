@@ -1,7 +1,7 @@
 import type { RunGroup } from "../protocol";
 import type { RunModel } from "./terminal-agent";
 
-/** A Run of a sequence: the model it runs on, the filter that cuts `Run all` to its Tasks, and the Tasks it names (automatic Runs). */
+/** A Run of a sequence: the model it runs on, the filter that cuts `Run all` to its Tasks, and the Tasks it names. */
 export interface PlannedRun {
   run: RunModel;
   group: RunGroup;

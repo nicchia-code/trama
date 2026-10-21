@@ -24,7 +24,7 @@ const create = defineCommand({
   mode: "immediate",
   summary: "Record an open Drift, or list the Tasks a new one would block.",
   description:
-    "`happens` (what the code does, in terms of behaviour) and `should` (what the Model or Requirement says) are short Markdown; `where` is required and says where in the code the difference was seen (read that code before filing; files and code names go only there). `options` are from two to five fix options, the first being the one you recommend; without options the Drift is accepted only with an attached `proposal`. `critical` marks an urgent developer decision. `task` names the Task you were implementing when you found the difference (the origin). `previous` is the resolved Drift this one follows. `notBlocking` names Tasks the Drift would block and leaves free, each with a one-line `reason`: the difference does not touch it (see `dryRun`). `announcement` is the ID printed by `trama announcement new`. With `dryRun: true` nothing is written: it prints the Tasks a Drift with these `refs` and this `task` would block, by number or identity and title; only `refs` and `task` are needed then.",
+    "`happens` (what the code does, in terms of behaviour) and `should` (what the Model or Requirement says) are short Markdown; `where` is required and says where in the code the difference was seen (read that code before filing; files and code names go only there). `options` are from two to five fix options, the first being the one you recommend; without options the Drift is accepted only with an attached `proposal`. `task` names the Task you were implementing when you found the difference (the origin). `previous` is the resolved Drift this one follows. `notBlocking` names Tasks the Drift would block and leaves free, each with a one-line `reason`: the difference does not touch it (see `dryRun`). `announcement` is the ID printed by `trama announcement new`. With `dryRun: true` nothing is written: it prints the Tasks a Drift with these `refs` and this `task` would block, by number or identity and title; only `refs` and `task` are needed then.",
   input: z
     .strictObject({
       title: z.string().min(1).optional().describe("A short title: at most five words. Required unless `dryRun`."),
@@ -33,7 +33,6 @@ const create = defineCommand({
       should: z.string().optional().describe("What the Model or Requirement says. Required unless `dryRun`."),
       where: z.string().optional().describe("Where in the code the difference was seen. Required unless `dryRun`."),
       options: z.array(z.strictObject({ title: z.string().describe("A few words naming this way to fix the code."), text: z.string().describe("What changes and what it costs.") })).optional().describe("From 2 to 5 fix options, the recommended one first; none only with `proposal`."),
-      critical: z.boolean().optional().describe("An urgent developer decision. Default false."),
       task: z.string().min(1).optional().describe("The Task being implemented when the Drift was found: its ID or short number."),
       proposal: z.string().min(1).optional().describe("The Draft or open Proposal that goes with the Drift: its ID or short number."),
       previous: z.string().min(1).optional().describe("The resolved Drift this one follows: its ID or short number."),
@@ -46,7 +45,7 @@ const create = defineCommand({
       for (const field of ["title", "happens", "should", "where"] as const) if (input[field] === undefined) ctx.addIssue({ code: "custom", path: [field], message: "required" });
     }),
   output: z.union([
-    card.extend({ path: z.string(), critical: z.boolean(), previous: z.string().nullable(), note: z.string().optional().describe("About the announcement, when it was not known.") }),
+    card.extend({ path: z.string(), previous: z.string().nullable(), note: z.string().optional().describe("About the announcement, when it was not known.") }),
     z.object({ tasks: z.array(z.object({ id: z.string(), number: z.string().nullable(), title: z.string() })) }).describe("`dryRun`"),
   ]),
   example: {
@@ -62,7 +61,7 @@ const create = defineCommand({
     task: "a1b2c3d4",
     announcement: "e5f6a7b8",
   },
-  effects: { writes: true, activity: true, coordinator: true },
+  effects: { writes: true, activity: true, editor: true },
   run(ctx, input) {
     const project = ctx.project();
     if (input.dryRun === true) return driftCandidatesView(project, input.refs, input.task);
@@ -77,7 +76,6 @@ const create = defineCommand({
       happens: input.happens as string,
       should: input.should as string,
       options: input.options ?? [],
-      critical: input.critical === true,
       announcement: input.announcement,
       where: input.where as string,
       notBlocking: (input.notBlocking ?? []).map((n) => ({ task: getTask(project, n.task, true).id, reason: n.reason })),
@@ -91,7 +89,7 @@ const create = defineCommand({
       });
     const n = numbersOf(ctx);
     const follows = d.data.previous === null ? "" : `; recurring, it follows Drift ${n.name("drift", d.data.previous)}`;
-    return text(`Created Drift ${n.name("drift", d.id)} at ${d.path}${follows}${note ? `\n${note}` : ""}`, { id: d.id, number: n.label("drift", d.id), path: d.path, critical: d.data.critical, previous: d.data.previous, ...(note ? { note } : {}) });
+    return text(`Created Drift ${n.name("drift", d.id)} at ${d.path}${follows}${note ? `\n${note}` : ""}`, { id: d.id, number: n.label("drift", d.id), path: d.path, previous: d.data.previous, ...(note ? { note } : {}) });
   },
 });
 

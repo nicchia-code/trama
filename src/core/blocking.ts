@@ -6,7 +6,7 @@ import type { Drift, Task } from "./work";
 /** Why a Task is blocked: an open Drift blocks it, or it waits for the Task that fixes the code of its own Drift. */
 export type Blocker =
   | { kind: "drift"; drift: string; title: string }
-  | { kind: "fix"; task: string; title: string; drift: string };
+  | { kind: "fix"; task: string; title: string; drift: string; driftTitle: string };
 
 /** The same element always has the same key, however its reference was written. */
 function elementKey(el: Element): string {
@@ -86,7 +86,7 @@ export function computeBlocked(project: ProjectModel, tasks: Task[], drifts: Dri
       const origin = byId.get(drift.data.origin);
       const fix = byId.get(drift.data.task);
       const leftFree = drift.data.notBlocking.some((n) => n.task === drift.data.origin);
-      if (origin && fix && origin.data.column !== "done" && fix.data.column !== "done" && !leftFree) add(origin, { kind: "fix", task: fix.id, title: fix.title, drift: drift.id });
+      if (origin && fix && origin.data.column !== "done" && fix.data.column !== "done" && !leftFree) add(origin, { kind: "fix", task: fix.id, title: fix.title, drift: drift.id, driftTitle: drift.title });
     }
   }
   return blocked;

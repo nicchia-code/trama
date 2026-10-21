@@ -14,7 +14,7 @@ import type { Result } from "./result";
  */
 
 /** The objects of the command line, in the order `trama --help` lists them. */
-export const OBJECTS = ["model", "proposal", "task", "drift", "history", "announcement", "comparison", "question", "autopilot", "advisor", "project", "timing", "hook"] as const;
+export const OBJECTS = ["model", "proposal", "task", "drift", "history", "announcement", "comparison", "question", "advisor", "project", "timing", "hook"] as const;
 export type CommandObject = (typeof OBJECTS)[number];
 
 /** The verbs, with the one meaning they have for every object; `hook` is the only object that does not follow them. */
@@ -38,8 +38,8 @@ export interface Effects {
   activity?: boolean;
   /** With `activity`, for a `move`: only these states of arrival count; the others do not. */
   activityStates?: readonly string[];
-  /** It sends messages to the editor's coordinator. */
-  coordinator?: boolean;
+  /** It sends messages to the editor. */
+  editor?: boolean;
 }
 
 /**
@@ -127,7 +127,7 @@ export function defineCommand<I extends z.ZodObject, O extends z.ZodType>(declar
     output: declaration.output,
     example: declaration.example,
     exampleArgs: declaration.exampleArgs,
-    effects: { writes: declaration.effects?.writes ?? false, activity: declaration.effects?.activity ?? false, activityStates: declaration.effects?.activityStates, coordinator: declaration.effects?.coordinator ?? false },
+    effects: { writes: declaration.effects?.writes ?? false, activity: declaration.effects?.activity ?? false, activityStates: declaration.effects?.activityStates, editor: declaration.effects?.editor ?? false },
     hidden: declaration.hidden ?? false,
     stdin: declaration.stdin,
     failure: declaration.failure,

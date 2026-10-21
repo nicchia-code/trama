@@ -29,7 +29,7 @@ describe("a resolution that blocks nothing", () => {
   test("proposal new with nonBlocking writes nonBlocking and the flag is read back", () => {
     created({ title: "Free Drifts", kind: "resolution", nonBlocking: true, body: "Filed by the blocker" });
     const id = listProposals(p).find((x) => x.title === "Free Drifts")?.id as string;
-    expect(getProposal(p, id).data).toMatchObject({ kind: "resolution", nonBlocking: true, automatic: false });
+    expect(getProposal(p, id).data).toMatchObject({ kind: "resolution", nonBlocking: true });
     expect(readFileSync(join(getProposal(p, id).dir, "proposal.md"), "utf8")).toContain("nonBlocking: true");
   });
 
@@ -40,27 +40,21 @@ describe("a resolution that blocks nothing", () => {
     expect(readFileSync(join(getProposal(p, id).dir, "proposal.md"), "utf8")).not.toContain("nonBlocking");
   });
 
-  test("nonBlocking without a resolution, or with automatic, is a usage error that creates nothing", () => {
+  test("nonBlocking without a resolution is a usage error that creates nothing", () => {
     const before = listProposals(p).length;
     expect(() => created({ title: "No resolution", nonBlocking: true })).toThrow(/nonBlocking: applies only with kind resolution/);
-    expect(() => created({ title: "Automatic", kind: "resolution", automatic: true, nonBlocking: true })).toThrow(/nonBlocking: cannot go together with automatic/);
     expect(listProposals(p).length).toBe(before);
   });
 
-  test("the core refuses the flag outside a manual resolution", () => {
+  test("the core refuses the flag outside a resolution", () => {
     expect(() => newProposal(p, "Change", "", { nonBlocking: true })).toThrow(/--non-blocking needs --resolution/);
-    expect(() => newProposal(p, "Automatic", "", { kind: "resolution", automatic: true, nonBlocking: true })).toThrow(/--non-blocking needs --resolution/);
     expect(listProposals(p)).toHaveLength(0);
   });
 
-  test("validation reports nonBlocking on a Proposal that is not a resolution, and on an automatic one", () => {
+  test("validation reports nonBlocking on a Proposal that is not a resolution", () => {
     const change = newProposal(p, "Change");
     markNonBlocking(change.id);
     expect(validateProposal(p, getProposal(p, change.id)).map((d) => d.message)).toContain("nonBlocking is only valid for a resolution Proposal");
-
-    const automatic = newProposal(p, "Automatic", "", { kind: "resolution", automatic: true });
-    markNonBlocking(automatic.id);
-    expect(validateProposal(p, getProposal(p, automatic.id)).map((d) => d.message)).toContain("a resolution cannot be both nonBlocking and automatic");
   });
 
   test("proposal list marks a nonBlocking resolution after its resolves count, and no other", () => {

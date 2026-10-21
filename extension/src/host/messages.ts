@@ -1,7 +1,7 @@
 import type { Raw } from "../../../src/core/schema";
 import type { AgentAction, ToHost } from "../protocol";
 import type { QuestionAction } from "./question-state";
-import { DELEGATION_ORDER, type DelegationMode, type SettingSchema, type SettingValue, settingValueError } from "./settings-schema";
+import { type SettingSchema, type SettingValue, settingValueError } from "./settings-schema";
 import { safeLink } from "../../../src/core/links";
 
 export type Parsed = { ok: true; message: ToHost } | { ok: false; reason: string };
@@ -23,7 +23,6 @@ function parseAction(value: unknown): AgentAction | string {
     case "implement-all":
       return { kind: "implement-all" };
     case "resolve-drifts":
-      if (raw["drift"] === undefined) return { kind: "resolve-drifts" };
       return typeof raw["drift"] === "string" && ID.test(raw["drift"]) ? { kind: "resolve-drifts", drift: raw["drift"] } : "resolve-drifts needs a valid Drift ID";
     case "import":
       return { kind: "import" };
@@ -104,10 +103,6 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       if (setting === undefined) return bad("setSetting needs a key of the Trama settings");
       const reason = settingValueError(setting, raw["value"]);
       return reason === null ? { ok: true, message: { type, key: setting.key, value: raw["value"] as SettingValue } } : bad(`${setting.key}: ${reason}`);
-    }
-    case "setDelegation": {
-      const mode = raw["mode"];
-      return typeof mode === "string" && DELEGATION_ORDER.includes(mode) ? { ok: true, message: { type, mode: mode as DelegationMode } } : bad("setDelegation needs a mode: disabled, enabled or yolo");
     }
     default:
       return bad(`unknown message type "${type}"`);

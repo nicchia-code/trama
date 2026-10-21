@@ -84,6 +84,13 @@ describe("trama comparison move", () => {
     expect(listDrifts(p)).toEqual([]);
   });
 
+  test("a Drift carrying `critical` is reported among the problems and nothing is written", () => {
+    const comparison = announce(p, { kind: "comparison", title: "Comparing order", machine: "order" });
+    const drift = { ...(JSON.parse(validComparison).drifts[0] as object), critical: true };
+    expect(() => archiveComparison(p, comparison.id, JSON.stringify({ tasks: [], drifts: [drift] }))).toThrow(/unknown field critical[\s\S]*nothing was written|nothing was written[\s\S]*unknown field critical/);
+    expect(listDrifts(p)).toEqual([]);
+  });
+
   test("a valid comparison files its Tasks and Drifts and delivers the waiting comparison", () => {
     const comparison = announce(p, { kind: "comparison", title: "Comparing order", machine: "order" });
     const result = archiveComparison(p, comparison.id, validComparison);

@@ -142,12 +142,9 @@ test("a whole number below the minimum shows its reason and is not saved; a vali
   expect(posted).toEqual([{ type: "setSetting", key: "trama.maxParallelAgents", value: 3 }]);
 });
 
-test("the Drift delegation sends its own message, and a workspace value shows under its control", () => {
-  const { posted } = setup({ "trama.skillsDir": { user: "", workspace: "custom/skills" } });
+test("a workspace value shows under its control", () => {
+  setup({ "trama.skillsDir": { user: "", workspace: "custom/skills" } });
   expect(screen.getByText(/The workspace setting overrides this:/).textContent).toBe("The workspace setting overrides this: custom/skills.");
-  fireEvent.pointerDown(screen.getByRole("combobox", { name: "Drift Auto Pilot" }), { button: 0, ctrlKey: false, pointerType: "mouse" });
-  fireEvent.click(screen.getByRole("option", { name: "yolo" }));
-  expect(posted).toEqual([{ type: "setDelegation", mode: "yolo" }]);
 });
 
 test("trama.theme is declared in the manifest as the only setting of Appearance", () => {

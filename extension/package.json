@@ -132,22 +132,6 @@
           "scope": "application",
           "markdownDescription": "Where `omp` terminals open: `panel` (the terminal area; the default) or `editor` (a terminal tab in the active editor group). It applies only in your user settings."
         },
-        "trama.driftAutoPilot": {
-          "type": "string",
-          "enum": [
-            "disabled",
-            "enabled",
-            "yolo"
-          ],
-          "enumDescriptions": [
-            "Manual: you decide on every Drift (the default).",
-            "The agent recommends, approves and fixes non-critical Drifts on its own.",
-            "Like enabled, critical Drifts included: the ones where your decision is urgently needed."
-          ],
-          "default": "disabled",
-          "scope": "application",
-          "markdownDescription": "How much the agent does with Drifts on its own: `disabled` (the default; you decide on every Drift), `enabled` (the agent recommends, approves and fixes non-critical Drifts on its own) or `yolo` (like `enabled`, critical Drifts included, the ones where your decision is urgently needed). It applies only in your user settings. After opening the editor, a finished scan or an explicit Resolve Drifts request is required before automatic collection resumes. A Task whose origin Drift is being fixed runs only after its fix Tasks are Done. A scan that failed or was interrupted counts as finished and does not suspend the delegation. Repeated automatic cycles have no additional limit. Lowering it stops new automatic steps but does not interrupt a Task already started."
-        },
         "trama.submitWhileRunning": {
           "type": "boolean",
           "default": false,

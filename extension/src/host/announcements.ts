@@ -5,7 +5,6 @@ import { announcementsDir, listAnnouncements, withdrawAll } from "../../../src/c
 import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { getProposal, listProposals } from "../../../src/core/proposals";
-import { sendCoordinatorMessage } from "../../../src/core/question-channel";
 import { announcementView } from "../../../src/core/snapshot";
 import type { AnnouncementView } from "../../../src/core/snapshot";
 import { projectAt } from "../../../src/core/store";
@@ -47,10 +46,6 @@ export function withdrawWaiting(root: string, which?: (a: Announcement) => boole
     const p = projectAt(root);
     const ids = which === undefined ? undefined : listAnnouncements(p).filter(which).map((a) => a.id);
     const withdrawn = withdrawAll(p, ids);
-    for (const a of withdrawn) if (a.kind === "check" && a.phase === "scanning" && a.job !== null) {
-      // The coordinator counts it only if it knows this job as a Run, so a window that followed another window's Run forwards it too.
-      sendCoordinatorMessage(p, { type: "interrupted-preflight", root, job: a.job, title: a.title }).catch(() => undefined);
-    }
     // An import ends with its agent and gives no notice: only a card the agent did not deliver, or a check it did not finish, is reported.
     const views = describe(p, withdrawn.filter((a) => a.kind !== "work"));
     if (views.length === 0 || !notify) return;

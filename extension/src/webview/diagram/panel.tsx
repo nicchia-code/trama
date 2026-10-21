@@ -86,19 +86,6 @@ function Named({ label, name }: { label: string; name: CardName }) {
   );
 }
 
-export function CriticalBadge() {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge variant="outline" className="border-red-600 text-red-600 dark:border-red-400 dark:text-red-400" aria-label="Critical Drift: urgent developer decision">
-          Critical
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent>Urgent developer decision</TooltipContent>
-    </Tooltip>
-  );
-}
-
 export function RecurringBadge({ previous }: { previous: { id: string; title: string } }) {
   return (
     <Tooltip>
@@ -231,18 +218,12 @@ function ResolvesBlock({ proposal, numbers, showDrift }: { proposal: ProposalVie
                 <button type="button" data-action={`resolves:${row.drift}`} className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 py-px text-left hover:[&_.title]:underline" onClick={() => showDrift(row.drift)}>
                   <IdTag name={row.name} />
                   <span className="title break-words">{row.title}</span>
-                  {row.critical ? <CriticalBadge /> : null}
                   {row.previous !== null ? <RecurringBadge previous={row.previous} /> : null}
                   <span className="break-words text-muted-foreground">{row.decision}</span>
                 </button>
               </TooltipTrigger>
               <TooltipContent>Show the Drift on the diagram</TooltipContent>
             </Tooltip>
-            {row.autopilotFailed !== null ? (
-              <Badge variant="destructive" aria-label={`Autopilot failed: ${row.autopilotFailed}`} title={`Autopilot failed: ${row.autopilotFailed}`}>
-                autopilot failed
-              </Badge>
-            ) : null}
             {row.notBlocking.length > 0 ? (
               <p className="text-muted-foreground">
                 Not blocking:{" "}
@@ -401,7 +382,6 @@ export function DetailsPanel({
         </div>
         <h2 className="mt-0.5 mb-1.5 text-[15px] font-semibold break-words">{detail.title}</h2>
         <div className="flex flex-wrap items-center gap-1.5">
-          {drift?.critical ? <CriticalBadge /> : null}
           {previous ? <RecurringBadge previous={previous} /> : null}
           {detail.change !== "same" ? (
             <Badge variant="outline" className={CHANGE_COLOR[detail.change].replace(" line-through", "")}>

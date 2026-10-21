@@ -153,13 +153,12 @@ For omp, writing in Italian, a typical setup looks like this:
 | `trama.skillsDir` | `.agents/skills` | Where Get Started installs the agent skills. |
 | `trama.language` | *empty* | Language for the prose the agent writes (descriptions, Proposals, Tasks, Drifts), e.g. `Italian`. Trama never fills it in: empty asks the agent nothing about language. Code, names, titles and IDs stay in English. |
 | `trama.terminalLocation` | `editor` | Where terminal agents open: `editor` (a tab in the active editor group, beside your code) or `panel` (terminal area, in the background). |
-| `trama.analysis` | *empty* | Model for design requests, Drift resolution, the preparation of automatic Drift resolution and import. |
+| `trama.analysis` | *empty* | Model for design requests, Drift resolution and import. |
 | `trama.scan` | *empty* | Model for scans, including the sub-agents that compare each Machine. |
-| `trama.execution` | *empty* | Model for implementing Tasks: implement, implement all and the automatic Run, including their pre-flight and the selective final scan. |
+| `trama.execution` | *empty* | Model for implementing Tasks: implement and implement all, including their pre-flight and the selective final scan. |
 | `trama.autoExit` | `true` | Close an agent's terminal as soon as it's done. |
 | `trama.maxParallelAgents` | `20` | How many sub-agents the agent may run at once. |
 | `trama.submitWhileRunning` | `false` | `true` lets you start a run while another is in progress; `false` keeps Run buttons unavailable until it finishes. |
-| `trama.driftAutoPilot` | `disabled` | Drift autopilot: `disabled` (you decide on every Drift), `enabled` (the agent recommends, approves and fixes non-critical Drifts on its own) or `yolo` (also critical Drifts). |
 | `trama.experimentalAdvisorScanner` | `false` | Experimental, with omp as the agent only: `true` makes omp's advisor check each Run's code against the Model and the Requirements, and turns the scans off (Scan buttons, pre-flight and end-of-run scan); in an omp session you start yourself with the advisor on, Trama's advisors only run `trama advisor show` and then stay silent. See the [extension README](./extension/README.md). |
 | `trama.experimentalParallelExecution` | `false` | Experimental, for runs over several Tasks with an agent that has sub-agents: `true` lets the agent start together Tasks that Trama would keep apart because they concern the same thing, or hold a Task until another is done, giving a reason for each choice. See the [extension README](./extension/README.md). |
 

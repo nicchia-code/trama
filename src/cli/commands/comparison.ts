@@ -50,7 +50,7 @@ const move = defineCommand({
   mode: "immediate",
   summary: "Deliver a comparison: file its Tasks and Drifts in one go.",
   description:
-    "The input is what the comparison found: an optional `design` (the Proposal every Task is linked to), `tasks` (each `title`, `refs`, `body`, optional `technical`) and `drifts` (each `title`, `refs`, `happens`, `should`, `where`, `options` as a list of `{title, text}`, and optional `critical`, `previous`, `proposal`, `notBlocking` as a list of `{task, reason}`); both lists may be empty. Every card follows the rules of `task new` and `drift new`. All cards are checked before any is written: if one is not valid nothing is written and every problem is listed per card. Otherwise the cards are created in order, the comparison is delivered and it is recorded as compared on this code.",
+    "The input is what the comparison found: an optional `design` (the Proposal every Task is linked to), `tasks` (each `title`, `refs`, `body`, optional `technical`) and `drifts` (each `title`, `refs`, `happens`, `should`, `where`, `options` as a list of `{title, text}`, and optional `previous`, `proposal`, `notBlocking` as a list of `{task, reason}`); both lists may be empty. Every card follows the rules of `task new` and `drift new`. All cards are checked before any is written: if one is not valid nothing is written and every problem is listed per card. Otherwise the cards are created in order, the comparison is delivered and it is recorded as compared on this code.",
   positionals: [{ name: "id", description: "The comparison: the ID printed by `comparison new`." }, { name: "state", description: "Where the comparison goes.", choices: ["delivered"] }],
   input: z.strictObject({
     design: z.string().optional().describe("The Proposal every Task is linked to."),
@@ -60,7 +60,7 @@ const move = defineCommand({
   output: z.object({ comparison: z.string(), delivered: z.boolean(), tasks: z.array(cardLine), drifts: z.array(cardLine.extend({ previous: z.string().nullable() })) }),
   example: { tasks: [{ title: "Order cancel", refs: ["order/Paid"], body: "Cancel a paid order." }], drifts: [] },
   exampleArgs: ["a1b2c3d4", "delivered"],
-  effects: { writes: true, activity: true, coordinator: true },
+  effects: { writes: true, activity: true, editor: true },
   run(ctx, input, [id]) {
     const project = ctx.project();
     const result = archiveComparison(project, id as string, JSON.stringify(input));

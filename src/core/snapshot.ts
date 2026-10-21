@@ -84,8 +84,6 @@ export interface ProposalView {
   title: string;
   body: string;
   kind: ProposalKind;
-  /** Marked for automatic resolution under the developer's delegation; the marker grants no approval. */
-  automatic: boolean;
   /** A resolution the experimental Drift blocker filed: its Drifts block no Task. Approving it changes nothing else. */
   nonBlocking: boolean;
   /** The Drifts a resolution resolves, in creation order, each with what approving does to it; empty for any other Proposal. */
@@ -130,8 +128,6 @@ export interface DriftView {
   /** When the Drift was created, UTC ISO 8601; null for a numbered Drift written before the field existed. */
   created: string | null;
   title: string;
-  /** True only when a developer decision is urgently needed. */
-  critical: boolean;
   /** The Drift this one follows, as its identity and title, when it is recurring. */
   previous: { id: string; title: string } | null;
   /** The fix Task that dismissed this Drift by closing without changes, with its note while Done; null otherwise. */
@@ -348,7 +344,6 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     title: proposal.title,
     body: stripTitle(proposal.body),
     kind: proposal.data.kind,
-    automatic: proposal.data.automatic,
     nonBlocking: proposal.data.nonBlocking,
     tasks: coverage === null ? [] : proposal.tasks.map((t) => ({ id: t.id, title: t.title, body: stripTitle(t.body), technical: t.technical, refs: t.refs })),
     removals: coverage?.removals ?? [],
@@ -413,7 +408,6 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
       id: d.id,
       created: d.data.created,
       title: d.title,
-      critical: d.data.critical,
       previous: followedDrift(p, d),
       closedUnchanged: closedUnchanged(p, d),
       notBlocking: freedTasks(d, tasks),

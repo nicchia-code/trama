@@ -132,10 +132,6 @@ describe("A Proposal's Tasks cover its scope", () => {
     expect(getProposal(p, scratch.id).data.status).toBe("approved");
   });
 
-  test("automatic is refused on a setup Proposal, as on any kind but resolution", () => {
-    expect(() => newProposal(p, "Automatic setup", "", { kind: "setup", automatic: true })).toThrow("--automatic can only be used with --resolution");
-  });
-
   test("an Already present row covers an entry the same way, and every row must resolve", () => {
     const row = newProposal(p, "Already there", "## Already present\n- `order` — checkout/order.md\n- `payment` — checkout/payment.md\n");
     rewordEvent(row.id);

@@ -2,37 +2,16 @@ import { afterEach, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  awaitAutopilotResume,
-  activeProjectJobs,
-  autopilotFailedCase,
   bindChatJob,
   chatJobSendStarted,
-  clearAutopilotFailure,
-  driftAutopilotStatus,
-  setJobsVerified,
   driftWork,
-  clearSendReservations,
-  forgetWindow,
-  projectWindowIds,
-  reserveSend,
-  sendReserved,
   endChatJobs,
-  isKnownSuccessfulScan,
   endHeldJob,
   endTerminalJobs,
-  excludeAutopilotDrift,
-  forgetDeveloperScanCases,
-  jobAbnormalEnd,
-  lastFailedScan,
-  receiveCoordinatorMessage,
-  recordAutopilotFailure,
-  recordSkippedDrift,
-  runContinuationHeld,
-  shownAutopilotFailures,
-  autopilotFailures,
-  autopilotReady,
-  resumeAutopilot,
   endUnsentJob,
+  jobAbnormalEnd,
+  localProjectJobs,
+  receiveNotice,
   startJob,
 } from "../extension/src/host/drift-resolution";
 
@@ -48,49 +27,23 @@ afterEach(() => {
   }
 });
 
-test("an abnormal job end received from another window keeps its reason; a normal end keeps none", () => {
+test("an abnormal terminal end keeps its reason; a normal end keeps none", () => {
   const project = root();
-  receiveCoordinatorMessage({ type: "job", id: "remote-run", root: project, kind: "run", active: true, place: { terminal: "terminal" } });
-  receiveCoordinatorMessage({ type: "job", id: "remote-run", root: project, kind: "run", active: false, place: { terminal: "terminal" }, abnormal: "its terminal was closed" });
-  expect(jobAbnormalEnd(project, "remote-run")).toBe("its terminal was closed");
-  receiveCoordinatorMessage({ type: "job", id: "remote-clean", root: project, kind: "run", active: true, place: { terminal: "terminal-2" } });
-  receiveCoordinatorMessage({ type: "job", id: "remote-clean", root: project, kind: "run", active: false, place: { terminal: "terminal-2" } });
-  expect(jobAbnormalEnd(project, "remote-clean")).toBeUndefined();
-});
-
-test("with the Advisor Scanner on, the end of an omp Run lifts the wait with any outcome, here and in other windows", () => {
-  const project = root();
-  expect(autopilotReady(project)).toBe(false);
-  startJob("run", project, { terminal: "advisor-run" }, true, undefined, "advisor-job", "automatic", "", true);
-  endTerminalJobs("advisor-run", "its terminal was closed");
-  expect(autopilotReady(project)).toBe(true);
-  const other = root();
-  receiveCoordinatorMessage({ type: "job", id: "remote-advisor", root: other, kind: "run", active: true, advisor: true, place: { terminal: "terminal-3" } });
-  expect(autopilotReady(other)).toBe(false);
-  receiveCoordinatorMessage({ type: "job", id: "remote-advisor", root: other, kind: "run", active: false, place: { terminal: "terminal-3" }, abnormal: "its terminal was closed" });
-  expect(autopilotReady(other)).toBe(true);
-});
-
-test("without the Advisor Scanner, the end of a Run does not lift the wait; a scan's end still does", () => {
-  const project = root();
-  startJob("run", project, { terminal: "plain-run" }, true, undefined, "plain-job");
-  endTerminalJobs("plain-run");
-  expect(autopilotReady(project)).toBe(false);
-  receiveCoordinatorMessage({ type: "job", id: "remote-plain", root: project, kind: "run", active: true, place: { terminal: "terminal-4" } });
-  receiveCoordinatorMessage({ type: "job", id: "remote-plain", root: project, kind: "run", active: false, place: { terminal: "terminal-4" } });
-  expect(autopilotReady(project)).toBe(false);
-  startJob("scan", project, { terminal: "plain-scan" }, true, undefined, "plain-scan-job");
-  endTerminalJobs("plain-scan");
-  expect(autopilotReady(project)).toBe(true);
+  startJob("run", project, { terminal: "terminal" }, undefined, "abnormal-run");
+  endTerminalJobs("terminal", "its terminal was closed");
+  expect(jobAbnormalEnd(project, "abnormal-run")).toBe("its terminal was closed");
+  startJob("run", project, { terminal: "terminal-2" }, undefined, "clean-run");
+  endTerminalJobs("terminal-2");
+  expect(jobAbnormalEnd(project, "clean-run")).toBeUndefined();
 });
 
 test("an interrupted or closed Cursor conversation ends its job abnormally; a completed one ends normally", () => {
   const project = root();
-  startJob("resolve", project, { chat: "cursor" }, false, undefined, "interrupted-job");
+  startJob("resolve", project, { chat: "cursor" }, undefined, "interrupted-job");
   bindChatJob(project, "interrupted");
   endChatJobs(project, "interrupted", "its conversation was interrupted");
   expect(jobAbnormalEnd(project, "interrupted-job")).toBe("its conversation was interrupted");
-  startJob("resolve", project, { chat: "cursor" }, false, undefined, "completed-job");
+  startJob("resolve", project, { chat: "cursor" }, undefined, "completed-job");
   bindChatJob(project, "completed");
   endChatJobs(project, "completed");
   expect(jobAbnormalEnd(project, "completed-job")).toBeUndefined();
@@ -98,52 +51,11 @@ test("an interrupted or closed Cursor conversation ends its job abnormally; a co
 
 test("a chat job whose send was not made by the chat ends at once, without an abnormal outcome", () => {
   const project = root();
-  startJob("run", project, { chat: "cursor" }, false, undefined, "unsent-job");
-  expect(activeProjectJobs(project).some((job) => job.id === "unsent-job")).toBe(true);
+  startJob("run", project, { chat: "cursor" }, undefined, "unsent-job");
+  expect(localProjectJobs(project).some((job) => job.id === "unsent-job")).toBe(true);
   endUnsentJob(project, "unsent-job");
-  expect(activeProjectJobs(project).some((job) => job.id === "unsent-job")).toBe(false);
+  expect(localProjectJobs(project).some((job) => job.id === "unsent-job")).toBe(false);
   expect(jobAbnormalEnd(project, "unsent-job")).toBeUndefined();
-});
-
-test("a skipped Drift and a failed case stay out of automatic resolution until they change or a developer scan forgets them", () => {
-  const project = root();
-  recordSkippedDrift(project, "skipped", "signature-1");
-  recordAutopilotFailure(project, "job", "failed", undefined, "fix did not apply");
-  expect(autopilotFailedCase(project, "skipped")).toBe(true);
-  clearAutopilotFailure(project, "skipped", "signature-1");
-  expect(autopilotFailedCase(project, "skipped")).toBe(true);
-  clearAutopilotFailure(project, "skipped", "signature-2");
-  expect(autopilotFailedCase(project, "skipped")).toBe(false);
-  recordSkippedDrift(project, "skipped", "signature-2");
-  forgetDeveloperScanCases(project);
-  expect(autopilotFailedCase(project, "skipped")).toBe(false);
-  expect(autopilotFailedCase(project, "failed")).toBe(false);
-});
-
-test("a skipped question shows only with the autopilot on, and not for a critical Drift in enabled mode", () => {
-  const project = root();
-  recordSkippedDrift(project, "plain", "signature-1");
-  recordSkippedDrift(project, "critical", "signature-1");
-  recordAutopilotFailure(project, "job", "failed", undefined, "fix did not apply");
-  const failures = autopilotFailures(project);
-  const isCritical = (drift: string) => drift === "critical";
-  const ids = (mode: "disabled" | "enabled" | "yolo") => shownAutopilotFailures(failures, mode, isCritical).map((f) => f.drift ?? f.job);
-  expect(ids("disabled")).toEqual(["failed"]);
-  expect(ids("enabled")).toEqual(["plain", "failed"]);
-  expect(ids("yolo")).toEqual(["plain", "critical", "failed"]);
-  expect(autopilotFailedCase(project, "critical")).toBe(true);
-});
-
-test("a skip forwarded from another window keeps its Drift out until its question is answered or a developer scan starts", () => {
-  const project = root();
-  const signature = JSON.stringify({ data: { status: "open" }, body: "first" });
-  receiveCoordinatorMessage({ type: "drift-question-skipped", root: project, drift: "forwarded", signature });
-  expect(autopilotFailedCase(project, "forwarded")).toBe(true);
-  receiveCoordinatorMessage({ type: "drift-question-answered", root: project, drift: "forwarded" });
-  expect(autopilotFailedCase(project, "forwarded")).toBe(false);
-  receiveCoordinatorMessage({ type: "drift-question-skipped", root: project, drift: "forwarded", signature });
-  receiveCoordinatorMessage({ type: "developer-scan-started", root: project });
-  expect(autopilotFailedCase(project, "forwarded")).toBe(false);
 });
 
 test("prompts during preparation are ignored but prompts and ends during delivery are retained", () => {
@@ -151,7 +63,7 @@ test("prompts during preparation are ignored but prompts and ends during deliver
   bindChatJob(project, "preparation");
   endChatJobs(project, "preparation");
   const sentAfter = chatJobSendStarted(project, "cursor");
-  startJob("run", project, { chat: "cursor" }, false, sentAfter);
+  startJob("run", project, { chat: "cursor" }, sentAfter);
   expect(driftWork()).toEqual({ resolving: false, running: true });
   endChatJobs(project, "preparation");
   expect(driftWork()).toEqual({ resolving: false, running: true });
@@ -163,273 +75,47 @@ test("prompts during preparation are ignored but prompts and ends during deliver
   const finishedAfter = chatJobSendStarted(finishedDuringDelivery, "cursor");
   bindChatJob(finishedDuringDelivery, "finished");
   endChatJobs(finishedDuringDelivery, "finished");
-  startJob("resolve", finishedDuringDelivery, { chat: "cursor" }, false, finishedAfter);
+  startJob("resolve", finishedDuringDelivery, { chat: "cursor" }, finishedAfter);
   expect(driftWork()).toEqual({ resolving: false, running: false });
 
   const activeDuringDelivery = root();
   const activeAfter = chatJobSendStarted(activeDuringDelivery, "cursor");
   bindChatJob(activeDuringDelivery, "active");
-  startJob("run", activeDuringDelivery, { chat: "cursor" }, false, activeAfter);
+  startJob("run", activeDuringDelivery, { chat: "cursor" }, activeAfter);
   expect(driftWork()).toEqual({ resolving: false, running: true });
   endChatJobs(activeDuringDelivery, "active");
   expect(driftWork()).toEqual({ resolving: false, running: false });
 });
 
-test("failed or interrupted scans are status information that count as finished for the autopilot", () => {
+test("a window sees only the jobs it started: job notices of other windows change nothing", () => {
   const project = root();
-  receiveCoordinatorMessage({ type: "job", id: "scan-job", root: project, kind: "scan", active: true, place: { terminal: "terminal" } });
-  receiveCoordinatorMessage({ type: "check", root: project, job: "scan-job", title: "System scan", phase: "scanning", failed: true });
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "waiting", failures: [{ job: "scan-job" }] });
-  receiveCoordinatorMessage({ type: "job", id: "scan-job", root: project, kind: "scan", active: false, place: { terminal: "terminal" } });
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "idle", reason: "Waiting for eligible Drifts", failures: [{ job: "scan-job" }] });
-  receiveCoordinatorMessage({ type: "job", id: "scan-interrupted", root: project, kind: "scan", active: true, place: { terminal: "terminal-2" } });
-  receiveCoordinatorMessage({ type: "job", id: "scan-interrupted", root: project, kind: "scan", active: false, place: { terminal: "terminal-2" } });
-  expect(activeProjectJobs(project)).toEqual([]);
-  expect(driftAutopilotStatus(project, "enabled").phase).toBe("idle");
-  resumeAutopilot(project);
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "idle", failures: [] });
-});
-
-test("a live window that did not answer the jobs request withholds automatic steps with its reason until verified", () => {
-  const project = root();
-  setJobsVerified(project, false);
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "suspended", reason: "Not every live editor window answered the jobs request" });
-  expect(driftAutopilotStatus(project, "disabled")).toMatchObject({ phase: "manual", reason: null });
-  setJobsVerified(project, true);
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "idle" });
-});
-
-test("a manual Run is reported without authorized corrections, an automatic Run is reported as them", () => {
-  const project = root();
-  receiveCoordinatorMessage({ type: "job", id: "manual-run", root: project, kind: "run", active: true, origin: "manual", place: { terminal: "terminal" } });
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "manual", reason: "A manual Run is in progress: it grants no authorized corrections" });
-  receiveCoordinatorMessage({ type: "job", id: "manual-run", root: project, kind: "run", active: false, place: { terminal: "terminal" } });
-  receiveCoordinatorMessage({ type: "job", id: "auto-run", root: project, kind: "run", active: true, origin: "automatic", place: { terminal: "terminal-2" } });
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "executing", reason: "Running authorized corrections" });
-  receiveCoordinatorMessage({ type: "job", id: "auto-run", root: project, kind: "run", active: false, place: { terminal: "terminal-2" } });
-});
-
-test("only a received failure for a known automatic job excludes its authorized Drift", () => {
-  const project = root();
-  startJob("resolve", project, { chat: "cursor" }, false, undefined, "auto-job", "automatic", "window");
-  bindChatJob(project, "autopilot-conversation");
-  receiveCoordinatorMessage({ type: "autopilot-failure-recorded", root: project, job: "unknown", drift: "drift-1", reason: "no" });
-  expect(autopilotFailedCase(project, "drift-1")).toBe(false);
-  receiveCoordinatorMessage({ type: "job", id: "auto-job", root: project, kind: "resolve", active: true, place: { chat: "cursor" }, origin: "automatic", windowId: "window" });
-  receiveCoordinatorMessage({ type: "autopilot-failure-recorded", root: project, job: "auto-job", drift: "drift-1", reason: "not applicable", signature: "unchanged" });
-  expect(autopilotFailedCase(project, "drift-1")).toBe(true);
-  clearAutopilotFailure(project, "drift-1", "unchanged");
-  expect(autopilotFailedCase(project, "drift-1")).toBe(true);
-  clearAutopilotFailure(project, "drift-1", "edited");
-  expect(autopilotFailedCase(project, "drift-1")).toBe(false);
-  endChatJobs(project, "autopilot-conversation");
-  receiveCoordinatorMessage({ type: "job", id: "auto-job", root: project, kind: "resolve", active: false, place: { chat: "cursor" }, origin: "automatic", windowId: "window" });
-});
-
-test("a developer scan makes failed cases eligible again when it starts; an automatic scan does not", () => {
-  const project = root();
-  recordAutopilotFailure(project, "run-job", "drift-1", undefined, "could not resolve");
-  startJob("scan", project, { terminal: "automatic-scan" }, false, undefined, "automatic-scan", "automatic");
-  receiveCoordinatorMessage({ type: "check", root: project, job: "automatic-scan", title: "Automatic scan", phase: "scanning", failed: false });
-  endTerminalJobs("automatic-scan");
-  expect(autopilotFailedCase(project, "drift-1")).toBe(true);
-  receiveCoordinatorMessage({ type: "developer-scan-started", root: project });
-  expect(autopilotFailedCase(project, "drift-1")).toBe(false);
-});
-
-test("a developer scan that fails or is interrupted frees failed cases at its start and records none", () => {
-  const project = root();
-  recordAutopilotFailure(project, "run-job", "drift-1", undefined, "could not resolve");
-  startJob("scan", project, { terminal: "failed-scan" }, false, undefined, "failed-scan", "manual");
-  receiveCoordinatorMessage({ type: "developer-scan-started", root: project });
-  expect(autopilotFailedCase(project, "drift-1")).toBe(false);
-  receiveCoordinatorMessage({ type: "check", root: project, job: "failed-scan", title: "Developer scan", phase: "scanning", failed: true });
-  endTerminalJobs("failed-scan");
-  expect(autopilotFailedCase(project, "drift-1")).toBe(false);
-});
-
-test("editing a failed Drift clears its signature-based exclusion", () => {
-  const project = root();
-  recordAutopilotFailure(project, "resolve-job", "drift-1", undefined, "could not resolve");
-  excludeAutopilotDrift(project, "drift-1", "unchanged");
-  clearAutopilotFailure(project, "drift-1", "unchanged");
-  expect(autopilotFailedCase(project, "drift-1")).toBe(true);
-  clearAutopilotFailure(project, "drift-1", "edited");
-  expect(autopilotFailedCase(project, "drift-1")).toBe(false);
-});
-
-test("a Run's check, failed or not, does not make failed cases eligible again", () => {
-  const project = root();
-  recordAutopilotFailure(project, "run-job", "drift-1", undefined, "could not resolve");
-  startJob("run", project, { terminal: "run-terminal" }, false, undefined, "run-job-2", "manual");
-  receiveCoordinatorMessage({ type: "check", root: project, job: "run-job-2", title: "Final check", phase: "scanning", failed: true });
-  expect(autopilotFailedCase(project, "drift-1")).toBe(true);
-  receiveCoordinatorMessage({ type: "check", root: project, job: "run-job-2", title: "Final check", phase: "scanning", failed: false });
-  expect(autopilotFailedCase(project, "drift-1")).toBe(true);
-  endTerminalJobs("run-terminal");
-});
-
-test("a failed final check of an automatic Run is recorded with its case and holds only that Run's continuation", () => {
-  const project = root();
-  startJob("run", project, { terminal: "auto-run-terminal" }, false, undefined, "auto-run", "automatic");
-  receiveCoordinatorMessage({ type: "check", root: project, job: "auto-run", title: "Final check after all Tasks", phase: "verifying", failed: true });
-  expect(driftAutopilotStatus(project, "enabled").failures).toEqual([expect.objectContaining({ job: "auto-run" })]);
-  expect(driftAutopilotStatus(project, "enabled").phase).not.toBe("suspended");
-  expect(runContinuationHeld(project, "auto-run")).toBe(true);
-  endTerminalJobs("auto-run-terminal");
-});
-
-test("a check declared after its scan ended does not make the scan successful", () => {
-  const project = root();
-  receiveCoordinatorMessage({ type: "job", id: "late-scan", root: project, kind: "scan", active: true, place: { terminal: "terminal" } });
-  receiveCoordinatorMessage({ type: "job", id: "late-scan", root: project, kind: "scan", active: false, place: { terminal: "terminal" } });
-  receiveCoordinatorMessage({ type: "check", root: project, job: "late-scan", title: "Late scan", phase: "scanning", failed: false });
-  expect(driftAutopilotStatus(project, "enabled").failures.map((failure) => failure.job)).toEqual(["late-scan"]);
-  expect(isKnownSuccessfulScan(project, "late-scan")).toBe(false);
-});
-
-test("a successful scan lifts the initial wait when its work ends, not at its check", () => {
-  const project = root();
-  awaitAutopilotResume(project);
-  receiveCoordinatorMessage({ type: "job", id: "ok-scan", root: project, kind: "scan", active: true, place: { terminal: "terminal" } });
-  receiveCoordinatorMessage({ type: "check", root: project, job: "ok-scan", title: "System scan", phase: "scanning", failed: false });
-  expect(autopilotReady(project)).toBe(false);
-  receiveCoordinatorMessage({ type: "job", id: "ok-scan", root: project, kind: "scan", active: false, place: { terminal: "terminal" } });
-  expect(autopilotReady(project)).toBe(true);
-});
-
-test("a check declared for a finished scan or a Run lifts no wait after the editor reopens", () => {
-  const project = root();
-  receiveCoordinatorMessage({ type: "job", id: "old-scan", root: project, kind: "scan", active: true, place: { terminal: "terminal" } });
-  receiveCoordinatorMessage({ type: "job", id: "old-scan", root: project, kind: "scan", active: false, place: { terminal: "terminal" } });
-  receiveCoordinatorMessage({ type: "job", id: "old-run", root: project, kind: "run", active: true, place: { terminal: "terminal-2" } });
-  receiveCoordinatorMessage({ type: "job", id: "old-run", root: project, kind: "run", active: false, place: { terminal: "terminal-2" } });
-  awaitAutopilotResume(project);
-  receiveCoordinatorMessage({ type: "check", root: project, job: "old-scan", title: "System scan", phase: "scanning", failed: false });
-  receiveCoordinatorMessage({ type: "check", root: project, job: "old-run", title: "Final check", phase: "scanning", failed: false });
-  expect(autopilotReady(project)).toBe(false);
-});
-
-test("autopilot status identifies jobs active in a different editor window", () => {
-  const project = root();
-  receiveCoordinatorMessage({ type: "job", id: "remote-scan", root: project, kind: "scan", active: true, place: { terminal: "remote" }, windowId: "window-b" });
-  expect(driftAutopilotStatus(project, "enabled", "window-a").remoteWindow).toBe(true);
-  expect(driftAutopilotStatus(project, "enabled", "window-b").remoteWindow).toBeUndefined();
-  receiveCoordinatorMessage({ type: "job", id: "remote-scan", root: project, kind: "scan", active: false, place: { terminal: "remote" }, windowId: "window-b" });
-});
-
-test("a lost editor window takes its reserved send and its jobs with it, and the other windows keep theirs", () => {
-  const project = root();
-  expect(reserveSend(project, "send-a", "window-a")).toBe(true);
-  expect(reserveSend(project, "send-b", "window-b")).toBe(false);
-  receiveCoordinatorMessage({ type: "job", id: "run-a", root: project, kind: "run", active: true, origin: "manual", windowId: "window-a", place: { terminal: "term-a" } });
-  receiveCoordinatorMessage({ type: "job", id: "run-b", root: project, kind: "run", active: true, origin: "manual", windowId: "window-b", place: { terminal: "term-b" } });
-  expect(projectWindowIds(project).sort()).toEqual(["window-a", "window-b"]);
-
-  forgetWindow(project, "window-a");
-
-  expect(projectWindowIds(project)).toEqual(["window-b"]);
-  expect(activeProjectJobs(project).map((job) => job.id)).toEqual(["run-b"]);
-  expect(jobAbnormalEnd(project, "run-a")).toBe("the editor window was lost");
-  expect(jobAbnormalEnd(project, "run-b")).toBeUndefined();
-  expect(sendReserved(project)).toBe(false);
-  expect(reserveSend(project, "send-b", "window-b")).toBe(true);
-  expect(driftWork(project)).toEqual({ resolving: false, running: true });
-  forgetWindow(project, "window-b");
-});
-
-test("losing the coordinator role clears the sends this window reserved", () => {
-  const project = root();
-  expect(reserveSend(project, "send-a", "window-a")).toBe(true);
-  expect(sendReserved(project)).toBe(true);
-
-  clearSendReservations(project);
-
-  expect(sendReserved(project)).toBe(false);
-  expect(reserveSend(project, "send-b", "window-b")).toBe(true);
-  clearSendReservations(project);
-});
-
-test("under disabled a window sees only its own jobs; another window's Run blocks it only while the autopilot is on", () => {
-  const project = root();
-  receiveCoordinatorMessage({ type: "job", id: "other-run", root: project, kind: "run", active: true, place: { terminal: "terminal" }, origin: "manual", windowId: "other-window" });
-  expect(driftWork(project, false)).toEqual({ resolving: false, running: false });
-  expect(activeProjectJobs(project, false)).toEqual([]);
-  expect(driftWork(project)).toEqual({ resolving: false, running: true });
-  receiveCoordinatorMessage({ type: "job", id: "other-run", root: project, kind: "run", active: false, place: { terminal: "terminal" } });
-});
-
-test("a Run's pre-flight that the Run ended without declaring is a failed scan with its title; a scan's check is not", () => {
-  const project = root();
-  startJob("run", project, { terminal: "pre-flight-run" }, false, undefined, "pre-run", "manual");
-  startJob("scan", project, { terminal: "pre-flight-scan" }, false, undefined, "pre-scan", "manual");
-  receiveCoordinatorMessage({ type: "interrupted-preflight", root: project, job: "pre-run", title: "Pre-flight of Checkout" });
-  receiveCoordinatorMessage({ type: "interrupted-preflight", root: project, job: "pre-scan", title: "System scan" });
-  expect(driftAutopilotStatus(project, "enabled").failures.map((failure) => failure.title)).toEqual(["Pre-flight of Checkout"]);
-  expect(lastFailedScan(project)).toBe("Pre-flight of Checkout");
-  endTerminalJobs("pre-flight-run");
-  endTerminalJobs("pre-flight-scan");
-});
-
-test("an interrupted pre-flight of a Run started in another window is a failed scan for the coordinator too", () => {
-  const project = root();
-  receiveCoordinatorMessage({ type: "job", id: "remote-run", root: project, kind: "run", active: true, place: { terminal: "remote-terminal" }, origin: "manual", windowId: "other-window" });
-  receiveCoordinatorMessage({ type: "interrupted-preflight", root: project, job: "remote-run", title: "Pre-flight of Shop" });
-  expect(lastFailedScan(project)).toBe("Pre-flight of Shop");
-  receiveCoordinatorMessage({ type: "job", id: "remote-run", root: project, kind: "run", active: false, place: { terminal: "remote-terminal" } });
+  receiveNotice({ type: "job", id: "other-run", root: project, kind: "run", active: true, place: { terminal: "terminal" }, holder: "other" });
+  expect(localProjectJobs(project)).toEqual([]);
+  expect(driftWork(project)).toEqual({ resolving: false, running: false });
+  startJob("run", project, { terminal: "own-terminal" }, undefined, "own-run");
+  expect(localProjectJobs(project).some((job) => job.kind === "run")).toBe(true);
+  endTerminalJobs("own-terminal");
+  expect(localProjectJobs(project).some((job) => job.kind === "run")).toBe(false);
 });
 
 test("a sequence of Runs stays one active Run between two of its Runs and ends with its last one", () => {
   const project = root();
-  startJob("run", project, { held: true }, false, undefined, "sequence-job");
-  startJob("run", project, { terminal: "group-1" }, false, undefined, "group-1-run");
+  startJob("run", project, { held: true }, undefined, "sequence-job");
+  startJob("run", project, { terminal: "group-1" }, undefined, "group-1-run");
   endTerminalJobs("group-1");
-  // Between two Runs of the sequence nothing has ended for the project: no barrier, no collection.
-  expect(activeProjectJobs(project).map((job) => job.id)).toEqual(["sequence-job"]);
+  expect(localProjectJobs(project).map((job) => job.id)).toEqual(["sequence-job"]);
   expect(driftWork(project)).toEqual({ resolving: false, running: true });
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "manual" });
-  startJob("run", project, { terminal: "group-2" }, false, undefined, "group-2-run");
+  startJob("run", project, { terminal: "group-2" }, undefined, "group-2-run");
   endTerminalJobs("group-2");
   expect(driftWork(project)).toEqual({ resolving: false, running: true });
   endHeldJob(project, "sequence-job");
   expect(driftWork(project)).toEqual({ resolving: false, running: false });
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "idle" });
 });
 
-test("a stopped sequence ends with its reason, and an automatic sequence is reported as executing", () => {
+test("a stopped sequence ends with its reason", () => {
   const project = root();
-  startJob("run", project, { held: true }, false, undefined, "auto-sequence", "automatic");
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "executing" });
-  endHeldJob(project, "auto-sequence", "its command exited with code 1");
-  expect(jobAbnormalEnd(project, "auto-sequence")).toBe("its command exited with code 1");
+  startJob("run", project, { held: true }, undefined, "stopped-sequence");
+  endHeldJob(project, "stopped-sequence", "its command exited with code 1");
+  expect(jobAbnormalEnd(project, "stopped-sequence")).toBe("its command exited with code 1");
   expect(driftWork(project).running).toBe(false);
-});
-
-test("another window keeps a held job active until its received end", () => {
-  const project = root();
-  receiveCoordinatorMessage({ type: "job", id: "remote-held", root: project, kind: "run", active: true, origin: "manual", windowId: "window-a", place: { held: true } });
-  expect(driftWork(project)).toEqual({ resolving: false, running: true });
-  receiveCoordinatorMessage({ type: "job", id: "remote-held", root: project, kind: "run", active: false, place: { held: true } });
-  expect(driftWork(project)).toEqual({ resolving: false, running: false });
-});
-
-test("an automatic collection holds the project as Resolving until its hand-over, then as Running until its Run is created", () => {
-  const project = root();
-  startJob("resolve", project, { held: true }, false, undefined, "collection-hold", "automatic");
-  startJob("resolve", project, { terminal: "resolution" }, false, undefined, "resolution-job", "automatic");
-  // The resolution agent ends: the hold keeps the project as Resolving while the collection prepares its Run.
-  endTerminalJobs("resolution");
-  expect(driftWork(project)).toEqual({ resolving: true, running: false });
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "preparing" });
-  // The hand-over starts the held Run before the resolution hold ends, so the project is never free in between.
-  startJob("run", project, { held: true }, false, undefined, "collection-run-hold", "automatic");
-  endHeldJob(project, "collection-hold");
-  expect(driftWork(project)).toEqual({ resolving: false, running: true });
-  expect(driftAutopilotStatus(project, "enabled")).toMatchObject({ phase: "executing" });
-  // The Run is created: its own job takes over and the hold ends.
-  startJob("run", project, { terminal: "fix-run" }, false, undefined, "fix-run-job", "automatic");
-  endHeldJob(project, "collection-run-hold");
-  expect(driftWork(project)).toEqual({ resolving: false, running: true });
-  endTerminalJobs("fix-run");
-  expect(driftWork(project)).toEqual({ resolving: false, running: false });
 });

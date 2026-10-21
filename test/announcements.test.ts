@@ -21,7 +21,7 @@ import {
   withdrawAll,
   removeBoundTo,
 } from "../src/core/announcements";
-import { createQuestionServer, settleCoordinatorMessages } from "../src/core/question-channel";
+import { cardName } from "../src/core/short-numbers";
 import { discardProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { newDrift, resolveDrift } from "../src/core/work";
@@ -95,10 +95,10 @@ describe("announcing", () => {
 
   test("a Resolve Drifts ghost is a Proposal that names its Drifts and keeps its title when a Draft takes it", () => {
     expect(resolutionTitle(p, [])).toBeUndefined();
-    expect(resolutionTitle(p, ["a1b2c3d4", "e5f6g7h8"])).toBe("Resolving 2 Drifts");
-    const resolve = announce(p, { kind: "proposal", title: "Resolve Drifts", drifts: ["a1b2c3d4", "e5f6g7h8"], source: "request", terminal: "ab12cd" }, t(1));
+    expect(resolutionTitle(p, ["a1b2c3d4"])).toBe(`Resolving Drift ${cardName(p, "drift", "a1b2c3d4")}`);
+    const resolve = announce(p, { kind: "proposal", title: "Resolve Drifts", drifts: ["a1b2c3d4"], source: "request", terminal: "ab12cd" }, t(1));
     const prop = newProposal(p, "Draft", "", { origin: { terminal: "ab12cd" } });
-    expect(getAnnouncement(p, resolve.id)).toMatchObject({ kind: "proposal", drifts: ["a1b2c3d4", "e5f6g7h8"], proposal: prop.id, title: "Resolve Drifts" });
+    expect(getAnnouncement(p, resolve.id)).toMatchObject({ kind: "proposal", drifts: ["a1b2c3d4"], proposal: prop.id, title: "Resolve Drifts" });
     expect(() => announce(p, { kind: "task", title: "Not a Proposal", drifts: ["a1b2c3d4"] })).toThrow(/Only a Proposal names Drifts/);
   });
 
@@ -113,12 +113,6 @@ describe("announcing", () => {
     const adopted = announce(p, { kind: "check", title: "Scan of Feature order", phase: "scanning", terminal: "ab12cd" }, t(2));
     expect(adopted).toMatchObject({ id: launched.id, title: "Scanning Feature order", phase: "scanning" });
     expect(listAnnouncements(p)).toHaveLength(1);
-  });
-  test("an agent's scan that takes over the launched scan keeps the job it names", () => {
-    const launched = announce(p, { kind: "check", title: "Scanning Feature order", phase: "scanning", source: "request", terminal: "ab12cd" }, t(1));
-    const adopted = announce(p, { kind: "check", title: "Scan of Feature order", phase: "scanning", terminal: "ab12cd", job: "run-7" }, t(2));
-    expect(adopted).toMatchObject({ id: launched.id, title: "Scanning Feature order", job: "run-7" });
-    expect(getAnnouncement(p, launched.id)?.job).toBe("run-7");
   });
 });
 
@@ -405,7 +399,6 @@ describe("a check", () => {
     expect(() => announcementMove(id, "bogus")).toThrow(/must be one of scanning, history, delivered, failed/);
 
     expect(announcementMove(id, "delivered").out).toBe(`Check ${id} is done`);
-    await settleCoordinatorMessages();
     expect(existsSync(join(announcementsDir(p), `${id}.md`))).toBe(false);
   });
 
@@ -426,80 +419,29 @@ describe("a check", () => {
     expect(() => announcementNew({ kind: "check", title: "Late check", phase: "history" })).toThrow(/phase: Invalid option/);
     withdrawAll(p);
   });
-  test("a finished check hands its outcome to the caller with its job, and forgetting it leaves nothing to finish", () => {
-    const id = announcementNew({ kind: "check", title: "Final check after completed Task", phase: "verifying", job: "run-7" }, { TRAMA_TERMINAL: "ab12cd" }).out;
+  test("a finished check hands its outcome to the caller, and forgetting it leaves nothing to finish", () => {
+    const id = announcementNew({ kind: "check", title: "Final check after completed Task", phase: "verifying" }, { TRAMA_TERMINAL: "ab12cd" }).out;
     const touched = getAnnouncement(p, id)!.touched;
-    expect(checkOutcome(p, id, true)).toEqual({ id, title: "Final check after completed Task", phase: "verifying", terminal: "ab12cd", chat: null, job: "run-7", touched, failed: true });
+    expect(checkOutcome(p, id, true)).toEqual({ id, title: "Final check after completed Task", phase: "verifying", terminal: "ab12cd", chat: null, touched, failed: true });
     forgetCheck(p, id);
     expect(checkOutcome(p, id)).toBeNull();
   });
-  test("a check announced in a terminal takes the job from TRAMA_JOB unless --job names another", () => {
-    const fromEnv = announcementNew({ kind: "check", title: "Final check after all Tasks", phase: "verifying" }, { TRAMA_TERMINAL: "ab12cd", TRAMA_JOB: "run-9" }).out;
-    const explicit = announcementNew({ kind: "check", title: "Final check after all Tasks", phase: "verifying", job: "run-7" }, { TRAMA_TERMINAL: "ab12cd", TRAMA_JOB: "run-9" }).out;
-    expect([getAnnouncement(p, fromEnv)?.job, getAnnouncement(p, explicit)?.job]).toEqual(["run-9", "run-7"]);
+  test("an announcement takes no job: the input is refused, nothing is written and a leftover job line is ignored", () => {
+    expect(() => announcementNew({ kind: "check", title: "Final check after all Tasks", phase: "verifying", job: "run-7" })).toThrow(/job/);
+    const id = announcementNew({ kind: "check", title: "Final check after all Tasks", phase: "verifying" }, { TRAMA_TERMINAL: "ab12cd", TRAMA_JOB: "run-9" }).out;
+    expect(readFileSync(join(announcementsDir(p), `${id}.md`), "utf8")).not.toContain("job");
+    const file = join(announcementsDir(p), `${id}.md`);
+    writeFileSync(file, readFileSync(file, "utf8").replace("phase: verifying", "phase: verifying\njob: old-run"));
+    expect("job" in (getAnnouncement(p, id) as object)).toBe(false);
     withdrawAll(p);
   });
-  test("a failed final check is finished with no success outcome", async () => {
-    const id = announcementNew({ kind: "check", title: "Final check after completed Task", phase: "verifying" }).out;
-    expect(JSON.parse(announcementMove(id, "failed", {}, "--json").out).outcome).toBe("failed");
-    await settleCoordinatorMessages();
-    expect(listAnnouncements(p).map((a) => a.id)).not.toContain(id);
-  });
-  /** Runs `body` while a live editor answers the coordinator messages of the command with `onMessage`. */
-  async function withEditor(onMessage: (message: Record<string, unknown>) => void | Promise<void>, body: () => Promise<void>) {
-    const runtimeVariable = process.platform === "win32" ? "LOCALAPPDATA" : "XDG_RUNTIME_DIR";
-    const previousRuntime = process.env[runtimeVariable];
-    const runtimeRoot = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-check-phase-") : "/tmp/trama-cp-");
-    process.env[runtimeVariable] = runtimeRoot;
-    const runtimeDir = process.platform === "win32" ? join(runtimeRoot, "Trama", "questions") : join(runtimeRoot, `trama-q-${process.getuid!()}`);
-    const server = await createQuestionServer({ project: p, runtimeDir, handler: async () => ({ status: "unavailable", reason: "No project coordinator is available." }), onCoordinatorMessage: onMessage });
-    try {
-      await body();
-    } finally {
-      await server.dispose();
-      if (previousRuntime === undefined) delete process.env[runtimeVariable];
-      else process.env[runtimeVariable] = previousRuntime;
-      rmSync(runtimeRoot, { recursive: true, force: true });
-    }
-  }
-  test("moving a check to scanning tells the editor its job, and a move that changes nothing tells it nothing", async () => {
-    const received: Record<string, unknown>[] = [];
-    await withEditor((message) => { received.push(message); }, async () => {
-      const id = announcementNew({ kind: "check", title: "Final check after completed Task", phase: "verifying", job: "run-7" }).out;
-      announcementMove(id, "scanning");
-      await settleCoordinatorMessages();
-      announcementMove(id, "scanning");
-      await settleCoordinatorMessages();
-      expect(received).toHaveLength(1);
-      expect(received[0]).toEqual(expect.objectContaining({ type: "check-phase", id, phase: "scanning", job: "run-7" }));
-    });
-  });
-  test("a check that failed reaches the editor as a failed outcome, and one that is not found reports no outcome", async () => {
-    const received: Record<string, unknown>[] = [];
-    await withEditor((message) => { received.push(message); }, async () => {
-      const failed = announcementNew({ kind: "check", title: "Final check after all Tasks", phase: "verifying", job: "run-3" }).out;
-      const done = announcementNew({ kind: "check", title: "Final check after Task T3", phase: "verifying" }).out;
-      announcementMove(failed, "failed");
-      announcementMove(done, "delivered");
-      announcementMove("zzzzzz", "failed");
-      await settleCoordinatorMessages();
-      expect(received).toEqual([expect.objectContaining({ type: "check", id: failed, failed: true, job: "run-3" }), expect.objectContaining({ type: "check", id: done, failed: false })]);
-      expect(listAnnouncements(p).map((a) => a.id)).toEqual([]);
-    });
-  });
-  test("the ghost of a finished check goes only after the editor has heard of its outcome", async () => {
-    const received: Record<string, unknown>[] = [];
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    await withEditor(async (message) => { received.push(message); await gate; }, async () => {
-      const id = announcementNew({ kind: "check", title: "Final check after all Tasks", phase: "verifying" }).out;
-      expect(announcementMove(id, "delivered").exit).toBe(0);
-      expect(existsSync(join(announcementsDir(p), `${id}.md`))).toBe(true);
-      release();
-      await settleCoordinatorMessages();
-      expect(received).toEqual([expect.objectContaining({ type: "check", id, failed: false })]);
-      expect(existsSync(join(announcementsDir(p), `${id}.md`))).toBe(false);
-    });
+  test("a failed final check is finished like a delivered one, with only the outcome told apart", () => {
+    const failed = announcementNew({ kind: "check", title: "Final check after completed Task", phase: "verifying" }).out;
+    const done = announcementNew({ kind: "check", title: "Final check after Task T3", phase: "verifying" }).out;
+    expect(JSON.parse(announcementMove(failed, "failed", {}, "--json").out)).toEqual({ id: failed, found: true, outcome: "failed" });
+    expect(JSON.parse(announcementMove(done, "delivered", {}, "--json").out)).toEqual({ id: done, found: true, outcome: "done" });
+    expect(JSON.parse(announcementMove("zzzzzz", "failed", {}, "--json").out)).toEqual({ id: "zzzzzz", found: false });
+    expect(listAnnouncements(p)).toEqual([]);
   });
 
 

@@ -74,8 +74,6 @@ interface DriftData {
   origin: string | null;
   /** The Drift this one follows, when it is recurring: set at creation and never changed. */
   previous: string | null;
-  /** True only when a developer decision is urgently needed. */
-  critical: boolean;
   option: number | null;
   note: string | null;
   resolvedBy: string | null;
@@ -131,7 +129,6 @@ function parseDrift(raw: Raw, where: string): DriftData {
     task: idField(raw, "task", where),
     origin: idField(raw, "origin", where),
     previous: idField(raw, "previous", where),
-    critical: boolField(raw, "critical", false, where),
     option: positiveIntOrNull(raw, "option", where),
     note: textOrNull(raw, "note", where),
     resolvedBy: idField(raw, "resolvedBy", where),
@@ -712,7 +709,7 @@ export interface PlannedDrift {
 
 export function planDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; critical?: boolean; where: string; notBlocking?: NotBlocking[] },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; notBlocking?: NotBlocking[] },
 ): PlannedDrift {
   if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with `refs`");
   const happens = input.happens.trim();
@@ -730,7 +727,7 @@ export function planDrift(
   const origin = input.origin ? getTask(p, input.origin).id : null;
   const previous = previousOf(p, input.previous, origin);
   const notBlocking = checkNotBlocking(p, input.notBlocking ?? [], input.refs, origin);
-  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, critical: input.critical ?? false, option: null, note: null, resolvedBy: null, created: createdNow(), notBlocking };
+  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, option: null, note: null, resolvedBy: null, created: createdNow(), notBlocking };
   const sections = [
     `## ${HAPPENS_HEADING}\n\n${happens}`,
     `## ${SHOULD_HEADING}\n\n${should}`,
@@ -748,7 +745,7 @@ export function writeDrift(p: Project, plan: PlannedDrift, announcement?: string
 
 export function newDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; critical?: boolean; where: string; announcement?: string; notBlocking?: NotBlocking[] },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; notBlocking?: NotBlocking[] },
 ): Drift {
   return writeDrift(p, planDrift(p, input), input.announcement);
 }

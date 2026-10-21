@@ -49,7 +49,6 @@ Compare State by State and Transition by Transition, then each Requirement secti
 - `happens` and `should` say what the System does and what it should do, in domain words. Name no variable, function, class, field or file unless unavoidable (then as `inline code`). Code locations go only in `where`.
 - Give two to five `options`, the recommended first, each a different way to reach what should happen without changing the Model or any Requirement. Each option has a short `title` and about 60 words of `text` (what it changes and costs), in short Markdown without headings or tables.
 - Drift titles: at most five words, about 40 characters, in English.
-- Set `critical` only when the developer urgently needs to decide this case.
 
 ### Drift with a Proposal
 
@@ -75,7 +74,7 @@ Run `trama comparison move <id> delivered --input -` exactly once, after you hav
   "tasks": [{ "title": "...", "refs": ["order/Paid"], "body": "...", "technical": false }],
   "drifts": [{ "title": "...", "refs": ["order/Paid"], "happens": "...", "should": "...",
                "options": [{ "title": "...", "text": "..." }], "where": "...",
-               "critical": false, "previous": "<resolved drift id, optional>",
+               "previous": "<resolved drift id, optional>",
                "proposal": "<draft id, optional>", "notBlocking": [{ "task": "<id>", "reason": "..." }] }]
 }
 ```

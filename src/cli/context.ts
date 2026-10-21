@@ -13,14 +13,14 @@ export interface Context {
   byAgent: boolean;
   /** The agent terminal (`TRAMA_TERMINAL`) or the chat (`CURSOR_AGENT`) the command runs in, when either is known. */
   origin: AgentOrigin;
-  /** The autopilot job this agent terminal was started for (`TRAMA_JOB`), when there is one. */
+  /** The job this agent terminal was started for (`TRAMA_JOB`), when there is one: it groups the timings of the phases. */
   job?: string;
   /** Whether the terminal carries the sign of a Run with the Advisor Scanner on (`TRAMA_ADVISOR_SCANNER` is `1`). */
   advisorScanner: boolean;
   project(assignNumbers?: boolean): Project;
 }
 
-/** The autopilot job of the agent's terminal (`TRAMA_JOB`), when the environment names one. */
+/** The job of the agent's terminal (`TRAMA_JOB`), when the environment names one. */
 export const jobFromEnv = (env: Record<string, string | undefined>): string | undefined => env["TRAMA_JOB"]?.trim() || undefined;
 
 export function makeContext(cwd: string, rootOption?: string, byAgent = false, origin: AgentOrigin = {}, job?: string, advisorScanner = false): Context {

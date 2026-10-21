@@ -35,7 +35,7 @@ export type TimingEvent =
 export type TimingRecord = TimingEvent & { at: string; terminal?: string; chat?: Chat; job?: string };
 
 export interface RecordOptions {
-  /** The coordinator job the event belongs to, when the agent runs one. */
+  /** The job the event belongs to, when the agent runs one. */
   job?: string;
   /** Whether the event starts a job: a check of the pre-flight or a scan. */
   startsJob?: boolean;

@@ -36,18 +36,13 @@ function statusBarItem(): vscode.StatusBarItem {
   return item;
 }
 
-function watchAutopilotTicks(): vscode.Disposable {
-  const timer = setInterval(() => void controller?.autopilotTick(), 400);
-  return new vscode.Disposable(() => clearInterval(timer));
-}
-
 export function activate(context: vscode.ExtensionContext): void {
   const session = new QuestionSession(() => trama.revealForQuestions(), agentName);
   const questions = new EditorQuestions(() => findProject(), session);
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
   const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
   const requests = new DesignRequests(context.workspaceState, tramaFiles, undefined, undefined, () => trama.launch({ kind: "implement-all" }));
-  const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri, questions, requests, context.workspaceState);
+  const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri, requests, context.workspaceState);
   controller = trama;
   context.subscriptions.push(
     tramaFiles,
@@ -63,7 +58,6 @@ export function activate(context: vscode.ExtensionContext): void {
     questions,
     requests,
     watchRequirements(),
-    watchAutopilotTicks(),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("trama")) trama.settingsChanged(event.affectsConfiguration("trama.ompPath"));
     }),

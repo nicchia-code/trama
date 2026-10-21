@@ -141,13 +141,13 @@ test("an open Drift carries its two sides and why its attached Proposal cannot b
   const prop = newProposal(p, "Lost orders");
   const payment = editInProposal(p, prop.id, "checkout/payment.md");
   writeFileSync(payment, readFileSync(payment, "utf8").replace("### Declined (final)", "### Declined (final)\n### Written off (final)"));
-  const urgent = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Lost", refs: ["payment"], proposal: prop.id, happens: "Code writes it off.", should: "Nothing writes it off.", critical: true });
+  const urgent = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Lost", refs: ["payment"], proposal: prop.id, happens: "Code writes it off.", should: "Nothing writes it off." });
   const legacy = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Theme", refs: ["requirements/ui#General"], happens: "Material 2.", should: "Material 3." });
-  writeFileSync(legacy.path, readFileSync(legacy.path, "utf8").replace(/^critical:.*\n/m, ""));
+  writeFileSync(legacy.path, readFileSync(legacy.path, "utf8").replace(/^(status:.*\n)/m, "$1critical: \"urgent\"\n"));
   const drifts = () => buildSnapshot(p).drifts;
 
-  expect(drifts()[0]).toMatchObject({ id: urgent.id, critical: true, sides: { happens: "Code writes it off.", should: "Nothing writes it off." }, requirementsOnly: false, proposalBlock: { kind: "draft" } });
-  expect(drifts()[1]).toMatchObject({ critical: false, requirementsOnly: true, proposal: null, proposalBlock: null });
+  expect(drifts()[0]).toMatchObject({ id: urgent.id, sides: { happens: "Code writes it off.", should: "Nothing writes it off." }, requirementsOnly: false, proposalBlock: { kind: "draft" } });
+  expect(drifts()[1]).toMatchObject({ requirementsOnly: true, proposal: null, proposalBlock: null });
   expect(drifts()[0]).toMatchObject({ proposalTitle: "Lost orders", proposalChanges: null });
   handOver(p, prop.id);
   expect(drifts()[0]?.proposalBlock).toBeNull();

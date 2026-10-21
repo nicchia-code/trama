@@ -684,20 +684,23 @@ describe("Tasks and Drifts", () => {
     writeFileSync(scanned.path, readFileSync(scanned.path, "utf8").replace(/^origin:.*\n/m, ""));
     expect(getDrift(p, scanned.id).data.origin).toBeNull();
   });
-  test("records, lists, and shows critical Drifts explicitly", () => {
+  test("a Drift has no severity: `critical` is refused on input, never written or shown, and an old one is read and ignored", () => {
     const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd());
-    const critical = cli("--json", "drift", "new", "--input", JSON.stringify({ ...NEW_DRIFT, title: "Urgent", happens: "Code differs.", critical: true }));
-    const criticalId = JSON.parse(critical.out).id as string;
-    expect(getDrift(p, criticalId).data.critical).toBe(true);
-    expect(readFileSync(getDrift(p, criticalId).path, "utf8")).toContain("critical: true");
-    const ordinary = cli("--json", "drift", "new", "--input", JSON.stringify({ ...NEW_DRIFT, title: "Ordinary", happens: "Code differs." }));
-    const ordinaryId = JSON.parse(ordinary.out).id as string;
-    expect(readFileSync(getDrift(p, ordinaryId).path, "utf8")).toContain("critical: false");
-    expect(cli("--json", "drift", "show", criticalId).out).toContain('"critical": true');
-    expect(cli("drift", "show", criticalId).out).toContain("CRITICAL: urgent developer decision");
-    expect(cli("drift", "show", ordinaryId).out).not.toContain("CRITICAL");
-    expect(cli("drift", "list").out).toContain("CRITICAL: urgent developer decision");
-    expect(cli("project", "show").out).toContain("CRITICAL: urgent developer decision");
+    for (const value of [true, false]) expect(() => cli("--json", "drift", "new", "--input", JSON.stringify({ ...NEW_DRIFT, critical: value }))).toThrow(UsageError);
+    expect(listDrifts(p)).toEqual([]);
+    const created = JSON.parse(cli("--json", "drift", "new", "--input", JSON.stringify({ ...NEW_DRIFT, title: "Ordinary", happens: "Code differs." })).out);
+    expect(created).not.toHaveProperty("critical");
+    const path = getDrift(p, created.id).path;
+    expect(readFileSync(path, "utf8")).not.toContain("critical");
+    for (const old of ["true", "false", "\"urgent\"", "7"]) {
+      writeFileSync(path, readFileSync(path, "utf8").replace(/^critical:.*\n/m, "").replace(/^(status:.*\n)/m, `$1critical: ${old}\n`));
+      const before = readFileSync(path, "utf8");
+      expect(JSON.parse(cli("--json", "drift", "show", created.id).out)).not.toHaveProperty("critical");
+      expect(cli("drift", "show", created.id).out).not.toMatch(/critical/i);
+      expect(cli("drift", "list").out).not.toMatch(/critical/i);
+      expect(cli("project", "show").out).not.toMatch(/critical/i);
+      expect(readFileSync(path, "utf8")).toBe(before);
+    }
   });
 
   test("a Drift may say where in the code it was seen: kept as a third section, carried by the fix Task, shown by drift show", async () => {
@@ -841,54 +844,6 @@ describe("Tasks and Drifts", () => {
     expect(board).not.toMatch(new RegExp(`^- Drift ${named("drift", drift.id)}`, "m"));
     expect(board).not.toContain("## In writing");
     expect(JSON.parse(out("--json", "project", "show")).inWriting).toEqual([]);
-  });
-  test("automatic resolution Proposals persist their marker and accept only the delegated first code fix", () => {
-    expect(() => run(["--root", dir, "proposal", "new", "--input", JSON.stringify({ title: "Not a resolution", automatic: true })], process.cwd())).toThrow(/automatic: applies only with kind resolution/);
-    const created = run(["--root", dir, "--json", "proposal", "new", "--input", JSON.stringify({ title: "Automatic fix", kind: "resolution", automatic: true })], process.cwd());
-    const id = JSON.parse(created.out).id as string;
-    const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Repair", refs: ["order"], happens: "Code differs.", should: "Code follows the Model." });
-    run(["--root", dir, "proposal", "edit", id, "--input", JSON.stringify({ drifts: [{ drift: drift.id, decision: "fix-code", option: 1 }] })], process.cwd());
-
-    let proposal = getProposal(p, id);
-    expect(proposal.data).toMatchObject({ kind: "resolution", automatic: true, drifts: [{ drift: drift.id, decision: "fix-code", option: 1 }] });
-    expect(readFileSync(join(proposal.dir, "proposal.md"), "utf8")).toContain("automatic: true");
-    expect(submitProposal(p, id).data.status).toBe("open");
-    approveProposal(p, id);
-    proposal = getProposal(p, id);
-    expect(proposal.data).toMatchObject({ status: "approved", automatic: true });
-    expect(run(["--root", dir, "--json", "proposal", "show", id], process.cwd()).out).toContain('"automatic": true');
-  });
-
-  test("automatic resolution validation and hand-over reject other decisions, options, notes, and file changes", () => {
-    const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Repair", refs: ["order"], happens: "Code differs.", should: "Code follows the Model." });
-    const res = newProposal(p, "Automatic", "", { kind: "resolution", automatic: true });
-    run(["--root", dir, "proposal", "edit", res.id, "--input", JSON.stringify({ drifts: [{ drift: drift.id, decision: "fix-code", option: 1 }] })], process.cwd());
-    const proposalPath = join(res.dir, "proposal.md");
-    const valid = readFileSync(proposalPath, "utf8");
-
-    for (const [replacement, message] of [
-      ["decision: proposal", "must use fix-code"],
-      ["decision: fix-code\n    option: 2", "must use fix option 1"],
-      ["decision: fix-code\n    option: 1\n    note: invented", "cannot have a note"],
-    ] as const) {
-      writeFileSync(proposalPath, valid.replace(/decision: fix-code\n    option: 1/, replacement));
-      expect(validateProposal(p, getProposal(p, res.id)).map((d) => d.message).join("\n")).toContain(message);
-      expect(() => submitProposal(p, res.id)).toThrow(new RegExp(message));
-    }
-
-    writeFileSync(proposalPath, valid);
-    const copied = editInProposal(p, res.id, "checkout/order.md");
-    writeFileSync(copied, readFileSync(copied, "utf8") + "\nchanged");
-    expect(validateProposal(p, getProposal(p, res.id)).map((d) => d.message).join("\n")).toContain("cannot touch or delete Model or Requirements files");
-    expect(() => submitProposal(p, res.id)).toThrow(/cannot touch or delete Model or Requirements files/);
-    const unregisteredDrift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Unregistered", refs: ["order"], happens: "Code differs.", should: "Code follows the Model." });
-    const unregistered = newProposal(p, "Automatic unregistered", "", { kind: "resolution", automatic: true });
-    run(["--root", dir, "proposal", "edit", unregistered.id, "--input", JSON.stringify({ drifts: [{ drift: unregisteredDrift.id, decision: "fix-code", option: 1 }] })], process.cwd());
-    const ghost = join(unregistered.dir, "model", "checkout", "ghost.md");
-    mkdirSync(join(unregistered.dir, "model", "checkout"), { recursive: true });
-    writeFileSync(ghost, "# Ghost\n");
-    expect(validateProposal(p, getProposal(p, unregistered.id)).map((d) => d.message).join("\n")).toContain("cannot touch or delete Model or Requirements files");
-    expect(() => submitProposal(p, unregistered.id)).toThrow(/cannot touch or delete Model or Requirements files/);
   });
 
   test("an attached Proposal shows under its Drift on the board, is marked in list and show, and returns to the lists once its Drift is resolved", async () => {

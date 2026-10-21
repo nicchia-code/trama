@@ -1,6 +1,6 @@
 import { Info } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { DRIFT_KEY, delegationOf, MODEL_ROLE_KEYS, settingValueError, type DelegationMode, type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
+import { MODEL_ROLE_KEYS, settingValueError, type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
 import type { ToHost, ToWebview } from "../../protocol";
 import { cn } from "../lib/utils";
@@ -164,12 +164,11 @@ interface FieldProps {
   openKey: string | null;
   setOpenKey: (key: string | null) => void;
   send: (key: string, value: SettingValue) => void;
-  post: (message: ToHost) => void;
   openLink: OpenLink;
 }
 
 /** One setting: its title with the «i», the control that fits it, and the messages under the control. */
-function SettingField({ setting, values, generation, models, listError, openKey, setOpenKey, send, post, openLink }: FieldProps) {
+function SettingField({ setting, values, generation, models, listError, openKey, setOpenKey, send, openLink }: FieldProps) {
   const id = `st-${setting.key.replace(/\./g, "-")}`;
   const { key } = setting;
   const saved = effectiveValue(setting, values);
@@ -221,8 +220,7 @@ function SettingField({ setting, values, generation, models, listError, openKey,
         value={chosen}
         onValueChange={(value) => {
           setPicked(value);
-          if (key === DRIFT_KEY) post({ type: "setDelegation", mode: value as DelegationMode });
-          else send(key, value);
+          send(key, value);
         }}
       >
         <SelectTrigger id={id} aria-label={setting.title} aria-describedby={describedBy} className="max-w-full justify-self-start">
@@ -376,15 +374,13 @@ export function SettingsPage({ schema, values, generation, models, listError, po
                 <SettingField
                   key={setting.key}
                   setting={setting}
-                  // The Drift autopilot menu shows the level of its setting, as the user settings give it.
-                  values={setting.key === DRIFT_KEY ? { user: delegationOf(values[DRIFT_KEY]?.user) } : values[setting.key]}
+                  values={values[setting.key]}
                   generation={generation}
                   models={models}
                   listError={listError}
                   openKey={openKey}
                   setOpenKey={setOpenKey}
                   send={send}
-                  post={post}
                   openLink={openLink}
                 />
               ))}

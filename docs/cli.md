@@ -4,7 +4,7 @@
 
 ## Conventions
 
-- `trama <object> <verb> [<id>] [<state>] [--input <json>]`. The objects are `model`, `proposal`, `task`, `drift`, `history`, `announcement`, `comparison`, `question`, `autopilot`, `project`, `timing` and `hook`. The verbs mean the same for every object: `show <id>` reads one thing, `list` reads several, `new` creates and prints the identity of what it created, `edit <id>` changes the content, `move <id> <state>` takes a card to another state (the state names are the Trama Model's, in lowercase with a dash for a space: `code-to-be-fixed`), `check` reports errors and warnings. An object has only the verbs of the reference below; `hook` is the only exception.
+- `trama <object> <verb> [<id>] [<state>] [--input <json>]`. The objects are `model`, `proposal`, `task`, `drift`, `history`, `announcement`, `comparison`, `question`, `advisor`, `project`, `timing` and `hook`. The verbs mean the same for every object: `show <id>` reads one thing, `list` reads several, `new` creates and prints the identity of what it created, `edit <id>` changes the content, `move <id> <state>` takes a card to another state (the state names are the Trama Model's, in lowercase with a dash for a space: `code-to-be-fixed`), `check` reports errors and warnings. An object has only the verbs of the reference below; `hook` is the only exception.
 - The positional arguments are only the identity of a card (or its short number), the reference of a Model element and the state of arrival of `move`. Every other datum, the filters of the reads included, goes in `--input`: there is no other option. The options that every command takes, in any position, are `--root <dir>`, `--json`, `--input <json>`, `--help` and `-h`.
 - `--input -` reads the JSON from standard input, accepting a leading UTF-8 byte order mark; any other value is the JSON text itself. No command reads standard input without `--input -`, except the `hook` commands. The input is a JSON object with camelCase fields. Each command checks it with its zod schema before doing anything else: an unknown field, a wrong type, a value outside its list or a missing required field is a usage error (exit 2) that lists every problem with the path of its field (for example `options[1].text`), and nothing changes. A command with required fields and no `--input` gives the usage error; a command without fields accepts only `{}`. Identities in the fields follow the rules of the arguments.
 - Without `--root`, the CLI walks up from the current directory to the first folder containing `.trama/`.
@@ -171,7 +171,7 @@ Runs at once; read-only.
 
 #### `trama proposal new`
 
-Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `automatic` and `nonBlocking` apply only to a resolution (`nonBlocking` for one whose Drifts block no Task, and not with `automatic`) and `job` binds an automatic resolution Draft to its autopilot job. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from.
+Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `nonBlocking` applies only to a resolution whose Drifts block no Task. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from.
 
 Input (`--input`):
 
@@ -180,9 +180,7 @@ Input (`--input`):
 - `kind`: `"change" | "import" | "resolution" | "setup"`, optional. The kind of Proposal. Default `change`.
 - `label`: `string`, optional. The short label of the Proposal: 1 to 30 characters, one line.
 - `requires`: `string not empty[]`, optional. The Proposals this one requires: IDs or short numbers.
-- `automatic`: `boolean`, optional. An automatic resolution. Only with kind `resolution`.
 - `nonBlocking`: `boolean`, optional. A resolution whose Drifts block no Task. Only with kind `resolution`.
-- `job`: `string not empty`, optional. The autopilot job of an automatic resolution. Only with `automatic`.
 - `announcement`: `string not empty`, optional. The announcement of this Proposal.
 - `request`: `string not empty`, optional. The written design request this Proposal comes from.
 
@@ -202,7 +200,7 @@ Output (`--json`):
 - note: string, optional. About the announcement, when it was not known.
 - requestNote: string, optional. About the design request, when it was not bound.
 
-Runs at once; writes in `.trama/`, counts as the agent's activity, sends messages to the editor's coordinator.
+Runs at once; writes in `.trama/`, counts as the agent's activity, sends messages to the editor.
 
 #### `trama proposal show <id>`
 
@@ -298,7 +296,7 @@ Output (`--json`):
 - show: string, optional. Toward `open`: the text of `proposal show`.
 - resolved: { drift: string }[], optional. Toward `approved`: the Drifts a resolution decided.
 
-Runs at once; writes in `.trama/`, counts as the agent's activity, sends messages to the editor's coordinator.
+Runs at once; writes in `.trama/`, counts as the agent's activity, sends messages to the editor.
 
 ### `task`
 
@@ -425,7 +423,7 @@ Runs at once; writes in `.trama/`, counts as the agent's activity.
 
 #### `trama drift new`
 
-`happens` (what the code does, in terms of behaviour) and `should` (what the Model or Requirement says) are short Markdown; `where` is required and says where in the code the difference was seen (read that code before filing; files and code names go only there). `options` are from two to five fix options, the first being the one you recommend; without options the Drift is accepted only with an attached `proposal`. `critical` marks an urgent developer decision. `task` names the Task you were implementing when you found the difference (the origin). `previous` is the resolved Drift this one follows. `notBlocking` names Tasks the Drift would block and leaves free, each with a one-line `reason`: the difference does not touch it (see `dryRun`). `announcement` is the ID printed by `trama announcement new`. With `dryRun: true` nothing is written: it prints the Tasks a Drift with these `refs` and this `task` would block, by number or identity and title; only `refs` and `task` are needed then.
+`happens` (what the code does, in terms of behaviour) and `should` (what the Model or Requirement says) are short Markdown; `where` is required and says where in the code the difference was seen (read that code before filing; files and code names go only there). `options` are from two to five fix options, the first being the one you recommend; without options the Drift is accepted only with an attached `proposal`. `task` names the Task you were implementing when you found the difference (the origin). `previous` is the resolved Drift this one follows. `notBlocking` names Tasks the Drift would block and leaves free, each with a one-line `reason`: the difference does not touch it (see `dryRun`). `announcement` is the ID printed by `trama announcement new`. With `dryRun: true` nothing is written: it prints the Tasks a Drift with these `refs` and this `task` would block, by number or identity and title; only `refs` and `task` are needed then.
 
 Input (`--input`):
 
@@ -435,7 +433,6 @@ Input (`--input`):
 - `should`: `string`, optional. What the Model or Requirement says. Required unless `dryRun`.
 - `where`: `string`, optional. Where in the code the difference was seen. Required unless `dryRun`.
 - `options`: `{ title: string, text: string }[]`, optional. From 2 to 5 fix options, the recommended one first; none only with `proposal`.
-- `critical`: `boolean`, optional. An urgent developer decision. Default false.
 - `task`: `string not empty`, optional. The Task being implemented when the Drift was found: its ID or short number.
 - `proposal`: `string not empty`, optional. The Draft or open Proposal that goes with the Drift: its ID or short number.
 - `previous`: `string not empty`, optional. The resolved Drift this one follows: its ID or short number.
@@ -456,7 +453,6 @@ Either:
 - id: string, required
 - number: string | null, required
 - path: string, required
-- critical: boolean, required
 - previous: string | null, required
 - note: string, optional. About the announcement, when it was not known.
 
@@ -464,7 +460,7 @@ Either:
 
 - tasks: { id: string, number: string | null, title: string }[], required
 
-Runs at once; writes in `.trama/`, counts as the agent's activity, sends messages to the editor's coordinator.
+Runs at once; writes in `.trama/`, counts as the agent's activity, sends messages to the editor.
 
 #### `trama drift show <id>`
 
@@ -617,14 +613,13 @@ Runs at once; read-only.
 
 #### `trama announcement new`
 
-Announce a card (`proposal`, `task` or `drift`) as soon as you know you will create it, so the Board shows a ghost of it; pass the printed ID as `announcement` when you create the card. Announce a final check or a scan with `kind: check` and its `phase` (`verifying` or `scanning`): it stays in In progress until `trama announcement move <id> delivered` or `failed`. `phase` is required for a check and refused for the other kinds. With `phase: scanning`, a scan check Trama announced at launch for this terminal or chat and still waiting is taken instead of creating one. `job` (only for a check) names the autopilot job the check belongs to; it defaults to the terminal's own (`TRAMA_JOB`). Prints the announcement's ID. Never wait for the ghost to show.
+Announce a card (`proposal`, `task` or `drift`) as soon as you know you will create it, so the Board shows a ghost of it; pass the printed ID as `announcement` when you create the card. Announce a final check or a scan with `kind: check` and its `phase` (`verifying` or `scanning`): it stays in In progress until `trama announcement move <id> delivered` or `failed`. `phase` is required for a check and refused for the other kinds. With `phase: scanning`, a scan check Trama announced at launch for this terminal or chat and still waiting is taken instead of creating one. Prints the announcement's ID. Never wait for the ghost to show.
 
 Input (`--input`):
 
 - `kind`: `"proposal" | "task" | "drift" | "check"`, required. What is announced: `proposal`, `task`, `drift` or `check`.
 - `title`: `string not empty`, required. A short title: at most five words for a card; for a check, what the work is.
 - `phase`: `"verifying" | "scanning"`, optional. Only for a check: `verifying` or `scanning`.
-- `job`: `string not empty`, optional. Only for a check: the autopilot job it belongs to.
 
 ```sh
 trama announcement new --input - <<'JSON'
@@ -638,13 +633,12 @@ Output (`--json`):
 - kind: "proposal" | "task" | "drift" | "check", required
 - title: string, required
 - phase: "verifying" | "scanning", optional
-- job: string, optional
 
 Runs at once; writes in `.trama/`, counts as the agent's activity.
 
 #### `trama announcement move <id> <state>`
 
-`scanning` moves a check from Verifying to Scanning, and `history` from Verifying or Scanning to History, when the final run writes its History; a check only moves forward, so a backward move is refused and changes nothing, and a check already in that phase is left as it is and the command says so. `delivered` delivers a finished check and removes its ghost, and tells the editor's coordinator it succeeded; `failed` does the same but tells it the check failed. An ID that is unknown, already delivered or withdrawn, or not a check is not an error: the command says no check was found, changes nothing, and reports no outcome to the coordinator. Nothing tells whether a check is the final one of a run, so the command does not check that.
+`scanning` moves a check from Verifying to Scanning, and `history` from Verifying or Scanning to History, when the final run writes its History; a check only moves forward, so a backward move is refused and changes nothing, and a check already in that phase is left as it is and the command says so. `delivered` delivers a finished check and removes its ghost; `failed` does exactly the same, and only the phase timings tell the two outcomes apart. An ID that is unknown, already delivered or withdrawn, or not a check is not an error: the command says no check was found and changes nothing. Nothing tells whether a check is the final one of a run, so the command does not check that.
 
 - `<id>`: The announcement of the check.
 - `<state>`: Where the check goes. One of `scanning`, `history`, `delivered`, `failed`.
@@ -662,7 +656,7 @@ Output (`--json`):
 - found: boolean, required
 - outcome: "done" | "failed", optional
 
-Runs at once; writes in `.trama/`, counts as the agent's activity, sends messages to the editor's coordinator.
+Runs at once; writes in `.trama/`, counts as the agent's activity.
 
 ### `comparison`
 
@@ -698,7 +692,7 @@ Runs at once; writes in `.trama/`, counts as the agent's activity.
 
 #### `trama comparison move <id> <state>`
 
-The input is what the comparison found: an optional `design` (the Proposal every Task is linked to), `tasks` (each `title`, `refs`, `body`, optional `technical`) and `drifts` (each `title`, `refs`, `happens`, `should`, `where`, `options` as a list of `{title, text}`, and optional `critical`, `previous`, `proposal`, `notBlocking` as a list of `{task, reason}`); both lists may be empty. Every card follows the rules of `task new` and `drift new`. All cards are checked before any is written: if one is not valid nothing is written and every problem is listed per card. Otherwise the cards are created in order, the comparison is delivered and it is recorded as compared on this code.
+The input is what the comparison found: an optional `design` (the Proposal every Task is linked to), `tasks` (each `title`, `refs`, `body`, optional `technical`) and `drifts` (each `title`, `refs`, `happens`, `should`, `where`, `options` as a list of `{title, text}`, and optional `previous`, `proposal`, `notBlocking` as a list of `{task, reason}`); both lists may be empty. Every card follows the rules of `task new` and `drift new`. All cards are checked before any is written: if one is not valid nothing is written and every problem is listed per card. Otherwise the cards are created in order, the comparison is delivered and it is recorded as compared on this code.
 
 - `<id>`: The comparison: the ID printed by `comparison new`.
 - `<state>`: Where the comparison goes. One of `delivered`.
@@ -722,7 +716,7 @@ Output (`--json`):
 - tasks: { id: string, number: string | null, title: string }[], required
 - drifts: { id: string, number: string | null, title: string, previous: string | null }[], required
 
-Runs at once; writes in `.trama/`, counts as the agent's activity, sends messages to the editor's coordinator.
+Runs at once; writes in `.trama/`, counts as the agent's activity, sends messages to the editor.
 
 ### `question`
 
@@ -757,63 +751,6 @@ Failed:
 - error: { code: "invalid-input" | "editor-interrupted" | "cancelled" | "question-failed", message: string }, required
 
 Runs and waits for the editor; read-only.
-
-### `autopilot`
-
-#### `trama autopilot show`
-
-Asks the project's coordinator in the editor and reads the answer: the delegation's mode, the phase of the coordination, the reason it waits or failed, the collection and its Proposal when there are any, and the permanent IDs of the Drifts and Tasks authorized. `status` tells an unavailable coordinator (`unavailable`) from a delegation that is off (`disabled`); neither shows an authorization. With `job` (or `TRAMA_JOB` in the terminal Trama started) it returns the scope currently authorized for that job and no other; without a job it shows the state for the developer, with no `drifts` or `tasks` an agent could use. Read-only. Reread it before each choice: the delegation can change while the agent works.
-
-Input (`--input`):
-
-- `job`: `string`, optional. The job whose authorized scope is wanted. Default: `TRAMA_JOB`.
-
-```sh
-trama autopilot show --input - <<'JSON'
-{"job":"job-1"}
-JSON
-```
-
-Output (`--json`):
-
-- status: "unavailable" | "disabled" | "available", required
-- mode: string, optional. `disabled`, `enabled` or `yolo`.
-- phase: string, optional
-- reason: string, optional. Why the coordination waits or failed.
-- collection: string, optional. The collection being resolved.
-- proposal: string, optional. The resolution Proposal of the collection.
-- remoteWindow: boolean, optional. Work is active in another editor window.
-- lastFailedScan: string, optional
-- failures: string[], optional
-- drifts: string[], required. Permanent IDs of the Drifts authorized for the job.
-- tasks: string[], required. Permanent IDs of the Tasks authorized for the job.
-
-Runs and waits for the editor; read-only.
-
-#### `trama autopilot move <job> <state>`
-
-Tells the project's coordinator that a Drift or a Task of the job could not be resolved or implemented, or that its check failed: it excludes the case from the next automatic steps and shows `reason`. Give exactly one of `task` and `drift`, by permanent ID; the coordinator checks that the case belongs to the job. It changes no Drift or Task on disk and retries nothing. Fails, with no success assumed, when no coordinator accepts it.
-
-- `<job>`: The autopilot job the case belongs to.
-- `<state>`: What happened to the case. One of `failed`.
-
-Input (`--input`):
-
-- `task`: `string`, optional. The Task that failed. Not with `drift`.
-- `drift`: `string`, optional. The Drift that could not be resolved. Not with `task`.
-- `reason`: `string`, required. Why, in one line.
-
-```sh
-trama autopilot move job-1 failed --input - <<'JSON'
-{"task":"a1b2c3d4","reason":"The final check failed after this Task."}
-JSON
-```
-
-Output (`--json`):
-
-- message: string, required
-
-Runs and waits for the editor; sends messages to the editor's coordinator.
 
 ### `advisor`
 
@@ -994,9 +931,8 @@ The extension initialises and updates the skills with these two commands, passin
 
 | Command | Effect |
 |---|---|
-| `proposal new` with `{ title, body?, kind?, label?, requires?, automatic?, nonBlocking?, job?, announcement?, request? }` | Creates `proposals/<id>-<slug>/proposal.md` with `status: draft` and `created`, the UTC creation instant in ISO 8601. The id is eight random lowercase letters and digits, unique among Proposals; a Task or a Drift may use the same string. A card still named `NNNN-<slug>` (at least four digits) stays addressable by that number and has no `created`. An id argument may be the whole identity, a prefix that only one card of that kind has, or the whole file or folder name; digits alone cite only a numbered card. `kind` is `change` (default), `import` (ADR 0008), `resolution` or `setup`: one value, so a Proposal is of one kind only. `requires` writes it on top of those draft, open or approved Proposals (refused for a rejected or discarded one). `request` binds it to the written design request `.trama/requests/<id>.md` it comes from, recorded as `request`; when that file does not exist the Proposal is created unbound and the output says the request was not found. `label` is the short label, 1 to 30 characters on one line, trimmed, refused before anything is created when invalid; a Draft with Tasks must have one before the hand-over accepts it, and open Proposals written before the label existed are not blocked. It shows as `Label:` under the title of `proposal show`, and as `label` in its `--json`. |
-| `proposal new` with `kind: "resolution"`, `automatic` and `job` | Creates a resolution Proposal marked `automatic: true` in its history and binds the Draft to the current authorized collection in the local host's memory using the job identity. `automatic` is valid only with `kind: "resolution"`, and `job` only with `automatic`: any other combination is a usage error that creates nothing. The hand-over rejects file changes to the Model or Requirements and any Drift decision other than `fix-code` with option 1 and no note. The marker and job binding do not authorize approval. |
-| `proposal new` with `kind: "resolution"` and `nonBlocking` | Creates a resolution Proposal marked `nonBlocking: true`, whose Drifts block no Task: the experimental Drift blocker files it at the end of a scan, a Run or an import. `nonBlocking` is valid only with `kind: "resolution"`, and not with `automatic`: either combination is a usage error that creates nothing. Validation refuses `nonBlocking` on any other kind and on an automatic resolution. The flag changes neither approval nor rejection, so the developer decides it like any manual resolution. `proposal list` and `project show` mark it `(blocks nothing)`, the Board shows a `blocks nothing` badge on its card, and `list`, `show`, `project show` and their `--json` carry it as `nonBlocking`. |
+| `proposal new` with `{ title, body?, kind?, label?, requires?, nonBlocking?, announcement?, request? }` | Creates `proposals/<id>-<slug>/proposal.md` with `status: draft` and `created`, the UTC creation instant in ISO 8601. The id is eight random lowercase letters and digits, unique among Proposals; a Task or a Drift may use the same string. A card still named `NNNN-<slug>` (at least four digits) stays addressable by that number and has no `created`. An id argument may be the whole identity, a prefix that only one card of that kind has, or the whole file or folder name; digits alone cite only a numbered card. `kind` is `change` (default), `import` (ADR 0008), `resolution` or `setup`: one value, so a Proposal is of one kind only. `requires` writes it on top of those draft, open or approved Proposals (refused for a rejected or discarded one). `request` binds it to the written design request `.trama/requests/<id>.md` it comes from, recorded as `request`; when that file does not exist the Proposal is created unbound and the output says the request was not found. `label` is the short label, 1 to 30 characters on one line, trimmed, refused before anything is created when invalid; a Draft with Tasks must have one before the hand-over accepts it, and open Proposals written before the label existed are not blocked. It shows as `Label:` under the title of `proposal show`, and as `label` in its `--json`. A Proposal is never an automatic resolution: `automatic` and `job` are unknown fields, a usage error, and an old file with `automatic: true` is read without error, the field ignored. |
+| `proposal new` with `kind: "resolution"` and `nonBlocking` | Creates a resolution Proposal marked `nonBlocking: true`, whose Drifts block no Task: the experimental Drift blocker files it at the end of a scan, a Run or an import. `nonBlocking` is valid only with `kind: "resolution"`: any other combination is a usage error that creates nothing. Validation refuses `nonBlocking` on any other kind. The flag changes neither approval nor rejection, so the developer decides it like any resolution. `proposal list` and `project show` mark it `(blocks nothing)`, the Board shows a `blocks nothing` badge on its card, and `list`, `show`, `project show` and their `--json` carry it as `nonBlocking`. |
 | `proposal new` with `kind: "setup"` | The first Proposal of an empty Model; a usage error, creating nothing, when the Model has a Feature or an Actor. |
 | `proposal edit <id>` with `{ label?, edit?, delete?, drifts?, removeDrifts? }` | Every use returns an open Proposal to Draft, with a notice, so the agent registers before every change; without input it only does that, touching no file. `edit` lists paths: each is a Model file relative to `.trama/model/`, `specs.yaml`, a Requirement file `requirements/<area>/area.md` or `requirements/<area>/<fragment>.md`, new or existing, or a Task `tasks/<slug>.md`. `requirements/<area>.md` and deeper paths are refused, saying why. For each it copies the current file into the Proposal and records its hash in `base`, or creates an empty file marked `new` if it does not exist, and prints the path to write (one per line; `--json`: `paths`, a list of `{ path, edit }`). Re-registering keeps the original hash and contents. `delete` lists paths to mark for deletion: each is added to `delete` and its hash recorded in `base`. `label` writes or changes the short label, with the rules of `proposal new`. `drifts` records or replaces, in a resolution, the decision on open Drifts (`{ drift, decision, option?, note? }`, `decision` being `proposal`, `dismissed` or `fix-code`; `option` and `note` only with `fix-code`), and `removeDrifts` takes Drifts out of the list. All of it runs under the Proposal's lock, in that order. |
 | `proposal move <id> open` | The only hand-over command: sets a Draft to `status: open` after the checks of the Model and Requirements with the Proposal applied, unregistered files, the Drift list of a resolution, including each `fix-code` Drift whose code can no longer be fixed. A refusal leaves it Draft and names every problem. A success prints, after its outcome, the warnings of the validation (none when there are none) and then the same text as `proposal show <id>`; with `--json` that text is the `show` field. Staleness or waiting for required approvals do not prevent the hand-over. A `setup` Proposal handed over while the Model has no Feature and no Actor is approved at once, as `approved` would do, and prints the same text after the outcome of that approval; when that approval refuses it (stale, requiring Proposals not approved yet, a Task that cannot be created), it stays Open and the output says why. `skillsDir` as in `approved`. When the Proposal is bound to a written design request, a successful hand-over deletes `.trama/requests/<id>.md` and says so; a file already gone does not make it fail, and a refused hand-over deletes nothing. |
@@ -1054,29 +990,17 @@ A Drift leaves free only the Tasks named by `notBlocking`. `drift show` lists th
 
 ## Comparisons
 
-The input of `comparison move <id> delivered` is a JSON object with a `tasks` list and a `drifts` list, and an optional `design`, the ID of a Proposal every Task of the file is linked to (as `proposal` in `task new`). A Task has `title`, `refs` (a list of strings), and optional `body` and `technical`. A Drift has `title`, `refs`, `happens`, `should`, `where`, and `options` (a list of `{"title", "text"}`), and optional `critical`, `previous` (the ID of a resolved Drift it recurs from), `proposal` (the ID of its own Proposal) and `notBlocking` (a list of `{"task", "reason"}`, naming the Tasks it does not block). Every card is checked before anything is written: when one fails, the output lists the problems, nothing is written and the comparison stays waiting. Tasks are written before Drifts. An agent filing cards sees the editor learn who holds each of them, as with `task new` and `drift new`.
+The input of `comparison move <id> delivered` is a JSON object with a `tasks` list and a `drifts` list, and an optional `design`, the ID of a Proposal every Task of the file is linked to (as `proposal` in `task new`). A Task has `title`, `refs` (a list of strings), and optional `body` and `technical`. A Drift has `title`, `refs`, `happens`, `should`, `where`, and `options` (a list of `{"title", "text"}`), and optional `previous` (the ID of a resolved Drift it recurs from), `proposal` (the ID of its own Proposal) and `notBlocking` (a list of `{"task", "reason"}`, naming the Tasks it does not block). Every card is checked before anything is written: when one fails, the output lists the problems, nothing is written and the comparison stays waiting. Tasks are written before Drifts. An agent filing cards sees the editor learn who holds each of them, as with `task new` and `drift new`.
 
 A successful `comparison move <id> delivered` records the comparison in the registry `.trama/compared/<fingerprint>.json`: for each reference of the comparison, and each element that contains it, it stores the text fingerprint of that element, under the code fingerprint of the moment. The folder has its own `.gitignore`, and the records of any other code fingerprint are deleted on that first write. The code fingerprint is the Git commit plus the content of the changed and untracked files, excluding `.trama`, the agents' skill folders (`.agents/skills`), `.omp/agents` and `.omp/WATCHDOG.yml`; `comparison new` announces it with the comparison, together with its references. Outside a Git repository, or for a comparison with no code fingerprint, a comparison that is withdrawn or rejected, nothing is recorded. `task list` with `runnable` and `scope` uses these records: a reference is already compared when a recorded element still has the same text fingerprint under the same code fingerprint.
 
 `trama timing list` shows the phase timings that the agent's commands record in `.trama/timings/`. Each coordinator job has one job file, named by the UTC instant the job started and the holder that ran it (`<instant>-<terminal or chat>.jsonl`), with one JSON line per event: the check phases (`announcement new` and `announcement move`), the Tasks an agent moves to `doing` and to `done`, the machine comparisons (`comparison new` and `comparison move`), the Drifts filed on a Task, and the waits of `task list` with `runnable` and `max`. Only commands run from a Trama terminal or chat are recorded; the developer's own commands write nothing. The folder has its own `.gitignore` containing `*`; the newest 20 job files are kept, and a new job deletes the older ones. Failing to write a record never fails the command that records it. A job that has parallel choices also shows `Parallel choices`: the count per kind and one line per choice, with kind, Tasks and reason (`--json`: `parallelChoices`). `trama timing new` with `{ kind, tasks, reason }` records such a choice of the experimental parallel execution: `kind` is `release`, `order` or `conflict`, `tasks` holds at least two existing Tasks and `reason` is one non-empty line; invalid input is a usage error and writes nothing, and outside a Trama terminal or chat the command writes nothing, says so and exits with 0.
 
 
-## Drift autopilot
+## Resolving Drifts
 
-| Command | Effect |
-|---|---|
-| `trama autopilot show` with `{ job? }` (or `TRAMA_JOB`) | Read-only status from the local editor coordinator. Reports the current mode and coordination phase, any wait/error reason, the active collection and Proposal identities when present, and whether work is active in another editor window. It also reports permanent Drift and Task IDs currently authorized for the queried job. Also reports the last scan of the project that failed or was interrupted, as information only: it changes no phase, and a later successful developer-started scan clears it. Without a recognized `job`, output is for the developer and does not grant an agent usable delegation. Distinguishes an unavailable coordinator from disabled delegation; neither is an authorization. It never changes the setting. |
-| `trama autopilot move <job> failed` with `{ task, reason }` or `{ drift, reason }` | Tells the coordinator that a Task or a Drift of the job failed or does not apply; exactly one of `task` and `drift`. The coordinator checks that the case belongs to the job before excluding it from the next automatic steps and showing the reason. It changes no Drift or Task file and retries nothing; with no coordinator that accepts it, the command fails. |
+No Drift resolves itself: there is no delegation, no automatic approval and no automatic Run. Resolve on one Drift (its card in the Board) takes only that Drift: the agent asks the developer the decisions and hands over a resolution to review; the Tasks that come out of it start by hand. A refused start keeps that scope until it really starts, so no other open Drift is taken with it.
 
-The setting `trama.driftAutoPilot` is application-scoped, `disabled` by default, and read only from the user's application setting. `disabled` is manual; `enabled` delegates non-critical Drifts; `yolo` includes critical Drifts. Automatic resolution still requires an open Drift with an applicable first Fix option, outside another Draft/open resolution and not excluded after failure. A successful developer-started scan, a changed Drift, or an explicit Resolve Drifts request makes failed cases eligible for evaluation again. The coordinator waits for Trama-tracked scans and Runs across project windows; external agent scans are not part of that barrier. A window that takes over the coordination waits for a new scan's end or an explicit Resolve Drifts request before it resumes; owning the role alone resumes nothing.
-
-This is a two-step workflow: the resolution agent submits a restricted automatic resolution Draft, and the host rechecks it and uses ordinary approval checks. Only after approval and normal resolution-agent completion may the host launch a separate Run limited to that resolution's fix Tasks and their incomplete origins. When the Drifts need several resolutions, the agent submits them as a chain (each one `requires` the earlier ones), and the host approves each one in dependency order as it is submitted; a Draft or open resolution outside that collection still blocks approval. Neither choosing a Fix nor submitting a resolution is approval or code execution. The agent must not approve or implement from the resolution workflow.
-
-Every Run, scan or resolution first reserves its project with the editor coordinator, and gives the reservation back whether its send started or not. While a reservation is open, no other send of the project starts and no automatic step starts. A reservation is not a running job.
-
-Manual Resolve Drifts keeps its question round and hands over a resolution for developer review. In `enabled`, critical cases and exceptions remain manual; in `yolo`, critical cases may be delegated, but missing/inapplicable options remain manual. A button request may ask for manual handling of exceptions; it does not make them automatic. Failed cases stay excluded until a successful developer-started scan, a Drift edit, or another explicit Resolve Drifts request; the Board links each failure to its Drift or Task. There is no additional cycle, time or spending limit: subsequent scans can start further cycles until the developer disables delegation or interrupts work.
-
-Resolve on one Drift (its card in the Board) takes only that Drift: a manual round or resolution names only it, and an automatic collection, when the delegation allows it, names only it too. A refused start keeps that scope until it really starts, so no other open Drift is taken with it.
 ## Announcements
 
 Announcing a card before the agent creates it makes the Board show a ghost of it meanwhile.
@@ -1084,9 +1008,9 @@ Announcing a card before the agent creates it makes the Board show a ghost of it
 | Command | Effect |
 |---|---|
 | `trama announcement new` with `{ kind: proposal\|task\|drift, title }` | Announces a card the agent is about to create, as soon as it knows it will. Prints the announcement ID, six letters and digits. Not developer-only: the agent runs it. Writes a temporary file under `.trama/announcements/` (see the file format). When `TRAMA_TERMINAL` holds a terminal ID (the extension sets it in every agent terminal it starts), the announcement belongs to that terminal; without it, or with a value that is not six lowercase letters and digits, it belongs to none, and with `CURSOR_AGENT=1` it carries `chat: cursor` (made by Cursor's chat agent). |
-| `trama announcement new` with `{ kind: check, title, phase: verifying\|scanning, job? }` | Annuncia un controllo: non una scheda, ma il lavoro che l'agente fa ancora quando nessuna scheda lo mostra (la verifica finale di una corsa, o una scansione). Stampa l'ID come gli altri annunci e copia `terminal` o `chat` allo stesso modo. `phase` è obbligatorio per `check` e rifiutato per gli altri tipi; `job` lega facoltativamente il controllo al lavoro coordinato che lo ha avviato. Il ghost sta in In progress. |
+| `trama announcement new` with `{ kind: check, title, phase: verifying\|scanning }` | Annuncia un controllo: non una scheda, ma il lavoro che l'agente fa ancora quando nessuna scheda lo mostra (la verifica finale di una corsa, o una scansione). Stampa l'ID come gli altri annunci e copia `terminal` o `chat` allo stesso modo. `phase` è obbligatorio per `check` e rifiutato per gli altri tipi. Un annuncio non ha `job`. Il ghost sta In progress. |
 | `trama announcement move <id> scanning\|history` | Passa un controllo da Verifying a Scanning, o da Verifying o Scanning a History, quando parte lo scan o la scrittura della History. Su un controllo già nella fase richiesta non cambia nulla e lo dice. Non si torna indietro: un passaggio all'indietro è rifiutato senza modifiche. |
-| `trama announcement move <id> delivered\|failed` | Consegna il controllo e rimuove il ghost. Con `delivered` comunica al coordinatore l'esito riuscito, con `failed` l'esito fallito. |
+| `trama announcement move <id> delivered\|failed` | Consegna il controllo e rimuove il ghost, allo stesso modo per entrambi. La differenza fra `delivered` e `failed` finisce soltanto nei tempi delle fasi; nessuno dei due manda l'esito a un coordinatore. |
 
 Un ID sconosciuto, già consegnato o ritirato, o che non è un controllo, non è un errore per `announcement move`: l'uscita dice che il controllo non è stato trovato e il comando finisce con successo, senza comunicare un esito riuscito. Annunciare un controllo e cambiarne la fase non riavviano nulla: non c'è quiete che li conti come attività. Nessuno dei comandi è riservato al developer.
 
@@ -1096,7 +1020,7 @@ Una Proposal creata con `announcement` non utilizzabile resta senza ghost: non p
 
 L’estensione sincronizza ogni volta che il pannello si aggiorna soltanto l’H1 degli annunci Writing già associati a una Draft leggibile, anche dopo modifiche dirette al titolo e durante un round di domande. Conserva tutti i metadati, incluso `touched`, e non riscrive un titolo già coincidente né ricrea annunci ritirati o consegnati.
 
-The extension announces each agent launch itself, except a Run, as soon as its instruction is really sent: a design or Resolve Drifts announces the Proposal the agent will create (an automatic collection names the Drifts it gathered, and its Proposal is titled `Resolve Drifts`), a scan announces its check in Scanning, and an import announces the work itself. In a terminal the announcement belongs to that terminal; in an editor chat it belongs to the chat of the project. An instruction that waits for the developer's Enter or lands on the clipboard announces nothing. When the agent's turn ends (idle hook, end of the command Trama typed, closing of the terminal, or the end, interruption or closing of a Trama conversation in the chat), the Proposals and Drifts it delivered or filed are released, so their buttons in the Board become available again.
+The extension announces each agent launch itself, except a Run, as soon as its instruction is really sent: a design or Resolve Drifts announces the Proposal the agent will create, a scan announces its check in Scanning, and an import announces the work itself. In a terminal the announcement belongs to that terminal; in an editor chat it belongs to the chat of the project. An instruction that waits for the developer's Enter or lands on the clipboard announces nothing. When the agent's turn ends (idle hook, end of the command Trama typed, closing of the terminal, or the end, interruption or closing of a Trama conversation in the chat), the Proposals and Drifts it delivered or filed are released, so their buttons in the Board become available again.
 
 Only the extension withdraws announcements the agent never delivered, and each terminal only its own: the command Trama typed into an agent terminal ending (recognised by the command line the editor reports for it, compared after trimming; any other command, or an end reported without that line, withdraws nothing), that terminal closing, or its agent going idle (`hook idle`) withdraws the announcements that belong to it. An announcement made by the editor's chat is withdrawn, with notice, when a Trama conversation of the project ends its turn (`AGENT_STOPPED`) or is interrupted (`AGENT_INTERRUPTED`), and without notice when it is closed (`CONVERSATION_CLOSED`). At startup the extension withdraws every announcement left on disk, with no notice; the Tasks still marked as taken stay taken until their agent's end releases them or the developer runs `task move <id> doing`. There is no timer: no elapsed time and no quiet period withdraws an announcement, and read-only commands do not count as activity. The command line alone never withdraws any.
 

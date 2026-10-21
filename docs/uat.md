@@ -855,24 +855,14 @@ Written from the Requirements; these settings only count in your **user** settin
 
 ---
 
-## Y. Drift autopilot
+## Y. Runs and Drift decisions
 
-These are acceptance scenarios for the coordinated automatic flow. Use a disposable project with controllable Trama agent launches and at least two editor windows on the same canonical project. Run queries as `trama autopilot show --root <project> --json` (with `--input '{"job":"<id>"}'` for a job); automatic agent prompts must carry the job ID supplied by Trama.
+Drifts are never resolved on their own: there is no delegation, no automatic approval and no automatic Run.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| Y1 | Leave the delegation at `disabled` (`"trama.driftAutoPilot": "disabled"`); start Resolve Drifts | Existing manual question and developer-review flow; no automatic delegation | ☐ |
-| Y2 | Set `"trama.driftAutoPilot": "enabled"` with open ordinary and critical Drifts; allow the tracked scan/Run barrier to clear | Only eligible non-critical Drifts can be delegated; critical and exceptional cases remain manual. No new automatic collection starts while any tracked scan or Run in either project window is active | ☐ |
-| Y3 | Set `"trama.driftAutoPilot": "yolo"`; test an eligible Drift with Fix options and another with no applicable first Fix option | Only the authorized eligible Drift is prepared with `fix-code`, option 1, no note; the other stays out. The agent submits but neither approves nor implements the resolution | ☐ |
-| Y4 | Query autopilot with the active job ID, then query without it or with an unknown ID; inspect status from a second editor window | The known job reports only its own current authorized permanent IDs; an unknown/missing job grants no usable delegation. The Board shows no autopilot status line, and `trama autopilot show` reports work active in another window | ☐ |
-| Y5 | Submit an automatic resolution and inspect host actions while its agent is still running | Host does not start the separate implementation Run before normal resolution-agent completion; after approval it filters Run Tasks to that collection's fix Tasks and incomplete origins, excluding unrelated Tasks | ☐ |
-| Y6 | Set `"trama.driftAutoPilot"` to `disabled`, or from `yolo` to `enabled`, while automatic work is running | No new steps start; already-started work is not killed. Critical residual work is no longer authorized once the setting leaves `yolo` | ☐ |
-| Y7 | Force a resolution choice or fix Task to fail; then let an unrelated eligible case proceed, edit the failed Drift, and run a successful developer scan | Failure is reported against its permanent Drift/Task ID and reason; failed work is not retried by the next automatic cycle, while independent work may continue. A changed Drift or successful developer scan makes failed cases eligible for evaluation again | ☐ |
-| Y8 | Make a Trama scan fail after it has filed a Drift; then, with no other scan or Run in progress, let the autopilot run. Separately, end a scan without a successful check (close its agent early) | A failed or interrupted scan does not suspend new automatic collections: once no other scan or Run is active, collection starts on the eligible open Drifts. A finished scan or explicit Resolve Drifts lifts the wait after the editor opens | ☐ |
-| Y9 | Start a scan with an external agent not launched by Trama | It does not appear in Trama's coordination barrier; the developer coordinates that work manually | ☐ |
-| Y10 | Allow a successful Run and its selective scan to produce another eligible Drift | The existing Run check represents its selective scan once; a later cycle may run without an extra built-in cycle/time/spending limit. The developer can stop further cycles by withdrawing delegation or interrupting work | ☐ |
-| Y11 | Trigger a failed resolution or Task case, then find its card in the Board | The card of the failed Drift or Task shows an `autopilot failed` badge; its tooltip and accessible name `Autopilot failed: <reason>` give the reason. Focus does not move and the panel does not open by itself; selecting the card opens the permanent Drift or Task card, and keyboard focus survives status refresh | ☐ |
-| Y12 | Leave `"trama.submitWhileRunning"` unset or `false` (default); start a Run, then look at Run all and a Task's Run button while the Run is in progress; tick the setting (`true`) and look again | With `false`, those Run buttons are disabled while the Run is in progress, and a launch is refused with `A run cannot start: A run is in progress.`; with `true` they are available. Scan System and Resolve Drifts are not affected by the setting | ☐ |
+| Y1 | Leave `"trama.submitWhileRunning"` unset or `false` (default); start a Run, then look at Run all and a Task's Run button while the Run is in progress; tick the setting (`true`) and look again | With `false`, those Run buttons are disabled while the Run is in progress, and a launch is refused with `A run cannot start: A run is in progress.`; with `true` they are available. Scan System and Resolve Drifts are not affected by the setting | ☐ |
+| Y2 | With several open Drifts, press **Resolve** on the card of one of them | Only that Drift is gathered: the agent asks the decisions and hands over a resolution to review; nothing is approved or run until you decide, and the Tasks that come out of it start by hand | ☐ |
 
 ---
 

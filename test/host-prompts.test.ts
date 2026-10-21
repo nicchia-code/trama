@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ASK_DEVELOPER_SENTENCE, buildAutomaticRunPrompt, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
@@ -14,30 +14,16 @@ test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "implement-all" })).toBe(
     'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task list --input \'{"runnable":true,"max":{maxParallelAgents}}\'`, one group at a time, until it says there is none.',
   );
-  expect(buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34", "ef56gh78"] })).toBe(
-    "Use the trama-resolve-drifts skill on the open Drifts ab12cd34, ef56gh78: ask the developer what should happen for each one, then write one resolution Proposal.",
-  );
-  expect(buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34"], scoped: true })).toBe(
-    "Use the trama-resolve-drifts skill on the open Drifts ab12cd34, and on no other open Drift: ask the developer what should happen for each one, then write one resolution Proposal.",
+  expect(buildPrompt({ kind: "resolve-drifts", drift: "ab12cd34" })).toBe(
+    "Use the trama-resolve-drifts skill on the open Drift ab12cd34, and on no other open Drift: ask the developer what should happen for it, then write one resolution Proposal.",
   );
 });
 
-test("automatic resolution and Runs stay scoped to coordinator authorization", () => {
-  const resolve = buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34"], automaticCollection: "collection" });
-  expect(resolve).toContain("first Fix option");
-  expect(resolve).toContain("Do not approve the Proposal or start a Run.");
-  const run = buildAutomaticRunPrompt("collection");
-  expect(run).toContain("Before each Task, run `trama autopilot show --json` and take the authorized Task IDs from its `tasks` field");
-  expect(run).toContain('`trama task list --input \'{"runnable":true,"tasks":["<id>",…],"max":{maxParallelAgents}}\'`');
-  expect(run).not.toContain("task next");
-  expect(resolve).toContain("Before each choice, run `trama autopilot show --json`");
-  expect(resolve).toContain("giving it the `automatic` field");
-  expect(run).not.toContain("--task task-");
-  expect(run).toContain("trama announcement move <check-id> failed");
-  expect(run).toContain('`trama autopilot move <job> failed --input -` and `{"task":"<id>","reason":"<reason>"}`');
-  expect(resolve).toContain('`trama autopilot move <job> failed --input -` and `{"drift":"<id>","reason":"<reason>"}`');
-  expect(`${run} ${resolve}`).not.toContain("agent-event");
-  expect(run).toContain("Do not use the general Task queue");
+test("no instruction mentions the delegation: Resolve Drifts is manual and nothing is automatic", () => {
+  const all = [buildPrompt({ kind: "resolve-drifts", drift: "ab12cd34" }), buildPrompt({ kind: "implement-all" }), buildPrompt({ kind: "implement", task: "t" })].join(" ");
+  expect(all).not.toContain("automatic");
+  expect(all).not.toContain("autopilot");
+  expect(all).not.toContain("TRAMA_JOB");
 });
 
 test("several Features are listed in backticks, comma separated", () => {
@@ -45,17 +31,12 @@ test("several Features are listed in backticks, comma separated", () => {
   expect(buildScanPrompt([])).toBe("Use the trama-scan skill on the whole System.");
 });
 
-test("an automatic Run of one model group names the Tasks it takes, and only then", () => {
-  expect(buildAutomaticRunPrompt("collection", ["aaaa1111", "bbbb2222"])).toContain("This Run takes only the Tasks `aaaa1111`, `bbbb2222` among the authorized ones;");
-  expect(buildAutomaticRunPrompt("collection")).not.toContain("This Run takes only");
-});
-
 test("the agent terminal is named after the work: the card's short number, or a fixed word", () => {
   const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
   expect(terminalName({ kind: "implement", task: "abc" }, short)).toBe("T3");
   expect(terminalName({ kind: "written-design", request: "r" }, short)).toBe("Design");
   expect(terminalName({ kind: "setup-request", request: "r" }, short)).toBe("Setup");
-  expect(terminalName({ kind: "resolve-drifts", drifts: [] }, short)).toBe("Drifts");
+  expect(terminalName({ kind: "resolve-drifts", drift: "ab12cd34" }, short)).toBe("Drifts");
   expect(terminalName({ kind: "scan", feature: "checkout" }, short)).toBe("Scan");
   expect(terminalName({ kind: "implement-all" }, short)).toBe("All tasks");
   expect(terminalName({ kind: "import" }, short)).toBe("Import");
@@ -96,7 +77,7 @@ test("the Drift blocker's sentence is added on the same line only when on, and o
   expect(mayFileDrifts({ kind: "import" })).toBe(true);
   expect(mayFileDrifts({ kind: "written-design", request: "r" })).toBe(false);
   expect(mayFileDrifts({ kind: "setup-request", request: "r" })).toBe(false);
-  expect(mayFileDrifts({ kind: "resolve-drifts", drifts: [] })).toBe(false);
+  expect(mayFileDrifts({ kind: "resolve-drifts", drift: "ab12cd34" })).toBe(false);
   expect(withDriftBlocker("Use the trama-scan skill on the whole System.", false)).toBe("Use the trama-scan skill on the whole System.");
   expect(withDriftBlocker("Use the trama-scan skill on the whole System.", true)).toBe(`Use the trama-scan skill on the whole System. ${sentence}`);
   expect(DRIFT_BLOCKER_SENTENCE).toBe(sentence);

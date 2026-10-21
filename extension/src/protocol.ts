@@ -1,11 +1,10 @@
 import type { AnnouncementView, Snapshot } from "../../src/core/snapshot";
-import type { DriftAutopilotStatus } from "./host/drift-resolution";
 import type { BoardModels } from "./host/proposal-models";
 import type { ModelSuggestion } from "./host/model-lists";
 import type { InitChoice } from "./host/project";
 import type { QuestionRoundView } from "./host/question-session";
 import type { QuestionAction } from "./host/question-state";
-import type { DelegationMode, SettingSchema, SettingsValues, SettingValue } from "./host/settings-schema";
+import type { SettingSchema, SettingsValues, SettingValue } from "./host/settings-schema";
 
 export type Column = "todo" | "doing" | "done";
 
@@ -25,8 +24,8 @@ export type AgentAction =
   | { kind: "implement-all"; group?: RunGroup }
   /** Describe the existing code as Proposals for the Model; the agent asks its questions only with `trama question new` and stops, asking the developer to open the editor, when the editor is unavailable. */
   | { kind: "import" }
-  /** One agent resolves every Drift open when the instruction is sent, or only `drift` when it is given (Resolve on one Drift card). The host refuses it while a Run or a resolution is going on, or one resolution Proposal is still to be decided. */
-  | { kind: "resolve-drifts"; drift?: string };
+  /** One agent resolves only `drift`, the one Drift of the card the developer pressed Resolve on. The host refuses it while a Run or a resolution is going on, when the Drift is not open or is already in a resolution, or while one resolution Proposal is still to be decided. */
+  | { kind: "resolve-drifts"; drift: string };
 
 /** Webview -> host. The host validates everything: the webview is untrusted input. */
 export type ToHost =
@@ -52,8 +51,6 @@ export type ToHost =
   | { type: "modelSuggestionsWanted" }
   /** The developer changed a Trama setting in the Settings tab: the host checks it against the manifest and saves it in the user settings. */
   | { type: "setSetting"; key: string; value: SettingValue }
-  /** The developer chose a level in the Drift autopilot menu: the host saves the Drift autopilot setting, asking first when it raises it. */
-  | { type: "setDelegation"; mode: DelegationMode }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
   | { type: "openLink"; url: string }
   /** Get Started: the developer chose how to set up the folder; the host initializes it and starts what that choice starts. */
@@ -77,8 +74,8 @@ export interface NavigateOptions {
 
 /** Host -> webview. */
 export type ToWebview =
-  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, the accessible autopilot status, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `models` carries the models chosen for the Proposals that carry Tasks. `scans.advisorScanner`: the Advisor Scanner is on, so the Scan buttons are disabled. */
-  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; autopilot: DriftAutopilotStatus; drifts: Record<string, string | null>; resolving: string[] }; models: BoardModels; scans: { advisorScanner: boolean } }
+  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `models` carries the models chosen for the Proposals that carry Tasks. `scans.advisorScanner`: the Advisor Scanner is on, so the Scan buttons are disabled. */
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; drifts: Record<string, string | null>; resolving: string[] }; models: BoardModels; scans: { advisorScanner: boolean } }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */

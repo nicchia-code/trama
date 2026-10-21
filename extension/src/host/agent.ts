@@ -8,20 +8,16 @@ import { writeFileAtomic } from "../../../src/core/atomic-write";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
-import { requestCoordinatorMessage, sendCoordinatorMessage, type CoordinatorMessage } from "../../../src/core/question-channel";
+import { sendCoordinatorMessage } from "../../../src/core/question-channel";
 import { bundledOmpHook, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, withAskLine, withTramaPath } from "./cursor";
 import { withdrawWaiting } from "./announcements";
-import { bindChatJob, chatJobSendStarted, endChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnsentJob, isHooked, jobAbnormalEnd, type DriftAutopilotMode, type Job, type JobKind, type JobOrigin, onAgentIdle, releaseAutopilotHold, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
+import { bindChatJob, chatJobSendStarted, endChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnsentJob, isHooked, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, releaseFiledWork, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
-import { questionEndpoint, questionWindowId } from "./questions";
+import { questionEndpoint } from "./questions";
 import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withDriftBlocker, withLanguage } from "./prompts";
 import { advisorOverlay, agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent, terminalEnv } from "./terminal-agent";
-import { delegationOf } from "./settings-schema";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
-
-/** The delegation the user's Drift autopilot setting gives: the only reader of it, and only the user value counts. */
-export const userDelegation = (): DriftAutopilotMode => delegationOf(settings().inspect<unknown>("driftAutoPilot")?.globalValue);
 
 /** The agent `trama.agent` names in user settings: `omp`, or `cursor` for every other value (the old `chat` and `claude` too) and when unset. */
 export const configuredAgent = (): "cursor" | TerminalAgent => (settings().inspect<string>("agent")?.globalValue === "omp" ? "omp" : "cursor");
@@ -119,7 +115,7 @@ export function watchAgentTerminal(): vscode.Disposable {
       endFiledWork(e.root, "editor");
       // Only a completed turn is a normal end: an interrupted or closed conversation never starts the Run that follows it.
       const abnormal = e.event === "AGENT_STOPPED" ? undefined : e.event === "AGENT_INTERRUPTED" ? "its conversation was interrupted" : "its conversation was closed";
-      for (const job of endChatJobs(e.root, e.conversation, abnormal)) void broadcastJob(e.root, job, false);
+      for (const job of endChatJobs(e.root, e.conversation, abnormal)) finishJob(e.root, job);
     }),
     onAgentIdle((terminal) => {
       for (const [tracked, info] of agentTerminals) {
@@ -150,7 +146,7 @@ function endAgentWork(info: { id: string; jobId?: string; root: string; line: st
   setHooked(info.id, false);
   releaseTakenTasks(info.root, { terminal: info.id });
   endFiledWork(info.root, info.id);
-  for (const job of endTerminalJobs(info.id, abnormal)) void broadcastJob(info.root, job, false);
+  for (const job of endTerminalJobs(info.id, abnormal)) finishJob(info.root, job);
   withdrawWaiting(info.root, (announcement) => announcement.terminal === info.id);
 }
 
@@ -243,24 +239,20 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** The identity a chat job's agent passes to the coordinator-aware commands: a chat has no environment, so the text gives it. */
-const jobIdentity = (jobId: string): string => `This Trama job has ID ${jobId}. Pass \`--job ${jobId}\` to every Trama command that accepts \`--job\`.`;
-
 /**
- * The instruction with its limit, sub-agent, parallel execution, advisor, job, Drift blocker, ask and language sentences. The
+ * The instruction with its limit, sub-agent, parallel execution, advisor, Drift blocker, ask and language sentences. The
  * parallel execution sentence goes right after the sub-agent sentence (or the limit one, when there is none), only to a
  * run over several Tasks and only when `trama.experimentalParallelExecution` is on, read now. The ask sentence stays on the
  * instruction's line unless `askOwnLine` is set, which Cursor's chat needs: it gets the ask sentence on a line of its own,
- * after the PATH line. A terminal's job comes from its environment.
+ * after the PATH line.
  */
-function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, severalTasks: boolean, jobId: string | undefined, askOwnLine: boolean, advisor = false): string {
+function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, severalTasks: boolean, askOwnLine: boolean, advisor = false): string {
   const limit = configuredMaxParallelAgents();
   const withLimit = withAgentLimit(instruction, limit);
   const withSubAgent = canScan(role) && !advisor ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
   const withParallel = severalTasks && configuredParallelExecution() ? `${withSubAgent} ${PARALLEL_EXECUTION_SENTENCE}` : withSubAgent;
   const withAdvisor = advisor ? `${withParallel} ${ADVISOR_SENTENCE}` : withParallel;
-  const withJob = jobId === undefined ? withAdvisor : `${withAdvisor} ${jobIdentity(jobId)}`;
-  const withBlocker = withDriftBlocker(withJob, filesDrifts && configuredDriftBlocker());
+  const withBlocker = withDriftBlocker(withAdvisor, filesDrifts && configuredDriftBlocker());
   return withLanguage(askOwnLine ? withBlocker : `${withBlocker} ${ASK_DEVELOPER_SENTENCE}`, configuredLanguage());
 }
 
@@ -278,7 +270,7 @@ function terminalRun(instruction: Instruction, name: string, filesDrifts: boolea
   const advisor = advisorConfig !== undefined;
   return {
     template: (family) => agentTemplate(canScan(role) && !advisor, models, family, hook, advisorConfig),
-    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, undefined, false, advisor),
+    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, false, advisor),
     hooked: hook !== undefined,
   };
 }
@@ -292,68 +284,34 @@ function writeAdvisorOverlay(storage: vscode.Uri | undefined): string {
   return file;
 }
 
-/**
- * Reserves the project's next send with its coordinator, which answers for the whole project. Without a coordinator in
- * reach nothing is reserved, as before; a project with a send reserved refuses this one.
- */
-async function reserveSendWithCoordinator(root: string, id: string, windowId: string): Promise<boolean> {
-  const responses = await requestCoordinatorMessage(projectAt(root), { type: "reserve-send", root, id, windowId }).catch(() => []);
-  const owner = responses.find((response) => response.coordinator === true);
-  return owner === undefined || owner["reserved"] === true;
-}
-
-/** Gives the reservation `id` back to the coordinator, whether its send started or not. */
-async function releaseSendWithCoordinator(root: string, id: string): Promise<void> {
-  await requestCoordinatorMessage(projectAt(root), { type: "release-send", root, id }).catch(() => undefined);
-}
-
 /** What a Run of a sequence does once its job ends locally: the next Run starts, or the held job ends (see `runSequence`). */
 const runEnds = new Map<string, (abnormal?: string) => void>();
 
-async function broadcastJob(root: string, job: Job, active: boolean): Promise<void> {
-  const abnormal = active ? undefined : jobAbnormalEnd(root, job.id);
-  // The end is handed to the step that follows it at once, not after the coordinator has heard of it: a sequence never waits on another window.
-  if (!active) {
-    const next = runEnds.get(job.id);
-    runEnds.delete(job.id);
-    next?.(abnormal);
-  }
-  const message: CoordinatorMessage = {
-    type: "job",
-    id: job.id,
-    root,
-    kind: job.kind,
-    active,
-    origin: job.origin,
-    windowId: job.windowId,
-    place: job.place,
-    ...(abnormal !== undefined ? { abnormal } : {}),
-    ...(job.advisor === true ? { advisor: true } : {}),
-  };
-  try { await sendCoordinatorMessage(projectAt(root), message); }
-  catch { /* An unavailable coordinator suspends automation; it never changes the local job's outcome. */ }
+/** A job of this window ended: the step that follows it, if any, hears of it at once. */
+function finishJob(root: string, job: Job): void {
+  const next = runEnds.get(job.id);
+  runEnds.delete(job.id);
+  next?.(jobAbnormalEnd(root, job.id));
 }
 
 /**
- * Holds the project from now until `endHeldJob` with a job of `kind` that has no terminal or chat: `resolve` while an
- * automatic collection is prepared and its agent works, `run` from its hand-over to its Run. The other windows hear of it.
+ * Holds the project from now until `endHeldJob` with a job of `kind` that has no terminal or chat: `run` between the Runs
+ * of a sequence cut by model.
  */
-export function startHeldJob(root: string, kind: JobKind, origin: JobOrigin, windowId: string, id: string): void {
-  const started = startJob(kind, root, { held: true }, false, undefined, id, origin, windowId);
-  if (started !== undefined && userDelegation() !== "disabled") void broadcastJob(root, { id, kind, root, place: { held: true }, origin, windowId }, true);
+export function startHeldJob(root: string, kind: JobKind, id: string): void {
+  startJob(kind, root, { held: true }, undefined, id);
 }
 
-/** Ends the held job `id`: its steps are over, or it was released with `abnormal`. The other windows hear of it. */
+/** Ends the held job `id`: its steps are over, or it was released with `abnormal`. */
 export function endHeldJob(root: string, id: string, abnormal?: string): void {
-  for (const job of endHeldJobs(root, id, abnormal)) void broadcastJob(root, job, false);
+  for (const job of endHeldJobs(root, id, abnormal)) finishJob(root, job);
 }
 
 export interface LaunchJobOptions {
   id?: string;
-  origin?: JobOrigin;
   /** Whether the instruction lets the agent file Drifts: the experimental Drift blocker's sentence then goes to it. */
   filesDrifts?: boolean;
-  /** Whether the instruction is for a run over several Tasks (Run all, a Run of its sequence by model, the automatic Run): the experimental parallel execution's sentence then goes to it. */
+  /** Whether the instruction is for a run over several Tasks (Run all, a Run of its sequence by model): the experimental parallel execution's sentence then goes to it. */
   severalTasks?: boolean;
   /** The model the instruction runs on when a Proposal's model applies (`proposalRunModel`); absent, the model of the role in Settings. */
   model?: RunModel;
@@ -374,19 +332,16 @@ export async function launchAgent(
   jobOptions: LaunchJobOptions = {},
 ): Promise<Launch | undefined> {
   const jobId = job === undefined ? undefined : jobOptions.id ?? randomUUID();
-  const jobOrigin = jobOptions.origin ?? "manual";
   const filesDrifts = jobOptions.filesDrifts === true;
   const severalTasks = jobOptions.severalTasks === true;
   const role = roleOf(name);
   const runModel = jobOptions.model?.model ?? configuredModels()[role];
-  const windowId = job === undefined ? "" : await questionWindowId(root) ?? "";
   const agent = configuredAgent();
-  // Under `disabled` the window reserves no send and announces no job start to the other windows: it knows only its own work.
-  const shared = userDelegation() !== "disabled";
+  // A window knows only its own work: nothing is reserved or announced to other windows.
   if ((agent === "cursor" || job === undefined) && !canSend()) return undefined;
   // Cursor's chat only exists in Cursor: elsewhere nothing is tried, announced, reserved or started, and the prompt the terminal would get goes to the clipboard.
   if (agent === "cursor" && !isCursor()) {
-    await vscode.env.clipboard.writeText(agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, undefined, false));
+    await vscode.env.clipboard.writeText(agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, false));
     void Promise.resolve(vscode.window.showInformationMessage(
       "Trama: Cursor's chat is only available in Cursor. The prompt is on the clipboard; choose omp in Trama's Settings to run the agent in a terminal.",
       "Open Settings",
@@ -397,7 +352,7 @@ export async function launchAgent(
     if (!canSend()) return agent === "cursor" ? "not-sent" : undefined;
     if (agent === "cursor") {
       const chat = "cursor";
-      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, jobId, true);
+      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, true);
       const sent: { job?: string } = {};
       // Runs right before the step that sends the prompt by itself: the card and the job begin now. The take-back, run when
       // that step fails, ends both: the prompt is not sent, so the job never began.
@@ -405,17 +360,15 @@ export async function launchAgent(
         const takeBackCard = announceSend(root, announceProposal, { chat: "cursor" });
         const sentAfter = chatJobSendStarted(root, chat);
         if (job === undefined || jobId === undefined) return takeBackCard;
-        const started = startJob(job, root, { chat }, false, sentAfter, jobId, jobOrigin, windowId);
+        const started = startJob(job, root, { chat }, sentAfter, jobId);
         sent.job = started;
         if (started === undefined) return takeBackCard;
         if (jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
-        if (shared) void broadcastJob(root, { id: started, kind: job, root, place: { chat }, origin: jobOrigin, windowId }, true);
         return () => {
           takeBackCard();
           for (const ended of endUnsentJob(root, started)) {
             runEnds.get(ended.id)?.("its instruction was not sent to the chat");
             runEnds.delete(ended.id);
-            if (shared) void broadcastJob(root, ended, false);
           }
         };
       };
@@ -454,28 +407,10 @@ export async function launchAgent(
     if (announceProposal !== undefined) announceLaunch(root, announceProposal, { terminal: terminalId });
     onSent?.(startedAt);
     if (job !== undefined && jobId !== undefined) {
-      const started = startJob(job, root, { terminal: terminalId }, run.hooked, undefined, jobId, jobOrigin, windowId, advisorConfig !== undefined);
+      const started = startJob(job, root, { terminal: terminalId }, undefined, jobId);
       if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
-      if (started !== undefined && shared) await broadcastJob(root, {
-        id: started, kind: job, root, place: { terminal: terminalId }, origin: jobOrigin, windowId, advisor: advisorConfig !== undefined,
-      }, true);
     }
     return "terminal";
   };
-  // Under an active autopilot a Run, scan or resolution is reserved with the project's coordinator before its check and send; the reservation goes
-  // back once the send has started or not, so another window's send or an automatic step cannot start meanwhile.
-  const reservation = shared && job !== undefined ? jobId : undefined;
-  if (reservation !== undefined && !await reserveSendWithCoordinator(root, reservation, windowId)) {
-    if (jobOrigin === "manual") void vscode.window.showWarningMessage("Trama: another instruction is being sent to this project; try again in a moment.");
-    return undefined;
-  }
-  let result: Launch | undefined;
-  try {
-    result = await (agent === "cursor" || job !== undefined ? inSendTurn(launch) : launch());
-  } finally {
-    if (reservation !== undefined) await releaseSendWithCoordinator(root, reservation);
-  }
-  // A Resolve Drifts or scan the developer starts lifts an automatic hold, but only once its instruction really started.
-  if (jobOrigin === "manual" && (job === "resolve" || job === "scan") && launched(result)) releaseAutopilotHold(root);
-  return result;
+  return agent === "cursor" || job !== undefined ? inSendTurn(launch) : launch();
 }

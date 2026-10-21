@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -19,13 +19,6 @@ const CURSOR_ORIG_UID_ENV = "CURSOR_ORIG_UID";
 
 export type CoordinatorJson = null | boolean | number | string | CoordinatorJson[] | { [key: string]: CoordinatorJson };
 export type CoordinatorMessage = { [key: string]: CoordinatorJson };
-
-export interface CoordinatorLease {
-  projectId: string;
-  windowId: string;
-  endpoint: string;
-}
-
 
 export interface QuestionServer {
   endpoint: string;
@@ -56,8 +49,8 @@ interface ServerOptions {
   onActivity?: (origin: AgentOrigin) => void;
   /** The agent in the terminal `terminal` (the hook of its agent said so) has settled: nothing is left to do. `root` is this window's project. */
   onAgentIdle?: (terminal: string, root: string) => void;
-  /** A project-scoped runtime coordinator event, independent of question rounds. */
-  onCoordinatorMessage?: (message: CoordinatorMessage) => CoordinatorJson | void | Promise<CoordinatorJson | void>;
+  /** A project-scoped notice from a command or another window, independent of question rounds. */
+  onCoordinatorMessage?: (message: CoordinatorMessage) => void | Promise<void>;
   onClose?: () => void;
 }
 
@@ -167,164 +160,6 @@ function records(directory: string, projectId: string): EditorRecord[] {
     } catch { /* Incomplete, invalid and stale discovery files do not identify live editors. */ }
   }
   return found;
-}
-
-function coordinatorLeaseValue(value: unknown, projectId: string): CoordinatorLease | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const lease = value as Partial<CoordinatorLease>;
-  const endpointLooksLocal = typeof lease.endpoint === "string" && (process.platform === "win32"
-    ? /^\\\\[.?]\\pipe\\trama-question-[a-f0-9-]+$/i.test(lease.endpoint)
-    : isAbsolute(lease.endpoint));
-  if (Object.keys(value).sort().join(",") !== "endpoint,projectId,windowId"
-    || lease.projectId !== projectId || typeof lease.windowId !== "string" || lease.windowId === "" || !endpointLooksLocal) return null;
-  return lease as CoordinatorLease;
-}
-
-function readCoordinatorLease(path: string, projectId: string): CoordinatorLease | null | undefined {
-  try {
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink()
-      || (process.platform !== "win32" && (stat.uid !== process.getuid!() || (stat.mode & 0o077) !== 0))) return null;
-    return coordinatorLeaseValue(JSON.parse(readFileSync(path, "utf8")), projectId);
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? undefined : null;
-  }
-}
-
-function sameCoordinatorLease(left: CoordinatorLease | null | undefined, right: CoordinatorLease): boolean {
-  return !!left && left.projectId === right.projectId && left.windowId === right.windowId && left.endpoint === right.endpoint;
-}
-
-function coordinatorLeasePath(directory: string, projectId: string): string {
-  return join(directory, `${projectId}.lease`);
-}
-
-async function probeCoordinatorOwner(directory: string, lease: CoordinatorLease): Promise<"live" | "stale" | "unverified"> {
-  const controller = new AbortController();
-  const sockets = new Set<Socket>();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-    for (const socket of sockets) socket.destroy();
-  }, 2_000);
-  try {
-    const record = records(directory, lease.projectId).find((candidate) => candidate.endpoint === lease.endpoint);
-    const editor = record ? await connectEditor(record, controller.signal, sockets) : null;
-    if (!editor) return timedOut ? "unverified" : "stale";
-    if (editor.record.windowId !== lease.windowId || editor.record.endpoint !== lease.endpoint
-      || editor.record.projectId !== lease.projectId) return "unverified";
-    return "live";
-  } catch {
-    return timedOut ? "unverified" : "stale";
-  } finally {
-    clearTimeout(timer);
-    for (const socket of sockets) socket.destroy();
-  }
-}
-
-/** Claim the project coordinator role for a discovered live editor window. */
-export async function acquireCoordinatorLease(
-  project: Project,
-  owner: Pick<CoordinatorLease, "windowId" | "endpoint">,
-  options: { runtimeDir?: string } = {},
-): Promise<CoordinatorLease | null> {
-  const projectId = questionProjectId(project);
-  let directory: string;
-  try {
-    directory = runtimeDirectory(options.runtimeDir);
-    outsideProject(directory, project);
-  } catch { return null; }
-  const privateDirectory = runtimeDirectoryReady(directory, false);
-  if (!privateDirectory || !owner.windowId || !owner.endpoint) return null;
-
-  const path = coordinatorLeasePath(directory, projectId);
-  const lease: CoordinatorLease = { projectId, windowId: owner.windowId, endpoint: owner.endpoint };
-  const current = readCoordinatorLease(path, projectId);
-  if (current === null) return null;
-  if (current && !sameCoordinatorLease(current, lease) && await probeCoordinatorOwner(directory, current) !== "stale") return null;
-
-  if (!records(directory, projectId).some((record) =>
-    record.windowId === lease.windowId && record.endpoint === lease.endpoint)) return null;
-  if (await probeCoordinatorOwner(directory, lease) !== "live") return null;
-  if (current && sameCoordinatorLease(current, lease)) return current;
-
-  if (current) {
-    if (!sameCoordinatorLease(readCoordinatorLease(path, projectId), current)) return null;
-    try { unlinkSync(path); } catch { return null; }
-  }
-  try {
-    writeFileSync(path, JSON.stringify(lease), { mode: 0o600, flag: "wx" });
-    return lease;
-  } catch {
-    const winner = readCoordinatorLease(path, projectId);
-    return winner && sameCoordinatorLease(winner, lease) ? winner : null;
-  }
-}
-
-/** Confirm the lease owner is still the discovered, live editor for its project. */
-export async function renewCoordinatorLease(
-  project: Project,
-  lease: CoordinatorLease,
-  options: { runtimeDir?: string } = {},
-): Promise<boolean> {
-  const projectId = questionProjectId(project);
-  if (lease.projectId !== projectId) return false;
-  let directory: string;
-  try {
-    directory = runtimeDirectory(options.runtimeDir);
-    outsideProject(directory, project);
-  } catch { return false; }
-  const privateDirectory = runtimeDirectoryReady(directory, false);
-  if (!privateDirectory || !sameCoordinatorLease(readCoordinatorLease(coordinatorLeasePath(directory, projectId), projectId), lease)
-    || !records(directory, projectId).some((record) => record.windowId === lease.windowId && record.endpoint === lease.endpoint)) return false;
-  return await probeCoordinatorOwner(directory, lease) === "live";
-}
-
-/**
- * Whether the editor window `windowId` of the project is lost: no discovery record names it, or every record of it no
- * longer answers on its endpoint. An unverified answer (a timeout) is not a loss, so nothing is forgotten by guess.
- */
-export async function editorWindowLost(
-  project: Project,
-  windowId: string,
-  options: { runtimeDir?: string } = {},
-): Promise<boolean> {
-  const projectId = questionProjectId(project);
-  let directory: string;
-  try {
-    directory = runtimeDirectory(options.runtimeDir);
-    outsideProject(directory, project);
-  } catch { return false; }
-  const privateDirectory = runtimeDirectoryReady(directory, false);
-  if (!privateDirectory) return false;
-  const found = records(directory, projectId).filter((record) => record.windowId === windowId);
-  if (found.length === 0) return true;
-  const states = await Promise.all(found.map((record) => probeCoordinatorOwner(directory, { projectId, windowId, endpoint: record.endpoint })));
-  return states.every((state) => state === "stale");
-}
-
-/** Release only this window's lease, leaving another owner's claim untouched. */
-export async function releaseCoordinatorLease(
-  project: Project,
-  lease: CoordinatorLease,
-  options: { runtimeDir?: string } = {},
-): Promise<boolean> {
-  const projectId = questionProjectId(project);
-  if (lease.projectId !== projectId) return false;
-  let directory: string;
-  try {
-    directory = runtimeDirectory(options.runtimeDir);
-    outsideProject(directory, project);
-  } catch { return false; }
-  const privateDirectory = runtimeDirectoryReady(directory, false);
-  const path = coordinatorLeasePath(directory, projectId);
-  if (!privateDirectory || !sameCoordinatorLease(readCoordinatorLease(path, projectId), lease)) return false;
-  try {
-    if (!sameCoordinatorLease(readCoordinatorLease(path, projectId), lease)) return false;
-    unlinkSync(path);
-    return true;
-  } catch { return false; }
 }
 
 /** Return complete lines without retaining any already-consumed question content. */
@@ -494,49 +329,22 @@ async function liveEditor(projectId: string, signal: AbortSignal | undefined, so
   return live[0] ?? null;
 }
 
-interface CoordinatorRelayResult {
-  delivered: number;
-  /** Live editors the message was addressed to, including those that did not answer in time; every one must acknowledge it. */
-  live: number;
-  error?: "no-live-receiver";
-  responses: CoordinatorMessage[];
-}
-
-/** Marks a live editor that did not answer its probe in time: it is live, so its jobs are unknown. */
-const UNANSWERED = Symbol("unanswered");
-
-/** Probes one discovery record; with `timeoutMs` an editor that does not answer in time is `UNANSWERED`. */
-async function probeEditor(record: EditorRecord, timeoutMs: number | undefined): Promise<EditorConnection | null | typeof UNANSWERED> {
-  if (timeoutMs === undefined) return connectEditor(record, undefined, new Set());
-  const sockets = new Set<Socket>();
-  let timer: NodeJS.Timeout | undefined;
-  const unanswered = new Promise<typeof UNANSWERED>((resolve) => {
-    timer = setTimeout(() => {
-      for (const socket of sockets) socket.destroy();
-      resolve(UNANSWERED);
-    }, timeoutMs);
-  });
-  const connection = await Promise.race([connectEditor(record, undefined, sockets), unanswered]);
-  clearTimeout(timer);
-  return connection;
-}
-
-async function relayCoordinatorMessage(
+/** Hands `message` to every live editor window of the project, each on its own; `live` counts the windows it was addressed to. */
+export async function sendCoordinatorMessage(
   project: Project,
   message: CoordinatorMessage,
-  options: { runtimeDir?: string; timeoutMs?: number } = {},
-): Promise<CoordinatorRelayResult> {
+  options: { runtimeDir?: string } = {},
+): Promise<{ delivered: number; live: number; error?: "no-live-receiver" }> {
   const payload = coordinatorMessage(message);
   if (!payload) throw new UsageError("Coordinator message must be a JSON object");
   const projectId = questionProjectId(project);
   const directory = runtimeDirectory(options.runtimeDir);
   const privateDirectory = runtimeDirectoryReady(directory, false);
-  if (!privateDirectory) return { delivered: 0, live: 0, error: "no-live-receiver", responses: [] };
+  if (!privateDirectory) return { delivered: 0, live: 0, error: "no-live-receiver" };
   const candidates = records(directory, projectId);
-  const probed = await Promise.all(candidates.map((record) => probeEditor(record, options.timeoutMs)));
-  const unanswered = probed.filter((probe) => probe === UNANSWERED).length;
+  const probed = await Promise.all(candidates.map((record) => connectEditor(record, undefined, new Set())));
   const connections = probed.filter((connection): connection is EditorConnection => {
-    if (!connection || connection === UNANSWERED) return false;
+    if (!connection) return false;
     const matched = !connection.socket.destroyed && !connection.socket.readableEnded
       && connection.record.projectId === projectId
       && candidates.some((record) => record.endpoint === connection.record.endpoint
@@ -544,34 +352,27 @@ async function relayCoordinatorMessage(
     if (!matched) connection.socket.destroy();
     return matched;
   });
-  const responses: CoordinatorMessage[] = [];
   const delivered = await Promise.all(connections.map((connection) => {
     const messageId = randomUUID();
     return new Promise<boolean>((resolve) => {
       let done = false;
-      let timer: NodeJS.Timeout | undefined;
-      const finish = (ok: boolean, response?: CoordinatorMessage) => {
+      const finish = (ok: boolean) => {
         if (done) return;
         done = true;
-        clearTimeout(timer);
         stopLines();
         connection.socket.removeListener("error", lost);
         connection.socket.removeListener("end", lost);
         connection.socket.removeListener("close", lost);
         connection.socket.destroy();
-        if (response) responses.push(response);
         resolve(ok);
       };
-      if (options.timeoutMs !== undefined) timer = setTimeout(() => finish(false), options.timeoutMs);
       const lost = () => finish(false);
       const stopLines = lines(connection.socket, (line) => {
         try {
           const reply: unknown = JSON.parse(line);
           if (!reply || typeof reply !== "object" || Array.isArray(reply)) { finish(false); return; }
           const value = reply as Record<string, unknown>;
-          const valid = value.type === "coordinator-received" && value.messageId === messageId;
-          const response = coordinatorMessage(value.response);
-          finish(valid, response ?? undefined);
+          finish(value.type === "coordinator-received" && value.messageId === messageId);
         } catch { finish(false); }
       });
       connection.socket.on("error", lost);
@@ -581,16 +382,7 @@ async function relayCoordinatorMessage(
     });
   }));
   const count = delivered.filter(Boolean).length;
-  return { delivered: count, live: connections.length + unanswered, ...(count === 0 ? { error: "no-live-receiver" as const } : {}), responses };
-}
-
-export async function sendCoordinatorMessage(
-  project: Project,
-  message: CoordinatorMessage,
-  options: { runtimeDir?: string; timeoutMs?: number } = {},
-): Promise<{ delivered: number; live: number; error?: "no-live-receiver" }> {
-  const { delivered, live, error } = await relayCoordinatorMessage(project, message, options);
-  return { delivered, live, ...(error ? { error } : {}) };
+  return { delivered: count, live: connections.length, ...(count === 0 ? { error: "no-live-receiver" as const } : {}) };
 }
 
 const commandMessages = new Set<Promise<unknown>>();
@@ -613,15 +405,6 @@ export async function settleCoordinatorMessages(): Promise<void> {
   await Promise.all(commandMessages);
 }
 
-/** Broadcasts a scoped read-only request to live project editors and returns their coordinator responses. */
-export async function requestCoordinatorMessage(
-  project: Project,
-  message: CoordinatorMessage,
-  options: { runtimeDir?: string } = {},
-): Promise<CoordinatorMessage[]> {
-  const { responses } = await relayCoordinatorMessage(project, message, options);
-  return responses;
-}
 
 
 /** Connect and identify editors before sending the validated round to exactly one window. */
@@ -829,10 +612,8 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
           const payload = coordinatorMessage(message.message);
           if (!payload || typeof message.messageId !== "string") throw new UsageError("A coordinator message needs a JSON object and message identity");
           if (!options.onCoordinatorMessage) { finish({ type: "coordinator-unavailable", messageId: message.messageId }); return; }
-          void Promise.resolve(options.onCoordinatorMessage(payload)).then((response) => {
-            const wrapped = response === undefined ? undefined : coordinatorMessage({ response });
-            if (response !== undefined && !wrapped) throw new UsageError("Coordinator response must be JSON");
-            finish({ type: "coordinator-received", messageId: message.messageId, ...(wrapped ? { response: wrapped["response"] } : {}) });
+          void Promise.resolve(options.onCoordinatorMessage(payload)).then(() => {
+            finish({ type: "coordinator-received", messageId: message.messageId });
           }).catch((error: unknown) => finish({
             type: "coordinator-received",
             messageId: message.messageId,

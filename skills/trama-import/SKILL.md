@@ -76,7 +76,6 @@ A difference between the documentation and the code is a **Drift**, not a doubt:
 - The command: `trama drift new --input - <<'JSON'` and `JSON`, with `{"title":"<title>","refs":["<ref>"],"happens":"<what the code does>","should":"<what the documentation says and why it differs>","options":[{"title":"<title of the way you recommend>","text":"<what it changes and costs>"},{"title":"<title of another way>","text":"<…>"}],"where":"<where in the code>","announcement":"<id>"}` (up to five options). Re-read the code at the `where` place first, and file only if it really does what `happens` says. The two texts, `where` and two to five options, the recommended one first with different titles, are required, except in the no-fix case above (there `where` is still required, and no option is passed).
 - Write both sides and the options at the level of behaviour: what the System does and what the documentation promises, in the words of the domain, not how the code does it. Name no variable, function, class, field or file unless the difference cannot be understood without it. Code locations go only in `where`, the files and no line numbers. Use short Markdown: short paragraphs, a bulleted list for several points, **bold** for the terms that carry the difference, about 100 words per side and about 60 per option.
 - Fix options reach what should happen without changing the Model or any Requirement, and respect every Requirement that applies to the elements of the Drift, not only those it names. An option that asks for an exception to, or a change of, the Model or a Requirement is not a fix option.
-- Omit `critical`. Set it only when the developer urgently needs to take a position on this difference; technical severity or complexity alone does not qualify.
 
 ## Asking
 
@@ -116,15 +115,15 @@ Keep the permanent ID of each Drift you file that blocks no Task: it blocks none
 
 When the import is over, gather those Drifts into one resolution, unless none is left:
 
-1. Leave out a Drift that is critical or recurring (it follows an earlier Drift). Read the delegation with `trama autopilot show --json`: if its `status` is `unavailable`, its `mode` is `disabled`, or it cannot be read, the delegation is off; otherwise leave out each non-critical, non-recurring Drift that has a Fix option, because the delegation resolves it on its own. A Drift left out stays open.
+1. Leave out a recurring Drift (it follows an earlier Drift): the developer decides it, seeing the chain of its predecessors. A Drift left out stays open.
 2. For each remaining Drift, record the recommended decision: when it has an attached Proposal, `proposal`, and the resolution carries that Proposal's changes as the trama-resolve-drifts skill describes; otherwise `fix-code` with option 1.
 3. Announce it with `trama announcement new --input -` with `{"kind":"proposal","title":"<title>"}`, write it with `trama proposal new --input -` and `{"title":"<title>","kind":"resolution","nonBlocking":true,"announcement":"<id>","body":"<what is resolved and why>"}`, and record each decision with `trama proposal edit <proposal id> --input -` and `{"drifts":[{"drift":"<drift id>","decision":"<decision>","option":1}]}` (`option` only with `fix-code`). Hand it over with `trama proposal move <id> open` and read its output.
 
 Never approve or reject this resolution, and never start a Run because of it: the developer decides it, as any manual resolution.
 
-## Autopilot boundary
+## Boundary
 
-Import describes existing code and only creates import Proposals and the Drifts of "Drifts for documentation differences"; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it. If `trama.driftAutoPilot` is `enabled` or `yolo` (read it with `trama autopilot show --json`), the host may later include an eligible open Drift from an import in a separate, coordinated resolution after Trama's scan/run barrier is clear; that work follows `trama-resolve-drifts`. Do not make import wait for, trigger, or perform that resolution yourself.
+Import describes existing code and only creates import Proposals and the Drifts of "Drifts for documentation differences"; it never resolves Drifts or runs implementation. Importing or filing a Drift is not authorization to decide it: the decision is the developer's.
 
 ## PowerShell
 

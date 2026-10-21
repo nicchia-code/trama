@@ -148,7 +148,7 @@ export function commandReference(registry: Registry): string {
       if (example.length > 0) lines.push("```sh", ...example, "```", "");
       const blocks = outputBlocks(command);
       if (blocks.length > 0) lines.push("Output (`--json`):", "", ...blocks.flatMap((block, i) => [...(blocks.length > 1 ? [`${block.label || (i === 0 ? "Either" : "Or")}:`, ""] : []), ...block.lines.map((l) => `- ${l}`), ""]));
-      const effects = [command.effects.writes ? "writes in `.trama/`" : "", command.effects.activity ? "counts as the agent's activity" : "", command.effects.coordinator ? "sends messages to the editor's coordinator" : ""].filter(Boolean);
+      const effects = [command.effects.writes ? "writes in `.trama/`" : "", command.effects.activity ? "counts as the agent's activity" : "", command.effects.editor ? "sends messages to the editor" : ""].filter(Boolean);
       lines.push(`Runs ${command.mode === "immediate" ? "at once" : command.mode === "blocking" ? "and waits for the editor" : "as an agent hook"}${effects.length > 0 ? `; ${effects.join(", ")}` : "; read-only"}.`, "");
     }
   }

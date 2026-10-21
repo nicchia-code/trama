@@ -2,8 +2,6 @@
 
 Un agente di programmazione che lavora per il developer. Esplora il Modello, scrive Proposal, archivia Task e Drift e realizza i Task attraverso la riga di comando di Trama. Le decisioni restano del developer: approvare, rifiutare o scartare una Proposal, risolvere un Drift, riprendere un Task e riscrivere le identità delle schede. L'agente può eseguirle per suo conto, ma è istruito a farlo solo quando il developer glielo chiede esplicitamente nella conversazione; senza quella richiesta si ferma e dice al developer che la decisione è sua, sulla Board, senza fargliene una domanda. Trama non gli impedisce tecnicamente di eseguirle: una decisione eseguita dall'agente produce lo stesso Evento del developer e ha le stesse condizioni e conseguenze.
 
-Fa eccezione la scelta della prima correzione raccomandata dei Drift per i quali il developer ha attivato la delega di risoluzione: l'agente può registrarla senza un'altra domanda, dopo la barriera delle scansioni. La delega viene verificata da Trama e non si estende ad altre decisioni. L'approvazione automatica di quella risoluzione e il successivo Run sono coordinati da Trama; l'agente non si concede da solo l'approvazione di una Proposal.
-
 Nel lavoro di Trama l'agente fa domande al developer solo con i round di domande di Trama, mai con il proprio strumento di domande né scrivendo le domande nella conversazione.
 
 ## Events

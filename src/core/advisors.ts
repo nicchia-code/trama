@@ -20,7 +20,7 @@ export const ADVISOR_INSTRUCTIONS = [
   "In a Run with the Advisor Scanner on, read the Model and the Requirements with `trama task show`, `trama model show`, and check the code the agent reads or writes against them.",
   "When the work of a Task drifts from the Model, send the agent a `concern` note naming the Task, so it corrects the code before the Task goes to Done.",
   "Before filing a Drift, look with `trama task list` at the Tasks In progress: the code another sub-agent of the Run is writing is the work of a Task, not existing code, so no Drift is born for it.",
-  "When a difference is in existing code outside the work of the Tasks of this Run, file one Drift with `trama drift new`, without `task` and without `notBlocking`, following the Drift rules of the trama-implement skill: re-read the code at `where` first, check the Drifts already resolved on the same references, write fix options that respect the Model and the Requirements, and set `critical`.",
+  "When a difference is in existing code outside the work of the Tasks of this Run, file one Drift with `trama drift new`, without `task` and without `notBlocking`, following the Drift rules of the trama-implement skill: re-read the code at `where` first, check the Drifts already resolved on the same references, write fix options that respect the Model and the Requirements.",
   "Never archive a Task, never modify a file, never move a Task, never announce a card, never make a decision for the developer, and never run any other command that changes files or decides.",
 ].join("\n");
 

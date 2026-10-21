@@ -21,7 +21,7 @@ export interface RunModel {
 
 /**
  * The role of an instruction, from the name of its terminal: `Design`, `Setup`, `Import` and `Drifts` are analysis, `Scan` is
- * scan, the implement runs (a Task's short number, `All tasks`, which the automatic Run uses too) are execution. The role
+ * scan, the implement runs (a Task's short number, `All tasks`) are execution. The role
  * only tells whether the instruction can scan: its model comes from the launch (`RunModel`).
  */
 // ponytail: the role follows the terminal name, which the Requirements tie one-to-one to the kind of instruction; pass the role explicitly if a name ever serves two roles.
@@ -58,7 +58,7 @@ export function advisorOverlay(scan: string): string {
 
 /**
  * The environment of an agent's terminal: the marks of an agent Trama started, the editor's question endpoint and the
- * terminal's ID, the autopilot job when there is one and, only for a Run launched with the Advisor Scanner on (`advisorConfig`
+ * terminal's ID, the job ID (`TRAMA_JOB`, which only times the phases of its work) and, only for a Run launched with the Advisor Scanner on (`advisorConfig`
  * is its overlay), `TRAMA_ADVISOR_SCANNER=1`, which Trama's advisors read through `trama advisor show`.
  */
 export function terminalEnv(endpoint: string, terminalId: string, jobId?: string, advisorConfig?: string): Record<string, string> {

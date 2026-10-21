@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseToHost } from "../extension/src/host/messages";
-import { delegationOf, planDelegationChange, planSettingChange, raisesDelegation, settingsSchema, settingTitle, settingValueError, shownAgentValue, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
+import { planSettingChange, settingsSchema, settingTitle, settingValueError, shownAgentValue, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
 import { groupSettings, numberFromText, workspaceOverride } from "../extension/src/webview/settings/logic";
 
 const manifest: ManifestPackage = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
@@ -19,7 +19,6 @@ const fixture: ManifestPackage = {
         "trama.experimentalAdvisorScanner": { type: "boolean", default: false, scope: "application", markdownDescription: "Advisor." },
         "trama.experimentalParallelExecution": { type: "boolean", default: false, scope: "application", markdownDescription: "Parallel." },
         "trama.maxParallelAgents": { type: "integer", default: 20, minimum: 1, scope: "application", markdownDescription: "Agents at once." },
-        "trama.driftAutoPilot": { type: "string", enum: ["disabled", "enabled", "yolo"], enumDescriptions: ["Off level.", "Enabled level.", "Yolo level."], default: "disabled", scope: "application", markdownDescription: "Drift autopilot." },
         "trama.submitWhileRunning": { type: "boolean", default: false, markdownDescription: "Runs overlap." },
         "trama.skillsDir": { type: "string", default: ".agents/skills", markdownDescription: "Skills folder." },
       },
@@ -27,7 +26,6 @@ const fixture: ManifestPackage = {
   },
 };
 const schema = settingsSchema(fixture);
-const DRIFT = "trama.driftAutoPilot";
 const setting = (key: string): SettingSchema => {
   const found = schema.find((s) => s.key === key);
   if (found === undefined) throw new Error(`no setting ${key}`);
@@ -46,13 +44,13 @@ test("the groups and their keys keep the order of the Settings tab", () => {
     ["Agent", ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.autoExit", "trama.language"]],
     ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Experimental", ["trama.driftAutoPilot", "trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution"]],
+    ["Experimental", ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["Agent", ["trama.autoExit", "trama.language"]],
     ["Models", ["trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Experimental", [DRIFT, "trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution"]],
+    ["Experimental", ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution"]],
   ]);
 });
 
@@ -91,7 +89,6 @@ test("the Experimental Parallel Execution is a checkbox right after the Advisor 
 
 test("controls follow the manifest type; maxParallelAgents is a whole number of at least 1", () => {
   expect(setting("trama.autoExit").control).toBe("boolean");
-  expect(setting(DRIFT).control).toBe("enum");
   expect(setting("trama.submitWhileRunning").control).toBe("boolean");
   expect(setting("trama.language").control).toBe("text");
   expect(setting("trama.maxParallelAgents")).toMatchObject({ control: "integer", minimum: 1, default: 20 });
@@ -99,7 +96,6 @@ test("controls follow the manifest type; maxParallelAgents is a whole number of 
 
 test("titles come from the key without its prefix", () => {
   expect(settingTitle("trama.maxParallelAgents")).toBe("Max Parallel Agents");
-  expect(settingTitle(DRIFT)).toBe("Drift Auto Pilot");
   expect(settingTitle("trama.skillsDir")).toBe("Skills Dir");
   expect(settingTitle("trama.autoExit")).toBe("Auto Exit");
   expect(setting("trama.autoExit").title).toBe("Auto Exit");
@@ -112,73 +108,18 @@ test("a value is valid only when it conforms to the schema", () => {
   expect(settingValueError(max, 1.5)).toBe("Enter a whole number of at least 1.");
   expect(settingValueError(max, NaN)).toBe("Enter a whole number of at least 1.");
   expect(settingValueError(max, "3")).toBe("Enter a whole number of at least 1.");
-  expect(settingValueError(setting(DRIFT), "yolo")).toBeNull();
-  expect(settingValueError(setting(DRIFT), "on")).not.toBeNull();
   expect(settingValueError(setting("trama.autoExit"), "yes")).not.toBeNull();
 });
 
 test("the default and an empty text remove the value from the user settings", () => {
   expect(storedValue(setting("trama.maxParallelAgents"), 20)).toBeUndefined();
-  expect(storedValue(setting(DRIFT), "disabled")).toBeUndefined();
-  expect(storedValue(setting(DRIFT), "enabled")).toBe("enabled");
   expect(storedValue(setting("trama.skillsDir"), ".agents/skills")).toBeUndefined();
   expect(storedValue(setting("trama.language"), "   ")).toBeUndefined();
   expect(storedValue(setting("trama.language"), "  Italian ")).toBe("Italian");
   expect(storedValue(setting("trama.maxParallelAgents"), 3)).toBe(3);
 });
 
-test("the delegation is the value of the Drift autopilot setting; unset or unknown counts as disabled", () => {
-  expect(delegationOf(undefined)).toBe("disabled");
-  expect(delegationOf("disabled")).toBe("disabled");
-  expect(delegationOf("enabled")).toBe("enabled");
-  expect(delegationOf("yolo")).toBe("yolo");
-  expect(delegationOf("on")).toBe("disabled");
-  expect(delegationOf(true)).toBe("disabled");
-  expect(raisesDelegation("disabled", "enabled")).toBe(true);
-  expect(raisesDelegation("enabled", "yolo")).toBe(true);
-  expect(raisesDelegation("yolo", "enabled")).toBe(false);
-  expect(raisesDelegation("enabled", "enabled")).toBe(false);
-});
-
-test("the Drift autopilot menu takes its levels, explanations and default from the manifest", () => {
-  expect(settingsSchema(manifest).find((s) => s.key === DRIFT)).toMatchObject({
-    group: "Experimental",
-    control: "enum",
-    default: properties[DRIFT]?.default,
-    values: properties[DRIFT]?.enum,
-    descriptions: properties[DRIFT]?.enumDescriptions,
-  });
-});
-
-test("raising the delegation asks first, with the manifest's explanation of the level chosen", () => {
-  const drift = setting(DRIFT);
-  expect(planDelegationChange(drift, undefined, "enabled")).toEqual({
-    ok: true,
-    ask: { question: "Let the agent approve and fix non-critical Drifts on its own?", detail: "Enabled level." },
-    writes: [{ key: DRIFT, value: "enabled" }],
-  });
-  expect(planDelegationChange(drift, "enabled", "yolo")).toEqual({
-    ok: true,
-    ask: { question: "Let the agent approve and fix every Drift on its own, critical ones included?", detail: "Yolo level." },
-    writes: [{ key: DRIFT, value: "yolo" }],
-  });
-  expect(planDelegationChange(drift, undefined, "yolo")).toEqual({
-    ok: true,
-    ask: { question: "Let the agent approve and fix every Drift on its own, critical ones included?", detail: "Yolo level." },
-    writes: [{ key: DRIFT, value: "yolo" }],
-  });
-});
-
-test("lowering the delegation asks nothing; Off clears the setting; the same level writes nothing", () => {
-  const drift = setting(DRIFT);
-  expect(planDelegationChange(drift, "yolo", "enabled")).toEqual({ ok: true, writes: [{ key: DRIFT, value: "enabled" }] });
-  expect(planDelegationChange(drift, "yolo", "disabled")).toEqual({ ok: true, writes: [{ key: DRIFT, value: undefined }] });
-  expect(planDelegationChange(drift, "enabled", "disabled")).toEqual({ ok: true, writes: [{ key: DRIFT, value: undefined }] });
-  expect(planDelegationChange(drift, "yolo", "yolo")).toEqual({ ok: true, writes: [] });
-});
-
-test("the Drift autopilot key changes only through the menu; the host refuses it in a generic change", () => {
-  expect(planSettingChange(schema, DRIFT, "yolo").ok).toBe(false);
+test("an unknown Trama key is refused in a setting change", () => {
   expect(planSettingChange(schema, "trama.unknown", true).ok).toBe(false);
 });
 
@@ -205,16 +146,9 @@ test("the host accepts a setting change only for a manifest key with a conformin
   expect(set("trama.maxParallelAgents", 0).ok).toBe(false);
   expect(set("trama.maxParallelAgents", "4").ok).toBe(false);
   expect(set("trama.autoExit", "true").ok).toBe(false);
-  expect(set(DRIFT, "on").ok).toBe(false);
   expect(set("trama.unknown", "x").ok).toBe(false);
   expect(set("editor.fontSize", 12).ok).toBe(false);
   expect(parseToHost({ type: "setSetting", key: "trama.autoExit", value: true }).ok).toBe(false);
-});
-
-test("the host accepts a Drift autopilot level only as one of the three", () => {
-  expect(parseToHost({ type: "setDelegation", mode: "yolo" }).ok).toBe(true);
-  expect(parseToHost({ type: "setDelegation", mode: "on" }).ok).toBe(false);
-  expect(parseToHost({ type: "setDelegation" }).ok).toBe(false);
 });
 
 test("a left-over chat or claude, or any other value, is shown as cursor; cursor and omp stay, unset stays unset", () => {
@@ -224,4 +158,10 @@ test("a left-over chat or claude, or any other value, is shown as cursor; cursor
   expect(shownAgentValue("cursor")).toBe("cursor");
   expect(shownAgentValue("omp")).toBe("omp");
   expect(shownAgentValue(undefined)).toBeUndefined();
+});
+
+test("the host no longer accepts a delegation message or the old Drift autopilot key", () => {
+  expect(parseToHost({ type: "setDelegation", mode: "yolo" }).ok).toBe(false);
+  expect(parseToHost({ type: "setSetting", key: "trama.driftAutoPilot", value: "yolo" }, schema).ok).toBe(false);
+  expect(properties["trama.driftAutoPilot"]).toBeUndefined();
 });

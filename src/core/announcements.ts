@@ -45,8 +45,6 @@ export interface Announcement {
   chat: Chat | null;
   /** The phase of a check; null for every other kind. */
   phase: CheckPhase | null;
-  /** The transient coordinator job bound to this check, when present. */
-  job: string | null;
   /** The Drifts a Proposal of Resolve Drifts names, in creation order; empty for every other announcement. */
   drifts: string[];
   /** The Machine a comparison compares; null for every other announcement. */
@@ -129,7 +127,6 @@ function parse(raw: Raw, body: string, id: string, where: string): Announcement 
     terminal: terminalField(raw, where),
     chat: raw["chat"] === undefined || raw["chat"] === null ? null : enumField(raw, "chat", CHATS, "cursor", where),
     phase: raw["phase"] === undefined || raw["phase"] === null ? null : enumField(raw, "phase", CHECK_PHASES, "verifying", where),
-    job: jobField(raw, where),
     drifts: idListField(raw, "drifts", where),
     proposals: idListField(raw, "proposals", where),
     machine: machineField(raw, where),
@@ -167,12 +164,6 @@ function terminalField(raw: Raw, where: string): string | null {
   if (typeof v === "string" && TERMINAL_PATTERN.test(v)) return v;
   throw new TramaError(`${where}: "terminal" must be an ID of six lowercase letters and digits, or none`);
 }
-function jobField(raw: Raw, where: string): string | null {
-  const value = raw["job"];
-  if (value === undefined || value === null) return null;
-  if (typeof value === "string") return value;
-  throw new TramaError(`${where}: "job" must be a string or none`);
-}
 
 function idListField(raw: Raw, key: string, where: string): string[] {
   const v = raw[key];
@@ -197,9 +188,9 @@ function write(p: Project, a: Announcement) {
   // The folder ignores itself and everything in it, so announcements are never versioned.
   const ignore = join(dir, ".gitignore");
   if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
-  const { id, title, chat, phase, job, drifts, machine, refs, code, texts, proposals, ...data } = a;
-  // `chat`, `phase`, `job`, `drifts`, `machine`, `refs`, `code`, `texts` and `proposals` are written only when set, so the other announcements look as before.
-  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}), ...(job ? { job } : {}), ...(drifts.length > 0 ? { drifts } : {}), ...(machine ? { machine } : {}), ...(refs.length > 0 ? { refs } : {}), ...(code ? { code } : {}), ...(Object.keys(texts).length > 0 ? { texts } : {}), ...(proposals.length > 0 ? { proposals } : {}) }, `# ${title}\n`);
+  const { id, title, chat, phase, drifts, machine, refs, code, texts, proposals, ...data } = a;
+  // `chat`, `phase`, `drifts`, `machine`, `refs`, `code`, `texts` and `proposals` are written only when set, so the other announcements look as before.
+  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(phase ? { phase } : {}), ...(drifts.length > 0 ? { drifts } : {}), ...(machine ? { machine } : {}), ...(refs.length > 0 ? { refs } : {}), ...(code ? { code } : {}), ...(Object.keys(texts).length > 0 ? { texts } : {}), ...(proposals.length > 0 ? { proposals } : {}) }, `# ${title}\n`);
 }
 
 function remove(p: Project, id: string) {
@@ -241,13 +232,12 @@ export const getAnnouncement = (p: Project, id: string): Announcement | null => 
 /** Announces a card as soon as it is known it will be created. */
 export function announce(
   p: Project,
-  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase; job?: string; drifts?: string[]; machine?: string; refs?: string[]; code?: string | null; texts?: Record<string, string> } & AgentOrigin,
+  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase; drifts?: string[]; machine?: string; refs?: string[]; code?: string | null; texts?: Record<string, string> } & AgentOrigin,
   now = new Date(),
 ): Announcement {
   const title = input.title.trim().replace(/\s+/g, " ");
   if (!title) throw new TramaError("An announcement needs a title");
   if ((input.kind === "check") !== (input.phase !== undefined)) throw new TramaError(input.kind === "check" ? "A check needs a phase" : "Only a check has a phase");
-  if (input.job !== undefined && input.kind !== "check") throw new TramaError("Only a check has a job");
   if (input.drifts !== undefined && input.drifts.length > 0 && input.kind !== "proposal") throw new TramaError("Only a Proposal names Drifts");
   if ((input.kind === "comparison") !== (input.machine !== undefined)) throw new TramaError(input.kind === "comparison" ? "A comparison needs a machine" : "Only a comparison has a machine");
   if (input.kind !== "comparison" && (input.refs !== undefined || input.code !== undefined || input.texts !== undefined)) throw new TramaError("Only a comparison has references and a code fingerprint");
@@ -255,7 +245,7 @@ export function announce(
   if (input.kind === "check" && input.phase === "scanning" && input.source === undefined) {
     const waiting = listAnnouncements(p).find((a) => a.kind === "check" && a.source === "request" && (input.terminal !== undefined ? a.terminal === input.terminal : a.terminal === null && a.chat === (input.chat ?? "editor")));
     if (waiting) {
-      const taken: Announcement = { ...waiting, phase: "scanning", job: input.job ?? waiting.job, touched: now.toISOString() };
+      const taken: Announcement = { ...waiting, phase: "scanning", touched: now.toISOString() };
       write(p, taken);
       return taken;
     }
@@ -271,7 +261,6 @@ export function announce(
     terminal: input.terminal ?? null,
     chat: input.terminal ? null : (input.chat ?? (input.source === "request" ? null : "editor")),
     phase: input.phase ?? null,
-    job: input.job ?? null,
     drifts: input.drifts ?? [],
     machine: input.machine ?? null,
     refs: input.refs ?? [],
@@ -284,11 +273,10 @@ export function announce(
   return announcement;
 }
 
-/** The title of a Resolve Drifts ghost: the Drift it names by its short number, or how many Drifts it names. Undefined when it names none. */
+/** The title of a Resolve Drifts ghost: «Resolving Drift <short number>» for the one Drift it names. Undefined when it names none. */
 export function resolutionTitle(p: Project, drifts: readonly string[]): string | undefined {
   const [only] = drifts;
-  if (drifts.length === 0 || only === undefined) return undefined;
-  return drifts.length === 1 ? `Resolving Drift ${cardName(p, "drift", only)}` : `Resolving ${drifts.length} Drifts`;
+  return only === undefined ? undefined : `Resolving Drift ${cardName(p, "drift", only)}`;
 }
 
 /**
@@ -401,7 +389,6 @@ export interface FinishedCheck {
   phase: CheckPhase | null;
   terminal: string | null;
   chat: Chat | null;
-  job: string | null;
   touched: string;
   failed: boolean;
 }
@@ -413,7 +400,7 @@ export interface FinishedCheck {
 export function checkOutcome(p: Project, id: string, failed = false): FinishedCheck | null {
   const check = findCheck(p, id);
   if (!check) return null;
-  return { id: check.id, title: check.title, phase: check.phase, terminal: check.terminal, chat: check.chat, job: check.job, touched: check.touched, failed };
+  return { id: check.id, title: check.title, phase: check.phase, terminal: check.terminal, chat: check.chat, touched: check.touched, failed };
 }
 
 /** The ghost of a finished check goes, whether or not the editor heard of its outcome. */

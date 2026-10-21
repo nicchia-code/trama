@@ -19,12 +19,12 @@ Usa sempre quando lavori sull'interfaccia: regole generali, pannello, Board e Re
 - Rendered text never makes the panel scroll sideways: long words wrap and a long line of a code block scrolls inside its own block. Text stays selectable.
 - Malformed Markdown never prevents a text from showing: it is shown as written, as far as it cannot be read as Markdown.
 - L'overlay delle domande segue le stesse regole: il testo della domanda, il contesto, la descrizione e i dettagli di ogni opzione sono resi come Markdown; le etichette delle opzioni, i pulsanti e la risposta libera mostrata nel riepilogo restano testo semplice.
-- Ogni pulsante con testo della Board ha, oltre al testo, un'icona a sinistra del testo: il pulsante della barra, quelli in fondo alle colonne, quelli delle schede (anche dentro una scheda di risoluzione) e `Close` degli avvisi. I chip dei riferimenti, i tag dei Task, i badge `blocked`, `waiting` e `Resolving`, le righe dei Drift di una scheda di risoluzione, le righe dei Task dentro le altre schede e il menu del periodo di Done restano senza icona, salvo l'icona `link` dei Task bloccati da più Drift (vedi `panel/Board`).
+- Ogni pulsante con testo della Board ha, oltre al testo, un'icona a sinistra del testo: il pulsante della barra, quelli in fondo alle colonne, quelli delle schede (anche dentro una scheda di risoluzione) e `Close` degli avvisi. I chip dei riferimenti, i tag dei Task, i badge `blocked`, `waiting` e `Resolving`, le righe dei popup di quei badge, le righe dei Drift di una scheda di risoluzione e il menu del periodo di Done restano senza icona.
 - Le stesse azioni hanno la stessa icona anche nel Diagramma: `Scan` nella sua barra, `Approve`, `Reject` e `Dismiss Drift` nei dettagli. Gli altri controlli del Diagramma e le altre schede del pannello non cambiano.
 - Le icone sono icone lucide, una per azione:
   - `Run all` e `Run` di un Task: `Play`.
   - `+ Add Work Item`: `Plus`.
-  - `Resolve all` e `Resolve` di un Drift: `WandSparkles`.
+  - `Resolve` di un Drift: `WandSparkles`.
   - `Scan System` nella Board e `Scan` nel Diagramma: `Search`.
   - `View on diagram`: `Network`.
   - `View requirements` e `View requirement`: `ListChecks`.

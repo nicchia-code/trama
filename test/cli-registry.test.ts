@@ -105,7 +105,7 @@ test("an old option is not an option: the fields of a command go in --input", ()
 test("the commands that count as the agent's activity are the ones declared with that effect, plus the old ones that stay", () => {
   for (const old of [["announcement", "new"], ["announcement", "move", "x", "history"], ["announcement", "move", "x", "delivered"], ["proposal", "new"], ["proposal", "edit", "x"], ["proposal", "move", "x", "open"], ["task", "new"], ["task", "move", "x", "doing"], ["drift", "new"], ["comparison", "new", "x"], ["comparison", "move", "x", "delivered"]])
     expect(countsAsActivity(old)).toBe(true);
-  for (const reading of [["model", "show"], ["model", "list"], ["model", "check"], ["project", "show"], ["project", "new"], ["project", "edit"], ["question", "new"], ["hook", "idle"], ["task", "list"], ["proposal", "show", "x"], ["proposal", "list"], ["proposal", "move", "x", "approved"], ["proposal", "move", "x", "rejected"], ["proposal", "move", "x", "discarded"], ["drift", "list"], ["drift", "show", "x"], ["drift", "move", "x", "dismissed"], ["timing", "list"], ["history", "list"], ["history", "show", "x"], ["history", "new"], ["history", "edit", "x"], ["autopilot", "show"], ["autopilot", "move", "x", "failed"], ["init"], ["nothing"]])
+  for (const reading of [["model", "show"], ["model", "list"], ["model", "check"], ["project", "show"], ["project", "new"], ["project", "edit"], ["question", "new"], ["hook", "idle"], ["task", "list"], ["proposal", "show", "x"], ["proposal", "list"], ["proposal", "move", "x", "approved"], ["proposal", "move", "x", "rejected"], ["proposal", "move", "x", "discarded"], ["drift", "list"], ["drift", "show", "x"], ["drift", "move", "x", "dismissed"], ["timing", "list"], ["history", "list"], ["history", "show", "x"], ["history", "new"], ["history", "edit", "x"], ["init"], ["nothing"]])
     expect(countsAsActivity(reading)).toBe(false);
 });
 
@@ -138,4 +138,17 @@ test("project new creates the project, refuses a second one and refuses to overw
   } finally {
     rmSync(other, { recursive: true, force: true });
   }
+});
+
+test("there is no autopilot object, and the removed delegation fields are refused", () => {
+  shop();
+  expect(OBJECTS as readonly string[]).not.toContain("autopilot");
+  expect(() => run(["--root", dir, "autopilot", "show"], dir)).toThrow(/Unknown command "autopilot".*trama --help/);
+  expect(() => run(["--root", dir, "autopilot", "move", "job-1", "failed"], dir)).toThrow(/Unknown command "autopilot".*trama --help/);
+  const refused = (argv: string[], input: object) => () => run(["--root", dir, ...argv, "--input", JSON.stringify(input)], dir);
+  expect(refused(["proposal", "new"], { title: "Resolve", kind: "resolution", automatic: true })).toThrow(/automatic: unknown field/);
+  expect(refused(["proposal", "new"], { title: "Resolve", job: "job-1" })).toThrow(/job: unknown field/);
+  expect(refused(["announcement", "new"], { kind: "check", title: "Check", phase: "verifying", job: "job-1" })).toThrow(/job: unknown field/);
+  const drift = { title: "Late refund", refs: ["order/Paid"], happens: "a", should: "b", where: "src/order.ts", options: [{ title: "x", text: "y" }, { title: "z", text: "w" }], critical: true };
+  expect(refused(["drift", "new"], drift)).toThrow(/critical: unknown field/);
 });

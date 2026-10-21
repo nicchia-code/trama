@@ -54,11 +54,8 @@ export const SETTING_GROUPS: readonly { title: string; keys: readonly string[] }
   { title: "Agent", keys: ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.autoExit", "trama.language"] },
   { title: "Models", keys: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"] },
   { title: "Project", keys: ["trama.skillsDir"] },
-  { title: "Experimental", keys: ["trama.driftAutoPilot", "trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution"] },
+  { title: "Experimental", keys: ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution"] },
 ];
-
-/** The Drift autopilot setting: how much the agent does with Drifts on its own, one choice over three levels. */
-export const DRIFT_KEY = "trama.driftAutoPilot";
 
 /** The agent setting: the agents are Cursor's chat and omp. */
 export const AGENT_KEY = "trama.agent";
@@ -74,26 +71,6 @@ export function shownAgentValue(user: unknown): unknown {
 
 /** The three model roles: the Settings tab suggests the agent's model names for them. */
 export const MODEL_ROLE_KEYS: readonly string[] = ["trama.analysis", "trama.scan", "trama.execution"];
-
-/** The delegation the Drift autopilot setting gives, lowest to highest. */
-export type DelegationMode = "disabled" | "enabled" | "yolo";
-export const DELEGATION_ORDER: readonly string[] = ["disabled", "enabled", "yolo"];
-
-/** The modal question that raising the delegation asks, by the mode it raises to. */
-export const DELEGATION_QUESTIONS: Record<string, string> = {
-  enabled: "Let the agent approve and fix non-critical Drifts on its own?",
-  yolo: "Let the agent approve and fix every Drift on its own, critical ones included?",
-};
-
-/** The delegation of the user's Drift autopilot value: an unset or unknown value counts as `disabled`. */
-export function delegationOf(value: unknown): DelegationMode {
-  return typeof value === "string" && DELEGATION_ORDER.includes(value) ? (value as DelegationMode) : "disabled";
-}
-
-/** Whether moving the delegation from `from` to `to` gives the agent more. */
-export function raisesDelegation(from: string, to: string): boolean {
-  return DELEGATION_ORDER.indexOf(to) > DELEGATION_ORDER.indexOf(from);
-}
 
 /** `trama.maxParallelAgents` → `Max Parallel Agents`; `trama.autoExit` → `Auto Exit`. */
 export function settingTitle(key: string): string {
@@ -156,26 +133,14 @@ export function storedValue(setting: SettingSchema, value: SettingValue): Settin
   return text;
 }
 
-/** What the host does for one Settings change: refused, or the writes to make after the developer confirms a raised delegation (`ask`). */
+/** What the host does for one Settings change: refused, or the writes to make. */
 export type SettingPlan =
   | { ok: false; reason: string }
-  | { ok: true; ask?: { question: string; detail: string }; writes: { key: string; value: SettingValue | undefined }[] };
+  | { ok: true; writes: { key: string; value: SettingValue | undefined }[] };
 
-/** Plans a change to one setting. The delegation keys are refused: only the Drift autopilot menu changes them. */
+/** Plans a change to one setting. */
 export function planSettingChange(schema: readonly SettingSchema[], key: string, value: SettingValue): SettingPlan {
   const setting = schema.find((s) => s.key === key);
   if (setting === undefined) return { ok: false, reason: `Unknown Trama setting ${key}` };
-  if (key === DRIFT_KEY) return { ok: false, reason: "Drift delegation is set with the Drift autopilot menu" };
   return { ok: true, writes: [{ key, value: storedValue(setting, value) }] };
-}
-
-/**
- * Plans the Drift autopilot menu's level from the user value (`current`). Only a change is written, and `disabled` removes the
- * value. Raising the delegation asks first; the detail is the manifest's explanation of the level chosen (`drift`).
- */
-export function planDelegationChange(drift: SettingSchema | undefined, current: unknown, mode: DelegationMode): SettingPlan {
-  const writes = delegationOf(current) === mode ? [] : [{ key: DRIFT_KEY, value: mode === "disabled" ? undefined : mode }];
-  if (!raisesDelegation(delegationOf(current), mode)) return { ok: true, writes };
-  const level = drift?.values?.indexOf(mode) ?? -1;
-  return { ok: true, ask: { question: DELEGATION_QUESTIONS[mode] ?? "", detail: drift?.descriptions?.[level] ?? "" }, writes };
 }

@@ -36,7 +36,7 @@ test("settings expose only Cursor's chat and omp with a panel-default terminal l
   expect(properties["trama.agent"].default).toBe("cursor");
   for (const key of ["analysis", "scan", "execution", "skillsDir"]) expect(properties[`trama.${key}`].markdownDescription).not.toMatch(/claude|copilot/i);
   expect(properties["trama.agent"].scope).toBe("application");
-  expect(properties["trama.driftAutoPilot"]).toMatchObject({ type: "string", enum: ["disabled", "enabled", "yolo"], default: "disabled", scope: "application" });
+  expect(properties["trama.driftAutoPilot"]).toBeUndefined();
   expect(properties["trama.autoFixDrifts"]).toBeUndefined();
   expect(properties["trama.autoFixCriticalDrifts"]).toBeUndefined();
   expect(properties["trama.terminalLocation"].enum).toEqual(["editor", "panel"]);

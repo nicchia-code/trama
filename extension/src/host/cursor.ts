@@ -76,9 +76,8 @@ export const deeplinkAccepts = (prompt: string): boolean => prompt.trim() !== ""
  * Sends `prompt` to a new agent conversation in Cursor's chat. Each step that is missing or fails moves silently to the
  * next, and none is tried twice, so no two chats get the same text: 1) `composer.createNew` with `autoSubmit`, which
  * sends it by itself (internal and undocumented); 2) the prompt deeplink, which waits for the developer's confirmation
- * and Enter; 3) the clipboard, with a notice. Automatic instructions take the same steps: one left waiting or on the
- * clipboard starts nothing, so the automatic flow holds until the developer acts. `announce` runs right before the
- * self-sending step and returns how to take its announcement back when that step fails.
+ * and Enter; 3) the clipboard, with a notice. An instruction left waiting or on the clipboard starts no job. `announce`
+ * runs right before the self-sending step and returns how to take its announcement back when that step fails.
  */
 export async function openCursorChat(root: string, prompt: string, canSend: () => boolean = () => true, model = "", announce: () => () => void = () => () => undefined): Promise<ChatDelivery> {
   if (!canSend()) return "not-sent";

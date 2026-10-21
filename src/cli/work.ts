@@ -18,7 +18,7 @@ import { recordTiming } from "../core/timings";
 /** One-line summary of a Proposal for lists and the board. `number` is its short number (`P3`) while it is live, otherwise null. */
 export function proposalSummary(p: Project, proposal: Proposal, numbers: ShortNumbers) {
   const h = proposal.data.status === "draft" || proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
-  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, automatic: proposal.data.automatic, nonBlocking: proposal.data.nonBlocking, stale: h.stale.length > 0, requires: h.requires.map((r) => r.id), attachedTo: attachedDrift(p, proposal.id)?.id ?? null, resolves: proposal.data.kind === "resolution" ? proposal.data.drifts.length : null };
+  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, nonBlocking: proposal.data.nonBlocking, stale: h.stale.length > 0, requires: h.requires.map((r) => r.id), attachedTo: attachedDrift(p, proposal.id)?.id ?? null, resolves: proposal.data.kind === "resolution" ? proposal.data.drifts.length : null };
 }
 
 const resolvesMark = (i: { resolves: number | null; nonBlocking: boolean }) => (i.resolves === null ? "" : ` (resolves ${i.resolves} Drift${i.resolves === 1 ? "" : "s"})${i.nonBlocking ? " (blocks nothing)" : ""}`);
@@ -29,7 +29,7 @@ export function proposalListView(p: Project, all: boolean): Result {
     .filter((x) => all || x.data.status === "draft" || x.data.status === "open")
     .map((x) => proposalSummary(p, x, numbers));
   const flags = (i: (typeof items)[number]) =>
-    [i.status, i.kind === "change" ? "" : i.kind, i.automatic ? "automatic" : "", i.stale ? "stale" : "", i.requires.length > 0 ? `requires ${i.requires.map((r) => numbers.name("proposal", r)).join(", ")}` : ""].filter(Boolean).join(", ");
+    [i.status, i.kind === "change" ? "" : i.kind, i.stale ? "stale" : "", i.requires.length > 0 ? `requires ${i.requires.map((r) => numbers.name("proposal", r)).join(", ")}` : ""].filter(Boolean).join(", ");
   const md = bullets(
     items.map((i) => `- ${numbers.name("proposal", i.id)} [${flags(i)}] ${i.title}${i.status === "draft" ? " (draft)" : ""}${resolvesMark(i)}${i.attachedTo ? ` (attached to ${numbers.name("drift", i.attachedTo)})` : ""}`),
     "_No Proposals._",
@@ -64,7 +64,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
     // The label goes under the title, the first line of the body.
     proposal.data.label ? proposal.body.trim().replace(/^#.*$/m, (title) => `${title}\n\nLabel: ${proposal.data.label}`) : proposal.body.trim(),
     "",
-    `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}${proposal.data.kind === "change" ? "" : ` · ${proposal.data.kind}`}${proposal.data.automatic ? " · automatic" : ""}`,
+    `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}${proposal.data.kind === "change" ? "" : ` · ${proposal.data.kind}`}`,
     attached ? `Attached to Drift ${numbers.name("drift", attached.id)} ${attached.title}. It brings no Tasks and is decided on the Drift.` : "",
     proposal.data.status === "draft" ? "Still being written; submit when finished. The developer cannot approve or reject it yet." : "",
     proposal.data.requires.length > 0 ? `Requires: ${proposal.data.requires.map((r) => numbers.name("proposal", r)).join(", ")}. Changes and validation below are on top of them.` : "",
@@ -98,7 +98,6 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
       label: proposal.data.label,
       status: proposal.data.status,
       kind: proposal.data.kind,
-      automatic: proposal.data.automatic,
       nonBlocking: proposal.data.nonBlocking,
       drifts: proposal.data.drifts,
       tasks: proposal.tasks.map((t) => ({ id: t.id, title: t.title, technical: t.technical, refs: t.refs })),
@@ -155,7 +154,7 @@ function withCheckNote(task: Task): string {
   return [...lines.slice(0, title + 1), "", "Closed without changes.", "", "## Check note", "", task.data.unchanged, ...lines.slice(title + 1)].join("\n");
 }
 
-const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null, freed: FreedTask[]) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, critical: d.data.critical, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, closedUnchanged: closed, notBlocking: freed.map((f) => ({ task: f.task, number: numbers.label("task", f.task), title: f.title, reason: f.reason })) });
+const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null, freed: FreedTask[]) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, closedUnchanged: closed, notBlocking: freed.map((f) => ({ task: f.task, number: numbers.label("task", f.task), title: f.title, reason: f.reason })) });
 
 /** The current text of a Model element or Requirement, for inlining into a Task or Drift. */
 export function describeRef(project: ProjectModel, ref: string, full = false): string {
@@ -373,7 +372,7 @@ export function driftShowView(p: Project, drift: Drift): Result {
   const followed = previous === null ? undefined : listDrifts(p).find((d) => d.id === previous);
   const followsLine = previous === null ? "" : `Follows Drift ${numbers.name("drift", previous)}${followed ? ` ${followed.title} (${followed.data.resolution})` : ""}`;
   const md = [
-    `# ${drift.title}${drift.data.critical ? " [CRITICAL: urgent developer decision]" : ""}`,
+    `# ${drift.title}`,
     ...(closed ? [`Dismissed by Task ${numbers.name("task", closed.task)} without changes`] : []),
     "",
     ...(previous === null ? [] : [followsLine, ""]),
@@ -408,7 +407,7 @@ export function driftListView(p: Project, all: boolean, refs: string[] = []): Re
   const drifts = listDrifts(p).filter((d) => (all || d.data.status === "open") && (refs.length === 0 || concernSameThing(model, d.data.refs, refs)));
   const tasks = listTasks(p);
   const md = bullets(
-    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}]${d.data.critical ? " [CRITICAL: urgent developer decision]" : ""} ${d.title}${d.data.previous === null ? "" : " (recurring)"}${closedUnchanged(p, d, tasks) ? " (dismissed, no changes)" : ""}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
+    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}] ${d.title}${d.data.previous === null ? "" : " (recurring)"}${closedUnchanged(p, d, tasks) ? " (dismissed, no changes)" : ""}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
     "_No Drifts._",
   );
   return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map((d) => driftSummary(d, numbers, closedUnchanged(p, d, tasks), freedTasks(d, tasks))) } };
@@ -490,7 +489,7 @@ export function boardView(p: Project): Result {
       ...proposals.map((i) => `- Proposal ${i.number ?? i.id}${i.stale ? " (stale)" : ""}: ${i.title}${resolvesMark(i)}${nestedDrifts(i.id)}`),
       ...drifts.map((d) => {
         const nested = attachedLine(d.proposal, "  ");
-        return `- Drift ${d.number ?? d.id}${d.critical ? " [CRITICAL: urgent developer decision]" : ""}: ${d.title}${d.previous === null ? "" : " (recurring)"}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
+        return `- Drift ${d.number ?? d.id}: ${d.title}${d.previous === null ? "" : " (recurring)"}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
       }),
     ]),
     "",

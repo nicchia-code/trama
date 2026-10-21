@@ -54,34 +54,6 @@ When the instruction asks you to write in a language, everything you generate fo
 6. **Check the output.** Hand each Proposal over (step 7) without `trama proposal show` before it: the hand-over's output reports the checks, and the changes and the Drift list it prints must match the answers, and nothing else. When it warns of a Requirement fragment larger than 12 KB that the resolution writes into, split that fragment in the same Proposal before handing it over, as step 7 says. Cut where it suits the project (usually by Feature or by a group of nearby Machines), give every new fragment a name and a description that say when it is needed, and move the sections without changing their text. Mind the 4,000-character budget of the Requirement skills: prefer a few medium fragments to many tiny ones, since every fragment adds a skill to it.
 7. **Hand over.** Run `trama proposal move <id> open` (the earlier ones first) only after step 6; if refused, or its output does not match the answers, reopen it with `trama proposal edit <id>`, correct it, and hand it over again. Then report, in domain terms: the Proposals with their decisions per Drift, the Drifts left open because their question was skipped or because they were no longer open, and tell the developer to review the resolution on the board or with `trama proposal show <id>`. Stop. Do not approve it, reject it or resolve any Drift.
 
-## Automatic mode
-
-Choose the workflow from the instruction and current host authorization. Manual requests keep the existing question-and-resolution process below; an active setting alone does not authorize you to take an automatic step.
-
-For an automatic job, obtain its exact scope with:
-
-`trama autopilot show --json --input -` with `{"job":"<id>"}`
-
-Use only Drift identities listed as currently authorized for that job. Query again immediately before each choice; if the coordinator is unavailable, the job identity is unrecognized, authorization is absent, or the setting no longer permits a Drift, do not choose it. Read each authorized Drift with `trama drift show <id>` and its attached Proposal if present. A Drift is eligible only when it is still open and the current host authorizes it. Do not open a question round, invent Fix options, choose the existing code behavior, alter the Model, resolve a Drift directly, or implement code.
-
-For every authorized Drift, choose **only Fix option 1**. Record it in the automatic resolution with `"decision":"fix-code","option":1` and no invented note. Make no entry for unauthorized, stale, failed, or inapplicable cases. An attached Proposal does not change this: the host applies its ordinary resolution rules when it approves the submitted resolution.
-
-Create the Draft with the job binding:
-
-`trama proposal new --input -` with `{"title":"<title>","kind":"resolution","automatic":true,"job":"<id>","body":"<why>"}`
-
-Add the authorized Drift decisions using `trama proposal edit <proposal-id> --input -` with `{"drifts":[{"drift":"<drift-id>","decision":"fix-code","option":1}]}`, then hand it over with `trama proposal move <proposal-id> open` without `trama proposal show` before it, and read its output. `automatic` marks the resolution and imposes restrictions; it does not approve it. Never approve, reject, discard or implement it. After successful submission, report the Proposal and return control to the host. The host—not this agent—rechecks authorization, performs ordinary approval checks, waits for this resolution agent to finish, and may then launch a separate filtered Run.
-
-When the authorized Drifts do not fit one Proposal, split them into a chain as in step 5: each Proposal with `"automatic":true,"job":"<id>"`, a later one opened with `requires` of the earlier ones' ids, each Drift in exactly one of them. Hand them over in dependency order, one at a time: the host approves each one as you hand it over, so hand an earlier Proposal over before writing the next. Never wait for an approval, and never approve one yourself.
-
-If a case cannot be applied or fails, report it to the coordinator using `trama autopilot move <job> failed --input -` with `{"drift":"<drift-id>","reason":"<text>"}`; this records no persistent Drift decision and does not retry. If the editor is unavailable or the coordinator cannot be confirmed, stop new automatic work and report the reason; never claim success from a prepared chat prompt, notes, or withdrawn check.
-
-## Autopilot limits
-
-`trama.driftAutoPilot` is the application-scoped user setting for Drift delegation, `disabled` by default, with the values `disabled` (manual), `enabled` (delegates only non-critical Drifts) and `yolo` (also delegates critical ones). Only the user value counts; read it with `trama autopilot show --json`, and an unrecognised value grants no delegation. A Drift must still have a first Fix option applicable, be open, outside any Draft/open resolution and not excluded after failure. The host coordinates across Trama windows and waits for all tracked scans and Runs; do not treat an idle delay or one archived Drift as clearance. Scans started without Trama are not tracked and must be coordinated by the developer.
-
-The automatic flow is resolution first, then—only after successful host approval and normal agent completion—a distinct Run for that resolution's fix Tasks and their still-incomplete origin Tasks. It excludes unrelated Tasks; it does not approve or implement from this skill. There is no extra cycle, time, or spending limit: later scans may lead to further cycles. The developer can withdraw delegation or interrupt work. A setting change stops new steps, not a Task already started; failed cases are not retried automatically.
-
 ## Asking
 
 Run **`trama question new --root <project> --input -`** with the JSON request on standard input, in a heredoc. Make **one round only**, with one question per Drift, in the order the Drifts were created, all single-choice (`multi: false`).
@@ -100,7 +72,7 @@ Run **`trama question new --root <project> --input -`** with the JSON request on
 - Only an initial `status: "unavailable"` result means the editor is unavailable. Then you ask in no other way: you stop, open no resolution, and tell the developer to open the project in the editor with Trama. When the developer says to continue, run the same `trama question new` again: it is a new round.
 - A usage error of `trama question new` (exit code 2, wrong arguments, unrecognised command) or an input error is **never** editor unavailability: correct the call and repeat it. A deliberate skip is not re-asked.
 
-- Never use your own question tool (`ask` in omp, `AskQuestion` in Cursor, `vscode_askQuestions` in VS Code, `AskUserQuestion` in Claude Code), and never write the questions in the conversation: `trama question new` is the only way to ask the developer.
+- Never use your own question tool (`ask` in omp, `AskQuestion` in Cursor), and never write the questions in the conversation: `trama question new` is the only way to ask the developer.
 
 ## PowerShell
 

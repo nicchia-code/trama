@@ -1,14 +1,15 @@
-import { Ban, Check, ChevronDown, ChevronUp, FileInput, Link, ListChecks, Network, Play, Settings, WandSparkles, X } from "lucide-react";
-import { Fragment, type ReactNode } from "react";
+import { Ban, Check, ChevronDown, ChevronUp, FileInput, ListChecks, Network, Play, Settings, WandSparkles, X } from "lucide-react";
+import { Fragment, type ReactNode, useRef, useState } from "react";
 import type { FocusRequest } from "../../protocol";
 import { cardNameOf, ID_NAMES } from "../../../../src/core/card-names";
 import { joinReasons } from "../../../../src/core/design";
-import { CriticalBadge, DriftCompare, IdTag, RecurringBadge } from "../diagram/panel";
+import { DriftCompare, IdTag, RecurringBadge } from "../diagram/panel";
 import { cn } from "../lib/utils";
 import { Markdown } from "../markdown";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
-import { AGENT_NAMES, type AnnouncedCard, type BlockBadge, type Badge as BadgeData, type Card as BoardCard, type DriftCard, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard, type WaitingCard } from "./logic";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { AGENT_NAMES, type AnnouncedCard, blockedReason, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
 import { BoardButton, Head, RefChips, StatusDot, Tip, TipBadge, TaskProposalTag, useBoardEnv } from "./parts";
 
 /** The shell of a card of the Board: its key, so a link can find it, and its accessible name. */
@@ -43,37 +44,84 @@ function CardBadge({ badge }: { badge: BadgeData }) {
   );
 }
 
-/** "blocked D2" / "waiting T4": a link to the Drift on the Diagram or to a card of the Board. It disables nothing. */
-function BlockedBadge({ badge }: { badge: BlockBadge }) {
+const BLOCK_BADGE = "inline-flex items-center gap-1 rounded-md border border-red-600 bg-red-600/10 px-1.5 text-[11px] leading-4 outline-none hover:bg-red-600/20 focus-visible:ring-2 focus-visible:ring-ring dark:border-red-400 dark:bg-red-400/15 dark:hover:bg-red-400/25";
+const BLOCK_ROW = "flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 rounded-sm py-0.5 text-left text-xs outline-none hover:[&_.title]:underline focus-visible:ring-2 focus-visible:ring-ring";
+
+/**
+ * A badge of a blocked Task that is a button: it opens a popup next to it, titled `title`, whose rows (`children`, given a
+ * `follow` that closes the popup and scrolls to a card) lead to the cards that block the Task. Esc, a click outside or
+ * pressing the badge again close it and give the focus back to the badge; following a row leaves the focus on its card.
+ */
+function BlockPopup({ tooltip, title, badge, children }: { tooltip: string; title: string; badge: ReactNode; children: (follow: (key: string) => void) => ReactNode }) {
   const env = useBoardEnv();
-  const target = badge.target;
-  const prefix = badge.label.startsWith("blocked ") ? "blocked " : "waiting ";
-  const id = target.kind === "diagram" ? target.drift : target.key.slice("task:".length);
-  const name = cardNameOf(env.numbers, target.kind === "diagram" ? "drift" : "task", id);
-  const text = `${badge.tooltip} (${name.isNumber ? ID_NAMES.number : ID_NAMES.identity} ${name.text})`;
+  const [open, setOpen] = useState(false);
+  const followed = useRef(false);
+  const follow = (key: string) => {
+    followed.current = true;
+    setOpen(false);
+    env.showCard(key);
+  };
   return (
-    <Tip text={text}>
-      <button
-        type="button"
-        data-badge=""
-        aria-label={text}
-        className="inline-flex items-center gap-1 rounded-md border border-red-600 bg-red-600/10 px-1.5 text-[11px] leading-4 outline-none hover:bg-red-600/20 focus-visible:ring-2 focus-visible:ring-ring dark:border-red-400 dark:bg-red-400/15 dark:hover:bg-red-400/25"
-        onClick={() => (target.kind === "diagram" ? env.context.navigate("diagram", { drift: target.drift }) : env.showCard(target.key))}
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tip text={tooltip}>
+        <PopoverTrigger asChild>
+          <button type="button" data-badge="" aria-label={tooltip} className={BLOCK_BADGE}>
+            {badge}
+          </button>
+        </PopoverTrigger>
+      </Tip>
+      <PopoverContent
+        align="start"
+        aria-label={title}
+        className="flex flex-col gap-1 p-2"
+        onCloseAutoFocus={(event) => {
+          if (!followed.current) return;
+          followed.current = false;
+          event.preventDefault();
+        }}
       >
-        {prefix}
-        <IdTag name={name} />
-      </button>
-    </Tip>
+        <div className="text-[11px] font-semibold text-muted-foreground">{title}</div>
+        {children(follow)}
+      </PopoverContent>
+    </Popover>
   );
 }
 
-/** "autopilot failed": the autopilot failed on or excluded this case. The reason is in the tooltip; the badge moves no focus. */
-function FailedBadge({ reason }: { reason: string | null }) {
-  if (reason === null) return null;
+/** `blocked`: the open Drifts that block a Task, in creation order; each row goes to its red card in Backlog, or to its row in the yellow card. */
+function BlockedBadge({ drifts }: { drifts: DriftBlocker[] }) {
+  if (drifts.length === 0) return null;
+  const tooltip = `Blocked by Drift ${drifts.map((d) => d.name.text).join(", ")}`;
   return (
-    <TipBadge tone="error" tooltip={`Autopilot failed: ${reason}`} label={`Autopilot failed: ${reason}`}>
-      autopilot failed
-    </TipBadge>
+    <BlockPopup tooltip={tooltip} title="Blocked by" badge="blocked">
+      {(follow) =>
+        drifts.map((d) => (
+          <button key={d.id} type="button" className={BLOCK_ROW} onClick={() => follow(d.key)}>
+            <IdTag name={d.name} className="text-[11px] font-semibold text-muted-foreground" />
+            <span className="title break-words">{d.title}</span>
+          </button>
+        ))
+      }
+    </BlockPopup>
+  );
+}
+
+/** `waiting T4`: a Task waits for the fix Task T4; the popup leads to T4 in Active and says which decided Drift it fixes. */
+function WaitingBadge({ fix }: { fix: FixWait }) {
+  return (
+    <BlockPopup tooltip={`Waiting for Task ${fix.name.text}`} title="Waiting for" badge={<>waiting <IdTag name={fix.name} /></>}>
+      {(follow) => (
+        <>
+          <button type="button" className={BLOCK_ROW} onClick={() => follow(fix.key)}>
+            <StatusDot task={fix} />
+            <IdTag name={fix.name} className="text-[11px] font-semibold text-muted-foreground" />
+            <span className="title break-words">{fix.title}</span>
+          </button>
+          <p className="text-xs text-muted-foreground">
+            From Drift <IdTag name={fix.drift.name} /> {fix.drift.title}
+          </p>
+        </>
+      )}
+    </BlockPopup>
   );
 }
 
@@ -121,40 +169,6 @@ function ModelControls({ card }: { card: ProposalCard }) {
   );
 }
 
-/** The other open Drifts that also block a Task, as a link icon whose tooltip and name list their short numbers; null when none. */
-function AlsoBlocked({ card, containing }: { card: TaskCard; containing: string | null }) {
-  const { numbers } = useBoardEnv();
-  const others = card.blockedBy.flatMap((b) => (b.kind === "drift" && b.drift !== containing ? [cardNameOf(numbers, "drift", b.drift).text] : []));
-  if (others.length === 0) return null;
-  const text = `Also blocked by ${others.join(", ")}`;
-  return (
-    <Tip text={text}>
-      <span role="img" aria-label={text} className="inline-flex text-red-600 dark:text-red-400">
-        <Link size={16} aria-hidden="true" focusable="false" />
-      </span>
-    </Tip>
-  );
-}
-
-/**
- * A Task inside a Drift, a resolution Proposal or a waiting card: its status dot, its ID and its Proposal tag, then its
- * title. No toggle, body, buttons or blocked badges. `containing` is the Drift the row sits under, if any; it is left out
- * of the link that says which other open Drifts also block it.
- */
-function TaskRow({ card, containing }: { card: TaskCard; containing: string | null }) {
-  return (
-    <div data-key={card.key} tabIndex={-1} className="flex flex-col gap-0.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      <Head>
-        <StatusDot task={card} />
-        <IdTag name={card.name} className="text-[11px] font-semibold text-muted-foreground" />
-        <TaskProposalTag card={card} />
-        <AlsoBlocked card={card} containing={containing} />
-      </Head>
-      <span className="break-words">{card.title}</span>
-    </div>
-  );
-}
-
 /** The line `Not blocking: T3, T5` under a Drift's Tasks: each one has its reason as tooltip and accessible name, and opens nothing. */
 function NotBlocking({ items }: { items: NotBlockingItem[] }) {
   if (items.length === 0) return null;
@@ -186,7 +200,7 @@ function ResolvesList({ card }: { card: ProposalCard }) {
       <div className="text-[11px] font-semibold text-muted-foreground">Resolves Drifts</div>
       <ul aria-label={`Drifts resolved by ${card.title}`} className="flex flex-col gap-1.5 text-xs">
         {card.resolves.map((row: ResolvedRow) => (
-          <li key={row.drift} className="flex flex-col gap-1">
+          <li key={row.drift} data-key={`drift:${row.drift}`} tabIndex={-1} className="flex flex-col gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <Tip text="Show the Drift on the diagram">
               <button
                 type="button"
@@ -196,19 +210,10 @@ function ResolvesList({ card }: { card: ProposalCard }) {
               >
                 <IdTag name={row.name} className="text-[11px] font-semibold text-muted-foreground" />
                 <span className="title break-words">{row.title}</span>
-                {row.critical ? <CriticalBadge /> : null}
                 {row.previous !== null ? <RecurringBadge previous={row.previous} /> : null}
                 <span className="break-words text-muted-foreground">{row.decision}</span>
               </button>
             </Tip>
-            <FailedBadge reason={row.autopilotFailed} />
-            {row.blocked.length > 0 ? (
-              <div className="ml-4 flex flex-col gap-1.5">
-                {row.blocked.map((t) => (
-                  <TaskRow key={t.key} card={t} containing={row.drift} />
-                ))}
-              </div>
-            ) : null}
             <NotBlocking items={row.notBlocking} />
           </li>
         ))}
@@ -286,32 +291,35 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
 function DriftCardView({ card }: { card: DriftCard }) {
   const env = useBoardEnv();
   const previous = card.drift.previous;
-  // A disabled Resolve shows its reason first, then the mode; the reason is also its accessible description.
-  const resolveTip = card.resolveBlocker === null ? `Ask an agent to resolve this Drift\n${card.resolveNote}` : `${card.resolveBlocker}\n${card.resolveNote}`;
+  const key = `${card.key}:details`;
+  const open = env.isExpanded(key);
+  const detailsId = `board-details-${card.key.replace(":", "-")}`;
+  const toggle = `${open ? "Hide" : "Show"} details`;
   return (
     <Shell card={card} kind="drift" label={`${card.heading}: ${card.title}`} className="border-l-red-600 dark:border-l-red-400">
       <Head kind="Drift">
         <IdTag name={card.name} className="text-[11px] font-semibold text-muted-foreground" />
-        {card.drift.critical ? <CriticalBadge /> : null}
         {previous !== null ? <RecurringBadge previous={previous} /> : null}
         {card.resolving ? <ResolvingBadge /> : null}
-        <FailedBadge reason={card.autopilotFailed} />
       </Head>
       <h3 className="font-semibold break-words">{card.title}</h3>
-      {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
-      <DriftCompare drift={card.drift} openLink={env.context.openLink} />
-      {card.blocked.map((t) => (
-        <TaskRow key={t.key} card={t} containing={card.id} />
-      ))}
-      <NotBlocking items={card.notBlocking} />
+      <div id={detailsId} hidden={!open} className="flex flex-col gap-2">
+        {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
+        <DriftCompare drift={card.drift} openLink={env.context.openLink} />
+        <NotBlocking items={card.notBlocking} />
+      </div>
       <Actions>
+        <Button variant="ghost" size="sm" aria-label={`${toggle} of drift ${card.name.text}`} aria-expanded={open} aria-controls={detailsId} onClick={() => env.toggleExpanded(key)}>
+          {open ? <ChevronUp aria-hidden="true" focusable="false" /> : <ChevronDown aria-hidden="true" focusable="false" />}
+          {toggle}
+        </Button>
         <BoardButton
           icon={WandSparkles}
           label="Resolve"
           aria={`Resolve ${card.heading}`}
           disabled={card.resolveBlocker !== null}
-          tooltip={resolveTip}
-          description={card.resolveBlocker ?? resolveTip}
+          tooltip={card.resolveBlocker ?? "Ask an agent to resolve this Drift"}
+          description={card.resolveBlocker}
           onClick={() => env.context.post({ type: "launch", action: { kind: "resolve-drifts", drift: card.id } })}
         />
         <BoardButton
@@ -332,7 +340,7 @@ function TaskCardView({ card }: { card: TaskCard }) {
   const open = env.isExpanded(key);
   const detailsId = `board-details-${card.id}`;
   const runnable = card.column !== "done" && !card.agent;
-  const runReason = joinReasons([card.finishing, env.runReason]);
+  const runReason = joinReasons([card.finishing, env.runReason, blockedReason(card.blockedByDrifts, card.waitingFor)]);
   const toggle = `${open ? "Hide" : "Show"} details`;
   return (
     <Shell card={card} kind="task" label={`Task ${card.name.text}: ${card.title}`} className={cn("border-l-border", card.agent && "board-working")}>
@@ -345,10 +353,10 @@ function TaskCardView({ card }: { card: TaskCard }) {
             technical
           </TipBadge>
         ) : null}
-        {card.blocks.map((b, at) => (
-          <BlockedBadge key={at} badge={b} />
+        <BlockedBadge drifts={card.blockedByDrifts} />
+        {card.waitingFor.map((fix) => (
+          <WaitingBadge key={fix.id} fix={fix} />
         ))}
-        <FailedBadge reason={card.autopilotFailed} />
       </Head>
       <h3 className="font-semibold break-words">{card.title}</h3>
       {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
@@ -380,34 +388,9 @@ function TaskCardView({ card }: { card: TaskCard }) {
   );
 }
 
-/** A fix Task other Tasks wait for, in Blocked: the fix Task stays in Active, and this card lists the Tasks it holds up, with no buttons. */
-function WaitingCardView({ card }: { card: WaitingCard }) {
-  const env = useBoardEnv();
-  const link = "Go to the card of this Task in Active";
-  return (
-    <Shell card={card} kind="waiting" label={`Waiting for ${card.task.name.text} ${card.task.title}`} className="border-l-muted-foreground">
-      <Head kind="Waiting for">
-        <StatusDot task={card.task} />
-        <IdTag name={card.task.name} className="text-[11px] font-semibold text-muted-foreground" />
-      </Head>
-      <h3 className="font-semibold break-words">
-        <Tip text={link}>
-          <button type="button" aria-label={link} className="rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => env.showCard(card.task.key)}>
-            {card.task.title}
-          </button>
-        </Tip>
-      </h3>
-      {card.waiting.map((t) => (
-        <TaskRow key={t.key} card={t} containing={null} />
-      ))}
-    </Shell>
-  );
-}
-
 export function CardView({ card }: { card: BoardCard }) {
   if (card.kind === "proposal") return <ProposalCardView card={card} />;
   if (card.kind === "drift") return <DriftCardView card={card} />;
-  if (card.kind === "waiting") return <WaitingCardView card={card} />;
   return <TaskCardView card={card} />;
 }
 

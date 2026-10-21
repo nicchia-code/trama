@@ -10,12 +10,14 @@ afterAll(() => rmSync(home, { recursive: true, force: true }));
 import { announce, listAnnouncements, withdrawAll } from "../src/core/announcements";
 import type { CursorHook } from "../src/core/cursor-chat";
 import { newProposal } from "../src/core/proposals";
+import { buildSnapshot } from "../src/core/snapshot";
+import { announcedGhosts, GHOST_COLUMN } from "../extension/src/webview/board/logic";
 import { projectAt } from "../src/core/store";
 import { dismissDrift, getTask, moveTask, newDrift, newTask } from "../src/core/work";
 import { FIX_OPTIONS } from "./fix-options";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
 import type { AgentAction } from "../extension/src/protocol";
-import { ASK_DEVELOPER_SENTENCE, buildAutomaticRunPrompt, buildPrompt } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, buildPrompt } from "../extension/src/host/prompts";
 import type { Project } from "../src/core/store";
 
 // A minimal editor: just the terminal events and the calls launchAgent makes.
@@ -310,7 +312,7 @@ describe("taken Tasks and the agent terminals", () => {
     try {
       await launch.launchAction(p, { kind: "resolve-drifts", drift: named.id });
       const line = (terminals.at(-1) as FakeTerminal).line;
-      expect(line).toContain(`the open Drifts ${named.id}, and on no other open Drift`);
+      expect(line).toContain(`the open Drift ${named.id}, and on no other open Drift`);
       expect(line).not.toContain(other.id);
 
       dismissDrift(p, other.id);
@@ -874,7 +876,6 @@ describe("agent instruction settings", () => {
   });
   test("the Drift blocker's sentence reaches only the instructions that may file Drifts, and only from the user setting", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
-    const { buildAutomaticRunPrompt } = await import("../extension/src/host/prompts");
     const sentence = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
     const scan = "Use the trama-scan skill on the whole System.";
     const send = async (instruction: string, name: string, filesDrifts: boolean) => {
@@ -886,7 +887,7 @@ describe("agent instruction settings", () => {
       expect(await send(scan, "Scan", true)).toBe(`omp '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
       expect(await send("Use the trama-implement skill on Task abc.", "T3", true)).toBe(`omp 'Use the trama-implement skill on Task abc. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
       expect(await send("Use the trama-import skill on this repository.", "Import", true)).toBe(`omp 'Use the trama-import skill on this repository. Run at most 20 sub-agents at once. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
-      expect((await send(buildAutomaticRunPrompt("collection"), "All tasks", true)).endsWith(` ${sentence} ${ASK_DEVELOPER_SENTENCE}'`)).toBe(true);
+      expect((await send(buildPrompt({ kind: "implement-all" }), "All tasks", true)).endsWith(` ${sentence} ${ASK_DEVELOPER_SENTENCE}'`)).toBe(true);
       expect(await send("Use the trama-design skill. Add refunds.", "Design", false)).not.toContain(sentence);
       expect(await send("Use the trama-resolve-drifts skill on the open Drifts ab12cd34.", "Drifts", false)).not.toContain(sentence);
       expect(await send(scan, "Scan", false)).not.toContain(sentence);
@@ -910,7 +911,7 @@ describe("agent instruction settings", () => {
   });
   test("the parallel execution's sentence reaches only the runs over several Tasks, right after the sub-agent sentence, and only from the user setting", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
-    const { buildAutomaticRunPrompt, PARALLEL_EXECUTION_SENTENCE } = await import("../extension/src/host/prompts");
+    const { PARALLEL_EXECUTION_SENTENCE } = await import("../extension/src/host/prompts");
     const sentence = 'The experimental parallel execution is on: follow the "Experimental parallel execution" section of the trama-implement skill.';
     expect(PARALLEL_EXECUTION_SENTENCE).toBe(sentence);
     const all = "Use the trama-implement skill on every Task in the todo column.";
@@ -921,7 +922,7 @@ describe("agent instruction settings", () => {
     inspected["experimentalParallelExecution"] = { globalValue: true };
     try {
       expect(await send(all, "All tasks", true)).toBe(`omp '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
-      expect((await send(buildAutomaticRunPrompt("collection"), "All tasks", true)).includes(` Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`)).toBe(true);
+      expect((await send(buildPrompt({ kind: "implement-all" }), "All tasks", true)).includes(` Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`)).toBe(true);
       expect(await send("Use the trama-implement skill on Task abc.", "T3", false)).not.toContain(sentence);
       expect(await send("Use the trama-scan skill on the whole System.", "Scan", false)).not.toContain(sentence);
       expect(await send("Use the trama-design skill. Add refunds.", "Design", false)).not.toContain(sentence);
@@ -947,9 +948,7 @@ describe("agent instruction settings", () => {
       [buildPrompt({ kind: "implement", task: "abc" }), "T3"],
       [buildPrompt({ kind: "implement-all" }), "All tasks"],
       [buildPrompt({ kind: "import" }), "Import"],
-      [buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34"] }), "Drifts"],
-      [buildPrompt({ kind: "resolve-drifts", drifts: ["ab12cd34"], automaticCollection: "c1" }), "Drifts"],
-      [buildAutomaticRunPrompt("c1"), "All tasks"],
+      [buildPrompt({ kind: "resolve-drifts", drift: "ab12cd34" }), "Drifts"],
     ];
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
@@ -1079,6 +1078,10 @@ describe("announcing a design request", () => {
     expect(listAnnouncements(p)).toEqual([]);
     await launchAgent(dir, "Use the trama-design skill. Add refunds", "Design", "Add refunds");
     expect(listAnnouncements(p).map((a) => ({ kind: a.kind, source: a.source, title: a.title, proposal: a.proposal }))).toEqual([{ kind: "proposal", source: "request", title: "Add refunds", proposal: null }]);
+    // The ghost of the launch stands in System Activities and carries the request's title.
+    const ghosts = announcedGhosts(buildSnapshot(p).announcements, false);
+    expect(GHOST_COLUMN).toBe("system");
+    expect(ghosts.map((g) => g.card.title)).toEqual(["Add refunds"]);
   });
 
   test("a design request sent to a chat announces a Proposal titled with the request, as the terminal does", async () => {
@@ -1098,6 +1101,7 @@ describe("announcing a design request", () => {
     expect(listAnnouncements(p).slice(before).map((a) => ({ kind: a.kind, source: a.source, title: a.title, terminal: a.terminal, proposal: a.proposal }))).toEqual([
       { kind: "proposal", source: "request", title: "Another change", terminal: null, proposal: null },
     ]);
+    expect(announcedGhosts(buildSnapshot(p).announcements, false).map((g) => g.card.title)).toContain("Another change");
   });
 });
 
@@ -1743,14 +1747,14 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
   test("a Run whose command exits with a failure or unknown status, or whose terminal closes, records an abnormal end with its reason; a clean exit records none", async () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { activeProjectJobs, jobAbnormalEnd } = await import("../extension/src/host/drift-resolution");
+    const { localProjectJobs, jobAbnormalEnd } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
     try {
       const startRun = async (name: string) => {
         await launchAgent(dir, `Run ${name}`, name, undefined, () => true, "run");
         const terminal = terminals.at(-1) as FakeTerminal;
         listeners.start.forEach((fn) => fn(shell(terminal)));
-        const job = activeProjectJobs(dir).at(-1);
+        const job = localProjectJobs(dir).at(-1);
         expect(job).toBeDefined();
         return { terminal, id: job?.id ?? "" };
       };
@@ -2074,7 +2078,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     try {
       bindChatJob(dir, "scan-before-send");
       const sentAfter = chatJobSendStarted(dir, "cursor");
-      startJob("run", dir, { chat: "cursor" }, true, sentAfter);
+      startJob("run", dir, { chat: "cursor" }, sentAfter);
       expect(driftWork()).toEqual({ resolving: false, running: true });
       bindChatJob(dir, "run-own");
       endChatJobs(dir, "scan-before-send");
@@ -2089,7 +2093,7 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
   test("chat jobs without an observable conversation stay active until an end event", async () => {
     const { bindChatJob, driftWork, endChatJobs, startJob } = await import("../extension/src/host/drift-resolution");
     const project = join(dir, crypto.randomUUID());
-    startJob("run", project, { chat: "cursor" }, true);
+    startJob("run", project, { chat: "cursor" });
     expect(driftWork()).toEqual({ resolving: false, running: true });
     bindChatJob(project, "bound-conversation");
     expect(driftWork()).toEqual({ resolving: false, running: true });
@@ -2099,8 +2103,8 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
 
   test("terminal jobs without an observable end stay active until the terminal closes", async () => {
     const { driftWork, endTerminalJobs, setHooked, startJob } = await import("../extension/src/host/drift-resolution");
-    startJob("run", dir, { terminal: "aaaaaa" }, false);
-    startJob("resolve", dir, { terminal: "bbbbbb" }, true);
+    startJob("run", dir, { terminal: "aaaaaa" });
+    startJob("resolve", dir, { terminal: "bbbbbb" });
     setHooked("bbbbbb", true);
     expect(driftWork().resolving).toBe(true);
     endTerminalJobs("aaaaaa");
@@ -2113,15 +2117,15 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
 test("a Cursor chat turn end also ends the filed work of an agent Trama did not start (holder editor)", async () => {
   const { watchAgentTerminal } = await import("../extension/src/host/agent");
   const { receiveCursorHook } = await import("../extension/src/host/cursor");
-  const { driftsFinishing, proposalsFinishing, receiveCoordinatorMessage, releaseFiledWork } = await import("../extension/src/host/drift-resolution");
+  const { driftsFinishing, proposalsFinishing, receiveNotice, releaseFiledWork } = await import("../extension/src/host/drift-resolution");
   const watching = watchAgentTerminal();
   const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ root: dir, conversation: "editor-work", ...h });
   try {
     for (const end of [{ hook: "stop", status: "completed" }, { hook: "stop", status: "aborted" }, { hook: "sessionEnd", reason: "user_close" }] as const) {
       turn({ hook: "beforeSubmitPrompt", tramaPrompt: true });
-      receiveCoordinatorMessage({ type: "drift-filed", root: dir, drift: "0a1b2c3d", holder: "editor" });
-      receiveCoordinatorMessage({ type: "proposal-delivered", root: dir, proposal: "iwham416", holder: "editor" });
-      receiveCoordinatorMessage({ type: "drift-filed", root: dir, drift: "4e5f6a7b", holder: "terminal-9" });
+      receiveNotice({ type: "drift-filed", root: dir, drift: "0a1b2c3d", holder: "editor" });
+      receiveNotice({ type: "proposal-delivered", root: dir, proposal: "iwham416", holder: "editor" });
+      receiveNotice({ type: "drift-filed", root: dir, drift: "4e5f6a7b", holder: "terminal-9" });
       expect(driftsFinishing(dir).sort()).toEqual(["0a1b2c3d", "4e5f6a7b"]);
       turn(end);
       expect(driftsFinishing(dir)).toEqual(["4e5f6a7b"]);

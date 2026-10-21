@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Play, Plus, Search, WandSparkles, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play, Plus, Search, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { namerOf, noNumbers } from "../../../../src/core/card-names";
 import { joinReasons, runBlocker } from "../../../../src/core/design";
@@ -15,13 +15,13 @@ import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
 import { type ModelList, ModelDialog, ProposalBodyDialog } from "./dialogs";
 import { HistoryEntryView } from "./history";
-import { announcedGhosts, autopilotNote, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, GHOST_COLUMN, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, NO_MODELS, type ProposalCard, withdrawnNotice } from "./logic";
+import { announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, GHOST_COLUMN, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, NO_MODELS, type ProposalCard, withdrawnNotice } from "./logic";
 import { BoardButton, BoardEnvContext, type BoardEnv, Tip } from "./parts";
 
 /** The state of Resolve Drifts and of the Runs the host gives with each picture. */
 export type ResolveState = NonNullable<Parameters<View["update"]>[2]>;
 
-const NO_RESOLVE_STATE: ResolveState = { blocker: null, runReason: null, autopilot: { mode: "disabled", phase: "manual", reason: null, failures: [] }, drifts: {}, resolving: [] };
+const NO_RESOLVE_STATE: ResolveState = { blocker: null, runReason: null, drifts: {}, resolving: [] };
 
 /** What the developer was told about announced cards the agent never delivered; kept until closed, or until the panel closes. */
 export interface Notice {
@@ -48,7 +48,7 @@ export interface BoardPageProps {
 const COLUMN_CLASS = "flex min-h-0 flex-col rounded-lg border bg-muted/40";
 
 /** A column of the Board: its heading with the number of its cards, its body, and the one action at its foot. */
-function Column({ id, count, children, foot }: { id: ColumnId; count: number; children: ReactNode; foot?: ReactNode }) {
+function Column({ id, count, children, foot }: { id: ColumnId; count?: number; children: ReactNode; foot?: ReactNode }) {
   const heading = `board-column-${id}`;
   return (
     <section data-column={id} aria-labelledby={heading} className={COLUMN_CLASS}>
@@ -56,9 +56,11 @@ function Column({ id, count, children, foot }: { id: ColumnId; count: number; ch
         <h2 id={heading} className="text-xs font-semibold tracking-wide uppercase">
           {COLUMN_TITLES[id]}
         </h2>
-        <Badge variant="secondary" className="px-1.5 py-0 tabular-nums">
-          {count}
-        </Badge>
+        {count === undefined ? null : (
+          <Badge variant="secondary" className="px-1.5 py-0 tabular-nums">
+            {count}
+          </Badge>
+        )}
       </div>
       {children}
       {foot === undefined ? null : <div className="flex flex-col gap-2 px-2 pb-2">{foot}</div>}
@@ -76,7 +78,7 @@ function CardColumn({ column, ghosts, foot }: { column: BoardColumn; ghosts: { i
     column.id === GHOST_COLUMN ? ghosts : [],
   );
   return (
-    <Column id={column.id} count={column.cards.length} foot={foot}>
+    <Column id={column.id} count={column.id === GHOST_COLUMN ? undefined : column.cards.length} foot={foot}>
       <ColumnBody>{cards.length > 0 ? cards : <Hint id={column.id} />}</ColumnBody>
     </Column>
   );
@@ -98,8 +100,8 @@ export function BoardPage({ snapshot, asking, resolve, advisorScanner, models, m
   const runReason = snapshot === null ? null : joinReasons([resolve.runReason, runBlocker(snapshot.tasks, namerOf(numbers))]);
   const columns = useMemo(() => {
     if (snapshot === null) return [];
-    const boardResolve: BoardResolve = { blocker: resolve.blocker, drifts: resolve.drifts, resolving: resolve.resolving, note: autopilotNote(resolve.autopilot) };
-    return buildBoard(snapshot, resolve.autopilot.failures, boardResolve, models);
+    const boardResolve: BoardResolve = { blocker: resolve.blocker, drifts: resolve.drifts, resolving: resolve.resolving };
+    return buildBoard(snapshot, boardResolve, models);
   }, [snapshot, resolve, models]);
 
   const backlogCard = (proposal: string | null): ProposalCard | undefined =>
@@ -139,9 +141,8 @@ export function BoardPage({ snapshot, asking, resolve, advisorScanner, models, m
 
   if (snapshot === null) return <div ref={root} />;
 
-  const ghosts = announcedGhosts(columns, snapshot.announcements, asking).map((g) => ({ item: <GhostCard key={g.card.key} card={g.card} />, index: g.index }));
+  const ghosts = announcedGhosts(snapshot.announcements, asking).map((g) => ({ item: <GhostCard key={g.card.key} card={g.card} />, index: g.index }));
   const scanLabel = scanButtonLabel("Scan System", snapshot.tasksSinceScan, advisorScanner);
-  const resolveNote = resolve.blocker === null ? autopilotNote(resolve.autopilot) : `${resolve.blocker}\n${autopilotNote(resolve.autopilot)}`;
   const history = historyGroups(snapshot.history, period);
   const historyCount = history.reduce((n, group) => n + group.entries.length, 0);
   const now = new Date();
@@ -172,18 +173,7 @@ export function BoardPage({ snapshot, asking, resolve, advisorScanner, models, m
           onClick={() => context.post({ type: "launch", action: { kind: "implement-all" } })}
         />
       );
-    return (
-      <BoardButton
-        icon={WandSparkles}
-        label="Resolve all"
-        aria="Resolve all the open Drifts"
-        variant="default"
-        full
-        disabled={resolve.blocker !== null}
-        tooltip={resolveNote}
-        onClick={() => context.post({ type: "launch", action: { kind: "resolve-drifts" } })}
-      />
-    );
+    return null;
   };
   const historyTitle = historyOpen ? "Collapse History column" : "Expand History column";
 

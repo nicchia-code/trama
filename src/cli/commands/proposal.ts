@@ -45,7 +45,7 @@ const create = defineCommand({
   mode: "immediate",
   summary: "Create a Draft Proposal.",
   description:
-    "Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `automatic` and `nonBlocking` apply only to a resolution (`nonBlocking` for one whose Drifts block no Task, and not with `automatic`) and `job` binds an automatic resolution Draft to its autopilot job. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from.",
+    "Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `nonBlocking` applies only to a resolution whose Drifts block no Task. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from.",
   input: z
     .strictObject({
       title: z.string().min(1).describe("A short title: at most five words."),
@@ -53,22 +53,17 @@ const create = defineCommand({
       kind: z.enum(KINDS).optional().describe("The kind of Proposal. Default `change`."),
       label: z.string().optional().describe("The short label of the Proposal: 1 to 30 characters, one line."),
       requires: stringList.optional().describe("The Proposals this one requires: IDs or short numbers."),
-      automatic: z.boolean().optional().describe("An automatic resolution. Only with kind `resolution`."),
       nonBlocking: z.boolean().optional().describe("A resolution whose Drifts block no Task. Only with kind `resolution`."),
-      job: z.string().min(1).optional().describe("The autopilot job of an automatic resolution. Only with `automatic`."),
       announcement: z.string().min(1).optional().describe("The announcement of this Proposal."),
       request: z.string().min(1).optional().describe("The written design request this Proposal comes from."),
     })
     .superRefine((input, ctx) => {
       const fail = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });
-      if (input.automatic === true && input.kind !== "resolution") fail("automatic", "applies only with kind resolution");
       if (input.nonBlocking === true && input.kind !== "resolution") fail("nonBlocking", "applies only with kind resolution");
-      if (input.nonBlocking === true && input.automatic === true) fail("nonBlocking", "cannot go together with automatic");
-      if (input.job !== undefined && input.automatic !== true) fail("job", "applies only with automatic");
     }),
   output: card.extend({ path: z.string(), request: z.string().nullable(), note: z.string().optional().describe("About the announcement, when it was not known."), requestNote: z.string().optional().describe("About the design request, when it was not bound.") }),
   example: { title: "Order cancel", body: "# Order cancel\n\nA paid order can be cancelled.", label: "Order cancel", announcement: "a1b2c3d4" },
-  effects: { writes: true, activity: true, coordinator: true },
+  effects: { writes: true, activity: true, editor: true },
   run(ctx, input) {
     const project = ctx.project();
     const kind = input.kind ?? "change";
@@ -77,21 +72,15 @@ const create = defineCommand({
       if (model.features.size > 0 || model.actors.size > 0) throw new UsageError('kind "setup" needs an empty Model: the Model is not empty (it has Features or Actors)');
     }
     const note = announcementNote(project, input.announcement, "proposal");
-    const job = input.job ?? (input.automatic === true ? ctx.job : undefined);
     const p = newProposal(project, input.title, input.body, {
       requires: (input.requires ?? []).map((id) => getProposal(project, id, true).id),
       kind,
-      automatic: input.automatic === true,
       nonBlocking: input.nonBlocking === true,
       announcement: input.announcement,
       origin: ctx.origin,
       request: input.request,
       ...(input.label === undefined ? {} : { label: input.label }),
     });
-    if (job !== undefined)
-      sendCoordinatorMessageSoon(project, { type: "proposal-draft", proposal: p.id, job }, (reason) => {
-        process.stderr.write(`Could not bind automatic resolution Draft ${p.id} to autopilot job ${job}: ${reason}\n`);
-      });
     const request = input.request;
     const requestNote = request !== undefined && p.data.request === null ? (requestExists(project, request) ? `Design request ${request} is already bound to another Proposal; the Proposal is not bound to any request.` : `Design request ${request} was not found; the Proposal is not bound to any request.`) : "";
     const notes = [note, requestNote].filter(Boolean).join("\n");
@@ -206,7 +195,7 @@ const move = defineCommand({
   output: card.extend({ warnings: z.array(z.looseObject({})).optional(), show: z.string().optional().describe("Toward `open`: the text of `proposal show`."), resolved: z.array(z.looseObject({ drift: z.string() })).optional().describe("Toward `approved`: the Drifts a resolution decided.") }),
   example: { skillsDir: ".agents/skills" },
   exampleArgs: ["P3", "approved"],
-  effects: { writes: true, activity: true, activityStates: ["open"], coordinator: true },
+  effects: { writes: true, activity: true, activityStates: ["open"], editor: true },
   run(ctx, input, [id, state]) {
     const project = ctx.project();
     if (input.skillsDir !== undefined && state !== "approved" && state !== "open") throw new UsageError(`skillsDir applies only toward approved or open, not ${state}`);
@@ -215,10 +204,6 @@ const move = defineCommand({
     const skillsDirs = input.skillsDir === undefined ? [] : [input.skillsDir];
     if (state === "open") {
       const p = submitProposal(project, proposalId, skillsDirs);
-      if (p.data.automatic)
-        sendCoordinatorMessageSoon(project, { type: "proposal-submitted", proposal: p.id }, (reason) => {
-          process.stderr.write(`Could not hand over automatic resolution Proposal ${p.id} to the autopilot: ${reason}\n`);
-        });
       // Approve and Reject wait for the end of the turn of the agent that delivered the Proposal; a Proposal approved at hand-over has nothing to wait for.
       const holder = ctx.origin.terminal ?? ctx.origin.chat;
       if (ctx.byAgent && holder !== undefined && !p.approvedAtHandOver)

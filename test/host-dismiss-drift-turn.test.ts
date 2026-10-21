@@ -76,7 +76,7 @@ mock.module("vscode", () => ({
 
 // The modules load after mock.module replaced "vscode", so they are imported here, as the other host tests do.
 const { Controller } = await import("../extension/src/host/controller");
-const { receiveCoordinatorMessage } = await import("../extension/src/host/drift-resolution");
+const { receiveNotice } = await import("../extension/src/host/drift-resolution");
 
 let dir: string;
 beforeAll(() => {
@@ -96,7 +96,7 @@ test("Dismiss Drift from the panel is refused while the agent that filed the Dri
   panel?.receive?.({ type: "ready" });
 
   // The agent files the Drift from a terminal and its turn is still going on: the refusal comes before any dialog.
-  receiveCoordinatorMessage({ type: "drift-filed", root: project.root, drift: drift.id, holder: "terminal-1" });
+  receiveNotice({ type: "drift-filed", root: project.root, drift: drift.id, holder: "terminal-1" });
   panel?.receive?.({ type: "dismissDrift", id: drift.id });
 
   expect(warnings).toEqual([]);
@@ -104,7 +104,7 @@ test("Dismiss Drift from the panel is refused while the agent that filed the Dri
   expect(getDrift(project, drift.id).data.status).toBe("open");
 
   // The agent's turn ends: the Drift is no longer held, and the developer's confirmation closes it without changes.
-  receiveCoordinatorMessage({ type: "turn-ended", root: project.root, holder: "terminal-1" });
+  receiveNotice({ type: "turn-ended", root: project.root, holder: "terminal-1" });
   errors.length = 0;
   panel?.receive?.({ type: "dismissDrift", id: drift.id });
   await dialog;
