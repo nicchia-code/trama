@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { execute, reportActivity } from "../src/cli/main";
 import { runCursorHook } from "../src/cli/commands/hook";
 import type { AgentOrigin } from "../src/core/announcements";
-import { type ChatState, CursorConversations, type CursorHook, hookAnswer, parseCursorHook, registersAgentWork, writeCursorHooks } from "../src/core/cursor-chat";
+import { type ChatState, completedCommandAnswer, CursorConversations, type CursorHook, hookAnswer, parseCursorHook, registersAgentWork, writeCursorHooks } from "../src/core/cursor-chat";
 import { createQuestionServer, questionProjectId, readChatStates } from "../src/core/question-channel";
 import { QUESTION_TOOL_REFUSAL } from "../src/core/questions";
 import { projectAt } from "../src/core/store";
@@ -246,23 +246,19 @@ test("a command line that runs trama is completed with its conversation and job,
   try {
     server.setChatState(chatState({ conversations: [{ conversation: "c1", job: "j1", advisor: false }, { conversation: "c2", advisor: false }], subagents: [{ call: "k1", conversation: "c1" }, { call: "k2", conversation: "k1" }] }));
     const run = async (input: object) => JSON.parse(await runCursorHook(JSON.stringify(input), { runtimeDir }));
+    // The identity as the shell of this platform gets it: PowerShell on Windows, a POSIX shell elsewhere.
+    const identity = (conversation: string, job?: string) => process.platform === "win32"
+      ? `$env:TRAMA_CHAT='${conversation}'; ${job === undefined ? "" : `$env:TRAMA_JOB='${job}'; `}`
+      : `TRAMA_CHAT='${conversation}' ${job === undefined ? "" : `TRAMA_JOB='${job}' `}`;
     const done = await run(shellTool("trama task list"));
-    expect(done).toEqual({ updated_input: { command: "TRAMA_CHAT='c1' TRAMA_JOB='j1' trama task list", working_directory: project } });
+    expect(done).toEqual({ updated_input: { command: `${identity("c1", "j1")}trama task list`, working_directory: project } });
     expect(done.permission).toBeUndefined();
     // A conversation without a job gets no TRAMA_JOB.
-    // On a compound line every trama invocation has the literal prefix, and no `export` leaves variables in the shell.
-    expect((await run(shellTool("cd x && trama model show", {}, "c2"))).updated_input.command).toBe("cd x && TRAMA_CHAT='c2' trama model show");
-    expect((await run(shellTool("trama task list | cat; (cd y && trama --root /p question new --input -)", {}, "c1"))).updated_input.command)
-      .toBe("TRAMA_CHAT='c1' TRAMA_JOB='j1' trama task list | cat; (cd y && TRAMA_CHAT='c1' TRAMA_JOB='j1' trama --root /p question new --input -)");
-    expect((await run(shellTool("echo hi && FOO=1 trama task list && trama model show", {}, "c2"))).updated_input.command).toBe("echo hi && TRAMA_CHAT='c2' FOO=1 trama task list && TRAMA_CHAT='c2' trama model show");
-    // Text inside quotes and here-document bodies is never rewritten, even when it looks like a trama command.
-    expect((await run(shellTool(`echo "a; trama task move x doing" && trama task list`, {}, "c2"))).updated_input.command).toBe(`echo "a; trama task move x doing" && TRAMA_CHAT='c2' trama task list`);
-    expect((await run(shellTool(`trama question new --input - <<'EOF'\n{"a":1}\ntrama task list\nEOF\ntrama model show`, {}, "c2"))).updated_input.command)
-      .toBe(`TRAMA_CHAT='c2' trama question new --input - <<'EOF'\n{"a":1}\ntrama task list\nEOF\nTRAMA_CHAT='c2' trama model show`);
+    expect((await run(shellTool("trama model show", {}, "c2"))).updated_input.command).toBe(`${identity("c2")}trama model show`);
     expect(await run(shellTool(`echo 'x && trama task list'`, {}, "c2"))).toEqual({});
     // A sub-agent, also a nested one, is its main conversation.
-    expect((await run(shellTool("trama task list", { parent_tool_call_id: "k1" }, "sub"))).updated_input.command).toContain("TRAMA_CHAT='c1' TRAMA_JOB='j1'");
-    expect((await run(shellTool("trama task list", { parent_tool_call_id: "k2" }, "sub2"))).updated_input.command).toContain("TRAMA_CHAT='c1' TRAMA_JOB='j1'");
+    expect((await run(shellTool("trama task list", { parent_tool_call_id: "k1" }, "sub"))).updated_input.command).toBe(`${identity("c1", "j1")}trama task list`);
+    expect((await run(shellTool("trama task list", { parent_tool_call_id: "k2" }, "sub2"))).updated_input.command).toBe(`${identity("c1", "j1")}trama task list`);
     // Not a conversation of Trama, a line that does not run trama, another tool: nothing changes.
     expect(await run(shellTool("trama task list", {}, "other"))).toEqual({});
     expect(await run(shellTool("echo trama"))).toEqual({});
@@ -270,6 +266,27 @@ test("a command line that runs trama is completed with its conversation and job,
   } finally {
     await server.dispose();
   }
+});
+
+test("on a POSIX shell every trama invocation of a line gets the literal prefix, and quoted text is never rewritten", () => {
+  const answer = (command: string, who: { conversation: string; job?: string } = { conversation: "c2" }) => completedCommandAnswer({ command }, who, false);
+  const completed = (command: string) => ({ updated_input: { command } });
+  // No `export` leaves variables in the shell.
+  expect(answer("cd x && trama model show")).toEqual(completed("cd x && TRAMA_CHAT='c2' trama model show"));
+  expect(answer("trama task list | cat; (cd y && trama --root /p question new --input -)", { conversation: "c1", job: "j1" }))
+    .toEqual(completed("TRAMA_CHAT='c1' TRAMA_JOB='j1' trama task list | cat; (cd y && TRAMA_CHAT='c1' TRAMA_JOB='j1' trama --root /p question new --input -)"));
+  expect(answer("echo hi && FOO=1 trama task list && trama model show")).toEqual(completed("echo hi && TRAMA_CHAT='c2' FOO=1 trama task list && TRAMA_CHAT='c2' trama model show"));
+  // Text inside quotes and here-document bodies is never rewritten, even when it looks like a trama command.
+  expect(answer(`echo "a; trama task move x doing" && trama task list`)).toEqual(completed(`echo "a; trama task move x doing" && TRAMA_CHAT='c2' trama task list`));
+  expect(answer(`trama question new --input - <<'EOF'\n{"a":1}\ntrama task list\nEOF\ntrama model show`))
+    .toEqual(completed(`TRAMA_CHAT='c2' trama question new --input - <<'EOF'\n{"a":1}\ntrama task list\nEOF\nTRAMA_CHAT='c2' trama model show`));
+  expect(answer("trama task list", { conversation: "it's" })).toEqual(completed(`TRAMA_CHAT='it'\\''s' trama task list`));
+});
+
+test("on Windows the line starts with the PowerShell assignments, with single quotes doubled", () => {
+  expect(completedCommandAnswer({ command: "cd x; trama model show", working_directory: "p" }, { conversation: "it's", job: "j1" }, true))
+    .toEqual({ updated_input: { command: "$env:TRAMA_CHAT='it''s'; $env:TRAMA_JOB='j1'; cd x; trama model show", working_directory: "p" } });
+  expect(completedCommandAnswer({ command: "trama task list" }, { conversation: "c2" }, true)).toEqual({ updated_input: { command: "$env:TRAMA_CHAT='c2'; trama task list" } });
 });
 
 test("without a state file the command line starts as it is", async () => {

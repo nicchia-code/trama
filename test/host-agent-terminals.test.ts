@@ -191,7 +191,8 @@ mock.module("vscode", () => ({
   commands: { executeCommand: async (id: string, ...args: unknown[]) => (editorCalls.push(id), commandHandler(id, ...args)) },
   env: {
     get appName() { return editor.appName; },
-    shell: "/bin/bash",
+    // Git Bash on Windows, so the command lines are quoted for a POSIX shell on every platform.
+    shell: process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/bin/bash",
     clipboard: { writeText: async (text: string) => { clipboard.push(text); } },
     openExternal: async (uri: { toString(): string }) => (editorCalls.push(uri.toString()), true),
   },

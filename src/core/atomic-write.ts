@@ -3,6 +3,10 @@ import { renameSync, rmSync, writeFileSync } from "node:fs";
 
 /** What Windows (or Linux, while another process holds the file) answers a rename over an open file with. */
 const BUSY_CODES: Record<string, true> = { EPERM: true, EACCES: true, EBUSY: true };
+
+/** Whether an error code is one Windows (or Linux, while another process holds the file) gives for a file in use. */
+export const isBusyCode = (code: string | undefined): boolean => code !== undefined && BUSY_CODES[code] === true;
+
 const RETRY_MS = 1000;
 const RETRY_STEP_MS = 10;
 
@@ -19,7 +23,7 @@ function renameRetrying(from: string, to: string): void {
       return;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (code === undefined || BUSY_CODES[code] !== true || Date.now() >= deadline) throw error;
+      if (!isBusyCode(code) || Date.now() >= deadline) throw error;
       pause(RETRY_STEP_MS);
     }
   }

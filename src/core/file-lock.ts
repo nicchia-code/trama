@@ -1,7 +1,7 @@
 import { closeSync, existsSync, linkSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { pause } from "./atomic-write";
+import { isBusyCode, pause } from "./atomic-write";
 import { TramaError } from "./errors";
 
 const RETRY_STEP_MS = 10;
@@ -39,7 +39,15 @@ function acquire(path: string, name: string): void {
       closeSync(openSync(path, "wx"));
       return;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST") {
+        // Windows refuses to create a lock file whose previous holder is still deleting it (EPERM or EACCES): the lock is
+        // being released, so it is waited for like a held one. Elsewhere those codes are real permission errors.
+        if (process.platform !== "win32" || !isBusyCode(code)) throw error;
+        if (Date.now() >= deadline) throw new TramaError(`${name} is being written by another process; try again in a moment`);
+        pause(RETRY_STEP_MS);
+        continue;
+      }
       const age = lockAgeMs(path);
       // Only a lock older than STALE_MS was left by a process that died holding it. One that vanished meanwhile was
       // released, maybe already taken by another process: it is never removed here, only created again.

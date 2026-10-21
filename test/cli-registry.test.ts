@@ -7,6 +7,7 @@ import { REGISTRY } from "../src/cli/commands";
 import { countsAsActivity, execute, run } from "../src/cli/main";
 import { OBJECTS, VERBS } from "../src/cli/registry";
 import { UsageError } from "../src/core/errors";
+import { normalizeLf } from "../src/core/line-endings";
 import { REFERENCE_END, REFERENCE_START, referenceBlock } from "../scripts/cli-reference";
 
 let dir: string;
@@ -38,7 +39,8 @@ test("every command is declared with its object and verb, and an input that refu
 });
 
 test("docs/cli.md carries the command reference generated from the registry", () => {
-  const doc = readFileSync(join(import.meta.dir, "../docs/cli.md"), "utf8");
+  // A Windows checkout may turn the file's line endings into CRLF.
+  const doc = normalizeLf(readFileSync(join(import.meta.dir, "../docs/cli.md"), "utf8"));
   const start = doc.indexOf(REFERENCE_START);
   const end = doc.indexOf(REFERENCE_END);
   expect(start).toBeGreaterThanOrEqual(0);
