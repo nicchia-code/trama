@@ -60,7 +60,8 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia della History** (`history.md`): Usa quando costruisci le voci di History: comandi, lettura nel quadro, modale dei dettagli e skill che le scrivono. Sections: `voce-history`.
 - **Tecnologia dei file di istruzioni** (`instruction-files.md`): Usa quando lavori al codice che esclude i file di istruzioni degli agenti nei lanci di omp: overlay di configurazione e ricerca dei file. Sections: `agent-terminal/Agent running`.
 - **Tecnologia di agenti e modelli** (`models.md`): Usa per agenti del terminale, ruoli dei modelli, limite dei sotto-agenti e advisor di omp. Sections: `agent-launching`.
-- **Tecnologia del progetto e del pannello** (`project-panel.md`): Usa per setup del progetto, skill dei Requisiti e tecnologia del pannello. Sections: `project`, `panel`.
+- **Tecnologia del pannello** (`panel.md`): Usa per la tecnologia del pannello e degli ingressi di Trama nell'editor: barra delle attività, barra di stato, icone. Sections: `panel`.
+- **Tecnologia del progetto** (`project.md`): Usa per setup del progetto, avvio dell'estensione e skill dei Requisiti. Sections: `project`.
 - **Tecnologia delle Proposal** (`proposal.md`): Usa quando lavori su Proposal, sui loro Task e sul loro scope o sulla consegna di una Proposal da una skill. Sections: `proposal`.
 - **Tecnologia dei round di domande** (`questions-notices.md`): Usa quando lavori sui round di domande. Sections: `question-round`.
 - **Quick Task technology** (`quick-task.md`): Usa quando costruisci il pulsante diviso della Board, il suo DropdownMenu e l'apertura della chat di un Quick Task con omp o con la chat di Cursor. Sections: `developer.OPEN_QUICK_TASK`.

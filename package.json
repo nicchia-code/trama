@@ -1,6 +1,6 @@
 {
   "name": "trama",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
@@ -45,6 +45,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/vscode": "^1.138.0",
+    "fantasticon": "^4.1.0",
     "happy-dom": "^21.0.4",
     "tailwindcss": "^4",
     "typescript": "^7.0.2"

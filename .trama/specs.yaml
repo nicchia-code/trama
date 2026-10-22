@@ -38,6 +38,9 @@ frameworks:
   - name: zod
     version: "4"
     note: input schemas of the command line
+  - name: fantasticon
+    note: development dependency, used only by `scripts/icon-font.ts`
+    chosenByAgent: turns the logo SVG into the one-glyph icon font of the status bar button, in a single step
 testing:
   - name: bun test
     note: the whole suite, also with `--isolate`

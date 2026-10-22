@@ -27,14 +27,20 @@ function guarded<A extends unknown[]>(action: (...args: A) => Promise<void>): (.
   };
 }
 
-/** A "Trama" button in the status bar that runs Open Trama. */
+/** A button in the status bar, only the Trama logo, that runs Open Trama. */
 function statusBarItem(): vscode.StatusBarItem {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  item.text = "Trama";
+  item.text = "$(trama-logo)";
   item.tooltip = "Open Trama";
+  item.accessibilityInformation = { label: "Open Trama" };
   item.command = "trama.open";
   item.show();
   return item;
+}
+
+/** The view of the Activity Bar icon: a tree that never has elements, so its welcome content (with the Open Trama button) always shows. */
+function homeView(): vscode.Disposable {
+  return vscode.window.registerTreeDataProvider<never>("trama.home", { getChildren: () => [], getTreeItem: (element) => element });
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -49,6 +55,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     tramaFiles,
     statusBarItem(),
+    homeView(),
     vscode.commands.registerCommand("trama.open", guarded(() => trama.open())),
     vscode.commands.registerCommand("trama.openSettings", guarded(() => trama.openSettings())),
     vscode.commands.registerCommand("trama.sendDesignRequest", guarded((uri?: vscode.Uri) => requests.send(uri))),

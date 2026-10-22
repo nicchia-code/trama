@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "publisher": "trama-dev",
   "license": "AGPL-3.0-only",
   "private": true,
@@ -54,17 +54,45 @@
         "category": "Trama"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "trama",
+          "title": "Trama",
+          "icon": "media/trama-icon-dark.svg"
+        }
+      ]
+    },
+    "views": {
+      "trama": [
+        {
+          "id": "trama.home",
+          "name": "Trama",
+          "when": "workspaceFolderCount > 0"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "trama.home",
+        "contents": "Model, Board and Requirements of your project, in one panel.\n[Open Trama](command:trama.open)"
+      }
+    ],
+    "icons": {
+      "trama-logo": {
+        "description": "Trama logo",
+        "default": {
+          "fontPath": "media/trama-logo.woff",
+          "fontCharacter": "\\E000"
+        }
+      }
+    },
     "menus": {
       "editor/title": [
         {
           "command": "trama.sendDesignRequest",
           "when": "resourcePath in trama.designRequestResources",
           "group": "navigation@1"
-        },
-        {
-          "command": "trama.open",
-          "when": "workspaceFolderCount > 0",
-          "group": "navigation@2"
         }
       ],
       "commandPalette": [

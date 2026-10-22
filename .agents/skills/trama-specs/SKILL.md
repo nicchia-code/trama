@@ -27,6 +27,7 @@ The technologies this project is built, tested and released with, from the devel
 - elkjs: lays out the Diagram
 - yaml: front matter and settings files
 - zod 4: input schemas of the command line
+- fantasticon: development dependency, used only by `scripts/icon-font.ts` (chosen by the agent: turns the logo SVG into the one-glyph icon font of the status bar button, in a single step)
 
 ## Testing
 
