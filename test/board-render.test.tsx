@@ -38,10 +38,11 @@ interface Calls {
   opened: string[];
   chosen: string[];
   images: string[];
+  ghosts: string[];
 }
 
 function env(over: Partial<BoardEnv> = {}): { env: BoardEnv; calls: Calls } {
-  const calls: Calls = { posted: [], navigated: [], shown: [], toggled: [], opened: [], chosen: [], images: [] };
+  const calls: Calls = { posted: [], navigated: [], shown: [], toggled: [], opened: [], chosen: [], images: [], ghosts: [] };
   return {
     calls,
     env: {
@@ -54,6 +55,7 @@ function env(over: Partial<BoardEnv> = {}): { env: BoardEnv; calls: Calls } {
       chooseModel: (id) => calls.chosen.push(id),
       openProposal: (id) => calls.opened.push(id),
       openTaskImage: (id, name) => calls.images.push(`${id}/${name}`),
+      openGhost: (key) => calls.ghosts.push(key),
       ...over,
     },
   };
@@ -398,10 +400,20 @@ describe("Blocked and waiting badges", () => {
 
 describe("Announced ghost rendering", () => {
   test("a check in History shows the Updating History row and its accessible name", () => {
-    draw(<GhostCard card={announcedCard({ id: "c00001", kind: "check", title: "Final check after all Tasks", phase: "history" }, true)} />);
-    const ghost = screen.getByRole("img", { name: "Agent checking the code: Final check after all Tasks, Updating History" });
+    draw(<GhostCard card={announcedCard({ id: "c00001", kind: "check", title: "Final check after all Tasks", phase: "history", notes: [], announced: "2026-10-01T10:00:00.000Z" }, true)} />);
+    const ghost = screen.getByRole("button", { name: "Agent checking the code: Final check after all Tasks, Updating History. Show details" });
     expect(ghost.textContent).toContain("Updating History");
-    expect(within(ghost as HTMLElement).queryByRole("button")).toBeNull();
+    expect(ghost.querySelector("button, a")).toBeNull();
+  });
+
+  test("the whole ghost is one button that opens its details, with its latest note cut to one line and the whole text as tooltip", () => {
+    const calls = draw(<GhostCard card={announcedCard({ id: "t00001", kind: "task", title: "A Task", phase: "preparing", notes: [{ at: "2026-10-01T10:00:00.000Z", text: "First" }, { at: "2026-10-01T10:01:00.000Z", text: "Checks the refunds against the Model" }], announced: "2026-10-01T10:00:00.000Z" }, false)} />);
+    const ghost = screen.getByRole("button", { name: "Task the agent is creating, preparing: A Task. Show details" });
+    const note = within(ghost).getByText("Checks the refunds against the Model");
+    expect(note.className).toContain("truncate");
+    expect(ghost.getAttribute("draggable")).toBe("false");
+    fireEvent.click(ghost);
+    expect(calls.ghosts).toEqual(["announced:t00001"]);
   });
 });
 
@@ -482,6 +494,51 @@ describe("The Board page", () => {
     expect(posted).toEqual([{ type: "writeDesignRequest" }, { type: "launch", action: { kind: "implement-all" } }, { type: "launch", action: { kind: "scan" } }]);
   });
 
+  describe("ghost details", () => {
+    const ghostView = (over: Partial<AnnouncementView> = {}): AnnouncementView => ({ id: "g00001", kind: "proposal", title: "Returns", phase: "preparing", notes: [], announced: new Date().toISOString(), ...over });
+    const ghostButton = () => screen.getByRole("button", { name: /Show details$/ });
+
+    test("a ghost with a note shows it under the phase, and the dialog lists the notes newest first, then closes with the focus back on the ghost", async () => {
+      const first = { at: "2026-10-01T10:00:00.000Z", text: "Reads the Model" };
+      const second = { at: "2026-10-01T10:05:00.000Z", text: "Writes the Draft" };
+      page(snapshot({ announcements: [ghostView({ notes: [first, second] })] }));
+      expect(ghostButton().textContent).toContain("Writes the Draft");
+      expect(ghostButton().textContent).not.toContain("Reads the Model");
+      fireEvent.click(ghostButton());
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByText("Returns")).not.toBeNull();
+      expect(within(dialog).getByText("Running for less than a minute")).not.toBeNull();
+      expect(within(dialog).getByText("The agent is exploring the Model and the code for this design; nothing is written yet.")).not.toBeNull();
+      const items = within(dialog).getAllByRole("listitem").map((li) => li.querySelector("span")?.textContent);
+      expect(items).toEqual(["Writes the Draft", "Reads the Model"]);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(ghostButton()));
+    });
+
+    test("without notes the ghost shows no note line and the dialog says so; the dialog follows a new note and a new phase", async () => {
+      const view = ghostView();
+      const { rerender, props } = page(snapshot({ announcements: [view] }));
+      expect(ghostButton().querySelector(".truncate")).toBeNull();
+      fireEvent.click(ghostButton());
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByText("No notes from the agent yet.")).not.toBeNull();
+      rerender(<BoardPage {...props} snapshot={snapshot({ announcements: [{ ...view, phase: "writing", notes: [{ at: "2026-10-01T10:05:00.000Z", text: "Writes the Draft" }] }] })} />);
+      await waitFor(() => expect(within(screen.getByRole("dialog")).getByText("Writes the Draft")).not.toBeNull());
+      expect(within(screen.getByRole("dialog")).getByText("The agent is writing this Proposal's Draft; it lands in Backlog when handed over.")).not.toBeNull();
+      expect(within(screen.getByRole("dialog")).queryByText("No notes from the agent yet.")).toBeNull();
+    });
+
+    test("the dialog closes by itself when its ghost goes away, and the focus goes to the column", async () => {
+      const { rerender, props } = page(snapshot({ announcements: [ghostView()] }));
+      fireEvent.click(ghostButton());
+      await screen.findByRole("dialog");
+      rerender(<BoardPage {...props} snapshot={snapshot()} />);
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(document.querySelector('[data-column="system"]')));
+    });
+  });
+
   test("Add Work Item fills the column without the main part taking the whole row, and the arrow never shrinks", () => {
     page(snapshot());
     const arrow = screen.getByRole("button", { name: "More ways to add work" });
@@ -544,8 +601,8 @@ describe("The Board page", () => {
   });
 
   test("the Unify Drifts ghost has the Unify type, its title and the accessible name of its phase", () => {
-    page(snapshot({ announcements: [{ id: "u00001", kind: "unify", title: "Unifying 3 Drifts", phase: "writing-proposal" }] }));
-    const ghost = screen.getByRole("img", { name: "Agent unifying Drifts: Unifying 3 Drifts, Writing" });
+    page(snapshot({ announcements: [{ id: "u00001", kind: "unify", title: "Unifying 3 Drifts", phase: "writing-proposal", notes: [], announced: "2026-10-01T10:00:00.000Z" }] }));
+    const ghost = screen.getByRole("button", { name: "Agent unifying Drifts: Unifying 3 Drifts, Writing. Show details" });
     expect(ghost.textContent).toContain("Unify");
     expect(ghost.textContent).toContain("Unifying 3 Drifts");
   });
@@ -626,14 +683,13 @@ describe("The Board page", () => {
   });
 
   test("the counts are the cards of Backlog and Active, never the ghosts; System Activities shows the ghosts, with no number", () => {
-    const announcement: AnnouncementView = { id: "a1", kind: "proposal", title: "Returns", phase: "writing" } as AnnouncementView;
+    const announcement: AnnouncementView = { id: "a1", kind: "proposal", title: "Returns", phase: "writing", notes: [], announced: "2026-10-01T10:00:00.000Z" };
     page(snapshot({ proposals: [proposalView()], tasks: [taskView()], announcements: [announcement] }));
     const counts = ["backlog", "active", "system"].map((id) => document.querySelector(`[data-column="${id}"] h2 + [data-slot="badge"]`)?.textContent);
     expect(counts).toEqual(["1", "1", undefined]);
     const system = document.querySelector('[data-column="system"]') as HTMLElement;
-    expect(within(system).getByRole("img", { name: /Proposal the agent is creating, writing: Returns/ })).not.toBeNull();
-    expect(within(system).queryByRole("button")).toBeNull();
-    expect(within(document.querySelector('[data-column="active"]') as HTMLElement).queryByRole("img", { name: /the agent is creating/ })).toBeNull();
+    expect(within(system).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Proposal the agent is creating, writing: Returns. Show details"]);
+    expect(within(document.querySelector('[data-column="active"]') as HTMLElement).queryByRole("button", { name: /the agent is creating/ })).toBeNull();
   });
 
   test("the Scan System button carries the number of finished Tasks, and is disabled with the Advisor Scanner", () => {

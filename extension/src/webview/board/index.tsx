@@ -14,7 +14,7 @@ import { SplitButton } from "../split-button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
-import { type ModelList, ModelDialog, ProposalBodyDialog } from "./dialogs";
+import { type ModelList, GhostDetailsDialog, ModelDialog, ProposalBodyDialog } from "./dialogs";
 import { HistoryEntryView } from "./history";
 import { announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, finalReviewMissingNotice, GHOST_COLUMN, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, NO_MODELS, type ProposalCard, stoppedFollowingNotice, withdrawnNotice } from "./logic";
 import { BoardButton, BoardEnvContext, type BoardEnv, Tip } from "./parts";
@@ -62,7 +62,7 @@ const COLUMN_CLASS = "flex min-h-0 flex-col rounded-lg border bg-muted/40";
 function Column({ id, count, children, foot }: { id: ColumnId; count?: number; children: ReactNode; foot?: ReactNode }) {
   const heading = `board-column-${id}`;
   return (
-    <section data-column={id} aria-labelledby={heading} className={COLUMN_CLASS}>
+    <section data-column={id} aria-labelledby={heading} tabIndex={-1} className={cn(COLUMN_CLASS, "outline-none")}>
       <div className="flex items-center gap-2 border-b px-2.5 py-2">
         <h2 id={heading} className="text-xs font-semibold tracking-wide uppercase">
           {COLUMN_TITLES[id]}
@@ -106,6 +106,7 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
   const [historyOpen, setHistoryOpen] = useState(false);
   const [bodyOf, setBodyOf] = useState<string | null>(null);
   const [modelOf, setModelOf] = useState<string | null>(null);
+  const [ghostOf, setGhostOf] = useState<string | null>(null);
 
   const numbers = snapshot?.numbers ?? noNumbers;
   const runReason = snapshot === null ? null : joinReasons([resolve.runReason, runBlocker(snapshot.tasks, namerOf(numbers))]);
@@ -119,12 +120,20 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
     proposal === null ? undefined : columns.find((column) => column.id === "backlog")?.cards.find((card): card is ProposalCard => card.kind === "proposal" && card.id === proposal);
   const bodyCard = backlogCard(bodyOf);
   const modelCard = backlogCard(modelOf);
+  const placedGhosts = useMemo(() => announcedGhosts(snapshot?.announcements ?? [], asking), [snapshot, asking]);
+  const ghostCard = ghostOf === null ? undefined : placedGhosts.find((g) => g.card.key === ghostOf)?.card;
   const modelChoosable = modelCard?.choosable === true ? modelCard : undefined;
   // A window follows its Proposal: it closes when the card is gone, and stays closed if the card comes back.
   useEffect(() => {
     if (bodyOf !== null && bodyCard === undefined) setBodyOf(null);
     if (modelOf !== null && modelChoosable === undefined) setModelOf(null);
   }, [bodyOf, bodyCard, modelOf, modelChoosable]);
+  // The details of a ghost follow it: when the ghost goes away, delivered or withdrawn, they close and the focus goes back to the column.
+  useEffect(() => {
+    if (ghostOf === null || ghostCard !== undefined) return;
+    setGhostOf(null);
+    root.current?.querySelector<HTMLElement>(`[data-column="${GHOST_COLUMN}"]`)?.focus();
+  }, [ghostOf, ghostCard]);
 
   const env: BoardEnv = {
     context,
@@ -148,12 +157,13 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
       context.post({ type: "modelSuggestionsWanted" });
     },
     openProposal: (proposal) => setBodyOf(proposal),
+    openGhost: (key) => setGhostOf(key),
     openTaskImage: (task, name) => context.post({ type: "openTaskImage", task, name }),
   };
 
   if (snapshot === null) return <div ref={root} />;
 
-  const ghosts = announcedGhosts(snapshot.announcements, asking).map((g) => ({ item: <GhostCard key={g.card.key} card={g.card} />, index: g.index }));
+  const ghosts = placedGhosts.map((g) => ({ item: <GhostCard key={g.card.key} card={g.card} />, index: g.index }));
   const scanLabel = scanButtonLabel("Scan System", snapshot.tasksSinceScan, advisorScanner);
   const history = historyGroups(snapshot.history, period);
   const historyCount = history.reduce((n, group) => n + group.entries.length, 0);
@@ -287,6 +297,7 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
             </section>
           </div>
           <ProposalBodyDialog card={bodyCard} onClose={() => setBodyOf(null)} />
+          <GhostDetailsDialog card={ghostCard} onClose={() => setGhostOf(null)} restoreFocus={(key) => root.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus()} />
           <ModelDialog card={modelChoosable} agent={models.agent} list={modelList} onClose={() => setModelOf(null)} />
         </div>
       </TooltipProvider>

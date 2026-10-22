@@ -56,5 +56,6 @@ This is the index of the Area's Requirements. The General Requirements are below
 
 ## Fragments
 
+- **Note dei ghost** (`ghost-notes.md`): Usa quando lavori al comando con cui l'agente dichiara una nota su un ghost. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
 - **Comandi di trama** (`main.md`): Usa per i comandi di trama: forma, input JSON, help ed elenco. Sections: `General`.
 - **Unify Drifts nella riga di comando** (`unify-drifts.md`): Usa quando cambi `trama drift new` con `unifies` o ciò che `drift show`, `drift list` e `project show` dicono dei Drift unificati e uniti. Sections: `agent.UNIFY_DRIFTS`.

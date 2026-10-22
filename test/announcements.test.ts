@@ -8,6 +8,7 @@ import {
   announcementsDir,
   bindDraft,
   changeCheckPhase,
+  declareNote,
   deliverCard,
   deliverComparison,
   getAnnouncement,
@@ -135,7 +136,7 @@ describe("a Draft and its announcement", () => {
     const a = announce(p, { kind: "proposal", title: "Planned", terminal: "ab12cd" });
     const prop = newProposal(p, "Real title", "", { announcement: a.id, origin: { terminal: "ab12cd" } });
     expect(listAnnouncements(p)).toHaveLength(1);
-    expect(buildSnapshot(p).announcements).toEqual([{ id: a.id, kind: "proposal", title: "Real title", phase: "writing" }]);
+    expect(buildSnapshot(p).announcements).toEqual([{ id: a.id, kind: "proposal", title: "Real title", phase: "writing", notes: [], announced: a.announced }]);
     expect(getAnnouncement(p, a.id)?.proposal).toBe(prop.id);
   });
 
@@ -575,5 +576,143 @@ describe("announcements with the conversation", () => {
     expect(bindConversation(p, "zzzzzz", "conv-1")).toBe(false);
     const terminal = announce(p, { kind: "work", title: "Import", source: "request", terminal: "ab12cd" });
     expect(bindConversation(p, terminal.id, "conv-1")).toBe(false);
+  });
+});
+
+describe("notes on announcements", () => {
+  const noteCommand = (input: Record<string, unknown>, env: Record<string, string | undefined> = {}, ...args: string[]) =>
+    run(["announcement", "edit", ...args, "--input", JSON.stringify(input)], dir, env);
+  const fileOf = (id: string) => readFileSync(join(dir, ".trama/announcements", `${id}.md`), "utf8");
+
+  test("a note on one announcement keeps its phase, title, touched and Draft, in every kind and phase", () => {
+    const proposal = announce(p, { kind: "proposal", title: "Design" }, t(1));
+    const writing = announce(p, { kind: "proposal", title: "Writing design", proposal: "abcd1234" }, t(2));
+    const check = announce(p, { kind: "check", title: "Final check", phase: "verifying" }, t(3));
+    const scanning = announce(p, { kind: "check", title: "Scan", phase: "scanning" }, t(4));
+    const history = announce(p, { kind: "check", title: "History", phase: "history" }, t(5));
+    const work = announce(p, { kind: "work", title: "Import", source: "request" }, t(6));
+    const comparison = announce(p, { kind: "comparison", title: "Comparing order", machine: "order" }, t(7));
+    for (const a of [proposal, writing, check, scanning, history, work, comparison]) {
+      const out = noteCommand({ note: "Reads the code" }, {}, a.id);
+      expect(out.out).toContain(`Note saved on ${a.id}`);
+      const after = getAnnouncement(p, a.id);
+      expect(after).toMatchObject({ phase: a.phase, title: a.title, touched: a.touched, proposal: a.proposal, announced: a.announced, kind: a.kind });
+      expect(after?.notes).toHaveLength(1);
+      expect(after?.notes[0]?.text).toBe("Reads the code");
+      expect(Number.isNaN(Date.parse(after?.notes[0]?.at ?? ""))).toBe(false);
+    }
+  });
+
+  test("a note is one line: line breaks become spaces and the ends are trimmed; an empty note is a usage error", () => {
+    const a = announce(p, { kind: "task", title: "Task" }, t(1));
+    declareNote(p, { id: a.id, text: "  first line\nsecond line\r\n third  \n" }, t(2));
+    expect(getAnnouncement(p, a.id)?.notes.map((n) => n.text)).toEqual(["first line second line third"]);
+    expect(() => noteCommand({ note: " \n \t " }, {}, a.id)).toThrow(/cannot be empty/);
+    expect(() => noteCommand({}, {}, a.id)).toThrow(/note/);
+    expect(getAnnouncement(p, a.id)?.notes).toHaveLength(1);
+  });
+
+  test("a note over 120 characters is cut to 119 and an ellipsis, counted in Unicode characters, and the command says so", () => {
+    const a = announce(p, { kind: "task", title: "Task" }, t(1));
+    const long = "è".repeat(130);
+    const out = noteCommand({ note: long }, {}, a.id, "--json");
+    expect(JSON.parse(out.out)).toEqual({ announcements: [a.id], truncated: true });
+    expect(getAnnouncement(p, a.id)?.notes[0]?.text).toBe(`${"è".repeat(119)}…`);
+    const text = noteCommand({ note: "x".repeat(120) }, {}, a.id);
+    expect(text.out).not.toContain("longer than");
+    expect(getAnnouncement(p, a.id)?.notes[1]?.text).toBe("x".repeat(120));
+    expect(noteCommand({ note: "😀".repeat(121) }, {}, a.id).out).toContain("longer than 120");
+    expect(getAnnouncement(p, a.id)?.notes[2]?.text).toBe(`${"😀".repeat(119)}…`);
+  });
+
+  test("an announcement keeps 6 notes, the oldest leaves first, and a note equal to the last only renews its instant", () => {
+    const a = announce(p, { kind: "task", title: "Task" }, t(0));
+    for (let i = 1; i <= 8; i++) declareNote(p, { id: a.id, text: `step ${i}` }, t(i));
+    expect(getAnnouncement(p, a.id)?.notes).toEqual([3, 4, 5, 6, 7, 8].map((i) => ({ at: t(i).toISOString(), text: `step ${i}` })));
+    declareNote(p, { id: a.id, text: "step 8" }, t(20));
+    declareNote(p, { id: a.id, text: "step\n8" }, t(21));
+    const notes = getAnnouncement(p, a.id)?.notes ?? [];
+    expect(notes).toHaveLength(6);
+    expect(notes[5]).toEqual({ at: t(21).toISOString(), text: "step 8" });
+    expect(notes[4]?.text).toBe("step 7");
+    // Equal notes that are not in a row count each time.
+    declareNote(p, { id: a.id, text: "step 7" }, t(22));
+    expect(getAnnouncement(p, a.id)?.notes.map((n) => n.text)).toEqual(["step 4", "step 5", "step 6", "step 7", "step 8", "step 7"]);
+  });
+
+  test("with an identity the note goes only there; an unknown identity is an error that writes nothing", () => {
+    const a = announce(p, { kind: "task", title: "A" }, t(1));
+    const b = announce(p, { kind: "task", title: "B" }, t(2));
+    noteCommand({ note: "only a" }, {}, a.id);
+    expect(getAnnouncement(p, b.id)?.notes).toEqual([]);
+    expect(() => noteCommand({ note: "nobody" }, {}, "zzzzzz")).toThrow(/zzzzzz/);
+    expect(listAnnouncements(p).flatMap((x) => x.notes)).toHaveLength(1);
+  });
+
+  test("without an identity the note goes to every announcement of the terminal, a comparison excepted, and to no other", () => {
+    const mine = announce(p, { kind: "task", title: "Mine", terminal: "ab12cd" }, t(1));
+    const check = announce(p, { kind: "check", title: "Check", phase: "verifying", terminal: "ab12cd" }, t(2));
+    const comparison = announce(p, { kind: "comparison", title: "Comparing order", machine: "order", terminal: "ab12cd" }, t(3));
+    const other = announce(p, { kind: "task", title: "Other terminal", terminal: "zz99zz" }, t(4));
+    const chat = announce(p, { kind: "task", title: "Chat", chat: "cursor" }, t(5));
+    const out = noteCommand({ note: "Starts" }, { TRAMA_TERMINAL: "ab12cd" });
+    expect(out.out.split("\n")).toEqual([`Note saved on ${mine.id}: Mine`, `Note saved on ${check.id}: Check`]);
+    expect(JSON.parse(noteCommand({ note: "Next" }, { TRAMA_TERMINAL: "ab12cd" }, "--json").out)).toEqual({ announcements: [mine.id, check.id], truncated: false });
+    for (const untouched of [comparison, other, chat]) expect(getAnnouncement(p, untouched.id)?.notes).toEqual([]);
+    expect(getAnnouncement(p, mine.id)?.notes.map((n) => n.text)).toEqual(["Starts", "Next"]);
+    // A comparison gets the note when it is named.
+    noteCommand({ note: "Reads the code" }, { TRAMA_TERMINAL: "ab12cd" }, comparison.id);
+    expect(getAnnouncement(p, comparison.id)?.notes.map((n) => n.text)).toEqual(["Reads the code"]);
+  });
+
+  test("a conversation reaches its own announcements and those of the project's chat; a chat without conversation only those that name none", () => {
+    const own = announce(p, { kind: "task", title: "Own", chat: "cursor", conversation: "conv-1" }, t(1));
+    const unbound = announce(p, { kind: "proposal", title: "Unbound", source: "request", chat: "cursor" }, t(2));
+    const another = announce(p, { kind: "task", title: "Another", chat: "cursor", conversation: "conv-2" }, t(3));
+    const editor = announce(p, { kind: "task", title: "Editor" }, t(4));
+    const terminal = announce(p, { kind: "task", title: "Terminal", terminal: "ab12cd" }, t(5));
+    expect(JSON.parse(noteCommand({ note: "Writes" }, { CURSOR_AGENT: "1", TRAMA_CHAT: "conv-1" }, "--json").out).announcements).toEqual([own.id, unbound.id]);
+    expect(JSON.parse(noteCommand({ note: "Writes again" }, { CURSOR_AGENT: "1" }, "--json").out).announcements).toEqual([unbound.id, editor.id]);
+    expect(JSON.parse(noteCommand({ note: "Plain" }, {}, "--json").out).announcements).toEqual([unbound.id, editor.id]);
+    for (const untouched of [another, terminal]) expect(getAnnouncement(p, untouched.id)?.notes).toEqual([]);
+  });
+
+  test("with no announcement to go to the command says so, exits with 0 and writes nothing", () => {
+    announce(p, { kind: "task", title: "Elsewhere", terminal: "zz99zz" }, t(1));
+    const before = readdirSync(announcementsDir(p)).map((f) => (f === ".gitignore" ? "" : readFileSync(join(announcementsDir(p), f), "utf8")));
+    const out = noteCommand({ note: "Nobody hears" }, { TRAMA_TERMINAL: "ab12cd" });
+    expect(out.out).toBe("No announcement is waiting here; the note was not saved.");
+    expect(JSON.parse(noteCommand({ note: "Nobody hears" }, { TRAMA_TERMINAL: "ab12cd" }, "--json").out)).toEqual({ announcements: [], truncated: false });
+    expect(readdirSync(announcementsDir(p)).map((f) => (f === ".gitignore" ? "" : readFileSync(join(announcementsDir(p), f), "utf8")))).toEqual(before);
+  });
+
+  test("the file carries `notes` only once there are some, and a malformed value is ignored without losing the announcement", () => {
+    const a = announce(p, { kind: "task", title: "Task" }, t(1));
+    expect(fileOf(a.id)).not.toContain("notes");
+    declareNote(p, { id: a.id, text: "Reads" }, t(2));
+    expect(fileOf(a.id)).toContain(`notes:\n  - at: ${t(2).toISOString()}\n    text: Reads`);
+    expect(getAnnouncement(p, a.id)?.touched).toBe(t(1).toISOString());
+    const stamp = "touched: 2026-01-01T10:00:00.000Z";
+    writeFileSync(join(announcementsDir(p), "bad001.md"), `---\nkind: task\nsource: agent\nproposal: null\n${stamp}\nnotes: yes\n---\n# Bad\n`);
+    writeFileSync(join(announcementsDir(p), "bad002.md"), `---\nkind: task\nsource: agent\nproposal: null\n${stamp}\nnotes:\n  - at: now\n    text: no instant\n  - at: 2026-01-01T10:00:00.000Z\n  - text: no at\n  - at: 2026-01-01T10:01:00.000Z\n    text: fine\n---\n# Bad two\n`);
+    expect(getAnnouncement(p, "bad001")?.notes).toEqual([]);
+    expect(getAnnouncement(p, "bad002")?.notes).toEqual([{ at: "2026-01-01T10:01:00.000Z", text: "fine" }]);
+  });
+
+  test("other changes to an announcement keep its notes, and the Board snapshot carries `notes` and `announced`", () => {
+    const check = announce(p, { kind: "check", title: "Final check", phase: "verifying" }, t(1));
+    const bare = announce(p, { kind: "task", title: "Bare" }, t(2));
+    declareNote(p, { id: check.id, text: "Verifies" }, t(3));
+    changeCheckPhase(p, check.id, "scanning", t(4));
+    expect(getAnnouncement(p, check.id)?.notes.map((n) => n.text)).toEqual(["Verifies"]);
+    const views = buildSnapshot(p).announcements;
+    expect(views.find((v) => v.id === check.id)).toMatchObject({ phase: "scanning", notes: [{ at: t(3).toISOString(), text: "Verifies" }], announced: check.announced });
+    expect(views.find((v) => v.id === bare.id)).toMatchObject({ notes: [], announced: bare.announced });
+  });
+
+  test("a note does not count as the agent's activity", async () => {
+    const { countsAsActivity } = await import("../src/cli/main");
+    expect(countsAsActivity(["announcement", "edit", "--input", "{}"])).toBe(false);
+    expect(countsAsActivity(["announcement", "new"])).toBe(true);
   });
 });

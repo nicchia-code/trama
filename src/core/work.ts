@@ -1,6 +1,6 @@
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type AgentOrigin, deliverCard } from "./announcements";
+import { type AgentOrigin, announcementsDir, deliverCard } from "./announcements";
 import { type Blocker, blockedByDrift, computeBlocked, concernSameThing, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
 import { clearProgress, readProgress, writeProgress } from "./progress";
@@ -977,6 +977,8 @@ export function newUnifiedDrift(
       const path = join(getProposal(p, id).dir, "proposal.md");
       return { path, text: readFileSync(path, "utf8") };
     }),
+    // Discarding a Proposal also removes the announcements bound to it: they are restored with the files.
+    ...announcementFiles(p),
   ];
   let drift: Drift | null = null;
   try {
@@ -990,12 +992,21 @@ export function newUnifiedDrift(
     }
     for (const id of attached) discardAttachedProposal(p, id);
   } catch (error) {
-    for (const { path, text } of saved) writeFileSync(path, text);
+    for (const { path, text } of saved) if (!existsSync(path) || readFileSync(path, "utf8") !== text) writeFileSync(path, text);
     if (drift !== null) rmSync(drift.path, { force: true });
     throw error;
   }
   deliverCard(p, input.announcement, "drift");
   return { drift, unified };
+}
+
+/** Every announcement file with its text, for a rollback. */
+function announcementFiles(p: Project): { path: string; text: string }[] {
+  const dir = announcementsDir(p);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".md"))
+    .map((name) => ({ path: join(dir, name), text: readFileSync(join(dir, name), "utf8") }));
 }
 
 /**

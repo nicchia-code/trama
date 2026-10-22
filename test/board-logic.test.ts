@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { DriftCard, TaskCard } from "../extension/src/webview/board/logic";
 import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockedReason, boardDecisionCount, buildBoard, createsText, driftReworkBlocker, NO_MODELS, finalReviewMissingNotice, finishingBlocker, stoppedFollowingNotice, formatCounts, GHOST_COLUMN, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockedReason, boardDecisionCount, buildBoard, createsText, driftReworkBlocker, ghostExplanation, NO_MODELS, finalReviewMissingNotice, finishingBlocker, noteTime, runningFor, stoppedFollowingNotice, formatCounts, GHOST_COLUMN, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
 import { runBlocker } from "../src/core/design";
 import { dismissBlocker } from "../extension/src/webview/dismiss";
@@ -258,7 +258,7 @@ test("the Board tab counts the Backlog cards (Proposals and red Drift cards), no
   expect(boardDecisionCount(columns)).toBe(4);
 });
 
-const announcement = (over: Partial<AnnouncementView> = {}): AnnouncementView => ({ id: "abc123", kind: "proposal", title: "Refunds", phase: "preparing", ...over });
+const announcement = (over: Partial<AnnouncementView> = {}): AnnouncementView => ({ id: "abc123", kind: "proposal", title: "Refunds", phase: "preparing", notes: [], announced: "2026-01-01T10:00:00.000Z", ...over });
 
 test("announced ghosts of every kind stand in System Activities, in the order announced", () => {
   const placed = announcedGhosts([announcement({ id: "d00001", kind: "drift", title: "A Drift" }), announcement({ id: "t00001", kind: "task", title: "A Task" }), announcement({ id: "p00001", title: "A Proposal" })], false);
@@ -318,6 +318,45 @@ test("a Scan ghost is a check the agent makes, a Resolve ghost names its Drifts,
   const imported = announcedCard(announcement({ kind: "work", title: "Importing from code", phase: null }), false);
   expect(imported.phase).toBe("");
   expect(imported.label).toBe("Agent importing the code");
+});
+
+test("a ghost shows the latest note and keeps the notes newest first with their time", () => {
+  expect(announcedCard(announcement(), false)).toMatchObject({ note: null, notes: [] });
+  const card = announcedCard(announcement({ notes: [{ at: "2026-01-01T10:00:00.000Z", text: "Reads the Model" }, { at: "2026-01-01T10:07:00.000Z", text: "Writes the Draft" }] }), false);
+  expect(card.note).toBe("Writes the Draft");
+  expect(card.notes.map((n) => n.text)).toEqual(["Writes the Draft", "Reads the Model"]);
+  expect(card.notes.map((n) => n.time)).toEqual([noteTime("2026-01-01T10:07:00.000Z"), noteTime("2026-01-01T10:00:00.000Z")]);
+  expect(noteTime("2026-01-01T10:07:00.000Z", "en-GB")).toMatch(/^\d{2}:\d{2}$/);
+  expect(card.announced).toBe("2026-01-01T10:00:00.000Z");
+});
+
+test("the running time says less than a minute, minutes, or hours and minutes", () => {
+  const at = "2026-01-01T10:00:00.000Z";
+  const after = (ms: number) => new Date(Date.parse(at) + ms);
+  expect(runningFor(at, after(59_000))).toBe("less than a minute");
+  expect(runningFor(at, after(-5_000))).toBe("less than a minute");
+  expect(runningFor(at, after(60_000))).toBe("1 min");
+  expect(runningFor(at, after(59 * 60_000))).toBe("59 min");
+  expect(runningFor(at, after(135 * 60_000))).toBe("2 h 15 min");
+});
+
+test("the explanation of a ghost depends on its kind and phase", () => {
+  const explain = (over: Partial<AnnouncementView>, asking = false) => ghostExplanation(announcement(over), asking);
+  expect(explain({})).toBe("The agent is exploring the Model and the code for this design; nothing is written yet.");
+  expect(explain({ phase: "writing" })).toBe("The agent is writing this Proposal's Draft; it lands in Backlog when handed over.");
+  expect(explain({ phase: "writing" }, true)).toBe("The agent is waiting for your answers to its questions.");
+  expect(explain({ kind: "drift" })).toBe("The agent is preparing a Drift: a difference between the code and the Model that you will decide on.");
+  expect(explain({ kind: "drift", phase: "writing-proposal" })).toBe("The agent is writing the Proposal this Drift will carry.");
+  expect(explain({ kind: "task" })).toBe("The agent is preparing a Task; it lands in Active.");
+  expect(explain({ kind: "resolve", phase: "writing" })).toBe("The agent is preparing the resolution of this Drift; it lands in Backlog for you to approve.");
+  expect(explain({ kind: "unify", phase: "writing-proposal" })).toBe("The agent is merging these Drifts into one unified Drift.");
+  expect(explain({ kind: "check", phase: "verifying" }, true)).toBe("The agent is running the final checks of the run: tests, lint and build.");
+  expect(explain({ kind: "check", phase: "scanning" })).toBe("The agent is comparing the code with the Model and the Requirements.");
+  expect(explain({ kind: "scan", phase: "scanning" })).toBe("The agent is comparing the code with the Model and the Requirements.");
+  expect(explain({ kind: "check", phase: "history" })).toBe("The agent is writing the History entries of the finished Tasks.");
+  expect(explain({ kind: "comparison", phase: null })).toBe("A comparison of one Machine with the code; its Tasks and Drifts arrive together.");
+  expect(explain({ kind: "work", title: "Importing from code", phase: null })).toBe("The agent is describing the existing code as Proposals.");
+  expect(explain({ kind: "work", title: "Quick", phase: null })).toBe("A free chat with the agent: Trama does not follow what it does.");
 });
 
 test("the notice of a withdrawn Resolve Drifts ghost names a Proposal, and a withdrawn Scan says the check was stopped", () => {
@@ -532,4 +571,9 @@ test("the worst Resolve and Dismiss disabling reasons of a Drift card stay withi
   const dismiss = dismissBlocker("d1", ["d1"], resolve, ["d1"]);
   expect((resolve as string).length).toBeLessThanOrEqual(160);
   expect((dismiss as string).length).toBeLessThanOrEqual(160);
+});
+
+test("a note at local midnight reads 00:05, never 24:05", () => {
+  const midnight = new Date(2026, 0, 2, 0, 5).toISOString();
+  expect(noteTime(midnight, "en-GB")).toBe("00:05");
 });

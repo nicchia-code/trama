@@ -24,6 +24,9 @@ L'agente chiude un Task di correzione senza cambiare il codice, perché rileggen
 ### DECLARE_TASK_PROGRESS
 The agent, or the sub-agent working on a Task, says roughly how far along the Task it has taken is, as a percentage it judges by itself.
 
+### DECLARE_ANNOUNCEMENT_NOTE
+L'agente, o il sotto-agente che confronta una Machine, dichiara in una riga breve cosa sta facendo e perché, a ogni tappa del suo lavoro, perché il developer lo legga sul ghost. Senza nominare un annuncio la nota vale per ogni annuncio ancora in attesa del suo terminale o della sua conversazione, tranne i confronti; un confronto la riceve solo quando chi confronta lo nomina.
+
 ### START_PROPOSAL
 The agent starts writing a new Proposal, which begins as a Draft.
 

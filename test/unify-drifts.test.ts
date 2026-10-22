@@ -1,9 +1,10 @@
 import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
+import { announce, announcementsDir } from "../src/core/announcements";
 import { driftListView, driftShowView } from "../src/cli/work";
 import { blockedTasks } from "../src/core/work";
 import { newProposal, getProposal } from "../src/core/proposals";
@@ -85,6 +86,23 @@ describe("a unified Drift", () => {
     newUnifiedDrift(p, unifyInput([a.id, b.id]));
     expect(getProposal(p, draft.id).data.status).toBe("discarded");
     expect(getDrift(p, a.id).data.proposal).toBeNull();
+  });
+
+  test("a failure while discarding a Proposal restores every file, the announcements bound to it included", () => {
+    const first = newProposal(p, "First");
+    const second = newProposal(p, "Second");
+    const note = announce(p, { kind: "proposal", title: "Writing", proposal: first.id });
+    const a = drift("A", { proposal: first.id });
+    const b = drift("B", { proposal: second.id });
+    const files = [a.path, b.path, join(getProposal(p, first.id).dir, "proposal.md"), join(getProposal(p, second.id).dir, "proposal.md"), join(announcementsDir(p), `${note.id}.md`)];
+    const before = files.map((f) => readFileSync(f, "utf8"));
+    const count = listDrifts(p).length;
+    // The second Proposal cannot be written, so its discard fails after the first one was discarded with its announcement.
+    chmodSync(files[3] as string, 0o444);
+    expect(() => newUnifiedDrift(p, unifyInput([a.id, b.id]))).toThrow();
+    chmodSync(files[3] as string, 0o644);
+    expect(listDrifts(p).length).toBe(count);
+    expect(files.map((f) => readFileSync(f, "utf8"))).toEqual(before);
   });
 
   test("is refused, writing nothing and naming every problem", () => {

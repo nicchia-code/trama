@@ -26,6 +26,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 
 - **Dati del lavoro dell'agente** (`agents.md`): Usa quando tocchi i dati di richieste di design, risoluzione dei Drift, domande pronte e round di domande. Sections: `design-request`, `drift-resolution`, `question-round`.
 - **Dati generali** (`general.md`): Usa sempre quando lavori sui dati: regole che valgono per tutte le informazioni del Sistema. Sections: `General`.
+- **Note dei ghost** (`ghost-notes.md`): Usa quando tocchi il campo delle note negli annunci e nel quadro della Board. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
 - **Dati di annunci e Proposal** (`proposals.md`): Usa quando tocchi i dati degli annunci e delle Proposal. Sections: `announcement`, `proposal`.
 - **Dati di Unify Drifts** (`unify-drifts.md`): Usa quando tocchi i campi dei Drift unificati e dei Drift uniti: `unifies`, `unifiedInto`, `resolution: unified` e `origin` e `previous` come liste. Sections: `agent.UNIFY_DRIFTS`, `drift/Unified`.
 - **Dati di Task, Drift e History** (`work.md`): Usa quando tocchi i dati di Task, Drift e voci di History. Sections: `task`, `task/Taken by the agent`, `drift`, `voce-history`.

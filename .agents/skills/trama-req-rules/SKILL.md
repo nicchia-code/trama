@@ -36,6 +36,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole del controllo di esecuzione** (`execution-check.md`): Usa quando lavori sul controllo di esecuzione che chiude i lavori il cui agente è scomparso e libera i Task che nessuna finestra segue, o su `trama task check`. Sections: `time`, `agent.CHECK_TASK`.
 - **Regole del focus** (`focus.md`): Usa quando calcoli cosa evidenzia il focus di una scheda del pannello: elementi, sezioni, passi e riferimenti mancanti. Sections: `focus`.
 - **Regole generali** (`general.md`): Usa sempre quando implementi regole di business: valgono per tutto il Sistema. Sections: `General`.
+- **Note dei ghost** (`ghost-notes.md`): Usa quando implementi le note che l'agente dichiara sui ghost: a chi vanno, lunghezza, quante se ne tengono, quando le skill le scrivono. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
 - **Regole dei file di istruzioni** (`instruction-files.md`): Usa quando implementi l'esclusione dei file di istruzioni degli agenti nei lanci di omp. Sections: `agent-terminal/Agent running`.
 - **Regole di agenti e modelli** (`models.md`): Usa per scelta dell'agente, ruoli dei modelli e istruzioni all'agente. Sections: `agent-launching`.
 - **Regole del progetto** (`project.md`): Usa quando implementi init, aggiornamento delle skill e skill dei Requisiti. Sections: `project`.

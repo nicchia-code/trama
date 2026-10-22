@@ -34,6 +34,10 @@ Compare State by State and Transition by Transition, then each Requirement secti
 - No source code at all: the Machine is still to be built. File one Task per coherent unit (usually a State with its Transitions), no Drifts, and say in your reply that the project had no code.
 - If the instruction says this is the pre-flight of a Run, file only Drifts, never Tasks.
 
+## Notes on the ghost
+
+Your comparison has a ghost on the Board, named by the ID `comparison new` printed. Write a note on it with that ID: `trama announcement edit <id> --input -` with `{"note":"<one line>"}`, passed with a heredoc as above. Write one when you start reading the code and one when you start filing (before `comparison move`): two notes in all, never one per command. A note is one sentence of at most 120 characters saying what you do and why, for the developer: no first person, no Trama command names, no short numbers of cards, in the language of the instruction when it asks for one (for example «Compares agent-terminal with the code, State by State»). Without the ID a note never reaches a comparison.
+
 ## Tasks
 
 - One Task per coherent unit of work, as specific as possible in `refs`: Model elements and Requirement sections (`order/Paid/user.CANCEL`, `requirements/ui#order/Paid`).

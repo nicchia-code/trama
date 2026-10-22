@@ -1,5 +1,5 @@
 import type { CardNumbers } from "./card-names";
-import { type Announcement, type AnnouncementKind, type CheckPhase, listAnnouncements, resolutionTitle } from "./announcements";
+import { type Announcement, type AnnouncementKind, type AnnouncementNote, type CheckPhase, listAnnouncements, resolutionTitle } from "./announcements";
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
 import { scanScope } from "./scan-scope";
@@ -215,6 +215,10 @@ export interface AnnouncementView {
   title: string;
   /** A card: Preparing until a Draft exists, then Writing (a Proposal) or Writing the Proposal (a Drift's Draft). A check: its own phase. An import has none. */
   phase: "preparing" | "writing" | "writing-proposal" | CheckPhase | null;
+  /** What the agent declared about what it is doing, oldest first, at most 6; empty when nothing was declared. */
+  notes: AnnouncementNote[];
+  /** When the announcement was born, UTC ISO 8601: the ghost's details measure how long the work has gone on from it. */
+  announced: string;
 }
 
 /** A Task cited by a History entry, as it is now; `exists` is false when the Task is gone. */
@@ -530,7 +534,7 @@ export function announcementView(p: Project, a: Announcement, proposalTitle: str
   const kind = resolving ? "resolve" : a.kind === "check" && a.source === "request" ? "scan" : a.kind === "drift" && a.source === "request" ? "unify" : a.kind;
   const phase = a.kind === "work" || a.kind === "comparison" ? null : a.phase ?? (a.proposal === null ? "preparing" : a.kind === "drift" ? "writing-proposal" : "writing");
   const title = resolving ? resolutionTitle(p, a.drifts) ?? a.title : (a.kind === "proposal" && a.proposal !== null && proposalTitle) || a.title;
-  return { id: a.id, kind, title, phase };
+  return { id: a.id, kind, title, phase, notes: a.notes, announced: a.announced };
 }
 
 /** The title is shown separately, so the body drops its leading H1. */

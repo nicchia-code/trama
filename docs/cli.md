@@ -697,6 +697,29 @@ Output (`--json`):
 
 Runs at once; writes in `.trama/`, counts as the agent's activity.
 
+#### `trama announcement edit [<id>]`
+
+Declares `note`, one short line about what you are doing and why, so the developer reads it on the ghost. With the announcement's ID the note goes only to that announcement, of any kind, comparisons included; without an ID it goes to every announcement still waiting that belongs to your terminal or your Cursor chat conversation, comparisons excepted (an agent with neither is the project's chat). Line breaks become spaces and the ends are trimmed; an empty note is a usage error and saves nothing. A note over 120 characters is saved cut to the first 119 followed by `…`, and the output says so. An announcement keeps its last 6 notes, each with the instant it arrived; a note equal to the previous one only renews that instant. A note changes nothing else (phase, title, delivery or withdrawal) and does not count as the agent's activity. With no announcement to go to the command says so and exits with 0; an unknown ID is an error and saves nothing.
+
+- `<id>` (optional): The announcement to write the note on; without it, every announcement waiting for your terminal or chat except comparisons.
+
+Input (`--input`):
+
+- `note`: `string`, required. One short line: what you are doing and why, for the developer. Cut to 120 characters.
+
+```sh
+trama announcement edit a1b2c3 --input - <<'JSON'
+{"note":"Compares the order Machine with its code before the Tasks run."}
+JSON
+```
+
+Output (`--json`):
+
+- announcements: string[], required. The IDs of the announcements the note went to.
+- truncated: boolean, required. True when the note was cut.
+
+Runs at once; writes in `.trama/`.
+
 #### `trama announcement move <id> <state>`
 
 `scanning` moves a check from Verifying to Scanning, and `history` from Verifying or Scanning to History, when the final run writes its History; a check only moves forward, so a backward move is refused and changes nothing, and a check already in that phase is left as it is and the command says so. `delivered` delivers a finished check and removes its ghost; `failed` does exactly the same, and only the phase timings tell the two outcomes apart. An ID that is unknown, already delivered or withdrawn, or not a check is not an error: the command says no check was found and changes nothing. Nothing tells whether a check is the final one of a run, so the command does not check that.
@@ -1103,8 +1126,11 @@ Announcing a card before the agent creates it makes the Board show a ghost of it
 | `trama announcement new` with `{ kind: check, title, phase: verifying\|scanning }` | Annuncia un controllo: non una scheda, ma il lavoro che l'agente fa ancora quando nessuna scheda lo mostra (la verifica finale di una corsa, o una scansione). Stampa l'ID come gli altri annunci e copia `terminal` o `chat` allo stesso modo. `phase` è obbligatorio per `check` e rifiutato per gli altri tipi. Un annuncio non ha `job`. Il ghost sta In progress. |
 | `trama announcement move <id> scanning\|history` | Passa un controllo da Verifying a Scanning, o da Verifying o Scanning a History, quando parte lo scan o la scrittura della History. Su un controllo già nella fase richiesta non cambia nulla e lo dice. Non si torna indietro: un passaggio all'indietro è rifiutato senza modifiche. |
 | `trama announcement move <id> delivered\|failed` | Consegna il controllo e rimuove il ghost, allo stesso modo per entrambi. La differenza fra `delivered` e `failed` finisce soltanto nei tempi delle fasi; nessuno dei due manda l'esito a un coordinatore. |
+| `trama announcement edit [<id>]` with `{ note }` | Declares a note on the ghost of the work the agent is doing: one short line about what it does and why, for the developer. With `<id>` the note goes only to that announcement, of any kind, comparisons included; without it, to every announcement still waiting that belongs to the terminal in `TRAMA_TERMINAL` or to the Cursor chat conversation in `TRAMA_CHAT` (an agent with neither is the project's chat, whose announcements any conversation withdraws), comparisons excepted. Not developer-only: the agent runs it. |
 
 Un ID sconosciuto, già consegnato o ritirato, o che non è un controllo, non è un errore per `announcement move`: l'uscita dice che il controllo non è stato trovato e il comando finisce con successo, senza comunicare un esito riuscito. Annunciare un controllo e cambiarne la fase non riavviano nulla: non c'è quiete che li conti come attività. Nessuno dei comandi è riservato al developer.
+
+A note is one line of plain text: line breaks become spaces and the ends are trimmed, and an empty note is a usage error that saves nothing. A note over 120 characters (counted as Unicode characters) is saved cut to the first 119 followed by `…`, and the output says so in one line; the exit code stays 0. Each announcement keeps at most 6 notes, oldest first, each with the instant it arrived (`notes` in the announcement file, a list of `{ at, text }`, written only when there are some); past 6 the oldest is dropped, and a note equal to the previous one only renews its instant. The output has one line per announcement the note went to (identity and title); with `--json` it is `{ announcements, truncated }`. With no announcement to go to the command says `No announcement is waiting here; the note was not saved.` and exits with 0; an unknown identity is an error (exit 1) and saves nothing. A note changes neither the phase, the title, `touched`, the Draft bound to the announcement, nor its delivery or withdrawal, and it does not count as the agent's activity: it is not among the commands that register its work and it does not contact the editor, which reads the note from the announcement file. The Board snapshot carries `notes` and `announced` (the instant the announcement was born) for every announcement.
 
 The `announcement` field of `proposal new`, `task new` and `drift new` names an announcement: when the card is created, the announcement it names is delivered and the ghost gives way to the real card. A `proposal new` with no `announcement` takes over the oldest announcement that Trama made for a design request and that no Draft has taken yet, only if it belongs to the terminal in `TRAMA_TERMINAL`, never to another terminal; with none waiting it makes an announcement of its own, so the Board shows its Draft, and that one belongs to the terminal in `TRAMA_TERMINAL`, if any. An ID that is unknown, already delivered or withdrawn, of another kind, or already bound to a Draft never prevents the card from being created; the output adds a note saying so. `proposal move <id> open` delivers the announcement bound to the Draft only when it succeeds; `proposal move <id> discarded` withdraws it with no notice.
 

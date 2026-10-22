@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { closeSync, ftruncateSync, openSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { announcementsDir, listAnnouncements, withdrawAll } from "../../../src/core/announcements";
+import { announcementsDir, listAnnouncements, ownedBy, withdrawAll } from "../../../src/core/announcements";
 import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { getProposal, listProposals } from "../../../src/core/proposals";
@@ -59,7 +59,7 @@ export function withdrawWaiting(root: string, which?: (a: Announcement) => boole
  * closing the conversation is silent. Events that do not end a turn (such as a final Advisor review) withdraw nothing.
  */
 function onCursorChat(event: CursorChatEvent): void {
-  const ofConversation = (a: Announcement) => a.chat !== null && (a.conversation === null || a.conversation === event.conversation);
+  const ofConversation = (a: Announcement) => ownedBy(a, { chat: "cursor", conversation: event.conversation });
   if (event.event === "AGENT_STOPPED" || event.event === "AGENT_INTERRUPTED") withdrawWaiting(event.root, ofConversation);
   else if (event.event === "CONVERSATION_CLOSED") withdrawWaiting(event.root, ofConversation, false);
 }
@@ -76,7 +76,7 @@ export function withdrawForCheck(root: string, job: { announcement?: string; con
     if (announcement !== undefined) withdrawWaiting(root, (a) => a.id === announcement, false);
     return;
   }
-  withdrawWaiting(root, (a) => a.chat !== null && (a.conversation === null || a.conversation === conversation));
+  withdrawWaiting(root, (a) => ownedBy(a, { chat: "cursor", conversation }));
 }
 
 export function synchronizeAnnouncementTitles(p: Project): void {

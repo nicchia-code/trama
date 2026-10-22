@@ -20,6 +20,8 @@ Un annuncio può essere infine un lavoro: ciò che fa un agente lanciato da Tram
 
 Per ora gli avvisi di un annuncio ritirato, quello di mancata consegna e quello del controllo fermato prima di finire, non si mostrano: Trama li prepara come sempre, ma la Board non li disegna (vedi il Panel). Il ghost sparisce lo stesso.
 
+Mentre un annuncio aspetta, l'agente che lo fa vivere può dichiarare una nota: una riga breve su cosa sta facendo e perché, a ogni tappa del suo lavoro. L'annuncio ricorda l'ultima nota e le cinque precedenti, ciascuna con il momento in cui è arrivata; le più vecchie si perdono. Una nota non cambia fase, titolo né consegna dell'annuncio e non conta come lavoro dell'agente. Il ghost mostra l'ultima nota sotto la fase, e il developer, cliccando il ghost, apre una finestra che spiega cosa sta facendo quel ghost, da quanto è in corso, e mostra le note (vedi il Panel). Le note spariscono con l'annuncio.
+
 ## States
 
 ### Announced (initial)
@@ -40,9 +42,11 @@ The card has not arrived yet, or the check is not finished. The Board shows its 
 #### Preparing (initial)
 The agent is working on it and nothing is written yet; it may be waiting for the developer's answers. Un controllo, un confronto e un lavoro non passano mai da qui: un controllo nasce già in Verifying o in Scanning, secondo la fase dichiarata annunciandolo, un confronto nasce già Comparing e un lavoro nasce già Al lavoro.
 - `agent.START_PROPOSAL` → Writing: only for an announced Proposal; the new Draft is bound to the announcement and the ghost takes its title, salvo il ghost di una risoluzione annunciata da Trama, che continua a dire quale Drift è in risoluzione. The Draft is taken by the oldest announcement of the developer's request still Preparing, or by the one the agent names. Vale anche per un Drift annunciato, quando l'agente lo nomina: la Draft si lega all'annuncio del Drift, che tiene il titolo del Drift.
+- `agent.DECLARE_ANNOUNCEMENT_NOTE` → Preparing: la nota si aggiunge all'annuncio.
 
 #### Writing
 The Draft of the Proposal exists and the agent is writing it. Per un Drift, la Draft è la Proposal che il Drift porterà allegata.
+- `agent.DECLARE_ANNOUNCEMENT_NOTE` → Writing: la nota si aggiunge all'annuncio.
 
 #### Checking
 Solo per un controllo: l'agente sta ancora lavorando dopo che i Task della sua corsa hanno lasciato In progress, o sta scansionando. Il ghost sta in System Activities e mostra la fase.
@@ -52,18 +56,22 @@ Solo per un controllo: l'agente sta ancora lavorando dopo che i Task della sua c
 L'agente esegue la verifica finale della corsa: test, lint e build.
 - `agent.CHANGE_CHECK_PHASE` → Scanning: la verifica è passata e le condizioni della scansione mirata di fine corsa sono vere, quindi l'agente comincia a confrontare ciò che i Task della corsa hanno toccato.
 - `agent.CHANGE_CHECK_PHASE` → Aggiornamento della History: solo per il controllo finale di una corsa che ha realizzato almeno un Task, quando la scansione mirata non parte (anche perché la verifica è fallita); l'agente comincia a scrivere o aggiornare le voci di History.
+- `agent.DECLARE_ANNOUNCEMENT_NOTE` → Verifying: la nota si aggiunge al controllo.
 
 ##### Scanning
 L'agente confronta il codice con il Modello e i Requisiti.
 - `agent.CHANGE_CHECK_PHASE` → Aggiornamento della History: solo per il controllo finale di una corsa; la scansione mirata è finita e l'agente comincia a scrivere o aggiornare le voci di History.
+- `agent.DECLARE_ANNOUNCEMENT_NOTE` → Scanning: la nota si aggiunge al controllo.
 
 ##### Aggiornamento della History
 Solo nel controllo finale di una corsa: l'agente racconta in voci di History i Task che la corsa ha realizzato (vedi la Voce di History). Quando ha finito dice che il controllo è finito, come dopo la verifica o lo scan.
+- `agent.DECLARE_ANNOUNCEMENT_NOTE` → Aggiornamento della History: la nota si aggiunge al controllo.
 
 #### Comparing
 Solo per un confronto: chi confronta legge il briefing della Machine e il codice. Il ghost sta in System Activities con il titolo del confronto.
 - `agent.START_PROPOSAL` → Comparing: chi confronta comincia la Draft che un suo Drift porterà allegata e nomina il confronto; la Draft si lega al confronto, che non cambia titolo, e non ha un ghost a sé.
 - `agent.FILE_COMPARISON` → Delivered: chi confronta archivia in un solo passo i Task e i Drift trovati, anche nessuno, con le Draft allegate ai suoi Drift, che poi consegna come dopo ogni Drift con una Proposal; le schede arrivano insieme e il ghost sparisce senza avvisi. Se una scheda del blocco non è valida non arriva nulla e l'annuncio resta Comparing.
+- `agent.DECLARE_ANNOUNCEMENT_NOTE` → Comparing: solo quando chi confronta nomina questo confronto; la nota si aggiunge al confronto. Una nota che non nomina nessun annuncio non arriva mai a un confronto.
 
 #### Al lavoro
 Solo per un lavoro: l'agente lanciato da Trama sta ancora lavorando. Il ghost sta in System Activities con il titolo del lavoro.
@@ -74,6 +82,7 @@ Solo per un lavoro: l'agente lanciato da Trama sta ancora lavorando. Il ghost st
 - `editor-chat.AGENT_INTERRUPTED` → Delivered: come sopra, per un turno interrotto o finito in errore.
 - `editor-chat.CONVERSATION_CLOSED` → Delivered: come sopra, per la chiusura della conversazione.
 - `time.CHECK_DUE` → Delivered: il controllo di esecuzione ha chiuso il terminale o il lavoro della chat del lavoro; il ghost sparisce senza avvisi propri, e resta soltanto l'avviso del controllo in cima alla Board.
+- `agent.DECLARE_ANNOUNCEMENT_NOTE` → Al lavoro: la nota si aggiunge al lavoro.
 
 ### Delivered (final)
 The real card has arrived, or the agent finished the check or the work, and the ghost is gone.

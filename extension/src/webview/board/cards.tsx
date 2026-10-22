@@ -440,20 +440,34 @@ export function CardView({ card }: { card: BoardCard }) {
 }
 
 /**
- * The ghost of a card the agent is about to create: a skeleton with the card's kind, its title and what the agent is
- * doing about it. It cannot be clicked, moved or focused and has no buttons or links; its accessible name says the kind,
- * the title and the phase, and its content is hidden from assistive technology.
+ * The ghost of a card the agent is about to create: a skeleton with the card's kind, its title, what the agent is doing
+ * about it and its latest note. It cannot be moved and has no buttons or links inside it: the whole ghost is one button
+ * that opens its read-only details. Its accessible name says the kind, the title and the phase, then `Show details`.
  */
 export function GhostCard({ card }: { card: AnnouncedCard }) {
+  const env = useBoardEnv();
   return (
-    <Card role="img" aria-label={card.label} data-key={card.key} data-kind="ghost" className="pointer-events-none shrink-0 gap-1.5 rounded-md border-dashed px-2.5 py-2.5 opacity-70 shadow-none select-none">
+    <button
+      type="button"
+      aria-label={`${card.label}. Show details`}
+      data-key={card.key}
+      data-kind="ghost"
+      draggable={false}
+      onClick={() => env.openGhost(card.key)}
+      className="flex shrink-0 cursor-pointer flex-col gap-1.5 rounded-md border border-dashed bg-card px-2.5 py-2.5 text-left text-card-foreground opacity-70 outline-none select-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
       <span className="text-[11px] font-semibold text-muted-foreground">{card.kindLabel}</span>
-      <div className="font-semibold break-words">{card.title}</div>
-      <div className="flex flex-col gap-1.5">
-        <span className="block h-2 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+      <span className="font-semibold break-words">{card.title}</span>
+      <span className="flex flex-col gap-1.5">
+        <span className="block h-2 w-full animate-pulse rounded bg-muted motion-reduce:animate-none" />
         <span className="block h-2 w-3/5 animate-pulse rounded bg-muted motion-reduce:animate-none" />
-      </div>
-      {card.phase === "" ? null : <div className="text-xs text-muted-foreground italic">{card.phase}</div>}
-    </Card>
+      </span>
+      {card.phase === "" ? null : <span className="text-xs text-muted-foreground italic">{card.phase}</span>}
+      {card.note === null ? null : (
+        <Tip text={card.note}>
+          <span className="block w-full animate-pulse truncate text-xs text-muted-foreground motion-reduce:animate-none">{card.note}</span>
+        </Tip>
+      )}
+    </button>
   );
 }

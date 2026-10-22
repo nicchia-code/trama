@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AGENT_ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, CHECK_START_PHASES, type CheckPhase, changeCheckPhase, checkOutcome, forgetCheck, getAnnouncement } from "../../core/announcements";
+import { AGENT_ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, CHECK_START_PHASES, type CheckPhase, changeCheckPhase, checkOutcome, declareNote, forgetCheck, getAnnouncement, NOTE_LENGTH } from "../../core/announcements";
 import { UsageError } from "../../core/errors";
 import { recordTiming } from "../../core/timings";
 import { defineCommand } from "../registry";
@@ -78,4 +78,27 @@ const move = defineCommand({
   },
 });
 
-export const ANNOUNCEMENT_COMMANDS = [create, move];
+const edit = defineCommand({
+  object: "announcement",
+  verb: "edit",
+  mode: "immediate",
+  summary: "Declare a note on the ghost of the work you are doing.",
+  description:
+    `Declares \`note\`, one short line about what you are doing and why, so the developer reads it on the ghost. With the announcement's ID the note goes only to that announcement, of any kind, comparisons included; without an ID it goes to every announcement still waiting that belongs to your terminal or your Cursor chat conversation, comparisons excepted (an agent with neither is the project's chat). Line breaks become spaces and the ends are trimmed; an empty note is a usage error and saves nothing. A note over ${NOTE_LENGTH} characters is saved cut to the first ${NOTE_LENGTH - 1} followed by \`…\`, and the output says so. An announcement keeps its last 6 notes, each with the instant it arrived; a note equal to the previous one only renews that instant. A note changes nothing else (phase, title, delivery or withdrawal) and does not count as the agent's activity. With no announcement to go to the command says so and exits with 0; an unknown ID is an error and saves nothing.`,
+  positionals: [{ name: "id", optional: true, description: "The announcement to write the note on; without it, every announcement waiting for your terminal or chat except comparisons." }],
+  input: z.strictObject({ note: z.string().describe(`One short line: what you are doing and why, for the developer. Cut to ${NOTE_LENGTH} characters.`) }),
+  output: z.object({ announcements: z.array(z.string()).describe("The IDs of the announcements the note went to."), truncated: z.boolean().describe("True when the note was cut.") }),
+  example: { note: "Compares the order Machine with its code before the Tasks run." },
+  exampleArgs: ["a1b2c3"],
+  effects: { writes: true },
+  run(ctx, input, [id]) {
+    const { announcements, truncated } = declareNote(ctx.project(), { text: input.note, ...(id === undefined ? {} : { id }), ...ctx.origin });
+    const ids = announcements.map((a) => a.id);
+    if (announcements.length === 0) return text("No announcement is waiting here; the note was not saved.", { announcements: ids, truncated });
+    const lines = announcements.map((a) => `Note saved on ${a.id}: ${a.title}`);
+    if (truncated) lines.push(`The note was longer than ${NOTE_LENGTH} characters and was saved cut to ${NOTE_LENGTH}.`);
+    return text(lines.join("\n"), { announcements: ids, truncated });
+  },
+});
+
+export const ANNOUNCEMENT_COMMANDS = [create, edit, move];

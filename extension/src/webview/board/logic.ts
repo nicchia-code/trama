@@ -574,6 +574,14 @@ export interface AnnouncedCard {
   phase: string;
   /** What assistive technology reads: the kind, the title and the phase. */
   label: string;
+  /** The note the ghost shows under its phase: the latest the agent declared, or null when it declared none. */
+  note: string | null;
+  /** What the details explain, chosen by kind and phase. */
+  explanation: string;
+  /** The notes of the agent, newest first, each with its time (`HH:MM`, local). */
+  notes: GhostNote[];
+  /** When the announcement was born, UTC ISO 8601: the details measure how long the work has gone on. */
+  announced: string;
 }
 
 const ANNOUNCED_KIND_LABELS: Record<AnnouncementView["kind"], string> = { proposal: "Proposal", task: "Task", drift: "Drift", check: "Check", scan: "Scan", resolve: "Resolve", unify: "Unify", work: "Import", comparison: "Compare" };
@@ -581,6 +589,55 @@ const ANNOUNCED_KIND_LABELS: Record<AnnouncementView["kind"], string> = { propos
 /** A check shows its own phase, which an open question round does not change. */
 export const announcedPhase = (phase: AnnouncementView["phase"], asking: boolean): string =>
   phase === null ? "" : phase === "verifying" ? "Verifying (tests, lint, build)" : phase === "scanning" ? "Scanning" : phase === "history" ? "Updating History" : asking ? "Waiting for your answers" : phase === "writing" ? "Writing" : phase === "writing-proposal" ? "Writing the Proposal" : "Preparing";
+
+/** A note of the agent as the details show it. */
+export interface GhostNote {
+  text: string;
+  /** UTC ISO 8601. */
+  at: string;
+  /** `HH:MM`, local. */
+  time: string;
+}
+
+/** The time of a note, as the details show it: hours and minutes, local. */
+export const noteTime = (at: string, locale?: string): string => new Date(at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+/** The notes of an announcement (oldest first) as the details list them: newest first. */
+export const ghostNotes = (notes: AnnouncementView["notes"], locale?: string): GhostNote[] => [...notes].reverse().map((n) => ({ text: n.text, at: n.at, time: noteTime(n.at, locale) }));
+
+/** How long a ghost has been running, as the details say it: `less than a minute`, `<n> min`, `<h> h <m> min`. */
+export function runningFor(announced: string, now: Date = new Date()): string {
+  const minutes = Math.max(0, Math.floor((now.getTime() - Date.parse(announced)) / 60_000));
+  if (!Number.isFinite(minutes) || minutes < 1) return "less than a minute";
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
+
+const WAITING_EXPLANATION = "The agent is waiting for your answers to its questions.";
+
+/** What the details explain about a ghost, by its kind and phase; `asking` is whether a question round is open (it does not change a check). */
+export function ghostExplanation(a: AnnouncementView, asking: boolean): string {
+  if (a.kind === "check" || a.kind === "scan")
+    return a.phase === "history"
+      ? "The agent is writing the History entries of the finished Tasks."
+      : a.phase === "scanning"
+        ? "The agent is comparing the code with the Model and the Requirements."
+        : "The agent is running the final checks of the run: tests, lint and build.";
+  if (a.kind === "comparison") return "A comparison of one Machine with the code; its Tasks and Drifts arrive together.";
+  if (a.kind === "work") return a.title === "Quick" ? "A free chat with the agent: Trama does not follow what it does." : "The agent is describing the existing code as Proposals.";
+  if (asking) return WAITING_EXPLANATION;
+  switch (a.kind) {
+    case "proposal":
+      return a.phase === "writing" ? "The agent is writing this Proposal's Draft; it lands in Backlog when handed over." : "The agent is exploring the Model and the code for this design; nothing is written yet.";
+    case "drift":
+      return a.phase === "writing-proposal" ? "The agent is writing the Proposal this Drift will carry." : "The agent is preparing a Drift: a difference between the code and the Model that you will decide on.";
+    case "task":
+      return "The agent is preparing a Task; it lands in Active.";
+    case "resolve":
+      return "The agent is preparing the resolution of this Drift; it lands in Backlog for you to approve.";
+    default:
+      return "The agent is merging these Drifts into one unified Drift.";
+  }
+}
 
 export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCard {
   const kindLabel = ANNOUNCED_KIND_LABELS[a.kind];
@@ -599,7 +656,8 @@ export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCa
       : a.kind === "work"
         ? "Agent importing the code"
         : `${kindLabel} the agent is creating, ${phase.toLowerCase()}: ${title}`;
-  return { key: `announced:${a.id}`, kind: a.kind, kindLabel, title, phase, label };
+  const notes = ghostNotes(a.notes);
+  return { key: `announced:${a.id}`, kind: a.kind, kindLabel, title, phase, label, note: notes[0]?.text ?? null, explanation: ghostExplanation(a, asking), notes, announced: a.announced };
 }
 
 /** The sentence the notice of a withdrawn announcement shows: a check was not finished, a card was not delivered; a Resolve Drifts ghost is a Proposal. */

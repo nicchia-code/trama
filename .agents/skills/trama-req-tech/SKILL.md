@@ -56,6 +56,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia della chat dell'editor** (`editor-chat.md`): Usa quando lavori sugli hook della chat di Cursor. Sections: `editor-chat`.
 - **Tecnica del controllo di esecuzione** (`execution-check.md`): Usa quando costruisci nell'estensione il controllo di esecuzione, la registrazione del processo di omp, la domanda fra finestre su chi segue un Task o `trama task check`. Sections: `time`, `agent.CHECK_TASK`.
 - **Tecnologia generale** (`general.md`): Usa sempre quando lavori sulla tecnologia: vincoli generali e piattaforme. Sections: `General`.
+- **Tecnologia delle note dei ghost** (`ghost-notes.md`): Usa quando lavori al codice delle note dei ghost: scrittura nel nucleo, quadro della Board, modale dei dettagli e skill. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
 - **Tecnologia della History** (`history.md`): Usa quando costruisci le voci di History: comandi, lettura nel quadro, modale dei dettagli e skill che le scrivono. Sections: `voce-history`.
 - **Tecnologia dei file di istruzioni** (`instruction-files.md`): Usa quando lavori al codice che esclude i file di istruzioni degli agenti nei lanci di omp: overlay di configurazione e ricerca dei file. Sections: `agent-terminal/Agent running`.
 - **Tecnologia di agenti e modelli** (`models.md`): Usa per agenti del terminale, ruoli dei modelli, limite dei sotto-agenti e advisor di omp. Sections: `agent-launching`.

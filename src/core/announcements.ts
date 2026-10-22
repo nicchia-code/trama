@@ -1,7 +1,7 @@
 import { randomInt } from "node:crypto";
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { TramaError } from "./errors";
+import { TramaError, UsageError } from "./errors";
 import { enumField, idField, type Raw } from "./schema";
 import { cardName } from "./short-numbers";
 import { type Project, readDocument, writeDocument, writeFileEnsuringDir } from "./store";
@@ -27,6 +27,17 @@ export const CHECK_START_PHASES: readonly CheckPhase[] = ["verifying", "scanning
 /** `agent`: announced by the agent. `request`: announced by Trama when a design request or Resolve Drifts was sent. */
 export type AnnouncementSource = "agent" | "request";
 const SOURCES: readonly AnnouncementSource[] = ["agent", "request"];
+
+/** The most notes an announcement keeps; the oldest is dropped past it. */
+export const MAX_NOTES = 6;
+/** The longest a note is, in Unicode characters: a longer one is cut to the first 119 followed by `…`. */
+export const NOTE_LENGTH = 120;
+
+/** A line the agent declared about what it is doing, with the instant it arrived (UTC ISO 8601). */
+export interface AnnouncementNote {
+  at: string;
+  text: string;
+}
 
 export interface Announcement {
   /** Six random lowercase letters and digits. */
@@ -59,6 +70,8 @@ export interface Announcement {
   texts: Record<string, string>;
   /** The Drafts a comparison has taken, in creation order; empty for every other announcement. */
   proposals: string[];
+  /** What the agent declared about what it is doing, oldest first, at most `MAX_NOTES`; empty when it declared nothing. */
+  notes: AnnouncementNote[];
   /** The title as announced; the ghost of a bound Draft shows the Draft's own title instead. */
   title: string;
 }
@@ -139,12 +152,27 @@ function parse(raw: Raw, body: string, id: string, where: string): Announcement 
     conversation: conversationField(raw, where),
     drifts: idListField(raw, "drifts", where),
     proposals: idListField(raw, "proposals", where),
+    notes: notesField(raw),
     machine: machineField(raw, where),
     refs: refsField(raw, where),
     code: codeField(raw, where),
     texts: textsField(raw, where),
     title: /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? id,
   };
+}
+
+/** The notes of a file; a value that is not a list, or an entry without a valid `at` and `text`, is ignored as if it were missing. */
+function notesField(raw: Raw): AnnouncementNote[] {
+  const v = raw["notes"];
+  if (!Array.isArray(v)) return [];
+  const notes: AnnouncementNote[] = [];
+  for (const item of v) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const { at, text } = item as Record<string, unknown>;
+    if (typeof at !== "string" || Number.isNaN(Date.parse(at)) || typeof text !== "string" || text.trim() === "") continue;
+    notes.push({ at, text });
+  }
+  return notes.slice(-MAX_NOTES);
 }
 
 function refsField(raw: Raw, where: string): string[] {
@@ -205,9 +233,9 @@ function write(p: Project, a: Announcement) {
   // The folder ignores itself and everything in it, so announcements are never versioned.
   const ignore = join(dir, ".gitignore");
   if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
-  const { id, title, chat, conversation, phase, drifts, machine, refs, code, texts, proposals, ...data } = a;
-  // `chat`, `conversation`, `phase`, `drifts`, `machine`, `refs`, `code`, `texts` and `proposals` are written only when set, so the other announcements look as before.
-  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(conversation ? { conversation } : {}), ...(phase ? { phase } : {}), ...(drifts.length > 0 ? { drifts } : {}), ...(machine ? { machine } : {}), ...(refs.length > 0 ? { refs } : {}), ...(code ? { code } : {}), ...(Object.keys(texts).length > 0 ? { texts } : {}), ...(proposals.length > 0 ? { proposals } : {}) }, `# ${title}\n`);
+  const { id, title, chat, conversation, phase, drifts, machine, refs, code, texts, proposals, notes, ...data } = a;
+  // `chat`, `conversation`, `phase`, `drifts`, `machine`, `refs`, `code`, `texts`, `proposals` and `notes` are written only when set, so the other announcements look as before.
+  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(conversation ? { conversation } : {}), ...(phase ? { phase } : {}), ...(drifts.length > 0 ? { drifts } : {}), ...(machine ? { machine } : {}), ...(refs.length > 0 ? { refs } : {}), ...(code ? { code } : {}), ...(Object.keys(texts).length > 0 ? { texts } : {}), ...(proposals.length > 0 ? { proposals } : {}), ...(notes.length > 0 ? { notes } : {}) }, `# ${title}\n`);
 }
 
 function remove(p: Project, id: string) {
@@ -292,6 +320,7 @@ export function announce(
     code: input.code ?? null,
     texts: input.texts ?? {},
     proposals: [],
+    notes: [],
     title,
   };
   write(p, announcement);
@@ -405,6 +434,61 @@ export function changeCheckPhase(p: Project, id: string, phase: CheckPhase, now 
   if (check.phase !== null && PHASE_RANK[check.phase] > PHASE_RANK[phase]) return "refused";
   write(p, { ...check, phase, touched: now.toISOString() });
   return "changed";
+}
+
+/**
+ * Whether an announcement belongs to the place an agent runs in: its terminal, or its Cursor conversation. An announcement
+ * of a chat that names no conversation belongs to every conversation of the project; one with a conversation, only to
+ * it. An agent with neither a terminal nor a conversation is the project's chat. These are the rules by which a
+ * terminal's or a conversation's end withdraws its announcements.
+ */
+export function ownedBy(a: Announcement, origin: AgentOrigin): boolean {
+  if (origin.terminal !== undefined) return a.terminal === origin.terminal;
+  return a.chat !== null && (a.conversation === null || a.conversation === origin.conversation);
+}
+
+/** What `declareNote` did: the announcements the note went to (in the order announced) and whether it was cut. */
+export interface DeclaredNote {
+  announcements: Announcement[];
+  truncated: boolean;
+}
+
+/**
+ * The agent declares what it is doing. With `id` the note goes to that announcement only, of any kind; without, to every
+ * announcement still waiting that belongs to the agent's terminal or conversation, a comparison excepted. The note is
+ * one line (line breaks become spaces, the ends are trimmed) of at most `NOTE_LENGTH` characters; each announcement keeps
+ * at most `MAX_NOTES`, and a note equal to the last one only renews its instant. Nothing else of the announcement changes,
+ * `touched` included. An empty note is a usage error and an unknown `id` an error; no announcement to go to is not one,
+ * and writes nothing.
+ */
+export function declareNote(p: Project, input: { id?: string; text: string } & AgentOrigin, now = new Date()): DeclaredNote {
+  let text = input.text.replace(/\s*[\r\n\u2028\u2029]+\s*/g, " ").trim();
+  if (text === "") throw new UsageError("A note cannot be empty.");
+  const chars = [...text];
+  const truncated = chars.length > NOTE_LENGTH;
+  if (truncated) text = `${chars.slice(0, NOTE_LENGTH - 1).join("")}…`;
+  const all = listAnnouncements(p);
+  let targets: Announcement[];
+  if (input.id !== undefined) {
+    const named = all.find((a) => a.id === input.id);
+    if (!named) throw new TramaError(`No announcement "${input.id}" is waiting (unknown, delivered or withdrawn); the note was not saved.`);
+    targets = [named];
+  } else {
+    // A conversation's note never reaches an announcement of another kind of chat (an agent Trama did not start).
+    targets = all.filter((a) => a.kind !== "comparison" && ownedBy(a, input) && (input.conversation === undefined || a.chat === input.chat));
+  }
+  const at = now.toISOString();
+  const announcements: Announcement[] = [];
+  for (const a of targets) {
+    // A ghost delivered or withdrawn since it was read stays gone: `write` would bring it back.
+    if (!existsSync(join(announcementsDir(p), `${a.id}.md`))) continue;
+    const last = a.notes[a.notes.length - 1];
+    const notes = last?.text === text ? [...a.notes.slice(0, -1), { at, text }] : [...a.notes, { at, text }].slice(-MAX_NOTES);
+    const noted = { ...a, notes };
+    write(p, noted);
+    announcements.push(noted);
+  }
+  return { announcements, truncated };
 }
 
 /** A check the agent finished, as the editor is told it over the local channel. */

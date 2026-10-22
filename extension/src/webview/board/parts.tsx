@@ -29,6 +29,8 @@ export interface BoardEnv {
   openProposal(proposal: string): void;
   /** Opens the whole image `name` of a Task in an editor tab. */
   openTaskImage(task: string, name: string): void;
+  /** Opens the read-only details of the ghost with this key (`AnnouncedCard.key`). */
+  openGhost(key: string): void;
 }
 
 export const BoardEnvContext = createContext<BoardEnv | null>(null);
