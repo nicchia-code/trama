@@ -85,6 +85,7 @@ export function snapshotOf(files: FileMap): Snapshot {
     proposals: [],
     resolutionDrifts: [],
     drifts: [],
+    unifiedDrifts: [],
     tasks: [],
     announcements: [],
     tasksSinceScan: 0,

@@ -60,12 +60,12 @@ export function concernSameThing(project: ProjectModel, a: string[], b: string[]
 }
 
 /**
- * The live Tasks an open Drift with these references and this origin blocks by itself, before it leaves any free: its
- * origin, and every Task that is not Done and concerns the same thing. The one rule of the blocks, also used to refuse
+ * The live Tasks an open Drift with these references and these origins blocks by itself, before it leaves any free: its
+ * origins, and every Task that is not Done and concerns the same thing. The one rule of the blocks, also used to refuse
  * a Drift that names a Task it would not block.
  */
-export function blockedByDrift(project: ProjectModel, tasks: Task[], refs: string[], origin: string | null): Task[] {
-  return tasks.filter((task) => task.data.column !== "done" && (origin === task.id || concernSameThing(project, refs, task.data.refs)));
+export function blockedByDrift(project: ProjectModel, tasks: Task[], refs: string[], origin: string[]): Task[] {
+  return tasks.filter((task) => task.data.column !== "done" && (origin.includes(task.id) || concernSameThing(project, refs, task.data.refs)));
 }
 
 /**
@@ -82,11 +82,13 @@ export function computeBlocked(project: ProjectModel, tasks: Task[], drifts: Dri
     if (drift.data.status === "open") {
       for (const task of blockedByDrift(project, tasks, drift.data.refs, drift.data.origin))
         if (!drift.data.notBlocking.some((n) => n.task === task.id)) add(task, { kind: "drift", drift: drift.id, title: drift.title });
-    } else if (drift.data.resolution === "fix-code" && drift.data.origin !== null && drift.data.task !== null) {
-      const origin = byId.get(drift.data.origin);
+    } else if (drift.data.resolution === "fix-code" && drift.data.task !== null) {
       const fix = byId.get(drift.data.task);
-      const leftFree = drift.data.notBlocking.some((n) => n.task === drift.data.origin);
-      if (origin && fix && origin.data.column !== "done" && fix.data.column !== "done" && !leftFree) add(origin, { kind: "fix", task: fix.id, title: fix.title, drift: drift.id, driftTitle: drift.title });
+      for (const id of drift.data.origin) {
+        const origin = byId.get(id);
+        const leftFree = drift.data.notBlocking.some((n) => n.task === id);
+        if (origin && fix && origin.data.column !== "done" && fix.data.column !== "done" && !leftFree) add(origin, { kind: "fix", task: fix.id, title: fix.title, drift: drift.id, driftTitle: drift.title });
+      }
     }
   }
   return blocked;

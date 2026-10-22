@@ -9,7 +9,7 @@ import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
 import { formatDiagnostic } from "../core/model";
 import { type Blocker, concernSameThing } from "../core/blocking";
 import { TramaError, UsageError } from "../core/errors";
-import { attachedDrift, BATCH_DEFAULT, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftBody, driftCandidates, driftOptions, driftSides, freedTasks, type FreedTask, getTask, listDrifts, listTasks, nextTask, type ProposalFilter, type Task, taskProgress, withoutPrepared } from "../core/work";
+import { attachedDrift, BATCH_DEFAULT, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftBody, driftCandidates, driftOptions, driftSides, freedTasks, type FreedTask, getTask, listDrifts, listTasks, nextTask, type ProposalFilter, type Task, taskProgress, unifiedCandidates, withoutPrepared } from "../core/work";
 import { type PreparedDecision, preparedFlag, type PreparedStatus, preparedStatus, preparedStatusText, unpreparedDrifts } from "../core/prepared";
 import type { Result } from "./result";
 import type { AgentOrigin } from "../core/announcements";
@@ -162,7 +162,7 @@ function withCheckNote(task: Task): string {
   return [...lines.slice(0, title + 1), "", "Closed without changes.", "", "## Check note", "", task.data.unchanged, ...lines.slice(title + 1)].join("\n");
 }
 
-const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null, freed: FreedTask[]) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, job: d.data.job, closedUnchanged: closed, notBlocking: freed.map((f) => ({ task: f.task, number: numbers.label("task", f.task), title: f.title, reason: f.reason })) });
+const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null, freed: FreedTask[]) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, unifies: d.data.unifies, unifiedInto: d.data.unifiedInto, job: d.data.job, closedUnchanged: closed, notBlocking: freed.map((f) => ({ task: f.task, number: numbers.label("task", f.task), title: f.title, reason: f.reason })) });
 
 function refsBlock(project: ProjectModel, refs: string[], full = false): string {
   return bullets(refs.map((r) => `- \`${r}\`\n${describeRef(project, r, full).split("\n").map((l) => `  > ${l}`).join("\n")}`), "_No references._");
@@ -295,16 +295,23 @@ export function driftShowView(p: Project, drift: Drift): Result {
     ? `In resolution Proposal ${numbers.name("proposal", holding.id)} ${holding.title}`
     : drift.data.resolvedBy ? `Resolved by Proposal ${numbers.name("proposal", drift.data.resolvedBy)}` : "";
   const resolutionJson = { inResolutionProposal: holding ? { id: holding.id, number: numbers.label("proposal", holding.id), title: holding.title } : null, resolvedBy: drift.data.resolvedBy };
-  // A recurring Drift names the Drift it follows. A resolved Drift has no short number, so it is named by its identity.
-  const previous = drift.data.previous;
-  const followed = previous === null ? undefined : listDrifts(p).find((d) => d.id === previous);
-  const followsLine = previous === null ? "" : `Follows Drift ${numbers.name("drift", previous)}${followed ? ` ${followed.title} (${followed.data.resolution})` : ""}`;
+  // A recurring Drift names each Drift it follows. A resolved Drift has no short number, so it is named by its identity.
+  const allDrifts = listDrifts(p);
+  const followsLines = drift.data.previous.map((id) => {
+    const followed = allDrifts.find((d) => d.id === id);
+    return `Follows Drift ${numbers.name("drift", id)}${followed ? ` ${followed.title} (${followed.data.resolution})` : ""}`;
+  });
+  const intoDrift = drift.data.unifiedInto === null ? undefined : allDrifts.find((d) => d.id === drift.data.unifiedInto);
+  const unifiedLine = drift.data.unifiedInto === null ? "" : `Unified into ${numbers.name("drift", drift.data.unifiedInto)}${intoDrift ? ` ${intoDrift.title}` : ""}`;
+  const unifiesBlock = drift.data.unifies.length === 0 ? [] : ["", "## Unifies", "", ...drift.data.unifies.map((id) => `- ${id} ${allDrifts.find((d) => d.id === id)?.title ?? "(no longer exists)"}`)];
   const md = [
     `# ${drift.title}`,
+    ...(unifiedLine === "" ? [] : [unifiedLine]),
     ...(closed ? [`Dismissed by Task ${numbers.name("task", closed.task)} without changes`] : []),
     "",
-    ...(previous === null ? [] : [followsLine, ""]),
+    ...(followsLines.length === 0 ? [] : [...followsLines, ""]),
     ...description,
+    ...unifiesBlock,
     ...(freed.length === 0 ? [] : ["", "## Not blocking", "", ...freed.map((f) => `- ${numbers.name("task", f.task)} ${f.title ?? "(no longer exists)"}: ${f.reason}`)]),
     ...decision,
     "",
@@ -337,19 +344,22 @@ export function driftListView(p: Project, all: boolean, refs: string[] = [], fil
   const drifts = filter.unprepared === true ? unpreparedDrifts(p, concerned) : concerned;
   const tasks = listTasks(p);
   const md = bullets(
-    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}] ${d.title}${d.data.previous === null ? "" : " (recurring)"}${closedUnchanged(p, d, tasks) ? " (dismissed, no changes)" : ""}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
+    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}] ${d.title}${d.data.previous.length === 0 ? "" : " (recurring)"}${d.data.unifies.length === 0 ? "" : ` (unifies ${d.data.unifies.length})`}${d.data.unifiedInto === null ? "" : ` (unified into ${numbers.name("drift", d.data.unifiedInto)})`}${closedUnchanged(p, d, tasks) ? " (dismissed, no changes)" : ""}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
     "_No Drifts._",
   );
   return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map((d) => ({ ...driftSummary(d, numbers, closedUnchanged(p, d, tasks), freedTasks(d, tasks)), prepared: preparedFlag(preparedStatus(p, d, model)) })) } };
 }
 
 /** The Tasks a new Drift with these references and this origin would block, by number or identity and title; writes nothing. */
-export function driftCandidatesView(p: Project, refs: string[], originArg: string | undefined): Result {
+export function driftCandidatesView(p: Project, refs: string[], originArg: string | undefined, unifies?: string[]): Result {
   if (refs.length === 0) throw new UsageError("Name at least one reference in `refs`");
   const numbers = syncShortNumbers(p);
   let candidates: Task[];
   try {
-    candidates = driftCandidates(p, refs, originArg === undefined ? null : getTask(p, originArg, true).id);
+    candidates =
+      unifies === undefined
+        ? driftCandidates(p, refs, originArg === undefined ? [] : [getTask(p, originArg, true).id])
+        : unifiedCandidates(p, unifies, refs);
   } catch (error) {
     if (error instanceof TramaError) throw new UsageError(error.message);
     throw error;
@@ -419,7 +429,7 @@ export function boardView(p: Project): Result {
       ...proposals.map((i) => `- Proposal ${i.number ?? i.id}${i.stale ? " (stale)" : ""}: ${i.title}${resolvesMark(i)}${nestedDrifts(i.id)}`),
       ...drifts.map((d) => {
         const nested = attachedLine(d.proposal, "  ");
-        return `- Drift ${d.number ?? d.id}: ${d.title}${d.previous === null ? "" : " (recurring)"}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
+        return `- Drift ${d.number ?? d.id}: ${d.title}${d.previous.length === 0 ? "" : " (recurring)"}${d.unifies.length === 0 ? "" : ` (unifies ${d.unifies.length})`}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
       }),
     ]),
     "",

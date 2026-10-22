@@ -75,7 +75,7 @@ export function briefingView(p: Project, b: Briefing, announcement: string): Res
 export function archiveView(p: Project, comparisonId: string, result: ArchiveResult): Result {
   const n = syncShortNumbers(p);
   const tasks = result.tasks.map((t) => ({ id: t.id, number: n.label("task", t.id), title: t.title }));
-  const drifts = result.drifts.map((d) => ({ id: d.id, number: n.label("drift", d.id), title: d.title, previous: d.data.previous }));
+  const drifts = result.drifts.map((d) => ({ id: d.id, number: n.label("drift", d.id), title: d.title, previous: d.data.previous[0] ?? null }));
   const lines = [
     ...tasks.map((t) => `- Task ${t.id}${t.number ? ` (${t.number})` : ""}: ${t.title}`),
     ...drifts.map((d) => `- Drift ${d.id}${d.number ? ` (${d.number})` : ""}: ${d.title}${d.previous === null ? "" : `; recurring, it follows Drift ${n.name("drift", d.previous)}`}`),

@@ -58,6 +58,9 @@ Una richiesta di design arriva in un solo modo: come richiesta scritta, un docum
 
 L'import dal comando Import from Code è questo Event solo con un Modello che non è vuoto; con il Modello vuoto il comando apre invece il wizard di setup (OPEN_GUIDED_SETUP). L'import che segue la conferma del wizard fa parte di quella conferma (INITIALIZE_PROJECT o CONFIRM_SETUP).
 
+### UNIFY_DRIFTS
+Il developer sceglie Unify Drifts dal menu che si apre dalla freccetta di + Add Work Item, in fondo alla colonna Backlog, per far unire dall'agente tutti i Drift aperti fuori da ogni risoluzione in un unico Drift, che poi risolve con Resolve come ogni Drift. Serve quando più Drift toccano le stesse cose o si contraddicono, e risolverli uno alla volta li farebbe tornare. Non scrive nulla prima: l'agente gli chiede soltanto i conflitti fra i Drift (vedi Drift resolution).
+
 ### OPEN_QUICK_TASK
 Il developer sceglie Add Quick Task dal menu che si apre dalla freccetta di + Add Work Item, in fondo alla colonna Backlog, per affidare all'agente un lavoro rapido e di fiducia, per esempio «committa il codice», senza richiesta scritta, senza scan e senza schede. Non scrive nulla prima: scrive direttamente nella chat che Trama apre.
 

@@ -95,7 +95,7 @@ export function createDiagramStore(): DiagramStore {
     const scene = buildScene(snapshot, proposalId);
     const level = validLevel(scene, base.level);
     const graph = buildGraph(scene, level, expanded);
-    const selected = base.selected && (graph.nodes.some((n) => n.id === base.selected) || graph.edges.some((e) => e.id === base.selected)) ? base.selected : null;
+    const selected = base.selected && (scene.unified.some((d) => `u:${d.id}` === base.selected) || graph.nodes.some((n) => n.id === base.selected) || graph.edges.some((e) => e.id === base.selected)) ? base.selected : null;
     // A focus of a Proposal that is no longer open, or of a Task that is gone, ends here.
     const spec = base.focusRequest ? focusSpec(snapshot, base.focusRequest) : null;
     return { scene, graph, level, selected, proposalId, focusRequest: spec ? base.focusRequest : null, focus: spec ? diagramFocus(scene, graph, spec) : null };
@@ -150,6 +150,7 @@ export function createDiagramStore(): DiagramStore {
    */
   function navigateDrift(id: string) {
     const now = compute();
+    if (now.scene?.unified.some((d) => d.id === id)) return redraw({ selected: `u:${id}` });
     const drift = now.scene?.drifts.find((d) => d.id === id);
     if (!now.scene || !drift) return redraw({});
     const scene = now.scene;

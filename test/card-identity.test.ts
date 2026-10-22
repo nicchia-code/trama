@@ -46,7 +46,7 @@ describe("a new card", () => {
     expect(readFileSync(join(proposal.dir, "proposal.md"), "utf8")).toContain(`created: ${proposal.data.created}`);
     expect(task.data.proposal).toBe(proposal.id);
     expect(drift.data.proposal).toBe(proposal.id);
-    expect(drift.data.origin).toBe(task.id);
+    expect(drift.data.origin).toEqual([task.id]);
     expect(getProposal(p, proposal.id).id).toBe(proposal.id);
     expect(getTask(p, task.id).data.drift).toBeNull();
   });

@@ -24,6 +24,10 @@ test("an omp Run with the Advisor Scanner on adds --advisor and its overlay, ins
   expect(agentTemplate(false, all, "posix", "/ext/omp-hook.js", "/store/launch.yml", true)).toBe("omp --hook '/ext/omp-hook.js' --advisor --config '/store/launch.yml' --model 'opus' {prompt}");
 });
 
+test("an attached instructions file goes as a quoted @file argument right before the prompt", () => {
+  expect(agentTemplate(false, all, "posix", "/ext/omp-hook.js", undefined, false, "/ext/media/unify-drifts.md")).toBe("omp --hook '/ext/omp-hook.js' --model 'opus' '@/ext/media/unify-drifts.md' {prompt}");
+});
+
 test("an overlay with only exclusions adds --config and never --advisor", () => {
   expect(agentTemplate(true, all, "posix", "/ext/omp-hook.js", "/store/launch.yml")).toBe("omp --hook '/ext/omp-hook.js' --config '/store/launch.yml' --model 'opus' --slow 'it'\\''s' {prompt}");
 });

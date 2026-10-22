@@ -115,6 +115,19 @@ describe("announcing", () => {
     expect(adopted).toMatchObject({ id: launched.id, title: "Scanning Feature order", phase: "scanning" });
     expect(listAnnouncements(p)).toHaveLength(1);
   });
+
+  test("an agent's Drift announcement takes over the one Trama announced for Unify Drifts in its terminal and keeps its title; another terminal's is left alone", () => {
+    const launched = announce(p, { kind: "drift", title: "Unifying 3 Drifts", source: "request", terminal: "ab12cd" }, t(1));
+    const foreign = announce(p, { kind: "drift", title: "Unifying 2 Drifts", source: "request", terminal: "zz99yy" }, t(2));
+    const adopted = announce(p, { kind: "drift", title: "Unifying 3 Drifts", terminal: "ab12cd" }, t(3));
+    expect(adopted).toMatchObject({ id: launched.id, title: "Unifying 3 Drifts" });
+    expect(listAnnouncements(p).map((a) => a.id).sort()).toEqual([launched.id, foreign.id].sort());
+    // An agent's Drift announced in a terminal with no Trama one is its own.
+    expect(announce(p, { kind: "drift", title: "Other", terminal: "qq11ww" }, t(4)).id).not.toBe(launched.id);
+    // The ghost Trama announced at launch is the Unify one; the agent's own Drift is a plain Drift.
+    expect(buildSnapshot(p).announcements.find((x) => x.id === launched.id)).toMatchObject({ kind: "unify", title: "Unifying 3 Drifts", phase: "preparing" });
+    expect(buildSnapshot(p).announcements.find((x) => x.title === "Other")?.kind).toBe("drift");
+  });
 });
 
 describe("a Draft and its announcement", () => {

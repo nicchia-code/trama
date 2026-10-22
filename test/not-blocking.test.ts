@@ -120,21 +120,21 @@ describe("drift candidates", () => {
     const paid = task(["order/Paid"]);
     const origin = task(["cart"]);
     const before = listDrifts(p).length;
-    expect(driftCandidates(p, ["order/Paid"], origin).map((t) => t.id).sort()).toEqual([paid, origin].sort());
-    expect(driftCandidates(p, ["order/Paid"], null).map((t) => t.id)).toEqual([paid]);
-    expect(driftCandidates(p, ["order/Shipped"], null)).toEqual([]);
+    expect(driftCandidates(p, ["order/Paid"], [origin]).map((t) => t.id).sort()).toEqual([paid, origin].sort());
+    expect(driftCandidates(p, ["order/Paid"], []).map((t) => t.id)).toEqual([paid]);
+    expect(driftCandidates(p, ["order/Shipped"], [])).toEqual([]);
     expect(listDrifts(p).length).toBe(before);
   });
 
   test("ignores the other Drifts, so a Task that another Drift blocks is still a candidate", () => {
     const paid = task(["order/Paid"]);
     drift(["order/Paid"]);
-    expect(driftCandidates(p, ["order/Paid"], null).map((t) => t.id)).toEqual([paid]);
+    expect(driftCandidates(p, ["order/Paid"], []).map((t) => t.id)).toEqual([paid]);
   });
 
   test("a reference that does not resolve, or an origin that is not a Task, is refused", () => {
-    expect(() => driftCandidates(p, ["order/Nope"], null)).toThrow();
-    expect(() => driftCandidates(p, ["order/Paid"], "zzzzzzzz")).toThrow();
+    expect(() => driftCandidates(p, ["order/Nope"], [])).toThrow();
+    expect(() => driftCandidates(p, ["order/Paid"], ["zzzzzzzz"])).toThrow();
   });
 });
 

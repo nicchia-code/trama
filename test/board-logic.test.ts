@@ -35,9 +35,9 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   specsChange: { entries: [], notesBefore: null }, scope: [],
   ...over,
 });
-const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, job: null, prepared: null, title: "Code refunds late", body: "line one\n\nline two\nline three", previous: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
+const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, job: null, prepared: null, title: "Code refunds late", body: "line one\n\nline two\nline three", previous: [], origin: [], unifies: [], unifiedInto: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", created: null, title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], file: "tasks/0012-refunds.md", images: [], ...over });
-const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
+const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], unifiedDrifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
 
 test("groups the snapshot into card columns: Backlog holds the Proposals and the Drift cards in one creation order, System Activities has no card", () => {
@@ -56,7 +56,7 @@ test("groups the snapshot into card columns: Backlog holds the Proposals and the
 });
 
 test("a handed-over resolution replaces only its listed open Drift cards", () => {
-  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0003", title: "Code refunds late", previous: null, decision: "Closed, nothing changes", note: null, notBlocking: [] }] });
+  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0003", title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", note: null, notBlocking: [] }] });
   const board = buildBoard(snapshot({ proposals: [proposal({ id: "before", created: "2026-10-01T10:00:00.000Z" }), resolution], drifts: [drift({ id: "0003", created: "2026-09-30T10:00:00.000Z" }), drift({ id: "0004", created: "2026-10-03T10:00:00.000Z" })] }));
   const cards = board[0]!.cards;
   expect(cards[1]).toMatchObject({ kind: "proposal", resolution: true, heading: "Resolution Proposal res", resolves: [{ drift: "0003" }] });
@@ -245,7 +245,7 @@ test("a Task waiting for a fix Task stays in Active with the fix Task, and no ca
 });
 
 test("the Board tab counts the Backlog cards (Proposals and red Drift cards), not Active, or the Drifts a delivered resolution lists", () => {
-  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0005", title: "Code refunds late", previous: null, decision: "Closed, nothing changes", note: null, notBlocking: [] }] });
+  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0005", title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", note: null, notBlocking: [] }] });
   const fix: TaskView["blockedBy"] = [{ kind: "fix", task: "0009", title: "Fix refunds", drift: "0004", driftTitle: "Refunds differ" }];
   const columns = buildBoard(
     snapshot({
@@ -337,7 +337,7 @@ test("a resolution's card has one row per Drift, written by number, with the dec
     snapshot({
       numbers: NUMBERS,
       proposals: [
-        proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: null, decision: "Code fixed with option Fix the code", note: "do it today", notBlocking: [] }, { drift: "0044", title: "Old", previous: null, decision: "(already resolved)", note: null, notBlocking: [] }] }),
+        proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: [], unifies: [], decision: "Code fixed with option Fix the code", note: "do it today", notBlocking: [] }, { drift: "0044", title: "Old", previous: [], unifies: [], decision: "(already resolved)", note: null, notBlocking: [] }] }),
         proposal({ id: "0009" }),
       ],
     }),
@@ -354,7 +354,7 @@ test("a resolution's card has one row per Drift, written by number, with the dec
 test("an open resolution's rows list its Drifts, and no card is made for those Drifts", () => {
   const cards = buildBoard(
     snapshot({
-      proposals: [proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: null, decision: "Code fixed with option Fix the code", note: null, notBlocking: [] }, { drift: "0044", title: "Old", previous: null, decision: "(already resolved)", note: null, notBlocking: [] }] })],
+      proposals: [proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: [], unifies: [], decision: "Code fixed with option Fix the code", note: null, notBlocking: [] }, { drift: "0044", title: "Old", previous: [], unifies: [], decision: "(already resolved)", note: null, notBlocking: [] }] })],
       drifts: [drift({ id: "0003" })],
     }),
   )[0]?.cards ?? [];

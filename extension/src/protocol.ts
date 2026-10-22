@@ -24,7 +24,9 @@ export type AgentAction =
   /** Describe the existing code as Proposals for the Model; the agent asks its questions only with `trama question new` and stops, asking the developer to open the editor, when the editor is unavailable. `excluded`: the paths the developer left out in the setup wizard (empty: import every folder); absent, the instruction says nothing about folders. */
   | { kind: "import"; excluded?: string[] }
   /** One agent resolves only `drift`, the one Drift of the card the developer pressed Resolve on. The host refuses it while a Run or a resolution is going on, when the Drift is not open or is already in a resolution, or while one resolution Proposal is still to be decided. */
-  | { kind: "resolve-drifts"; drift: string };
+  | { kind: "resolve-drifts"; drift: string }
+  /** One agent unites every open Drift that sits in no resolution into one Drift. The host rechecks the conditions at the click, gathers the Drifts only when the instruction is really sent, and refuses with the reasons of `unify.blockers` of the Snapshot message. */
+  | { kind: "unify-drifts" };
 
 /** How the setup wizard starts in a folder. */
 export type SetupChoice = "import" | "scratch";
@@ -122,8 +124,8 @@ export interface NavigateOptions {
 
 /** Host -> webview. */
 export type ToWebview =
-  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `models` carries the models chosen for the Proposals that carry Tasks. `scans.advisorScanner`: the Advisor Scanner is on, so the Scan buttons are disabled. */
-  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; drifts: Record<string, string | null>; resolving: string[] }; models: BoardModels; scans: { advisorScanner: boolean } }
+  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `unify.blockers` are all the reasons Unify Drifts is unavailable, in order (empty when it works), and `unify.unifying` the open Drifts the running Unify Drifts agent works on. `models` carries the models chosen for the Proposals that carry Tasks. `scans.advisorScanner`: the Advisor Scanner is on, so the Scan buttons are disabled. */
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; scans: { advisorScanner: boolean } }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** A Run of the chat ended without the Advisor's final review: the Board shows a notice with the reason (`ui#chat-advisor`). */

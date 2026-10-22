@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -7,20 +7,20 @@ import { TramaError, UsageError } from "../../../src/core/errors";
 import { findInstructionFiles } from "../../../src/core/instruction-files";
 import { approveProposal, getProposal, rejectProposal, resolutionHolding } from "../../../src/core/proposals";
 import { type PreparedQuestion, preparedOutcome, preparedStatus } from "../../../src/core/prepared";
-import { reworkProposalBlocker, reworkProposalDrifts, resolveDriftBlocker, resolveDriftsBlocker, runWindowBlocker, writePreparedResolution } from "../../../src/core/resolution";
+import { reworkProposalBlocker, reworkProposalDrifts, resolveDriftBlocker, resolveDriftsBlocker, runWindowBlocker, unifiableDrifts, unifyDriftsBlockers, writePreparedResolution } from "../../../src/core/resolution";
 import type { QuestionAnswer } from "../../../src/core/questions";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { namerOf } from "../../../src/core/card-names";
 import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
-import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, listDrifts, listTasks, requireNotAttached } from "../../../src/core/work";
+import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
 import type { AgentAction, SetupChoice, ToHost, ToWebview, WorkspaceFolderView } from "../protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAdvisorScanner, configuredAgent, configuredAsyncDriftResolver, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, endHeldJob, launchAgent, launched, openQuickTask, settings, startHeldJob } from "./agent";
-import { isCursor } from "./cursor";
+import { configuredAdvisorScanner, configuredAgent, configuredAsyncDriftResolver, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, launchAgent, launched, openQuickTask, settings, startHeldJob } from "./agent";
+import { bundledUnifyInstructions, isCursor } from "./cursor";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
-import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onFinalReviewMissing, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing } from "./drift-resolution";
+import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onFinalReviewMissing, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing, unifyingDrifts } from "./drift-resolution";
 import { askPreparedRound } from "./questions";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
@@ -563,7 +563,7 @@ export class Controller implements vscode.Disposable {
       const drifts = Object.fromEntries(listDrifts(project).filter((d) => d.data.status === "open").map((d) => [d.id, resolveDriftBlocker(project, work, this.namedByResolution.has(d.id), asyncResolver && snapshot.drifts.find((x) => x.id === d.id)?.prepared?.valid === true)]));
       // The open Drifts the running resolution is working on: those this window asked an agent to resolve.
       const resolving = work.resolving ? Object.keys(drifts).filter((id) => this.namedByResolution.has(id)) : [];
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }, settings().get<boolean>("submitWhileRunning", false) === true), drifts, resolving }, models, scans: { advisorScanner: configuredAdvisorScanner() } });
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }, settings().get<boolean>("submitWhileRunning", false) === true), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, scans: { advisorScanner: configuredAdvisorScanner() } });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -828,6 +828,12 @@ export class Controller implements vscode.Disposable {
     return proposalRunModel(this.modelMemory, project, getTask(project, task).data.proposal, proposalAgent());
   }
 
+  /** The model a Resolve run takes from the Proposal of a Drift's origin Tasks: for a unified Drift only when all its origins belong to that one Proposal. */
+  private runModelOfDrift(project: Project, drift: string): RunModel | undefined {
+    if (!this.modelMemory) return undefined;
+    return proposalRunModel(this.modelMemory, project, originDesign(project, getDrift(project, drift).data.origin), proposalAgent());
+  }
+
   /** The valid prepared question of an open Drift when the Async Drift Resolver is on (read now, from user settings), null otherwise. */
   private preparedQuestionOf(project: Project, drift: string): PreparedQuestion | null {
     if (!configuredAsyncDriftResolver()) return null;
@@ -947,6 +953,10 @@ export class Controller implements vscode.Disposable {
         const blocker = resolveDriftBlocker(project, driftWork(project.root), this.namedByResolution.has(action.drift), answered === undefined && feedback === undefined && this.preparedQuestionOf(project, action.drift) !== null);
         return blocker === null ? null : `Resolve this Drift is unavailable: ${blocker}.`;
       }
+      if (action.kind === "unify-drifts") {
+        const reasons = unifyDriftsBlockers(project, driftWork(project.root), driftsFinishing(project.root));
+        return reasons.length === 0 ? null : `Unify Drifts is unavailable: ${reasons.join(". ")}.`;
+      }
       if (action.kind === "scan" && configuredAdvisorScanner()) return "Scan is unavailable: the Advisor Scanner is on.";
       const isRun = action.kind === "implement" || action.kind === "implement-all";
       const submitWhileRunning = settings().get<boolean>("submitWhileRunning", false) === true;
@@ -958,13 +968,13 @@ export class Controller implements vscode.Disposable {
       }
       return null;
     };
-    const send = async (resolved: ResolvedAction, announceProposal?: DesignAnnouncement | LaunchAnnouncement, instruction: Instruction = buildPrompt(resolved), checkSend: () => string | null = () => null, model?: RunModel) => {
+    const send = async (resolved: ResolvedAction, announceProposal?: DesignAnnouncement | LaunchAnnouncement, instruction: Instruction = buildPrompt(resolved), checkSend: () => string | null = () => null, model?: RunModel, extra: LaunchJobOptions = {}) => {
       let refused: string | null = null;
       const canSend = () => (refused = refusal() ?? checkSend()) === null;
       const rememberScan = resolved.kind === "scan" && resolved.feature === undefined
         ? (startedAt: number) => rememberDeliveredScan(project, startedAt)
         : undefined;
-      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" || resolved.kind === "rework-resolution" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), severalTasks: resolved.kind === "implement-all", model });
+      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" || resolved.kind === "rework-resolution" ? "resolve" : resolved.kind === "unify-drifts" ? "unify" : resolved.kind === "scan" ? "scan" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), severalTasks: resolved.kind === "implement-all", model, ...extra });
       if (refused !== null) throw new TramaError(refused);
       return result;
     };
@@ -980,13 +990,23 @@ export class Controller implements vscode.Disposable {
           return;
         }
         const instruction = feedback !== undefined ? reworkPrompt(drift, feedback) : answered === undefined ? undefined : `${buildPrompt({ kind: "resolve-drifts", drift })} ${PREPARED_ANSWER_SENTENCE} ${JSON.stringify(answered)}.`;
-        const result = await send({ kind: "resolve-drifts", drift }, { kind: "resolve", drifts: () => [drift] }, instruction, undefined, this.runModelOfTask(project, getDrift(project, drift).data.origin));
+        const result = await send({ kind: "resolve-drifts", drift }, { kind: "resolve", drifts: () => [drift] }, instruction, undefined, this.runModelOfDrift(project, drift));
         if (launched(result)) this.namedByResolution.add(drift);
         return;
       }
       case "rework-resolution": {
-        const result = await send(action, { kind: "resolve", drifts: () => action.drifts }, undefined, undefined, this.runModelOfTask(project, getDrift(project, action.drifts[0] ?? "").data.origin));
+        const result = await send(action, { kind: "resolve", drifts: () => action.drifts }, undefined, undefined, this.runModelOfDrift(project, action.drifts[0] ?? ""));
         if (launched(result)) for (const drift of action.drifts) this.namedByResolution.add(drift);
+        return;
+      }
+      case "unify-drifts": {
+        const file = bundledUnifyInstructions();
+        if (file === undefined) throw new TramaError("Unify Drifts is unavailable: its instructions are missing from the extension's package.");
+        const text = readFileSync(file, "utf8");
+        // The Drifts are gathered each time the instruction is built, which happens only when it is really about to be sent; the card and the job use the last gathering.
+        let gathered: string[] = [];
+        const gather = (): string[] => (gathered = unifiableDrifts(project, driftsFinishing(project.root)));
+        await send({ kind: "unify-drifts", drifts: [] }, { kind: "unify", drifts: () => gathered }, () => buildPrompt({ kind: "unify-drifts", drifts: gather() }), undefined, undefined, { role: "analysis", attachment: { file, text }, drifts: () => gathered });
         return;
       }
       case "rework":

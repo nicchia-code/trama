@@ -32,6 +32,9 @@ test("the hook names the first workspace folder with a Trama Model, and keeps on
   expect(parseCursorHook(prompt("Please use the trama-design skill"))?.tramaPrompt).toBe(true);
   expect(parseCursorHook(prompt("Use the trama-req-ui skill"))?.tramaPrompt).toBe(false);
   expect(parseCursorHook(prompt("Use the trama-designer skill"))?.tramaPrompt).toBe(false);
+  expect(parseCursorHook(prompt("Trama: Unify Drifts\n\nUnite the Drifts into one.\n\nUnify the open Drifts `a`, `b`."))?.tramaPrompt).toBe(true);
+  expect(parseCursorHook(prompt("Trama: Unify Drifts\r\n\r\nUnite the Drifts."))?.tramaPrompt).toBe(true);
+  expect(parseCursorHook(prompt("Please read Trama: Unify Drifts and more"))?.tramaPrompt).toBe(false);
   expect(parseCursorHook({ ...prompt("x"), workspace_roots: [join(root, "other")] })).toBeNull();
   expect(parseCursorHook({ ...prompt("x"), hook_event_name: "notAHook" })).toBeNull();
 });

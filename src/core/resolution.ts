@@ -3,7 +3,7 @@ import { joinReasons } from "./design";
 import { copyProposalFiles, type DriftDecision, type DriftDecisionKind, discardProposal, getProposal, listProposals, newProposal, type Proposal, requireEditable, resolutionHolding, save, submitProposal, touch, withProposalLock } from "./proposals";
 import { cardName } from "./short-numbers";
 import type { Project } from "./store";
-import { chosenOption, driftOptions, fixCodeRefusal, followedDrift, type FreedTask, freedTasks, getDrift, listDrifts, listTasks } from "./work";
+import { chosenOption, driftOptions, fixCodeRefusal, followedDrifts, type FreedTask, freedTasks, getDrift, listDrifts, listTasks, unifiedDrifts } from "./work";
 
 /**
  * Records, replaces or (`remove`) removes the decision on `driftId` in a resolution Proposal, a Draft or an open one;
@@ -97,6 +97,29 @@ export function resolveDriftBlocker(p: Project, work: WindowWork, agentOnIt: boo
 }
 
 /**
+ * The Drifts Unify Drifts would unite now, in creation order: open, in no resolution being written or open (a prepared one
+ * included), and not held by the turn of the agent that filed them (`finishing`).
+ */
+export function unifiableDrifts(p: Project, finishing: readonly string[] = []): string[] {
+  return listDrifts(p).filter((d) => d.data.status === "open" && !finishing.includes(d.id) && resolutionHolding(p, d.id) === null).map((d) => d.id);
+}
+
+/**
+ * Why Unify Drifts cannot be launched now: every reason that holds, in order (Drifts are being resolved, a run in progress,
+ * the resolution Proposal awaiting a decision, fewer than two Drifts to unify). Empty when it works. `work` is what holds in this window;
+ * a run counts even with `trama.submitWhileRunning` on.
+ */
+export function unifyDriftsBlockers(p: Project, work: WindowWork, finishing: readonly string[] = []): string[] {
+  const awaiting = awaitingResolution(p);
+  return [
+    work.resolving ? "Drifts are being resolved" : null,
+    work.running ? "A run is in progress" : null,
+    awaiting ? `Proposal ${cardName(p, "proposal", awaiting.id)} resolving Drifts awaits a decision` : null,
+    unifiableDrifts(p, finishing).length < 2 ? "Unify needs at least two open Drifts" : null,
+  ].filter((reason): reason is string => reason !== null);
+}
+
+/**
  * Why Rework with feedback on the open resolution `proposal` cannot be launched now, or null: it is not an open resolution,
  * Drifts are being resolved, a run is in progress, or another resolution (not born from a prepared question) awaits a decision.
  */
@@ -179,7 +202,9 @@ export interface ResolvedDrift {
   drift: string;
   title: string;
   /** The Drift this one follows, when it is recurring. */
-  previous: { id: string; title: string } | null;
+  previous: { id: string; title: string }[];
+  /** The Drifts a unified Drift merged, in creation order; empty for any other Drift. */
+  unifies: { id: string; title: string }[];
   decision: string;
   note: string | null;
   /** The Tasks the Drift leaves free, each with its reason: the card shows them under the row. */
@@ -194,6 +219,6 @@ export function resolvedDrifts(p: Project, proposal: Proposal): ResolvedDrift[] 
     if (!d) return [];
     const already = drift.data.status === "resolved" && drift.data.resolvedBy !== proposal.id;
     const option = d.option === undefined ? undefined : driftOptions(drift)[d.option - 1]?.title;
-    return [{ drift: drift.id, title: drift.title, previous: followedDrift(p, drift), decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null), notBlocking: freedTasks(drift, tasks) }];
+    return [{ drift: drift.id, title: drift.title, previous: followedDrifts(p, drift), unifies: unifiedDrifts(p, drift), decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null), notBlocking: freedTasks(drift, tasks) }];
   });
 }

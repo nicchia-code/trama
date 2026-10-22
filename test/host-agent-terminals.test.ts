@@ -13,7 +13,7 @@ import { newProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { announcedGhosts, GHOST_COLUMN } from "../extension/src/webview/board/logic";
 import { projectAt } from "../src/core/store";
-import { dismissDrift, getTask, listTasks, moveTask, newDrift, newTask } from "../src/core/work";
+import { dismissDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask } from "../src/core/work";
 import { FIX_OPTIONS } from "./fix-options";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
 import type { AgentAction } from "../extension/src/protocol";
@@ -2893,6 +2893,154 @@ describe("the minute timer of the execution check", () => {
       vi.useRealTimers();
       for (const earlier of terminals) listeners.close.forEach((listener) => listener(earlier));
       watching.dispose();
+    }
+  });
+});
+
+describe("Unify Drifts", () => {
+  const instructions = "Trama: Unify Drifts\n\nUnite the Drifts into one.\n";
+  /** A copy of the shop project with the extension's package beside it: the hook module and the instructions file. */
+  const setUp = (analysis: string) => {
+    const root = mkdtempSync(join(tmpdir(), "trama-unify-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    extensionPath = join(root, "ext");
+    mkdirSync(join(extensionPath, "dist"), { recursive: true });
+    mkdirSync(join(extensionPath, "media"), { recursive: true });
+    writeFileSync(join(extensionPath, "dist", "omp-hook.js"), "");
+    writeFileSync(join(extensionPath, "media", "unify-drifts.md"), instructions);
+    settingValues["analysis"] = analysis;
+    settingValues["execution"] = "haiku";
+    const p = projectAt(root);
+    const drift = (title: string) => newDrift(p, { where: "src/refund.ts", title, refs: ["order"], happens: "Code does it.", should: "Model says so.", options: FIX_OPTIONS }).id;
+    return { root, p, drift };
+  };
+  const tearDown = (root: string) => {
+    extensionPath = "";
+    settingValues["agent"] = "omp";
+    delete settingValues["analysis"];
+    delete settingValues["execution"];
+    editor.appName = "Visual Studio Code";
+    commandHandler = () => undefined;
+    rmSync(root, { recursive: true, force: true });
+  };
+
+  test("omp gets the terminal Unify on the analysis model, the instructions file as @file and the one-line instruction; the job counts as a resolution", async () => {
+    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
+    const { Controller } = await import("../extension/src/host/controller");
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { driftWork, unifyingDrifts } = await import("../extension/src/host/drift-resolution");
+    const { unifyDriftsBlockers } = await import("../src/core/resolution");
+    const watching = watchAgentTerminal();
+    const { root, p, drift } = setUp("opus");
+    settingValues["agent"] = "omp";
+    const terminalCount = terminals.length;
+    const controller = new Controller({ scheme: "file" } as never);
+    const launch = controller as unknown as { launchAction(project: Project, action: AgentAction): Promise<void> };
+    try {
+      const [a, b, c] = [drift("A"), drift("B"), drift("C")] as [string, string, string];
+      expect(unifyDriftsBlockers(p, driftWork(root))).toEqual([]);
+      await launch.launchAction(p, { kind: "unify-drifts" });
+
+      const terminal = terminals.at(-1) as FakeTerminal;
+      expect(terminals).toHaveLength(terminalCount + 1);
+      expect(created.at(-1)?.name).toBe("Unify");
+      expect(environments.at(-1)?.["TRAMA_JOB"]).toBeDefined();
+      const file = join(extensionPath, "media", "unify-drifts.md");
+      expect(terminal.line).toContain(`omp --hook '${join(extensionPath, "dist", "omp-hook.js")}' --model 'opus' '@${file}' 'Unify the open Drifts \`${a}\`, \`${b}\`, \`${c}\` into one Drift, following the instructions above. Run at most 20 sub-agents at once.`);
+      expect(terminal.line).not.toContain("--slow");
+
+      const ghost = listAnnouncements(p).find((x) => x.kind === "drift");
+      expect(ghost?.title).toBe("Unifying 3 Drifts");
+      expect(ghost?.terminal).toBe(environments.at(-1)?.["TRAMA_TERMINAL"]);
+
+      // The job counts as a resolution: the Drifts it gathered are marked and nothing else that resolves or runs can start.
+      expect(driftWork(root).resolving).toBe(true);
+      expect(unifyingDrifts(root)).toEqual([a, b, c]);
+      expect(unifyDriftsBlockers(p, driftWork(root))[0]).toBe("Drifts are being resolved");
+      await expect(launch.launchAction(p, { kind: "unify-drifts" })).rejects.toThrow("Unify Drifts is unavailable: Drifts are being resolved");
+      await expect(launch.launchAction(p, { kind: "resolve-drifts", drift: a })).rejects.toThrow("Resolve this Drift is unavailable: Drifts are being resolved");
+      expect(terminals).toHaveLength(terminalCount + 1);
+
+      // It ends as a resolution does, and changes no Drift.
+      listeners.close.forEach((fn) => fn(terminal));
+      expect(driftWork(root).resolving).toBe(false);
+      expect(unifyingDrifts(root)).toEqual([]);
+      expect(listDrifts(p).map((d) => d.data.status)).toEqual(["open", "open", "open"]);
+    } finally {
+      for (const terminal of terminals.slice(terminalCount)) listeners.close.forEach((fn) => fn(terminal));
+      watching.dispose();
+      controller.dispose();
+      tearDown(root);
+    }
+  });
+
+  test("it is refused with fewer than two eligible Drifts, and no terminal, job or card is left", async () => {
+    const { Controller } = await import("../extension/src/host/controller");
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { driftWork } = await import("../extension/src/host/drift-resolution");
+    const { unifyDriftsBlockers } = await import("../src/core/resolution");
+    const watching = watchAgentTerminal();
+    const { root, p, drift } = setUp("");
+    settingValues["agent"] = "omp";
+    const terminalCount = terminals.length;
+    const controller = new Controller({ scheme: "file" } as never);
+    const launch = controller as unknown as { launchAction(project: Project, action: AgentAction): Promise<void> };
+    try {
+      await expect(launch.launchAction(p, { kind: "unify-drifts" })).rejects.toThrow("Unify Drifts is unavailable: Unify needs at least two open Drifts.");
+      drift("Only");
+      expect(unifyDriftsBlockers(p, driftWork(root))).toEqual(["Unify needs at least two open Drifts"]);
+      await expect(launch.launchAction(p, { kind: "unify-drifts" })).rejects.toThrow("Unify needs at least two open Drifts");
+      // A Drift an agent filed in a turn that has not ended does not count.
+      const second = drift("Second");
+      expect(unifyDriftsBlockers(p, driftWork(root), [second])).toEqual(["Unify needs at least two open Drifts"]);
+      expect(unifyDriftsBlockers(p, driftWork(root))).toEqual([]);
+      expect(terminals).toHaveLength(terminalCount);
+      expect(driftWork(root).resolving).toBe(false);
+      expect(listAnnouncements(p)).toEqual([]);
+    } finally {
+      watching.dispose();
+      controller.dispose();
+      tearDown(root);
+    }
+  });
+
+  test("Cursor's chat gets the instructions text, a blank line, then the Drifts line and the usual lines, on the analysis model; elsewhere the full text goes to the clipboard and nothing starts", async () => {
+    const { Controller } = await import("../extension/src/host/controller");
+    const { checkChatJobs } = await import("../extension/src/host/agent");
+    const { driftWork, unifyingDrifts } = await import("../extension/src/host/drift-resolution");
+    const { root, p, drift } = setUp("opus");
+    const controller = new Controller({ scheme: "file" } as never);
+    const launch = controller as unknown as { launchAction(project: Project, action: AgentAction): Promise<void> };
+    try {
+      const [a, b] = [drift("A"), drift("B")] as [string, string];
+      const line = `Unify the open Drifts \`${a}\`, \`${b}\` into one Drift, following the instructions above. Run at most 20 sub-agents at once.`;
+
+      editor.appName = "Visual Studio Code";
+      settingValues["agent"] = "cursor";
+      clipboard.length = 0;
+      await launch.launchAction(p, { kind: "unify-drifts" });
+      expect(clipboard).toEqual([`${instructions.trimEnd()}\n\n${line} ${ASK_DEVELOPER_SENTENCE}`]);
+      expect(driftWork(root).resolving).toBe(false);
+      expect(listAnnouncements(p)).toEqual([]);
+
+      editor.appName = "Cursor";
+      let sent: { partialState: { text: string; modelConfig?: { modelName: string } } } | undefined;
+      commandHandler = (id, ...args) => {
+        if (id === "composer.createNew") sent = args[0] as typeof sent;
+        return { composerId: "c" };
+      };
+      await launch.launchAction(p, { kind: "unify-drifts" });
+      expect(sent?.partialState.text).toBe(`${instructions.trimEnd()}\n\n${line}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(sent?.partialState.modelConfig?.modelName).toBe("opus");
+      expect(listAnnouncements(p).find((x) => x.kind === "drift")?.title).toBe("Unifying 2 Drifts");
+      expect(driftWork(root).resolving).toBe(true);
+      expect(unifyingDrifts(root)).toEqual([a, b]);
+      checkChatJobs(Date.now() + 120_000);
+      expect(driftWork(root).resolving).toBe(false);
+    } finally {
+      withdrawAll(p);
+      controller.dispose();
+      tearDown(root);
     }
   });
 });

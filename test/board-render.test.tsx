@@ -83,7 +83,7 @@ const task: TaskCard = {
   blockedBy: [], body: "", images: [], file: "task.md", column: "todo", finishing: null, views: { diagram: false, requirements: false },
 };
 const resolved = (over: Partial<ProposalCard["resolves"][number]> = {}): ProposalCard["resolves"][number] => ({
-  drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", previous: null, decision: "Closed, nothing changes", blocked: [], notBlocking: [], ...over,
+  drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", blocked: [], notBlocking: [], ...over,
 });
 
 describe("Board card rendering", () => {
@@ -130,7 +130,7 @@ describe("Board card rendering", () => {
           ...proposal, heading: "Resolution Proposal P2", resolution: true, blocker: null,
           resolves: [
             resolved(),
-            resolved({ drift: "again", name: { text: "D5", isNumber: true }, title: "Again", previous: { id: "0001", title: "Earlier" } }),
+            resolved({ drift: "again", name: { text: "D5", isNumber: true }, title: "Again", previous: [{ id: "0001", title: "Earlier" }] }),
             resolved({ drift: "failed", name: { text: "D6", isNumber: true }, title: "Refunds" }),
             resolved({ drift: "free", name: { text: "D7", isNumber: true }, title: "Free", notBlocking: [{ name: { text: "T2", isNumber: true }, reason: "Only the wording." }] }),
           ],
@@ -165,10 +165,10 @@ describe("Board card rendering", () => {
   });
 
   test("a Drift card shows its two sides and Resolve and Dismiss ask the host", () => {
-    const drift: DriftView = { id: "liveDrift", created: null, job: null, prepared: null, title: "Code refunds late", body: "", previous: null, refs: ["order/Shipped"], proposal: null, sides: { happens: "It refunds late.", should: "It refunds at once.", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [] };
+    const drift: DriftView = { id: "liveDrift", created: null, job: null, prepared: null, title: "Code refunds late", body: "", previous: [], origin: [], unifies: [], unifiedInto: null, refs: ["order/Shipped"], proposal: null, sides: { happens: "It refunds late.", should: "It refunds at once.", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [] };
     const calls = draw(
       <CardView
-        card={{ kind: "drift", key: "drift:liveDrift", id: "liveDrift", name: { text: "D4", isNumber: true }, heading: "Drift D4", title: "Code refunds late", refs: ["order/Shipped"], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: true, resolveBlocker: null, blocked: [], notBlocking: [] }}
+        card={{ kind: "drift", key: "drift:liveDrift", id: "liveDrift", name: { text: "D4", isNumber: true }, heading: "Drift D4", title: "Code refunds late", refs: ["order/Shipped"], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: true, unifying: false, resolveBlocker: null, blocked: [], notBlocking: [] }}
       />,
       { isExpanded: () => true },
     );
@@ -192,8 +192,8 @@ describe("Board card rendering", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rework with feedback…" }));
     expect(calls.posted).toEqual([{ type: "reworkProposal", proposal: "live" }]);
     cleanup();
-    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: null } as unknown as DriftView;
-    const more = draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, resolveBlocker: null, blocked: [], notBlocking: [] }} />);
+    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [] } as unknown as DriftView;
+    const more = draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, unifying: false, resolveBlocker: null, blocked: [], notBlocking: [] }} />);
     const driftArrow = screen.getByRole("button", { name: "More ways to handle D1" });
     driftArrow.focus();
     fireEvent.keyDown(driftArrow, { key: "Enter" });
@@ -210,9 +210,9 @@ describe("Board card rendering", () => {
   });
 
   test("a Drift's chips go to Requirements, Specs or the diagram with the tooltip that says so, each with the focus of its reference", () => {
-    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: null } as unknown as DriftView;
+    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [] } as unknown as DriftView;
     const refs = ["requirements/ui#focus", "specs#frameworks", "order/Paid"];
-    const calls = draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs, proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, resolveBlocker: null, blocked: [], notBlocking: [] }} />, { isExpanded: () => true });
+    const calls = draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs, proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, unifying: false, resolveBlocker: null, blocked: [], notBlocking: [] }} />, { isExpanded: () => true });
     expect(refs.map((ref) => screen.getByRole("button", { name: ref }).getAttribute("aria-description"))).toEqual(["Show requirements/ui#focus in Requirements", "Show specs#frameworks in Specs", "Show order/Paid on the diagram"]);
     for (const ref of refs) fireEvent.click(screen.getByRole("button", { name: ref }));
     expect(calls.navigated).toEqual([
@@ -236,8 +236,8 @@ describe("Board card rendering", () => {
   });
 
   test("a Drift's Dismiss that cannot be used is disabled with its reason as accessible description", () => {
-    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: null } as unknown as DriftView;
-    draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null, drift, dismissBlocker: "An agent is resolving Drifts", reworkBlocker: "An agent is resolving Drifts. Drifts are being resolved", resolving: false, resolveBlocker: "Drifts are being resolved", blocked: [], notBlocking: [] }} />);
+    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [] } as unknown as DriftView;
+    draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null, drift, dismissBlocker: "An agent is resolving Drifts", reworkBlocker: "An agent is resolving Drifts. Drifts are being resolved", resolving: false, unifying: false, resolveBlocker: "Drifts are being resolved", blocked: [], notBlocking: [] }} />);
     const dismiss = screen.getByRole("button", { name: "Dismiss Drift" }) as HTMLButtonElement;
     expect([dismiss.disabled, dismiss.getAttribute("aria-description")]).toEqual([true, "An agent is resolving Drifts"]);
     const resolve = screen.getByRole("button", { name: "Resolve Drift D1" }) as HTMLButtonElement;
@@ -245,8 +245,8 @@ describe("Board card rendering", () => {
   });
 
   test("a Drift card is closed until Show details, which names the Drift and asks the page to toggle", () => {
-    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: null } as unknown as DriftView;
-    const calls = draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: ["order/Paid"], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, resolveBlocker: null, blocked: [], notBlocking: [] }} />);
+    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [] } as unknown as DriftView;
+    const calls = draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: ["order/Paid"], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, unifying: false, resolveBlocker: null, blocked: [], notBlocking: [] }} />);
     expect(screen.queryByRole("button", { name: "order/Paid" })).toBeNull();
     const toggle = screen.getByRole("button", { name: "Show details of drift D1" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
@@ -255,8 +255,8 @@ describe("Board card rendering", () => {
   });
 
   test("a Drift card's details run chips, then the two sides, then the Not blocking line, with its accessible reason", () => {
-    const drift: DriftView = { id: "d", created: null, job: null, prepared: null, title: "T", body: "", previous: null, refs: ["order/Paid"], proposal: null, sides: { happens: "It refunds late.", should: "It refunds at once.", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [] };
-    draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: ["order/Paid"], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, resolveBlocker: null, blocked: [], notBlocking: [{ name: { text: "T2", isNumber: true }, reason: "Only the wording." }] }} />, { isExpanded: () => true });
+    const drift: DriftView = { id: "d", created: null, job: null, prepared: null, title: "T", body: "", previous: [], origin: [], unifies: [], unifiedInto: null, refs: ["order/Paid"], proposal: null, sides: { happens: "It refunds late.", should: "It refunds at once.", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [] };
+    draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: ["order/Paid"], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, unifying: false, resolveBlocker: null, blocked: [], notBlocking: [{ name: { text: "T2", isNumber: true }, reason: "Only the wording." }] }} />, { isExpanded: () => true });
     const chip = screen.getByRole("button", { name: "order/Paid" });
     const sides = screen.getByText("What happens");
     const free = screen.getByRole("img", { name: "Not blocked by this Drift: Only the wording." });
@@ -266,8 +266,8 @@ describe("Board card rendering", () => {
   });
 
   test("a Drift without references or free Tasks has neither the chip row nor the Not blocking line", () => {
-    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: null } as unknown as DriftView;
-    draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, resolveBlocker: null, blocked: [], notBlocking: [] }} />);
+    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [] } as unknown as DriftView;
+    draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, unifying: false, resolveBlocker: null, blocked: [], notBlocking: [] }} />);
     expect(screen.queryByText(/Not blocking/)).toBeNull();
     expect(screen.queryByRole("button", { name: "order/Paid" })).toBeNull();
   });
@@ -447,8 +447,8 @@ const proposalView = (over: Partial<ProposalView> = {}): ProposalView => ({
   tasks: [{ id: "t1", title: "Do it", refs: [], technical: true, body: "", images: [] }], removals: [], changes: [], machines: [], actors: [], areas: [], specs: EMPTY_SPECS, specsChange: { entries: [], notesBefore: null }, scope: [], ...over,
 });
 const taskView = (over: Partial<TaskView> = {}): TaskView => ({ id: "liveTask", created: "2026-10-01T10:00:00.000Z", title: "A task", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], file: "tasks/liveTask.md", images: [], ...over });
-const driftView = (over: Partial<DriftView> = {}): DriftView => ({ id: "liveDrift", created: "2026-10-01T10:00:00.000Z", job: null, prepared: null, title: "Code refunds late", body: "", previous: null, refs: [], proposal: null, sides: { happens: "A", should: "B", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
-const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
+const driftView = (over: Partial<DriftView> = {}): DriftView => ({ id: "liveDrift", created: "2026-10-01T10:00:00.000Z", job: null, prepared: null, title: "Code refunds late", body: "", previous: [], origin: [], unifies: [], unifiedInto: null, refs: [], proposal: null, sides: { happens: "A", should: "B", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
+const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], unifiedDrifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
 
 function page(snap: Snapshot | null, over: Partial<BoardPageProps> = {}) {
   const posted: ToHost[] = [];
@@ -482,6 +482,20 @@ describe("The Board page", () => {
     expect(posted).toEqual([{ type: "writeDesignRequest" }, { type: "launch", action: { kind: "implement-all" } }, { type: "launch", action: { kind: "scan" } }]);
   });
 
+  test("Add Work Item fills the column without the main part taking the whole row, and the arrow never shrinks", () => {
+    page(snapshot());
+    const arrow = screen.getByRole("button", { name: "More ways to add work" });
+    const main = screen.getByRole("button", { name: "Add Work Item" });
+    expect(arrow.parentElement?.className).toContain("w-full");
+    expect(main.className).toContain("flex-1");
+    expect(main.className).toContain("min-w-0");
+    expect(main.className).not.toContain("w-full");
+    expect(main.className.split(" ")).not.toContain("shrink-0");
+    expect(arrow.className).toContain("shrink-0");
+    expect(main.className).toContain("border-dashed");
+    expect(arrow.className).toContain("border-dashed");
+  });
+
   test("the arrow of Add Work Item opens a menu with Add Quick Task, which asks the host and closes the menu", async () => {
     const { posted } = page(snapshot());
     const arrow = screen.getByRole("button", { name: "More ways to add work" }) as HTMLButtonElement;
@@ -492,6 +506,80 @@ describe("The Board page", () => {
     fireEvent.click(item);
     expect(posted).toEqual([{ type: "openQuickTask" }]);
     await waitFor(() => expect(screen.queryByRole("menuitem")).toBeNull());
+  });
+
+  const openMenu = async () => {
+    const arrow = screen.getByRole("button", { name: "More ways to add work" });
+    arrow.focus();
+    fireEvent.keyDown(arrow, { key: "Enter" });
+    await screen.findByRole("menuitem", { name: "Add Quick Task" });
+  };
+
+  test("the menu of Add Work Item has Unify Drifts and Add Quick Task, in this order", async () => {
+    page(snapshot());
+    await openMenu();
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Unify Drifts", "Add Quick Task"]);
+  });
+
+  test("an enabled Unify Drifts closes the menu and asks the host to launch it", async () => {
+    const { posted } = page(snapshot());
+    await openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unify Drifts" }));
+    expect(posted).toEqual([{ type: "launch", action: { kind: "unify-drifts" } }]);
+    await waitFor(() => expect(screen.queryByRole("menuitem")).toBeNull());
+  });
+
+  test("a disabled Unify Drifts shows every reason, stays in the menu and sends nothing; Add Quick Task still works", async () => {
+    const { posted } = page(snapshot(), { unify: { blockers: ["Drifts are being resolved", "Unify needs at least two open Drifts"], unifying: [] } });
+    const arrow = screen.getByRole("button", { name: "More ways to add work" }) as HTMLButtonElement;
+    expect(arrow.disabled).toBe(false);
+    await openMenu();
+    const item = screen.getByRole("menuitem", { name: "Unify Drifts" });
+    expect([item.getAttribute("aria-disabled"), item.getAttribute("aria-description")]).toEqual(["true", "Drifts are being resolved. Unify needs at least two open Drifts"]);
+    fireEvent.click(item);
+    expect(screen.getByRole("menuitem", { name: "Add Quick Task" })).not.toBeNull();
+    expect(posted).toEqual([]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add Quick Task" }));
+    expect(posted).toEqual([{ type: "openQuickTask" }]);
+  });
+
+  test("the Unify Drifts ghost has the Unify type, its title and the accessible name of its phase", () => {
+    page(snapshot({ announcements: [{ id: "u00001", kind: "unify", title: "Unifying 3 Drifts", phase: "writing-proposal" }] }));
+    const ghost = screen.getByRole("img", { name: "Agent unifying Drifts: Unifying 3 Drifts, Writing" });
+    expect(ghost.textContent).toContain("Unify");
+    expect(ghost.textContent).toContain("Unifying 3 Drifts");
+  });
+
+  test("while the agent unifies, its cards wear Unifying and Resolve says why, with the host's reason after", () => {
+    const { posted } = page(snapshot({ drifts: [driftView(), driftView({ id: "other", created: "2026-10-02T10:00:00.000Z", title: "Other" })] }), {
+      resolve: { blocker: "Drifts are being resolved", runReason: "Drifts are being resolved", drifts: { liveDrift: "Drifts are being resolved", other: "Drifts are being resolved" }, resolving: [] },
+      unify: { blockers: ["Drifts are being resolved"], unifying: ["liveDrift"] },
+    });
+    expect(screen.getAllByRole("img", { name: "An agent is unifying this Drift" }).length).toBe(1);
+    const gathered = screen.getAllByRole("button", { name: /^Resolve Drift/ })[0] as HTMLButtonElement;
+    expect([gathered.disabled, gathered.getAttribute("aria-description")]).toEqual([true, "An agent is unifying this Drift. Drifts are being resolved"]);
+    const free = screen.getAllByRole("button", { name: /^Resolve Drift/ })[1] as HTMLButtonElement;
+    expect(free.getAttribute("aria-description")).toBe("Drifts are being resolved");
+    const dismiss = screen.getAllByRole("button", { name: "More ways to handle D4" })[0] as HTMLButtonElement;
+    expect(dismiss.getAttribute("aria-description")).toContain("An agent is resolving Drifts");
+    fireEvent.click(gathered);
+    expect(posted).toEqual([]);
+  });
+
+  test("a unified Drift has the unified badge before recurring, and its details list the Drifts it unifies", () => {
+    const calls: unknown[][] = [];
+    page(snapshot({ drifts: [driftView({ unifies: [{ id: "oldA", title: "Old A" }, { id: "oldB", title: "Old B" }], previous: [{ id: "p1", title: "P1", decision: "fix-code" }, { id: "p2", title: "P2", decision: null }] })] }), {
+      context: { post: () => {}, navigate: (...args: unknown[]) => calls.push(args), openLink: () => {} } as BoardPageProps["context"],
+    });
+    const badges = screen.getAllByRole("img", { hidden: true }).length;
+    expect(badges).toBeGreaterThan(0);
+    const badge = screen.getByLabelText("Unifies 2 Drifts");
+    expect(badge.textContent).toBe("unified");
+    expect(badge.nextElementSibling?.getAttribute("aria-label")).toBe("Recurring: follows 2 Drifts");
+    fireEvent.click(screen.getByRole("button", { name: /Show details/ }));
+    const row = screen.getByRole("button", { name: /Old A/ });
+    fireEvent.click(row);
+    expect(calls).toEqual([["diagram", { drift: "oldA" }]]);
   });
 
   test("the arrow of Add Work Item says whether its menu is open", async () => {

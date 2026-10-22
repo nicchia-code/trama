@@ -6,7 +6,7 @@ import { filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-ch
 import { syncShortNumbers } from "../../core/short-numbers";
 import { recordTiming } from "../../core/timings";
 import { editDrift, preparedFlag, preparedStatus } from "../../core/prepared";
-import { getDrift, getTask, newDrift, resolveDrift } from "../../core/work";
+import { getDrift, getTask, newDrift, newUnifiedDrift, resolveDrift } from "../../core/work";
 import type { Context } from "../context";
 import { defineCommand } from "../registry";
 import { text } from "../result";
@@ -23,9 +23,9 @@ const create = defineCommand({
   object: "drift",
   verb: "new",
   mode: "immediate",
-  summary: "Record an open Drift, or list the Tasks a new one would block.",
+  summary: "Record an open Drift, unify open Drifts into one, or list the Tasks a new one would block.",
   description:
-    "`happens` (what the code does, in terms of behaviour) and `should` (what the Model or Requirement says) are short Markdown; `where` is required and says where in the code the difference was seen (read that code before filing; files and code names go only there). `options` are from two to five fix options, the first being the one you recommend; without options the Drift is accepted only with an attached `proposal`. `task` names the Task you were implementing when you found the difference (the origin). `previous` is the resolved Drift this one follows. `notBlocking` names Tasks the Drift would block and leaves free, each with a one-line `reason`: the difference does not touch it (see `dryRun`). `announcement` is the ID printed by `trama announcement new`. With `dryRun: true` nothing is written: it prints the Tasks a Drift with these `refs` and this `task` would block, by number or identity and title; only `refs` and `task` are needed then.",
+    "`happens` (what the code does, in terms of behaviour) and `should` (what the Model or Requirement says) are short Markdown; `where` is required and says where in the code the difference was seen (read that code before filing; files and code names go only there). `options` are from two to five fix options, the first being the one you recommend; without options the Drift is accepted only with an attached `proposal`. `task` names the Task you were implementing when you found the difference (the origin). `previous` is the resolved Drift this one follows. `notBlocking` names Tasks the Drift would block and leaves free, each with a one-line `reason`: the difference does not touch it (see `dryRun`). `announcement` is the ID printed by `trama announcement new`. `unifies` (Unify Drifts) names at least two open Drifts, by ID or short number, that this Drift merges: in the same step each becomes resolved as `unified` into the new Drift, loses its short number and prepared question, and its attached Proposal, in writing or open, is discarded; the new Drift has one `happens` and one `should` that tell all their differences, `refs` that cover all their elements and fix `options` that hold for all of them together, and takes their origins and precedents by itself, so `task` and `previous` are refused with it. It is refused, writing nothing and naming every problem, when a Drift is missing, repeated, not open or in a resolution being written or open, or when `proposal` is attached to one of them. With `dryRun: true` nothing is written: it prints the Tasks a Drift with these `refs` and this `task` (or these `unifies`, their origins included) would block, by number or identity and title; only `refs` and `task` (or `unifies`) are needed then.",
   input: z
     .strictObject({
       title: z.string().min(1).optional().describe("A short title: at most five words. Required unless `dryRun`."),
@@ -36,17 +36,20 @@ const create = defineCommand({
       options: z.array(z.strictObject({ title: z.string().describe("A few words naming this way to fix the code."), text: z.string().describe("What changes and what it costs.") })).optional().describe("From 2 to 5 fix options, the recommended one first; none only with `proposal`."),
       task: z.string().min(1).optional().describe("The Task being implemented when the Drift was found: its ID or short number."),
       proposal: z.string().min(1).optional().describe("The Draft or open Proposal that goes with the Drift: its ID or short number."),
-      previous: z.string().min(1).optional().describe("The resolved Drift this one follows: its ID or short number."),
+      previous: z.string().min(1).optional().describe("The resolved Drift this one follows: its ID or short number. Not with `unifies`."),
       notBlocking: z.array(z.strictObject({ task: z.string().min(1).describe("The Task, by ID or short number."), reason: z.string().describe("Why the difference does not touch it, on one line.") })).optional().describe("Tasks the Drift would block and leaves free."),
       announcement: z.string().min(1).optional().describe("The announcement of this Drift."),
+      unifies: z.array(z.string().min(1)).optional().describe("Unify Drifts: the open Drifts, by ID or short number, this Drift merges and closes as `unified`. At least two, none repeated, none in a resolution being written or open. Not with `task` or `previous`: Trama works them out."),
       dryRun: z.boolean().optional().describe("Write nothing: print the Tasks the Drift would block."),
     })
     .superRefine((input, ctx) => {
+      if (input.unifies !== undefined)
+        for (const field of ["task", "previous"] as const) if (input[field] !== undefined) ctx.addIssue({ code: "custom", path: [field], message: "not allowed with `unifies`: Trama works the origins and precedents out from the unified Drifts" });
       if (input.dryRun === true) return;
       for (const field of ["title", "happens", "should", "where"] as const) if (input[field] === undefined) ctx.addIssue({ code: "custom", path: [field], message: "required" });
     }),
   output: z.union([
-    card.extend({ path: z.string(), previous: z.string().nullable(), note: z.string().optional().describe("About the announcement, when it was not known.") }),
+    card.extend({ path: z.string(), previous: z.array(z.string()), unified: z.array(z.string()).describe("The Drifts a unified Drift merged, by identity."), note: z.string().optional().describe("About the announcement, when it was not known.") }),
     z.object({ tasks: z.array(z.object({ id: z.string(), number: z.string().nullable(), title: z.string() })) }).describe("`dryRun`"),
   ]),
   example: {
@@ -65,15 +68,12 @@ const create = defineCommand({
   effects: { writes: true, activity: true, editor: true },
   run(ctx, input) {
     const project = ctx.project();
-    if (input.dryRun === true) return driftCandidatesView(project, input.refs, input.task);
+    if (input.dryRun === true) return driftCandidatesView(project, input.refs, input.task, input.unifies);
     const note = announcementNote(project, input.announcement, "drift");
-    const origin = input.task === undefined ? undefined : getTask(project, input.task, true).id;
-    const d = newDrift(project, {
+    const filing = {
       title: input.title as string,
       refs: input.refs,
       proposal: input.proposal === undefined ? undefined : getProposal(project, input.proposal, true).id,
-      origin,
-      previous: input.previous === undefined ? undefined : getDrift(project, input.previous, true).id,
       happens: input.happens as string,
       should: input.should as string,
       options: input.options ?? [],
@@ -81,6 +81,24 @@ const create = defineCommand({
       where: input.where as string,
       notBlocking: (input.notBlocking ?? []).map((n) => ({ task: getTask(project, n.task, true).id, reason: n.reason })),
       job: ctx.job,
+    };
+    if (input.unifies !== undefined) {
+      const { drift, unified } = newUnifiedDrift(project, { ...filing, unifies: input.unifies });
+      const filed = filingOrigin(ctx.origin);
+      if (filed.holder !== undefined)
+        sendCoordinatorMessageSoon(project, { type: "drift-filed", root: project.root, drift: drift.id, ...filed }, (reason) => {
+          if (ctx.byAgent) process.stderr.write(`The editor did not learn that Drift ${drift.id} was filed by an agent (${reason}); «Dismiss Drift» is not held for that agent's turn.\n`);
+        });
+      const n = numbersOf(ctx);
+      const follows = drift.data.previous.length === 0 ? "" : `; recurring, it follows Drift ${drift.data.previous.map((id) => n.name("drift", id)).join(", ")}`;
+      const lines = unified.map((d) => `Unified ${d.id} into ${drift.id}`);
+      return text(`Created Drift ${n.name("drift", drift.id)} at ${drift.path}${follows}\n${lines.join("\n")}${note ? `\n${note}` : ""}`, { id: drift.id, number: n.label("drift", drift.id), path: drift.path, previous: drift.data.previous, unified: unified.map((d) => d.id), ...(note ? { note } : {}) });
+    }
+    const origin = input.task === undefined ? undefined : getTask(project, input.task, true).id;
+    const d = newDrift(project, {
+      ...filing,
+      origin,
+      previous: input.previous === undefined ? undefined : getDrift(project, input.previous, true).id,
     });
     if (origin !== undefined) recordTiming(project, ctx.origin, { event: "task-end", task: origin, title: getTask(project, origin, true).title, outcome: "drift", drift: d.id }, { job: ctx.job });
     // The agent that files a Drift keeps «Dismiss Drift» from it until its turn ends: the editor learns who holds it here. An agent Trama did not start and that does not say where it comes from files as the `editor` holder.
@@ -90,8 +108,8 @@ const create = defineCommand({
         if (ctx.byAgent) process.stderr.write(`The editor did not learn that Drift ${d.id} was filed by an agent (${reason}); «Dismiss Drift» is not held for that agent's turn.\n`);
       });
     const n = numbersOf(ctx);
-    const follows = d.data.previous === null ? "" : `; recurring, it follows Drift ${n.name("drift", d.data.previous)}`;
-    return text(`Created Drift ${n.name("drift", d.id)} at ${d.path}${follows}${note ? `\n${note}` : ""}`, { id: d.id, number: n.label("drift", d.id), path: d.path, previous: d.data.previous, ...(note ? { note } : {}) });
+    const follows = d.data.previous.length === 0 ? "" : `; recurring, it follows Drift ${d.data.previous.map((id) => n.name("drift", id)).join(", ")}`;
+    return text(`Created Drift ${n.name("drift", d.id)} at ${d.path}${follows}${note ? `\n${note}` : ""}`, { id: d.id, number: n.label("drift", d.id), path: d.path, previous: d.data.previous, unified: [], ...(note ? { note } : {}) });
   },
 });
 

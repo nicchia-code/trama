@@ -317,6 +317,8 @@ function containersOfState(scene: Scene, machine: MergedMachine, state: string, 
  * Elements the Proposal adds, removes or changes carry the Proposal for Approve and Reject.
  */
 export function detailOfSelection(scene: Scene, graph: GraphSpec, selected: string | null): Detail {
+  const merged = selected?.startsWith("u:") ? scene.unified.find((d) => `u:${d.id}` === selected) : undefined;
+  if (merged) return { ...detailOfDrift(scene, merged), numbers: scene.numbers };
   const n = graph.nodes.find((x) => x.id === selected);
   const edge = graph.edges.find((x) => x.id === selected);
   if (n?.drift) {

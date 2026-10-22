@@ -2,13 +2,15 @@ import type { AgentAction, RunGroup } from "../protocol";
 
 /** An action whose free text has been collected. */
 export type ResolvedAction =
-  | Exclude<AgentAction, { kind: "resolve-drifts" }>
+  | Exclude<AgentAction, { kind: "resolve-drifts" | "unify-drifts" }>
   /** A written design request, saved as `.trama/requests/<request>.md`. */
   | { kind: "written-design"; request: string }
   /** A written design request that starts a project from scratch: the `trama-setup` skill, named `Setup`. */
   | { kind: "setup-request"; request: string }
   /** Resolve Drifts on the one Drift the developer chose: always a manual request, answered with a round of questions. */
   | { kind: "resolve-drifts"; drift: string }
+  /** Unify Drifts on the `drifts` gathered when the instruction is sent, in creation order: one agent unites them into one Drift. */
+  | { kind: "unify-drifts"; drifts: string[] }
   /** Rework with feedback on a rejected Proposal, redone with the `skill` that wrote it: `design` (change, or setup on a Model that has a Feature or an Actor), `setup` (setup on an empty Model) or `import`. */
   | { kind: "rework"; proposal: string; skill: "design" | "setup" | "import" }
   /** Rework with feedback on a rejected resolution: one agent resolves its `drifts`, the ones still open and in no other resolution. */
@@ -23,6 +25,8 @@ export function buildPrompt(action: ResolvedAction): string {
       return `Use the trama-design skill on the design request in \`.trama/requests/${action.request}.md\`. Bind the first Proposal you open to it with the \`request\` field.`;
     case "resolve-drifts":
       return `Use the trama-resolve-drifts skill on the open Drift ${action.drift}, and on no other open Drift: ask the developer what should happen for it, then write one resolution Proposal.`;
+    case "unify-drifts":
+      return `Unify the open Drifts ${action.drifts.map((d) => `\`${d}\``).join(", ")} into one Drift, following the instructions above.`;
     case "rework":
       return action.skill === "setup"
         ? `Use the trama-setup skill to rework the rejected setup Proposal ${action.proposal} with the developer's feedback. Bind the setup Proposal you open to it with the \`reworks\` field.`
@@ -101,6 +105,8 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
     case "resolve-drifts":
     case "rework-resolution":
       return "Drifts";
+    case "unify-drifts":
+      return "Unify";
     case "rework":
       return action.skill === "design" ? "Design" : action.skill === "setup" ? "Setup" : "Import";
   }
@@ -144,13 +150,14 @@ export const PARALLEL_EXECUTION_SENTENCE = 'The experimental parallel execution 
 /** The sentence every instruction carries: the agent asks the developer only through `trama question new`, never with its own question tool. */
 export const ASK_DEVELOPER_SENTENCE = "Ask the developer only with `trama question new`, as the skill says, never with your own question tool; run it with no time limit and wait until it ends.";
 
-/** Whether the instruction for `action` lets the agent file Drifts: scans, implementations and imports do; designs and Resolve Drifts do not. */
+/** Whether the instruction for `action` lets the agent file Drifts: scans, implementations, imports and Unify Drifts do; designs and Resolve Drifts do not. */
 export function mayFileDrifts(action: ResolvedAction): boolean {
   switch (action.kind) {
     case "scan":
     case "implement":
     case "implement-all":
     case "import":
+    case "unify-drifts":
       return true;
     case "written-design":
     case "setup-request":

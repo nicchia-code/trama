@@ -35,12 +35,13 @@ export const canScan = (role: Role): boolean => role !== "analysis";
  * The template of omp's command line, with `{prompt}` where the quoted prompt goes: `--model` is the run's model; for
  * instructions that can scan, `--slow` is `scan`, the scan model. `ompHook` tells omp when it is idle. `config` is the
  * overlay file omp loads with `--config` (only when it has content); `advisor` is a Run with the Advisor Scanner on, which
- * adds `--advisor` and which the caller launches without `--slow`.
+ * adds `--advisor` and which the caller launches without `--slow`. `attachment` is the absolute path of a file omp attaches
+ * to the first message with `@<path>` (Unify Drifts' instructions), given before the prompt.
  */
-export function agentTemplate(scanning: boolean, models: { model: string; scan: string }, family: ShellFamily, ompHook?: string, config?: string, advisor = false): string {
+export function agentTemplate(scanning: boolean, models: { model: string; scan: string }, family: ShellFamily, ompHook?: string, config?: string, advisor = false, attachment?: string): string {
   const option = (flag: string, value: string) => (value === "" ? [] : [flag, quote(family, value)]);
   const words = ["omp", ...(ompHook === undefined ? [] : ["--hook", quote(family, ompHook)]), ...(advisor ? ["--advisor"] : []), ...(config === undefined ? [] : ["--config", quote(family, config)]), ...option("--model", models.model), ...(scanning ? option("--slow", models.scan) : [])];
-  return [...words, "{prompt}"].join(" ");
+  return [...words, ...(attachment === undefined ? [] : [quote(family, `@${attachment}`)]), "{prompt}"].join(" ");
 }
 
 /** The command line of a Quick Task's terminal: `omp`, with `--model <m>` only when the execution role has a model; no hook, overlay, `--slow`, `--advisor` or prompt. */

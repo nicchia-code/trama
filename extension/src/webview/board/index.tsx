@@ -10,7 +10,7 @@ import { scanButtonLabel } from "../scan-label";
 import type { Slot, View, ViewContext } from "../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
+import { SplitButton } from "../split-button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
@@ -24,6 +24,14 @@ export type ResolveState = NonNullable<Parameters<View["update"]>[2]>;
 
 const NO_RESOLVE_STATE: ResolveState = { blocker: null, runReason: null, drifts: {}, resolving: [] };
 
+/** What the host says of Unify Drifts: every reason it is unavailable (empty when it works) and the Drifts its agent works on. */
+export interface UnifyState {
+  blockers: string[];
+  unifying: string[];
+}
+
+const NO_UNIFY_STATE: UnifyState = { blockers: [], unifying: [] };
+
 /** What the developer was told about announced cards the agent never delivered; kept until closed, or until the panel closes. */
 export interface Notice {
   id: number;
@@ -35,6 +43,8 @@ export interface BoardPageProps {
   /** Whether a question round is open. */
   asking: boolean;
   resolve: ResolveState;
+  /** Unify Drifts: why its menu item is disabled and which Drifts its agent works on. */
+  unify?: UnifyState;
   /** Whether the Advisor Scanner is on: the Scan System button is then disabled. */
   advisorScanner: boolean;
   /** The models chosen for the Proposals that carry Tasks, and the agent of `trama.agent`. */
@@ -86,7 +96,7 @@ function CardColumn({ column, ghosts, foot }: { column: BoardColumn; ghosts: { i
 }
 
 /** The Board: four columns of cards, a bar with the one Scan button, and the notices of cards that never came. */
-export function BoardPage({ snapshot, asking, resolve, advisorScanner, models, modelList, notices, closeNotice, context }: BoardPageProps) {
+export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, advisorScanner, models, modelList, notices, closeNotice, context }: BoardPageProps) {
   const root = useRef<HTMLDivElement>(null);
   /** Task details the developer left open. Kept while the panel lives, so a refresh does not close them. */
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -101,9 +111,9 @@ export function BoardPage({ snapshot, asking, resolve, advisorScanner, models, m
   const runReason = snapshot === null ? null : joinReasons([resolve.runReason, runBlocker(snapshot.tasks, namerOf(numbers))]);
   const columns = useMemo(() => {
     if (snapshot === null) return [];
-    const boardResolve: BoardResolve = { blocker: resolve.blocker, drifts: resolve.drifts, resolving: resolve.resolving };
+    const boardResolve: BoardResolve = { blocker: resolve.blocker, drifts: resolve.drifts, resolving: resolve.resolving, unifying: unify.unifying };
     return buildBoard(snapshot, boardResolve, models);
-  }, [snapshot, resolve, models]);
+  }, [snapshot, resolve, unify, models]);
 
   const backlogCard = (proposal: string | null): ProposalCard | undefined =>
     proposal === null ? undefined : columns.find((column) => column.id === "backlog")?.cards.find((card): card is ProposalCard => card.kind === "proposal" && card.id === proposal);
@@ -151,31 +161,28 @@ export function BoardPage({ snapshot, asking, resolve, advisorScanner, models, m
   const foot = (id: ColumnId): ReactNode => {
     if (id === "backlog")
       return (
-        <div className="flex w-full">
-          <BoardButton
-            icon={Plus}
-            label="Add Work Item"
-            aria="Add Work Item"
-            tooltip="Write a work item in Markdown and send it to an agent"
-            full
-            className="rounded-r-none border-dashed"
-            onClick={() => context.post({ type: "writeDesignRequest" })}
-          />
-          <DropdownMenu>
-            <Tip text="More ways to add work">
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" aria-label="More ways to add work" className="-ml-px rounded-l-none border-dashed px-2">
-                  <ChevronUp aria-hidden="true" focusable="false" />
-                </Button>
-              </DropdownMenuTrigger>
-            </Tip>
-            <DropdownMenuContent side="top" align="end">
-              <Tip text="Ask an agent for a quick job, without scans or cards">
-                <DropdownMenuItem onSelect={() => context.post({ type: "openQuickTask" })}>Add Quick Task</DropdownMenuItem>
-              </Tip>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        <SplitButton
+          icon={Plus}
+          label="Add Work Item"
+          aria="Add Work Item"
+          tooltip="Write a work item in Markdown and send it to an agent"
+          dashed
+          full
+          arrowIcon={ChevronUp}
+          side="top"
+          arrowName="More ways to add work"
+          items={[
+            {
+              label: "Unify Drifts",
+              tooltip: "Merge every open Drift into one Drift to resolve",
+              disabled: unify.blockers.length > 0,
+              reason: unify.blockers.join(". "),
+              onSelect: () => context.post({ type: "launch", action: { kind: "unify-drifts" } }),
+            },
+            { label: "Add Quick Task", tooltip: "Ask an agent for a quick job, without scans or cards", onSelect: () => context.post({ type: "openQuickTask" }) },
+          ]}
+          onClick={() => context.post({ type: "writeDesignRequest" })}
+        />
       );
     if (id === "active")
       return (
@@ -289,7 +296,7 @@ export function BoardPage({ snapshot, asking, resolve, advisorScanner, models, m
 
 /** The Board: its view, and the model names the Board's model window offers. */
 export interface BoardView extends View {
-  update(next: Snapshot, isAsking?: boolean, resolveState?: ResolveState, scans?: { advisorScanner: boolean }, models?: BoardModels): void;
+  update(next: Snapshot, isAsking?: boolean, resolveState?: ResolveState, scans?: { advisorScanner: boolean }, models?: BoardModels, unify?: UnifyState): void;
   receiveModels(message: { models: ModelSuggestion[]; error?: string }): void;
 }
 
@@ -306,6 +313,7 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
     snapshot: null,
     asking: false,
     resolve: NO_RESOLVE_STATE,
+    unify: NO_UNIFY_STATE,
     advisorScanner: false,
     models: NO_MODELS,
     modelList: { models: [], error: null },
@@ -320,8 +328,8 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
   render();
 
   return {
-    update(next, isAsking = false, resolveState = NO_RESOLVE_STATE, scans = { advisorScanner: false }, models = NO_MODELS) {
-      page = { ...page, snapshot: next, asking: isAsking, resolve: resolveState, advisorScanner: scans.advisorScanner, models };
+    update(next, isAsking = false, resolveState = NO_RESOLVE_STATE, scans = { advisorScanner: false }, models = NO_MODELS, unify = NO_UNIFY_STATE) {
+      page = { ...page, snapshot: next, asking: isAsking, resolve: resolveState, unify, advisorScanner: scans.advisorScanner, models };
       render();
     },
     receiveModels(message) {

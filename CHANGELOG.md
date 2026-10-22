@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.11
+
+- Unify Drifts: `trama drift new` accepts `unifies`, a list of at least two open Drifts, and files one unified Drift while closing the merged ones as `resolution: unified` with `unifiedInto` (all or nothing). A Drift can now have several origins and several precedents: in the file `origin` and `previous` are a string for one value and a list for several, and the Snapshot and `--json` always carry `origin`, `previous`, `unifies` and `unifiedInto` as lists (`snapshot.unifiedDrifts` has the merged Drifts). The unified Drift blocks every origin, fixing its code sends every origin not Done back to To do, and a `unified` Drift is not counted among the Drifts already resolved, is never a `previous` and refuses `drift move`. `drift show`, `drift list` and `project show` mark it. The skills `trama-resolve-drifts`, `trama-scan`, `trama-implement`, `trama-import` and `trama-compare` know about several origins and precedents; update skills to refresh installed copies.
+- **+ Add Work Item** at the foot of Backlog uses the same split-button component as Reject and Dismiss Drift (dashed border, `ChevronUp` arrow, menu above the button) in a full-width mode: the main part grows and shrinks, the arrow never shrinks and never leaves the column.
+
 ## 0.0.10
 
 - Writing rules in the skills: the `## Language` section of `trama-design`, `trama-setup` (new), `trama-scan`, `trama-compare` (new), `trama-implement`, `trama-import` and `trama-resolve-drifts` says that in the texts written for Trama, Trama is always «Trama» and the agent «the agent», with no first person; the skills that write Tasks (`trama-design`, `trama-setup`, `trama-scan`, `trama-compare`, `trama-implement`) say that a Task body is understood without the conversation. Update skills to refresh installed copies.

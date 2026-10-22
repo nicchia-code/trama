@@ -4,7 +4,7 @@ import { type CardName, type CardNumbers, ID_NAMES, cardNameOf } from "../../../
 import { joinReasons } from "../../../../src/core/design";
 import { REQUIRED_STATUS, appliesUnder } from "../../../../src/core/required";
 import type { DriftView, ProposalView } from "../../../../src/core/snapshot";
-import { approveBlocker, driftReworkBlocker, finishingBlocker, recurringLabel, resolvedRows } from "../board/logic";
+import { approveBlocker, driftReworkBlocker, finishingBlocker, decisionLabel, recurringLabel, resolvedRows, unifiedLabel } from "../board/logic";
 import { driftComparison } from "../drift-compare";
 import { dismissBlocker } from "../dismiss";
 import { InlineMarkdown, Markdown } from "../markdown";
@@ -88,7 +88,65 @@ function Named({ label, name }: { label: string; name: CardName }) {
   );
 }
 
-export function RecurringBadge({ previous }: { previous: { id: string; title: string } }) {
+/** The badge of a unified Drift: it only says how many Drifts it unifies, and opens nothing. */
+export function UnifiedBadge({ count }: { count: number }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant="outline" aria-label={unifiedLabel(count)} data-badge>
+          unified
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>{unifiedLabel(count)}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** The `Unifies` section of a unified Drift: one row per merged Drift, which leads to its details on the Diagram. */
+export function UnifiesList({ unifies, numbers, show }: { unifies: readonly { id: string; title: string }[]; numbers: CardNumbers; show: (drift: string) => void }) {
+  return (
+    <section className="my-2 text-xs">
+      <h4 className="mb-1 text-xs font-semibold">Unifies</h4>
+      <ul aria-label="Drifts unified by this Drift" className="flex flex-col gap-0.5">
+        {unifies.map((u) => (
+          <li key={u.id}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" data-action={`unifies:${u.id}`} className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 rounded-sm py-px text-left outline-none hover:[&_.title]:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => show(u.id)}>
+                  <IdTag name={cardNameOf(numbers, "drift", u.id)} />
+                  <span className="title break-words">{u.title}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Show the Drift on the diagram</TooltipContent>
+            </Tooltip>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** The Drifts a recurring Drift follows when it follows several, each with identity, title and how it was decided. */
+function FollowsList({ previous, numbers, show }: { previous: DriftView["previous"]; numbers: CardNumbers; show: (drift: string) => void }) {
+  return (
+    <section className="my-2 text-xs">
+      <h4 className="mb-1 text-xs font-semibold">Follows</h4>
+      <ul aria-label="Drifts followed by this Drift" className="flex flex-col gap-0.5">
+        {previous.map((p) => (
+          <li key={p.id}>
+            <button type="button" data-action={`follows:${p.id}`} className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 rounded-sm py-px text-left outline-none hover:[&_.title]:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => show(p.id)}>
+              <IdTag name={cardNameOf(numbers, "drift", p.id)} />
+              <span className="title break-words">{p.title}</span>
+              <span className="break-words text-muted-foreground">{decisionLabel(p.decision)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export function RecurringBadge({ previous }: { previous: readonly { id: string; title: string }[] }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -225,7 +283,8 @@ function ResolvesBlock({ proposal, numbers, showDrift }: { proposal: ProposalVie
                 <button type="button" data-action={`resolves:${row.drift}`} className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 py-px text-left hover:[&_.title]:underline" onClick={() => showDrift(row.drift)}>
                   <IdTag name={row.name} />
                   <span className="title break-words">{row.title}</span>
-                  {row.previous !== null ? <RecurringBadge previous={row.previous} /> : null}
+                  {row.unifies.length > 0 ? <UnifiedBadge count={row.unifies.length} /> : null}
+                  {row.previous.length > 0 ? <RecurringBadge previous={row.previous} /> : null}
                   <span className="break-words text-muted-foreground">{row.decision}</span>
                 </button>
               </TooltipTrigger>
@@ -350,9 +409,8 @@ function ProposalBlock({
           arrowDisabled={reworkReason !== null}
           arrowReason={reworkReason}
           arrowName={`More ways to reject ${cardNameOf(numbers, "proposal", p.id).text}`}
-          itemTooltip="Reject it and have the agent redo it with your feedback"
+          items={[{ label: "Rework with feedback…", tooltip: "Reject it and have the agent redo it with your feedback", onSelect: () => actions.rework(p.id) }]}
           onClick={() => actions.reject(p.id)}
-          onRework={() => actions.rework(p.id)}
         />
       </div>
     </section>
@@ -413,7 +471,13 @@ export function DetailsPanel({
         </div>
         <h2 className="mt-0.5 mb-1.5 text-[15px] font-semibold break-words">{detail.title}</h2>
         <div className="flex flex-wrap items-center gap-1.5">
-          {previous ? <RecurringBadge previous={previous} /> : null}
+          {drift && drift.unifies.length > 0 ? <UnifiedBadge count={drift.unifies.length} /> : null}
+          {previous && previous.length > 0 ? <RecurringBadge previous={previous} /> : null}
+          {drift?.unifiedInto != null ? (
+            <Badge variant="outline" data-state="unified">
+              Unified
+            </Badge>
+          ) : null}
           {detail.change !== "same" ? (
             <Badge variant="outline" className={CHANGE_COLOR[detail.change].replace(" line-through", "")}>
               {CHANGE_TEXT[detail.change]}
@@ -424,6 +488,15 @@ export function DetailsPanel({
       {drift ? (
         <>
           <DriftCompare drift={drift} openLink={actions.openLink} />
+          {drift.unifies.length > 0 ? <UnifiesList unifies={drift.unifies} numbers={detail.numbers} show={actions.showDrift} /> : null}
+          {drift.previous.length > 1 ? <FollowsList previous={drift.previous} numbers={detail.numbers} show={actions.showDrift} /> : null}
+          {drift.unifiedInto != null ? (
+            <p className="my-2 text-xs">
+              <button type="button" data-action={`unified-into:${drift.unifiedInto.id}`} className="rounded-sm text-left outline-none hover:[&_.title]:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => actions.showDrift(drift.unifiedInto!.id)}>
+                Unified into <IdTag name={cardNameOf(detail.numbers, "drift", drift.unifiedInto.id)} /> <span className="title">– {drift.unifiedInto.title}</span>
+              </button>
+            </p>
+          ) : (
           <div className="my-2.5 flex flex-wrap gap-1.5">
             <SplitButton
               icon={Ban}
@@ -434,11 +507,11 @@ export function DetailsPanel({
               arrowDisabled={driftReworkReason !== null}
               arrowReason={driftReworkReason}
               arrowName={`More ways to handle ${driftName?.text ?? drift.id}`}
-              itemTooltip="Have the agent resolve this Drift following your feedback"
+              items={[{ label: "Rework with feedback…", tooltip: "Have the agent resolve this Drift following your feedback", onSelect: () => actions.reworkDrift(drift.id) }]}
               onClick={() => actions.dismiss(drift.id)}
-              onRework={() => actions.reworkDrift(drift.id)}
             />
           </div>
+          )}
         </>
       ) : null}
       {detail.description ? (

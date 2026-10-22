@@ -90,7 +90,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   else if (message.type === "snapshot") {
     snapshot = message.snapshot;
     mounted.diagram.update(snapshot, message.asking, message.resolve, message.scans);
-    board.update(snapshot, message.asking, message.resolve, message.scans, message.models);
+    board.update(snapshot, message.asking, message.resolve, message.scans, message.models, message.unify);
     mounted.requirements.update(snapshot);
     mounted.specs.update(snapshot);
     store.set({ error: null, diagnostics: snapshot.diagnostics, decisions: boardDecisionCount(buildBoard(snapshot)) });

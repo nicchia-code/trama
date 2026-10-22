@@ -25,11 +25,11 @@ describe("a recurring Drift follows a Drift already resolved", () => {
     const first = drift("First");
     resolveDrift(p, first.id, "fix-code", [], { option: 1 });
     const second = drift("Second", { previous: first.id });
-    expect(getDrift(p, second.id).data.previous).toBe(first.id);
+    expect(getDrift(p, second.id).data.previous).toEqual([first.id]);
   });
 
   test("a Drift without a previous one is not recurring", () => {
-    expect(drift("Plain").data.previous).toBeNull();
+    expect(drift("Plain").data.previous).toEqual([]);
   });
 
   test("an open previous Drift is refused, saying it is still open", () => {
@@ -48,7 +48,7 @@ describe("a recurring Drift follows a Drift already resolved", () => {
     const first = drift("First", { origin });
     resolveDrift(p, first.id, "fix-code", [], { option: 1 });
     const fixTask = getDrift(p, first.id).data.task ?? "";
-    expect(drift("Second", { origin: fixTask }).data.previous).toBe(first.id);
+    expect(drift("Second", { origin: fixTask }).data.previous).toEqual([first.id]);
   });
 
   test("a named previous Drift that differs from the one the origin Task fixes is refused", () => {
@@ -73,7 +73,7 @@ describe("the command line shows the Drift a recurring one follows", () => {
     const { first, second } = recurring();
     const shown = driftShowView(p, getDrift(p, second.id));
     expect(shown.md).toContain(`Follows Drift ${first.id} First (fix-code)`);
-    expect(shown.json).toMatchObject({ previous: first.id });
+    expect(shown.json).toMatchObject({ previous: [first.id] });
   });
 
   test("drift list and the board mark a recurring Drift, and a plain one is not marked", () => {
@@ -84,8 +84,8 @@ describe("the command line shows the Drift a recurring one follows", () => {
     expect(listed.md).not.toMatch(/Plain \(recurring\)/);
     expect(listed.json).toMatchObject({
       drifts: expect.arrayContaining([
-        expect.objectContaining({ id: second.id, previous: first.id }),
-        expect.objectContaining({ id: plain.id, previous: null }),
+        expect.objectContaining({ id: second.id, previous: [first.id] }),
+        expect.objectContaining({ id: plain.id, previous: [] }),
       ]),
     });
     expect(boardView(p).md).toMatch(/Drift .*Second \(recurring\)/);

@@ -48,3 +48,4 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Task progress rules** (`task-progress.md`): Use when implementing the percentage the agent declares on a Task it has taken, or which chat conversation holds and releases a taken Task. Sections: `task/Taken by the agent`.
 - **Regole dei Task** (`tasks.md`): Usa quando implementi le regole dei Task. Sections: `task`.
 - **Regole dell'attesa del turno e della History** (`turn-history.md`): Usa per l'attesa del turno sulle schede e le voci di History. Sections: `voce-history`, `panel/Board`.
+- **Unify Drifts** (`unify-drifts.md`): Usa quando implementi Unify Drifts: quali Drift si uniscono, quando si può lanciare, l'istruzione all'agente, ciò che l'agente fa e le regole del Drift unificato e dei Drift uniti. Sections: `developer.UNIFY_DRIFTS`, `agent.UNIFY_DRIFTS`.

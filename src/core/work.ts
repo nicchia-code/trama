@@ -1,3 +1,4 @@
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AgentOrigin, deliverCard } from "./announcements";
 import { type Blocker, blockedByDrift, computeBlocked, concernSameThing, refusalFor } from "./blocking";
@@ -58,7 +59,7 @@ interface TaskData {
   unchanged: string | null;
 }
 
-export type DriftResolution = "fix-code" | "proposal" | "dismissed";
+export type DriftResolution = "fix-code" | "proposal" | "dismissed" | "unified";
 
 /** A Task an open Drift leaves free at creation, and the reason it gives on one line; the list is written only at creation. */
 export interface NotBlocking {
@@ -72,9 +73,14 @@ interface DriftData {
   refs: string[];
   proposal: string | null;
   task: string | null;
-  origin: string | null;
-  /** The Drift this one follows, when it is recurring: set at creation and never changed. */
-  previous: string | null;
+  /** The Tasks this Drift remembers as its origin, in order: none, one, or several for a unified Drift. Written as one value or a list. */
+  origin: string[];
+  /** The Drifts this one follows, when it is recurring: set at creation and never changed. A unified Drift can follow several. */
+  previous: string[];
+  /** The Drifts a unified Drift merged, in creation order; empty for any other Drift. */
+  unifies: string[];
+  /** The unified Drift this one was merged into, when its resolution is `unified`; null otherwise. */
+  unifiedInto: string | null;
   option: number | null;
   note: string | null;
   resolvedBy: string | null;
@@ -91,7 +97,7 @@ export type Drift = Item<DriftData>;
 const tasksDir = (p: Project) => join(p.dir, "tasks");
 const driftsDir = (p: Project) => join(p.dir, "drifts");
 
-const RESOLUTIONS: readonly DriftResolution[] = ["fix-code", "proposal", "dismissed"];
+const RESOLUTIONS: readonly DriftResolution[] = ["fix-code", "proposal", "dismissed", "unified"];
 const DRIFT_STATUSES: readonly DriftData["status"][] = ["open", "resolved"];
 
 function parseTask(raw: Raw, where: string): TaskData {
@@ -124,15 +130,25 @@ function agentField(raw: Raw, where: string): { agent: boolean; holder: string |
 const holderOf = (origin: AgentOrigin): string | null =>
   origin.terminal ?? (origin.chat === "cursor" ? (origin.conversation ? `cursor:${origin.conversation}` : "cursor") : null);
 
+/** A card ID field that is a single value or a list of values; absent or null is an empty list. */
+function idListField(raw: Raw, key: string, where: string): string[] {
+  const v = raw[key];
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) return [idField(raw, key, where) as string];
+  return v.map((item) => idField({ [key]: item }, key, where) ?? "").filter((id) => id !== "");
+}
+
 function parseDrift(raw: Raw, where: string): DriftData {
-  return {
+  const data: DriftData = {
     status: enumField(raw, "status", DRIFT_STATUSES, "open", where),
     resolution: enumOrNull(raw, "resolution", RESOLUTIONS, where),
     refs: stringList(raw, "refs", where),
     proposal: idField(raw, "proposal", where),
     task: idField(raw, "task", where),
-    origin: idField(raw, "origin", where),
-    previous: idField(raw, "previous", where),
+    origin: idListField(raw, "origin", where),
+    previous: idListField(raw, "previous", where),
+    unifies: idListField(raw, "unifies", where),
+    unifiedInto: idField(raw, "unifiedInto", where),
     option: positiveIntOrNull(raw, "option", where),
     note: textOrNull(raw, "note", where),
     resolvedBy: idField(raw, "resolvedBy", where),
@@ -140,6 +156,9 @@ function parseDrift(raw: Raw, where: string): DriftData {
     notBlocking: notBlockingField(raw, where),
     job: textOrNull(raw, "job", where),
   };
+  if (data.resolution === "unified" && data.unifiedInto === null) throw new TramaError(`${where}: resolution "unified" needs "unifiedInto", the Drift it was merged into`);
+  if (data.unifiedInto !== null && data.resolution !== "unified") throw new TramaError(`${where}: "unifiedInto" goes only with resolution "unified", found ${JSON.stringify(data.resolution)}`);
+  return data;
 }
 
 /** The `notBlocking` list of a Drift: each item a Task identity and a reason on one line; absent or null is none. */
@@ -169,7 +188,14 @@ function saveItem(path: string, data: object, body: string) {
   if (copy["created"] == null) delete copy["created"];
   if (copy["finished"] === null) delete copy["finished"];
   if (copy["unchanged"] === null) delete copy["unchanged"];
-  if (copy["previous"] === null) delete copy["previous"];
+  // One value is written as a string, several as a list; a Drift with no origin keeps `origin: null`, one with no precedent or merge has no such key.
+  for (const key of ["origin", "previous"] as const) {
+    const v = copy[key];
+    if (Array.isArray(v)) copy[key] = v.length === 0 ? (key === "origin" ? null : undefined) : v.length === 1 ? v[0] : v;
+    if (copy[key] === undefined) delete copy[key];
+  }
+  if (Array.isArray(copy["unifies"]) && copy["unifies"].length === 0) delete copy["unifies"];
+  if (copy["unifiedInto"] === null) delete copy["unifiedInto"];
   if (Array.isArray(copy["notBlocking"]) && copy["notBlocking"].length === 0) delete copy["notBlocking"];
   if (copy["job"] === null) delete copy["job"];
   if (copy["resolvedBy"] === null) delete copy["resolvedBy"];
@@ -261,7 +287,7 @@ export function planTask(
   const linked = input.proposal ? getProposal(p, input.proposal).id : null;
   let proposal = linked;
   if (drift) {
-    const origin = drift.data.origin ? getTask(p, drift.data.origin).data.proposal : null;
+    const origin = originDesign(p, drift.data.origin);
     if (linked !== null && linked !== origin)
       throw new TramaError(
         origin
@@ -582,9 +608,43 @@ export function getDrift(p: Project, id: string, asArgument = false): Drift {
   return load(driftsDir(p), findCard(driftsDir(p), cited ?? id, "Drift", "file", asArgument && cited === null), parseDrift);
 }
 
-/** The identity and title of the Drift `drift` follows, when it is recurring; null otherwise. A Drift whose file is gone keeps its identity as title. */
-export function followedDrift(p: Project, drift: Drift): { id: string; title: string } | null {
-  const id = drift.data.previous;
+/**
+ * The Proposal every origin Task of a Drift belongs to: null when there is no origin, an origin belongs to no design, or
+ * the origins belong to different designs. The design a fix Task joins, and whose model Resolve uses.
+ */
+export function originDesign(p: Project, origins: string[]): string | null {
+  const designs = new Set(origins.map((id) => getTask(p, id).data.proposal));
+  const [only] = designs;
+  return designs.size === 1 && only !== undefined ? only : null;
+}
+
+/** A Drift a recurring Drift follows: its identity, its title and how it was decided (null when it is not resolved or its file is gone). */
+export interface FollowedDrift {
+  id: string;
+  title: string;
+  decision: DriftResolution | null;
+}
+
+/** The identity, title and decision of each Drift `drift` follows, when it is recurring; empty otherwise. A Drift whose file is gone keeps its identity as title. */
+export function followedDrifts(p: Project, drift: Drift): FollowedDrift[] {
+  if (drift.data.previous.length === 0) return [];
+  const all = listDrifts(p);
+  return drift.data.previous.map((id) => {
+    const found = all.find((d) => d.id === id);
+    return { id, title: found?.title ?? id, decision: found?.data.resolution ?? null };
+  });
+}
+
+/** The identity and title of each Drift a unified Drift merged, in order; empty for any other Drift. */
+export function unifiedDrifts(p: Project, drift: Drift): { id: string; title: string }[] {
+  if (drift.data.unifies.length === 0) return [];
+  const all = listDrifts(p);
+  return drift.data.unifies.map((id) => ({ id, title: all.find((d) => d.id === id)?.title ?? id }));
+}
+
+/** The identity and title of the unified Drift `drift` was merged into; null for a Drift that was not. */
+export function unifiedInto(p: Project, drift: Drift): { id: string; title: string } | null {
+  const id = drift.data.unifiedInto;
   if (id === null) return null;
   return { id, title: listDrifts(p).find((d) => d.id === id)?.title ?? id };
 }
@@ -744,9 +804,9 @@ export function freedTasks(drift: Drift, tasks: Task[]): FreedTask[] {
 }
 
 /** The live Tasks a new Drift with these references and this origin would block: what `trama drift new` with `dryRun` lists. Refuses references that do not resolve and an origin that is not a Task. */
-export function driftCandidates(p: Project, refs: string[], origin: string | null): Task[] {
+export function driftCandidates(p: Project, refs: string[], origin: string[]): Task[] {
   checkRefs(p, refs);
-  if (origin !== null) getTask(p, origin);
+  for (const id of origin) getTask(p, id);
   return blockedByDrift(loadProject(p), listTasks(p), refs, origin);
 }
 
@@ -754,7 +814,7 @@ export function driftCandidates(p: Project, refs: string[], origin: string | nul
  * The Tasks a new Drift may leave free: each one a Task the Drift would block (the origin included), named once, with
  * a reason on one line. Refuses, naming the Task, anything else.
  */
-function checkNotBlocking(p: Project, named: NotBlocking[], refs: string[], origin: string | null): NotBlocking[] {
+function checkNotBlocking(p: Project, named: NotBlocking[], refs: string[], origin: string[]): NotBlocking[] {
   const existing = listTasks(p);
   const wouldBlock = blockedByDrift(loadProject(p), existing, refs, origin);
   const seen = new Set<string>();
@@ -783,6 +843,18 @@ export function planDrift(
   p: Project,
   input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; notBlocking?: NotBlocking[]; job?: string },
 ): PlannedDrift {
+  const origin = input.origin ? getTask(p, input.origin).id : null;
+  const previous = previousOf(p, input.previous, origin);
+  return planDriftWith(p, input, origin === null ? [] : [origin], previous === null ? [] : [previous], []);
+}
+
+function planDriftWith(
+  p: Project,
+  input: { title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; notBlocking?: NotBlocking[]; job?: string },
+  origin: string[],
+  previous: string[],
+  unifies: string[],
+): PlannedDrift {
   if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with `refs`");
   const happens = input.happens.trim();
   const should = input.should.trim();
@@ -796,10 +868,8 @@ export function planDrift(
   if (attached) requireAttachable(p, attached);
   if (options.length === 0 && attached === null) throw new TramaError("A Drift without Fix options needs an attached Proposal that fixes the Model or the Requirements: give `proposal` with its Draft, or two to five fix options");
   const proposal = attached?.id ?? null;
-  const origin = input.origin ? getTask(p, input.origin).id : null;
-  const previous = previousOf(p, input.previous, origin);
   const notBlocking = checkNotBlocking(p, input.notBlocking ?? [], input.refs, origin);
-  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, option: null, note: null, resolvedBy: null, created: createdNow(), notBlocking, job: input.job?.trim() || null };
+  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, unifies, unifiedInto: null, option: null, note: null, resolvedBy: null, created: createdNow(), notBlocking, job: input.job?.trim() || null };
   const sections = [
     `## ${HAPPENS_HEADING}\n\n${happens}`,
     `## ${SHOULD_HEADING}\n\n${should}`,
@@ -820,6 +890,112 @@ export function newDrift(
   input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; notBlocking?: NotBlocking[]; job?: string },
 ): Drift {
   return writeDrift(p, planDrift(p, input), input.announcement);
+}
+
+/**
+ * The Drifts a unified Drift would merge, named by identity, short number or unique prefix, in creation order. Refuses,
+ * naming every problem and writing nothing, when they are fewer than two, repeated, missing, not open or in a resolution
+ * being written or open, or when `proposal` is attached to one of them.
+ */
+export function unifiedBy(p: Project, named: string[], proposal?: string): Drift[] {
+  const problems: string[] = [];
+  const found = new Map<string, Drift>();
+  const repeated = new Set<string>();
+  for (const arg of named) {
+    let drift: Drift;
+    try {
+      drift = getDrift(p, arg, true);
+    } catch (error) {
+      problems.push(error instanceof TramaError ? error.message : `Drift ${arg} cannot be read`);
+      continue;
+    }
+    if (found.has(drift.id)) {
+      repeated.add(drift.id);
+      continue;
+    }
+    found.set(drift.id, drift);
+    const name = cardName(p, "drift", drift.id);
+    if (drift.data.status !== "open") problems.push(`Drift ${name} is already resolved: only an open Drift can be unified`);
+    else {
+      const holding = resolutionHolding(p, drift.id);
+      if (holding) problems.push(`Drift ${name} is part of resolution ${cardName(p, "proposal", holding.id)}, which is being written or open: it cannot be unified`);
+    }
+  }
+  for (const id of repeated) problems.push(`Drift ${cardName(p, "drift", id)} is named more than once in unifies`);
+  if (named.length < 2) problems.push("Unifying needs at least two Drifts in unifies");
+  if (proposal !== undefined) {
+    const attached = getProposal(p, proposal, true);
+    for (const drift of found.values())
+      if (drift.data.proposal === attached.id) problems.push(`Proposal ${cardName(p, "proposal", attached.id)} is attached to Drift ${cardName(p, "drift", drift.id)}, which is being unified: give a Proposal of its own`);
+  }
+  if (problems.length > 0) throw new TramaError(problems.join("\n"));
+  return listDrifts(p).filter((d) => found.has(d.id));
+}
+
+/** The origins of a unified Drift: those of the Drifts it merges, without repeats, in the order of `unified`. */
+const unifiedOrigins = (unified: Drift[]): string[] => [...new Set(unified.flatMap((d) => d.data.origin))];
+
+/**
+ * The Drifts a unified Drift follows: those of the merged Drifts, then each Drift a fix Task that is one of its origins
+ * fixes (only one resolved by fixing the code or with a Proposal), without repeats.
+ */
+function unifiedPrevious(p: Project, unified: Drift[], origin: string[]): string[] {
+  const fixed = origin.flatMap((id) => {
+    const drift = getTask(p, id).data.drift;
+    if (drift === null) return [];
+    try {
+      const resolution = getDrift(p, drift).data.resolution;
+      return resolution === "fix-code" || resolution === "proposal" ? [drift] : [];
+    } catch {
+      return [];
+    }
+  });
+  return [...new Set([...unified.flatMap((d) => d.data.previous), ...fixed])];
+}
+
+/** The live Tasks a unified Drift with these `refs` would block: the origins of its merged Drifts and every Task concerning the same thing. Writes nothing. */
+export function unifiedCandidates(p: Project, named: string[], refs: string[]): Task[] {
+  return driftCandidates(p, refs, unifiedOrigins(unifiedBy(p, named)));
+}
+
+/**
+ * Files one Drift that merges the open Drifts named in `unifies`, and closes them in the same step: each becomes resolved
+ * as `unified` into the new Drift, loses its prepared question's validity, and its attached Proposal, in writing or open,
+ * is discarded without feedback. Everything is checked first; if a write fails the files already written are restored.
+ */
+export function newUnifiedDrift(
+  p: Project,
+  input: { unifies: string[]; title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; notBlocking?: NotBlocking[]; job?: string },
+): { drift: Drift; unified: Drift[] } {
+  const unified = unifiedBy(p, input.unifies, input.proposal);
+  const origin = unifiedOrigins(unified);
+  const plan = planDriftWith(p, input, origin, unifiedPrevious(p, unified, origin), unified.map((d) => d.id));
+  const attached = [...new Set(unified.flatMap((d) => (d.data.proposal === null ? [] : [d.data.proposal])))];
+  const saved = [
+    ...unified.map((d) => ({ path: d.path, text: readFileSync(d.path, "utf8") })),
+    ...attached.map((id) => {
+      const path = join(getProposal(p, id).dir, "proposal.md");
+      return { path, text: readFileSync(path, "utf8") };
+    }),
+  ];
+  let drift: Drift | null = null;
+  try {
+    drift = create(driftsDir(p), plan.title, plan.data, plan.body, "Drift");
+    for (const d of unified) {
+      d.data.status = "resolved";
+      d.data.resolution = "unified";
+      d.data.unifiedInto = drift.id;
+      d.data.proposal = null;
+      saveItem(d.path, d.data, d.body);
+    }
+    for (const id of attached) discardAttachedProposal(p, id);
+  } catch (error) {
+    for (const { path, text } of saved) writeFileSync(path, text);
+    if (drift !== null) rmSync(drift.path, { force: true });
+    throw error;
+  }
+  deliverCard(p, input.announcement, "drift");
+  return { drift, unified };
 }
 
 /**
@@ -873,7 +1049,7 @@ export function chosenOption(p: Project, drift: Drift, option: number | undefine
  */
 export function dismissDrift(p: Project, id: string): Drift {
   const drift = getDrift(p, id);
-  if (drift.data.status !== "open") throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is already resolved`);
+  requireOpen(p, drift);
   const holding = resolutionHolding(p, drift.id);
   if (holding) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is part of resolution ${cardName(p, "proposal", holding.id)}: decide it there`);
   if (drift.data.proposal) discardAttachedProposal(p, drift.data.proposal);
@@ -891,7 +1067,7 @@ export function dismissDrift(p: Project, id: string): Drift {
  */
 export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-proposal" | "dismiss", skillsDirs: string[] = [], choice: FixChoice = {}): Drift {
   const drift = getDrift(p, id);
-  if (drift.data.status !== "open") throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is already resolved`);
+  requireOpen(p, drift);
   // A note is refused with accepting or dismissing even when empty: the check looks at the note as given, before it is cleaned.
   const note = choice.note?.trim() || null;
   if (how !== "fix-code" && (choice.option !== undefined || choice.note !== undefined))
@@ -936,9 +1112,8 @@ function fixCode(p: Project, drift: Drift, optionNumber: number | undefined, not
   const refs = liveRefs(p, drift.data.refs);
   // A Drift that only contradicts Requirements changes no behaviour, so its Task is technical.
   const touchesModel = drift.data.refs.some((r) => parseRequirementRef(r) === null);
-  // The fix belongs to the design of the Task the Drift came from, if any, even when it is technical.
-  const origin = drift.data.origin ? getTask(p, drift.data.origin) : null;
-  const design = origin?.data.proposal;
+  // The design of the origin Tasks, when they all share one: the fix belongs to it, even when it is technical.
+  const design = originDesign(p, drift.data.origin);
   const task = newTask(p, {
     title: `Fix code to match the ${touchesModel ? "Model" : "Requirements"}: ${drift.title}`,
     refs,
@@ -951,15 +1126,24 @@ function fixCode(p: Project, drift: Drift, optionNumber: number | undefined, not
   drift.data.resolution = "fix-code";
   drift.data.option = option ? (optionNumber as number) : null;
   drift.data.note = note;
-  // The Task the Drift came from goes back to To do and, until the fix Task is Done, is blocked (see computeBlocked);
+  // Each Task the Drift came from goes back to To do and, until the fix Task is Done, is blocked (see computeBlocked);
   // an origin the Drift left free is not held by it, so it stays where it is.
-  if (origin && origin.data.column !== "done" && !drift.data.notBlocking.some((n) => n.task === origin.id)) {
+  for (const id of drift.data.origin) {
+    const origin = getTask(p, id);
+    if (origin.data.column === "done" || drift.data.notBlocking.some((n) => n.task === origin.id)) continue;
     origin.data.column = "todo";
     origin.data.agent = false;
     origin.data.holder = null;
     saveItem(origin.path, origin.data, origin.body);
     clearProgress(p, origin.id);
   }
+}
+
+/** Refuses a Drift that is not open: a unified one says where it went, because it was never decided. */
+function requireOpen(p: Project, drift: Drift): void {
+  const name = cardName(p, "drift", drift.id);
+  if (drift.data.resolution === "unified") throw new TramaError(`Drift ${name} was unified into Drift ${cardName(p, "drift", drift.data.unifiedInto as string)}: it was not decided, decide that Drift instead`);
+  if (drift.data.status !== "open") throw new TramaError(`Drift ${name} is already resolved`);
 }
 
 /** Rejects the open Proposal attached to a Drift with `why` as feedback, discards a Draft, leaves a decided one. */

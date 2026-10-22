@@ -64,9 +64,10 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia dei round di domande** (`questions-notices.md`): Usa quando lavori sui round di domande. Sections: `question-round`.
 - **Quick Task technology** (`quick-task.md`): Usa quando costruisci il pulsante diviso della Board, il suo DropdownMenu e l'apertura della chat di un Quick Task con omp o con la chat di Cursor. Sections: `developer.OPEN_QUICK_TASK`.
 - **Tecnologia di design request** (`requests.md`): Usa quando lavori su richieste di design scritte. Sections: `design-request`.
-- **Rework with feedback** (`rework.md`): Usa quando costruisci Rework with feedback: il pulsante diviso di Reject e di Dismiss Drift, i messaggi fra webview e host, la casella e la conferma, il campo `reworks` in `src/core` e le skill che rifanno. Sections: `developer.REWORK_PROPOSAL`, `developer.REWORK_DRIFT`.
+- **Rework with feedback** (`rework.md`): Usa quando costruisci Rework with feedback o il pulsante diviso condiviso (Reject, Dismiss Drift e + Add Work Item): i messaggi fra webview e host, la casella e la conferma, il campo `reworks` in `src/core` e le skill che rifanno. Sections: `developer.REWORK_PROPOSAL`, `developer.REWORK_DRIFT`.
 - **Tecnologia dei confronti** (`scans.md`): Usa per registro dei confronti e tempi delle fasi. Sections: `work`.
 - **Tecnologia della scheda Settings** (`settings.md`): Usa per la tecnologia della scheda Settings e i suggerimenti dei modelli. Sections: `panel/Settings`.
 - **Tecnologia del wizard di setup** (`setup-wizard.md`): Usa quando lavori al codice del wizard di setup: modulo del webview, messaggi con l'host, albero delle cartelle, conferma e skill di import. Sections: `setup-wizard`.
 - **Task progress technology** (`task-progress.md`): Use when working on how the agent declares the percentage of a Task and how it is read. Sections: `task/Taken by the agent`.
+- **Unify Drifts technology** (`unify-drifts.md`): Usa quando lavori al codice di Unify Drifts: voce disabilitabile del pulsante diviso, messaggio e lancio dall'host, file di istruzioni inline, lavoro di unificazione e `trama drift new` con `unifies`. Sections: `developer.UNIFY_DRIFTS`, `agent.UNIFY_DRIFTS`.
 - **Tecnologia dei Task** (`work.md`): Usa quando lavori sui Task. Sections: `task`.

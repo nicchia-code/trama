@@ -64,8 +64,8 @@ export function briefing(p: Project, machineId: string, refs: string[], candidat
     scope,
     openTasks: tasks,
     openDrifts: drifts.filter((d) => d.data.status === "open"),
-    closedDrifts: drifts.filter((d) => d.data.status === "resolved"),
-    candidates: candidates ? new Map(scope.map((ref) => [ref, driftCandidates(p, [ref], null)])) : null,
+    closedDrifts: drifts.filter((d) => d.data.status === "resolved" && d.data.resolution !== "unified"),
+    candidates: candidates ? new Map(scope.map((ref) => [ref, driftCandidates(p, [ref], [])])) : null,
   };
 }
 

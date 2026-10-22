@@ -3,7 +3,7 @@ import { Fragment, type ReactNode, useRef, useState } from "react";
 import type { FocusRequest } from "../../protocol";
 import { cardNameOf, ID_NAMES } from "../../../../src/core/card-names";
 import { joinReasons } from "../../../../src/core/design";
-import { DriftCompare, IdTag, RecurringBadge } from "../diagram/panel";
+import { DriftCompare, IdTag, RecurringBadge, UnifiedBadge, UnifiesList } from "../diagram/panel";
 import { cn } from "../lib/utils";
 import { Markdown } from "../markdown";
 import { previewable, TaskImages } from "../task-images";
@@ -137,6 +137,15 @@ function ResolvingBadge() {
   );
 }
 
+/** "Unifying": the Unify Drifts agent gathered this Drift and works on it now; the card stays in Backlog until the unified Drift is registered. */
+function UnifyingBadge() {
+  return (
+    <TipBadge tone="info" tooltip="An agent is unifying this Drift" label="An agent is unifying this Drift">
+      Unifying
+    </TipBadge>
+  );
+}
+
 /** The model controls of a Proposal that carries Tasks, at the end of its head row: the chosen model as a badge, then the gear. The gear is never disabled. */
 function ModelControls({ card }: { card: ProposalCard }) {
   const env = useBoardEnv();
@@ -213,7 +222,8 @@ function ResolvesList({ card }: { card: ProposalCard }) {
               >
                 <IdTag name={row.name} className="text-[11px] font-semibold text-muted-foreground" />
                 <span className="title break-words">{row.title}</span>
-                {row.previous !== null ? <RecurringBadge previous={row.previous} /> : null}
+                {row.unifies.length > 0 ? <UnifiedBadge count={row.unifies.length} /> : null}
+                {row.previous.length > 0 ? <RecurringBadge previous={row.previous} /> : null}
                 <span className="break-words text-muted-foreground">{row.decision}</span>
               </button>
             </Tip>
@@ -295,9 +305,8 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
           arrowDisabled={card.reworkBlocker !== null}
           arrowReason={card.reworkBlocker}
           arrowName={`More ways to reject ${card.name.text}`}
-          itemTooltip="Reject it and have the agent redo it with your feedback"
+          items={[{ label: "Rework with feedback…", tooltip: "Reject it and have the agent redo it with your feedback", onSelect: () => env.context.post({ type: "reworkProposal", proposal: card.id }) }]}
           onClick={() => env.context.post({ type: "rejectProposal", id: card.id })}
-          onRework={() => env.context.post({ type: "reworkProposal", proposal: card.id })}
         />
       </Actions>
     </Shell>
@@ -315,13 +324,16 @@ function DriftCardView({ card }: { card: DriftCard }) {
     <Shell card={card} kind="drift" label={`${card.heading}: ${card.title}`} className="border-l-red-600 dark:border-l-red-400">
       <Head kind="Drift">
         <IdTag name={card.name} className="text-[11px] font-semibold text-muted-foreground" />
-        {previous !== null ? <RecurringBadge previous={previous} /> : null}
+        {card.drift.unifies.length > 0 ? <UnifiedBadge count={card.drift.unifies.length} /> : null}
+        {previous.length > 0 ? <RecurringBadge previous={previous} /> : null}
         {card.resolving ? <ResolvingBadge /> : null}
+        {card.unifying ? <UnifyingBadge /> : null}
       </Head>
       <h3 className="font-semibold break-words">{card.title}</h3>
       <div id={detailsId} hidden={!open} className="flex flex-col gap-2">
         {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
         <DriftCompare drift={card.drift} openLink={env.context.openLink} />
+        {card.drift.unifies.length > 0 ? <UnifiesList unifies={card.drift.unifies} numbers={env.numbers} show={(drift) => env.context.navigate("diagram", { drift })} /> : null}
         <NotBlocking items={card.notBlocking} />
       </div>
       <Actions>
@@ -347,9 +359,8 @@ function DriftCardView({ card }: { card: DriftCard }) {
           arrowDisabled={card.reworkBlocker !== null}
           arrowReason={card.reworkBlocker}
           arrowName={`More ways to handle ${card.name.text}`}
-          itemTooltip="Have the agent resolve this Drift following your feedback"
+          items={[{ label: "Rework with feedback…", tooltip: "Have the agent resolve this Drift following your feedback", onSelect: () => env.context.post({ type: "reworkDrift", drift: card.id }) }]}
           onClick={() => env.context.post({ type: "dismissDrift", id: card.id })}
-          onRework={() => env.context.post({ type: "reworkDrift", drift: card.id })}
         />
       </Actions>
     </Shell>

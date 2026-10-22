@@ -46,6 +46,32 @@ test("an open Drift shows its two sides and Dismiss Drift asks the host to dismi
   expect(posted).toEqual([{ type: "dismissDrift", id: drift?.id ?? "" }]);
 });
 
+test("a unified Drift shows its badge, a Unifies list and no buttons; a merged Drift shows Unified and where it went", () => {
+  const base = snapshot.drifts.find((d) => d.refs.includes("order/Shipped"));
+  expect(base).toBeDefined();
+  const merged = { ...base!, id: "mergedA1", title: "Merged one", refs: ["order/Shipped"], unifiedInto: { id: "unifiedU1", title: "The unified one" } };
+  const unified = { ...base!, id: "unifiedU1", title: "The unified one", refs: ["order/Shipped"], unifies: [{ id: "mergedA1", title: "Merged one" }], previous: [{ id: "p1", title: "Earlier", decision: "fix-code" as const }, { id: "p2", title: "Before", decision: "dismissed" as const }] };
+  const store = createDiagramStore();
+  store.update({ ...snapshot, drifts: [unified], unifiedDrifts: [merged] }, null, false);
+  render(
+    <TooltipProvider>
+      <DiagramDetails store={store} context={{ post: () => {}, navigate: () => {}, openLink: () => {} }} />
+    </TooltipProvider>,
+  );
+  act(() => store.navigateDrift("unifiedU1"));
+  expect(screen.getByLabelText("Unifies 1 Drifts").textContent).toBe("unified");
+  expect(screen.getByLabelText("Recurring: follows 2 Drifts").textContent).toBe("recurring");
+  expect(screen.getByText("Earlier")).not.toBeNull();
+  expect(screen.getByText("Code fixed")).not.toBeNull();
+  expect(screen.getByText("Closed, nothing changes")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Merged one/ }));
+  expect(screen.getByText("Unified")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "Dismiss Drift" })).toBeNull();
+  expect(screen.getByRole("button", { name: /Unified into/ }).textContent).toContain("The unified one");
+  fireEvent.click(screen.getByRole("button", { name: /Unified into/ }));
+  expect(screen.getByLabelText("Unifies 1 Drifts")).not.toBeNull();
+});
+
 test("a drawn Proposal shows Approve and Reject on what it changes, and they send the decision", () => {
   const { store, posted } = setup();
   const proposal = snapshot.proposals.find((p) => p.title === "Returns after shipping");

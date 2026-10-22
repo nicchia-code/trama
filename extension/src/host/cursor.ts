@@ -26,6 +26,13 @@ export function bundledOmpHook(extensionPath = vscode.extensions.getExtension("t
   return existsSync(hook) ? hook : undefined;
 }
 
+/** The instructions of Unify Drifts, shipped in this extension's package (`media/unify-drifts.md`); undefined when the package has none. */
+export function bundledUnifyInstructions(extensionPath = vscode.extensions.getExtension("trama-dev.trama")?.extensionPath): string | undefined {
+  if (extensionPath === undefined) return undefined;
+  const file = join(extensionPath, "media", "unify-drifts.md");
+  return existsSync(file) ? file : undefined;
+}
+
 /**
  * Cursor starts its agent's commands without the PATH the extension adds to the editor's terminals, so the instruction
  * gets a second line saying where the shipped trama program is; without one for this platform it stays one line.

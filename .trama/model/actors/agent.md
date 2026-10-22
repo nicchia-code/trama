@@ -39,6 +39,9 @@ The agent files a new Task.
 ### FILE_DRIFT
 The agent files a new Drift.
 
+### UNIFY_DRIFTS
+L'agente di Unify Drifts registra il Drift unificato e, nello stesso passo, chiude i Drift che unisce: il Drift nuovo nasce Open e ognuno di quelli uniti diventa Unified. O succede tutto o non succede nulla.
+
 ### FILE_COMPARISON
 L'agente, o un suo sotto-agente, finisce il confronto di una Machine e archivia in un solo passo tutti i Task e i Drift che ha trovato, anche nessuno; un Drift del blocco può portare allegata una Draft, che l'agente consegna subito dopo.
 

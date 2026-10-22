@@ -760,14 +760,14 @@ describe("Tasks and Drifts", () => {
 
     const viaCli = run(["--root", dir, "drift", "new", "--input", JSON.stringify({ ...NEW_DRIFT, title: "Cli", task: task.id })], process.cwd());
     const cliId = /Created Drift (D\d+)/.exec(viaCli.out)?.[1] ?? "";
-    expect(getDrift(p, cliId, true).data.origin).toBe(task.id);
-    expect(getDrift(p, viaCore.id).data.origin).toBe(task.id);
+    expect(getDrift(p, cliId, true).data.origin).toEqual([task.id]);
+    expect(getDrift(p, viaCore.id).data.origin).toEqual([task.id]);
     expect(() => run(["--root", dir, "drift", "new", "--input", JSON.stringify({ ...NEW_DRIFT, title: "Missing", task: "42" })], process.cwd())).toThrow(/No Task/);
 
     const scanned = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "From a scan", refs: ["order"], happens: "The code does it one way.", should: "The Model says another." });
-    expect(getDrift(p, scanned.id).data.origin).toBeNull();
+    expect(getDrift(p, scanned.id).data.origin).toEqual([]);
     writeFileSync(scanned.path, readFileSync(scanned.path, "utf8").replace(/^origin:.*\n/m, ""));
-    expect(getDrift(p, scanned.id).data.origin).toBeNull();
+    expect(getDrift(p, scanned.id).data.origin).toEqual([]);
   });
   test("a Drift has no severity: `critical` is refused on input, never written or shown, and an old one is read and ignored", () => {
     const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd());

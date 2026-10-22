@@ -258,18 +258,18 @@ export function announce(
   if (input.drifts !== undefined && input.drifts.length > 0 && input.kind !== "proposal") throw new TramaError("Only a Proposal names Drifts");
   if ((input.kind === "comparison") !== (input.machine !== undefined)) throw new TramaError(input.kind === "comparison" ? "A comparison needs a machine" : "Only a comparison has a machine");
   if (input.kind !== "comparison" && (input.refs !== undefined || input.code !== undefined || input.texts !== undefined)) throw new TramaError("Only a comparison has references and a code fingerprint");
-  // A scan the agent announces is the check of a scan Trama announced at launch, if one still waits in the same terminal or chat: it takes that one over.
-  if (input.kind === "check" && input.phase === "scanning" && input.source === undefined) {
+  // A scan the agent announces is the check of a scan Trama announced at launch, if one still waits in the same terminal or chat: it takes that one over. So is a Drift of Unify Drifts, announced by Trama at launch, and it keeps its title.
+  if (((input.kind === "check" && input.phase === "scanning") || input.kind === "drift") && input.source === undefined) {
     // The oldest one of the same terminal or conversation wins; a conversation also takes a Trama check of the chat with no conversation yet and writes its own into it. Another conversation's check is never taken.
     const holder = input.terminal === undefined ? (input.chat ?? "editor") : undefined;
     const waiting = listAnnouncements(p).find((a) => {
-      if (a.kind !== "check" || a.source !== "request") return false;
+      if (a.kind !== input.kind || a.source !== "request") return false;
       if (input.terminal !== undefined) return a.terminal === input.terminal;
       if (a.terminal !== null || a.chat !== holder) return false;
       return input.conversation !== undefined ? a.conversation === null || a.conversation === input.conversation : a.conversation === null;
     });
     if (waiting) {
-      const taken: Announcement = { ...waiting, phase: "scanning", touched: now.toISOString(), ...(waiting.conversation === null && input.conversation !== undefined ? { conversation: input.conversation } : {}) };
+      const taken: Announcement = { ...waiting, ...(input.kind === "check" ? { phase: "scanning" as const } : {}), touched: now.toISOString(), ...(waiting.conversation === null && input.conversation !== undefined ? { conversation: input.conversation } : {}) };
       write(p, taken);
       return taken;
     }

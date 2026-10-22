@@ -8,7 +8,7 @@ import { projectAt } from "../../../src/core/store";
 import { getTask } from "../../../src/core/work";
 
 /** Trama-launched jobs, retained only in memory for their live editor windows. */
-export type JobKind = "run" | "resolve" | "scan" | "prepared";
+export type JobKind = "run" | "resolve" | "scan" | "prepared" | "unify";
 
 /**
  * Where a job runs: a terminal or a chat. A held job has none: it keeps the project in its state between the Runs of a
@@ -29,6 +29,8 @@ export interface Job {
   announcement?: string;
   /** A chat Run with the Advisor Scanner on: the Advisor of the chat watches its agents once the job knows the conversation. */
   advisor?: boolean;
+  /** The Drifts a `unify` job gathered when its instruction was sent, in creation order: the Board marks their cards as being unified. */
+  drifts?: readonly string[];
 }
 
 /** Writes the job's conversation into its launch announcement, if that one still waits. A failure leaves it as it is: the announcement is only a hint for the Board. */
@@ -68,7 +70,12 @@ export function localProjectJobs(root: string): Job[] {
 /** Which of Drift resolution and a run are going in this window; both may hold at once. Resolve Drifts and Runs are exclusive; scans do not block manual actions. Only this window's own jobs count: it does not see the jobs of other editor windows or of agents started outside Trama. */
 export function driftWork(root?: string): { resolving: boolean; running: boolean } {
   const all = root === undefined ? [...jobs] : localProjectJobs(root);
-  return { resolving: all.some((j) => j.kind === "resolve" || j.kind === "prepared"), running: all.some((j) => j.kind === "run") };
+  return { resolving: all.some((j) => j.kind === "resolve" || j.kind === "prepared" || j.kind === "unify"), running: all.some((j) => j.kind === "run") };
+}
+
+/** The Drifts the Unify Drifts jobs of this window, in the project at `root`, are working on. */
+export function unifyingDrifts(root: string): string[] {
+  return localProjectJobs(root).filter((j) => j.kind === "unify").flatMap((j) => [...(j.drifts ?? [])]);
 }
 
 /** The panel and the launches hear of every change of `driftWork()`. */
@@ -215,8 +222,9 @@ export function startJob(
   id: string = randomUUID(),
   announcement?: string,
   advisor = false,
+  drifts: readonly string[] = [],
 ): string | undefined {
-  const job: Job = { id, kind, root, place, started: Date.now(), ...(announcement !== undefined ? { announcement } : {}), ...(advisor ? { advisor } : {}) };
+  const job: Job = { id, kind, root, place, started: Date.now(), ...(announcement !== undefined ? { announcement } : {}), ...(advisor ? { advisor } : {}), ...(drifts.length > 0 ? { drifts } : {}) };
   if ("chat" in place) {
     const pending = takePendingChat(root, place.chat, sentAfter);
     if (pending?.ended) return undefined;

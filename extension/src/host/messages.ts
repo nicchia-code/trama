@@ -31,6 +31,8 @@ function parseAction(value: unknown): AgentAction | string {
       return { kind: "implement-all" };
     case "resolve-drifts":
       return typeof raw["drift"] === "string" && ID.test(raw["drift"]) ? { kind: "resolve-drifts", drift: raw["drift"] } : "resolve-drifts needs a valid Drift ID";
+    case "unify-drifts":
+      return { kind: "unify-drifts" };
     case "import":
       return { kind: "import" };
     default:

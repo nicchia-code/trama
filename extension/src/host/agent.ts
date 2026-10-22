@@ -337,15 +337,21 @@ function isTypedCommand(terminal: vscode.Terminal, commandLine: string | undefin
 
 /** What a design request announces: its title. */
 export type DesignAnnouncement = string;
-/** A card a launch announces: a Resolve Drifts, which names the Drifts it resolves (read once the instruction is sent, when they are known), a manual scan, or an import (`work`). */
+/** A card a launch announces: a Resolve Drifts, which names the Drifts it resolves (read once the instruction is sent, when they are known), a manual scan, an import (`work`), or Unify Drifts, a Drift titled by the number of Drifts it unites. */
 export type LaunchAnnouncement =
   | { kind: "resolve"; drifts: () => readonly string[] }
+  | { kind: "unify"; drifts: () => readonly string[] }
   | { kind: "work" | "check"; title: string };
 
 /** Announces the card of a launch and returns its ID, or undefined when no card is announced. */
 function announceLaunch(root: string, announcement: DesignAnnouncement | LaunchAnnouncement, origin: AgentOrigin): string | undefined {
   try {
     if (typeof announcement === "string") return announce(projectAt(root), { kind: "proposal", title: announcement, source: "request", ...origin }).id;
+    if (announcement.kind === "unify") {
+      const drifts = [...announcement.drifts()];
+      if (drifts.length === 0) return undefined;
+      return announce(projectAt(root), { kind: "drift", title: `Unifying ${drifts.length} Drifts`, source: "request", ...origin }).id;
+    }
     if (announcement.kind === "resolve") {
       // Resolve Drifts is a Proposal named "Resolve Drifts" that names its Drifts; the panel titles it from them.
       const drifts = [...announcement.drifts()];
@@ -429,12 +435,16 @@ export const configuredModels = (): Models => ({
   execution: settings().get<string>("execution", "").trim(),
 });
 
-function terminalRun(instruction: Instruction, name: string, filesDrifts: boolean, severalTasks: boolean, model: string, overlay: string | undefined, advisor: boolean): TerminalRun {
-  const role = roleOf(name);
+/** The message of a chat launch that carries instructions of its own (Unify Drifts): their text, a blank line, then the one-line instruction. */
+function withAttachment(prompt: string, attachment: { text: string } | undefined): string {
+  return attachment === undefined ? prompt : `${attachment.text.trimEnd()}\n\n${prompt}`;
+}
+
+function terminalRun(instruction: Instruction, role: Role, filesDrifts: boolean, severalTasks: boolean, model: string, overlay: string | undefined, advisor: boolean, attachment: string | undefined): TerminalRun {
   const hook = bundledOmpHook();
   const models = { model, scan: configuredModels().scan };
   return {
-    template: (family) => agentTemplate(canScan(role) && !advisor, models, family, hook, overlay, advisor),
+    template: (family) => agentTemplate(canScan(role) && !advisor, models, family, hook, overlay, advisor, attachment),
     prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, false, advisor ? ADVISOR_SENTENCE : undefined),
     hooked: hook !== undefined,
   };
@@ -511,6 +521,12 @@ export interface LaunchJobOptions {
   model?: RunModel;
   /** Called once the Run's job ends: with why it ended abnormally, or with nothing for a normal end. A Run that did not start ends with a reason too. */
   onEnd?: (abnormal?: string) => void;
+  /** Overrides the role the terminal's name gives (Unify Drifts is always analysis, whatever its terminal is called). */
+  role?: Role;
+  /** Unify Drifts: the text of the instructions Trama carries (`file` is where it lives, `text` its content). omp gets `@file` before the one-line prompt; the chat gets the text, a blank line, then the prompt. */
+  attachment?: { file: string; text: string };
+  /** Unify Drifts: the Drifts the job gathered, read when the job starts. */
+  drifts?: () => readonly string[];
 }
 
 export async function launchAgent(
@@ -526,14 +542,14 @@ export async function launchAgent(
   const jobId = job === undefined ? undefined : jobOptions.id ?? randomUUID();
   const filesDrifts = jobOptions.filesDrifts === true;
   const severalTasks = jobOptions.severalTasks === true;
-  const role = roleOf(name);
+  const role = jobOptions.role ?? roleOf(name);
   const runModel = jobOptions.model?.model ?? configuredModels()[role];
   const agent = configuredAgent();
   // A window knows only its own work: nothing is reserved or announced to other windows.
   if ((agent === "cursor" || job === undefined) && !canSend()) return undefined;
   // Cursor's chat only exists in Cursor: elsewhere nothing is tried, announced, reserved or started, and the prompt the terminal would get goes to the clipboard.
   if (agent === "cursor" && !isCursor()) {
-    await vscode.env.clipboard.writeText(agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, false, job === "run" && configuredAdvisorScanner() ? ADVISOR_CHAT_SENTENCE : undefined));
+    await vscode.env.clipboard.writeText(withAttachment(agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, false, job === "run" && configuredAdvisorScanner() ? ADVISOR_CHAT_SENTENCE : undefined), jobOptions.attachment));
     void Promise.resolve(vscode.window.showInformationMessage(
       "Trama: Cursor's chat is only available in Cursor. The prompt is on the clipboard; choose omp in Trama's Settings to run the agent in a terminal.",
       "Open Settings",
@@ -545,7 +561,7 @@ export async function launchAgent(
     if (agent === "cursor") {
       const chat = "cursor";
       const advisor = job === "run" && configuredAdvisorScanner() ? ADVISOR_CHAT_SENTENCE : undefined;
-      const prompt = () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, true, advisor);
+      const prompt = () => withAttachment(agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, true, advisor), jobOptions.attachment);
       const sent: { job?: string } = {};
       // Runs right before the step that sends the prompt by itself: the card and the job begin now. The take-back, run when
       // that step fails, ends both: the prompt is not sent, so the job never began.
@@ -553,7 +569,7 @@ export async function launchAgent(
         const { id: cardId, takeBack: takeBackCard } = announceSend(root, announceProposal, { chat: "cursor" });
         const sentAfter = chatJobSendStarted(root, chat);
         if (job === undefined || jobId === undefined) return takeBackCard;
-        const started = startJob(job, root, { chat }, sentAfter, jobId, cardId, advisor !== undefined);
+        const started = startJob(job, root, { chat }, sentAfter, jobId, cardId, advisor !== undefined, jobOptions.drifts?.() ?? []);
         if (started !== undefined) {
           chatJobNames.set(jobId, name);
           launchedRoots.add(root);
@@ -577,7 +593,7 @@ export async function launchAgent(
     }
     const advisor = job === "run" && configuredAdvisorScanner();
     const overlay = await writeLaunchOverlay(root, advisor);
-    const run = terminalRun(instruction, name, filesDrifts, severalTasks, runModel, overlay, advisor);
+    const run = terminalRun(instruction, role, filesDrifts, severalTasks, runModel, overlay, advisor, jobOptions.attachment?.file);
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
@@ -605,7 +621,7 @@ export async function launchAgent(
     if (announceProposal !== undefined) announceLaunch(root, announceProposal, { terminal: terminalId });
     onSent?.(startedAt);
     if (job !== undefined && jobId !== undefined) {
-      const started = startJob(job, root, { terminal: terminalId }, undefined, jobId);
+      const started = startJob(job, root, { terminal: terminalId }, undefined, jobId, undefined, false, jobOptions.drifts?.() ?? []);
       if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
     }
     // Last step: the job, the announcement and the sent instant already stand when the command is written.

@@ -41,6 +41,8 @@ export interface Scene {
   /** The short numbers of the live cards, to write cards the way the Board does. */
   numbers: CardNumbers;
   drifts: DriftView[];
+  /** The Drifts merged into a unified Drift: never drawn, only reached by their details (`Unified`, `Unified into`), selected as `u:<id>`. */
+  unified: DriftView[];
   /** The Requirement Areas as they are now, for the Requirement references of Drifts. */
   areas: AreaView[];
 }
@@ -124,6 +126,7 @@ export function buildScene(snapshot: Snapshot, proposalId: string | null): Scene
     files: new Map(model.machines.map((m) => [m.id, m.file])),
     proposal,
     drifts: snapshot.drifts,
+    unified: snapshot.unifiedDrifts ?? [],
     areas: snapshot.areas,
     numbers: snapshot.numbers ?? noNumbers,
   };

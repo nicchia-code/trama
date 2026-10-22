@@ -39,13 +39,14 @@ Compare State by State and Transition by Transition, then each Requirement secti
 - One Task per coherent unit of work, as specific as possible in `refs`: Model elements and Requirement sections (`order/Paid/user.CANCEL`, `requirements/ui#order/Paid`).
 - Skip what an open Task in the briefing already covers.
 - The body says *what* must be true when done, in domain words, not which files to touch.
+- The body of a Task is understood without the conversation that produced it: it says what must be true when done, with the conditions and consequences as the Model says them, and every decision of the interview that concerns it, because whoever implements it does not see that conversation.
 - A Task that only applies Requirements without changing behaviour is technical: `technical: true`.
 - If the instruction names a Proposal the Tasks belong to, put its ID in `design`; otherwise leave `design` out.
 
 ## Drifts
 
 - Re-read the code at the place you will cite in `where` before filing. File only if that code really does what `happens` says.
-- A difference that a resolved Drift in the briefing closed stays closed while the Model or Requirement says the same. If it is back after a fix, set `previous` to that resolved Drift's ID.
+- A difference that a resolved Drift in the briefing closed stays closed while the Model or Requirement says the same. If it is back after a fix, set `previous` to that resolved Drift's ID. A Drift resolved as `unified` was merged into another Drift without any decision: it is not a resolved Drift in this sense, never a `previous`, and the unified Drift that took its place is the one that counts.
 - `happens` and `should` say what the System does and what it should do, in domain words. Name no variable, function, class, field or file unless unavoidable (then as `inline code`). Code locations go only in `where`.
 - Give two to five `options`, the recommended first, each a different way to reach what should happen without changing the Model or any Requirement. Each option has a short `title` and about 60 words of `text` (what it changes and costs), in short Markdown without headings or tables.
 - Drift titles: at most five words, about 40 characters, in English.
@@ -86,6 +87,14 @@ Never approve, reject, discard or resolve any card, and never choose a resolutio
 ## Reply
 
 Name each card by short number and title, as `Task T3 – title` or `Drift D2 – title`, but write only permanent identities in files and commands. Report: the comparison ID; the cards created with their identities; references you found no code for; any doubt you could not settle.
+
+## Language
+
+When the instruction asks you to write in a language, everything you generate for Trama that the developer reads goes in that language: the bodies and titles of Tasks and Drifts, the text of questions and their options, and your replies in the conversation. Without a language in the instruction, nothing here changes.
+
+- **Always in English**, whatever the language: technical terms (commands and tools, names of products, services, libraries and languages, and Trama's own terms: Proposal, Task, Drift, Board, Run, Scan), code and its comments, commit messages, the project's own documentation, and the headers Trama reads in files ("What happens", "What should happen", "Where in the code", "Fix options", "Already present").
+- **A language changes nothing already written.** When you edit a file written in another language, keep its existing text and write only the new or rewritten text in the chosen language.
+- **No first person in Trama's texts.** In what you write for Trama (questions, contexts and options of rounds, titles and bodies of Tasks and Drifts, History entries), Trama is always "Trama" and you are "the agent": no "I", "me", "my", "we", "our", and in Italian no "io", "noi" or first-person verbs. Your replies in the conversation are not Trama's texts and do not change. Text already written is not rewritten.
 
 ## Experimental context sharing
 

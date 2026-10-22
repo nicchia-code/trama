@@ -46,7 +46,7 @@ Compare State by State and Transition by Transition, then each Requirement secti
 ## Drifts
 
 - Re-read the code at the place you will cite in `where` before filing. File only if that code really does what `happens` says.
-- A difference that a resolved Drift in the briefing closed stays closed while the Model or Requirement says the same. If it is back after a fix, set `previous` to that resolved Drift's ID.
+- A difference that a resolved Drift in the briefing closed stays closed while the Model or Requirement says the same. If it is back after a fix, set `previous` to that resolved Drift's ID. A Drift resolved as `unified` was merged into another Drift without any decision: it is not a resolved Drift in this sense, never a `previous`, and the unified Drift that took its place is the one that counts.
 - `happens` and `should` say what the System does and what it should do, in domain words. Name no variable, function, class, field or file unless unavoidable (then as `inline code`). Code locations go only in `where`.
 - Give two to five `options`, the recommended first, each a different way to reach what should happen without changing the Model or any Requirement. Each option has a short `title` and about 60 words of `text` (what it changes and costs), in short Markdown without headings or tables.
 - Drift titles: at most five words, about 40 characters, in English.

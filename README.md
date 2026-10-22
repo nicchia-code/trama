@@ -68,6 +68,8 @@ Small details that change neither the diagram nor one of your rules aren't Drift
 
 Each Drift shows what happens, what should happen, and two to five ways to fix the code, with the agent's recommendation first. You pick one. Or you keep the code as it is, and the map is updated to match. Until you decide, the agent won't start any Task about that part of the app, so nothing new gets built on shaky ground.
 
+When several Drifts are open at once, **Unify Drifts** (in the arrow menu of **+ Add Work Item**) has the agent merge all the open ones that are not in a resolution into a single Drift: one account of what happens, one of what should happen, and ways to fix the code that hold for all of them together. You decide that one Drift instead of many; the merged ones close without a decision, and the Tasks they blocked stay blocked by the new Drift.
+
 ### 6. Set the rules once
 
 Tech stack, design, data, business rules: write them once, next to the map, and the agent follows them on every task.

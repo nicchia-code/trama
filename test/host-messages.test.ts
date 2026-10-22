@@ -21,6 +21,7 @@ test("accepts every well-formed message of the contract", () => {
   expect(parseToHost({ type: "launch", action: { kind: "resolve-drifts" } })).toEqual({ ok: false, reason: "resolve-drifts needs a valid Drift ID" });
   expect(ok({ type: "launch", action: { kind: "resolve-drifts", drift: "ab12cd34" } })).toEqual({ type: "launch", action: { kind: "resolve-drifts", drift: "ab12cd34" } });
   expect(parseToHost({ type: "launch", action: { kind: "resolve-drifts", drift: "../x" } })).toEqual({ ok: false, reason: "resolve-drifts needs a valid Drift ID" });
+  expect(ok({ type: "launch", action: { kind: "unify-drifts" } })).toEqual({ type: "launch", action: { kind: "unify-drifts" } });
   expect(ok({ type: "launch", action: { kind: "import" } })).toEqual({ type: "launch", action: { kind: "import" } });
   expect(ok({ type: "openModelFile", path: "checkout/order.md" })).toEqual({ type: "openModelFile", path: "checkout/order.md" });
   expect(ok({ type: "openFile", path: "tasks/0003-x.md" })).toEqual({ type: "openFile", path: "tasks/0003-x.md" });

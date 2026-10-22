@@ -69,7 +69,7 @@ export interface CursorHookReply {
 }
 
 const HOOKS: readonly CursorHook["hook"][] = ["beforeSubmitPrompt", "stop", "sessionEnd", "afterShellExecution", "preToolUse", "afterFileEdit", "postToolUse", "subagentStart", "subagentStop"];
-const SKILL_PROMPT = /trama-(design|scan|implement|import|resolve-drifts|setup)(?![\p{L}\p{N}-])/u;
+const SKILL_PROMPT = /trama-(design|scan|implement|import|resolve-drifts|setup)(?![\p{L}\p{N}-])|^Trama: Unify Drifts\r?$/mu;
 
 /** What Cursor needs back from every hook: it must never be blocked. `text` is what a window gave for the hook, when it gave any. */
 export function hookAnswer(hookName: unknown, reply?: string): object {

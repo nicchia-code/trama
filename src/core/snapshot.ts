@@ -13,7 +13,7 @@ import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
 import { readTaskImages, type TaskImage } from "./task-images";
 import { readLastScan } from "./last-scan";
-import { attachedDrift, closedUnchanged, type Column, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, followedDrift, freedTasks, type FreedTask, listDrifts, listTasks, taskProgress } from "./work";
+import { attachedDrift, closedUnchanged, type Column, type Drift, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, type FollowedDrift, followedDrifts, freedTasks, type FreedTask, listDrifts, listTasks, taskProgress, unifiedDrifts, unifiedInto } from "./work";
 import { preparedFlag, preparedStatus } from "./prepared";
 import { type Specs, type SpecsChange, specsChange } from "./specs";
 import { type HistoryFault, readHistory } from "./history";
@@ -139,8 +139,14 @@ export interface DriftView {
   /** When the Drift was created, UTC ISO 8601; null for a numbered Drift written before the field existed. */
   created: string | null;
   title: string;
-  /** The Drift this one follows, as its identity and title, when it is recurring. */
-  previous: { id: string; title: string } | null;
+  /** The Drifts this one follows, each as identity and title, when it is recurring; empty otherwise. A unified Drift can follow several. */
+  previous: FollowedDrift[];
+  /** The Tasks this Drift remembers as its origin, by identity: none, one, or several for a unified Drift. */
+  origin: string[];
+  /** The Drifts a unified Drift merged, in creation order, each as identity and title; empty for any other Drift. */
+  unifies: { id: string; title: string }[];
+  /** The unified Drift this one was merged into, as identity and title; null unless its resolution is unified. */
+  unifiedInto: { id: string; title: string } | null;
   /** The fix Task that dismissed this Drift by closing without changes, with its note while Done; null otherwise. */
   closedUnchanged: { task: string; note: string | null } | null;
   /** The Tasks this Drift leaves free, in the order named, each with its reason; the title is null for a Task that no longer exists. */
@@ -204,7 +210,7 @@ export interface TaskView {
 export interface AnnouncementView {
   id: string;
   /** A manual scan is a check announced by Trama, shown as Scan. */
-  kind: AnnouncementKind | "scan" | "resolve";
+  kind: AnnouncementKind | "scan" | "resolve" | "unify";
   /** The Draft's own title once a Draft is bound to it, the announced title before. */
   title: string;
   /** A card: Preparing until a Draft exists, then Writing (a Proposal) or Writing the Proposal (a Drift's Draft). A check: its own phase. An import has none. */
@@ -253,6 +259,8 @@ export interface Snapshot extends ModelView {
   /** The Tasks an agent filed in a turn it has not finished: their Run waits for that turn's end. The editor knows them in memory and passes them in; other callers pass none. */
   finishingTasks: string[];
   drifts: DriftView[];
+  /** The Drifts merged into a unified Drift: they are no longer open and show no card, only their details (`Unified` state, `Unified into`). */
+  unifiedDrifts: DriftView[];
   tasks: TaskView[];
   /** Done Tasks finished after this working copy's remembered global Scan launch. */
   tasksSinceScan: number;
@@ -413,6 +421,30 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
   // The developer does not see attached Proposals, so the ghost of a Proposal whose Draft is attached to an open Drift is drawn nowhere.
   const announcements = listAnnouncements(p).filter((a) => !(a.kind === "proposal" && a.proposal !== null && attachedDrift(p, a.proposal)));
+  const driftView = (d: Drift): DriftView => ({
+    id: d.id,
+    created: d.data.created,
+    title: d.title,
+    previous: followedDrifts(p, d),
+    origin: d.data.origin,
+    unifies: unifiedDrifts(p, d),
+    unifiedInto: unifiedInto(p, d),
+    closedUnchanged: closedUnchanged(p, d),
+    notBlocking: freedTasks(d, tasks),
+    body: driftBody(d),
+    job: d.data.job,
+    prepared: preparedFlag(preparedStatus(p, d, project)),
+    sides: driftSides(d),
+    options: driftOptions(d),
+    option: d.data.option,
+    note: d.data.note,
+    requirementsOnly: d.data.refs.every((r) => parseRequirementRef(r) !== null),
+    refs: d.data.refs,
+    proposal: d.data.proposal,
+    proposalBlock: d.data.proposal === null ? null : approvalBlock(p, d.data.proposal),
+    proposalTitle: (d.data.proposal !== null && proposalById.get(d.data.proposal)?.title) || null,
+    proposalChanges: openProposals.find((x) => x.id === d.data.proposal)?.changes ?? null,
+  });
   return {
     ...modelView(project),
     specs: project.specs,
@@ -424,27 +456,8 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
     finishingDrifts: [...finishingDrifts],
     finishingProposals: [...finishingProposals],
     finishingTasks: [...finishingTasks],
-    drifts: drifts.filter((d) => d.data.status === "open").map((d) => ({
-      id: d.id,
-      created: d.data.created,
-      title: d.title,
-      previous: followedDrift(p, d),
-      closedUnchanged: closedUnchanged(p, d),
-      notBlocking: freedTasks(d, tasks),
-      body: driftBody(d),
-      job: d.data.job,
-      prepared: preparedFlag(preparedStatus(p, d, project)),
-      sides: driftSides(d),
-      options: driftOptions(d),
-      option: d.data.option,
-      note: d.data.note,
-      requirementsOnly: d.data.refs.every((r) => parseRequirementRef(r) !== null),
-      refs: d.data.refs,
-      proposal: d.data.proposal,
-      proposalBlock: d.data.proposal === null ? null : approvalBlock(p, d.data.proposal),
-      proposalTitle: (d.data.proposal !== null && proposalById.get(d.data.proposal)?.title) || null,
-      proposalChanges: openProposals.find((x) => x.id === d.data.proposal)?.changes ?? null,
-    })),
+    drifts: drifts.filter((d) => d.data.status === "open").map(driftView),
+    unifiedDrifts: drifts.filter((d) => d.data.resolution === "unified").map(driftView),
     tasksSinceScan,
     tasks: tasks.map((t) => ({
       id: t.id,
@@ -513,7 +526,8 @@ function shortenTitle(title: string): string {
 export function announcementView(p: Project, a: Announcement, proposalTitle: string | undefined): AnnouncementView {
   // A Proposal that names Drifts is the Resolve Drifts ghost: its title comes from the Drifts it names, never from the Draft.
   const resolving = a.kind === "proposal" && a.drifts.length > 0;
-  const kind = resolving ? "resolve" : a.kind === "check" && a.source === "request" ? "scan" : a.kind;
+  // A Drift Trama announces at launch (source `request`) is the ghost of Unify Drifts: an agent's own Drift is announced by the agent.
+  const kind = resolving ? "resolve" : a.kind === "check" && a.source === "request" ? "scan" : a.kind === "drift" && a.source === "request" ? "unify" : a.kind;
   const phase = a.kind === "work" || a.kind === "comparison" ? null : a.phase ?? (a.proposal === null ? "preparing" : a.kind === "drift" ? "writing-proposal" : "writing");
   const title = resolving ? resolutionTitle(p, a.drifts) ?? a.title : (a.kind === "proposal" && a.proposal !== null && proposalTitle) || a.title;
   return { id: a.id, kind, title, phase };

@@ -131,7 +131,9 @@ export interface ResolvedRow {
   name: CardName;
   title: string;
   /** The Drift this one follows, as its identity and title, when it is recurring. */
-  previous: { id: string; title: string } | null;
+  previous: { id: string; title: string }[];
+  /** The Drifts this one unifies, when it is a unified Drift. */
+  unifies: { id: string; title: string }[];
   decision: string;
   /** The Tasks this Drift blocks, shown under its row. */
   blocked: TaskCard[];
@@ -139,8 +141,16 @@ export interface ResolvedRow {
   notBlocking: NotBlockingItem[];
 }
 
-/** The text of a recurring Drift's badge, its tooltip and accessible name: the identity and title of the Drift it follows. */
-export const recurringLabel = (previous: { id: string; title: string }): string => `Recurring: follows Drift ${previous.id} – ${previous.title}`;
+/** How a followed Drift was decided, in words, for the list of a recurring Drift's details. */
+export const decisionLabel = (decision: DriftView["previous"][number]["decision"]): string =>
+  decision === "fix-code" ? "Code fixed" : decision === "proposal" ? "Model updated to match the code" : decision === "dismissed" ? "Closed, nothing changes" : decision === "unified" ? "Unified" : "Not decided";
+
+/** The text of a unified Drift's badge, its tooltip and accessible name: how many Drifts it unifies. */
+export const unifiedLabel = (count: number): string => `Unifies ${count} Drifts`;
+
+/** The text of a recurring Drift's badge, its tooltip and accessible name: the identity and title of the Drift it follows, or how many it follows. */
+export const recurringLabel = (previous: readonly { id: string; title: string }[]): string =>
+  previous.length === 1 ? `Recurring: follows Drift ${previous[0]?.id} – ${previous[0]?.title}` : `Recurring: follows ${previous.length} Drifts`;
 
 export interface ProposalCard {
   kind: "proposal";
@@ -190,6 +200,8 @@ export interface DriftCard {
   reworkBlocker: string | null;
   /** Whether the agent is resolving this Drift now: it stays in Blocked with a Resolving badge. */
   resolving: boolean;
+  /** Whether the Unify Drifts agent gathered this Drift and works on it now: it stays in Backlog with an Unifying badge. */
+  unifying: boolean;
   /** Why «Resolve» is disabled on this card, or null when it works. */
   resolveBlocker: string | null;
   /** The Tasks this open Drift blocks, shown under its card. */
@@ -302,7 +314,7 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
 
 /** The rows of a resolution's `Resolves Drifts` block, in the order the snapshot carries them; none for any other Proposal. */
 export const resolvedRows = (p: Pick<ProposalView, "resolves">, numbers: CardNumbers = noNumbers, blocked: Map<string, TaskCard[]> = new Map()): ResolvedRow[] =>
-  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, previous: r.previous, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, blocked: blocked.get(r.drift) ?? [], notBlocking: notBlockingItems(r.notBlocking, numbers) }));
+  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, previous: r.previous, unifies: r.unifies, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, blocked: blocked.get(r.drift) ?? [], notBlocking: notBlockingItems(r.notBlocking, numbers) }));
 
 /** `Creates 1 Task` / `Creates N Tasks`, counting removals too; null for zero. */
 export function createsText(n: number): string | null {
@@ -341,6 +353,8 @@ export interface DriftResolve {
   /** The host's reasons for this Drift's Resolve, without «The agent is still finishing»; null when it has none. */
   hostReason?: string | null;
   resolving: boolean;
+  /** Whether the Unify Drifts agent works on this Drift now. */
+  unifying?: boolean;
 }
 
 /** Why the arrow of «Dismiss Drift» is disabled: the reasons of Dismiss Drift, in their order, then those of Resolve. */
@@ -364,6 +378,7 @@ export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers, dismis
     dismissBlocker,
     reworkBlocker: driftReworkBlocker(dismissBlocker, resolve.hostReason ?? null),
     resolving: resolve.resolving,
+    unifying: resolve.unifying === true,
     resolveBlocker: resolve.blocker,
     blocked,
     notBlocking: notBlockingItems(d.notBlocking, numbers),
@@ -425,17 +440,22 @@ export interface BoardResolve {
   drifts: Readonly<Record<string, string | null>>;
   /** The open Drifts the running resolution works on: they stay in Blocked with a Resolving badge. */
   resolving: readonly string[];
+  /** The open Drifts the Unify Drifts agent gathered and works on: their cards wear an Unifying badge. */
+  unifying?: readonly string[];
 }
 
-export const NO_RESOLVE: BoardResolve = { blocker: null, drifts: {}, resolving: [] };
+export const NO_RESOLVE: BoardResolve = { blocker: null, drifts: {}, resolving: [], unifying: [] };
+
+/** Why Resolve is disabled on a Drift the Unify Drifts agent works on, ahead of the host's reason. */
+export const UNIFYING_REASON = "An agent is unifying this Drift";
 
 /**
  * Why «Resolve» is disabled on one open Drift's card, or null when it works: every reason that holds, in order: the agent
  * that filed the Drift is still finishing, then the host's reasons for that Drift (an agent is resolving this Drift or Drifts
  * are being resolved, a run is in progress, a resolution Proposal awaits a decision).
  */
-export function resolveBlocker(driftId: string, finishingDrifts: readonly string[], resolve: Pick<BoardResolve, "drifts">): string | null {
-  return joinReasons([finishingBlocker(driftId, finishingDrifts), resolve.drifts[driftId] ?? null]);
+export function resolveBlocker(driftId: string, finishingDrifts: readonly string[], resolve: Pick<BoardResolve, "drifts" | "unifying">): string | null {
+  return joinReasons([finishingBlocker(driftId, finishingDrifts), resolve.unifying?.includes(driftId) === true ? UNIFYING_REASON : null, resolve.drifts[driftId] ?? null]);
 }
 
 /** Sorts items by creation, oldest first, as the Board Requirement says. */
@@ -463,7 +483,7 @@ export function buildBoard(snapshot: Snapshot, resolve: BoardResolve = NO_RESOLV
     ...snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, underDrift, snapshot.finishingProposals, models, focusViews(snapshot, { kind: "proposal", id: p.id }), resolve.blocker) as Card })),
     ...snapshot.drifts
       .filter((d) => !delivered.has(d.id))
-      .map((d) => ({ id: d.id, created: d.created, card: driftCard(d, numbers, dismissBlocker(d.id, snapshot.resolutionDrifts, resolve.blocker, snapshot.finishingDrifts), { blocker: resolveBlocker(d.id, snapshot.finishingDrifts, resolve), hostReason: resolve.drifts[d.id] ?? null, resolving: resolve.resolving.includes(d.id) }, underDrift.get(d.id) ?? []) as Card })),
+      .map((d) => ({ id: d.id, created: d.created, card: driftCard(d, numbers, dismissBlocker(d.id, snapshot.resolutionDrifts, resolve.blocker, snapshot.finishingDrifts), { blocker: resolveBlocker(d.id, snapshot.finishingDrifts, resolve), hostReason: resolve.drifts[d.id] ?? null, resolving: resolve.resolving.includes(d.id), unifying: resolve.unifying?.includes(d.id) === true }, underDrift.get(d.id) ?? []) as Card })),
   ]);
   // A blocked Task keeps its card in Active, with its blocked and waiting badges.
   const active: Card[] = [...tasks.values()].filter((card) => card.column !== "done");
@@ -547,7 +567,7 @@ export interface AnnouncedCard {
   /** Stable per announcement, so the same node is reused while it is only updated. */
   key: string;
   kind: AnnouncementView["kind"];
-  /** "Proposal", "Task", "Drift" or "Check". */
+  /** "Proposal", "Task", "Drift", "Check", "Scan", "Resolve", "Unify", "Import" or "Compare". */
   kindLabel: string;
   title: string;
   /** "Preparing", "Writing", "Writing the Proposal", or "Waiting for your answers" while a question round is open; for a check, its own phase. */
@@ -556,7 +576,7 @@ export interface AnnouncedCard {
   label: string;
 }
 
-const ANNOUNCED_KIND_LABELS: Record<AnnouncementView["kind"], string> = { proposal: "Proposal", task: "Task", drift: "Drift", check: "Check", scan: "Scan", resolve: "Resolve", work: "Import", comparison: "Compare" };
+const ANNOUNCED_KIND_LABELS: Record<AnnouncementView["kind"], string> = { proposal: "Proposal", task: "Task", drift: "Drift", check: "Check", scan: "Scan", resolve: "Resolve", unify: "Unify", work: "Import", comparison: "Compare" };
 
 /** A check shows its own phase, which an open question round does not change. */
 export const announcedPhase = (phase: AnnouncementView["phase"], asking: boolean): string =>
@@ -564,7 +584,8 @@ export const announcedPhase = (phase: AnnouncementView["phase"], asking: boolean
 
 export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCard {
   const kindLabel = ANNOUNCED_KIND_LABELS[a.kind];
-  const phase = announcedPhase(a.phase, asking);
+  // The Draft Unify Drifts' agent attaches is just «Writing» on its ghost.
+  const phase = announcedPhase(a.kind === "unify" && a.phase === "writing-proposal" ? "writing" : a.phase, asking);
   const title = a.title;
   const isCheck = a.kind === "check" || a.kind === "scan";
   const label = isCheck
@@ -573,6 +594,8 @@ export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCa
       ? `Agent comparing the code: ${title}`
     : a.kind === "resolve"
       ? `Agent resolving Drifts: ${title}, ${phase}`
+      : a.kind === "unify"
+        ? `Agent unifying Drifts: ${title}, ${phase}`
       : a.kind === "work"
         ? "Agent importing the code"
         : `${kindLabel} the agent is creating, ${phase.toLowerCase()}: ${title}`;
