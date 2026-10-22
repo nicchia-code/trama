@@ -17,8 +17,8 @@ const option = z.strictObject({
 const question = z
   .strictObject({
     id: notBlank.describe("Unique in the round."),
-    question: notBlank.describe("The question, in Markdown."),
-    context: notBlank.optional().describe("The background of the decision, in Markdown, shown under the question."),
+    question: notBlank.describe("The question, in Markdown: one short sentence that reads on its own. The developer sees only the round, never the agent's conversation, so it must not refer to it. No first person (write \"Trama\" or \"the agent\", never \"I\" or \"we\")."),
+    context: notBlank.optional().describe("The background of the decision, in Markdown, shown under the question. The developer does not see the agent's conversation, so the context says what is needed to decide, with no first person. Omit it when the question and the options are enough on their own."),
     options: z.array(option).min(2).describe("At least two options; never add an Other option, the editor always offers a free answer."),
     recommended: z.number().int().min(0).describe("The index of the recommended option."),
     multi: z.boolean().describe("Whether several options can be chosen."),
@@ -61,7 +61,7 @@ const create = defineCommand({
   mode: "blocking",
   summary: "Ask the developer a round of questions in the editor and wait for the answers.",
   description:
-    "Reads one complete question round from `--input -` (or the JSON text), shows it in the editor's Trama panel, waits for the developer and prints the result as JSON, always, also when it fails. The whole round is checked before any question is shown. Every question has 2 or more options, an in-range recommendation and an explicit `multi`. Completed and initially unavailable results exit 0; question failures and cancellation exit 1; a malformed round exits 2. `unavailable` means the editor is not reachable: stop and tell the developer.",
+    "Reads one complete question round from `--input -` (or the JSON text), shows it in the editor's Trama panel, waits for the developer and prints the result as JSON, always, also when it fails. The developer sees only the round (each question, its context, its options and their own answers), never the agent's conversation, so every question with its context and options must be understandable on its own, and the texts use no first person (write \"Trama\" or \"the agent\", never \"I\" or \"we\"). The whole round is checked before any question is shown. Every question has 2 or more options, an in-range recommendation and an explicit `multi`. Completed and initially unavailable results exit 0; question failures and cancellation exit 1; a malformed round exits 2. `unavailable` means the editor is not reachable: stop and tell the developer.",
   input: round,
   output: z.union([
     z.object({ status: z.literal("answered"), answers: z.record(z.string(), answer).describe("By question ID.") }).describe("Completed"),

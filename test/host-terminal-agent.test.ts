@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { agentCommandLine } from "../extension/src/host/quote";
-import { advisorOverlay, agentTemplate, roleOf } from "../extension/src/host/terminal-agent";
+import { agentTemplate, launchOverlay, roleOf } from "../extension/src/host/terminal-agent";
 
 const none = { model: "", scan: "" };
 const all = { model: "opus", scan: "it's" };
@@ -20,13 +20,24 @@ test("omp's idle hook is attached to its command", () => {
   expect(agentTemplate(false, none, "posix", "/ext/omp-hook.js")).toBe("omp --hook '/ext/omp-hook.js' {prompt}");
 });
 
-test("an omp Run with the Advisor Scanner on loads its overlay instead of --slow", () => {
-  expect(agentTemplate(false, all, "posix", "/ext/omp-hook.js", "/store/advisor.yml")).toBe("omp --hook '/ext/omp-hook.js' --advisor --config '/store/advisor.yml' --model 'opus' {prompt}");
+test("an omp Run with the Advisor Scanner on adds --advisor and its overlay, instead of --slow", () => {
+  expect(agentTemplate(false, all, "posix", "/ext/omp-hook.js", "/store/launch.yml", true)).toBe("omp --hook '/ext/omp-hook.js' --advisor --config '/store/launch.yml' --model 'opus' {prompt}");
 });
 
-test("the advisor overlay sets the advisor role only when trama.scan is set, and turns the task advisors on", () => {
-  expect(advisorOverlay("")).toBe('task:\n  agentAdvisor:\n    task: "on"\n');
-  expect(advisorOverlay("it's \"x\"")).toBe('modelRoles:\n  advisor: "it\'s \\"x\\""\ntask:\n  agentAdvisor:\n    task: "on"\n');
+test("an overlay with only exclusions adds --config and never --advisor", () => {
+  expect(agentTemplate(true, all, "posix", "/ext/omp-hook.js", "/store/launch.yml")).toBe("omp --hook '/ext/omp-hook.js' --config '/store/launch.yml' --model 'opus' --slow 'it'\\''s' {prompt}");
+});
+
+test("the overlay has the advisor role only when trama.scan is set, the task advisors on, and the exclusions when there are some", () => {
+  expect(launchOverlay({ disabledExtensions: [] })).toBeUndefined();
+  expect(launchOverlay({ advisor: { scan: "" }, disabledExtensions: [] })).toBe('task:\n  agentAdvisor:\n    task: "on"\n');
+  expect(launchOverlay({ advisor: { scan: "it's \"x\"" }, disabledExtensions: [] })).toBe('modelRoles:\n  advisor: "it\'s \\"x\\""\ntask:\n  agentAdvisor:\n    task: "on"\n');
+  expect(launchOverlay({ disabledExtensions: ["rule:a", "context-file:project:AGENTS.md"] })).toBe('disabledExtensions:\n  - "rule:a"\n  - "context-file:project:AGENTS.md"\n');
+  expect(launchOverlay({ advisor: { scan: "" }, disabledExtensions: ["rule:a"] })).toBe('task:\n  agentAdvisor:\n    task: "on"\ndisabledExtensions:\n  - "rule:a"\n');
+});
+
+test("an exclusion that looks like YAML structure stays one string", () => {
+  expect(launchOverlay({ disabledExtensions: ["a\nb: c", "- x"] })).toBe('disabledExtensions:\n  - "a\\nb: c"\n  - "- x"\n');
 });
 
 test("settings expose only Cursor's chat and omp with a panel-default terminal location", async () => {
@@ -41,6 +52,9 @@ test("settings expose only Cursor's chat and omp with a panel-default terminal l
   expect(properties["trama.autoFixCriticalDrifts"]).toBeUndefined();
   expect(properties["trama.terminalLocation"].enum).toEqual(["editor", "panel"]);
   expect(properties["trama.terminalLocation"].scope).toBe("application");
+  expect(properties["trama.ignoreInstructionFiles"].type).toBe("boolean");
+  expect(properties["trama.ignoreInstructionFiles"].default).toBe(false);
+  expect(properties["trama.ignoreInstructionFiles"].scope).toBe("application");
   for (const key of ["agentLauncher", "terminalAgent", "agentCommand", "externalTerminalCommand", "autoImplement", "autoScan"])
     expect(properties[`trama.${key}`]).toBeUndefined();
 });

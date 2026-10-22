@@ -13,6 +13,7 @@ const ok = (message: unknown) => {
 test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "ready" })).toEqual({ type: "ready" });
   expect(ok({ type: "writeDesignRequest" })).toEqual({ type: "writeDesignRequest" });
+  expect(ok({ type: "openQuickTask" })).toEqual({ type: "openQuickTask" });
   expect(ok({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ type: "launch", action: { kind: "scan", feature: "checkout" } });
   expect(ok({ type: "launch", action: { kind: "scan" } })).toEqual({ type: "launch", action: { kind: "scan" } });
   expect(ok({ type: "launch", action: { kind: "implement", task: "0003" } })).toEqual({ type: "launch", action: { kind: "implement", task: "0003" } });
@@ -27,6 +28,12 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "openCard", kind: "task", id: "task-1" })).toEqual({ type: "openCard", kind: "task", id: "task-1" });
   expect(ok({ type: "approveProposal", id: "0001" })).toEqual({ type: "approveProposal", id: "0001" });
   expect(ok({ type: "rejectProposal", id: "0001" })).toEqual({ type: "rejectProposal", id: "0001" });
+  expect(ok({ type: "reworkProposal", proposal: "0001" })).toEqual({ type: "reworkProposal", proposal: "0001" });
+  expect(ok({ type: "reworkDrift", drift: "0001" })).toEqual({ type: "reworkDrift", drift: "0001" });
+  for (const bad of [undefined, "", "../x"]) {
+    expect(parseToHost({ type: "reworkProposal", proposal: bad }).ok).toBe(false);
+    expect(parseToHost({ type: "reworkDrift", drift: bad }).ok).toBe(false);
+  }
   expect(ok({ type: "dismissDrift", id: "0001" })).toEqual({ type: "dismissDrift", id: "0001" });
   expect(ok({ type: "setProposalModel", proposal: "0001", model: "gpt-5" })).toEqual({ type: "setProposalModel", proposal: "0001", model: "gpt-5" });
   expect(ok({ type: "setProposalModel", proposal: "0001", model: "" })).toEqual({ type: "setProposalModel", proposal: "0001", model: "" });
@@ -92,6 +99,15 @@ test("openLink accepts only http and https addresses", () => {
   expect(parseToHost({ type: "openLink" }).ok).toBe(false);
 });
 
+test("openTaskImage is accepted only for an image the Task has", () => {
+  const has = (task: string, name: string) => task === "abcd1234" && name === "shot.png";
+  expect(parseToHost({ type: "openTaskImage", task: "abcd1234", name: "shot.png" }, [], has)).toEqual({ ok: true, message: { type: "openTaskImage", task: "abcd1234", name: "shot.png" } });
+  for (const message of [{ task: "abcd1234", name: "other.png" }, { task: "zzzzzzzz", name: "shot.png" }, { task: "abcd1234" }, { name: "shot.png" }, { task: "../x", name: "shot.png" }, { task: "abcd1234", name: "" }, { task: 5, name: 5 }]) {
+    expect(parseToHost({ type: "openTaskImage", ...message }, [], has).ok).toBe(false);
+  }
+  expect(parseToHost({ type: "openTaskImage", task: "abcd1234", name: "shot.png" }).ok).toBe(false);
+});
+
 test("the messages of the setup wizard are checked: the choice, the agent, the folder and the paths", () => {
   expect(ok({ type: "openGuidedSetup", choice: "import" })).toEqual({ type: "openGuidedSetup", choice: "import" });
   expect(ok({ type: "openGuidedSetup", choice: "scratch" })).toEqual({ type: "openGuidedSetup", choice: "scratch" });
@@ -101,6 +117,12 @@ test("the messages of the setup wizard are checked: the choice, the agent, the f
   expect(ok({ type: "agentCheckWanted", agent: "omp", ompPath: "/bin/omp" })).toEqual({ type: "agentCheckWanted", agent: "omp", ompPath: "/bin/omp" });
   for (const agent of ["chat", undefined, 1]) expect(parseToHost({ type: "agentCheckWanted", agent, ompPath: "" }).ok).toBe(false);
   expect(parseToHost({ type: "agentCheckWanted", agent: "omp" }).ok).toBe(false);
+
+  expect(ok({ type: "instructionFilesWanted" })).toEqual({ type: "instructionFilesWanted" });
+  expect(ok({ type: "instructionFilesWanted", root: "/work/app" })).toEqual({ type: "instructionFilesWanted", root: "/work/app" });
+  for (const root of ["", 3, null]) expect(parseToHost({ type: "instructionFilesWanted", root }).ok).toBe(false);
+  expect(ok({ type: "openInstructionFile", path: "/work/app/AGENTS.md" })).toEqual({ type: "openInstructionFile", path: "/work/app/AGENTS.md" });
+  for (const path of ["", 3, undefined]) expect(parseToHost({ type: "openInstructionFile", path }).ok).toBe(false);
 
   expect(ok({ type: "modelSuggestionsWanted" })).toEqual({ type: "modelSuggestionsWanted" });
   expect(ok({ type: "modelSuggestionsWanted", agent: "cursor", ompPath: "" })).toEqual({ type: "modelSuggestionsWanted", agent: "cursor", ompPath: "" });
@@ -134,4 +156,9 @@ test("confirmSetup carries the mode, the path, the folder, only wizard keys that
   expect(parse({ mode: "settings", values: [{ key: "trama.agent", value: "claude" }] }).ok).toBe(false);
   // Excluded paths stay inside the folder and cannot break the quoted instruction.
   for (const path of ["../x", "/abs", "a/../b", "a`b", "a\nb", "", "a//b"]) expect(parse({ mode: "settings", excluded: [path] }).ok).toBe(false);
+});
+
+test("reworkDrift needs a Drift identity", () => {
+  expect(parseToHost({ type: "reworkDrift", drift: "0001" })).toEqual({ ok: true, message: { type: "reworkDrift", drift: "0001" } });
+  for (const drift of [undefined, "", "../secret", 3]) expect(parseToHost({ type: "reworkDrift", drift }).ok).toBe(false);
 });

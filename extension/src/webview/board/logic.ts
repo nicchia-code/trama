@@ -4,7 +4,7 @@ import { formatDiagnostic } from "../../../../src/core/model";
 import { compareByCreation } from "../../../../src/core/schema";
 import { joinReasons } from "../../../../src/core/design";
 import type { Blocker } from "../../../../src/core/blocking";
-import type { AnnouncementView, DriftView, HistoryView, ProposalTag, ProposalView, Snapshot, TaskView } from "../../../../src/core/snapshot";
+import type { AnnouncementView, DriftView, HistoryView, ProposalTag, ProposalView, Snapshot, TaskImageView, TaskView } from "../../../../src/core/snapshot";
 import type { Column, FocusRequest } from "../../protocol";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import { focusStepCount } from "../focus/steps";
@@ -159,6 +159,8 @@ export interface ProposalCard {
   blocker: string | null;
   /** Why Reject is disabled; null when the Proposal can be rejected. */
   rejectBlocker: string | null;
+  /** Why the arrow of Reject (Rework with feedback) is disabled: Reject's reasons, and for a resolution also Resolve's; null when it works. */
+  reworkBlocker: string | null;
   /** Which View buttons the card has: each shows only when its tab would have at least one step of the Proposal's focus (`rules#focus`). */
   views: FocusViews;
   /** The Drifts a resolution resolves, one row each; empty for any other Proposal. */
@@ -184,6 +186,8 @@ export interface DriftCard {
   drift: DriftView;
   /** Why «Dismiss Drift» is disabled on this card, or null when it works. */
   dismissBlocker: string | null;
+  /** Why the arrow of «Dismiss Drift» (Rework with feedback) is disabled: the reasons of Dismiss Drift, then those of Resolve; null when it works. */
+  reworkBlocker: string | null;
   /** Whether the agent is resolving this Drift now: it stays in Blocked with a Resolving badge. */
   resolving: boolean;
   /** Why «Resolve» is disabled on this card, or null when it works. */
@@ -226,6 +230,8 @@ export interface TaskCard {
   finishing: string | null;
   /** The Task's text after its title, in Markdown; empty when it has none. */
   body: string;
+  /** The images the Task carries, in the order they were tied; the details show them under the body. */
+  images: TaskImageView[];
   /** Path relative to `.trama/`. */
   file: string;
   column: Column;
@@ -303,7 +309,7 @@ export function createsText(n: number): string | null {
   return n === 0 ? null : `Creates ${n} ${n === 1 ? "Task" : "Tasks"}`;
 }
 
-export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, blocked: Map<string, TaskCard[]> = new Map(), finishing: readonly string[] = [], models: BoardModels = NO_MODELS, views: FocusViews = NO_VIEWS): ProposalCard {
+export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, blocked: Map<string, TaskCard[]> = new Map(), finishing: readonly string[] = [], models: BoardModels = NO_MODELS, views: FocusViews = NO_VIEWS, resolveReason: string | null = null): ProposalCard {
   const wait = finishingBlocker(p.id, finishing);
   const name = cardNameOf(numbers, "proposal", p.id);
   const choosable = Object.hasOwn(models.proposals, p.id);
@@ -320,6 +326,7 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, 
     changes: summarizeChanges(p.changes),
     blocker: joinReasons([wait, approveBlocker(p, numbers)]),
     rejectBlocker: wait,
+    reworkBlocker: joinReasons([wait, p.kind === "resolution" ? resolveReason : null]),
     views,
     resolves: resolvedRows(p, numbers, blocked),
     creates: createsText(p.creates),
@@ -331,7 +338,14 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, 
 /** What the Board shows of one Drift's Resolve: why it is refused, and whether the agent works on the Drift now. */
 export interface DriftResolve {
   blocker: string | null;
+  /** The host's reasons for this Drift's Resolve, without «The agent is still finishing»; null when it has none. */
+  hostReason?: string | null;
   resolving: boolean;
+}
+
+/** Why the arrow of «Dismiss Drift» is disabled: the reasons of Dismiss Drift, in their order, then those of Resolve. */
+export function driftReworkBlocker(dismiss: string | null, resolveReasons: string | null): string | null {
+  return joinReasons([dismiss, resolveReasons]);
 }
 
 /** A Drift's card. `resolve` says why its Resolve is refused and whether the agent is resolving it now. */
@@ -348,6 +362,7 @@ export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers, dismis
     proposal: d.proposal,
     drift: d,
     dismissBlocker,
+    reworkBlocker: driftReworkBlocker(dismissBlocker, resolve.hostReason ?? null),
     resolving: resolve.resolving,
     resolveBlocker: resolve.blocker,
     blocked,
@@ -382,6 +397,7 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, finishin
     waitingFor,
     blockedBy: t.blockedBy,
     body: t.body,
+    images: t.images,
     file: t.file,
     column: t.column,
     finishing,
@@ -444,10 +460,10 @@ export function buildBoard(snapshot: Snapshot, resolve: BoardResolve = NO_RESOLV
     }
   }
   const backlog = byCreation<{ id: string; created: string | null; card: Card }>([
-    ...snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, underDrift, snapshot.finishingProposals, models, focusViews(snapshot, { kind: "proposal", id: p.id })) as Card })),
+    ...snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, underDrift, snapshot.finishingProposals, models, focusViews(snapshot, { kind: "proposal", id: p.id }), resolve.blocker) as Card })),
     ...snapshot.drifts
       .filter((d) => !delivered.has(d.id))
-      .map((d) => ({ id: d.id, created: d.created, card: driftCard(d, numbers, dismissBlocker(d.id, snapshot.resolutionDrifts, resolve.blocker, snapshot.finishingDrifts), { blocker: resolveBlocker(d.id, snapshot.finishingDrifts, resolve), resolving: resolve.resolving.includes(d.id) }, underDrift.get(d.id) ?? []) as Card })),
+      .map((d) => ({ id: d.id, created: d.created, card: driftCard(d, numbers, dismissBlocker(d.id, snapshot.resolutionDrifts, resolve.blocker, snapshot.finishingDrifts), { blocker: resolveBlocker(d.id, snapshot.finishingDrifts, resolve), hostReason: resolve.drifts[d.id] ?? null, resolving: resolve.resolving.includes(d.id) }, underDrift.get(d.id) ?? []) as Card })),
   ]);
   // A blocked Task keeps its card in Active, with its blocked and waiting badges.
   const active: Card[] = [...tasks.values()].filter((card) => card.column !== "done");

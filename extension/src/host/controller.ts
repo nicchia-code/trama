@@ -1,27 +1,31 @@
 import { readdirSync } from "node:fs";
 import { basename } from "node:path";
+import { homedir } from "node:os";
 import { randomBytes, randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
-import { approveProposal, rejectProposal } from "../../../src/core/proposals";
+import { findInstructionFiles } from "../../../src/core/instruction-files";
+import { approveProposal, getProposal, rejectProposal, resolutionHolding } from "../../../src/core/proposals";
 import { type PreparedQuestion, preparedOutcome, preparedStatus } from "../../../src/core/prepared";
-import { resolveDriftBlocker, resolveDriftsBlocker, runWindowBlocker, writePreparedResolution } from "../../../src/core/resolution";
+import { reworkProposalBlocker, reworkProposalDrifts, resolveDriftBlocker, resolveDriftsBlocker, runWindowBlocker, writePreparedResolution } from "../../../src/core/resolution";
 import type { QuestionAnswer } from "../../../src/core/questions";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { namerOf } from "../../../src/core/card-names";
 import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
-import { blockedTasks, dismissDrift, getDrift, getTask, listDrifts, listTasks, requireNotAttached } from "../../../src/core/work";
+import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, listDrifts, listTasks, requireNotAttached } from "../../../src/core/work";
 import type { AgentAction, SetupChoice, ToHost, ToWebview, WorkspaceFolderView } from "../protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAdvisorScanner, configuredAgent, configuredAsyncDriftResolver, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, endHeldJob, launchAgent, launched, settings, startHeldJob } from "./agent";
+import { configuredAdvisorScanner, configuredAgent, configuredAsyncDriftResolver, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, endHeldJob, launchAgent, launched, openQuickTask, settings, startHeldJob } from "./agent";
 import { isCursor } from "./cursor";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onFinalReviewMissing, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing } from "./drift-resolution";
 import { askPreparedRound } from "./questions";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
+import { taskImagePath, withImageUris } from "./task-images";
+import { taskImagesRoot } from "../../../src/core/task-images";
 import { appliedProposalModels, boardModels, chooseProposalModel, forgetProposalModels, proposalRunModel, type BoardModels, type ModelMemory, type ProposalAgent } from "./proposal-models";
 import type { RunModel } from "./terminal-agent";
 import { planRuns, runSequence, type AppliedModel, type PlannedRun } from "./run-groups";
@@ -34,7 +38,7 @@ import type { QuestionSession } from "./question-session";
 import type { DesignRequests } from "./design-requests";
 
 import { writeLastScan } from "../../../src/core/last-scan";
-import { buildPrompt, mayFileDrifts, PREPARED_ANSWER_SENTENCE, terminalName, type ResolvedAction } from "./prompts";
+import { buildPrompt, mayFileDrifts, PREPARED_ANSWER_SENTENCE, reworkPrompt, terminalName, type ResolvedAction } from "./prompts";
 
 const DEBOUNCE_MS = 150;
 
@@ -98,6 +102,10 @@ export class Controller implements vscode.Disposable {
   private pendingGuided: Extract<ToWebview, { type: "guidedSetup" }> | undefined;
   /** The newest request of model suggestions made by the wizard: an answer that arrives after a newer one is dropped. */
   private wizardSuggestionsRequest = 0;
+  /** The paths of the newest `instructionFiles` answer: the only ones the wizard may ask to open. */
+  private instructionFilePaths = new Set<string>();
+  /** The newest instruction-files search: an answer that arrives after a newer request is dropped. */
+  private instructionFilesRequest = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -276,6 +284,30 @@ export class Controller implements vscode.Disposable {
     }
   }
 
+  /** The agent instruction files of `root` (a workspace folder) or, without `root`, of the project's folder, for the wizard's Agent step. */
+  private async postInstructionFiles(root: string | undefined): Promise<void> {
+    const folder = root === undefined ? findProject()?.root : fileFolders().find((f) => f.uri.fsPath === root)?.uri.fsPath;
+    if (folder === undefined) {
+      this.post({ type: "error", message: "Ignored a request for a folder outside the workspace." });
+      return;
+    }
+    const request = ++this.instructionFilesRequest;
+    const files = await findInstructionFiles(folder, homedir());
+    if (request !== this.instructionFilesRequest) return;
+    this.instructionFilePaths = new Set(files.map((file) => file.path));
+    this.post({ type: "instructionFiles", root: folder, files });
+  }
+
+  /** Opens a file of the last instruction-files answer in an editor tab that is not a preview, beside the panel. */
+  private async openInstructionFile(path: string): Promise<void> {
+    if (!this.instructionFilePaths.has(path)) {
+      this.post({ type: "error", message: "Ignored a request to open a file that is not an agent instruction file." });
+      return;
+    }
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(path));
+    await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside, preview: false });
+  }
+
   /** The model names of `agent` (and `ompPath`, for omp) for the wizard's Models step, which suggests them before the agent is saved. */
   private async postWizardSuggestions(agent: "cursor" | "omp", ompPath: string): Promise<void> {
     const request = ++this.wizardSuggestionsRequest;
@@ -418,7 +450,7 @@ export class Controller implements vscode.Disposable {
     const panel = vscode.window.createWebviewPanel("trama", title, vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
-      localResourceRoots: [dist],
+      localResourceRoots: [dist, ...this.imageRoots()],
     });
     panel.iconPath = {
       light: vscode.Uri.joinPath(this.extensionUri, "media", "trama-icon-dark.svg"),
@@ -470,6 +502,20 @@ export class Controller implements vscode.Disposable {
     void this.panel?.webview.postMessage(message);
   }
 
+  /** The folder of the Task images of the project, as a resource root; none without a project. */
+  private imageRoots(project = findProject()): vscode.Uri[] {
+    return project ? [vscode.Uri.file(taskImagesRoot(project))] : [];
+  }
+
+  /** Lets the open panel load the Task images of `project`: a panel made before the project existed has no such root. */
+  private allowTaskImages(project: Project): void {
+    if (!this.panel) return;
+    const options = this.panel.webview.options;
+    const roots = options.localResourceRoots ?? [];
+    const missing = this.imageRoots(project).filter((root) => !roots.some((r) => r.fsPath === root.fsPath));
+    if (missing.length > 0) this.panel.webview.options = { ...options, localResourceRoots: [...roots, ...missing] };
+  }
+
   private scheduleRefresh(): void {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => this.refresh(), DEBOUNCE_MS);
@@ -505,7 +551,10 @@ export class Controller implements vscode.Disposable {
       if (this.modelMemory) forgetProposalModels(this.modelMemory, project).catch((err: unknown) => this.post({ type: "error", message: describeError(err) }));
       const work = driftWork(project.root);
       synchronizeAnnouncementTitles(project);
-      const snapshot = buildSnapshot(project, driftsFinishing(project.root), proposalsFinishing(project.root), tasksFinishing(project.root));
+      this.allowTaskImages(project);
+      const built = buildSnapshot(project, driftsFinishing(project.root), proposalsFinishing(project.root), tasksFinishing(project.root));
+      const webview = this.panel?.webview;
+      const snapshot = webview ? withImageUris(built, (path) => webview.asWebviewUri(vscode.Uri.file(path)).toString()) : built;
       const models: BoardModels = this.modelMemory ? boardModels(this.modelMemory, snapshot.proposals, proposalAgent()) : { agent: proposalAgent(), proposals: {} };
       if (this.panel) this.panel.title = snapshot.system.name.trim() || this.projectTitle(project);
       // The Drifts an agent was asked to resolve are forgotten once no resolution runs, so a later Resolve is not held by them.
@@ -546,7 +595,7 @@ export class Controller implements vscode.Disposable {
         () => true,
         "run",
         undefined,
-        { filesDrifts: true, severalTasks: true, model: planned.run, onEnd, advisorStorage: this.globalStorageUri },
+        { filesDrifts: true, severalTasks: true, model: planned.run, onEnd },
       );
       return launched(result);
     } catch (error) {
@@ -556,7 +605,8 @@ export class Controller implements vscode.Disposable {
   }
 
   private async handle(raw: unknown): Promise<void> {
-    const parsed = parseToHost(raw, this.manifestSettings());
+    const project = findProject();
+    const parsed = parseToHost(raw, this.manifestSettings(), (task, name) => project !== undefined && taskImagePath(project, task, name) !== undefined);
     if (!parsed.ok) {
       this.post({ type: "error", message: `Ignored an invalid message from the view: ${parsed.reason}.` });
       return;
@@ -581,6 +631,14 @@ export class Controller implements vscode.Disposable {
     }
     if (message.type === "agentCheckWanted") {
       await this.checkAgent(message.agent, message.ompPath);
+      return;
+    }
+    if (message.type === "instructionFilesWanted") {
+      await this.postInstructionFiles(message.root);
+      return;
+    }
+    if (message.type === "openInstructionFile") {
+      await this.openInstructionFile(message.path);
       return;
     }
     if (message.type === "folderChildrenWanted") {
@@ -619,6 +677,13 @@ export class Controller implements vscode.Disposable {
       case "launch":
         await this.launchAction(project, message.action);
         return;
+      case "openQuickTask":
+        try {
+          await openQuickTask(project.root);
+        } catch (err) {
+          this.post({ type: "error", message: describeError(err) });
+        }
+        return;
       case "openGuidedSetup":
         await this.openGuidedSetup(project, message.choice);
         return;
@@ -638,6 +703,13 @@ export class Controller implements vscode.Disposable {
       case "openLink":
         await vscode.env.openExternal(vscode.Uri.parse(message.url, true));
         return;
+      case "openTaskImage": {
+        const path = taskImagePath(project, message.task, message.name);
+        if (path === undefined) return;
+        // Beside the panel and without taking the focus, so the panel stays where it was; not a preview tab.
+        await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(path), { viewColumn: vscode.ViewColumn.Beside, preview: false, preserveFocus: true });
+        return;
+      }
       case "approveProposal":
         requireNotAttached(project, message.id);
         if (this.refuseWhileFinishing(project, message.id, "Approve")) return;
@@ -652,20 +724,18 @@ export class Controller implements vscode.Disposable {
       case "rejectProposal": {
         requireNotAttached(project, message.id);
         if (this.refuseWhileFinishing(project, message.id, "Reject")) return;
-        const feedback = await vscode.window.showInputBox({
-          title: `Reject Proposal ${cardName(project, "proposal", message.id)}`,
-          prompt: "Feedback for the agent (optional): what should the next Proposal do differently? Press Enter to reject without feedback, Esc to cancel.",
-          ignoreFocusOut: true,
-        });
-        if (feedback === undefined) return;
-        requireNotAttached(project, message.id);
-        if (this.refuseWhileFinishing(project, message.id, "Reject")) return;
-        rejectProposal(project, message.id, feedback);
+        rejectProposal(project, message.id);
         this.refresh();
         return;
       }
       case "dismissDrift":
         await this.dismissDriftAfterConfirm(project, message.id);
+        return;
+      case "reworkDrift":
+        await this.reworkDriftWithFeedback(project, message.drift);
+        return;
+      case "reworkProposal":
+        await this.reworkProposalWithFeedback(project, message.proposal);
         return;
     }
   }
@@ -675,6 +745,43 @@ export class Controller implements vscode.Disposable {
     if (!proposalsFinishing(project.root).includes(id)) return false;
     void vscode.window.showErrorMessage(`Trama: ${action} Proposal is unavailable: the agent is still finishing.`);
     return true;
+  }
+
+  /**
+   * «Rework with feedback…»: the host rechecks what Resolve needs, asks for the developer's feedback in an input box (Esc does nothing) and,
+   * when it is empty, for a confirmation; then launches the resolution agent on that one Drift, never with its prepared question.
+   */
+  private async reworkDriftWithFeedback(project: Project, id: string): Promise<void> {
+    const drift = getDrift(project, id);
+    const name = cardName(project, "drift", drift.id);
+    const unavailable = (): string | null => {
+      if (drift.data.status !== "open") return `Drift ${name} is ${drift.data.status}`;
+      if (driftsFinishing(project.root).includes(id)) return "the agent is still finishing";
+      const holding = resolutionHolding(project, id);
+      if (holding) return `Drift ${name} is part of resolution ${cardName(project, "proposal", holding.id)}`;
+      return resolveDriftBlocker(project, driftWork(project.root), this.namedByResolution.has(id));
+    };
+    const refuse = (): boolean => {
+      const reason = unavailable();
+      if (reason === null) return false;
+      void vscode.window.showErrorMessage(`Trama: Rework is unavailable: ${reason}.`);
+      return true;
+    };
+    if (refuse()) return;
+    const feedback = await vscode.window.showInputBox({
+      title: `Rework ${name} – ${drift.title}`,
+      prompt: "How should the agent resolve this Drift? Leave empty to resolve it as Resolve does.",
+      placeHolder: "Feedback for the agent",
+      ignoreFocusOut: true,
+    });
+    if (feedback === undefined) return;
+    const text = feedback.trim();
+    if (text === "") {
+      const choice = await vscode.window.showWarningMessage(`Resolve ${name} without feedback?`, { modal: true }, "Resolve");
+      if (choice !== "Resolve") return;
+    }
+    if (refuse()) return;
+    await this.launchAction(project, { kind: "resolve-drifts", drift: id }, undefined, text);
   }
 
   /** «Dismiss Drift»: the host asks for the developer's confirmation in a modal dialog; cancelling changes nothing. Closing the Drift is `dismissDrift` in `src/core`, which rechecks its conditions and refuses without changing anything. */
@@ -764,15 +871,80 @@ export class Controller implements vscode.Disposable {
     if (given !== undefined) await this.launchAction(project, { kind: "resolve-drifts", drift }, given);
   }
 
-  private async launchAction(project: Project, action: AgentAction, answered?: { selected: string[]; text?: string }): Promise<void> {
+  /**
+   * «Rework with feedback…» on an open Proposal: asks for the developer's feedback in an input box (Esc does nothing) and, when it is empty, for a
+   * confirmation; then rechecks the conditions of Reject (and, for a resolution, of Resolve) on the board just read, rejects the Proposal with the
+   * feedback and the `reworkRequested` mark, and sends the instruction that redoes it. When the rejection is refused nothing starts.
+   */
+  private async reworkProposalWithFeedback(project: Project, id: string): Promise<void> {
+    const proposal = getProposal(project, id);
+    const name = cardName(project, "proposal", id);
+    const refuse = (): boolean => {
+      const current = getProposal(project, id);
+      let reason: string | null = null;
+      if (current.data.status !== "open") reason = `Proposal ${name} is ${current.data.status}`;
+      else if (attachedDrift(project, id) !== null) {
+        try {
+          requireNotAttached(project, id);
+        } catch (err) {
+          reason = describeError(err);
+        }
+      } else if (proposalsFinishing(project.root).includes(id)) reason = "Reject Proposal is unavailable: the agent is still finishing.";
+      else if (current.data.kind === "resolution") reason = reworkProposalBlocker(project, driftWork(project.root), id);
+      if (reason === null) return false;
+      void vscode.window.showErrorMessage(`Trama: ${reason}`);
+      return true;
+    };
+    if (refuse()) return;
+    const feedback = await vscode.window.showInputBox({
+      title: `Rework ${name} – ${proposal.title}`,
+      prompt: "What should the agent change? Leave empty to redo it on the current Model.",
+      placeHolder: "Feedback for the agent",
+      ignoreFocusOut: true,
+    });
+    if (feedback === undefined) return;
+    const text = feedback.trim();
+    if (text === "") {
+      const choice = await vscode.window.showWarningMessage(`Rework ${name} without feedback? The agent redoes it on the current Model.`, { modal: true }, "Rework");
+      if (choice !== "Rework") return;
+    }
+    if (refuse()) return;
+    try {
+      rejectProposal(project, id, text, { reworkRequested: true });
+    } catch (err) {
+      void vscode.window.showErrorMessage(`Trama: ${describeError(err)}`);
+      return;
+    }
+    this.refresh();
+    if (proposal.data.kind === "resolution") {
+      const drifts = reworkProposalDrifts(project, id);
+      if (drifts.length === 0) {
+        void vscode.window.showWarningMessage(`Trama: ${name} was rejected: none of its Drifts is still open.`);
+        return;
+      }
+      await this.launchAction(project, { kind: "rework-resolution", proposal: id, drifts });
+      return;
+    }
+    const skill = proposal.data.kind === "import" ? "import" : proposal.data.kind === "setup" && modelIsEmpty(project) ? "setup" : "design";
+    await this.launchAction(project, { kind: "rework", proposal: id, skill });
+  }
+
+  /** `feedback` is set only by Rework: the Drift's prepared question is never used and the instruction carries the feedback. */
+  private async launchAction(project: Project, action: AgentAction | Extract<ResolvedAction, { kind: "rework" | "rework-resolution" }>, answered?: { selected: string[]; text?: string }, feedback?: string): Promise<void> {
     // Resolve Drifts and Runs are checked from current state at the request and at each delivery checkpoint.
     const refusal = (): string | null => {
       if (action.kind === "resolve-drifts" && driftsFinishing(project.root).includes(action.drift)) return "Resolve this Drift is unavailable: the agent is still finishing.";
       if (action.kind === "implement" && tasksFinishing(project.root).includes(action.task)) return "Run this Task is unavailable: the agent is still finishing.";
+      if (action.kind === "rework-resolution") {
+        const blocker = resolveDriftsBlocker(project, driftWork(project.root));
+        return blocker === null ? null : `Rework is unavailable: ${blocker}.`;
+      }
       if (action.kind === "resolve-drifts") {
         const drift = getDrift(project, action.drift);
         if (drift.data.status !== "open") return `Resolve this Drift is unavailable: Drift ${cardName(project, "drift", drift.id)} is ${drift.data.status}`;
-        const blocker = resolveDriftBlocker(project, driftWork(project.root), this.namedByResolution.has(action.drift), answered === undefined && this.preparedQuestionOf(project, action.drift) !== null);
+        const holding = feedback !== undefined ? resolutionHolding(project, action.drift) : null;
+        if (holding) return `Resolve this Drift is unavailable: Drift ${cardName(project, "drift", drift.id)} is part of resolution ${cardName(project, "proposal", holding.id)}.`;
+        const blocker = resolveDriftBlocker(project, driftWork(project.root), this.namedByResolution.has(action.drift), answered === undefined && feedback === undefined && this.preparedQuestionOf(project, action.drift) !== null);
         return blocker === null ? null : `Resolve this Drift is unavailable: ${blocker}.`;
       }
       if (action.kind === "scan" && configuredAdvisorScanner()) return "Scan is unavailable: the Advisor Scanner is on.";
@@ -792,7 +964,7 @@ export class Controller implements vscode.Disposable {
       const rememberScan = resolved.kind === "scan" && resolved.feature === undefined
         ? (startedAt: number) => rememberDeliveredScan(project, startedAt)
         : undefined;
-      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), severalTasks: resolved.kind === "implement-all", model, advisorStorage: this.globalStorageUri });
+      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" || resolved.kind === "rework-resolution" ? "resolve" : resolved.kind === "scan" ? "scan" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), severalTasks: resolved.kind === "implement-all", model });
       if (refused !== null) throw new TramaError(refused);
       return result;
     };
@@ -802,16 +974,24 @@ export class Controller implements vscode.Disposable {
       case "resolve-drifts": {
         // Resolve Drifts is always a request on the one Drift the developer chose.
         const drift = action.drift;
-        const prepared = answered === undefined ? this.preparedQuestionOf(project, drift) : null;
+        const prepared = answered === undefined && feedback === undefined ? this.preparedQuestionOf(project, drift) : null;
         if (prepared !== null) {
           await this.resolvePrepared(project, drift, prepared);
           return;
         }
-        const instruction = answered === undefined ? undefined : `${buildPrompt({ kind: "resolve-drifts", drift })} ${PREPARED_ANSWER_SENTENCE} ${JSON.stringify(answered)}.`;
+        const instruction = feedback !== undefined ? reworkPrompt(drift, feedback) : answered === undefined ? undefined : `${buildPrompt({ kind: "resolve-drifts", drift })} ${PREPARED_ANSWER_SENTENCE} ${JSON.stringify(answered)}.`;
         const result = await send({ kind: "resolve-drifts", drift }, { kind: "resolve", drifts: () => [drift] }, instruction, undefined, this.runModelOfTask(project, getDrift(project, drift).data.origin));
         if (launched(result)) this.namedByResolution.add(drift);
         return;
       }
+      case "rework-resolution": {
+        const result = await send(action, { kind: "resolve", drifts: () => action.drifts }, undefined, undefined, this.runModelOfTask(project, getDrift(project, action.drifts[0] ?? "").data.origin));
+        if (launched(result)) for (const drift of action.drifts) this.namedByResolution.add(drift);
+        return;
+      }
+      case "rework":
+        await send(action, getProposal(project, action.proposal).title);
+        return;
       case "scan": {
         if (action.feature !== undefined && !loadModel(project).features.has(action.feature))
           throw new TramaError(`No Feature "${action.feature}" in the Model`);

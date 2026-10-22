@@ -9,7 +9,7 @@ import { Button } from "../ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import type { WizardController, WizardSnapshot } from "./controller";
-import { agentCheckLine, chosenAgent, confirmLabel, hasPrevious, nextBlock, STEP_SENTENCES, stepsOf, summaryRows, type WizardChoice, type WizardState, type WizardStep, visibleKeys } from "./logic";
+import { agentCheckLine, chosenAgent, confirmLabel, hasPrevious, ignoresInstructionFiles, nextBlock, STEP_SENTENCES, stepsOf, summaryRows, type WizardChoice, type WizardState, type WizardStep, visibleKeys } from "./logic";
 import { FolderTree } from "./tree";
 
 const WAYS: { choice: WizardChoice; title: string; sentence: string }[] = [
@@ -140,6 +140,29 @@ function SettingsBody({ controller, snapshot, state, openLink, step }: BodyProps
           </p>
         )}
       </div>
+      {step === "Agent" && snapshot.instructionFiles !== null && snapshot.instructionFiles.length > 0 ? (
+        <div className="mt-4 rounded-md border border-amber-600/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+          <p className="m-0 flex items-start gap-2">
+            <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <span>Agent instruction files found. The agent loads them in every Trama job: remove them from the repository, or check that they do not conflict with Trama.</span>
+          </p>
+          <ul className="m-0 mt-2 list-none space-y-1 p-0 font-mono text-xs">
+            {snapshot.instructionFiles.map((file) => (
+              <li key={file.path}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button type="button" className="cursor-pointer break-all border-0 bg-transparent p-0 text-left font-mono text-xs underline underline-offset-2" aria-label={`Open ${file.label}`} onClick={() => controller.openInstructionFile(file.path)}>
+                      {file.label}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{`Open ${file.label}`}</TooltipContent>
+                </Tooltip>
+              </li>
+            ))}
+          </ul>
+          {ignoresInstructionFiles(snapshot.schema, state) ? <p className="m-0 mt-2 text-muted-foreground">Trama's omp jobs ignore these files.</p> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

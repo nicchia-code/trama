@@ -1,4 +1,5 @@
 import { approvalBlock, changes, coversScope, getProposal, health, listProposals, proposalCoverage, type Proposal, resolutionHolding, unfixableDrifts, validateProposal } from "../core/proposals";
+import { readTaskImages } from "../core/task-images";
 import { decisionText } from "../core/resolution";
 import { requiredReasons } from "../core/required";
 import { bullets, describeRef, requirementsBlock } from "../core/describe";
@@ -52,6 +53,8 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
   const numbers = syncShortNumbers(p);
   const live = proposal.data.status === "draft" || proposal.data.status === "open";
   const attached = attachedDrift(p, proposal.id);
+  const redone = proposal.data.reworks;
+  const reworked = redone === null ? "" : `${numbers.name("proposal", redone)} ${listProposals(p).find((x) => x.id === redone)?.title ?? ""}`.trim();
   const resolvedDrifts = proposal.data.kind === "resolution" ? resolvedDriftsOf(p, proposal) : [];
   const h = live ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
   // Only an ordinary Proposal not attached to a Drift brings Tasks, so only it has removals and scope: computed now while it is live; once approved, only the scope it saved before is history.
@@ -60,8 +63,10 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
   const fileChanges = changes(p, proposal);
   const errors = live ? [...validateProposal(p, proposal), ...unfixableDrifts(p, proposal).map((message) => ({ file: "proposal.md", line: 0, message }))] : [];
   const md = [
-    // The label goes under the title, the first line of the body.
-    proposal.data.label ? proposal.body.trim().replace(/^#.*$/m, (title) => `${title}\n\nLabel: ${proposal.data.label}`) : proposal.body.trim(),
+    // The label and the Reworks line go under the title, the first line of the body.
+    proposal.data.label || reworked
+      ? proposal.body.trim().replace(/^#.*$/m, (title) => [title, proposal.data.label ? `Label: ${proposal.data.label}` : "", reworked ? `Reworks: ${reworked}` : ""].filter(Boolean).join("\n\n"))
+      : proposal.body.trim(),
     "",
     `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}${proposal.data.kind === "change" ? "" : ` · ${proposal.data.kind}`}`,
     attached ? `Attached to Drift ${numbers.name("drift", attached.id)} ${attached.title}. It brings no Tasks and is decided on the Drift.` : "",
@@ -95,12 +100,13 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
       number: numbers.label("proposal", proposal.id),
       title: proposal.title,
       label: proposal.data.label,
+      reworks: proposal.data.reworks,
       status: proposal.data.status,
       kind: proposal.data.kind,
       nonBlocking: proposal.data.nonBlocking,
       prepared: proposal.data.prepared,
       drifts: proposal.data.drifts,
-      tasks: proposal.tasks.map((t) => ({ id: t.id, title: t.title, technical: t.technical, refs: t.refs })),
+      tasks: proposal.tasks.map((t) => ({ id: t.id, title: t.title, technical: t.technical, refs: t.refs, images: readTaskImages(p, t.id).map((i) => i.name) })),
       ...(proposal.data.kind === "resolution" ? { resolvesDrifts: resolvedDrifts } : {}),
       requires: proposal.data.requires,
       blockedBy: h.requires,
@@ -169,6 +175,7 @@ export function taskShowView(p: Project, task: Task): Result {
   const numbers = syncShortNumbers(p);
   const blocked = blockedTasks(p);
   const blockedBy = blocked.get(task.id) ?? [];
+  const images = readTaskImages(p, task.id);
   const md = [
     `${withCheckNote(task)}`,
     "",
@@ -177,9 +184,10 @@ export function taskShowView(p: Project, task: Task): Result {
     "",
     "## References",
     task.data.refs.length === 0 ? "_Technical Task: no references._" : refsBlock(project, task.data.refs, true),
+    ...(images.length === 0 ? [] : ["", "## Images", ...images.map((i) => `- ${i.path}`)]),
     ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, task.data.refs, "text")] : []),
   ].join("\n");
-  return { md, json: { ...taskSummary(p, task, blocked, numbers), body: task.body } };
+  return { md, json: { ...taskSummary(p, task, blocked, numbers), body: task.body, images: images.map((i) => i.path) } };
 }
 
 /** A Task's line in the textual lists: its marks, and what blocks it. */

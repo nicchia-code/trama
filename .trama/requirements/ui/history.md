@@ -1,0 +1,11 @@
+---
+description: "Usa quando mostri le voci di History: la colonna, la modale dei dettagli e i comandi che le elencano."
+---
+# Interfaccia della History
+
+## voce-history
+- Una voce nella colonna History è una scheda con il titolo, la data e il riassunto. La data è scritta come l'ora locale `HH:MM` nei gruppi `Today` e `Yesterday`, e come giorno e ora per esteso nella lingua dell'editor negli altri; il tooltip dà sempre data e ora complete. Il riassunto è reso come Markdown solo in linea, intero, senza troncarlo. La scheda non ha pulsanti, salvo la «i», e non si apre cliccandola.
+- Accanto al titolo, a destra, la «i» è un pulsante a sola icona (l'icona lucide `Info`, 16 px, nel colore del testo) con tooltip e nome accessibile `Show the Tasks of <titolo>`. Apre i dettagli della voce in una finestra modale sopra il pannello.
+- La modale ha come titolo il titolo della voce e sotto la data completa; poi il testo completo della voce, reso come Markdown; poi la sezione `Tasks` con un Task per riga, nell'ordine di creazione dei Task: pallino di stato, ID, titolo, tag, data di fine quando c'è e i riferimenti come chip che portano al Diagramma o alla scheda Requirements, come quelli dei Drift. Un Task che non è più Done mostra il suo stato di adesso; un Task che non esiste più compare con la sua identità e `no longer exists`.
+- La modale si chiude con il pulsante `Close` (icona `close`), con Esc e cliccando fuori; seguire un chip chiude la modale e apre il Diagramma o la scheda Requirements. All'apertura il focus va al pulsante `Close`, resta dentro la modale finché è aperta e alla chiusura torna alla «i» che l'ha aperta. La modale ha il ruolo di dialogo modale con il nome della voce, e scorre al suo interno quando il testo è lungo. Si chiude da sola quando il pannello si chiude o quando la voce sparisce dai file.
+- `trama history list` elenca le voci, la più recente prima, con identità, data e titolo; `trama history show <id>` stampa titolo, data, riassunto, testo e i Task citati con il loro stato. I testi della riga di comando e del pannello sono in inglese, nella lingua fissa dell'interfaccia; titolo, riassunto e testo delle voci restano nella lingua in cui l'agente li ha scritti.

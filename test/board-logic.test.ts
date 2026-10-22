@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { DriftCard, TaskCard } from "../extension/src/webview/board/logic";
 import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockedReason, boardDecisionCount, buildBoard, createsText, finalReviewMissingNotice, finishingBlocker, stoppedFollowingNotice, formatCounts, GHOST_COLUMN, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockedReason, boardDecisionCount, buildBoard, createsText, driftReworkBlocker, NO_MODELS, finalReviewMissingNotice, finishingBlocker, stoppedFollowingNotice, formatCounts, GHOST_COLUMN, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
 import { runBlocker } from "../src/core/design";
 import { dismissBlocker } from "../extension/src/webview/dismiss";
@@ -36,7 +36,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   ...over,
 });
 const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, job: null, prepared: null, title: "Code refunds late", body: "line one\n\nline two\nline three", previous: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
-const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", created: null, title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], file: "tasks/0012-refunds.md", ...over });
+const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", created: null, title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], file: "tasks/0012-refunds.md", images: [], ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
 
@@ -120,6 +120,20 @@ test("Approve and Reject wait while the agent that delivered the Proposal is sti
   const free = proposalCard(delivered, NUMBERS, new Map(), []);
   expect(free.blocker).toBeNull();
   expect(free.rejectBlocker).toBeNull();
+  expect(waiting.reworkBlocker).toBe("The agent is still finishing");
+  expect(free.reworkBlocker).toBeNull();
+});
+
+test("the arrow of Reject on a resolution adds the reasons of Resolve after the finishing one; an ordinary Proposal does not", () => {
+  const resolution = proposal({ id: "iwham416", kind: "resolution" });
+  const reasons = "A run is in progress";
+  const card = proposalCard(resolution, NUMBERS, new Map(), ["iwham416"], NO_MODELS, undefined, reasons);
+  expect(card.rejectBlocker).toBe("The agent is still finishing");
+  expect(card.reworkBlocker).toBe("The agent is still finishing. A run is in progress");
+  expect(proposalCard(resolution, NUMBERS, new Map(), [], NO_MODELS, undefined, reasons).reworkBlocker).toBe("A run is in progress");
+  expect(proposalCard(proposal({ id: "iwham416" }), NUMBERS, new Map(), [], NO_MODELS, undefined, reasons).reworkBlocker).toBeNull();
+  expect(driftReworkBlocker("An agent is resolving Drifts", "Drifts are being resolved")).toBe("An agent is resolving Drifts. Drifts are being resolved");
+  expect(driftReworkBlocker(null, null)).toBeNull();
 });
 
 test("the model gear shows only on a Proposal that carries Tasks, and the chosen model is badged, struck when chosen for another agent", () => {

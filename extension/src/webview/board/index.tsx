@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Play, Plus, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, Play, Plus, Search, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { namerOf, noNumbers } from "../../../../src/core/card-names";
 import { joinReasons, runBlocker } from "../../../../src/core/design";
@@ -10,6 +10,7 @@ import { scanButtonLabel } from "../scan-label";
 import type { Slot, View, ViewContext } from "../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
@@ -137,6 +138,7 @@ export function BoardPage({ snapshot, asking, resolve, advisorScanner, models, m
       context.post({ type: "modelSuggestionsWanted" });
     },
     openProposal: (proposal) => setBodyOf(proposal),
+    openTaskImage: (task, name) => context.post({ type: "openTaskImage", task, name }),
   };
 
   if (snapshot === null) return <div ref={root} />;
@@ -149,15 +151,31 @@ export function BoardPage({ snapshot, asking, resolve, advisorScanner, models, m
   const foot = (id: ColumnId): ReactNode => {
     if (id === "backlog")
       return (
-        <BoardButton
-          icon={Plus}
-          label="Add Work Item"
-          aria="Add Work Item"
-          tooltip="Write a work item in Markdown and send it to an agent"
-          full
-          className="border-dashed"
-          onClick={() => context.post({ type: "writeDesignRequest" })}
-        />
+        <div className="flex w-full">
+          <BoardButton
+            icon={Plus}
+            label="Add Work Item"
+            aria="Add Work Item"
+            tooltip="Write a work item in Markdown and send it to an agent"
+            full
+            className="rounded-r-none border-dashed"
+            onClick={() => context.post({ type: "writeDesignRequest" })}
+          />
+          <DropdownMenu>
+            <Tip text="More ways to add work">
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" aria-label="More ways to add work" className="-ml-px rounded-l-none border-dashed px-2">
+                  <ChevronUp aria-hidden="true" focusable="false" />
+                </Button>
+              </DropdownMenuTrigger>
+            </Tip>
+            <DropdownMenuContent side="top" align="end">
+              <Tip text="Ask an agent for a quick job, without scans or cards">
+                <DropdownMenuItem onSelect={() => context.post({ type: "openQuickTask" })}>Add Quick Task</DropdownMenuItem>
+              </Tip>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       );
     if (id === "active")
       return (
@@ -191,17 +209,19 @@ export function BoardPage({ snapshot, asking, resolve, advisorScanner, models, m
               onClick={() => context.post({ type: "launch", action: { kind: "scan" } })}
             />
           </div>
-          <div role="status" className="flex flex-col gap-1 px-3 empty:hidden">
-            {notices.map((notice) => (
-              <div key={notice.id} className="mt-1.5 flex items-center justify-between gap-2 rounded-md border border-amber-600 bg-amber-600/10 px-2 py-1 dark:border-amber-400 dark:bg-amber-400/15">
-                <span className="break-words">{notice.text}</span>
-                <Button variant="outline" size="sm" aria-label={`Close the notice: ${notice.text}`} onClick={() => closeNotice(notice.id)}>
-                  <X aria-hidden="true" focusable="false" />
-                  Close
-                </Button>
-              </div>
-            ))}
-          </div>
+          {notices.length > 0 && (
+            <div role="status" className="flex flex-col gap-1 px-3">
+              {notices.map((notice) => (
+                <div key={notice.id} className="mt-1.5 flex items-center justify-between gap-2 rounded-md border border-amber-600 bg-amber-600/10 px-2 py-1 dark:border-amber-400 dark:bg-amber-400/15">
+                  <span className="break-words">{notice.text}</span>
+                  <Button variant="outline" size="sm" aria-label={`Close the notice: ${notice.text}`} onClick={() => closeNotice(notice.id)}>
+                    <X aria-hidden="true" focusable="false" />
+                    Close
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
           <div
             className="grid min-h-0 flex-1 [grid-template-rows:minmax(0,1fr)] gap-2.5 overflow-x-auto p-2.5"
             style={{ gridTemplateColumns: historyOpen ? "repeat(4, minmax(250px, 1fr))" : "repeat(3, minmax(250px, 1fr)) 40px" }}
@@ -273,6 +293,13 @@ export interface BoardView extends View {
   receiveModels(message: { models: ModelSuggestion[]; error?: string }): void;
 }
 
+/**
+ * Switch for the yellow notices of withdrawn ghosts (the agent finished or stopped without delivering) and of the Run
+ * that ended without the Advisor's final review. Off: the host still prepares them (`extension/src/host/controller.ts`
+ * is unchanged) but the Board does not draw them. Set it back to `true` to show them again.
+ */
+export const SHOW_WITHDRAWN_NOTICES = false;
+
 export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
   let nextNotice = 0;
   let page: BoardPageProps = {
@@ -302,10 +329,12 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
       render();
     },
     withdrawn(gone: AnnouncementView[]) {
+      if (!SHOW_WITHDRAWN_NOTICES) return;
       page = { ...page, notices: [...page.notices, ...gone.map((a) => ({ id: nextNotice++, text: withdrawnNotice(a) }))] };
       render();
     },
     finalReviewMissing(reason: string) {
+      if (!SHOW_WITHDRAWN_NOTICES) return;
       page = { ...page, notices: [...page.notices, { id: nextNotice++, text: finalReviewMissingNotice(reason) }] };
       render();
     },

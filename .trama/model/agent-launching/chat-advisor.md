@@ -8,15 +8,17 @@ Le revisioni sono di tre tipi. La revisione continua guarda le modifiche mentre 
 
 Quando `trama-advisor` trova che il codice scritto dal Task si allontana da ciò che chiedono il Task, il Modello o i Requisiti, lo dice all'agente con le note, e l'agente lo corregge prima di portare il Task in Done. Quando la differenza sta nel codice che c'era già, fuori dal lavoro del Task, la archivia lui come Drift, come l'advisor di omp (vedi il Drift). Le note aspettano soltanto nella memoria dell'editor: non sono informazione del progetto e si perdono se l'editor riparte.
 
+Per ora l'avviso del Run finito senza la revisione finale non si mostra: Trama lo prepara come sempre, ma la Board non lo disegna (vedi il Panel).
+
 ## States
 
 ### Al lavoro (initial)
 L'agente realizza i Task; nessuna revisione che l'agente aspetta è in corso.
 - `editor-chat.TURN_FINISHING` → Revisione finale: solo per l'agente principale. Trama continua il turno chiedendo all'agente di far rivedere a `trama-advisor` la corsa intera e di aspettarne l'esito; la revisione copre anche le note in attesa e le modifiche non ancora riviste, e una revisione continua in corso non conta più. Il turno non finisce, quindi Task presi, annunci e lavoro restano.
 - `editor-chat.SUBAGENT_STOPPED` → Revisione del Task: solo per un sotto-agente che realizza un Task. Trama gli risponde chiedendogli di far rivedere il suo Task a `trama-advisor` e di aspettarne l'esito prima di restituire il risultato; la revisione copre anche le sue note in attesa e le modifiche non ancora riviste.
-- `editor-chat.AGENT_STOPPED` → Finita senza revisione finale: solo per l'agente principale; il turno è finito senza che Trama potesse continuarlo, per esempio perché l'hook non ha raggiunto l'editor in tempo. Il Run finisce come ogni Run nella chat, e in cima alla Board il developer è avvisato che il Run è finito senza la revisione finale dell'Advisor, con il motivo.
+- `editor-chat.AGENT_STOPPED` → Finita senza revisione finale: solo per l'agente principale; il turno è finito senza che Trama potesse continuarlo, per esempio perché l'hook non ha raggiunto l'editor in tempo. Il Run finisce come ogni Run nella chat, e Trama prepara l'avviso che il Run è finito senza la revisione finale dell'Advisor, con il motivo.
 - `editor-chat.AGENT_STOPPED` → Finita: per un sotto-agente, la conversazione che lo ha lanciato ha concluso il turno.
-- `editor-chat.AGENT_INTERRUPTED` → Finita senza revisione finale: solo per l'agente principale; il Run è stato interrotto o è andato in errore prima della revisione finale. Il developer è avvisato come sopra.
+- `editor-chat.AGENT_INTERRUPTED` → Finita senza revisione finale: solo per l'agente principale; il Run è stato interrotto o è andato in errore prima della revisione finale. Trama prepara l'avviso come sopra.
 - `editor-chat.AGENT_INTERRUPTED` → Finita: per un sotto-agente, la conversazione che lo ha lanciato è stata interrotta.
 - `editor-chat.SUBAGENT_INTERRUPTED` → Finita: solo per quel sotto-agente; il Run continua senza la sua revisione.
 - `editor-chat.CONVERSATION_CLOSED` → Finita: il developer ha chiuso la conversazione di sua scelta, quindi nessun avviso.
@@ -61,9 +63,9 @@ L'agente principale aspetta l'esito di `trama-advisor` sulla corsa intera.
 - `agent.ADVISOR_REVIEWED` → Finita: l'esito è pulito; l'agente conclude la corsa come sempre e la sua prossima fine di turno non è continuata.
 - `agent.ADVISOR_REVIEWED` → Correzione finale: l'esito ha delle note; l'agente corregge prima di concludere.
 - `editor-chat.TURN_FINISHING` → Revisione finale: l'agente ha concluso il turno senza aspettare l'esito; Trama continua di nuovo il turno con la revisione finale, se non l'ha già chiesta tre volte.
-- `editor-chat.TURN_FINISHING` → Finita senza revisione finale: come sopra, dopo la terza richiesta; Trama non continua il turno, il Run finisce come sempre e il developer è avvisato in cima alla Board.
-- `editor-chat.AGENT_STOPPED` → Finita senza revisione finale: il turno è finito senza l'esito e senza che Trama potesse continuarlo; il developer è avvisato in cima alla Board.
-- `editor-chat.AGENT_INTERRUPTED` → Finita senza revisione finale: il developer ha interrotto la revisione, o la corsa è andata in errore; il developer è avvisato in cima alla Board.
+- `editor-chat.TURN_FINISHING` → Finita senza revisione finale: come sopra, dopo la terza richiesta; Trama non continua il turno, il Run finisce come sempre e Trama prepara l'avviso della revisione finale mancata.
+- `editor-chat.AGENT_STOPPED` → Finita senza revisione finale: il turno è finito senza l'esito e senza che Trama potesse continuarlo; Trama prepara l'avviso della revisione finale mancata.
+- `editor-chat.AGENT_INTERRUPTED` → Finita senza revisione finale: il developer ha interrotto la revisione, o la corsa è andata in errore; Trama prepara l'avviso della revisione finale mancata.
 - `editor-chat.CONVERSATION_CLOSED` → Finita: nessun avviso.
 
 ### Correzione finale
@@ -78,4 +80,4 @@ L'agente principale corregge secondo le note della revisione finale.
 L'advisor non guarda più questo agente. Le note ancora in attesa sono dimenticate.
 
 ### Finita senza revisione finale (final)
-Il Run è finito senza un esito della revisione finale; il developer ne è stato avvisato.
+Il Run è finito senza un esito della revisione finale; Trama ne ha preparato l'avviso.

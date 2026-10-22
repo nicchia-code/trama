@@ -10,7 +10,10 @@ Può anche registrare direttamente un Drift dalla riga di comando, per annotare 
 The developer approves an open Proposal, from the Board or from the Diagram's detail panel. Una Proposal allegata a un Drift aperto non si approva così: si decide con il Drift, dalla riga di comando o con una risoluzione.
 
 ### REJECT_PROPOSAL
-The developer rejects an open Proposal and may give feedback for the agent. Cancelling the feedback prompt rejects nothing; confirming it empty rejects without feedback. Una Proposal allegata a un Drift aperto non si rifiuta così: si decide con il Drift, dalla riga di comando o con una risoluzione.
+The developer rejects an open Proposal, from the Board or from the Diagram's detail panel. Reject non chiede più nessun feedback: chi vuole dire all'agente che cosa cambiare usa Rework with feedback (REWORK_PROPOSAL). Dalla riga di comando il rifiuto accetta ancora un feedback facoltativo; confermato vuoto, non ne aggiunge nessuno. Una Proposal allegata a un Drift aperto non si rifiuta così: si decide con il Drift, dalla riga di comando o con una risoluzione.
+
+### REWORK_PROPOSAL
+Il developer sceglie Rework with feedback… dal menu della freccetta di Reject di una Proposal aperta, sulla Board o nei dettagli del Diagramma, e scrive nella casella di input dell'editor che cosa l'agente deve cambiare. Annullare la casella non fa nulla. Confermarla vuota chiede prima una conferma, contro i clic sbagliati: confermata, la Proposal è rifatta senza feedback sul Modello di adesso; annullata, non succede nulla. Con un testo parte subito.
 
 ### SCEGLI_MODELLO_PROPOSAL
 Il developer sceglie, dall'ingranaggio della scheda di una Proposal in Backlog, il modello con cui lavorano gli agenti dei lavori di quella Proposal, oppure lo toglie e torna al default dei Settings. Sceglie un modello suggerito o ne scrive il nome, come nella scheda Settings.
@@ -22,13 +25,16 @@ The developer discards a Proposal the agent is still writing, with the command l
 Il developer registra direttamente un nuovo Drift dalla riga di comando. Il Drift nasce Open e attende una decisione, con le stesse regole di un Drift registrato dall'agente.
 
 ### FIX_DRIFT_CODE
-The developer keeps the side of an open Drift that says what should happen: the Model or the Requirement is right and the code must change. La Proposal allegata, se c'è, è messa da parte con il Drift. Solo dalla riga di comando: dal pannello un singolo Drift si può solo chiudere senza cambiare nulla.
+The developer keeps the side of an open Drift that says what should happen: the Model or the Requirement is right and the code must change. La Proposal allegata, se c'è, è messa da parte con il Drift. Solo dalla riga di comando: dal pannello un singolo Drift si può solo chiudere senza cambiare nulla oppure far risolvere dall'agente, con Resolve o con Rework with feedback.
 
 ### ACCEPT_DRIFT_PROPOSAL
 The developer keeps the side of an open Drift that says what happens, when a Proposal is attached: the code is right and the Proposal is accepted. Solo dalla riga di comando.
 
 ### DISMISS_DRIFT
 Il developer tiene il lato di un Drift aperto che dice ciò che succede: il codice è giusto e nulla cambia. Dalla riga di comando, solo quando nessuna Proposal è allegata; dal pannello, con Dismiss Drift nella scheda della Board o nei dettagli del Diagramma e dopo una conferma, anche quando una Proposal è allegata, che è scartata con il Drift.
+
+### REWORK_DRIFT
+Il developer sceglie Rework with feedback… dal menu della freccetta di Dismiss Drift di un Drift aperto, sulla Board o nei dettagli del Diagramma, e scrive nella casella di input dell'editor come vuole che l'agente risolva il Drift. Non chiude il Drift: chiede una risoluzione guidata da quel testo. Annullare la casella non fa nulla. Confermarla vuota chiede prima una conferma: confermata, la risoluzione parte senza feedback; annullata, non succede nulla. Con un testo parte subito.
 
 ### MOVE_TASK_TO_TODO
 The developer moves a Task to the To do column, with the command line. The Board offers no way to do it.
@@ -51,6 +57,9 @@ The developer asks the coding agent to work, from a button or a command: design 
 Una richiesta di design arriva in un solo modo: come richiesta scritta, un documento Markdown che il developer apre con + Add Work Item in fondo alla colonna Backlog, compone in una scheda dell'editor e invia con il pulsante Send to agent della scheda o chiudendo la scheda (vedi la Design request). Non c'è più una richiesta rapida di una riga.
 
 L'import dal comando Import from Code è questo Event solo con un Modello che non è vuoto; con il Modello vuoto il comando apre invece il wizard di setup (OPEN_GUIDED_SETUP). L'import che segue la conferma del wizard fa parte di quella conferma (INITIALIZE_PROJECT o CONFIRM_SETUP).
+
+### OPEN_QUICK_TASK
+Il developer sceglie Add Quick Task dal menu che si apre dalla freccetta di + Add Work Item, in fondo alla colonna Backlog, per affidare all'agente un lavoro rapido e di fiducia, per esempio «committa il codice», senza richiesta scritta, senza scan e senza schede. Non scrive nulla prima: scrive direttamente nella chat che Trama apre.
 
 ### CLOSE_REQUEST
 Il developer chiude la scheda di una richiesta di design scritta che non ha mai inviato, quando nessun'altra scheda mostra più quella richiesta. Chiudere la finestra dell'editor con la scheda aperta non è questo Event, né lo è chiudere la scheda di una richiesta già inviata.

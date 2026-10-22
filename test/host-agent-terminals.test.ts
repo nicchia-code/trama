@@ -459,6 +459,108 @@ describe("the identity of an agent terminal", () => {
   });
 });
 
+describe("Quick Task", () => {
+  test("with omp a bare Quick terminal takes the focus, has no hook or prompt, and its ghost ends with the command and with the terminal", async () => {
+    const { openQuickTask, watchAgentTerminal } = await import("../extension/src/host/agent");
+    watchAgentTerminal();
+    const p = projectAt(dir);
+    withdrawAll(p);
+    const saved = { ...settingValues };
+    // Dynamic: the module must load after mock.module replaced "vscode".
+    const { localProjectJobs } = await import("../extension/src/host/drift-resolution");
+    const jobsBefore = localProjectJobs(dir).length;
+    Object.assign(settingValues, { advisor: true, language: "it", experimentalAdvisorScanner: true, ignoreInstructionFiles: true, scan: "slow-model", execution: "  fast  " });
+    try {
+      await openQuickTask(dir);
+      const terminal = terminals.at(-1) as FakeTerminal;
+      const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      expect(created.at(-1)).toMatchObject({ name: "Quick", cwd: dir });
+      expect(environments.at(-1)).toMatchObject({ TRAMA_AGENT: "1", TRAMA_TERMINAL: id });
+      expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_ADVISOR_SCANNER");
+      expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_JOB");
+      expect(terminal.line).toBe("omp --model 'fast'");
+      expect(terminal.shown).toEqual([false]);
+      expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["work", "Quick", id]]);
+      listeners.end.forEach((fn) => fn(shell(terminal)));
+      expect(listAnnouncements(p)).toEqual([]);
+      expect(localProjectJobs(dir)).toHaveLength(jobsBefore);
+
+      settingValues.execution = "";
+      await openQuickTask(dir);
+      const second = terminals.at(-1) as FakeTerminal;
+      expect(second.line).toBe("omp");
+      expect(listAnnouncements(p)).toHaveLength(1);
+      listeners.close.forEach((fn) => fn(second));
+      expect(listAnnouncements(p)).toEqual([]);
+    } finally {
+      for (const key of Object.keys(settingValues)) delete settingValues[key];
+      Object.assign(settingValues, saved);
+    }
+  });
+
+  test("in the editor tab the terminal opens with the focus", async () => {
+    const { openQuickTask, watchAgentTerminal } = await import("../extension/src/host/agent");
+    watchAgentTerminal();
+    inspected["terminalLocation"] = { globalValue: "editor" };
+    try {
+      await openQuickTask(dir);
+      expect(created.at(-1)?.location).toEqual({ viewColumn: 1, preserveFocus: false });
+      expect((terminals.at(-1) as FakeTerminal).shown).toEqual([false]);
+    } finally {
+      delete inspected["terminalLocation"];
+      withdrawAll(projectAt(dir));
+    }
+  });
+
+  test("with Cursor's chat only composer.createNew is called, with no text, and an error shows the message without deeplink or clipboard", async () => {
+    const { openQuickTask } = await import("../extension/src/host/agent");
+    const savedAgent = settingValues["agent"];
+    const savedHandler = commandHandler;
+    const calls: unknown[][] = [];
+    settingValues["agent"] = "cursor";
+    editor.appName = "Cursor";
+    const before = { calls: editorCalls.length, terminals: terminals.length, clipboard: clipboard.length, errors: errorMessages.length };
+    try {
+      commandHandler = (id, ...args) => void calls.push([id, ...args]);
+      settingValues["execution"] = "";
+      await openQuickTask(dir);
+      settingValues["execution"] = " gpt ";
+      await openQuickTask(dir);
+      expect(calls).toEqual([
+        ["composer.createNew", { partialState: { unifiedMode: "agent" }, openInNewTab: true }],
+        ["composer.createNew", { partialState: { unifiedMode: "agent", modelConfig: { modelName: "gpt", maxMode: false } }, openInNewTab: true }],
+      ]);
+      commandHandler = () => { throw new Error("missing"); };
+      await openQuickTask(dir);
+      expect(errorMessages.slice(before.errors)).toEqual(["Trama: could not open a new Cursor chat."]);
+      expect(editorCalls.slice(before.calls)).toEqual(["composer.createNew", "composer.createNew", "composer.createNew"]);
+      expect(terminals).toHaveLength(before.terminals);
+      expect(clipboard).toHaveLength(before.clipboard);
+      expect(listAnnouncements(projectAt(dir))).toEqual([]);
+    } finally {
+      commandHandler = savedHandler;
+      editor.appName = "Visual Studio Code";
+      settingValues["agent"] = savedAgent;
+      delete settingValues["execution"];
+    }
+  });
+
+  test("outside Cursor with Cursor's chat chosen nothing opens and the clipboard is untouched", async () => {
+    const { openQuickTask } = await import("../extension/src/host/agent");
+    const savedAgent = settingValues["agent"];
+    settingValues["agent"] = "cursor";
+    const before = { calls: editorCalls.length, terminals: terminals.length, clipboard: clipboard.length };
+    try {
+      await openQuickTask(dir);
+      expect(editorCalls).toHaveLength(before.calls);
+      expect(terminals).toHaveLength(before.terminals);
+      expect(clipboard).toHaveLength(before.clipboard);
+    } finally {
+      settingValues["agent"] = savedAgent;
+    }
+  });
+});
+
 describe("omp run hooks", () => {
   test("every job loads the bundled omp hook module in its own terminal", async () => {
     // Dynamic import is intentional: the fake vscode extension registry must be in place before agent.ts loads.
@@ -775,6 +877,21 @@ describe("automatic terminal exit", () => {
       delete inspected.experimentalParallelExecution;
     }
   });
+  test("Ignore Instruction Files is on only from the user value true", async () => {
+    const { configuredIgnoreInstructionFiles } = await import("../extension/src/host/agent");
+    try {
+      expect(configuredIgnoreInstructionFiles()).toBe(false);
+      inspected.ignoreInstructionFiles = { globalValue: true };
+      expect(configuredIgnoreInstructionFiles()).toBe(true);
+      inspected.ignoreInstructionFiles = { globalValue: "true" };
+      expect(configuredIgnoreInstructionFiles()).toBe(false);
+      inspected.ignoreInstructionFiles = { workspaceValue: true };
+      expect(configuredIgnoreInstructionFiles()).toBe(false);
+    } finally {
+      delete inspected.ignoreInstructionFiles;
+    }
+  });
+
   test("Context Sharing is on only from the user value true", async () => {
     const { configuredContextSharing } = await import("../extension/src/host/agent");
     try {

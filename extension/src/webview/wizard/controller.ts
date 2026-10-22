@@ -1,7 +1,7 @@
 import type { ModelSuggestion } from "../../host/model-lists";
 import type { SettingSchema, SettingsValues, SettingValue } from "../../host/settings-schema";
 import { storedValue } from "../../host/settings-schema";
-import type { FolderEntry, ToHost, ToWebview, WorkspaceFolderView } from "../../protocol";
+import type { FolderEntry, InstructionFileView, ToHost, ToWebview, WorkspaceFolderView } from "../../protocol";
 import {
   type AgentCheckResult,
   changedWrites,
@@ -34,6 +34,8 @@ export interface WizardSnapshot {
   folders: readonly WorkspaceFolderView[];
   /** The model names suggested for the agent chosen now; null until they arrive. */
   models: { list: ModelSuggestion[]; error: string | null } | null;
+  /** The instruction files found the last time the Agent step was shown; null while the search runs or before it started. */
+  instructionFiles: readonly InstructionFileView[] | null;
   /** The check of the agent chosen now; null while it is being checked. */
   check: AgentCheckResult | null;
   /** The confirmation is under way: no button can be pressed. */
@@ -65,6 +67,9 @@ export class WizardController {
   private foldersKnown = false;
   private models: WizardSnapshot["models"] = null;
   private check: AgentCheckResult | null = null;
+  private instructionFiles: readonly InstructionFileView[] | null = null;
+  /** The folder the last instruction-files search was asked for (null: the project's folder), while the Agent step is on view. */
+  private instructionRoot: string | null | undefined = undefined;
   private busy = false;
   private error: string | null = null;
   private generation = 0;
@@ -95,7 +100,7 @@ export class WizardController {
   }
 
   private build(): WizardSnapshot {
-    return { state: this.state, schema: this.schema, current: this.current, folders: this.folders, models: this.models, check: this.check, busy: this.busy, error: this.error, generation: this.generation };
+    return { state: this.state, schema: this.schema, current: this.current, folders: this.folders, models: this.models, check: this.check, instructionFiles: this.instructionFiles, busy: this.busy, error: this.error, generation: this.generation };
   }
 
   private emit(): void {
@@ -131,6 +136,7 @@ export class WizardController {
     this.pending = null;
     this.resetAsked();
     this.models = null;
+    this.instructionFiles = null;
     this.check = null;
     this.busy = false;
     this.error = null;
@@ -144,6 +150,7 @@ export class WizardController {
     this.busy = false;
     this.error = null;
     this.models = null;
+    this.instructionFiles = null;
     this.check = null;
     this.resetAsked();
     this.emit();
@@ -152,6 +159,7 @@ export class WizardController {
   private resetAsked(): void {
     this.checkKey = null;
     this.modelsKey = null;
+    this.instructionRoot = undefined;
     this.requestedFolders.clear();
   }
 
@@ -192,6 +200,18 @@ export class WizardController {
     if (state === null || message.agent !== chosenAgent(this.schema, state) || message.ompPath !== chosenOmpPath(this.schema, state)) return;
     this.check = { agent: message.agent, ompPath: message.ompPath, ok: message.ok, ...(message.models === undefined ? {} : { models: message.models }), ...(message.error === undefined ? {} : { error: message.error }) };
     this.emit();
+  }
+
+  receiveInstructionFiles(message: Extract<ToWebview, { type: "instructionFiles" }>): void {
+    const state = this.state;
+    if (state === null || state.step !== "Agent" || this.instructionRoot === undefined || (this.instructionRoot !== null && message.root !== this.instructionRoot)) return;
+    this.instructionFiles = message.files;
+    this.emit();
+  }
+
+  /** The warning's link: the host opens the file when it is in its last answer. */
+  openInstructionFile(path: string): void {
+    this.callbacks.post({ type: "openInstructionFile", path });
   }
 
   receiveFolderChildren(message: Extract<ToWebview, { type: "folderChildren" }>): void {
@@ -320,6 +340,12 @@ export class WizardController {
       this.modelsKey = key;
       this.models = null;
       this.callbacks.post({ type: "modelSuggestionsWanted", agent: agent === "omp" ? "omp" : "cursor", ompPath });
+    }
+    if (state.step !== "Agent") this.instructionRoot = undefined;
+    else if (this.instructionRoot === undefined) {
+      this.instructionRoot = state.mode === "first" ? state.root : null;
+      this.instructionFiles = null;
+      this.callbacks.post({ type: "instructionFilesWanted", ...(this.instructionRoot === null ? {} : { root: this.instructionRoot }) });
     }
     if (state.step === "Folders") this.openFolder("");
   }

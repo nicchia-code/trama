@@ -40,6 +40,7 @@ When the instruction asks you to write in a language, everything you generate fo
 
 - **Always in English**, whatever the language: technical terms are never translated: commands and tools (`git pull`, `npm install`), names of products, services, libraries and languages, and Trama's own terms (Proposal, Task, Drift, Board, Run, Scan). Also always English: code and its comments, commit messages, the project's own documentation; the headers Trama reads in files ("States", "Events", "General", "What happens", "What should happen", "Where in the code", "Fix options", "Already present"), the `(initial)` and `(final)` markers, the keys of Specs and the front matter fields. Trama's interface (panel, editor, command line) stays in English.
 - **A language changes nothing already written.** When you edit a file written in another language, keep its existing text and write only the new or rewritten text in the chosen language; never translate the whole file.
+- **No first person in Trama's texts.** In what you write for Trama (questions, contexts and options of rounds, titles and bodies of Proposals, Tasks and Drifts, History entries), Trama is always "Trama" and you are "the agent": no "I", "me", "my", "we", "our", and in Italian no "io", "noi" or first-person verbs. Your replies in the conversation are not Trama's texts and do not change. Text already written is not rewritten.
 
 ## Steps
 
@@ -58,6 +59,15 @@ When the instruction asks you to write in a language, everything you generate fo
    Give each Drift a short title (see Naming cards).
 8. **Hand every Proposal over.** Run `trama proposal move <id> open` for each, without `trama proposal show` before it: its checks report the problems and its output prints the changes, which must describe the code and nothing else. When it warns of a fragment larger than 12 KB that the Proposal writes into, split that fragment in the same Proposal and hand it over again: cut by Feature or by a group of nearby Machines, give every new fragment a name and a description that say when it is needed, move the sections without changing their text, and prefer a few medium fragments to many tiny ones (every fragment counts against the 4,000-character budget of the Requirement skills). A dependency need not be approved for the hand-over. If a hand-over is refused or its output does not match, reopen the Proposal with `trama proposal edit <id>`, correct it, and hand it over again before continuing.
 9. **Report and stop.** After every submission succeeds, list the Proposals in the order to approve them, with how many doubts each has, whether the Specs were written or updated, the Drifts you filed (each named by short number and title), the differences you could not file yet, the folders you skipped, and any contradiction with Machines that were already modelled (suggest a Scan for those Features). Approving an import Proposal starts no Scan: the Model already matches the code.
+
+## Reworking a rejected import Proposal
+
+When the instruction says to rework the rejected Proposal `<id>` with the developer's feedback (Rework with feedback), follow the Steps with these changes; everything else holds:
+
+- Read the rejected Proposal with `trama proposal show <id>` (body, decisions, files, Tasks and `## Feedback`). Its decisions count as already taken, including the folders and the split into Features, except what the feedback changes or leaves in doubt. Without `## Feedback`, redo the same import on the Model as it is now.
+- The round of step 3 is optional: ask one round of `trama question new` only for the decisions the feedback opens or leaves open, with the rules of `trama-design` ("The interview" and "Reworking a rejected Proposal"); otherwise work alone.
+- Write the Proposal again from scratch, on the Model as it is now, without requesting the rejected one; the rework may be split into several Proposals, as an import is. Pass `"reworks":"<id>"` only in the first `trama proposal new` of the rework (never together with `request`); Trama links it only when the named Proposal is rejected and no other one already reworks it, otherwise it creates it unlinked and the result says why.
+- After the hand-over, tell the developer to review the new Proposals. Never approve, reject or discard them yourself.
 
 ## Specs
 
@@ -84,6 +94,7 @@ Run **`trama question new --root <project> --input -`** with the JSON request on
 
 - Send one complete round as `{questions: [...]}`. Every question has a unique non-empty `id`, `question`, `options` as `{label, description}`, a zero-based `recommended` index, and an explicit `multi` boolean. Two fields are optional: `context` on a question and `details` on an option; when present they must not be blank.
 - Keep `question` short: one sentence that reads on its own. Put the background of the decision in `context`, the tradeoff in a few words in `description`, and a longer explanation, only when it is needed, in `details`. `question`, `context`, `description` and `details` are Markdown; labels are plain text. Set `multi: true` only when several answers can hold together. Do not supply "Other": Trama always offers a free-text answer.
+- The developer sees only the round (each question, its context, its options and their own answers), never your conversation. Make every question self-contained: it says everything needed to decide, with no references to the conversation or to another question, and no first person (write "Trama" or "the agent", never "I" or "we"). Omit `context` when the question and the options are enough on their own.
 - A result with `status: "answered"` contains `answers` keyed by question id. An answered entry has the original `selected` labels and optional free-form `text`; a `status: "skipped"` entry is an explicit developer skip. Use the recommendation for that skipped decision, report it as an assumption for review, and do not ask it again.
 - An `invalid-input` error means the request was refused before opening a round: correct the identified field and submit the corrected request.
 - An **`editor-interrupted` error stops this workflow immediately**. Do not use partial answers or recommendations, fall back, retry, reroute, resume the round, or create or submit a Proposal from its unanswered decisions. Report that the editor was lost.

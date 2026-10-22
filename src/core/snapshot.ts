@@ -11,6 +11,7 @@ import { type Project, readTrackedFiles } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
+import { readTaskImages, type TaskImage } from "./task-images";
 import { readLastScan } from "./last-scan";
 import { attachedDrift, closedUnchanged, type Column, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, followedDrift, freedTasks, type FreedTask, listDrifts, listTasks, taskProgress } from "./work";
 import { preparedFlag, preparedStatus } from "./prepared";
@@ -68,6 +69,11 @@ export interface ModelView {
   areas: AreaView[];
 }
 
+/** An image of a Task as the panel gets it: the host adds `uri`, the address the webview loads it from. */
+export interface TaskImageView extends TaskImage {
+  uri?: string;
+}
+
 /** A Task an ordinary Proposal holds, as the Diagram details list it: its body is drawn behind a toggle. */
 export interface ProposalTaskView {
   id: string;
@@ -75,6 +81,8 @@ export interface ProposalTaskView {
   body: string;
   technical: boolean;
   refs: string[];
+  /** The images the Task carries for the model that implements it, in order; only those that exist. */
+  images: TaskImageView[];
 }
 
 /** An open Proposal with everything the Diagram needs to draw it as a ghost over the current Model. */
@@ -188,6 +196,8 @@ export interface TaskView {
   blockedBy: Blocker[];
   /** Path relative to `.trama/`, for opening the file. */
   file: string;
+  /** The images the Task carries for the model that implements it, in order; only those that exist. */
+  images: TaskImageView[];
 }
 
 /** A card the agent is about to create, drawn as a ghost in the column it will land in, or a check drawn in In progress. */
@@ -355,7 +365,7 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     kind: proposal.data.kind,
     nonBlocking: proposal.data.nonBlocking,
     prepared: proposal.data.prepared,
-    tasks: coverage === null ? [] : proposal.tasks.map((t) => ({ id: t.id, title: t.title, body: stripTitle(t.body), technical: t.technical, refs: t.refs })),
+    tasks: coverage === null ? [] : proposal.tasks.map((t) => ({ id: t.id, title: t.title, body: stripTitle(t.body), technical: t.technical, refs: t.refs, images: readTaskImages(p, t.id) })),
     removals: coverage?.removals ?? [],
     creates: coverage === null ? 0 : proposal.tasks.length + coverage.removals.length,
     resolves: proposal.data.kind === "resolution" ? resolvedDrifts(p, proposal) : [],
@@ -453,6 +463,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
       unchanged: t.data.unchanged,
       blockedBy: blocked.get(t.id) ?? [],
       file: `tasks/${t.name}`,
+      images: readTaskImages(p, t.id),
     })),
     announcements: announcements.map((a) => announcementView(p, a, a.proposal === null ? undefined : proposalById.get(a.proposal)?.title)),
     numbers,

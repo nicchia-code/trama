@@ -122,6 +122,9 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   else if (message.type === "agentCheck") {
     settings.receiveAgentCheck(message);
     getStarted.receiveAgentCheck(message);
+  } else if (message.type === "instructionFiles") {
+    settings.receiveInstructionFiles(message);
+    getStarted.receiveInstructionFiles(message);
   } else if (message.type === "folderChildren") {
     settings.receiveFolderChildren(message);
     getStarted.receiveFolderChildren(message);

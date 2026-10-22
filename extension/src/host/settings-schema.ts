@@ -51,7 +51,7 @@ export interface SettingsValues {
 /** The five groups, in order; each lists its keys in order. Every key in the manifest must appear once. */
 export const SETTING_GROUPS: readonly { title: string; keys: readonly string[] }[] = [
   { title: "Appearance", keys: ["trama.theme"] },
-  { title: "Agent", keys: ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.autoExit", "trama.language"] },
+  { title: "Agent", keys: ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"] },
   { title: "Models", keys: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"] },
   { title: "Project", keys: ["trama.skillsDir"] },
   { title: "Experimental", keys: ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution", "trama.experimentalAsyncDriftResolver", "trama.experimentalContextSharing"] },

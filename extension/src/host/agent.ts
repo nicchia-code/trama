@@ -1,10 +1,12 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, join, win32 } from "node:path";
 import { announce, newTerminalId, type AgentOrigin, withdrawAll } from "../../../src/core/announcements";
 import { ADVISOR_CHAT_SENTENCE, ADVISOR_SENTENCE } from "../../../src/core/advisors";
 import { writeFileAtomic } from "../../../src/core/atomic-write";
+import { developerExclusions, findInstructionFiles, instructionExclusions, mergeExclusions } from "../../../src/core/instruction-files";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
@@ -18,7 +20,7 @@ import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shel
 import { questionEndpoint } from "./questions";
 import { pruneAgentProcesses, releaseUnfollowedTasks } from "./task-release";
 import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
-import { advisorOverlay, agentTemplate, canScan, type Models, type Role, roleOf, type RunModel, type TerminalAgent, terminalEnv } from "./terminal-agent";
+import { agentTemplate, canScan, launchOverlay, type Models, quickCommandLine, type Role, roleOf, type RunModel, type TerminalAgent, terminalEnv } from "./terminal-agent";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
 
@@ -44,6 +46,8 @@ export const configuredParallelExecution = (): boolean => settings().inspect<unk
 export const configuredAsyncDriftResolver = (): boolean => settings().inspect<unknown>("experimentalAsyncDriftResolver")?.globalValue === true;
 /** Whether `trama.experimentalContextSharing` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
 export const configuredContextSharing = (): boolean => settings().inspect<unknown>("experimentalContextSharing")?.globalValue === true;
+/** Whether `trama.ignoreInstructionFiles` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
+export const configuredIgnoreInstructionFiles = (): boolean => settings().inspect<unknown>("ignoreInstructionFiles")?.globalValue === true;
 /** The configured concurrent sub-agent limit, from user settings only; invalid values use the default. */
 export const configuredMaxParallelAgents = (): number => {
   const value: unknown = settings().inspect<number>("maxParallelAgents")?.globalValue ?? 20;
@@ -425,25 +429,53 @@ export const configuredModels = (): Models => ({
   execution: settings().get<string>("execution", "").trim(),
 });
 
-function terminalRun(instruction: Instruction, name: string, filesDrifts: boolean, severalTasks: boolean, model: string, advisorConfig?: string): TerminalRun {
+function terminalRun(instruction: Instruction, name: string, filesDrifts: boolean, severalTasks: boolean, model: string, overlay: string | undefined, advisor: boolean): TerminalRun {
   const role = roleOf(name);
   const hook = bundledOmpHook();
   const models = { model, scan: configuredModels().scan };
-  const advisor = advisorConfig !== undefined;
   return {
-    template: (family) => agentTemplate(canScan(role) && !advisor, models, family, hook, advisorConfig),
+    template: (family) => agentTemplate(canScan(role) && !advisor, models, family, hook, overlay, advisor),
     prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, false, advisor ? ADVISOR_SENTENCE : undefined),
     hooked: hook !== undefined,
   };
 }
 
-/** Writes the advisor overlay of an omp Run into the extension's storage and returns its path: the overlay never goes into the repository. */
-function writeAdvisorOverlay(storage: vscode.Uri | undefined): string {
-  if (storage === undefined) throw new TramaError("The Advisor Scanner needs the extension's storage.");
-  mkdirSync(storage.fsPath, { recursive: true });
-  const file = join(storage.fsPath, "advisor.yml");
-  writeFileAtomic(file, advisorOverlay(configuredModels().scan));
-  return file;
+/** The extension's global storage, where the overlay of an omp launch is written; set once when the extension activates. */
+let overlayStorage: vscode.Uri | undefined;
+export function setOverlayStorage(storage: vscode.Uri): void {
+  overlayStorage = storage;
+}
+
+/**
+ * The omp exclusions of this launch: when `trama.ignoreInstructionFiles` is on (read now), the developer's `disabledExtensions` followed by the
+ * identities of the instruction files found now in the project's folder. Whatever fails in the search or the reading leaves them out: the launch never stops here.
+ */
+async function instructionExclusionsFor(root: string): Promise<string[]> {
+  if (!configuredIgnoreInstructionFiles()) return [];
+  try {
+    const home = homedir();
+    const ours = instructionExclusions(await findInstructionFiles(root, home), root, home);
+    return ours.length === 0 ? [] : mergeExclusions(await developerExclusions(root, home), ours);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Writes the overlay of an omp launch into the extension's storage and returns its path, or `undefined` when it has nothing to say or cannot be written: the overlay
+ * never goes into the repository and an error here never stops the launch (`quality#agent-terminal/Agent running`).
+ */
+async function writeLaunchOverlay(root: string, advisor: boolean): Promise<string | undefined> {
+  const text = launchOverlay({ ...(advisor ? { advisor: { scan: configuredModels().scan } } : {}), disabledExtensions: await instructionExclusionsFor(root) });
+  if (text === undefined || overlayStorage === undefined) return undefined;
+  try {
+    mkdirSync(overlayStorage.fsPath, { recursive: true });
+    const file = join(overlayStorage.fsPath, "launch.yml");
+    writeFileAtomic(file, text);
+    return file;
+  } catch {
+    return undefined;
+  }
 }
 
 /** What a Run of a sequence does once its job ends locally: the next Run starts, or the held job ends (see `runSequence`). */
@@ -479,8 +511,6 @@ export interface LaunchJobOptions {
   model?: RunModel;
   /** Called once the Run's job ends: with why it ended abnormally, or with nothing for a normal end. A Run that did not start ends with a reason too. */
   onEnd?: (abnormal?: string) => void;
-  /** The extension's global storage: an omp Run with the Advisor Scanner on writes its advisor overlay there. */
-  advisorStorage?: vscode.Uri;
 }
 
 export async function launchAgent(
@@ -545,8 +575,9 @@ export async function launchAgent(
       if (delivery !== "not-sent") onSent?.(Date.now());
       return delivery;
     }
-    const advisorConfig = job === "run" && configuredAdvisorScanner() ? writeAdvisorOverlay(jobOptions.advisorStorage) : undefined;
-    const run = terminalRun(instruction, name, filesDrifts, severalTasks, runModel, advisorConfig);
+    const advisor = job === "run" && configuredAdvisorScanner();
+    const overlay = await writeLaunchOverlay(root, advisor);
+    const run = terminalRun(instruction, name, filesDrifts, severalTasks, runModel, overlay, advisor);
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
@@ -560,7 +591,7 @@ export async function launchAgent(
       name,
       cwd: root,
       shellPath,
-      env: terminalEnv(endpoint, terminalId, jobId, advisorConfig),
+      env: terminalEnv(endpoint, terminalId, jobId, advisor),
       ...(asTab ? { location: { viewColumn: vscode.ViewColumn.Active, preserveFocus: true } } : {}),
     });
     if (replaced) warnShellReplaced(defaultShell);
@@ -582,4 +613,51 @@ export async function launchAgent(
     return "terminal";
   };
   return agent === "cursor" || job !== undefined ? inSendTurn(launch) : launch();
+}
+
+/**
+ * Add Quick Task: a new, bare chat with the agent (`trama.agent`, read now) on the model of the execution role, with no instruction, skill, sentence or job.
+ * With omp a terminal named `Quick` runs `omp [--model <m>]` and takes the focus; with Cursor's chat `composer.createNew` opens an empty conversation
+ * and nothing else (no job, no announcement, no deeplink, no clipboard).
+ */
+export async function openQuickTask(root: string): Promise<void> {
+  const model = configuredModels().execution;
+  if (configuredAgent() === "cursor") {
+    if (!isCursor()) {
+      void Promise.resolve(vscode.window.showInformationMessage(
+        "Trama: Cursor's chat is only available in Cursor. Choose omp in Trama's Settings to open a Quick Task in a terminal.",
+        "Open Settings",
+      )).then((choice) => (choice === "Open Settings" ? vscode.commands.executeCommand("trama.openSettings") : undefined));
+      return;
+    }
+    try {
+      const partialState = { unifiedMode: "agent", ...(model === "" ? {} : { modelConfig: { modelName: model, maxMode: false } }) };
+      await vscode.commands.executeCommand("composer.createNew", { partialState, openInNewTab: true });
+    } catch {
+      void vscode.window.showErrorMessage("Trama: could not open a new Cursor chat.");
+    }
+    return;
+  }
+  const endpoint = await questionEndpoint(root);
+  if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
+  const asTab = settings().inspect<string>("terminalLocation")?.globalValue === "editor";
+  const terminalId = newTerminalId();
+  const defaultShell = vscode.env.shell;
+  const replaced = !isSupportedShell(defaultShell);
+  const shellPath = replaced ? win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : undefined;
+  const terminal = vscode.window.createTerminal({
+    name: "Quick",
+    cwd: root,
+    shellPath,
+    env: terminalEnv(endpoint, terminalId),
+    ...(asTab ? { location: { viewColumn: vscode.ViewColumn.Active, preserveFocus: false } } : {}),
+  });
+  if (replaced) warnShellReplaced(defaultShell);
+  const line = quickCommandLine(model, shellFamily(shellPath ?? defaultShell));
+  agentTerminals.set(terminal, { id: terminalId, root, line, since: Date.now() });
+  launchedRoots.add(root);
+  setHooked(terminalId, false);
+  terminal.show(false);
+  announceLaunch(root, { kind: "work", title: "Quick" }, { terminal: terminalId });
+  writeWhenShellReady(terminal, line);
 }

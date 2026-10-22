@@ -26,8 +26,8 @@ test("advisor show reads no project, takes no input and is not the agent's activ
   expect(run(["--help"], "/nonexistent").out).toMatch(/advisor\s+show/);
 });
 
-test("the terminal of a Run with the advisor overlay carries TRAMA_ADVISOR_SCANNER=1 and any other terminal does not", () => {
-  const withOverlay = terminalEnv("/sock", "abc123", "job1", "/store/advisor.yml");
+test("the terminal of a Run with the Advisor Scanner on carries TRAMA_ADVISOR_SCANNER=1 and any other terminal does not", () => {
+  const withOverlay = terminalEnv("/sock", "abc123", "job1", true);
   expect(withOverlay).toEqual({ TRAMA_AGENT: "1", TRAMA_QUESTION_ENDPOINT: "/sock", TRAMA_TERMINAL: "abc123", TRAMA_JOB: "job1", TRAMA_ADVISOR_SCANNER: "1" });
   const without = terminalEnv("/sock", "abc123", "job1");
   expect(without).toEqual({ TRAMA_AGENT: "1", TRAMA_QUESTION_ENDPOINT: "/sock", TRAMA_TERMINAL: "abc123", TRAMA_JOB: "job1" });

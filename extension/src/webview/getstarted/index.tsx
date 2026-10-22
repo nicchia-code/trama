@@ -16,6 +16,7 @@ export interface GetStartedView extends View {
   receiveModels(message: Extract<ToWebview, { type: "modelSuggestions" }>): void;
   receiveAgentCheck(message: Extract<ToWebview, { type: "agentCheck" }>): void;
   receiveFolderChildren(message: Extract<ToWebview, { type: "folderChildren" }>): void;
+  receiveInstructionFiles(message: Extract<ToWebview, { type: "instructionFiles" }>): void;
   /** Whether the folder has a Trama project: the wizard starts over when the folder stops being one and is forgotten when it becomes one. */
   projectPresent(present: boolean): void;
 }
@@ -48,6 +49,7 @@ export const mountGetStarted = (slot: Slot, context: ViewContext): GetStartedVie
     receiveModels: (message) => wizard.receiveModels(message),
     receiveAgentCheck: (message) => wizard.receiveAgentCheck(message),
     receiveFolderChildren: (message) => wizard.receiveFolderChildren(message),
+    receiveInstructionFiles: (message) => wizard.receiveInstructionFiles(message),
     projectPresent(present) {
       if (present) wizard.close();
       else wizard.open("first");

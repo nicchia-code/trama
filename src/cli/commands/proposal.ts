@@ -7,9 +7,10 @@ import {
   checkedLabel,
   deleteInProposal,
   discardProposal,
+  changeTaskImages,
   editInProposal,
   getProposal,
-  newProposal,
+  createProposal,
   rejectProposal,
   save,
   setProposalLabel,
@@ -45,7 +46,7 @@ const create = defineCommand({
   mode: "immediate",
   summary: "Create a Draft Proposal.",
   description:
-    "Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `nonBlocking` applies only to a resolution whose Drifts block no Task. `prepared` applies only to a resolution born from the answer to a Drift's prepared question. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from.",
+    "Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `nonBlocking` applies only to a resolution whose Drifts block no Task. `prepared` applies only to a resolution born from the answer to a Drift's prepared question. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from. `reworks` names the rejected Proposal this one redoes (Rework with feedback): when it exists, is rejected and is not already redone, the new Proposal takes its place (same creation instant) and replaces it in the `requires` of every Draft or open Proposal, which the result lists; otherwise the Proposal is created without the link and `reworksNote` says why. `reworks` and `request` cannot be given together.",
   input: z
     .strictObject({
       title: z.string().min(1).describe("A short title: at most five words."),
@@ -57,13 +58,23 @@ const create = defineCommand({
       prepared: z.boolean().optional().describe("A resolution born from the answer to a Drift's prepared question. Only with kind `resolution`."),
       announcement: z.string().min(1).optional().describe("The announcement of this Proposal."),
       request: z.string().min(1).optional().describe("The written design request this Proposal comes from."),
+      reworks: z.string().min(1).optional().describe("The rejected Proposal this one redoes: ID or short number. Not with `request`."),
     })
     .superRefine((input, ctx) => {
       const fail = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });
       if (input.nonBlocking === true && input.kind !== "resolution") fail("nonBlocking", "applies only with kind resolution");
       if (input.prepared === true && input.kind !== "resolution") fail("prepared", "applies only with kind resolution");
+      if (input.reworks !== undefined && input.request !== undefined) fail("reworks", "cannot be given together with request");
     }),
-  output: card.extend({ path: z.string(), request: z.string().nullable(), note: z.string().optional().describe("About the announcement, when it was not known."), requestNote: z.string().optional().describe("About the design request, when it was not bound.") }),
+  output: card.extend({
+    path: z.string(),
+    request: z.string().nullable(),
+    reworks: z.string().nullable().describe("The ID of the rejected Proposal now bound, or null."),
+    note: z.string().optional().describe("About the announcement, when it was not known."),
+    requestNote: z.string().optional().describe("About the design request, when it was not bound."),
+    reworksNote: z.string().optional().describe("Why the Proposal does not redo the one named in `reworks`, when it was not bound."),
+    requiresChanged: z.array(z.string()).optional().describe("The Draft or open Proposals whose `requires` now names this Proposal instead of the rejected one."),
+  }),
   example: { title: "Order cancel", body: "# Order cancel\n\nA paid order can be cancelled.", label: "Order cancel", announcement: "a1b2c3d4" },
   effects: { writes: true, activity: true, editor: true },
   run(ctx, input) {
@@ -74,7 +85,16 @@ const create = defineCommand({
       if (model.features.size > 0 || model.actors.size > 0) throw new UsageError('kind "setup" needs an empty Model: the Model is not empty (it has Features or Actors)');
     }
     const note = announcementNote(project, input.announcement, "proposal");
-    const p = newProposal(project, input.title, input.body, {
+    let reworksCited = input.reworks;
+    if (reworksCited !== undefined) {
+      try {
+        reworksCited = getProposal(project, reworksCited, true).id;
+      } catch (err) {
+        // A short number that names no live Proposal (or the wrong kind) is refused; any other text that names nothing only leaves the link out.
+        if (/^[pPtTdD]\d+$/.test(reworksCited)) throw err;
+      }
+    }
+    const { proposal: p, rework } = createProposal(project, input.title, input.body, {
       requires: (input.requires ?? []).map((id) => getProposal(project, id, true).id),
       kind,
       nonBlocking: input.nonBlocking === true,
@@ -82,13 +102,15 @@ const create = defineCommand({
       announcement: input.announcement,
       origin: ctx.origin,
       request: input.request,
+      ...(reworksCited === undefined ? {} : { reworks: reworksCited }),
       ...(input.label === undefined ? {} : { label: input.label }),
     });
     const request = input.request;
     const requestNote = request !== undefined && p.data.request === null ? (requestExists(project, request) ? `Design request ${request} is already bound to another Proposal; the Proposal is not bound to any request.` : `Design request ${request} was not found; the Proposal is not bound to any request.`) : "";
-    const notes = [note, requestNote].filter(Boolean).join("\n");
+    const notes = [note, requestNote, rework.note].filter(Boolean).join("\n");
     const n = numbersOf(ctx);
-    return text(`Created Draft Proposal ${n.name("proposal", p.id)} at ${p.dir}. Hand it over when finished.${notes ? `\n${notes}` : ""}`, { id: p.id, number: n.label("proposal", p.id), path: p.dir, status: p.data.status, request: p.data.request, ...(note ? { note } : {}), ...(requestNote ? { requestNote } : {}) });
+    const changed = rework.changed.length === 0 ? "" : `\nThe Proposals that required the rejected one now require this one: ${rework.changed.map((id) => n.name("proposal", id)).join(", ")}. They may be stale.`;
+    return text(`Created Draft Proposal ${n.name("proposal", p.id)} at ${p.dir}. Hand it over when finished.${notes ? `\n${notes}` : ""}${changed}`, { id: p.id, number: n.label("proposal", p.id), path: p.dir, status: p.data.status, request: p.data.request, reworks: rework.reworks, ...(note ? { note } : {}), ...(requestNote ? { requestNote } : {}), ...(rework.note ? { reworksNote: rework.note } : {}), ...(rework.changed.length > 0 ? { requiresChanged: rework.changed } : {}) });
   },
 });
 
@@ -97,10 +119,10 @@ const show = defineCommand({
   verb: "show",
   mode: "immediate",
   summary: "A Proposal: staleness, structural changes, validation.",
-  description: "The Proposal's text, its status, what it requires, the files it changes, its Tasks, the scope it covers and the validation of the Model and Requirements with it applied. Read-only.",
+  description: "The Proposal's text, its status, what it requires, the files it changes, its Tasks (each with the images tied to it, as `images` in `--json`), the scope it covers and the validation of the Model and Requirements with it applied. Read-only.",
   positionals: [{ name: "id", description: "The Proposal: its ID, a unique prefix or its short number." }],
   input: z.strictObject({}),
-  output: card.extend({ title: z.string() }),
+  output: card.extend({ title: z.string(), tasks: z.array(z.looseObject({ id: z.string(), images: z.array(z.string()).describe("The file names of the images tied to the Task; empty when it has none.") })).optional() }),
   exampleArgs: ["P3"],
   run: (ctx, _input, [id]) => proposalShowView(ctx.project(), getProposal(ctx.project(), id as string, true)),
 });
@@ -130,13 +152,16 @@ const driftDecision = z
     if (input.note !== undefined) ctx.addIssue({ code: "custom", path: ["note"], message: "applies only with decision fix-code" });
   });
 
+const IMAGES_RULES = "The file is copied into `.trama/task-images/<Task identity>/` (not versioned), and a change returns an open Proposal to Draft.";
+const imageTask = z.string().min(1).describe("The Task: its full name `tasks/<identity>-<slug>.md` or the identity of a Task of the Proposal.");
+
 const edit = defineCommand({
   object: "proposal",
   verb: "edit",
   mode: "immediate",
   summary: "Open a Proposal for writing: label, files and decisions on Drifts.",
   description:
-    "Every use sends an open Proposal back to Draft and says so; hand it over again with `proposal move <id> open`. Without input it only returns an open Proposal to Draft, touching no file. `label` writes or changes the short label. `edit` makes each path (a Model file, `specs.yaml`, a Requirement fragment such as `requirements/<area>/<fragment>.md`, or a Task as `tasks/<slug>.md`) editable inside the Proposal and prints the path to write for each; a new Task takes a new identity, and a Task is rewritten by the full name printed. `delete` marks each path for deletion. `drifts` records or replaces the decisions of a resolution on open Drifts, and `removeDrifts` takes Drifts out of its list.",
+    "Every use sends an open Proposal back to Draft and says so; hand it over again with `proposal move <id> open`. Without input it only returns an open Proposal to Draft, touching no file. `label` writes or changes the short label. `edit` makes each path (a Model file, `specs.yaml`, a Requirement fragment such as `requirements/<area>/<fragment>.md`, or a Task as `tasks/<slug>.md`) editable inside the Proposal and prints the path to write for each; a new Task takes a new identity, and a Task is rewritten by the full name printed. `delete` marks each path for deletion. `drifts` records or replaces the decisions of a resolution on open Drifts, and `removeDrifts` takes Drifts out of its list. `images` ties images to the Tasks of the Proposal, a list of `{ task, path }` (`path` is a local `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg` file, absolute or relative to the project root), and `removeImages` takes them away, a list of `{ task, name }`. " + IMAGES_RULES,
   positionals: [{ name: "id", description: "The Proposal: its ID, a unique prefix or its short number." }],
   input: z.strictObject({
     label: z.string().optional().describe("The short label: 1 to 30 characters, one line."),
@@ -144,14 +169,17 @@ const edit = defineCommand({
     delete: stringList.optional().describe("Paths to mark for deletion."),
     drifts: z.array(driftDecision).optional().describe("The decisions to record on Drifts. Only in a resolution."),
     removeDrifts: stringList.optional().describe("Drifts to take out of the list: IDs or short numbers."),
+    images: z.array(z.strictObject({ task: imageTask, path: z.string().min(1).describe("A local `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg` file, absolute or relative to the project root.") })).optional().describe("Images to tie to Tasks of the Proposal. " + IMAGES_RULES),
+    removeImages: z.array(z.strictObject({ task: imageTask, name: z.string().min(1).describe("The name of the image file in the Task's folder.") })).optional().describe("Images to take away from Tasks of the Proposal."),
   }),
-  output: card.extend({ returnedToDraft: z.boolean(), label: z.string().nullable(), paths: z.array(z.object({ path: z.string(), edit: z.string() })).describe("The path to write, for each path of `edit`."), drifts: z.array(z.looseObject({ drift: z.string() })) }),
+  output: card.extend({ returnedToDraft: z.boolean(), label: z.string().nullable(), paths: z.array(z.object({ path: z.string(), edit: z.string() })).describe("The path to write, for each path of `edit`."), drifts: z.array(z.looseObject({ drift: z.string() })), images: z.array(z.string()).describe("The path of each image copy made, in the order of `images`.") }),
   example: { edit: ["order/order.md", "tasks/cancel.md"], label: "Order cancel" },
   exampleArgs: ["P3"],
   effects: { writes: true, activity: true },
   run(ctx, input, [id]) {
     const project = ctx.project();
     if (input.label !== undefined) checkedLabel(input.label);
+    const copies: string[] = [];
     const { proposalId, returnedToDraft, paths } = withProposalLock(
       project,
       id as string,
@@ -163,6 +191,7 @@ const edit = defineCommand({
         for (const path of input.delete ?? []) deleteInProposal(project, proposalId, path);
         for (const d of input.drifts ?? []) resolveDriftInProposal(project, proposalId, getDrift(project, d.drift, true).id, { decision: d.decision as DriftDecisionKind, ...(d.option === undefined ? {} : { option: d.option }), ...(d.note === undefined ? {} : { note: d.note }) });
         for (const drift of input.removeDrifts ?? []) resolveDriftInProposal(project, proposalId, getDrift(project, drift, true).id, { remove: true });
+        if (input.images !== undefined || input.removeImages !== undefined) copies.push(...changeTaskImages(project, proposalId, input.images ?? [], input.removeImages ?? []));
         const proposal = getProposal(project, proposalId);
         if (proposal.data.status === "open") {
           touch(proposal);
@@ -174,9 +203,9 @@ const edit = defineCommand({
     );
     const proposal = getProposal(project, proposalId);
     const n = numbersOf(ctx);
-    const lines = [...paths.map((p) => p.edit), ...(input.label === undefined ? [] : [`Label of Proposal ${n.name("proposal", proposalId)} is "${proposal.data.label}".`]), ...(input.delete ?? []).map((p) => `Marked ${p} for deletion.`), ...(input.drifts ?? []).map((d) => `Recorded Drift ${n.name("drift", getDrift(project, d.drift, true).id)} as ${d.decision}.`), ...(input.removeDrifts ?? []).map((d) => `Removed Drift ${d} from the list.`)];
+    const lines = [...paths.map((p) => p.edit), ...(input.label === undefined ? [] : [`Label of Proposal ${n.name("proposal", proposalId)} is "${proposal.data.label}".`]), ...(input.delete ?? []).map((p) => `Marked ${p} for deletion.`), ...(input.drifts ?? []).map((d) => `Recorded Drift ${n.name("drift", getDrift(project, d.drift, true).id)} as ${d.decision}.`), ...(input.removeDrifts ?? []).map((d) => `Removed Drift ${d} from the list.`), ...copies.map((c) => `Image copied to ${c}`), ...(input.removeImages ?? []).map((r) => `Removed image ${r.name} from Task ${r.task}.`)];
     if (lines.length === 0) lines.push(`Proposal ${n.name("proposal", proposalId)} is a Draft.`);
-    return text(`${lines.join("\n")}${returnedToDraft ? `\n${RETURNED}` : ""}`, { id: proposalId, number: n.label("proposal", proposalId), status: proposal.data.status, returnedToDraft, label: proposal.data.label, paths, drifts: proposal.data.drifts });
+    return text(`${lines.join("\n")}${returnedToDraft ? `\n${RETURNED}` : ""}`, { id: proposalId, number: n.label("proposal", proposalId), status: proposal.data.status, returnedToDraft, label: proposal.data.label, paths, drifts: proposal.data.drifts, images: copies });
   },
 });
 

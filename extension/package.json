@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "publisher": "trama-dev",
   "license": "AGPL-3.0-only",
   "private": true,
@@ -131,6 +131,12 @@
           "default": "panel",
           "scope": "application",
           "markdownDescription": "Where `omp` terminals open: `panel` (the terminal area; the default) or `editor` (a tab in the active editor group)."
+        },
+        "trama.ignoreInstructionFiles": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "With omp: Trama's jobs ignore agent instruction files (AGENTS.md, CLAUDE.md, Cursor rules, .omp/RULES.md) in the project and your user folders. Off by default."
         },
         "trama.submitWhileRunning": {
           "type": "boolean",

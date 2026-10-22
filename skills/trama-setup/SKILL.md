@@ -16,6 +16,15 @@ For the format of Model and Requirement files, read [`trama-design`](../trama-de
 - In every command and every file use only the **permanent identity** of a card (from `--json`, field `id`, or from the file name). Never write a short number (`P3`, `T3`) in a file.
 - Name cards to the developer by short number and title ("Proposal P3 – title"). A closed card has no number: use its identity.
 - Give every card you create, and its announcement, a **short title**: at most five words, about 40 characters, a name for the card rather than a sentence describing the work (for example "Testo fantasma" instead of "Descrivere Start from Scratch e guidare le richieste scritte con un testo fantasma"). Put the detail in the body, even when the title loses information. No command checks the length of a title. Titles that Trama or a skill composes from another title stay as they are: `Fix code to match the …`, `Import: <Feature>`, the titles of checks.
+- **Self-contained Tasks.** The body of a Task is understood without the conversation that produced it: it says what must be true when done, with the conditions and consequences as the Model says them, and every decision of the interview that concerns it, because whoever implements it does not see that conversation.
+
+## Language
+
+When the instruction asks you to write in a language, everything you generate for Trama that the developer reads goes in that language: the bodies, descriptions and introductions of Proposals, Model files, Requirements, Tasks and Drifts; the titles of Proposals, Tasks, Drifts, Areas and Requirement fragments, and of announcements; the names of the System, Features, Machines, Actors and States; new identifiers (IDs of Features, Machines and Actors, Event names), transliterated into the allowed ASCII letters (`città` → `citta`, an Event `PAGAMENTO_RIUSCITO`); the text of questions and their options, and your replies in the conversation. Without a language in the instruction, nothing here changes.
+
+- **Always in English**, whatever the language: technical terms are never translated: commands and tools (`git pull`, `npm install`), names of products, services, libraries and languages, and Trama's own terms (Proposal, Task, Drift, Board, Run, Scan). Also always English: code and its comments, commit messages, the project's own documentation; the headers Trama reads in files ("States", "Events", "General", "What happens", "What should happen", "Where in the code", "Fix options", "Already present"), the `(initial)` and `(final)` markers, the keys of Specs and the front matter fields. Trama's interface (panel, editor, command line) stays in English.
+- **A language changes nothing already written.** When you edit a file written in another language, keep its existing text and write only the new or rewritten text in the chosen language; never translate the whole file.
+- **No first person in Trama's texts.** In what you write for Trama (questions, contexts and options of rounds, titles and bodies of Proposals, Tasks and Drifts, History entries), Trama is always "Trama" and you are "the agent": no "I", "me", "my", "we", "our", and in Italian no "io", "noi" or first-person verbs. Your replies in the conversation are not Trama's texts and do not change. Text already written is not rewritten.
 
 ## Step 1: read the request
 
@@ -24,6 +33,8 @@ The instruction names a file `.trama/requests/<id>.md`. Read the **whole** file 
 The request is the starting point of the interview, never its answers. Every decision it makes still becomes a question with its options, the option the request indicates being your recommendation.
 
 Look at every image the request links, with the same rules as `trama-design`: local files and web addresses you can open, images you cannot see ignored silently, what matters written in words, and no copy, link or citation of the request's images, or their paths, in the Proposal, the Model, the Requirements, the Specs or the Tasks.
+
+**Images for the Tasks** work as in `trama-design` ("Images for the Tasks"): when the request links at least one local image you can see, the first round has one single-choice yes/no question about sending them also to the model that implements the Tasks; with yes, bind each local image to at least one Task that needs it with `trama proposal edit <id> --input -` and `{"images":[{"task":"<task identity>","path":"<image path>"}]}` before the hand-over (which deletes the request's images folder); with no, bind none. Images linked by a web address never count.
 
 ## Step 2: check the Model is empty
 
@@ -74,6 +85,16 @@ Do not ask the developer to review the Proposal. Do not approve, reject or disca
 ## Written design request
 
 The request is consumed by the successful hand-over of the bound Proposal: its file is deleted then. Do not delete the file yourself.
+
+## Reworking a rejected setup Proposal
+
+When the instruction says to rework the rejected setup Proposal `<id>` with the developer's feedback (Rework with feedback), follow this skill with these changes; everything else stays as written:
+
+- Read the rejected Proposal with `trama proposal show <id>` (body, decisions, files, Tasks and `## Feedback`) instead of a request file. Its decisions count as already taken, except what the feedback changes or leaves in doubt. Without `## Feedback`, redo the same setup on the Model as it is now. Step 2 still holds: the Model must be empty.
+- The interview is optional: one round of `trama question new` only for the decisions the feedback opens or leaves open, as `trama-design` says in "Reworking a rejected Proposal".
+- Write the setup Proposal again from scratch, without requesting the rejected one. Bind it with `"reworks":"<id>"` in `trama proposal new` (never together with `request`); Trama links it only when the named Proposal is rejected and no other one already reworks it, otherwise it creates it unlinked and the result says why.
+- When the rejected Proposal's Tasks had images, bind them to the new Tasks that need them, copying each from the old Task (the path `trama task show` prints) with `images` in `trama proposal edit`, without asking the developer again.
+- After the hand-over, report its result as Step 5 says (approved on hand-over, or open and why it was not approved) and, when the Proposal stays open, tell the developer to review it. Never approve, reject or discard it yourself.
 
 ## PowerShell
 

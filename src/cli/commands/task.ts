@@ -81,10 +81,10 @@ const show = defineCommand({
   verb: "show",
   mode: "immediate",
   summary: "A Task with its references and the Requirements to implement.",
-  description: "Everything needed to carry the Task out, with no pointers to other commands or skills: the Model elements it references in full, and the Requirements that apply. Names each Drift or Task that blocks it. Read-only.",
+  description: "Everything needed to carry the Task out, with no pointers to other commands or skills: the Model elements it references in full, and the Requirements that apply. Names each Drift or Task that blocks it. An `Images` block lists the absolute paths of the images tied to the Task, and `--json` carries them as `images`. Read-only.",
   positionals: [{ name: "id", description: "The Task: its ID, a unique prefix or its short number." }],
   input: z.strictObject({}),
-  output: summary.extend({ body: z.string() }),
+  output: summary.extend({ body: z.string(), images: z.array(z.string()).describe("The absolute paths of the images tied to the Task; empty when it has none.") }),
   exampleArgs: ["T3"],
   run: (ctx, _input, [id]) => taskShowView(ctx.project(), getTask(ctx.project(), id as string, true)),
 });

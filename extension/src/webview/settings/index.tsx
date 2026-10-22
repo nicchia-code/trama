@@ -32,6 +32,7 @@ export interface SettingsView extends View {
   receiveWizardModels(message: ModelSuggestionsMessage): void;
   receiveAgentCheck(message: AgentCheckMessage): void;
   receiveFolderChildren(message: FolderChildrenMessage): void;
+  receiveInstructionFiles(message: Extract<ToWebview, { type: "instructionFiles" }>): void;
   receiveResult(message: GuidedSetupResultMessage): void;
 }
 
@@ -151,6 +152,7 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
     receiveWizardModels: (message) => wizard.receiveModels(message),
     receiveAgentCheck: (message) => wizard.receiveAgentCheck(message),
     receiveFolderChildren: (message) => wizard.receiveFolderChildren(message),
+    receiveInstructionFiles: (message) => wizard.receiveInstructionFiles(message),
     receiveResult: (message) => wizard.receiveResult(message),
   };
 };

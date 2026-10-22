@@ -95,8 +95,11 @@ function parseConfirmSetup(raw: Raw, settings: readonly SettingSchema[]): Parsed
   };
 }
 
-/** Checks a message from the webview, which is untrusted input, against the `ToHost` contract. `settings` is the manifest's schema: only its keys can be set. */
-export function parseToHost(value: unknown, settings: readonly SettingSchema[] = []): Parsed {
+/**
+ * Checks a message from the webview, which is untrusted input, against the `ToHost` contract. `settings` is the manifest's schema: only its keys can be set.
+ * `hasTaskImage` tells whether a Task has an image file of that name: `openTaskImage` is accepted only for one that exists.
+ */
+export function parseToHost(value: unknown, settings: readonly SettingSchema[] = [], hasTaskImage: (task: string, name: string) => boolean = () => false): Parsed {
   if (typeof value !== "object" || value === null) return bad("not a message");
   const raw = value as Raw;
   if (typeof raw["type"] !== "string") return bad("not a message");
@@ -105,6 +108,7 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
   switch (type) {
     case "ready":
     case "writeDesignRequest":
+    case "openQuickTask":
       return { ok: true, message: { type } };
     case "modelSuggestionsWanted": {
       if (raw["agent"] === undefined && raw["ompPath"] === undefined) return { ok: true, message: { type } };
@@ -115,6 +119,15 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       return isAgent(raw["agent"]) && typeof raw["ompPath"] === "string" && raw["ompPath"].length <= MAX_PATH_TEXT
         ? { ok: true, message: { type, agent: raw["agent"], ompPath: raw["ompPath"] } }
         : bad("agentCheckWanted needs an agent (cursor or omp) and an omp path");
+    case "instructionFilesWanted":
+      if (raw["root"] === undefined) return { ok: true, message: { type } };
+      return typeof raw["root"] === "string" && raw["root"] !== "" && raw["root"].length <= MAX_PATH_TEXT
+        ? { ok: true, message: { type, root: raw["root"] } }
+        : bad("instructionFilesWanted needs a folder, or none");
+    case "openInstructionFile":
+      return typeof raw["path"] === "string" && raw["path"] !== "" && raw["path"].length <= MAX_PATH_TEXT
+        ? { ok: true, message: { type, path: raw["path"] } }
+        : bad("openInstructionFile needs a path");
     case "openGuidedSetup":
       return raw["choice"] === "import" || raw["choice"] === "scratch" ? { ok: true, message: { type, choice: raw["choice"] } } : bad("openGuidedSetup needs a choice: import or scratch");
     case "folderChildrenWanted":
@@ -137,6 +150,14 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
     case "approveProposal":
     case "rejectProposal":
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };
+    case "reworkProposal": {
+      const proposal = typeof raw["proposal"] === "string" && ID.test(raw["proposal"]) ? raw["proposal"] : undefined;
+      return proposal === undefined ? bad("reworkProposal needs a valid Proposal ID") : { ok: true, message: { type, proposal } };
+    }
+    case "reworkDrift": {
+      const drift = typeof raw["drift"] === "string" && ID.test(raw["drift"]) ? raw["drift"] : undefined;
+      return drift === undefined ? bad("reworkDrift needs a valid Drift ID") : { ok: true, message: { type, drift } };
+    }
     case "dismissDrift":
       return id === undefined ? bad("dismissDrift needs a valid Drift ID") : { ok: true, message: { type, id } };
     case "setProposalModel": {
@@ -152,6 +173,12 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
     case "openLink": {
       const url = typeof raw["url"] === "string" ? safeLink(raw["url"]) : null;
       return url === null ? bad("openLink needs an http or https address") : { ok: true, message: { type, url } };
+    }
+    case "openTaskImage": {
+      const task = typeof raw["task"] === "string" && ID.test(raw["task"]) ? raw["task"] : undefined;
+      const name = raw["name"];
+      if (task === undefined || typeof name !== "string" || name === "" || name.length > 255 || !hasTaskImage(task, name)) return bad("openTaskImage needs an image that the Task has");
+      return { ok: true, message: { type, task, name } };
     }
     case "setSetting": {
       const setting = settings.find((s) => s.key === raw["key"]);

@@ -12,6 +12,7 @@ let workspaceFolders: { name: string; uri: { fsPath: string; scheme: string } }[
 let receive: ((raw: unknown) => void) | undefined;
 let modalAnswer: string | undefined;
 const modals: string[] = [];
+const opened: { path: string; options: unknown }[] = [];
 
 mock.module("vscode", () => ({
   window: {
@@ -40,12 +41,14 @@ mock.module("vscode", () => ({
       return modalAnswer;
     },
     showErrorMessage: async () => undefined,
+    showTextDocument: async (document: { fsPath: string }, options: unknown) => void opened.push({ path: document.fsPath, options }),
   },
   workspace: {
     get workspaceFolders() {
       return workspaceFolders;
     },
     getWorkspaceFolder: () => undefined,
+    openTextDocument: async (uri: { fsPath: string }) => uri,
     getConfiguration: () => ({
       get: (key: string, fallback: unknown) => userSettings.get(key) ?? fallback,
       inspect: (key: string) => ({ globalValue: userSettings.get(key) }),
@@ -100,6 +103,7 @@ beforeEach(() => {
   writes.length = 0;
   launched.length = 0;
   modals.length = 0;
+  opened.length = 0;
   modalAnswer = undefined;
   failOn = undefined;
   setups = 0;
@@ -293,4 +297,33 @@ test("the Diagram's buttons with a Model that is not empty carry out the path as
   expect(launched).toHaveLength(1);
   expect(String(launched[0]?.instruction)).not.toContain("folders");
   expect(messages.some((m) => m["type"] === "guidedSetup" || m["type"] === "guidedSetupResult")).toBe(false);
+});
+
+test("the instruction files of a workspace folder are sent as labels and paths, and only those can be opened", async () => {
+  writeFileSync(join(root, "AGENTS.md"), "SECRET");
+  await send({ type: "instructionFilesWanted", root });
+  const answer = messages.find((m) => m["type"] === "instructionFiles") as { root: string; files: { label: string; path: string }[] };
+  expect(answer.root).toBe(root);
+  expect(answer.files).toContainEqual({ label: "AGENTS.md", path: join(root, "AGENTS.md") });
+  expect(JSON.stringify(answer)).not.toContain("SECRET");
+
+  await send({ type: "openInstructionFile", path: join(root, "AGENTS.md") });
+  expect(opened).toEqual([{ path: join(root, "AGENTS.md"), options: { viewColumn: -2, preview: false } }]);
+  messages.length = 0;
+  await send({ type: "openInstructionFile", path: join(root, "package.json") });
+  expect(opened).toHaveLength(1);
+  expect(messages.some((m) => m["type"] === "error")).toBe(true);
+});
+
+test("a search for a folder outside the workspace is refused, and without a folder it is for the project's folder", async () => {
+  await send({ type: "instructionFilesWanted", root: join(root, "..") });
+  expect(messages.some((m) => m["type"] === "instructionFiles")).toBe(false);
+  expect(messages.some((m) => m["type"] === "error")).toBe(true);
+  messages.length = 0;
+  mkdirSync(join(root, ".trama", "model"), { recursive: true });
+  writeFileSync(join(root, "CLAUDE.md"), "x");
+  await send({ type: "instructionFilesWanted" });
+  const answer = messages.find((m) => m["type"] === "instructionFiles") as { root: string; files: { label: string }[] };
+  expect(answer.root).toBe(root);
+  expect(answer.files.map((f) => f.label)).toContain("CLAUDE.md");
 });

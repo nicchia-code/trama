@@ -31,12 +31,14 @@ Solo nel primo setup. Il developer sceglie come mettere Trama nella cartella: Im
 - `developer.NEXT_SETUP_STEP` → Agent: solo con un percorso scelto; senza, Next non è disponibile e dice perché.
 
 #### Agent
-L'agente con cui Trama lavora, scelto fra la chat di Cursor e omp; con omp anche dove trovare omp e dove si apre il suo terminale. Il passo verifica l'agente scelto, ogni volta che la scelta o il percorso di omp cambiano, e mostra il risultato: con omp se omp risponde, con quanti modelli, oppure perché non risponde; con la chat di Cursor se l'editor è Cursor. Una verifica fallita è un avviso e non impedisce di andare avanti.
+L'agente con cui Trama lavora, scelto fra la chat di Cursor e omp; con omp anche dove trovare omp, dove si apre il suo terminale e se i lavori di Trama ignorano i file di istruzioni degli agenti (vedi l'Agent terminal). Il passo verifica l'agente scelto, ogni volta che la scelta o il percorso di omp cambiano, e mostra il risultato: con omp se omp risponde, con quanti modelli, oppure perché non risponde; con la chat di Cursor se l'editor è Cursor. Una verifica fallita è un avviso e non impedisce di andare avanti.
+
+Ogni volta che il passo si mostra, Trama cerca anche i file di istruzioni che gli agenti caricano da soli, qualunque agente sia scelto: quelli più comuni nella cartella del progetto (nel primo setup quella scelta nel passo Path), quelli generali nelle cartelle che la contengono fino alla cartella home esclusa, e quelli dell'utente. Un file vuoto non conta. Quando ne trova, un avviso dice che l'agente li carica in ogni lavoro di Trama e consiglia di toglierli dal repository o di controllare che non contraddicano Trama, ed elenca i file trovati, uno per riga; scegliere un file lo apre in una scheda dell'editor e il wizard resta dov'è. Con omp e i file di istruzioni ignorati, l'avviso dice anche che i lavori di Trama con omp non li leggono. L'avviso non impedisce di andare avanti e non cambia nulla nei file; senza file trovati non compare.
 - `developer.NEXT_SETUP_STEP` → Models
 - `developer.PREVIOUS_SETUP_STEP` → Path: solo nel primo setup; negli altri modi Agent è il primo passo e Back non è disponibile.
 
 #### Models
-I tre ruoli dei modelli (analisi, scansione, esecuzione) e il numero massimo di sotto-agenti in parallelo. I modelli suggeriti sono quelli dell'agente scelto nel passo precedente, anche se non è ancora salvato. Un numero di sotto-agenti non valido mostra perché e Next non è disponibile finché non torna valido.
+I tre ruoli dei modelli (analisi, scansione, esecuzione) e il numero massimo di sotto-agenti in parallelo. Una frase del passo consiglia, a parole e senza nominare modelli, il peso di ciascun ruolo: il modello più capace per l'analisi, uno intermedio per l'esecuzione, uno veloce e leggero per la scansione. Il wizard non sceglie né ordina i modelli in base al consiglio. I modelli suggeriti sono quelli dell'agente scelto nel passo precedente, anche se non è ancora salvato. Un numero di sotto-agenti non valido mostra perché e Next non è disponibile finché non torna valido.
 - `developer.NEXT_SETUP_STEP` → Project: solo con valori validi.
 - `developer.PREVIOUS_SETUP_STEP` → Agent
 

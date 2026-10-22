@@ -3,7 +3,7 @@ import { type AgentOrigin, deliverCard } from "./announcements";
 import { type Blocker, blockedByDrift, computeBlocked, concernSameThing, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
 import { clearProgress, readProgress, writeProgress } from "./progress";
-import { approveProposal, discardAttachedProposal, type DriftDecisionKind, getProposal, type Proposal, rejectProposal, resolutionHolding } from "./proposals";
+import { approveProposal, discardAttachedProposal, type DriftDecisionKind, getProposal, type Proposal, pruneImages, rejectProposal, resolutionHolding } from "./proposals";
 import type { RemovedElement } from "./scan-scope";
 import { loadProject, parseRequirementRef, type ProjectModel, resolveProjectRef } from "./requirements";
 import { boolField, compareByCreation, createdField, enumField, enumOrNull, idField, instantField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
@@ -383,6 +383,7 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
   }
   saveItem(task.path, task.data, task.body);
   if (!task.data.agent) clearProgress(p, task.id);
+  pruneImages(p);
   if (drift) {
     drift.data.status = "resolved";
     drift.data.resolution = "dismissed";

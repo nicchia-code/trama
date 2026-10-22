@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { withFileLock } from "./file-lock";
 import { type AgentOrigin, type Announcement, bindDraft, removeBoundTo } from "./announcements";
 import { consumeRequest, requestExists } from "./design-requests";
@@ -32,7 +32,9 @@ import type { Diagnostic, FileMap } from "./types";
 import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
 import { cardName, identityOfShortNumber, savedIdentityOfShortNumber, syncShortNumbers } from "./short-numbers";
 import { isSpecsRef, SPECS_FILE } from "./specs";
-import { attachedDrift, type DriftOutcome, fixCodeRefusal, listDrifts, planApprovalTasks, requireNotAttached, resolveListedDrifts, writeApprovalTasks } from "./work";
+import { attachedDrift, type DriftOutcome, fixCodeRefusal, listDrifts, listTasks, planApprovalTasks, requireNotAttached, resolveListedDrifts, writeApprovalTasks } from "./work";
+import { IMAGE_EXTENSIONS, isImagePath, pruneTaskImages, removeTaskImage } from "./task-image-cleanup";
+import { copyTaskImages, readTaskImages } from "./task-images";
 import { removedElements, type RemovedKind, SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
 
 /**
@@ -82,6 +84,10 @@ interface ProposalData {
   scanScope: ScanScopeEntry[] | null;
   /** Short name shown on the Board and in `proposal show`; required before a Proposal with Tasks is handed over. Absent on Proposals written before the field existed. */
   label: string | null;
+  /** The rejected Proposal this one redoes (Rework with feedback); kept after the decision. Absent elsewhere. */
+  reworks: string | null;
+  /** Set when the Proposal was rejected with Rework with feedback; absent elsewhere. */
+  reworkRequested: boolean;
 }
 
 /** Longest label a Proposal can carry, in characters. */
@@ -147,7 +153,10 @@ function parseData(raw: Raw, where: string): ProposalData {
     created: createdField(raw, where),
     scanScope: scanScopeField(raw, where),
     label: textOrNull(raw, "label", where),
+    reworks: idField(raw, "reworks", where),
+    reworkRequested: boolField(raw, "reworkRequested", false, where),
   };
+  if (data.reworks !== null && data.request !== null) throw new TramaError(`${where}: a Proposal with "reworks" has no "request"`);
   data.drifts = driftsField(raw, data.kind, where);
   for (const id of data.requires)
     if (!/^[a-z0-9]{8}$/.test(id) && !/^\d+$/.test(id)) throw new TramaError(`${where}: "requires" lists Proposal IDs, not "${id}"`);
@@ -236,7 +245,7 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
 
 /** Writes `proposal.md` from the Proposal's data, leaving defaults out of the file. */
 export function save(proposal: Proposal) {
-  const { kind, nonBlocking, prepared, drifts, requires, request, created, scanScope, label, ...rest } = proposal.data;
+  const { kind, nonBlocking, prepared, drifts, requires, request, created, scanScope, label, reworks, reworkRequested, ...rest } = proposal.data;
   // Defaults stay out of the file, so Proposals without dependencies look as they always did.
   // Numbered Proposals have no `created`; writing it would pretend they remember an instant they do not.
   const data = {
@@ -252,6 +261,8 @@ export function save(proposal: Proposal) {
     ...(created === null ? {} : { created }),
     ...(scanScope === null ? {} : { scanScope }),
     ...(label === null ? {} : { label }),
+    ...(reworks === null ? {} : { reworks }),
+    ...(reworkRequested ? { reworkRequested: true } : {}),
   };
   writeDocument(join(proposal.dir, "proposal.md"), data, proposal.body);
 }
@@ -276,8 +287,30 @@ export function newProposal(
   p: Project,
   title: string,
   body = "",
-  options: { requires?: string[]; kind?: ProposalKind; nonBlocking?: boolean; prepared?: boolean; announcement?: string; origin?: AgentOrigin; request?: string; label?: string } = {},
+  options: { requires?: string[]; kind?: ProposalKind; nonBlocking?: boolean; prepared?: boolean; announcement?: string; origin?: AgentOrigin; request?: string; label?: string; reworks?: string } = {},
 ): Proposal {
+  return createProposal(p, title, body, options).proposal;
+}
+
+/** What binding a new Proposal to the rejected one it redoes did: the Proposals whose `requires` changed, or why nothing was bound. */
+export interface ReworkOutcome {
+  /** Identity of the rejected Proposal now bound, or null. */
+  reworks: string | null;
+  /** Why the Proposal was created without the link; empty when it was bound or none was asked. */
+  note: string;
+  /** Draft or open Proposals whose `requires` now names the new Proposal instead of the rejected one. */
+  changed: string[];
+}
+
+/** `newProposal` plus the outcome of the link to a rejected Proposal (`reworks`), made in the same step under the rejected Proposal's lock. */
+export function createProposal(
+  p: Project,
+  title: string,
+  body = "",
+  options: { requires?: string[]; kind?: ProposalKind; nonBlocking?: boolean; prepared?: boolean; announcement?: string; origin?: AgentOrigin; request?: string; label?: string; reworks?: string } = {},
+): { proposal: Proposal; rework: ReworkOutcome } {
+  if (options.reworks !== undefined && options.request !== undefined)
+    throw new TramaError("Refused: a Proposal that reworks another cannot be bound to a design request; give reworks or request, not both");
   if (options.nonBlocking && (options.kind ?? "change") !== "resolution")
     throw new TramaError("--non-blocking needs --resolution");
   if (options.prepared && (options.kind ?? "change") !== "resolution")
@@ -289,35 +322,92 @@ export function newProposal(
       throw new TramaError(`Proposal ${cardName(p, "proposal", required.id)} was ${required.data.status}; a new Proposal cannot require it`);
     return required.id;
   });
-  const id = newCardId(proposalsDir(p), "folder", "Proposal");
-  const name = `${id}-${slugify(title)}`;
-  const proposal: Proposal = {
-    id,
-    name,
-    dir: join(proposalsDir(p), name),
-    title,
-    data: {
-      status: "draft",
-      kind: options.kind ?? "change",
-      nonBlocking: options.nonBlocking ?? false,
-      prepared: options.prepared ?? false,
-      drifts: [],
-      requires: [...new Set(requires)],
-      base: {},
-      delete: [],
-      // Only the first Proposal opened for a request binds it; a request that does not exist binds nothing.
-      request: requestToBind(p, options.request),
-      created: createdNow(),
-      scanScope: null,
-      label,
-    },
-    body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
-    tasks: [],
+  const citing = options.reworks;
+  let target: Proposal | null = null;
+  if (citing !== undefined) {
+    try {
+      target = getProposal(p, citing);
+    } catch {
+      target = null;
+    }
+  }
+  const none = (note: string): ReworkOutcome => ({ reworks: null, note, changed: [] });
+  const make = (rework: Proposal | null): { proposal: Proposal; rework: ReworkOutcome } => {
+    const id = newCardId(proposalsDir(p), "folder", "Proposal");
+    const name = `${id}-${slugify(title)}`;
+    const proposal: Proposal = {
+      id,
+      name,
+      dir: join(proposalsDir(p), name),
+      title,
+      data: {
+        status: "draft",
+        kind: options.kind ?? "change",
+        nonBlocking: options.nonBlocking ?? false,
+        prepared: options.prepared ?? false,
+        drifts: [],
+        requires: [...new Set(requires)],
+        base: {},
+        delete: [],
+        // Only the first Proposal opened for a request binds it; a request that does not exist binds nothing.
+        request: requestToBind(p, options.request),
+        // A Proposal that redoes a rejected one takes its place: same instant (absent when the rejected one has none).
+        created: rework === null ? createdNow() : rework.data.created,
+        scanScope: null,
+        label,
+        reworks: rework === null ? null : rework.id,
+        reworkRequested: false,
+      },
+      body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
+      tasks: [],
+    };
+    save(proposal);
+    const changed = rework === null ? [] : rewriteRequires(p, rework.id, proposal.id);
+    bindDraft(p, proposal, options.announcement, options.origin);
+    return { proposal, rework: { reworks: rework?.id ?? null, note: "", changed } };
   };
-  save(proposal);
-  bindDraft(p, proposal, options.announcement, options.origin);
-  return proposal;
+  if (citing === undefined) return make(null);
+  if (target === null) {
+    const created = make(null);
+    created.rework = none(`Proposal ${citing} was not found; the Proposal does not redo any Proposal.`);
+    return created;
+  }
+  // The rejected Proposal's lock makes two agents redoing it at once bind it only once.
+  return withProposalLock(p, target.id, () => {
+    const current = getProposal(p, target!.id);
+    const name = cardName(p, "proposal", current.id);
+    const problem =
+      current.data.status !== "rejected"
+        ? `Proposal ${name} is ${current.data.status}, not rejected; the Proposal does not redo it.`
+        : listProposals(p).some((x) => x.data.reworks === current.id)
+          ? `Proposal ${name} is already redone by another Proposal; the Proposal does not redo it.`
+          : "";
+    if (problem !== "") {
+      const created = make(null);
+      created.rework = none(problem);
+      return created;
+    }
+    return make(current);
+  });
 }
+
+/** Replaces `from` with `to` in the `requires` of every draft or open Proposal, each rewritten under its own lock; returns the ones changed. */
+function rewriteRequires(p: Project, from: string, to: string): string[] {
+  const changed: string[] = [];
+  for (const other of listProposals(p)) {
+    if (other.id === to || (other.data.status !== "draft" && other.data.status !== "open")) continue;
+    if (!other.data.requires.some((r) => canonicalCardId(r) === from)) continue;
+    withProposalLock(p, other.id, () => {
+      const fresh = getProposal(p, other.id);
+      if (!fresh.data.requires.some((r) => canonicalCardId(r) === from)) return;
+      fresh.data.requires = [...new Set(fresh.data.requires.map((r) => (canonicalCardId(r) === from ? to : r)))];
+      save(fresh);
+      changed.push(fresh.id);
+    });
+  }
+  return changed;
+}
+
 function requestToBind(p: Project, request: string | undefined): string | null {
   if (request === undefined || !requestExists(p, request)) return null;
   return listProposals(p).some((x) => x.data.request === request) ? null : request;
@@ -568,6 +658,48 @@ function deleteTaskInProposal(p: Project, id: string, path: string) {
   touch(proposal);
   rmSync(target);
   save(proposal);
+  pruneImages(p);
+}
+
+/** Deletes the image folders of the Tasks that must no longer keep them (`task-image-cleanup`), from the cards as they are now. */
+export function pruneImages(p: Project): void {
+  pruneTaskImages(p, listProposals(p), listTasks(p));
+}
+
+/** The Task of `proposal` named by its full name `tasks/<identity>-<slug>.md` or by its identity, or a refusal. */
+function imageTaskOf(p: Project, proposal: Proposal, cited: string): ProposalTask {
+  const file = cited.startsWith("tasks/") ? cited.slice("tasks/".length) : cited;
+  const found = proposal.tasks.find((t) => t.name === file || t.id === file);
+  if (!found) throw new TramaError(`${cited} is not a Task of Proposal ${cardName(p, "proposal", proposal.id)}`);
+  return found;
+}
+
+/**
+ * Ties images to Tasks of the Proposal and takes copies away; an edit, so an open Proposal returns to Draft. Everything
+ * is checked first (Task of the Proposal, file exists and is a regular file, image extension, copy to take away exists):
+ * a refusal changes nothing. Returns the path of each copy made, in order.
+ */
+export function changeTaskImages(p: Project, id: string, add: { task: string; path: string }[], remove: { task: string; name: string }[]): string[] {
+  return withProposalLock(p, id, () => {
+    const proposal = getProposal(p, id);
+    requireEditable(p, proposal);
+    const copies = add.map((e) => {
+      const task = imageTaskOf(p, proposal, e.task);
+      if (!isImagePath(e.path)) throw new TramaError(`${e.path} is not an image: only ${IMAGE_EXTENSIONS.join(", ")} files can be tied to a Task`);
+      const source = resolve(p.root, e.path);
+      if (!existsSync(source) || !statSync(source).isFile()) throw new TramaError(`${e.path} does not exist or is not a file`);
+      return { task, source };
+    });
+    const removals = remove.map((e) => {
+      const task = imageTaskOf(p, proposal, e.task);
+      if (!readTaskImages(p, task.id).some((img) => img.name === e.name)) throw new TramaError(`Task ${task.id} has no image named ${e.name}`);
+      return { task, name: e.name };
+    });
+    touch(proposal);
+    save(proposal);
+    for (const r of removals) removeTaskImage(p, r.task.id, r.name);
+    return copies.flatMap((c) => copyTaskImages(p, c.task.id, [c.source]).map((img) => img.path));
+  });
 }
 
 export interface ProposalHealth {
@@ -844,14 +976,19 @@ export function approveProposal(p: Project, id: string, skillsDirs: string[] = [
   return { ...written, resolved };
 }
 
-/** Rejects an open Proposal. The feedback is optional: with text it is appended under `## Feedback`; empty or blank adds nothing. */
-export function rejectProposal(p: Project, id: string, feedback = ""): Proposal {
+/**
+ * Rejects an open Proposal. The feedback is optional: with text it is appended under `## Feedback`; empty or blank adds nothing.
+ * `reworkRequested` (Rework with feedback) writes `reworkRequested: true` in the same step; rejections through a Drift leave it off.
+ */
+export function rejectProposal(p: Project, id: string, feedback = "", options: { reworkRequested?: boolean } = {}): Proposal {
   const proposal = getProposal(p, id);
   requireStatus(p, proposal, "open", "rejected");
   proposal.data.status = "rejected";
+  if (options.reworkRequested === true) proposal.data.reworkRequested = true;
   const text = feedback.trim();
   if (text) proposal.body = `${proposal.body.trimEnd()}\n\n## Feedback\n\n${text}\n`;
   save(proposal);
+  pruneImages(p);
   return proposal;
 }
 
@@ -877,6 +1014,7 @@ export function submitProposal(p: Project, id: string, skillsDirs: string[] = []
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} cannot be handed over yet:\n${problems.map((x) => `- ${x}`).join("\n")}${warningsText(warnings)}`);
   proposal.data.status = "open";
   save(proposal);
+  pruneImages(p);
   removeBoundTo(p, proposal.id, true);
   const requestConsumed = proposal.data.request !== null && consumeRequest(p, proposal.data.request);
   const handedOver = { ...proposal, requestConsumed, warnings, approvedAtHandOver: false, openReason: null };
@@ -913,6 +1051,7 @@ function giveUp(p: Project, proposal: Proposal): Proposal {
   proposal.data.status = "discarded";
   save(proposal);
   removeBoundTo(p, proposal.id);
+  pruneImages(p);
   return proposal;
 }
 

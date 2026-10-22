@@ -301,6 +301,19 @@ test("the six skills that create cards give them a short title, and no command c
   }
 });
 
+test("the skills give the writing rules: no first person in Trama's texts, and self-contained Tasks", () => {
+  const firstPerson = "- **No first person in Trama's texts.**";
+  const selfContained = "The body of a Task is understood without the conversation that produced it";
+  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-compare", "trama-implement", "trama-import", "trama-resolve-drifts"]) {
+    const skill = SKILLS[`${name}/SKILL.md`] as string;
+    expect(skill).toContain("## Language");
+    expect(skill).toContain(firstPerson);
+    expect(skill).toContain('Trama is always "Trama" and you are "the agent"');
+    expect(skill).toContain("Your replies in the conversation are not Trama's texts and do not change");
+    if (name !== "trama-import" && name !== "trama-resolve-drifts") expect(skill).toContain(selfContained);
+  }
+});
+
 test("a CRLF checkout (core.autocrlf) of installed skills and omp definitions is not a conflict, and a project edit leaves it as it is", () => {
   const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
   try {
@@ -320,5 +333,14 @@ test("a CRLF checkout (core.autocrlf) of installed skills and omp definitions is
     expect(skillConflicts(join(root, ".agents/skills"))).toEqual([skill]);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Asking sections tell the agent the developer sees only the round, in the same words", () => {
+  const sentence = "The developer sees only the round (each question, its context, its options and their own answers), never your conversation.";
+  for (const name of ["trama-design", "trama-import", "trama-resolve-drifts"]) {
+    const text = readFileSync(join(import.meta.dir, "..", "skills", name, "SKILL.md"), "utf8");
+    expect(text).toContain(sentence);
+    expect(text).toContain('no first person (write "Trama" or "the agent", never "I" or "we")');
   }
 });

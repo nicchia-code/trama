@@ -8,7 +8,11 @@ export type ResolvedAction =
   /** A written design request that starts a project from scratch: the `trama-setup` skill, named `Setup`. */
   | { kind: "setup-request"; request: string }
   /** Resolve Drifts on the one Drift the developer chose: always a manual request, answered with a round of questions. */
-  | { kind: "resolve-drifts"; drift: string };
+  | { kind: "resolve-drifts"; drift: string }
+  /** Rework with feedback on a rejected Proposal, redone with the `skill` that wrote it: `design` (change, or setup on a Model that has a Feature or an Actor), `setup` (setup on an empty Model) or `import`. */
+  | { kind: "rework"; proposal: string; skill: "design" | "setup" | "import" }
+  /** Rework with feedback on a rejected resolution: one agent resolves its `drifts`, the ones still open and in no other resolution. */
+  | { kind: "rework-resolution"; proposal: string; drifts: string[] };
 
 /** The one-line instruction that makes the external agent use the right Trama skill. */
 export function buildPrompt(action: ResolvedAction): string {
@@ -19,6 +23,12 @@ export function buildPrompt(action: ResolvedAction): string {
       return `Use the trama-design skill on the design request in \`.trama/requests/${action.request}.md\`. Bind the first Proposal you open to it with the \`request\` field.`;
     case "resolve-drifts":
       return `Use the trama-resolve-drifts skill on the open Drift ${action.drift}, and on no other open Drift: ask the developer what should happen for it, then write one resolution Proposal.`;
+    case "rework":
+      return action.skill === "setup"
+        ? `Use the trama-setup skill to rework the rejected setup Proposal ${action.proposal} with the developer's feedback. Bind the setup Proposal you open to it with the \`reworks\` field.`
+        : `Use the trama-${action.skill} skill to rework the rejected Proposal ${action.proposal} with the developer's feedback. Bind the first Proposal you open to it with the \`reworks\` field.`;
+    case "rework-resolution":
+      return `Use the trama-resolve-drifts skill to rework the rejected resolution ${action.proposal} with the developer's feedback, on the Drifts ${action.drifts.map((d) => `\`${d}\``).join(", ")}. Bind the resolution you open to it with the \`reworks\` field.`;
     case "scan":
       return buildScanPrompt(action.feature === undefined ? [] : [action.feature]);
     case "implement":
@@ -89,7 +99,10 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
     case "setup-request":
       return "Setup";
     case "resolve-drifts":
+    case "rework-resolution":
       return "Drifts";
+    case "rework":
+      return action.skill === "design" ? "Design" : action.skill === "setup" ? "Setup" : "Import";
   }
 }
 
@@ -112,6 +125,16 @@ export const ASYNC_DRIFT_RESOLVER_SENTENCE = "The Async Drift Resolver is on: be
 export const CONTEXT_SHARING_SENTENCE =
   'The experimental context sharing is on: pass each sub-agent what you have already read that concerns its part, as the "Experimental context sharing" section of your skill says.';
 
+/** The sentence that follows the Resolve instruction when the developer gave feedback on how to resolve the Drift, followed by the feedback in quotes. */
+export const REWORK_FEEDBACK_SENTENCE = "The developer's feedback on how to resolve it:";
+
+/** The Rework instruction for one Drift: exactly the Resolve instruction when `feedback` is empty after trimming, otherwise followed on the same line by the feedback as typed, without the spaces around it. */
+export function reworkPrompt(drift: string, feedback: string): string {
+  const text = feedback.trim();
+  const base = buildPrompt({ kind: "resolve-drifts", drift });
+  return text === "" ? base : `${base} ${REWORK_FEEDBACK_SENTENCE} "${text}"`;
+}
+
 /** The sentence that hands the resolution agent the developer's answer to a Drift's prepared question, followed by the answer as JSON and a full stop. */
 export const PREPARED_ANSWER_SENTENCE = "The developer already answered this Drift's prepared question; do not ask again. Answer:";
 
@@ -132,7 +155,10 @@ export function mayFileDrifts(action: ResolvedAction): boolean {
     case "written-design":
     case "setup-request":
     case "resolve-drifts":
+    case "rework-resolution":
       return false;
+    case "rework":
+      return action.skill === "import";
   }
 }
 

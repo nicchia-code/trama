@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, sep } from "node:path";
 import * as vscode from "vscode";
 import { consumeRequest, createRequest, isEmptyRequest, requestFile, requestIdAt, requestsDir, requestTitle, sweepRequestImages } from "../../../src/core/design-requests";
-import { approvalBlock, listProposals } from "../../../src/core/proposals";
+import { approvalBlock, listProposals, pruneImages } from "../../../src/core/proposals";
 import type { Project } from "../../../src/core/store";
 import { type DesignAnnouncement, type Launch, launchAgent, launched } from "./agent";
 import { findProject, NO_PROJECT_WARNING } from "./project";
@@ -74,7 +74,10 @@ export class DesignRequests implements vscode.Disposable {
     this.finishMissing(vscode.window.tabGroups.all.flatMap((group) => group.tabs));
     this.forget();
     const current = this.project();
-    if (current) sweepRequestImages(current);
+    if (current) {
+      sweepRequestImages(current);
+      pruneImages(current);
+    }
     void this.clearGoneSetup();
     this.updateContext();
   }

@@ -17,12 +17,13 @@ export function stepsFor(mode: WizardMode, choice: WizardChoice | null): WizardS
 }
 
 export const AGENT_KEY = "trama.agent";
+export const IGNORE_INSTRUCTION_FILES_KEY = "trama.ignoreInstructionFiles";
 /** The keys that mean something only with the agent `omp`. */
-export const OMP_ONLY_KEYS: readonly string[] = ["trama.ompPath", "trama.terminalLocation"];
+export const OMP_ONLY_KEYS: readonly string[] = ["trama.ompPath", "trama.terminalLocation", IGNORE_INSTRUCTION_FILES_KEY];
 
 /** The keys each step asks for, in order. */
 export const STEP_KEYS: Readonly<Partial<Record<WizardStep, readonly string[]>>> = {
-  Agent: [AGENT_KEY, "trama.ompPath", "trama.terminalLocation"],
+  Agent: [AGENT_KEY, "trama.ompPath", "trama.terminalLocation", IGNORE_INSTRUCTION_FILES_KEY],
   Models: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"],
   Project: ["trama.skillsDir"],
   Advanced: ["trama.theme", "trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution", "trama.experimentalAsyncDriftResolver", "trama.experimentalContextSharing"],
@@ -31,7 +32,7 @@ export const STEP_KEYS: Readonly<Partial<Record<WizardStep, readonly string[]>>>
 export const STEP_SENTENCES: Readonly<Record<WizardStep, string>> = {
   Path: "Choose how Trama starts in this folder.",
   Agent: "Choose the coding agent Trama works with.",
-  Models: "Choose the model for each kind of work.",
+  Models: "Choose the model for each kind of work. Analysis works best with your most capable model, Execution with a mid-range one, Scan with a fast, light one.",
   Project: "Choose where Trama installs the agent skills.",
   Folders: "Uncheck the folders the agent should not import.",
   Advanced: "Theme and experimental features. You can skip this step.",
@@ -93,6 +94,12 @@ export function chosenOmpPath(schema: readonly SettingSchema[], state: WizardSta
   const setting = schema.find((s) => s.key === "trama.ompPath");
   const value = setting === undefined ? undefined : wizardValue(setting, state);
   return typeof value === "string" ? value.trim() : "";
+}
+
+/** Whether the Agent step says that omp jobs ignore the instruction files: the wizard's agent is `omp` and `trama.ignoreInstructionFiles` is on. */
+export function ignoresInstructionFiles(schema: readonly SettingSchema[], state: WizardState): boolean {
+  const setting = schema.find((s) => s.key === IGNORE_INSTRUCTION_FILES_KEY);
+  return chosenAgent(schema, state) === "omp" && setting !== undefined && wizardValue(setting, state) === true;
 }
 
 /** The keys a step shows: the ones only omp uses go when the agent is another. */

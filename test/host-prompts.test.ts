@@ -94,3 +94,28 @@ test("the Drift blocker's sentence is added on the same line only when on, and o
 test("every instruction carries the one ask sentence, whatever the job", () => {
   expect(ASK_DEVELOPER_SENTENCE).toBe("Ask the developer only with `trama question new`, as the skill says, never with your own question tool; run it with no time limit and wait until it ends.");
 });
+
+test("the Rework instruction is the Resolve one, with the trimmed feedback after it on the same line", async () => {
+  const { reworkPrompt } = await import("../extension/src/host/prompts");
+  const resolve = buildPrompt({ kind: "resolve-drifts", drift: "ab12cd34" });
+  expect(reworkPrompt("ab12cd34", "   ")).toBe(resolve);
+  expect(reworkPrompt("ab12cd34", "  keep the code  ")).toBe(`${resolve} The developer's feedback on how to resolve it: "keep the code"`);
+});
+
+test("the Rework instruction of a rejected Proposal follows its kind, binds it with reworks and names its terminal", () => {
+  const name = (kind: "task" | "proposal", id: string) => id;
+  const design = { kind: "rework", proposal: "ab12cd34", skill: "design" } as const;
+  expect(buildPrompt(design)).toBe("Use the trama-design skill to rework the rejected Proposal ab12cd34 with the developer's feedback. Bind the first Proposal you open to it with the `reworks` field.");
+  expect(terminalName(design, name)).toBe("Design");
+  const setup = { kind: "rework", proposal: "ab12cd34", skill: "setup" } as const;
+  expect(buildPrompt(setup)).toBe("Use the trama-setup skill to rework the rejected setup Proposal ab12cd34 with the developer's feedback. Bind the setup Proposal you open to it with the `reworks` field.");
+  expect(terminalName(setup, name)).toBe("Setup");
+  const imported = { kind: "rework", proposal: "ab12cd34", skill: "import" } as const;
+  expect(buildPrompt(imported)).toBe("Use the trama-import skill to rework the rejected Proposal ab12cd34 with the developer's feedback. Bind the first Proposal you open to it with the `reworks` field.");
+  expect(terminalName(imported, name)).toBe("Import");
+  expect(mayFileDrifts(imported)).toBe(true);
+  expect(mayFileDrifts(design)).toBe(false);
+  const resolution = { kind: "rework-resolution", proposal: "ab12cd34", drifts: ["aaaaaaaa", "bbbbbbbb"] } as const;
+  expect(buildPrompt({ ...resolution, drifts: [...resolution.drifts] })).toBe("Use the trama-resolve-drifts skill to rework the rejected resolution ab12cd34 with the developer's feedback, on the Drifts `aaaaaaaa`, `bbbbbbbb`. Bind the resolution you open to it with the `reworks` field.");
+  expect(terminalName({ ...resolution, drifts: [...resolution.drifts] }, name)).toBe("Drifts");
+});

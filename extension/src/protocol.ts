@@ -39,6 +39,12 @@ export interface WorkspaceFolderView {
   hasFiles: boolean;
 }
 
+/** An agent instruction file the wizard's Agent step warns about: the label is shown, the absolute path is what opening it asks for. */
+export interface InstructionFileView {
+  label: string;
+  path: string;
+}
+
 /** One entry of a folder the wizard's tree shows. */
 export interface FolderEntry {
   name: string;
@@ -52,6 +58,8 @@ export type ToHost =
   | { type: "launch"; action: AgentAction }
   /** + Add Work Item: the host opens the Markdown document of a written design request. */
   | { type: "writeDesignRequest" }
+  /** Add Quick Task (the arrow of + Add Work Item): the host opens a new, empty chat with the agent. */
+  | { type: "openQuickTask" }
   /** What the developer did on the overlay of question round `round`; the host answers with the new state. */
   | { type: "questionAction"; round: number; action: QuestionAction }
   /** Tracked path: relative to `.trama/model/`, or `requirements/<area>.md`. */
@@ -62,20 +70,32 @@ export type ToHost =
   | { type: "openCard"; kind: "task" | "drift"; id: string }
   | { type: "approveProposal"; id: string }
   | { type: "rejectProposal"; id: string }
+  /** «Rework with feedback…» of Reject's arrow: the host asks the developer what to change, rejects the Proposal and has the agent redo it. */
+  | { type: "reworkProposal"; proposal: string }
+  /** «Rework with feedback…» of Dismiss Drift's arrow: the host asks the developer for feedback and has the agent resolve the Drift following it. */
+  | { type: "reworkDrift"; drift: string }
   /** The developer confirmed the model field of a Proposal's model window: the host saves `model` for that Proposal (an empty text forgets it). */
   | { type: "setProposalModel"; proposal: string; model: string }
   /** The developer pressed «Dismiss Drift»: the host asks for confirmation in a modal dialog, then closes the Drift without changes, discarding its attached Proposal. */
   | { type: "dismissDrift"; id: string }
+  /** The developer chose «Rework with feedback…» on an open Drift: the host asks for the feedback in an input box, then launches the resolution agent on that one Drift with it. */
+  | { type: "reworkDrift"; drift: string }
   /** The Settings tab was opened: the host answers with the model names of the agent (`modelSuggestions`). With `agent` (and `ompPath`) they are for that agent instead of the saved one, and the answer says so: this is how the wizard suggests the models of an agent it has not saved yet. */
   | { type: "modelSuggestionsWanted"; agent?: "cursor" | "omp"; ompPath?: string }
   /** The developer changed a Trama setting in the Settings tab: the host checks it against the manifest and saves it in the user settings. */
   | { type: "setSetting"; key: string; value: SettingValue }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
   | { type: "openLink"; url: string }
+  /** The developer chose a preview of an image of a Task: the host opens that file whole in an editor tab, only if it is an image the Task has. */
+  | { type: "openTaskImage"; task: string; name: string }
   /** Import from Code or Start from Scratch on the Diagram with the empty Model: the host shows the Settings tab with the wizard in the Empty Model mode and that choice. */
   | { type: "openGuidedSetup"; choice: SetupChoice }
   /** The wizard's Agent step wants the chosen agent checked; the host answers with `agentCheck`. */
   | { type: "agentCheckWanted"; agent: "cursor" | "omp"; ompPath: string }
+  /** The wizard's Agent step is shown: the host searches the agent instruction files of `root` (a workspace folder; absent means the project's folder) and answers with `instructionFiles`. */
+  | { type: "instructionFilesWanted"; root?: string }
+  /** The developer followed a file of the warning on the Agent step: the host opens it only if it is in the last `instructionFiles` answer. */
+  | { type: "openInstructionFile"; path: string }
   /** The wizard's tree opens `path` (relative to `root`, empty for the first level); the host answers with `folderChildren`. */
   | { type: "folderChildrenWanted"; root: string; path: string }
   /**
@@ -124,6 +144,8 @@ export type ToWebview =
   | { type: "guidedSetupResult"; ok: boolean; error: string | null }
   /** The check of an agent for the wizard: omp answered (`models` is how many), or why it did not, or whether the editor is Cursor. */
   | { type: "agentCheck"; agent: string; ompPath: string; ok: boolean; models?: number; error?: string }
+  /** The agent instruction files found for `root`, with `path` absolute and `label` as it is shown. No content is sent. */
+  | { type: "instructionFiles"; root: string; files: InstructionFileView[] }
   /** The entries of one folder of the wizard's tree, without the ones named with a dot or ignored by git. */
   | { type: "folderChildren"; root: string; path: string; entries: FolderEntry[] }
   | ({ type: "navigate"; view: ViewName } & NavigateOptions)

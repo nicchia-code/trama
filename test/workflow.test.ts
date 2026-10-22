@@ -124,6 +124,18 @@ describe("Proposals", () => {
     expect(() => rejectProposal(p, d)).toThrow(/rejected/);
   });
 
+  test("rejecting with Rework marks reworkRequested in the same step; a plain rejection does not", () => {
+    const [a, b] = ["A", "B"].map((title) => newProposal(p, title).id) as [string, string];
+    for (const id of [a, b]) handOver(p, id);
+    rejectProposal(p, a, "  Redo it.  ", { reworkRequested: true });
+    rejectProposal(p, b);
+    expect(getProposal(p, a).data.reworkRequested).toBe(true);
+    expect(getProposal(p, a).body).toContain("## Feedback\n\nRedo it.");
+    expect(readFileSync(join(getProposal(p, a).dir, "proposal.md"), "utf8")).toContain("reworkRequested: true");
+    expect(getProposal(p, b).data.reworkRequested).toBe(false);
+    expect(readFileSync(join(getProposal(p, b).dir, "proposal.md"), "utf8")).not.toContain("reworkRequested");
+  });
+
   test("paths cannot escape the Model directory", () => {
     const prop = newProposal(p, "Escape");
     expect(() => editInProposal(p, prop.id, "../../../etc/passwd.md")).toThrow();

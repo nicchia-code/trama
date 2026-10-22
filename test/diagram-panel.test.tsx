@@ -59,3 +59,62 @@ test("a drawn Proposal shows Approve and Reject on what it changes, and they sen
   fireEvent.click(approve);
   expect(posted.at(-1)).toEqual({ type: "approveProposal", id: proposal?.id ?? "" });
 });
+
+test("the arrows of Dismiss Drift and Reject open Rework with feedback in the details", async () => {
+  const { store, posted } = setup();
+  const drift = snapshot.drifts.find((d) => d.refs.includes("order/Shipped"));
+  act(() => store.navigateDrift(drift?.id ?? ""));
+  const arrow = screen.getByRole("button", { name: /^More ways to handle / });
+  arrow.focus();
+  fireEvent.keyDown(arrow, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Rework with feedback…" }));
+  expect(posted).toEqual([{ type: "reworkDrift", drift: drift?.id ?? "" }]);
+  cleanup();
+  const again = setup();
+  const proposal = snapshot.proposals.find((p) => p.title === "Returns after shipping");
+  act(() => again.store.chooseProposal(proposal?.id ?? null));
+  act(() => again.store.navigateRef("order/Returned"));
+  const reject = screen.getByRole("button", { name: /^More ways to reject / });
+  reject.focus();
+  fireEvent.keyDown(reject, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Rework with feedback…" }));
+  expect(again.posted).toEqual([{ type: "reworkProposal", proposal: proposal?.id ?? "" }]);
+});
+
+test("the Tasks of a Proposal show their image previews behind Show details, and a click asks the host to open the image", () => {
+  const target = snapshot.proposals.find((p) => p.title === "Returns after shipping");
+  const withImages = {
+    ...snapshot,
+    proposals: snapshot.proposals.map((p) =>
+      p.id === target?.id
+        ? {
+            ...p,
+            tasks: [
+              { id: "aaaaaaaa", title: "Draw it", body: "", technical: true, refs: [], images: [{ name: "a.png", path: "/x/a.png", uri: "https://webview/a.png" }, { name: "gone.png", path: "/x/gone.png" }] },
+              { id: "bbbbbbbb", title: "Plain", body: "", technical: true, refs: [], images: [] },
+            ],
+          }
+        : p,
+    ),
+  };
+  const store = createDiagramStore();
+  const posted: ToHost[] = [];
+  store.update(withImages, null, false);
+  render(
+    <TooltipProvider>
+      <DiagramDetails store={store} context={{ post: (m) => posted.push(m), navigate: () => {}, openLink: () => {} }} />
+    </TooltipProvider>,
+  );
+  act(() => store.chooseProposal(target?.id ?? null));
+  act(() => store.navigateRef("order/Returned"));
+  // Only the Task with an image has the toggle, even with no body; the image shows after it is opened.
+  const toggles = screen.getAllByRole("button", { name: "Show details" });
+  expect(toggles).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: /^Open image / })).toBeNull();
+  fireEvent.click(toggles[0] as HTMLElement);
+  const preview = screen.getByRole("button", { name: "Open image a.png" });
+  expect(preview.querySelector("img")?.getAttribute("src")).toBe("https://webview/a.png");
+  expect(screen.queryByRole("button", { name: "Open image gone.png" })).toBeNull();
+  fireEvent.click(preview);
+  expect(posted).toEqual([{ type: "openTaskImage", task: "aaaaaaaa", name: "a.png" }]);
+});

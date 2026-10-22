@@ -20,7 +20,7 @@ The panel's components (`extension/src/webview/ui/`) are copied and adapted from
 
 ## Radix UI
 
-The primitives under the shadcn/ui components (`@radix-ui/react-slot`, `-tabs`, `-dialog`, `-select`, `-checkbox`, `-tooltip`, `-popover`).
+The primitives under the shadcn/ui components (`@radix-ui/react-slot`, `-tabs`, `-dialog`, `-select`, `-checkbox`, `-tooltip`, `-popover`, `-dropdown-menu`).
 
 - Source: https://github.com/radix-ui/primitives
 - License: MIT License.

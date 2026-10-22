@@ -4,13 +4,15 @@ import { type CardName, type CardNumbers, ID_NAMES, cardNameOf } from "../../../
 import { joinReasons } from "../../../../src/core/design";
 import { REQUIRED_STATUS, appliesUnder } from "../../../../src/core/required";
 import type { DriftView, ProposalView } from "../../../../src/core/snapshot";
-import { approveBlocker, finishingBlocker, recurringLabel, resolvedRows } from "../board/logic";
+import { approveBlocker, driftReworkBlocker, finishingBlocker, recurringLabel, resolvedRows } from "../board/logic";
 import { driftComparison } from "../drift-compare";
 import { dismissBlocker } from "../dismiss";
 import { InlineMarkdown, Markdown } from "../markdown";
+import { previewable, TaskImages } from "../task-images";
 import type { ViewContext } from "../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { SplitButton } from "../split-button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../lib/utils";
 import { viewOfRef } from "../requirements/logic";
@@ -157,7 +159,7 @@ function Item({ item, jump, openLink }: { item: DetailItem; jump: (ref: string) 
   );
 }
 
-function ProposalTasks({ proposal, jump, openLink }: { proposal: ProposalView; jump: (ref: string) => void; openLink: (url: string) => void }) {
+function ProposalTasks({ proposal, jump, openLink, openImage }: { proposal: ProposalView; jump: (ref: string) => void; openLink: (url: string) => void; openImage: (task: string, name: string) => void }) {
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
   const toggle = (at: number) => setOpen((now) => (now.has(at) ? new Set([...now].filter((x) => x !== at)) : new Set([...now, at])));
   const refLink = (ref: string) => (
@@ -180,7 +182,7 @@ function ProposalTasks({ proposal, jump, openLink }: { proposal: ProposalView; j
             {t.refs.map((ref) => (
               <Fragment key={ref}> {refLink(ref)}</Fragment>
             ))}
-            {t.body.trim() !== "" ? (
+            {t.body.trim() !== "" || previewable(t.images).length > 0 ? (
               <>
                 <div className="mt-1">
                   <Button variant="ghost" size="sm" aria-expanded={open.has(at)} onClick={() => toggle(at)}>
@@ -188,7 +190,12 @@ function ProposalTasks({ proposal, jump, openLink }: { proposal: ProposalView; j
                     {open.has(at) ? "Hide details" : "Show details"}
                   </Button>
                 </div>
-                {open.has(at) ? <Markdown source={t.body} openLink={openLink} /> : null}
+                {open.has(at) ? (
+                  <>
+                    {t.body.trim() !== "" ? <Markdown source={t.body} openLink={openLink} /> : null}
+                    <TaskImages images={t.images} open={(name) => openImage(t.id, name)} />
+                  </>
+                ) : null}
               </>
             ) : null}
           </li>
@@ -248,12 +255,15 @@ function ProposalBlock({
   proposal: p,
   numbers,
   finishing,
+  reworkReason,
   actions,
 }: {
   proposal: ProposalView;
   numbers: CardNumbers;
   finishing: string | null;
-  actions: { jump(ref: string): void; showDrift(drift: string): void; approve(id: string): void; reject(id: string): void; openLink(url: string): void };
+  /** Why the arrow of Reject is disabled, or null. */
+  reworkReason: string | null;
+  actions: { jump(ref: string): void; showDrift(drift: string): void; approve(id: string): void; reject(id: string): void; rework(id: string): void; openLink(url: string): void; openTaskImage(task: string, name: string): void };
 }) {
   const open = p.requires.filter((r) => appliesUnder(r.status));
   const unusable = p.requires.filter((r) => !appliesUnder(r.status));
@@ -328,10 +338,22 @@ function ProposalBlock({
         </>
       ) : null}
       {p.resolves.length > 0 ? <ResolvesBlock proposal={p} numbers={numbers} showDrift={actions.showDrift} /> : null}
-      {p.tasks.length + p.removals.length > 0 ? <ProposalTasks proposal={p} jump={actions.jump} openLink={actions.openLink} /> : null}
+      {p.tasks.length + p.removals.length > 0 ? <ProposalTasks proposal={p} jump={actions.jump} openLink={actions.openLink} openImage={actions.openTaskImage} /> : null}
       <div className="my-2.5 flex flex-wrap gap-1.5">
         <ActionButton icon={Check} variant="default" label="Approve" disabled={blocker !== null} tooltip={blocker ?? "Apply this Proposal to the Model"} onClick={() => actions.approve(p.id)} />
-        <ActionButton icon={X} label="Reject" disabled={finishing !== null} tooltip={finishing ?? "Reject this Proposal; feedback for the agent is optional"} onClick={() => actions.reject(p.id)} />
+        <SplitButton
+          icon={X}
+          label="Reject"
+          tooltip="Reject this Proposal"
+          disabled={finishing !== null}
+          reason={finishing}
+          arrowDisabled={reworkReason !== null}
+          arrowReason={reworkReason}
+          arrowName={`More ways to reject ${cardNameOf(numbers, "proposal", p.id).text}`}
+          itemTooltip="Reject it and have the agent redo it with your feedback"
+          onClick={() => actions.reject(p.id)}
+          onRework={() => actions.rework(p.id)}
+        />
       </div>
     </section>
   );
@@ -342,6 +364,8 @@ export function DetailsPanel({
   detail,
   dismissReason,
   proposalWait,
+  proposalReworkReason,
+  driftReworkReason,
   actions,
 }: {
   detail: Detail;
@@ -349,6 +373,10 @@ export function DetailsPanel({
   dismissReason: string | null;
   /** Why Approve and Reject are disabled for the Proposal in the detail, or null. */
   proposalWait: string | null;
+  /** Why the arrow of Reject is disabled for the Proposal in the detail (a resolution adds Resolve's reasons), or null. */
+  proposalReworkReason: string | null;
+  /** Why the arrow of «Dismiss Drift» is disabled for the Drift in the detail, or null. */
+  driftReworkReason: string | null;
   actions: {
     jump(ref: string): void;
     openFile(path: string): void;
@@ -356,7 +384,10 @@ export function DetailsPanel({
     toggle(state: string): void;
     approve(id: string): void;
     reject(id: string): void;
+    rework(id: string): void;
+    reworkDrift(id: string): void;
     openLink(url: string): void;
+    openTaskImage(task: string, name: string): void;
     showDrift(id: string): void;
     dismiss(id: string): void;
   };
@@ -394,7 +425,19 @@ export function DetailsPanel({
         <>
           <DriftCompare drift={drift} openLink={actions.openLink} />
           <div className="my-2.5 flex flex-wrap gap-1.5">
-            <ActionButton icon={Ban} label="Dismiss Drift" disabled={dismissReason !== null} tooltip={dismissReason ?? "Close this Drift without changes"} onClick={() => actions.dismiss(drift.id)} />
+            <SplitButton
+              icon={Ban}
+              label="Dismiss Drift"
+              tooltip="Close this Drift without changes"
+              disabled={dismissReason !== null}
+              reason={dismissReason}
+              arrowDisabled={driftReworkReason !== null}
+              arrowReason={driftReworkReason}
+              arrowName={`More ways to handle ${driftName?.text ?? drift.id}`}
+              itemTooltip="Have the agent resolve this Drift following your feedback"
+              onClick={() => actions.dismiss(drift.id)}
+              onRework={() => actions.reworkDrift(drift.id)}
+            />
           </div>
         </>
       ) : null}
@@ -422,7 +465,7 @@ export function DetailsPanel({
           </Fragment>
         ),
       )}
-      {detail.proposal ? <ProposalBlock proposal={detail.proposal} numbers={detail.numbers} finishing={proposalWait} actions={actions} /> : null}
+      {detail.proposal ? <ProposalBlock proposal={detail.proposal} numbers={detail.numbers} finishing={proposalWait} reworkReason={proposalReworkReason} actions={actions} /> : null}
     </>
   );
 }
@@ -438,6 +481,14 @@ export function DiagramDetails({ store, context }: { store: DiagramStore; contex
       detail={detail}
       dismissReason={detail.drift && snapshot ? dismissBlocker(detail.drift.id, snapshot.resolutionDrifts, state.resolveBlocker, snapshot.finishingDrifts) : null}
       proposalWait={detail.proposal && snapshot ? finishingBlocker(detail.proposal.id, snapshot.finishingProposals) : null}
+      proposalReworkReason={
+        detail.proposal && snapshot ? joinReasons([finishingBlocker(detail.proposal.id, snapshot.finishingProposals), detail.proposal.kind === "resolution" ? state.resolveBlocker : null]) : null
+      }
+      driftReworkReason={
+        detail.drift && snapshot
+          ? driftReworkBlocker(dismissBlocker(detail.drift.id, snapshot.resolutionDrifts, state.resolveBlocker, snapshot.finishingDrifts), state.resolveBlocker)
+          : null
+      }
       actions={{
         jump: (ref) => (viewOfRef(ref) === "requirements" ? context.navigate("requirements", { ref }) : store.navigateRef(ref)),
         openFile: (path) => context.post({ type: "openModelFile", path }),
@@ -445,7 +496,10 @@ export function DiagramDetails({ store, context }: { store: DiagramStore; contex
         toggle: (name) => store.toggleState(name),
         approve: (id) => context.post({ type: "approveProposal", id }),
         reject: (id) => context.post({ type: "rejectProposal", id }),
+        rework: (id) => context.post({ type: "reworkProposal", proposal: id }),
+        reworkDrift: (id) => context.post({ type: "reworkDrift", drift: id }),
         openLink: context.openLink,
+        openTaskImage: (task, name) => context.post({ type: "openTaskImage", task, name }),
         showDrift: (id) => store.navigateDrift(id),
         dismiss: (id) => context.post({ type: "dismissDrift", id }),
       }}

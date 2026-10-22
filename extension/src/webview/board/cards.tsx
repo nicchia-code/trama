@@ -6,8 +6,10 @@ import { joinReasons } from "../../../../src/core/design";
 import { DriftCompare, IdTag, RecurringBadge } from "../diagram/panel";
 import { cn } from "../lib/utils";
 import { Markdown } from "../markdown";
+import { previewable, TaskImages } from "../task-images";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
+import { SplitButton } from "../split-button";
 import { Progress } from "../ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { AGENT_NAMES, type AnnouncedCard, blockedReason, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
@@ -283,7 +285,20 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
         {card.views.diagram ? <ViewButton kind="diagram" focus={{ kind: "proposal", id: card.id }} verb="changes" name={card.name.text} /> : null}
         {card.views.requirements ? <ViewButton kind="requirements" focus={{ kind: "proposal", id: card.id }} verb="changes" name={card.name.text} /> : null}
         <BoardButton icon={Check} label="Approve" aria={`Approve ${card.heading}`} variant="default" disabled={card.blocker !== null} tooltip={card.blocker} onClick={() => env.context.post({ type: "approveProposal", id: card.id })} />
-        <BoardButton icon={X} label="Reject" aria={`Reject ${card.heading}`} disabled={card.rejectBlocker !== null} tooltip={card.rejectBlocker} onClick={() => env.context.post({ type: "rejectProposal", id: card.id })} />
+        <SplitButton
+          icon={X}
+          label="Reject"
+          aria={`Reject ${card.heading}`}
+          tooltip="Reject this Proposal"
+          disabled={card.rejectBlocker !== null}
+          reason={card.rejectBlocker}
+          arrowDisabled={card.reworkBlocker !== null}
+          arrowReason={card.reworkBlocker}
+          arrowName={`More ways to reject ${card.name.text}`}
+          itemTooltip="Reject it and have the agent redo it with your feedback"
+          onClick={() => env.context.post({ type: "rejectProposal", id: card.id })}
+          onRework={() => env.context.post({ type: "reworkProposal", proposal: card.id })}
+        />
       </Actions>
     </Shell>
   );
@@ -323,12 +338,18 @@ function DriftCardView({ card }: { card: DriftCard }) {
           description={card.resolveBlocker}
           onClick={() => env.context.post({ type: "launch", action: { kind: "resolve-drifts", drift: card.id } })}
         />
-        <BoardButton
+        <SplitButton
           icon={Ban}
           label="Dismiss Drift"
+          tooltip="Close this Drift without changes"
           disabled={card.dismissBlocker !== null}
-          tooltip={card.dismissBlocker ?? "Close this Drift without changes"}
+          reason={card.dismissBlocker}
+          arrowDisabled={card.reworkBlocker !== null}
+          arrowReason={card.reworkBlocker}
+          arrowName={`More ways to handle ${card.name.text}`}
+          itemTooltip="Have the agent resolve this Drift following your feedback"
           onClick={() => env.context.post({ type: "dismissDrift", id: card.id })}
+          onRework={() => env.context.post({ type: "reworkDrift", drift: card.id })}
         />
       </Actions>
     </Shell>
@@ -343,6 +364,7 @@ function TaskCardView({ card }: { card: TaskCard }) {
   const runnable = card.column !== "done" && !card.agent;
   const runReason = joinReasons([card.finishing, env.runReason, blockedReason(card.blockedByDrifts, card.waitingFor)]);
   const toggle = `${open ? "Hide" : "Show"} details`;
+  const hasDetails = card.body !== "" || previewable(card.images).length > 0;
   return (
     <Shell card={card} kind="task" label={`Task ${card.name.text}: ${card.title}`} className={cn("border-l-border", card.agent && "board-working")}>
       <Head>
@@ -367,13 +389,14 @@ function TaskCardView({ card }: { card: TaskCard }) {
           from Drift <IdTag name={cardNameOf(env.numbers, "drift", card.drift)} />
         </p>
       ) : null}
-      {card.body ? (
+      {hasDetails ? (
         <div id={detailsId} hidden={!open} className="text-muted-foreground">
-          <Markdown source={card.body} openLink={env.context.openLink} />
+          {card.body ? <Markdown source={card.body} openLink={env.context.openLink} /> : null}
+          <TaskImages images={card.images} open={(name) => env.openTaskImage(card.id, name)} />
         </div>
       ) : null}
       <Actions>
-        {card.body ? (
+        {hasDetails ? (
           <Button variant="ghost" size="sm" aria-label={`${toggle} of task ${card.name.text}`} aria-expanded={open} aria-controls={detailsId} onClick={() => env.toggleExpanded(key)}>
             {open ? <ChevronUp aria-hidden="true" focusable="false" /> : <ChevronDown aria-hidden="true" focusable="false" />}
             {toggle}

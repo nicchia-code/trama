@@ -9,6 +9,7 @@ import {
   confirmLabel,
   exclusions,
   hasPrevious,
+  ignoresInstructionFiles,
   nextBlock,
   nextStep,
   openStep,
@@ -19,6 +20,7 @@ import {
   setRoot,
   setValue,
   skipAdvanced,
+  STEP_SENTENCES,
   stepsFor,
   summaryRows,
   toggleExcluded,
@@ -113,11 +115,21 @@ test("a new folder to initialize forgets the exclusions and the folders read", (
 
 test("the keys of omp show only with omp, and the language is never in the wizard", () => {
   expect(visibleKeys("Agent", "cursor")).toEqual(["trama.agent"]);
-  expect(visibleKeys("Agent", "omp")).toEqual(["trama.agent", "trama.ompPath", "trama.terminalLocation"]);
+  expect(visibleKeys("Agent", "omp")).toEqual(["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles"]);
   expect(visibleKeys("Models", "cursor")).toEqual(["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]);
   expect(visibleKeys("Advanced", "cursor")[0]).toBe("trama.theme");
   expect(visibleKeys("Advanced", "cursor")).toHaveLength(7);
   for (const step of ["Agent", "Models", "Project", "Advanced"] as const) for (const key of visibleKeys(step, "omp")) expect(schema.some((s) => s.key === key)).toBe(true);
+});
+
+test("the Models step gives the advice in words and the note about ignored files shows only with omp and the setting on", () => {
+  expect(STEP_SENTENCES.Models).toBe("Choose the model for each kind of work. Analysis works best with your most capable model, Execution with a mid-range one, Scan with a fast, light one.");
+  let state = open("settings");
+  expect(ignoresInstructionFiles(schema, state)).toBe(false);
+  state = setValue(setValue(state, "trama.agent", "omp"), "trama.ignoreInstructionFiles", true);
+  expect(ignoresInstructionFiles(schema, state)).toBe(true);
+  expect(ignoresInstructionFiles(schema, setValue(state, "trama.agent", undefined))).toBe(false);
+  expect(ignoresInstructionFiles(schema, setValue(state, "trama.ignoreInstructionFiles", undefined))).toBe(false);
 });
 
 test("the summary marks a key whose value differs from the user value now, comparing as Settings does", () => {

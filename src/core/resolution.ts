@@ -67,8 +67,8 @@ function commit(p: Project, proposal: Proposal, drifts: DriftDecision[]) {
  * The resolution Proposal still being written or open, the oldest, or null. Always computed from the files, never remembered.
  * A resolution born from a prepared question (`prepared: true`) never stops Resolve, so it is not counted here.
  */
-export function awaitingResolution(p: Project): Proposal | null {
-  return listProposals(p).find((r) => r.data.kind === "resolution" && !r.data.prepared && (r.data.status === "draft" || r.data.status === "open")) ?? null;
+export function awaitingResolution(p: Project, exceptId?: string): Proposal | null {
+  return listProposals(p).find((r) => r.id !== exceptId && r.data.kind === "resolution" && !r.data.prepared && (r.data.status === "draft" || r.data.status === "open")) ?? null;
 }
 
 /** Why Resolve Drifts cannot be launched now: every reason that holds, in order (Drifts are being resolved, a run in progress, the resolution Proposal awaiting a decision, no open Drifts), or null. `work` is what holds in this window. */
@@ -94,6 +94,28 @@ export function resolveDriftBlocker(p: Project, work: WindowWork, agentOnIt: boo
     work.running ? "A run is in progress" : null,
     awaiting ? `Proposal ${cardName(p, "proposal", awaiting.id)} resolving Drifts awaits a decision` : null,
   ]);
+}
+
+/**
+ * Why Rework with feedback on the open resolution `proposal` cannot be launched now, or null: it is not an open resolution,
+ * Drifts are being resolved, a run is in progress, or another resolution (not born from a prepared question) awaits a decision.
+ */
+export function reworkProposalBlocker(p: Project, work: WindowWork, proposal: string): string | null {
+  const r = getProposal(p, proposal);
+  const awaiting = awaitingResolution(p, r.id);
+  return joinReasons([
+    r.data.kind === "resolution" && r.data.status === "open" ? null : `Proposal ${cardName(p, "proposal", r.id)} is not an open resolution`,
+    work.resolving ? "Drifts are being resolved" : null,
+    work.running ? "A run is in progress" : null,
+    awaiting ? `Proposal ${cardName(p, "proposal", awaiting.id)} resolving Drifts awaits a decision` : null,
+  ]);
+}
+
+/** The Drifts a reworked resolution hands back to the agent: its Drifts still open and in no other resolution, in the order the resolution lists them. Call it after the rejection. */
+export function reworkProposalDrifts(p: Project, proposal: string): string[] {
+  const r = getProposal(p, proposal);
+  const open = new Set(listDrifts(p).filter((d) => d.data.status === "open").map((d) => d.id));
+  return r.data.drifts.map((d) => d.drift).filter((id) => open.has(id) && resolutionHolding(p, id, r.id) === null);
 }
 
 /** The answer to a Drift's prepared question, as the host reads it: the decision it comes to. */

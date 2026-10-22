@@ -278,3 +278,70 @@ test("Get Started mounts the wizard in the first-setup mode only without a proje
   act(() => view.projectPresent(false));
   expect(heading()).toBe("Path");
 });
+
+const FILES = [
+  { label: "AGENTS.md", path: "/work/app/AGENTS.md" },
+  { label: "~/.claude/CLAUDE.md", path: "/home/me/.claude/CLAUDE.md" },
+];
+const wanted = (posted: ToHost[]) => posted.filter((m) => m.type === "instructionFilesWanted");
+
+test("the Models step shows the advice in words", () => {
+  setup({ mode: "settings" });
+  press("Next");
+  expect(heading()).toBe("Models");
+  expect(screen.getByText("Choose the model for each kind of work. Analysis works best with your most capable model, Execution with a mid-range one, Scan with a fast, light one.")).not.toBeNull();
+});
+
+test("the Agent step searches the instruction files of the project folder, shows no box before the answer or without files, and never blocks Next", () => {
+  const { controller, posted } = setup({ mode: "settings" });
+  expect(wanted(posted)).toEqual([{ type: "instructionFilesWanted" }]);
+  expect(screen.queryByText(/Agent instruction files found/)).toBeNull();
+  act(() => controller.receiveInstructionFiles({ type: "instructionFiles", root: "/work/app", files: [] }));
+  expect(screen.queryByText(/Agent instruction files found/)).toBeNull();
+  act(() => controller.receiveInstructionFiles({ type: "instructionFiles", root: "/work/app", files: FILES }));
+  expect(screen.getByText("Agent instruction files found. The agent loads them in every Trama job: remove them from the repository, or check that they do not conflict with Trama.")).not.toBeNull();
+  expect(screen.getAllByRole("button", { name: /^Open / }).map((item) => item.textContent)).toEqual(["AGENTS.md", "~/.claude/CLAUDE.md"]);
+  expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByText("Trama's omp jobs ignore these files.")).toBeNull();
+});
+
+test("following a file asks the host to open it; labels are text, never markup", () => {
+  const { controller, posted } = setup({ mode: "settings" });
+  act(() => controller.receiveInstructionFiles({ type: "instructionFiles", root: "/work/app", files: [{ label: "<b>x</b>.md", path: "/work/app/x.md" }] }));
+  expect(document.querySelector("li b")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open <b>x</b>.md" }));
+  expect(posted).toContainEqual({ type: "openInstructionFile", path: "/work/app/x.md" });
+});
+
+test("the note about ignored files follows the wizard's agent and setting at once, without a new search", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.agent": { user: "omp" } } });
+  act(() => controller.receiveInstructionFiles({ type: "instructionFiles", root: "/work/app", files: FILES }));
+  expect(screen.queryByText("Trama's omp jobs ignore these files.")).toBeNull();
+  const ignore = schema.find((s) => s.key === "trama.ignoreInstructionFiles");
+  expect(ignore).toBeDefined();
+  act(() => controller.setValue(ignore!, true));
+  expect(screen.getByText("Trama's omp jobs ignore these files.")).not.toBeNull();
+  act(() => controller.setValue(ignore!, false));
+  expect(screen.queryByText("Trama's omp jobs ignore these files.")).toBeNull();
+  act(() => controller.setValue(ignore!, true));
+  act(() => controller.setValue(schema.find((s) => s.key === "trama.agent")!, "cursor"));
+  expect(screen.queryByText("Trama's omp jobs ignore these files.")).toBeNull();
+  expect(wanted(posted)).toHaveLength(1);
+});
+
+test("the search is asked again each time the Agent step is shown; in the first setup it is for the folder chosen in Path and an answer for another folder is ignored", () => {
+  const { controller, posted } = setup();
+  fireEvent.click(screen.getByRole("radio", { name: /Start from Scratch/ }));
+  press("Next");
+  expect(heading()).toBe("Agent");
+  expect(wanted(posted)).toEqual([{ type: "instructionFilesWanted", root: "/work/app" }]);
+  act(() => controller.receiveInstructionFiles({ type: "instructionFiles", root: "/work/other", files: FILES }));
+  expect(screen.queryByText(/Agent instruction files found/)).toBeNull();
+  act(() => controller.receiveInstructionFiles({ type: "instructionFiles", root: "/work/app", files: FILES }));
+  expect(screen.getByText(/Agent instruction files found/)).not.toBeNull();
+  press("Next");
+  press("Back");
+  expect(heading()).toBe("Agent");
+  expect(wanted(posted)).toHaveLength(2);
+  expect(screen.queryByText(/Agent instruction files found/)).toBeNull();
+});

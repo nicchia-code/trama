@@ -27,6 +27,8 @@ export interface BoardEnv {
   chooseModel(proposal: string): void;
   /** Opens the body window of a Proposal in Backlog. */
   openProposal(proposal: string): void;
+  /** Opens the whole image `name` of a Task in an editor tab. */
+  openTaskImage(task: string, name: string): void;
 }
 
 export const BoardEnvContext = createContext<BoardEnv | null>(null);

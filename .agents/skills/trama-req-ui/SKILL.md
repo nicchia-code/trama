@@ -28,9 +28,12 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Interfaccia del focus** (`focus.md`): Usa quando mostri il focus nel Diagramma, nei Requisiti o nelle Specs, o i pulsanti View e i chip che lo aprono. Sections: `focus`.
 - **Get Started e wizard di setup** (`get-started.md`): Usa quando mostri Get Started, il wizard di setup, Guided setup, Start from Scratch, Import from Code o il Diagramma con il Modello vuoto. Sections: `panel/Get Started`, `panel/Diagram`, `project`, `setup-wizard`.
 - **Ghost e avvisi** (`ghosts.md`): Usa quando mostri i ghost degli annunci e i loro avvisi nella Board. Sections: `announcement`.
+- **Interfaccia della History** (`history.md`): Usa quando mostri le voci di History: la colonna, la modale dei dettagli e i comandi che le elencano. Sections: `voce-history`.
 - **Interfaccia generale e pannello** (`panel.md`): Usa sempre quando lavori sull'interfaccia: regole generali, pannello, Board e Requisiti. Sections: `General`, `panel`, `panel/Requirements`.
 - **Interfaccia dei round di domande** (`questions-notices.md`): Usa quando mostri i round di domande. Sections: `question-round`.
+- **Quick Task interface** (`quick-task.md`): Usa quando costruisci o cambi il pulsante diviso + Add Work Item, il suo menu Add Quick Task e ciò che il Quick Task mostra. Sections: `developer.OPEN_QUICK_TASK`.
+- **Rework with feedback** (`rework.md`): Usa quando costruisci o cambi la freccetta di Reject e di Dismiss Drift, il suo menu Rework with feedback, la casella del feedback e la sua conferma. Sections: `developer.REWORK_PROPOSAL`, `developer.REWORK_DRIFT`.
 - **Schede Settings e Specs** (`settings-specs.md`): Usa quando costruisci o cambi le schede Settings e Specs del pannello. Sections: `panel/Settings`, `panel/Specs`.
 - **Task progress interface** (`task-progress.md`): Use when showing the percentage the agent declared on a Task, on the Board or in the command line. Sections: `task/Taken by the agent`.
-- **Interfaccia di Proposal e Task** (`tasks.md`): Usa quando mostri Task, voci di History e Proposal di risoluzione o allegate a un Drift. Sections: `proposal`, `task`, `voce-history`.
+- **Interfaccia di Proposal e Task** (`tasks.md`): Usa quando mostri Task, le loro immagini, e Proposal di risoluzione o allegate a un Drift. Sections: `proposal`, `task`.
 - **Interfaccia dei Drift** (`work.md`): Usa quando mostri Drift, Proposal di risoluzione e il pulsante Resolve Drifts. Sections: `drift`, `drift-resolution`.

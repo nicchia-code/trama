@@ -32,13 +32,13 @@ description: "Usa sempre quando lavori sull'interfaccia: regole generali, pannel
 - Le stesse azioni hanno la stessa icona anche nel Diagramma: `Scan` nella sua barra, `Approve`, `Reject` e `Dismiss Drift` nei dettagli. Gli altri controlli del Diagramma e le altre schede del pannello non cambiano.
 - Le icone sono icone lucide, una per azione:
   - `Run all` e `Run` di un Task: `Play`.
-  - `+ Add Work Item`: `Plus`.
+  - `+ Add Work Item`: `Plus`; la sua freccetta, a sola icona: `ChevronUp`; la voce `Add Quick Task` del suo menu: nessuna icona.
   - `Resolve` di un Drift: `WandSparkles`.
   - `Scan System` nella Board e `Scan` nel Diagramma: `Search`.
   - `View on diagram`: `Network`.
   - `View requirements` e `View requirement`: `ListChecks`.
-  - `Approve`: `Check`. `Reject`: `X`.
-  - `Dismiss Drift`: `Ban`.
+  - `Approve`: `Check`. `Reject`: `X`; la sua freccetta, a sola icona: `ChevronDown`; la voce `Rework with feedback…` del suo menu: nessuna icona.
+  - `Dismiss Drift`: `Ban`; la sua freccetta, a sola icona: `ChevronDown`; la voce `Rework with feedback…` del suo menu: nessuna icona.
   - `Open` di un Task: `FileInput`.
   - `Show details`: `ChevronDown`; `Hide details`: `ChevronUp`.
   - `Close` di un avviso, della modale di una voce di History e della modale del corpo di una Proposal: `X`.
