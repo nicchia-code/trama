@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { agentCommandLine, isSupportedShell, programName, quote, shellFamily } from "../extension/src/host/quote";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { agentCommandLine, isSupportedShell, programName, quote, quoteProgram, shellFamily } from "../extension/src/host/quote";
 
 const NASTY = ["plain", "it's", "''", "a\nb", "$HOME `id` $(id) !! \\ \\n \"q\"", "  leading and trailing  ", "", "'; rm -rf / #", "%PATH% & | < > ^"];
 
@@ -33,6 +36,26 @@ test("Windows PowerShell 5.1 wraps every argument in double quotes, doubles inne
   expect(quote("powershell5", 'a\\"b')).toBe(String.raw`'"a\\""b"'`);
 });
 
+
+// Skipped on Windows like the POSIX round-trip above; PowerShell's `& '<program>'` form is checked as text in host-terminal-agent.test.ts.
+(process.platform === "win32" ? test.skip : test)("a program path with spaces and a quote runs from a POSIX command line when quoted as a command", () => {
+  const folder = mkdtempSync(join(tmpdir(), "it's an omp "));
+  try {
+    const program = join(folder, "my omp");
+    writeFileSync(program, '#!/bin/sh\nprintf "%s|" "$@"\n', { mode: 0o755 });
+    const run = Bun.spawnSync(["sh", "-c", `${quoteProgram("posix", program)} ${quote("posix", "a b")} ${quote("posix", "it's")}`]);
+    expect(run.stdout.toString()).toBe("a b|it's|");
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("a program is quoted like an argument, with the call operator in PowerShell where a quoted string alone is not a command", () => {
+  expect(quoteProgram("posix", "omp")).toBe("'omp'");
+  expect(quoteProgram("fish", "it's")).toBe("'it\\'s'");
+  expect(quoteProgram("powershell", "C:\\Program Files\\omp.exe")).toBe("& 'C:\\Program Files\\omp.exe'");
+  expect(quoteProgram("powershell5", "it's")).toBe("& 'it''s'");
+});
 
 test("PowerShell 7 keeps the plain PowerShell quoting, without escaping the double quotes", () => {
   expect(quote("powershell", '{"a": 1}')).toBe(`'{"a": 1}'`);

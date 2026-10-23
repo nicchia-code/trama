@@ -25,7 +25,7 @@ import {
   summaryRows,
   toggleExcluded,
   type Tree,
-  visibleKeys,
+  STEP_KEYS,
   type WizardState,
 } from "../extension/src/webview/wizard/logic";
 
@@ -35,21 +35,21 @@ const setting = (key: string) => schema.find((s) => s.key === key)!;
 const open = (mode: "first" | "settings" | "empty-model" = "first", values: Record<string, SettingsValues> = {}) => openWizard(mode, null, values, "/work/app");
 
 test("each mode and path shows its steps in order", () => {
-  expect(stepsFor("first", null)).toEqual(["Path", "Agent", "Models", "Project", "Advanced", "Summary"]);
-  expect(stepsFor("first", "scratch")).toEqual(["Path", "Agent", "Models", "Project", "Advanced", "Summary"]);
-  expect(stepsFor("first", "import")).toEqual(["Path", "Agent", "Models", "Project", "Folders", "Advanced", "Summary"]);
-  expect(stepsFor("settings", null)).toEqual(["Agent", "Models", "Project", "Advanced", "Summary"]);
-  expect(stepsFor("settings", "import")).toEqual(["Agent", "Models", "Project", "Advanced", "Summary"]);
-  expect(stepsFor("empty-model", "import")).toEqual(["Agent", "Models", "Project", "Folders", "Advanced", "Summary"]);
-  expect(stepsFor("empty-model", "scratch")).toEqual(["Agent", "Models", "Project", "Advanced", "Summary"]);
+  expect(stepsFor("first", null)).toEqual(["Path", "omp", "Models", "Project", "Advanced", "Summary"]);
+  expect(stepsFor("first", "scratch")).toEqual(["Path", "omp", "Models", "Project", "Advanced", "Summary"]);
+  expect(stepsFor("first", "import")).toEqual(["Path", "omp", "Models", "Project", "Folders", "Advanced", "Summary"]);
+  expect(stepsFor("settings", null)).toEqual(["omp", "Models", "Project", "Advanced", "Summary"]);
+  expect(stepsFor("settings", "import")).toEqual(["omp", "Models", "Project", "Advanced", "Summary"]);
+  expect(stepsFor("empty-model", "import")).toEqual(["omp", "Models", "Project", "Folders", "Advanced", "Summary"]);
+  expect(stepsFor("empty-model", "scratch")).toEqual(["omp", "Models", "Project", "Advanced", "Summary"]);
 });
 
 test("the wizard opens on the first step of its mode, with the user values of the settings", () => {
   expect(open("first").step).toBe("Path");
-  expect(open("settings").step).toBe("Agent");
-  expect(open("empty-model").step).toBe("Agent");
-  const state = open("settings", { "trama.agent": { user: "omp" }, "trama.scan": { user: "gpt-5" }, "trama.theme": {} });
-  expect(state.values["trama.agent"]).toBe("omp");
+  expect(open("settings").step).toBe("omp");
+  expect(open("empty-model").step).toBe("omp");
+  const state = open("settings", { "trama.ompPath": { user: "/x/omp" }, "trama.scan": { user: "gpt-5" }, "trama.theme": {} });
+  expect(state.values["trama.ompPath"]).toBe("/x/omp");
   expect(state.values["trama.scan"]).toBe("gpt-5");
   expect(state.values["trama.theme"]).toBeUndefined();
   expect(Object.keys(state.values)).not.toContain("trama.language");
@@ -59,7 +59,7 @@ test("Back and Next keep the choices; Back is missing on the first step of the m
   let state = setChoice(open("first"), "import");
   expect(hasPrevious(state)).toBe(false);
   state = setValue(nextStep(state), "trama.scan", "gpt-5");
-  expect(state.step).toBe("Agent");
+  expect(state.step).toBe("omp");
   expect(hasPrevious(state)).toBe(true);
   state = nextStep(nextStep(nextStep(state)));
   expect(state.step).toBe("Folders");
@@ -70,27 +70,27 @@ test("Back and Next keep the choices; Back is missing on the first step of the m
   expect(previousStep(state).step).toBe("Path");
   const settings = open("settings");
   expect(hasPrevious(settings)).toBe(false);
-  expect(openStep(settings, "Folders").step).toBe("Agent");
+  expect(openStep(settings, "Folders").step).toBe("omp");
   expect(openStep(settings, "Summary").step).toBe("Summary");
 });
 
 test("Next of Path needs a path, Next of Models a valid number of sub-agents, Next of Folders something still included", () => {
   const path = open("first");
-  expect(nextBlock(schema, path)).toBe("Choose how to start");
-  expect(nextBlock(schema, setChoice(path, "scratch"))).toBeNull();
+  expect(nextBlock(schema, path, null)).toBe("Choose how to start");
+  expect(nextBlock(schema, setChoice(path, "scratch"), null)).toBeNull();
 
   const models = { ...open("settings"), step: "Models" as const };
-  expect(nextBlock(schema, models)).toBeNull();
+  expect(nextBlock(schema, models, null)).toBeNull();
   const invalid = setInvalid(models, "trama.maxParallelAgents", true);
-  expect(nextBlock(schema, invalid)).toContain("Max Parallel Agents");
-  expect(nextBlock(schema, setInvalid(invalid, "trama.maxParallelAgents", false))).toBeNull();
+  expect(nextBlock(schema, invalid, null)).toContain("Max Parallel Agents");
+  expect(nextBlock(schema, setInvalid(invalid, "trama.maxParallelAgents", false), null)).toBeNull();
 
   const folders = { ...open("empty-model"), choice: "import" as const, step: "Folders" as const };
-  expect(nextBlock(schema, folders)).toBe("Reading the folders");
+  expect(nextBlock(schema, folders, null)).toBe("Reading the folders");
   const tree: Tree = { "": [{ name: "src", kind: "folder", hasChildren: true }, { name: "README.md", kind: "file", hasChildren: false }] };
-  expect(nextBlock(schema, { ...folders, tree })).toBeNull();
-  expect(nextBlock(schema, { ...folders, tree, excluded: ["README.md", "src"] })).toBe("Include at least one folder or file");
-  expect(nextBlock(schema, { ...folders, tree, excluded: ["README.md"] })).toBeNull();
+  expect(nextBlock(schema, { ...folders, tree }, null)).toBeNull();
+  expect(nextBlock(schema, { ...folders, tree, excluded: ["README.md", "src"] }, null)).toBe("Include at least one folder or file");
+  expect(nextBlock(schema, { ...folders, tree, excluded: ["README.md"] }, null)).toBeNull();
 });
 
 test("Skip brings the keys of Advanced back to the values the step started with, then goes to the summary", () => {
@@ -113,22 +113,21 @@ test("a new folder to initialize forgets the exclusions and the folders read", (
   expect(moved.tree).toEqual({});
 });
 
-test("the keys of omp show only with omp, and the language is never in the wizard", () => {
-  expect(visibleKeys("Agent", "cursor")).toEqual(["trama.agent"]);
-  expect(visibleKeys("Agent", "omp")).toEqual(["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles"]);
-  expect(visibleKeys("Models", "cursor")).toEqual(["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]);
-  expect(visibleKeys("Advanced", "cursor")[0]).toBe("trama.theme");
-  expect(visibleKeys("Advanced", "cursor")).toHaveLength(6);
-  for (const step of ["Agent", "Models", "Project", "Advanced"] as const) for (const key of visibleKeys(step, "omp")) expect(schema.some((s) => s.key === key)).toBe(true);
+test("the keys of each step are always shown, and the language is never in the wizard", () => {
+  expect(STEP_KEYS.omp).toEqual(["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles"]);
+  expect(STEP_KEYS.Models).toEqual(["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]);
+  expect(STEP_KEYS.Advanced?.[0]).toBe("trama.theme");
+  expect(STEP_KEYS.Advanced).toHaveLength(8);
+  expect(STEP_KEYS.Advanced?.slice(-2)).toEqual(["trama.ompChat", "trama.ompChatApproval"]);
+  for (const step of ["omp", "Models", "Project", "Advanced"] as const) for (const key of STEP_KEYS[step] ?? []) expect(schema.some((s) => s.key === key)).toBe(true);
 });
 
-test("the Models step gives the advice in words and the note about ignored files shows only with omp and the setting on", () => {
+test("the Models step gives the advice in words and the note about ignored files shows only with the setting on", () => {
   expect(STEP_SENTENCES.Models).toBe("Choose the model for each kind of work. Analysis works best with your most capable model, Execution with a mid-range one, Scan with a fast, light one.");
   let state = open("settings");
   expect(ignoresInstructionFiles(schema, state)).toBe(false);
-  state = setValue(setValue(state, "trama.agent", "omp"), "trama.ignoreInstructionFiles", true);
+  state = setValue(state, "trama.ignoreInstructionFiles", true);
   expect(ignoresInstructionFiles(schema, state)).toBe(true);
-  expect(ignoresInstructionFiles(schema, setValue(state, "trama.agent", undefined))).toBe(false);
   expect(ignoresInstructionFiles(schema, setValue(state, "trama.ignoreInstructionFiles", undefined))).toBe(false);
 });
 
@@ -163,17 +162,11 @@ test("a value changed from outside while the wizard is open does not change the 
   expect(row.was).toBe("other");
 });
 
-test("the keys of omp are in the summary and the writes only with omp", () => {
+test("the keys of omp are always in the summary and the writes", () => {
   let state = open("settings");
   state = setValue(state, "trama.ompPath", "/opt/omp");
-  expect(summaryRows(schema, state, {}, []).some((r) => r.title === "Omp Path")).toBe(false);
-  expect(changedWrites(schema, state, {})).toEqual([]);
-  state = setValue(state, "trama.agent", "omp");
   expect(summaryRows(schema, state, {}, []).some((r) => r.title === "Omp Path")).toBe(true);
-  expect(changedWrites(schema, state, {})).toEqual([
-    { key: "trama.agent", value: "omp" },
-    { key: "trama.ompPath", value: "/opt/omp" },
-  ]);
+  expect(changedWrites(schema, state, {})).toEqual([{ key: "trama.ompPath", value: "/opt/omp" }]);
 });
 
 test("the writes are the changed keys in the order of the steps; a repeated confirmation writes only what still differs", () => {
@@ -258,10 +251,24 @@ test("the exclusions never repeat what a removed folder holds and are sorted", (
   expect(exclusions(["b/c", "a", "b/a"])).toEqual(["a", "b/a", "b/c"]);
 });
 
-test("the Agent step says what the check found, without blocking", () => {
-  expect(agentCheckLine(null)).toEqual({ tone: "checking", text: "Checking the agent…" });
-  expect(agentCheckLine({ agent: "omp", ompPath: "", ok: true, models: 12 })).toEqual({ tone: "ok", text: "omp answered with 12 models." });
-  expect(agentCheckLine({ agent: "omp", ompPath: "/x", ok: false, error: "omp not found at /x" })).toEqual({ tone: "warning", text: "omp not found at /x. You can go on and fix it later." });
-  expect(agentCheckLine({ agent: "cursor", ompPath: "", ok: true })).toEqual({ tone: "ok", text: "Cursor's chat is available." });
-  expect(agentCheckLine({ agent: "cursor", ompPath: "", ok: false })).toEqual({ tone: "warning", text: "Cursor's chat works only in Cursor. You can go on and fix it later." });
+test("the omp step says what the check found", () => {
+  expect(agentCheckLine(null)).toEqual({ tone: "checking", text: "Checking omp…" });
+  expect(agentCheckLine({ ompPath: "", state: "updating", version: "18.13.0" })).toEqual({ tone: "checking", text: "Updating omp to 18.13.0…" });
+  expect(agentCheckLine({ ompPath: "", state: "done", ok: true, missing: false, version: "18.12.6", models: 12 })).toEqual({ tone: "ok", text: "omp 18.12.6 answered with 12 models." });
+  expect(agentCheckLine({ ompPath: "", state: "done", ok: true, missing: false, version: "18.12.6", models: 12, updateError: "omp update exited with code 1" })).toEqual({
+    tone: "warning",
+    text: "Could not update omp (omp update exited with code 1). omp 18.12.6 answered with 12 models.",
+  });
+  expect(agentCheckLine({ ompPath: "/x", state: "done", ok: false, missing: true, error: "omp not found at /x" })).toEqual({ tone: "warning", text: "omp not found at /x. Trama cannot work without omp." });
+});
+
+test("Next of the omp step waits for omp to answer with the path of the step", () => {
+  const omp = openStep(openWizard("settings", null, { "trama.ompPath": { user: "/x/omp" } }, null), "omp");
+  const BLOCK = "omp must answer before you go on.";
+  expect(nextBlock(schema, omp, null)).toBe(BLOCK);
+  expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "updating", version: "2" })).toBe(BLOCK);
+  expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: false, missing: true, error: "omp not found at /x/omp" })).toBe(BLOCK);
+  expect(nextBlock(schema, omp, { ompPath: "/other", state: "done", ok: true, missing: false, models: 3 })).toBe(BLOCK);
+  expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: true, missing: false, models: 3 })).toBeNull();
+  expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: true, missing: false, models: 3, updateError: "omp update exited with code 1" })).toBeNull();
 });

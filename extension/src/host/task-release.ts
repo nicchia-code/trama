@@ -7,13 +7,9 @@ import { listTasks, releaseHeldTasks } from "../../../src/core/work";
 import { followsAgent, reportStoppedFollowing } from "./drift-resolution";
 import { ownWindowId } from "./questions";
 
-/** Whether this window follows `holder`: a Trama terminal in Agent running, or a conversation of Trama's chat with a job. */
-const followedHere = (root: string, holder: string): boolean =>
-  holder.startsWith("cursor:") ? followsAgent(root, "cursor", holder.slice("cursor:".length)) : followsAgent(root, holder);
-
 /**
- * The execution check's release of Tasks nobody follows (`rules#time`): a Task taken by a Trama terminal or a Cursor
- * conversation that no open window of the project follows goes back to To do, and for a terminal only when the agent
+ * The execution check's release of Tasks nobody follows (`rules#time`): a Task taken by a Trama terminal (or the omp Chat
+ * conversation that replaces it) that no open window of the project follows goes back to To do, and only when the agent
  * process registered for it is gone or was never registered. Without a window that answers, a window that does not
  * answer follows everything, so its Tasks stay taken until the next check. Only `taskId`, when given, is looked at.
  * Returns the identities of the Tasks this window released.
@@ -23,14 +19,14 @@ export async function releaseUnfollowedTasks(root: string, taskId?: string): Pro
   const taken = listTasks(project)
     .filter((task) => task.data.agent && (taskId === undefined || task.id === taskId))
     .map((task) => ({ id: task.id, holder: task.data.holder }));
-  const ask = holdersToAsk(taken, (holder) => followedHere(root, holder));
+  const ask = holdersToAsk(taken, (holder) => followsAgent(root, holder));
   if (ask.length === 0) return [];
   const followedElsewhere = await askFollowedHolders(project, ask, { ownWindow: ownWindowId(root) });
   // An unreadable registry says nothing: no terminal is released for want of a registration.
   const processes = readAgentProcesses(questionProjectId(project));
   const gone = unfollowedTasks({
     tasks: taken,
-    followedHere: (holder) => followedHere(root, holder),
+    followedHere: (holder) => followsAgent(root, holder),
     followedElsewhere,
     terminalProcessAlive: (terminal) => {
       if (processes === undefined) return true;

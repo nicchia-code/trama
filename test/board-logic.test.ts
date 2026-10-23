@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { DriftCard, TaskCard } from "../extension/src/webview/board/logic";
 import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockedReason, boardDecisionCount, buildBoard, createsText, driftReworkBlocker, ghostExplanation, NO_MODELS, finalReviewMissingNotice, finishingBlocker, noteTime, runningFor, stoppedFollowingNotice, formatCounts, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockedReason, boardDecisionCount, buildBoard, createsText, driftReworkBlocker, ghostExplanation, NO_MODELS, finishingBlocker, noteTime, runningFor, stoppedFollowingNotice, formatCounts, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
 import { runBlocker } from "../src/core/design";
 import { dismissBlocker } from "../extension/src/webview/dismiss";
@@ -135,16 +135,16 @@ test("the arrow of Reject on a resolution adds the reasons of Resolve after the 
   expect(driftReworkBlocker(null, null)).toBeNull();
 });
 
-test("the model gear shows only on a Proposal that carries Tasks, and the chosen model is badged, struck when chosen for another agent", () => {
+test("the model gear shows only on a Proposal that carries Tasks, and the chosen model is its name alone", () => {
   const carries = proposal({ id: "0007", tasks: [{ id: "0012", title: "Refunds", technical: false, refs: [] } as never] });
-  const models = { agent: "omp" as const, proposals: { "0007": { name: "gpt-5", agent: "cursor" as const, applies: false } } };
+  const models = { proposals: { "0007": { name: "gpt-5" } } };
   const card = proposalCard(carries, NUMBERS, new Map(), [], models);
   expect(card.choosable).toBe(true);
-  expect(card.model).toEqual({ name: "gpt-5", agent: "cursor", applies: false });
-  const unchosen = proposalCard(carries, NUMBERS, new Map(), [], { agent: "omp", proposals: { "0007": null } });
+  expect(card.model).toEqual({ name: "gpt-5" });
+  const unchosen = proposalCard(carries, NUMBERS, new Map(), [], { proposals: { "0007": null } });
   expect(unchosen.choosable).toBe(true);
   expect(unchosen.model).toBeNull();
-  const bare = proposalCard(proposal({ id: "0007" }), NUMBERS, new Map(), [], { agent: "omp", proposals: {} });
+  const bare = proposalCard(proposal({ id: "0007" }), NUMBERS, new Map(), [], { proposals: {} });
   expect(bare.choosable).toBe(false);
   expect(bare.model).toBeNull();
 });
@@ -556,10 +556,6 @@ test("a card has a View button only for the tab that would show a step of its fo
   const withProposal = shopWithProposals();
   const [card] = buildBoard(withProposal)[0]?.cards ?? [];
   expect(card).toMatchObject({ kind: "proposal", views: { diagram: true } });
-});
-
-test("the notice of a Run without the Advisor's final review carries its English reason", () => {
-  expect(finalReviewMissingNotice("the run was interrupted")).toBe("The Run finished without the Advisor's final review: the run was interrupted.");
 });
 
 test("the notice of a job the run control stopped following names the job and why", () => {

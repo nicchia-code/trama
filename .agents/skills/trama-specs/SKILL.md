@@ -43,3 +43,7 @@ The technologies this project is built, tested and released with, from the devel
 ## Deployment
 
 - VS Code Marketplace package: one `.vsix` per platform (`linux-x64`, `darwin-arm64`, `win32-x64`), with the `trama` binary inside
+
+## Infrastructure as code
+
+- omp: the only coding agent Trama runs and the only source of model names; required, installed with its official installer (`https://omp.sh/install`, `install.ps1` on Windows) when missing and updated with `omp update` before Trama launches it

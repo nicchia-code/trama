@@ -8,7 +8,7 @@ import { cn } from "../lib/utils";
 export const tabId = (id: string) => `omp-chat-tab-${id}`;
 export const panelId = (id: string) => `omp-chat-panel-${id}`;
 
-/** The dot of a tab: animated while the agent is in a turn (still with reduced motion), in the colour of warnings while a form waits. */
+/** The dot of a tab: animated while the agent is in a turn (still with reduced motion), in the colour of warnings while a form or a permission request waits. */
 function Dot({ state }: { state: ConversationItem["state"] }) {
   if (state === "idle") return null;
   return (

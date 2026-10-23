@@ -189,14 +189,6 @@ test("the window learns whether a round comes from a Trama terminal by how it wa
   expect(origins).toEqual([true, false]);
 });
 
-test("a round asked from the shell of Cursor's chat agent tells the window so", async () => {
-  const origins: Array<[boolean | undefined, boolean | undefined]> = [];
-  await server(async (_project, _request, context) => { origins.push([context.fromTramaTerminal, context.fromCursorChat]); return answer("choice"); });
-  await askEditor(projectAt(projectRoot), round(), {}, { runtimeDir, env: { CURSOR_AGENT: "1" } });
-  await askEditor(projectAt(projectRoot), round(), {}, { runtimeDir, env: {} });
-  expect(origins).toEqual([[false, true], [false, false]]);
-});
-
 test("explicit project routing works from an unrelated caller working directory", async () => {
   await server(async () => answer("choice", "explicit project"));
   const elsewhere = join(root, "elsewhere");
@@ -541,32 +533,20 @@ test("runtime files contain routing identities only, never pending questions or 
   chmodSync(runtimeDir, 0o700);
 });
 
-(process.platform === "win32" ? test.skip : test)("inside Cursor's sandbox the record folder is named after CURSOR_ORIG_UID, and an unreachable editor says so", async () => {
+(process.platform === "win32" ? test.skip : test)("the record folder is always named after the process UID, whatever CURSOR_ORIG_UID says, and an unreachable editor has one reason", async () => {
   const saved = { xdg: process.env.XDG_RUNTIME_DIR, sandbox: process.env.CURSOR_SANDBOX, uid: process.env.CURSOR_ORIG_UID };
   const xdg = join(root, "x");
   mkdirSync(xdg);
   process.env.XDG_RUNTIME_DIR = xdg;
+  process.env.CURSOR_SANDBOX = "native";
+  process.env.CURSOR_ORIG_UID = "4242";
   try {
-    // The sandbox maps the commands to UID 0: the editor's folder is still named after the real UID.
-    process.env.CURSOR_SANDBOX = "native";
-    process.env.CURSOR_ORIG_UID = "4242";
     const created = await createQuestionServer({ project: projectAt(projectRoot), handler: async () => answer("choice") });
     servers.push(created);
-    expect(existsSync(join(xdg, "trama-q-4242"))).toBe(true);
+    expect(existsSync(join(xdg, `trama-q-${process.getuid!()}`))).toBe(true);
+    expect(existsSync(join(xdg, "trama-q-4242"))).toBe(false);
     expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toMatchObject({ status: "answered" });
-
-    // No editor reached from inside the sandbox: the reason tells the agent to ask once more outside it.
-    process.env.CURSOR_ORIG_UID = "4343";
-    expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toEqual({ status: "unavailable", reason: "Editor not reachable from Cursor's sandbox. Run the same trama question new once more outside the sandbox; if the editor is still unavailable, stop and tell the developer to open the project in the editor with Trama." });
-
-    // A non-integer original UID is ignored: the folder keeps the mapped UID and the reason stays the sandbox one.
-    process.env.CURSOR_ORIG_UID = "root";
-    expect(existsSync(join(xdg, `trama-q-${process.getuid!()}`))).toBe(false);
-    expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toMatchObject({ status: "unavailable", reason: expect.stringContaining("Cursor's sandbox") });
-
-    // Outside the sandbox CURSOR_ORIG_UID changes nothing, and the reason is the usual one.
-    delete process.env.CURSOR_SANDBOX;
-    process.env.CURSOR_ORIG_UID = "4242";
+    await created.dispose();
     expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toEqual(unavailableQuestions());
     expect(unavailableQuestions()).toEqual({ status: "unavailable", reason: "Editor not available for this project. Do not ask in any other way: stop, tell the developer to open the project in the editor with Trama, and run the same trama question new again when they say to continue." });
   } finally {
@@ -583,34 +563,5 @@ test("the refusal of an agent's own question tool is one exact shared message", 
 test("a window that does not expect a coordinator message says so, and the sender counts it as unexpected", async () => {
   await server(async () => answer("choice"), { onCoordinatorMessage: () => false });
   await server(async () => answer("choice"), { onCoordinatorMessage: () => undefined });
-  expect(await sendCoordinatorMessage(projectAt(projectRoot), { type: "advisor-reviewed" }, { runtimeDir })).toEqual({ delivered: 2, live: 2, unexpected: 1 });
-});
-
-test("trama advisor review sends the result to the editor and says whether a window expected it", async () => {
-  mkdirSync(join(projectRoot, ".trama"));
-  const received: CoordinatorMessage[] = [];
-  let expected = true;
-  await server(async () => answer("choice"), { onCoordinatorMessage: (message) => { received.push(message); return expected; } });
-  const review = (input: unknown) => execute(["--root", projectRoot, "advisor", "review", "--input", "-"], projectRoot, { env: {}, runtimeDir, stdin: async () => JSON.stringify(input) });
-
-  expect(await review({ review: "r1", clean: false, notes: "The Task asks for X; the code does Y." })).toEqual({ out: "Review r1 reached the editor.", exit: 0 });
-  expect(received).toEqual([{ type: "advisor-reviewed", review: "r1", clean: false, notes: "The Task asks for X; the code does Y." }]);
-  expect(await review({ review: "r2", clean: true })).toEqual({ out: "Review r2 reached the editor.", exit: 0 });
-  expect(received[1]).toEqual({ type: "advisor-reviewed", review: "r2", clean: true });
-  expected = false;
-  expect(await review({ review: "r3", clean: true })).toEqual({ out: "Review r3 reached no editor that expects it.", exit: 0 });
-});
-
-test("trama advisor review without an editor says so and exits 0; an invalid result is a usage error that sends nothing", async () => {
-  mkdirSync(join(projectRoot, ".trama"));
-  const received: CoordinatorMessage[] = [];
-  const review = (input: unknown, json = false) => execute(["--root", projectRoot, "advisor", "review", "--input", "-", ...(json ? ["--json"] : [])], projectRoot, { env: {}, runtimeDir, stdin: async () => JSON.stringify(input) });
-  const json = await review({ review: "r1", clean: true }, true);
-  expect([JSON.parse(json.out), json.exit]).toEqual([{ delivered: false }, 0]);
-  expect((await review({ review: "r1", clean: true })).out).toBe("Review r1 reached no editor that expects it.");
-  await server(async () => answer("choice"), { onCoordinatorMessage: (message) => { received.push(message); } });
-  for (const invalid of [{ review: "r1", clean: false }, { review: "r1", clean: false, notes: "  " }, { review: "r1", clean: true, notes: "x" }, { clean: true }, { review: "", clean: true }, { review: "r1", clean: "yes" }, { review: "r1", clean: true, extra: 1 }])
-    await expect(review(invalid)).rejects.toThrow();
-  expect(received).toEqual([]);
-  expect(readdirSync(join(projectRoot, ".trama"))).toEqual([]);
+  expect(await sendCoordinatorMessage(projectAt(projectRoot), { type: "agent-notice" }, { runtimeDir })).toEqual({ delivered: 2, live: 2, unexpected: 1 });
 });

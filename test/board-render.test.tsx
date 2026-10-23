@@ -801,16 +801,6 @@ describe("The Board page", () => {
     view.unmount();
   });
 
-  test("a Run without the Advisor's final review draws no notice while the notices are switched off", () => {
-    let slotted: ReactNode = null;
-    const board = mountBoard((node) => { slotted = node; }, { post: () => {}, navigate: () => {}, openLink: () => {} });
-    board.update(snapshot());
-    board.finalReviewMissing?.("the run was interrupted");
-    const view = render(<TooltipProvider>{slotted}</TooltipProvider>);
-    expect(screen.queryByText(/The Run finished without the Advisor's final review/)).toBeNull();
-    view.unmount();
-  });
-
   test("History is collapsed first; the chevron opens it, with its period menu and its count, and closes it again", () => {
     const entry: HistoryView = { id: "h1", title: "Returns refunded", summary: "Done.", body: "", created: new Date().toISOString(), updated: new Date().toISOString(), file: "history/h1.md", tasks: [] };
     page(snapshot({ history: [entry] }));
@@ -864,7 +854,7 @@ describe("Backlog Proposal body window", () => {
 });
 
 describe("Model window of a Proposal", () => {
-  const withModels = { agent: "omp" as const, proposals: { live: { name: "anthropic/claude-opus-5-5", agent: "omp" as const, applies: true } } };
+  const withModels = { proposals: { live: { name: "anthropic/claude-opus-5-5" } } };
 
   test("the card shows the chosen model; the gear opens the window, which asks for the model names and shows the model in the field", () => {
     const { posted } = page(snapshot({ proposals: [proposalView()] }), { models: withModels });
@@ -891,7 +881,7 @@ describe("Model window of a Proposal", () => {
   });
 
   test("Esc closes the window, and the gear is there with no Task-less Proposal", () => {
-    page(snapshot({ proposals: [proposalView({ id: "bare", tasks: [] })] }), { models: { agent: "omp", proposals: {} } });
+    page(snapshot({ proposals: [proposalView({ id: "bare", tasks: [] })] }), { models: { proposals: {} } });
     expect(screen.queryByRole("button", { name: /Choose the model/ })).toBeNull();
     cleanup();
     page(snapshot({ proposals: [proposalView()] }), { models: withModels });
@@ -900,19 +890,11 @@ describe("Model window of a Proposal", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  test("a model chosen for another agent is shown struck, and the window says the Settings roles apply", () => {
-    page(snapshot({ proposals: [proposalView()] }), { models: { agent: "cursor", proposals: { live: { name: "gpt-5", agent: "omp", applies: false } } } });
-    expect(screen.getByRole("img", { name: "Chosen for omp: the Settings roles apply" }).className).toContain("line-through");
+  test("a chosen model is one badge without any agent, and the window has no Chosen for line", () => {
+    page(snapshot({ proposals: [proposalView()] }), { models: { proposals: { live: { name: "gpt-5" } } } });
+    expect(screen.getByRole("img", { name: "Model for this Proposal's work: gpt-5" }).className).not.toContain("line-through");
     fireEvent.click(screen.getByRole("button", { name: "Choose the model for P2" }));
-    expect(screen.getByRole("dialog").textContent).toContain("Chosen for omp: the Settings roles apply. Confirm a model to use it with Cursor's chat.");
-  });
-
-  test("a model chosen for Cursor's chat is shown struck while omp is the agent", () => {
-    page(snapshot({ proposals: [proposalView()] }), { models: { agent: "omp", proposals: { live: { name: "gpt-5", agent: "cursor", applies: false } } } });
-    const badge = screen.getByRole("img", { name: "Chosen for Cursor's chat: the Settings roles apply" });
-    expect(badge.className).toContain("line-through");
-    fireEvent.click(screen.getByRole("button", { name: "Choose the model for P2" }));
-    expect(screen.getByRole("dialog").textContent).toContain("Chosen for Cursor's chat: the Settings roles apply. Confirm a model to use it with omp.");
+    expect(screen.getByRole("dialog").textContent).not.toContain("Chosen for");
   });
 });
 

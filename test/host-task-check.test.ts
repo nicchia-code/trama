@@ -25,12 +25,12 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-test("a Task held by a conversation no window follows is released with the Board notice", async () => {
+test("a Task held by a terminal no window follows is released with the Board notice", async () => {
   const p = projectAt(dir);
   const notices: string[] = [];
   onStoppedFollowing((subject, reason) => notices.push(`${subject}: ${reason}`));
   const id = newTask(p, { title: "Held", refs: ["order"], technical: false }).id;
-  moveTask(p, id, "doing", "agent", { chat: "cursor", conversation: "c1" });
+  moveTask(p, id, "doing", "agent", { terminal: "c1" });
   const reply = await checkTaskHolder(dir, id);
   expect(reply).toEqual({ result: "released", reason: "no window follows its agent" });
   expect(getTask(p, id).data.column).toBe("todo");
@@ -43,4 +43,18 @@ test("a Task with no known holder or not held by the agent is unavailable and un
   moveTask(p, anonymous, "doing", "agent");
   expect(await checkTaskHolder(dir, anonymous)).toEqual({ result: "unavailable" });
   expect(getTask(p, anonymous).data.column).toBe("doing");
+});
+
+test("a Task held by an omp Chat conversation this window follows is alive and stays taken", async () => {
+  const { setHooked } = await import("../extension/src/host/drift-resolution");
+  const p = projectAt(dir);
+  const id = newTask(p, { title: "Chatting", refs: ["order"], technical: false }).id;
+  moveTask(p, id, "doing", "agent", { terminal: "chat1" });
+  setHooked("chat1", true);
+  try {
+    expect(await checkTaskHolder(dir, id)).toEqual({ result: "alive", holder: "chat1" });
+    expect(getTask(p, id).data.column).toBe("doing");
+  } finally {
+    setHooked("chat1", false);
+  }
 });

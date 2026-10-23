@@ -1,8 +1,10 @@
-import { Route } from "lucide-react";
+import { CircleCheck, Loader, Route, TriangleAlert } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { OMP_CHAT_KEY, type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
+import { type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
 import type { ToHost, ToWebview } from "../../protocol";
+import { InstallOmpButton } from "../install-omp";
+import { cn } from "../lib/utils";
 import type { OpenLink } from "../markdown";
 import type { ThemeController } from "../theme";
 import { Button } from "../ui/button";
@@ -11,7 +13,7 @@ import type { Slot, View, ViewContext } from "../types";
 import { Wizard } from "../wizard";
 import { WizardController } from "../wizard/controller";
 import { SettingField } from "./field";
-import { groupSettings, THEME_KEY, themeSetting } from "./logic";
+import { groupSettings, type OmpStatus, ompStatusLine, THEME_KEY, themeSetting } from "./logic";
 
 type SettingsMessage = Extract<ToWebview, { type: "settings" }>;
 type ModelSuggestionsMessage = Extract<ToWebview, { type: "modelSuggestions" }>;
@@ -34,14 +36,14 @@ export interface SettingsView extends View {
   receiveFolderChildren(message: FolderChildrenMessage): void;
   receiveInstructionFiles(message: Extract<ToWebview, { type: "instructionFiles" }>): void;
   receiveResult(message: GuidedSetupResultMessage): void;
+  /** The state of omp: being checked, the version that answers, or why not. */
+  receiveOmpStatus(message: Extract<ToWebview, { type: "ompStatus" }>): void;
 }
 
 export interface SettingsPageProps {
   schema: readonly SettingSchema[];
   values: Record<string, SettingsValues>;
   generation: number;
-  /** The agent now in `trama.agent`: the omp-only settings are disabled unless it is `omp`. */
-  agent: "cursor" | "omp";
   models: ModelSuggestion[];
   /** Why omp gives no model names, from the newest list; null when there is nothing to show. */
   listError: string | null;
@@ -51,10 +53,12 @@ export interface SettingsPageProps {
   onGuidedSetup?: () => void;
   /** The setup wizard while it is open: it takes the place of the button and the form. */
   wizard?: ReactNode;
+  /** The state of omp, from the host's `ompStatus`; null until the first message, which reads as checking. */
+  omp?: OmpStatus | null;
 }
 
 /** The page: every setting the manifest declares, in groups, each saved to the user settings when the developer confirms it. */
-export function SettingsPage({ schema, values, generation, agent, models, listError, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
+export function SettingsPage({ schema, values, generation, models, listError, omp = null, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
   /** The only bubble open at a time. */
   const [openKey, setOpenKey] = useState<string | null>(null);
   const send = (key: string, value: SettingValue) => post({ type: "setSetting", key, value });
@@ -78,6 +82,7 @@ export function SettingsPage({ schema, values, generation, agent, models, listEr
         {groupSettings(schema).map((group) => (
           <section key={group.title} className="mb-5">
             <h2 className="mb-2 border-b pb-1 text-lg font-semibold">{group.title}</h2>
+            {group.title === "omp" ? <OmpStatusRow status={omp} onInstall={() => post({ type: "installOmp" })} /> : null}
             <div className="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-4">
               {group.settings.map((setting) => (
                 <SettingField
@@ -91,7 +96,6 @@ export function SettingsPage({ schema, values, generation, agent, models, listEr
                   setOpenKey={setOpenKey}
                   send={send}
                   openLink={openLink}
-                  {...(setting.key === OMP_CHAT_KEY && agent !== "omp" ? { disabled: true, note: "Only with omp" } : {})}
                 />
               ))}
             </div>
@@ -102,9 +106,24 @@ export function SettingsPage({ schema, values, generation, agent, models, listEr
   );
 }
 
+/** The line under the title of the omp group: its state in secondary text with an icon, and `Install omp` when omp is missing. A polite live region. */
+export function OmpStatusRow({ status, onInstall }: { status: OmpStatus | null; onInstall: () => void }) {
+  const line = ompStatusLine(status);
+  const Icon = line.tone === "checking" ? Loader : line.tone === "ok" ? CircleCheck : TriangleAlert;
+  return (
+    <div aria-live="polite" className="mb-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+      <p className={cn("m-0 flex items-start gap-2", line.tone === "warning" && "text-amber-700 dark:text-amber-400")}>
+        <Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", line.tone === "checking" && "animate-spin motion-reduce:animate-none")} />
+        <span>{line.text}</span>
+      </p>
+      {line.missing ? <InstallOmpButton onInstall={onInstall} /> : null}
+    </div>
+  );
+}
+
 /** Mounts the Settings tab in `slot`; the panel's theme follows `trama.theme` as the host sends it, also while the tab is hidden. */
 export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeController): SettingsView => {
-  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, agent: "cursor", models: [], listError: null, post: context.post, openLink: context.openLink };
+  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, omp: null, post: context.post, openLink: context.openLink };
   let hasProject = false;
   const wizard = new WizardController({
     post: context.post,
@@ -129,17 +148,23 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
       // The settings do not depend on the snapshot: the host sends them on their own.
     },
     show() {
-      // The model names are asked again, since the agent may have changed.
+      // The model names are asked again each time the tab becomes visible.
       context.post({ type: "modelSuggestionsWanted" });
+      context.post({ type: "ompStatusWanted" });
     },
     receive(message) {
-      page = { ...page, schema: message.schema, values: message.values, agent: message.agent, generation: page.generation + 1 };
+      page = { ...page, schema: message.schema, values: message.values, generation: page.generation + 1 };
       theme.setSetting(themeSetting(message.values[THEME_KEY]?.user));
       wizard.receiveSettings(message);
       render();
     },
     receiveModels(message) {
       page = { ...page, models: message.models, listError: message.error ?? null };
+      render();
+    },
+    receiveOmpStatus(message) {
+      const { type: _type, ...status } = message;
+      page = { ...page, omp: status };
       render();
     },
     projectPresent(present) {

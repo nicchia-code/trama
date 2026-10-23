@@ -5,7 +5,7 @@ import { ReadableStream as NodeReadableStream, TransformStream as NodeTransformS
 import { join } from "node:path";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { OmpClient, type OmpClientDeps } from "../extension/src/host/omp-chat/client";
-import { type OmpExit, type OmpLaunch, OmpStartFailure, type OmpSessionPort } from "../extension/src/host/omp-chat/ports";
+import { type OmpExit, type OmpLaunch, OmpStartFailure, type OmpSessionPort, type PermissionRequest } from "../extension/src/host/omp-chat/ports";
 
 // The client talks to a stand-in for omp (`fixtures/fake-omp.ts`) started through a small `sh` wrapper, so the real process handling is what runs.
 const posix = process.platform !== "win32";
@@ -26,7 +26,7 @@ beforeAll(() => {
 });
 afterAll(() => rmSync(folder, { recursive: true, force: true }));
 
-const launch = (mode = "", extra: Record<string, string> = {}): OmpLaunch => ({ args: ["--model", "m/one", "acp", "--yolo"], env: { FAKE_OMP: mode, TRAMA_TERMINAL: "term-1", ...extra }, cwd: project });
+const launch = (mode = "", extra: Record<string, string> = {}, args = ["--model", "m/one", "acp", "--yolo"]): OmpLaunch => ({ args, env: { FAKE_OMP: mode, TRAMA_TERMINAL: "term-1", ...extra }, cwd: project });
 const client = (deps: Partial<OmpClientDeps> = {}) => new OmpClient({ ompPath: () => wrapper, mcpServers: (root) => (deps.mcpServers ? deps.mcpServers(root) : []), ...deps });
 
 const texts = (session: OmpSessionPort) => {
@@ -203,7 +203,7 @@ describe.skipIf(!posix)("what omp asks", () => {
     expect(seen).not.toContain("form:accept");
   });
 
-  test("a permission request is answered with allow_always, never a refusal", async () => {
+  test("with yolo a permission request is answered with allow_always, never a refusal", async () => {
     const session = await client().start(launch());
     try {
       const seen = texts(session);
@@ -212,6 +212,61 @@ describe.skipIf(!posix)("what omp asks", () => {
     } finally {
       await session.stop();
     }
+  });
+
+  const asked = (session: OmpSessionPort) => {
+    const requests: PermissionRequest[] = [];
+    session.onPermissionRequest((request) => requests.push(request));
+    return requests;
+  };
+
+  test("without yolo a permission request waits, replayed to a late listener, and the chosen option goes back; an option not offered is ignored", async () => {
+    const session = await client().start(launch("", {}, ["--model", "m/one", "acp"]));
+    try {
+      const seen = texts(session);
+      const requests = asked(session);
+      const turn = session.sendPrompt({ text: "perm" });
+      await until(() => requests.length === 1);
+      const late = asked(session);
+      expect(late.map((request) => request.requestId)).toEqual([requests[0]!.requestId]);
+      expect(requests[0]?.options.map((option) => option.optionId)).toEqual(["no", "once", "always"]);
+      session.answerPermission(requests[0]!.requestId, "nope");
+      session.answerPermission("unknown", "once");
+      session.answerPermission(requests[0]!.requestId, "no");
+      await turn;
+      expect(seen.filter((text) => text.startsWith("perm:"))).toEqual(["perm:no"]);
+    } finally {
+      await session.stop();
+    }
+  });
+
+  test("a waiting permission request is answered cancelled on Stop", async () => {
+    const session = await client().start(launch("", {}, ["acp"]));
+    try {
+      const seen = texts(session);
+      const cancelled: string[] = [];
+      session.onPermissionCancelled((id) => cancelled.push(id));
+      const requests = asked(session);
+      const turn = session.sendPrompt({ text: "perm" });
+      await until(() => requests.length === 1);
+      session.cancel();
+      await turn;
+      expect(cancelled).toEqual([requests[0]!.requestId]);
+      expect(seen).toContain("perm:undefined");
+    } finally {
+      await session.stop();
+    }
+  });
+
+  test("a waiting permission request is answered cancelled when the conversation closes", async () => {
+    const session = await client().start(launch("", {}, ["acp"]));
+    const cancelled: string[] = [];
+    session.onPermissionCancelled((id) => cancelled.push(id));
+    const requests = asked(session);
+    void session.sendPrompt({ text: "perm" }).catch(() => {});
+    await until(() => requests.length === 1);
+    await session.stop();
+    expect(cancelled).toEqual([requests[0]!.requestId]);
   });
 });
 

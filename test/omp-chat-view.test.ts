@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chatViewState, ompChatFocusCommand, ompChatKey, ompChatVisible, tabAfterClose, tabKeyAction } from "../src/core/omp-chat-view";
+import { chatViewState, ompChatVisible, tabAfterClose, tabKeyAction } from "../src/core/omp-chat-view";
 
 describe("the state of the omp Chat view", () => {
   test("Hidden without omp Chat in use and without conversations", () => {
@@ -19,17 +19,11 @@ describe("the state of the omp Chat view", () => {
   });
 });
 
-describe("the view of each editor", () => {
-  test("the context key is panel in Cursor, sidebar elsewhere, false while the view is not there", () => {
-    expect(ompChatKey(true, true)).toBe("panel");
-    expect(ompChatKey(true, false)).toBe("sidebar");
-    expect(ompChatKey(false, true)).toBe(false);
-    expect(ompChatKey(false, false)).toBe(false);
-  });
-
-  test("the view is shown with the focus command of the editor in use", () => {
-    expect(ompChatFocusCommand(true)).toBe("trama.ompChat.focus");
-    expect(ompChatFocusCommand(false)).toBe("trama.ompChatSidebar.focus");
+describe("the context key", () => {
+  test("is a boolean: true while the view is there, false in Hidden", () => {
+    expect(ompChatVisible({ inUse: true, conversations: 0 })).toBe(true);
+    expect(ompChatVisible({ inUse: false, conversations: 2 })).toBe(true);
+    expect(ompChatVisible({ inUse: false, conversations: 0 })).toBe(false);
   });
 });
 

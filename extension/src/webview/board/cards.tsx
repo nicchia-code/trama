@@ -10,7 +10,7 @@ import { Card } from "../ui/card";
 import { SplitButton } from "../split-button";
 import { Progress } from "../ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { AGENT_NAMES, type AnnouncedCard, blockedReason, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
+import { type AnnouncedCard, blockedReason, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
 import { BoardButton, Head, RefChips, StatusDot, Tip, TipBadge, TaskProposalTag, useBoardEnv } from "./parts";
 
 /**
@@ -170,17 +170,8 @@ function ModelControls({ card }: { card: ProposalCard }) {
     </Tip>
   );
   const model =
-    chosen === null ? null : chosen.applies ? (
+    chosen === null ? null : (
       <TipBadge tone="info" tooltip={`Model for this Proposal's work: ${chosen.name}`} label={`Model for this Proposal's work: ${chosen.name}`} className="max-w-full break-words whitespace-normal">
-        {chosen.name}
-      </TipBadge>
-    ) : (
-      <TipBadge
-        tone="info"
-        tooltip={`Chosen for ${AGENT_NAMES[chosen.agent]}: the Settings roles apply`}
-        label={`Chosen for ${AGENT_NAMES[chosen.agent]}: the Settings roles apply`}
-        className="max-w-full border-muted-foreground bg-transparent break-words whitespace-normal text-muted-foreground line-through dark:border-muted-foreground dark:bg-transparent"
-      >
         {chosen.name}
       </TipBadge>
     );

@@ -50,12 +50,8 @@ export interface Announcement {
   touched: string;
   /** When it was announced; set once and never changed, so it orders the list (`touched` moves with a binding). */
   announced: string;
-  /** The agent terminal it belongs to (see `TERMINAL_ENV`), or null: made from a chat or by an agent Trama did not start, or written before this field existed. */
+  /** The agent terminal it belongs to (see `TERMINAL_ENV`), or null when it was written before this field existed or by a comparison briefed outside a terminal. */
   terminal: string | null;
-  /** `cursor` for Cursor's chat, `editor` for an agent Trama did not start and that does not say where it comes from; null in announcements written before this field existed. Never set together with `terminal`. */
-  chat: Chat | null;
-  /** The Cursor conversation an announcement with `chat: cursor` belongs to; null when it is not known, for every other announcement and in files written before this field existed. */
-  conversation: string | null;
   /** The phase of a check; null for every other kind. */
   phase: CheckPhase | null;
   /** The Drifts a Proposal of Resolve Drifts names, in creation order; empty for every other announcement. */
@@ -99,30 +95,15 @@ export function terminalFromEnv(env: Record<string, string | undefined>): string
   return value !== undefined && TERMINAL_PATTERN.test(value) ? value : undefined;
 }
 
-/** Set to `1` by Cursor in the shell of its chat agent, and not in the developer's terminals. */
-export const CURSOR_AGENT_ENV = "CURSOR_AGENT";
-
-/** The chat holder of an announcement: Cursor's chat, or an agent Trama did not start and that does not say where it comes from. */
-export type Chat = "cursor" | "editor";
-const CHATS: readonly Chat[] = ["cursor", "editor"];
-/** Where an agent's command runs: a Trama-started terminal, Cursor's chat, an agent Trama did not start, or neither. */
+/** Where an agent's command runs: a Trama-started terminal, or none (an agent Trama did not start). An omp Chat conversation has the terminal it replaces. */
 export interface AgentOrigin {
   terminal?: string;
-  chat?: Chat;
-  /** The Cursor conversation, only together with `chat: "cursor"`. */
-  conversation?: string;
 }
 
-/** Set in the environment of Cursor's chat agent to the ID of its conversation. */
-export const CHAT_ENV = "TRAMA_CHAT";
-
-/** A recognized terminal wins; otherwise chat announcements belong to Cursor or to an agent Trama did not start (`editor`). */
+/** The terminal an agent runs in, from its environment; empty when it was not started by Trama. */
 export function originFromEnv(env: Record<string, string | undefined>): AgentOrigin {
   const terminal = terminalFromEnv(env);
-  if (terminal) return { terminal };
-  if (env[CURSOR_AGENT_ENV] !== "1") return { chat: "editor" };
-  const conversation = env[CHAT_ENV]?.trim();
-  return conversation ? { chat: "cursor", conversation } : { chat: "cursor" };
+  return terminal ? { terminal } : {};
 }
 
 function newId(dir: string): string {
@@ -134,6 +115,8 @@ function newId(dir: string): string {
 }
 
 function parse(raw: Raw, body: string, id: string, where: string): Announcement {
+  // Written when Cursor's chat could announce: an announcement belongs to a terminal only, so Trama neither reads, converts nor deletes such a file.
+  for (const legacy of ["chat", "conversation"]) if (raw[legacy] !== undefined) throw new TramaError(`${where}: "${legacy}" is no longer supported, since an announcement belongs to an agent terminal only; correct or delete the file`);
   const stamp = (key: string): string => {
     const v = raw[key];
     if (typeof v === "string" && !Number.isNaN(Date.parse(v))) return v;
@@ -147,9 +130,7 @@ function parse(raw: Raw, body: string, id: string, where: string): Announcement 
     announced: raw["announced"] === undefined ? stamp("touched") : stamp("announced"),
     touched: stamp("touched"),
     terminal: terminalField(raw, where),
-    chat: raw["chat"] === undefined || raw["chat"] === null ? null : enumField(raw, "chat", CHATS, "cursor", where),
     phase: raw["phase"] === undefined || raw["phase"] === null ? null : enumField(raw, "phase", CHECK_PHASES, "verifying", where),
-    conversation: conversationField(raw, where),
     drifts: idListField(raw, "drifts", where),
     proposals: idListField(raw, "proposals", where),
     notes: notesField(raw),
@@ -203,13 +184,6 @@ function terminalField(raw: Raw, where: string): string | null {
   throw new TramaError(`${where}: "terminal" must be an ID of six lowercase letters and digits, or none`);
 }
 
-function conversationField(raw: Raw, where: string): string | null {
-  const v = raw["conversation"];
-  if (v === undefined || v === null) return null;
-  if (typeof v === "string" && v.trim() !== "") return v;
-  throw new TramaError(`${where}: "conversation" must be a conversation ID, or none`);
-}
-
 function idListField(raw: Raw, key: string, where: string): string[] {
   const v = raw[key];
   if (v === undefined || v === null) return [];
@@ -233,9 +207,9 @@ function write(p: Project, a: Announcement) {
   // The folder ignores itself and everything in it, so announcements are never versioned.
   const ignore = join(dir, ".gitignore");
   if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
-  const { id, title, chat, conversation, phase, drifts, machine, refs, code, texts, proposals, notes, ...data } = a;
-  // `chat`, `conversation`, `phase`, `drifts`, `machine`, `refs`, `code`, `texts`, `proposals` and `notes` are written only when set, so the other announcements look as before.
-  writeDocument(join(dir, `${id}.md`), { ...data, ...(chat ? { chat } : {}), ...(conversation ? { conversation } : {}), ...(phase ? { phase } : {}), ...(drifts.length > 0 ? { drifts } : {}), ...(machine ? { machine } : {}), ...(refs.length > 0 ? { refs } : {}), ...(code ? { code } : {}), ...(Object.keys(texts).length > 0 ? { texts } : {}), ...(proposals.length > 0 ? { proposals } : {}), ...(notes.length > 0 ? { notes } : {}) }, `# ${title}\n`);
+  const { id, title, phase, drifts, machine, refs, code, texts, proposals, notes, ...data } = a;
+  // `phase`, `drifts`, `machine`, `refs`, `code`, `texts`, `proposals` and `notes` are written only when set, so the other announcements look as before.
+  writeDocument(join(dir, `${id}.md`), { ...data, ...(phase ? { phase } : {}), ...(drifts.length > 0 ? { drifts } : {}), ...(machine ? { machine } : {}), ...(refs.length > 0 ? { refs } : {}), ...(code ? { code } : {}), ...(Object.keys(texts).length > 0 ? { texts } : {}), ...(proposals.length > 0 ? { proposals } : {}), ...(notes.length > 0 ? { notes } : {}) }, `# ${title}\n`);
 }
 
 function remove(p: Project, id: string) {
@@ -286,18 +260,12 @@ export function announce(
   if (input.drifts !== undefined && input.drifts.length > 0 && input.kind !== "proposal") throw new TramaError("Only a Proposal names Drifts");
   if ((input.kind === "comparison") !== (input.machine !== undefined)) throw new TramaError(input.kind === "comparison" ? "A comparison needs a machine" : "Only a comparison has a machine");
   if (input.kind !== "comparison" && (input.refs !== undefined || input.code !== undefined || input.texts !== undefined)) throw new TramaError("Only a comparison has references and a code fingerprint");
-  // A scan the agent announces is the check of a scan Trama announced at launch, if one still waits in the same terminal or chat: it takes that one over. So is a Drift of Unify Drifts, announced by Trama at launch, and it keeps its title.
-  if (((input.kind === "check" && input.phase === "scanning") || input.kind === "drift") && input.source === undefined) {
-    // The oldest one of the same terminal or conversation wins; a conversation also takes a Trama check of the chat with no conversation yet and writes its own into it. Another conversation's check is never taken.
-    const holder = input.terminal === undefined ? (input.chat ?? "editor") : undefined;
-    const waiting = listAnnouncements(p).find((a) => {
-      if (a.kind !== input.kind || a.source !== "request") return false;
-      if (input.terminal !== undefined) return a.terminal === input.terminal;
-      if (a.terminal !== null || a.chat !== holder) return false;
-      return input.conversation !== undefined ? a.conversation === null || a.conversation === input.conversation : a.conversation === null;
-    });
+  // A scan the agent announces is the check of a scan Trama announced at launch, if one still waits in the same terminal: it takes that one over. So is a Drift of Unify Drifts, announced by Trama at launch, and it keeps its title.
+  if (((input.kind === "check" && input.phase === "scanning") || input.kind === "drift") && input.source === undefined && input.terminal !== undefined) {
+    // The oldest one of the same terminal wins.
+    const waiting = listAnnouncements(p).find((a) => a.kind === input.kind && a.source === "request" && a.terminal === input.terminal);
     if (waiting) {
-      const taken: Announcement = { ...waiting, ...(input.kind === "check" ? { phase: "scanning" as const } : {}), touched: now.toISOString(), ...(waiting.conversation === null && input.conversation !== undefined ? { conversation: input.conversation } : {}) };
+      const taken: Announcement = { ...waiting, ...(input.kind === "check" ? { phase: "scanning" as const } : {}), touched: now.toISOString() };
       write(p, taken);
       return taken;
     }
@@ -311,8 +279,6 @@ export function announce(
     announced: nextAnnouncedStamp(p),
     touched: stamp,
     terminal: input.terminal ?? null,
-    chat: input.terminal ? null : (input.chat ?? (input.source === "request" ? null : "editor")),
-    conversation: !input.terminal && input.chat === "cursor" && input.conversation ? input.conversation : null,
     phase: input.phase ?? null,
     drifts: input.drifts ?? [],
     machine: input.machine ?? null,
@@ -349,26 +315,18 @@ export function announcementNote(p: Project, id: string | undefined, kind: Annou
 }
 
 /**
- * A Draft takes the oldest request of its own origin (its terminal, or its chat when it has none), or the announcement
- * named by ID when that one belongs to the same origin. Without an origin, nothing is bound.
+ * A Draft takes the oldest request of its own terminal, or the announcement named by ID when that one belongs to the
+ * same terminal. Without a terminal, nothing is bound and no announcement is made: the Draft has no ghost.
  */
 export function bindDraft(p: Project, proposal: { id: string; title: string }, announcementId?: string, origin: AgentOrigin = {}, now = new Date()): Announcement | null {
+  const terminal = origin.terminal;
+  if (terminal === undefined) return null;
   const all = listAnnouncements(p);
   const target = announcementId !== undefined
-    ? all.find((a) =>
-        a.id === announcementId
-        && (a.kind === "proposal" || a.kind === "drift")
-        && a.proposal === null
-        && (origin.terminal !== undefined
-          ? a.terminal === origin.terminal && a.chat === null
-          : origin.chat !== undefined && a.chat === origin.chat && a.terminal === null))
-    : origin.terminal !== undefined || origin.chat !== undefined
-      ? all.find((a) => a.kind === "proposal" && a.source === "request" && a.proposal === null && (origin.terminal !== undefined ? a.terminal === origin.terminal : a.terminal === null && a.chat === origin.chat))
-      : undefined;
+    ? all.find((a) => a.id === announcementId && (a.kind === "proposal" || a.kind === "drift") && a.proposal === null && a.terminal === terminal)
+    : all.find((a) => a.kind === "proposal" && a.source === "request" && a.proposal === null && a.terminal === terminal);
   if (announcementId !== undefined) {
-    const comparison = all.find((a) => a.id === announcementId && a.kind === "comparison" && (origin.terminal !== undefined
-      ? a.terminal === origin.terminal && a.chat === null
-      : origin.chat !== undefined && a.chat === origin.chat && a.terminal === null));
+    const comparison = all.find((a) => a.id === announcementId && a.kind === "comparison" && a.terminal === terminal);
     if (comparison) {
       // A comparison keeps its title and its ghost: the Draft only joins its list.
       const joined = { ...comparison, proposals: [...comparison.proposals, proposal.id], touched: now.toISOString() };
@@ -436,15 +394,9 @@ export function changeCheckPhase(p: Project, id: string, phase: CheckPhase, now 
   return "changed";
 }
 
-/**
- * Whether an announcement belongs to the place an agent runs in: its terminal, or its Cursor conversation. An announcement
- * of a chat that names no conversation belongs to every conversation of the project; one with a conversation, only to
- * it. An agent with neither a terminal nor a conversation is the project's chat. These are the rules by which a
- * terminal's or a conversation's end withdraws its announcements.
- */
+/** Whether an announcement belongs to the agent terminal an agent runs in. These are the rules by which a terminal's end withdraws its announcements. */
 export function ownedBy(a: Announcement, origin: AgentOrigin): boolean {
-  if (origin.terminal !== undefined) return a.terminal === origin.terminal;
-  return a.chat !== null && (a.conversation === null || a.conversation === origin.conversation);
+  return origin.terminal !== undefined && a.terminal === origin.terminal;
 }
 
 /** What `declareNote` did: the announcements the note went to (in the order announced) and whether it was cut. */
@@ -455,7 +407,7 @@ export interface DeclaredNote {
 
 /**
  * The agent declares what it is doing. With `id` the note goes to that announcement only, of any kind; without, to every
- * announcement still waiting that belongs to the agent's terminal or conversation, a comparison excepted. The note is
+ * announcement still waiting that belongs to the agent's terminal, a comparison excepted. The note is
  * one line (line breaks become spaces, the ends are trimmed) of at most `NOTE_LENGTH` characters; each announcement keeps
  * at most `MAX_NOTES`, and a note equal to the last one only renews its instant. Nothing else of the announcement changes,
  * `touched` included. An empty note is a usage error and an unknown `id` an error; no announcement to go to is not one,
@@ -474,8 +426,8 @@ export function declareNote(p: Project, input: { id?: string; text: string } & A
     if (!named) throw new TramaError(`No announcement "${input.id}" is waiting (unknown, delivered or withdrawn); the note was not saved.`);
     targets = [named];
   } else {
-    // A conversation's note never reaches an announcement of another kind of chat (an agent Trama did not start).
-    targets = all.filter((a) => a.kind !== "comparison" && ownedBy(a, input) && (input.conversation === undefined || a.chat === input.chat));
+    // Without a terminal there is no announcement to go to.
+    targets = input.terminal === undefined ? [] : all.filter((a) => a.kind !== "comparison" && ownedBy(a, input));
   }
   const at = now.toISOString();
   const announcements: Announcement[] = [];
@@ -497,7 +449,6 @@ export interface FinishedCheck {
   title: string;
   phase: CheckPhase | null;
   terminal: string | null;
-  chat: Chat | null;
   touched: string;
   failed: boolean;
 }
@@ -509,7 +460,7 @@ export interface FinishedCheck {
 export function checkOutcome(p: Project, id: string, failed = false): FinishedCheck | null {
   const check = findCheck(p, id);
   if (!check) return null;
-  return { id: check.id, title: check.title, phase: check.phase, terminal: check.terminal, chat: check.chat, touched: check.touched, failed };
+  return { id: check.id, title: check.title, phase: check.phase, terminal: check.terminal, touched: check.touched, failed };
 }
 
 /** The ghost of a finished check goes, whether or not the editor heard of its outcome. */
@@ -524,16 +475,4 @@ export function withdrawAll(p: Project, ids?: readonly string[]): Announcement[]
   const gone = listAnnouncements(p).filter((a) => !ids || ids.includes(a.id));
   for (const a of gone) remove(p, a.id);
   return gone;
-}
-
-
-/**
- * Writes `conversation` into the Cursor-chat announcement `id` when it still waits and has none yet: the host learned
- * which conversation the launch opened. Returns whether it wrote.
- */
-export function bindConversation(p: Project, id: string, conversation: string): boolean {
-  const a = getAnnouncement(p, id);
-  if (!a || a.chat !== "cursor" || a.conversation !== null) return false;
-  write(p, { ...a, conversation });
-  return true;
 }

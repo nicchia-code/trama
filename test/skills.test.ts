@@ -215,12 +215,8 @@ test("trama-implement skips the pre-flight and the targeted scan when the Adviso
   expect(skill).toContain("it blocks every Task not Done that concerns the same thing");
   expect(skill).toContain("A Task already In progress that it blocks is not stopped: finish it");
   expect(skill).toContain("Correct that code before moving the Task to Done; do not file a Drift for it.");
-  expect(skill).toContain("act on every text that begins with `Trama's Advisor` at once");
-  expect(skill).toContain("in the background, with `run_in_background: true`, for a round of continuous review, and in the foreground, waiting for its outcome, for the review of a Task or the final review");
-  expect(skill).toContain("Never wait for a round or check on it: no `sleep`, no polling, and never read its transcript or its output files in `~/.cursor/subagents/`.");
-  expect(skill).toContain("Cursor delivers the outcome of a background round to you by itself, with its notes: correct the code accordingly");
-  expect(skill).toContain("Ignore the outcome of a round that Cursor delivers after you were asked for the review of a Task or the final review");
-  expect(skill).toContain("ignore the outcome of a round that arrives after the review of its Task was asked for");
+  expect(skill).not.toContain("Cursor");
+  expect(skill).not.toContain("trama-advisor");
 });
 
 test("trama-implement has the Parallel execution section: plan from the text, limits, records, revision, conflicts and report", () => {

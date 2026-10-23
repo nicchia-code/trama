@@ -10,7 +10,7 @@ export interface ChatSurface {
   post(message: ToChatWebview): void;
   /** Sets the context key `trama.ompChatVisible`. */
   setVisible(visible: boolean): void;
-  /** Shows the view (`trama.ompChat.focus`), with `preserveFocus` for the jobs. */
+  /** Shows the view (`trama.ompChatSidebar.focus`), with `preserveFocus` for the jobs. */
   reveal(preserveFocus: boolean): void;
   /** The `trama.theme` setting. */
   theme(): ThemeSetting;
@@ -29,6 +29,8 @@ interface Tab {
   /** The conversation works for Trama (`setWorking`). */
   working: boolean;
   forms: Set<string>;
+  /** The permission requests waiting for the developer, with the ids of the options omp offered. */
+  permissions: Map<string, string[]>;
   model?: string;
   start: { first?: FirstMessage; notice?: string };
   subscriptions: Disposable[];
@@ -55,7 +57,7 @@ export class ChatViewModel implements ChatViewPort {
   private readonly closeListeners = new Set<(id: string) => void>();
 
   /**
-   * `inUse`: omp Chat on in the user settings with `trama.agent` on omp (read now). `pending`: the conversations the window has saved and waits to resume, by
+   * `inUse`: omp Chat on, not turned off in the user settings (read now). `pending`: the conversations the window has saved and waits to resume, by
    * id (read now), which keep the view like open ones.
    */
   constructor(
@@ -107,7 +109,7 @@ export class ChatViewModel implements ChatViewPort {
       ...(options.first === undefined ? {} : { first: promptOf(options.first, this.surface) }),
       ...(options.notice === undefined ? {} : { notice: options.notice }),
     };
-    const created: Tab = { id: tab.id, name: tab.name, session, inTurn: session.inTurn, working: false, forms: new Set(), start, subscriptions: [] };
+    const created: Tab = { id: tab.id, name: tab.name, session, inTurn: session.inTurn, working: false, forms: new Set(), permissions: new Map(), start, subscriptions: [] };
     this.tabs.push(created);
     this.selected = tab.id;
     this.refresh();
@@ -192,6 +194,15 @@ export class ChatViewModel implements ChatViewPort {
         this.postConversations();
         return;
       }
+      case "permissionAnswer": {
+        const tab = this.find(message.id);
+        // An answer that is not one of the offered options is ignored and the request keeps waiting.
+        if (tab === undefined || tab.permissions.get(message.requestId)?.includes(message.optionId) !== true) return;
+        tab.permissions.delete(message.requestId);
+        tab.session.answerPermission(message.requestId, message.optionId);
+        this.postConversations();
+        return;
+      }
       case "openFile":
         this.surface.openFile(message.path);
         return;
@@ -211,6 +222,7 @@ export class ChatViewModel implements ChatViewPort {
 
   private runState(tab: Tab): ConversationRunState {
     if (tab.forms.size > 0) return "waiting-form";
+    if (tab.permissions.size > 0) return "waiting-permission";
     return tab.inTurn || tab.working ? "running" : "idle";
   }
 
@@ -239,6 +251,8 @@ export class ChatViewModel implements ChatViewPort {
   /** Follows the session: its notifications (the history first), its turns, its forms and its models. */
   private subscribe(tab: Tab): void {
     this.unsubscribe(tab);
+    // The session replays the requests still waiting; the ones cancelled while the webview was gone are not there.
+    tab.permissions.clear();
     const { session } = tab;
     tab.inTurn = session.inTurn;
     tab.subscriptions = [
@@ -250,6 +264,16 @@ export class ChatViewModel implements ChatViewPort {
       session.onFormRequest((request) => {
         tab.forms.add(request.requestId);
         this.surface.post({ type: "formRequest", id: tab.id, requestId: request.requestId, message: request.message, schema: request.schema });
+        this.postConversations();
+      }),
+      session.onPermissionRequest((request) => {
+        tab.permissions.set(request.requestId, request.options.map((option) => option.optionId));
+        this.surface.post({ type: "permissionRequest", id: tab.id, requestId: request.requestId, toolCall: request.toolCall, options: request.options });
+        this.postConversations();
+      }),
+      session.onPermissionCancelled((requestId) => {
+        if (!tab.permissions.delete(requestId)) return;
+        this.surface.post({ type: "permissionCancelled", id: tab.id, requestId });
         this.postConversations();
       }),
     ];

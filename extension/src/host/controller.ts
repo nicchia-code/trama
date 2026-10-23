@@ -17,26 +17,28 @@ import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
 import type { AgentAction, NavigateOptions, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAdvisorScanner, configuredAgent, configuredAsyncDriftResolver, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, launchAgent, launched, openAskMore, openQuickTask, PREPARED_QUESTION_AGENT, settings, startHeldJob } from "./agent";
-import { bundledUnifyInstructions, isCursor } from "./cursor";
+import { configuredAdvisorScanner, configuredAsyncDriftResolver, configuredModels, configuredOmpPath, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, openAskMore, openQuickTask, settings, startHeldJob } from "./agent";
+import { bundledUnifyInstructions } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
-import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onFinalReviewMissing, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing, unifyingDrifts } from "./drift-resolution";
+import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing, unifyingDrifts } from "./drift-resolution";
 import { askPreparedRound } from "./questions";
 import { askMoreSubject, askMoreTerminalName } from "./ask-more";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { taskImagePath, withImageUris } from "./task-images";
 import { taskImagesRoot } from "../../../src/core/task-images";
-import { appliedProposalModels, boardModels, chooseProposalModel, forgetProposalModels, proposalRunModel, type BoardModels, type ModelMemory, type ProposalAgent } from "./proposal-models";
+import { appliedProposalModels, boardModels, chooseProposalModel, forgetProposalModels, proposalRunModel, type BoardModels, type ModelMemory } from "./proposal-models";
 import type { RunModel } from "./terminal-agent";
 import { planRuns, runSequence, type AppliedModel, type PlannedRun } from "./run-groups";
-import { cursorModels, ompModels, type ModelList } from "./model-lists";
-import { AGENT_KEY, planSettingChange, settingsSchema, settingTitle, shownAgentValue, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
+import { ompModels, type ModelList } from "./model-lists";
+import { ensureOmpUpdated, findOmp, forgetUpdateCheck } from "./omp-update";
+import { ompStatus } from "./omp-status";
+import { planSettingChange, settingsSchema, settingTitle, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
 import { resolveMarkdownFile } from "./paths";
 import { checkSkills, fileFolders, findProject, initializeProject, NO_PROJECT_WARNING, updateSkills } from "./project";
 import { folderChildren, folderInside, gitIgnored, type RawEntry } from "./folder-tree";
 import { askMoreTarget } from "./question-state";
-import type { QuestionSession } from "./question-session";
+import { PREPARED_QUESTION_AGENT, type QuestionSession } from "./question-session";
 import type { DesignRequests } from "./design-requests";
 
 import { writeLastScan } from "../../../src/core/last-scan";
@@ -79,9 +81,6 @@ function modelIsEmpty(project: Project): boolean {
   return model.features.size === 0 && model.actors.size === 0;
 }
 
-/** The agent a Proposal's model is chosen for and read against: the effective `trama.agent`, where every value other than `omp` counts as `cursor`. */
-const proposalAgent = (): ProposalAgent => (configuredAgent() === "omp" ? "omp" : "cursor");
-
 /** Owns the single Trama panel, feeds it snapshots and carries out what the developer asks of it. */
 export class Controller implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
@@ -94,8 +93,8 @@ export class Controller implements vscode.Disposable {
 
   /** The newest request for model suggestions: an answer that arrives after a newer request is dropped. */
   private suggestionsRequest = 0;
-  /** The agent of `trama.agent` the suggestions were prepared for: a change of it prepares them again. */
-  private suggestedAgent: string | undefined;
+  /** The newest omp status request of the Settings tab: an answer that arrives after a newer request is dropped. */
+  private ompStatusRequest = 0;
   /** Whether a check of the installed skills is under way: another opening does not start a second. */
   private checkingSkills = false;
   /** The tab a panel just created goes to once its webview is ready (`openSettings`, `openGhostDetails`), with the options of the `navigate`. */
@@ -244,7 +243,7 @@ export class Controller implements vscode.Disposable {
     try {
       const schema = this.manifestSettings();
       for (const { key, value } of message.values) {
-        const plan = planSettingChange(schema, key, value, configuredAgent());
+        const plan = planSettingChange(schema, key, value);
         if (!plan.ok) {
           this.postSettings();
           finish(plan.reason);
@@ -295,17 +294,60 @@ export class Controller implements vscode.Disposable {
     }
   }
 
-  /** The check of the Agent step: omp by `omp models`, the chat of Cursor by the editor's name. */
-  private async checkAgent(agent: "cursor" | "omp", ompPath: string): Promise<void> {
-    if (agent === "omp") {
-      const list = await ompModels(ompPath.trim());
-      this.post({ type: "agentCheck", agent, ompPath, ok: list.error === undefined, models: list.models.length, ...(list.error === undefined ? {} : { error: list.error }) });
-    } else {
-      this.post({ type: "agentCheck", agent, ompPath, ok: isCursor() });
+  /**
+   * The check of the omp step: the program found as the launches find it, the update check and, with a newer version, the update (announced
+   * with `updating`), then `omp models --json`.
+   */
+  private async checkAgent(ompPath: string): Promise<void> {
+    const wanted = ompPath.trim();
+    const program = await findOmp(wanted);
+    if (program === undefined) {
+      this.post({ type: "agentCheck", ompPath, state: "done", ok: false, missing: true, error: `omp not found at ${wanted === "" ? "the editor PATH" : wanted}` });
+      return;
     }
+    const outcome = await ensureOmpUpdated(program, (version) => this.post({ type: "agentCheck", ompPath, state: "updating", version }));
+    if (outcome.missing === true) {
+      this.post({ type: "agentCheck", ompPath, state: "done", ok: false, missing: true, error: `omp not found at ${wanted === "" ? "the editor PATH" : wanted}` });
+      return;
+    }
+    const list = await ompModels(wanted === "" ? program : wanted);
+    this.post({
+      type: "agentCheck",
+      ompPath,
+      state: "done",
+      ok: list.error === undefined,
+      missing: list.missing === true,
+      ...(outcome.version === undefined ? {} : { version: outcome.version }),
+      ...(list.error === undefined ? { models: list.models.length } : { error: list.error }),
+      ...(outcome.updateError === undefined ? {} : { updateError: outcome.updateError }),
+    });
   }
 
-  /** The agent instruction files of `root` (a workspace folder) or, without `root`, of the project's folder, for the wizard's Agent step. */
+  /** Install omp: a visible terminal with the official installer; when it ends the wizard and the Settings tab get a new omp check, for the path set by then. */
+  installOmp(): void {
+    installOmp(() => {
+      forgetUpdateCheck();
+      void this.checkAgent(configuredOmpPath());
+      void this.postOmpStatus();
+    });
+  }
+
+  /** Sends the Settings tab the state of omp: `checking` at once, then the version that answers or why nothing does. Only the newest request is answered. */
+  async postOmpStatus(): Promise<void> {
+    const request = ++this.ompStatusRequest;
+    this.post({ type: "ompStatus", state: "checking" });
+    const status = await ompStatus(configuredOmpPath());
+    if (request !== this.ompStatusRequest) return;
+    this.post({
+      type: "ompStatus",
+      state: "done",
+      missing: status.missing,
+      ...(status.version === undefined ? {} : { version: status.version }),
+      ...(status.error === undefined ? {} : { error: status.error }),
+    });
+  }
+
+  /** The agent instruction files of `root` (a workspace folder) or, without `root`, of the project's folder, for the wizard's omp step. */
   private async postInstructionFiles(root: string | undefined): Promise<void> {
     const folder = root === undefined ? findProject()?.root : fileFolders().find((f) => f.uri.fsPath === root)?.uri.fsPath;
     if (folder === undefined) {
@@ -329,11 +371,11 @@ export class Controller implements vscode.Disposable {
     await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside, preview: false });
   }
 
-  /** The model names of `agent` (and `ompPath`, for omp) for the wizard's Models step, which suggests them before the agent is saved. */
-  private async postWizardSuggestions(agent: "cursor" | "omp", ompPath: string): Promise<void> {
+  /** The model names of the omp at `ompPath` for the wizard's Models step, which suggests them before the path is saved. */
+  private async postWizardSuggestions(ompPath: string): Promise<void> {
     const request = ++this.wizardSuggestionsRequest;
-    const list = await this.modelList(agent, ompPath.trim());
-    if (request === this.wizardSuggestionsRequest) this.post({ type: "modelSuggestions", ...list, agent, ompPath });
+    const list = await ompModels(ompPath.trim());
+    if (request === this.wizardSuggestionsRequest) this.post({ type: "modelSuggestions", ...list, ompPath });
   }
 
   /** One folder of the wizard's tree: `root` must be a workspace folder and `path` inside it. */
@@ -402,7 +444,10 @@ export class Controller implements vscode.Disposable {
   settingsChanged(ompPathChanged = false): void {
     this.refresh();
     this.postSettings();
-    if (configuredAgent() !== this.suggestedAgent || (ompPathChanged && this.suggestedAgent === "omp")) void this.postModelSuggestions();
+    if (ompPathChanged) {
+      void this.postModelSuggestions();
+      void this.postOmpStatus();
+    }
   }
 
   /** The Trama settings as the manifest declares them, read at run time: the Settings tab and the check of its messages both use them. */
@@ -418,28 +463,25 @@ export class Controller implements vscode.Disposable {
     for (const setting of schema) {
       const inspected = config.inspect<unknown>(sectionKey(setting.key));
       values[setting.key] = setting.scope === "application"
-        ? { user: setting.key === AGENT_KEY ? shownAgentValue(inspected?.globalValue) : inspected?.globalValue }
+        ? { user: inspected?.globalValue }
         : { user: inspected?.globalValue, workspace: inspected?.workspaceValue };
     }
-    this.post({ type: "settings", schema, values, agent: configuredAgent() });
+    this.post({ type: "settings", schema, values });
   }
 
   /**
-   * Sends the Settings tab the model names of the agent of `trama.agent`, for the three model roles, and the reason when omp gives
+   * Sends the Settings tab the model names omp declares, for the three model roles, and the reason when omp gives
    * none. Only the newest request is sent: an answer that arrives after a newer request is dropped.
    */
   async postModelSuggestions(): Promise<void> {
     const request = ++this.suggestionsRequest;
-    this.suggestedAgent = configuredAgent();
-    const list = await this.modelList(this.suggestedAgent);
+    const list = await this.modelList();
     if (request === this.suggestionsRequest) this.post({ type: "modelSuggestions", ...list });
   }
 
-  private async modelList(agent: string, ompPath?: string): Promise<ModelList> {
+  private async modelList(ompPath?: string): Promise<ModelList> {
     // `trama.ompPath` is application-scoped: only the user value counts; empty means `omp` from the editor's PATH.
-    if (agent === "omp") return ompModels(ompPath ?? (settings().inspect<string>("ompPath")?.globalValue ?? "").trim());
-    if (isCursor()) return { models: this.globalStorageUri === undefined ? [] : await cursorModels(this.globalStorageUri.fsPath) };
-    return { models: [] };
+    return ompModels(ompPath ?? configuredOmpPath());
   }
 
   /** Carries out a Settings plan. A refused plan saves nothing. The Settings tab is sent again either way, so its controls show the values that really hold. */
@@ -487,7 +529,6 @@ export class Controller implements vscode.Disposable {
     const subscriptions = [
       ...(this.tramaFiles ? this.watchChanges(this.tramaFiles) : []),
       onAnnouncementsWithdrawn((announcements) => this.post({ type: "withdrawn", announcements })),
-      onFinalReviewMissing((reason) => this.post({ type: "finalReviewMissing", reason })),
       onStoppedFollowing((subject, reason) => this.post({ type: "stoppedFollowing", subject, reason })),
       onQuestionRoundChange(() => this.refresh()),
       onDriftResolutionChange(() => this.refresh()),
@@ -576,7 +617,7 @@ export class Controller implements vscode.Disposable {
       const built = buildSnapshot(project, driftsFinishing(project.root), proposalsFinishing(project.root), tasksFinishing(project.root));
       const webview = this.panel?.webview;
       const snapshot = webview ? withImageUris(built, (path) => webview.asWebviewUri(vscode.Uri.file(path)).toString()) : built;
-      const models: BoardModels = this.modelMemory ? boardModels(this.modelMemory, snapshot.proposals, proposalAgent()) : { agent: proposalAgent(), proposals: {} };
+      const models: BoardModels = this.modelMemory ? boardModels(this.modelMemory, snapshot.proposals) : { proposals: {} };
       if (this.panel) this.panel.title = snapshot.system.name.trim() || this.projectTitle(project);
       // The Drifts an agent was asked to resolve are forgotten once no resolution runs, so a later Resolve is not held by them.
       if (!work.resolving) this.namedByResolution.clear();
@@ -596,9 +637,9 @@ export class Controller implements vscode.Disposable {
     return planRuns(runnable.map((task) => ({ id: task.id, proposal: task.proposal })), this.appliedModels(project), configuredModels().execution);
   }
 
-  /** The Proposals whose model applies to the agent of `trama.agent` now, read at the launch. */
+  /** The Proposals that have a model chosen, read at the launch. */
   private appliedModels(project: Project): AppliedModel[] {
-    return this.modelMemory ? appliedProposalModels(this.modelMemory, project, proposalAgent()) : [];
+    return this.modelMemory ? appliedProposalModels(this.modelMemory, project) : [];
   }
 
   /**
@@ -647,12 +688,20 @@ export class Controller implements vscode.Disposable {
       return;
     }
     if (message.type === "modelSuggestionsWanted") {
-      if (message.agent === undefined) await this.postModelSuggestions();
-      else await this.postWizardSuggestions(message.agent, message.ompPath ?? "");
+      if (message.ompPath === undefined) await this.postModelSuggestions();
+      else await this.postWizardSuggestions(message.ompPath);
+      return;
+    }
+    if (message.type === "ompStatusWanted") {
+      await this.postOmpStatus();
       return;
     }
     if (message.type === "agentCheckWanted") {
-      await this.checkAgent(message.agent, message.ompPath);
+      await this.checkAgent(message.ompPath);
+      return;
+    }
+    if (message.type === "installOmp") {
+      this.installOmp();
       return;
     }
     if (message.type === "instructionFilesWanted") {
@@ -686,7 +735,7 @@ export class Controller implements vscode.Disposable {
       return;
     }
     if (message.type === "setSetting") {
-      await this.applyPlan(planSettingChange(this.manifestSettings(), message.key, message.value, configuredAgent()));
+      await this.applyPlan(planSettingChange(this.manifestSettings(), message.key, message.value));
       return;
     }
     if (message.type === "writeDesignRequest") {
@@ -747,7 +796,7 @@ export class Controller implements vscode.Disposable {
         return;
       case "setProposalModel": {
         if (!this.modelMemory) throw new TramaError("Trama cannot keep the model of a Proposal: the workspace state is not available.");
-        await chooseProposalModel(this.modelMemory, project, message.proposal, message.model, proposalAgent());
+        await chooseProposalModel(this.modelMemory, project, message.proposal, message.model);
         this.refresh();
         return;
       }
@@ -852,16 +901,16 @@ export class Controller implements vscode.Disposable {
     this.refresh();
   }
 
-  /** The model a run takes from the Proposal of Task `task` (null: none) in place of its role, read at the launch: none unless that model was chosen for `trama.agent` now. */
+  /** The model a run takes from the Proposal of Task `task` (null: none) in place of its role, read at the launch: none when the Proposal has no model. */
   private runModelOfTask(project: Project, task: string | null): RunModel | undefined {
     if (!this.modelMemory || task === null) return undefined;
-    return proposalRunModel(this.modelMemory, project, getTask(project, task).data.proposal, proposalAgent());
+    return proposalRunModel(this.modelMemory, project, getTask(project, task).data.proposal);
   }
 
   /** The model a Resolve run takes from the Proposal of a Drift's origin Tasks: for a unified Drift only when all its origins belong to that one Proposal. */
   private runModelOfDrift(project: Project, drift: string): RunModel | undefined {
     if (!this.modelMemory) return undefined;
-    return proposalRunModel(this.modelMemory, project, originDesign(project, getDrift(project, drift).data.origin), proposalAgent());
+    return proposalRunModel(this.modelMemory, project, originDesign(project, getDrift(project, drift).data.origin));
   }
 
   /** The valid prepared question of an open Drift when the Async Drift Resolver is on (read now, from user settings), null otherwise. */

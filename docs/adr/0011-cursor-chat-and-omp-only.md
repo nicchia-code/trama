@@ -1,6 +1,8 @@
 ---
 status: accepted
 ---
+> Replaced by [ADR 0013](0013-vscode-and-omp-only.md): Cursor and its chat are no longer supported; omp, in VS Code, is the only agent.
+
 # Only Cursor's chat and omp are supported agents
 
 Trama supports two agents: **Cursor's chat**, which works only in Cursor, and **omp**, which works in Cursor and in every editor compatible with the VS Code extension API, VS Code included. `trama.agent` is `cursor` (the default) or `omp`. Claude Code, Copilot's chat and the chat in any editor that is not Cursor are no longer supported.

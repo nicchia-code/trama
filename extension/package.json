@@ -2,7 +2,7 @@
   "name": "trama",
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "publisher": "trama-dev",
   "license": "AGPL-3.0-only",
   "private": true,
@@ -73,13 +73,6 @@
           "title": "omp Chat",
           "icon": "media/trama-icon-dark.svg"
         }
-      ],
-      "panel": [
-        {
-          "id": "trama-omp-chat",
-          "title": "omp Chat",
-          "icon": "media/trama-icon-dark.svg"
-        }
       ]
     },
     "views": {
@@ -95,15 +88,7 @@
           "id": "trama.ompChatSidebar",
           "name": "omp Chat",
           "type": "webview",
-          "when": "trama.ompChatVisible == 'sidebar'"
-        }
-      ],
-      "trama-omp-chat": [
-        {
-          "id": "trama.ompChat",
-          "name": "omp Chat",
-          "type": "webview",
-          "when": "trama.ompChatVisible == 'panel'"
+          "when": "trama.ompChatVisible"
         }
       ]
     },
@@ -165,25 +150,11 @@
           "scope": "application",
           "markdownDescription": "Colours of the Trama panel. Auto (the default) follows the editor's theme; Light and Dark fix it."
         },
-        "trama.agent": {
-          "type": "string",
-          "enum": [
-            "cursor",
-            "omp"
-          ],
-          "enumDescriptions": [
-            "Cursor's chat, only in Cursor.",
-            "omp in the editor's integrated terminal, in every editor."
-          ],
-          "default": "cursor",
-          "scope": "application",
-          "markdownDescription": "The agent Trama starts: `cursor` (Cursor's chat, only in Cursor; the default) or `omp` (in the editor's terminal, in any editor)."
-        },
         "trama.ompPath": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Path of the `omp` program used to suggest model names. Empty uses `omp` from the editor's PATH."
+          "markdownDescription": "Path of the `omp` program Trama runs for every agent, the model list and the checks. Empty looks for `omp` in the editor's PATH, then in `~/.bun/bin` and `~/.local/bin`."
         },
         "trama.terminalLocation": {
           "type": "string",
@@ -203,7 +174,7 @@
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "With omp: Trama's jobs ignore agent instruction files (AGENTS.md, CLAUDE.md, Cursor rules, .omp/RULES.md) in the project and your user folders. Off by default."
+          "markdownDescription": "Trama's jobs ignore agent instruction files (AGENTS.md, CLAUDE.md, .omp/RULES.md) in the project and your user folders. Off by default."
         },
         "trama.analysis": {
           "type": "string",
@@ -278,9 +249,20 @@
         },
         "trama.ompChat": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "scope": "application",
-          "markdownDescription": "On, with omp: Trama's jobs open a conversation in the omp Chat view instead of a terminal. Every command runs without asking."
+          "markdownDescription": "Trama's jobs open a conversation in the omp Chat view instead of a terminal."
+        },
+        "trama.ompChatApproval": {
+          "type": "string",
+          "enum": ["ask", "yolo"],
+          "enumDescriptions": [
+            "omp asks permission as in the terminal: each request shows in the conversation and waits for your choice.",
+            "omp runs every command without asking, even those it would ask about in the terminal."
+          ],
+          "default": "ask",
+          "scope": "application",
+          "markdownDescription": "How omp approves commands in omp Chat. With `yolo`, omp runs every command without asking, even those it would ask about in the terminal."
         }
       }
     }

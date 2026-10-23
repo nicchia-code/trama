@@ -47,6 +47,11 @@ export function quote(family: ShellFamily, text: string): string {
   }
 }
 
+/** Quotes `program` as the command a line runs: like an argument, and with the call operator in PowerShell, where a quoted string alone is not a command. */
+export function quoteProgram(family: ShellFamily, program: string): string {
+  return family === "powershell" || family === "powershell5" ? `& ${psLiteral(program)}` : quote(family, program);
+}
+
 /** A PowerShell single-quoted string. PowerShell also treats the typographic single quotes as quote characters. */
 function psLiteral(text: string): string {
   return `'${text.replace(/['\u2018\u2019\u201a\u201b]/g, "$&$&")}'`;

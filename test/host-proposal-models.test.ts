@@ -48,12 +48,12 @@ function openWithTask(): string {
 }
 
 describe("choosing the model of a Proposal", () => {
-  test("stores the trimmed model with the agent set at the moment, and changes no file", () => {
+  test("stores the trimmed model alone, and changes no file", () => {
     const id = openWithTask();
     const before = readFileSync(join(getProposal(p, id).dir, "proposal.md"), "utf8");
     const store = memory();
-    return chooseProposalModel(store, p, id, "  gpt-5  ", "omp").then(() => {
-      expect(proposalModels(store)).toEqual({ [id]: { model: "gpt-5", agent: "omp" } });
+    return chooseProposalModel(store, p, id, "  gpt-5  ").then(() => {
+      expect(proposalModels(store)).toEqual({ [id]: { model: "gpt-5" } });
       expect(readFileSync(join(getProposal(p, id).dir, "proposal.md"), "utf8")).toBe(before);
       expect(getProposal(p, id).data.status).toBe("open");
     });
@@ -61,20 +61,20 @@ describe("choosing the model of a Proposal", () => {
 
   test("an empty text forgets the model", async () => {
     const id = openWithTask();
-    const store = memory({ [id]: { model: "gpt-5", agent: "cursor" } });
-    await chooseProposalModel(store, p, id, "   ", "cursor");
+    const store = memory({ [id]: { model: "gpt-5" } });
+    await chooseProposalModel(store, p, id, "   ");
     expect(proposalModels(store)).toEqual({});
   });
 
   test("refuses a Draft and an open Proposal with no Tasks, changing nothing", async () => {
     const store = memory();
     const draft = newProposal(p, "Draft");
-    await expect(chooseProposalModel(store, p, draft.id, "gpt-5", "cursor")).rejects.toThrow("is draft");
+    await expect(chooseProposalModel(store, p, draft.id, "gpt-5")).rejects.toThrow("is draft");
     const bare = newProposal(p, "Bare");
     const file = editInProposal(p, bare.id, "checkout/order.md");
     writeFileSync(file, orderChange(readFileSync(file, "utf8")));
     handOver(p, bare.id);
-    await expect(chooseProposalModel(store, p, bare.id, "gpt-5", "cursor")).rejects.toThrow("carries no Tasks");
+    await expect(chooseProposalModel(store, p, bare.id, "gpt-5")).rejects.toThrow("carries no Tasks");
     expect(store.value).toBeUndefined();
   });
 });
@@ -82,35 +82,25 @@ describe("choosing the model of a Proposal", () => {
 describe("reading the stored models", () => {
   test("entries of another shape are ignored and dropped by the next write", async () => {
     const id = openWithTask();
-    const good = { model: "gpt-5", agent: "omp" } as const;
+    const good = { model: "gpt-5" };
     const store = memory({
       [id]: good,
-      other: { model: "x", agent: "cursor", extra: true },
-      bad: { model: " spaced ", agent: "cursor" },
-      wrongAgent: { model: "x", agent: "editor" },
-      empty: { model: "", agent: "cursor" },
+      other: { model: "x", extra: true },
+      bad: { model: " spaced " },
+      empty: { model: "" },
     });
     expect(proposalModels(store)).toEqual({ [id]: good });
-    await chooseProposalModel(store, p, id, "gpt-4", "cursor");
-    expect(store.value).toEqual({ [id]: { model: "gpt-4", agent: "cursor" } });
+    await chooseProposalModel(store, p, id, "gpt-4");
+    expect(store.value).toEqual({ [id]: { model: "gpt-4" } });
   });
 
-  test("an entry of agent chat reads as cursor and is written as cursor by the next write", async () => {
+  test.each(["omp", "cursor", "chat", "claude"])("an entry with agent %s is ignored and dropped by the next write", async (agent) => {
     const id = openWithTask();
     const other = openWithTask();
-    const store = memory({ [id]: { model: "gpt-5", agent: "chat" }, [other]: { model: "b", agent: "chat" } });
-    expect(proposalModels(store)).toEqual({ [id]: { model: "gpt-5", agent: "cursor" }, [other]: { model: "b", agent: "cursor" } });
-    await chooseProposalModel(store, p, id, "gpt-4", "omp");
-    expect(store.value).toEqual({ [id]: { model: "gpt-4", agent: "omp" }, [other]: { model: "b", agent: "cursor" } });
-  });
-
-  test("an entry of agent claude is ignored and dropped by the next write", async () => {
-    const id = openWithTask();
-    const other = openWithTask();
-    const store = memory({ [id]: { model: "gpt-5", agent: "claude" } });
+    const store = memory({ [id]: { model: "gpt-5", agent }, [other]: { model: "b", agent } });
     expect(proposalModels(store)).toEqual({});
-    await chooseProposalModel(store, p, other, "gpt-4", "cursor");
-    expect(store.value).toEqual({ [other]: { model: "gpt-4", agent: "cursor" } });
+    await chooseProposalModel(store, p, other, "gpt-4");
+    expect(store.value).toEqual({ [other]: { model: "gpt-4" } });
   });
 
   test("a value that is not an object reads as no models", () => {
@@ -120,17 +110,15 @@ describe("reading the stored models", () => {
 });
 
 describe("the models the Board shows", () => {
-  test("gives every Proposal that carries Tasks its chosen model, marked when it was chosen for the agent now, and none otherwise", () => {
+  test("gives every Proposal that carries Tasks its chosen model name, and none otherwise", () => {
     const withModel = openWithTask();
     const withoutModel = openWithTask();
     const bare = newProposal(p, "Bare");
-    const store = memory({ [withModel]: { model: "gpt-5", agent: "omp" }, [bare.id]: { model: "x", agent: "omp" } });
+    const store = memory({ [withModel]: { model: "gpt-5" }, [bare.id]: { model: "x" } });
     const proposals = [{ id: withModel, tasks: [{}] }, { id: withoutModel, tasks: [{}] }, { id: bare.id, tasks: [] }];
-    expect(boardModels(store, proposals, "omp")).toEqual({
-      agent: "omp",
-      proposals: { [withModel]: { name: "gpt-5", agent: "omp", applies: true }, [withoutModel]: null },
+    expect(boardModels(store, proposals)).toEqual({
+      proposals: { [withModel]: { name: "gpt-5" }, [withoutModel]: null },
     });
-    expect(boardModels(store, proposals, "cursor").proposals[withModel]).toEqual({ name: "gpt-5", agent: "omp", applies: false });
   });
 });
 
@@ -139,8 +127,8 @@ describe("forgetting the models", () => {
     const draft = newProposal(p, "Draft");
     const open = openWithTask();
     const models: ProposalModels = {
-      [draft.id]: { model: "a", agent: "cursor" },
-      [open]: { model: "b", agent: "omp" },
+      [draft.id]: { model: "a" },
+      [open]: { model: "b" },
     };
     const store = memory(models);
     await forgetProposalModels(store, p);
@@ -153,9 +141,9 @@ describe("forgetting the models", () => {
     const discarded = newProposal(p, "Discarded");
     discardProposal(p, discarded.id);
     const store = memory({
-      [rejected]: { model: "a", agent: "cursor" },
-      [discarded.id]: { model: "b", agent: "omp" },
-      gone00000: { model: "c", agent: "cursor" },
+      [rejected]: { model: "a" },
+      [discarded.id]: { model: "b" },
+      gone00000: { model: "c" },
     });
     await forgetProposalModels(store, p);
     expect(store.value).toEqual({});
@@ -166,9 +154,9 @@ describe("forgetting the models", () => {
     approveProposal(p, id);
     const tasks = listTasks(p).filter((task) => task.data.proposal === id);
     expect(tasks.length).toBeGreaterThan(0);
-    const store = memory({ [id]: { model: "a", agent: "cursor" } });
+    const store = memory({ [id]: { model: "a" } });
     await forgetProposalModels(store, p);
-    expect(proposalModels(store)).toEqual({ [id]: { model: "a", agent: "cursor" } });
+    expect(proposalModels(store)).toEqual({ [id]: { model: "a" } });
 
     for (const task of tasks) {
       moveTask(p, task.id, "doing", "developer");
@@ -181,7 +169,7 @@ describe("forgetting the models", () => {
   test("writes nothing when it forgets nothing", async () => {
     const id = openWithTask();
     let writes = 0;
-    const store = memory({ [id]: { model: "a", agent: "cursor" } });
+    const store = memory({ [id]: { model: "a" } });
     const counted: ModelMemory = {
       get: store.get,
       update: (key, value) => {
@@ -195,26 +183,30 @@ describe("forgetting the models", () => {
 });
 
 describe("the model a run takes from its Proposal", () => {
-  test("applies only to the agent it was chosen for, and is named by the Proposal's short number", () => {
+  test("is the model chosen for the Proposal, and none for another or for no Proposal", () => {
     const id = openWithTask();
-    const store = memory({ [id]: { model: "gpt-5", agent: "omp" } });
-    expect(proposalRunModel(store, p, id, "omp")).toEqual({ model: "gpt-5" });
-    expect(proposalRunModel(store, p, id, "cursor")).toBeUndefined();
-    expect(proposalRunModel(store, p, null, "omp")).toBeUndefined();
-    expect(proposalRunModel(store, p, "gone00000", "omp")).toBeUndefined();
+    const store = memory({ [id]: { model: "gpt-5" } });
+    expect(proposalRunModel(store, p, id)).toEqual({ model: "gpt-5" });
+    expect(proposalRunModel(store, p, null)).toBeUndefined();
+    expect(proposalRunModel(store, p, "gone00000")).toBeUndefined();
   });
 
   test("names an approved Proposal, which has no short number, by its title", () => {
     const id = openWithTask();
     approveProposal(p, id);
+    const store = memory({ [id]: { model: "gpt-5" } });
+    expect(proposalRunModel(store, p, id)).toEqual({ model: "gpt-5" });
+  });
+
+  test("an entry written with an agent gives no model", () => {
+    const id = openWithTask();
     const store = memory({ [id]: { model: "gpt-5", agent: "omp" } });
-    expect(proposalRunModel(store, p, id, "omp")).toEqual({ model: "gpt-5" });
+    expect(proposalRunModel(store, p, id)).toBeUndefined();
   });
 });
 
-test("the applied models are the Proposals whose model was chosen for the agent now", () => {
+test("the applied models are the Proposals that have a model chosen", () => {
   const id = openWithTask();
-  const store = memory({ [id]: { model: "gpt-5", agent: "omp" } });
-  expect(appliedProposalModels(store, p, "omp")).toEqual([{ id, run: { model: "gpt-5" } }]);
-  expect(appliedProposalModels(store, p, "cursor")).toEqual([]);
+  const store = memory({ [id]: { model: "gpt-5" } });
+  expect(appliedProposalModels(store, p)).toEqual([{ id, run: { model: "gpt-5" } }]);
 });

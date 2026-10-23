@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { closeSync, ftruncateSync, openSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { announcementsDir, listAnnouncements, ownedBy, withdrawAll } from "../../../src/core/announcements";
+import { announcementsDir, listAnnouncements, withdrawAll } from "../../../src/core/announcements";
 import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { getProposal, listProposals } from "../../../src/core/proposals";
@@ -9,8 +9,6 @@ import { announcementView } from "../../../src/core/snapshot";
 import type { AnnouncementView } from "../../../src/core/snapshot";
 import { projectAt } from "../../../src/core/store";
 import type { Project } from "../../../src/core/store";
-import type { CursorChatEvent } from "../../../src/core/cursor-chat";
-import { onCursorChatEvent } from "./cursor";
 
 type Listener = (withdrawn: AnnouncementView[]) => void;
 const listeners = new Set<Listener>();
@@ -37,7 +35,7 @@ function guarded(action: () => void, failure = "announcements could not be withd
 
 /**
  * The agent terminal's idle hook, the command Trama typed into it ending, or the terminal closing withdraws its waiting
- * announcements. Applicable Cursor chat events do the same for chat announcements; elapsed time never withdraws one.
+ * announcements. Elapsed time never withdraws one.
  * The panel is told when `notify` is true, so the developer learns that the agent finished without delivering. `which`
  * selects only matching announcements; without it, all waiting announcements are withdrawn.
  */
@@ -51,32 +49,6 @@ export function withdrawWaiting(root: string, which?: (a: Announcement) => boole
     if (views.length === 0 || !notify) return;
     for (const listener of [...listeners]) listener(views);
   });
-}
-
-/**
- * A conversation ending withdraws the chat announcements it owns, and those of the project's chat that name no
- * conversation; another conversation's announcements stay. A stopped or interrupted turn gives the usual notice, while
- * closing the conversation is silent. Events that do not end a turn (such as a final Advisor review) withdraw nothing.
- */
-function onCursorChat(event: CursorChatEvent): void {
-  const ofConversation = (a: Announcement) => ownedBy(a, { chat: "cursor", conversation: event.conversation });
-  if (event.event === "AGENT_STOPPED" || event.event === "AGENT_INTERRUPTED") withdrawWaiting(event.root, ofConversation);
-  else if (event.event === "CONVERSATION_CLOSED") withdrawWaiting(event.root, ofConversation, false);
-}
-
-/**
- * The execution check closed a Cursor chat job (`time.CHECK_DUE`). A job bound to its conversation withdraws that
- * conversation's announcements and the project chat's, with the usual notice. A job never bound to a conversation never
- * started: only the announcement Trama made at its launch goes, silently; announcements others made in the project's
- * chat stay. Terminals need nothing here: their abnormal end already withdraws their announcements.
- */
-export function withdrawForCheck(root: string, job: { announcement?: string; conversation?: string }): void {
-  const { announcement, conversation } = job;
-  if (conversation === undefined) {
-    if (announcement !== undefined) withdrawWaiting(root, (a) => a.id === announcement, false);
-    return;
-  }
-  withdrawWaiting(root, (a) => ownedBy(a, { chat: "cursor", conversation }));
 }
 
 export function synchronizeAnnouncementTitles(p: Project): void {
@@ -129,5 +101,5 @@ export function watchAnnouncements(root: () => string | undefined): vscode.Dispo
       withdrawAll(p);
     });
   }
-  return onCursorChatEvent(onCursorChat);
+  return vscode.Disposable.from();
 }

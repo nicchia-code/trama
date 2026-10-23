@@ -1,7 +1,6 @@
 import { MessageCircleQuestion, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ModelSuggestion } from "../../host/model-lists";
-import type { ProposalAgent } from "../../host/proposal-models";
 import { DriftCompare, RecurringBadge, UnifiedBadge, UnifiesList } from "../diagram/panel";
 import { Markdown } from "../markdown";
 import { modelOptions } from "../settings/logic";
@@ -10,7 +9,7 @@ import { ComboboxInput } from "../ui/combobox";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
-import { AGENT_NAMES, type AnnouncedCard, type DriftCard, type ProposalCard, runningFor, type TaskCard } from "./logic";
+import { type AnnouncedCard, type DriftCard, type ProposalCard, runningFor, type TaskCard } from "./logic";
 import { NotBlocking } from "./cards";
 import { RefChips, Tip, TaskProposalTag, useBoardEnv } from "./parts";
 
@@ -203,9 +202,8 @@ export interface ModelList {
  * the agent offers; a confirmed name saves at once and the window stays open until it is closed, and an empty one goes back
  * to the Settings roles. It follows the Proposal like the body window.
  */
-export function ModelDialog({ card, agent, list, onClose }: { card: ProposalCard | undefined; agent: ProposalAgent; list: ModelList; onClose: () => void }) {
+export function ModelDialog({ card, list, onClose }: { card: ProposalCard | undefined; list: ModelList; onClose: () => void }) {
   const { context } = useBoardEnv();
-  const other = card?.model != null && !card.model.applies ? card.model : null;
   return (
     <Dialog open={card !== undefined} onOpenChange={(open) => !open && onClose()}>
       {card === undefined ? null : (
@@ -214,18 +212,13 @@ export function ModelDialog({ card, agent, list, onClose }: { card: ProposalCard
             <DialogTitle className="text-[15px] leading-snug break-words">{`Model for ${card.name.text} ${card.title}`}</DialogTitle>
             <DialogDescription id="board-model-hint">Used by the Runs of this Proposal's Tasks and by Resolve on a Drift filed from one of them. Scans always use trama.scan. Leave empty to use the Settings roles.</DialogDescription>
           </DialogHeader>
-          {other === null ? null : (
-            <p id="board-model-chosen" className="text-amber-700 dark:text-amber-400">
-              {`Chosen for ${AGENT_NAMES[other.agent]}: the Settings roles apply. Confirm a model to use it with ${AGENT_NAMES[agent]}.`}
-            </p>
-          )}
           <label htmlFor="board-model-field" className="font-semibold">
             Model
           </label>
           <ComboboxInput
             id="board-model-field"
             aria-label="Model"
-            aria-describedby={["board-model-hint", other === null ? null : "board-model-chosen", list.error === null ? null : "board-model-note"].filter((id) => id !== null).join(" ")}
+            aria-describedby={["board-model-hint", list.error === null ? null : "board-model-note"].filter((id) => id !== null).join(" ")}
             placeholder="Settings roles (trama.analysis, trama.execution)"
             options={modelOptions(list.models)}
             value={card.model?.name ?? ""}

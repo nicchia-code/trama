@@ -29,7 +29,6 @@ mock.module("vscode", () => ({
 }));
 const { Controller } = await import("../extension/src/host/controller");
 const { driftWork, localProjectJobs } = await import("../extension/src/host/drift-resolution");
-const { agentName } = await import("../extension/src/host/agent");
 
 let dir: string;
 let p: Project;
@@ -84,11 +83,6 @@ test("a valid prepared question is not stopped by a resolution awaiting a decisi
   expect(getProposal(p, manual.id).data.status).toBe("draft");
   expect(resolveDriftsBlocker(p, free)).not.toBeNull();
   expect(d.id).toBeTruthy();
-});
-
-test("the round of a prepared question is labelled Prepared question", () => {
-  expect(agentName({ prepared: true })).toBe("Prepared question");
-  expect(agentName({})).toBeNull();
 });
 
 /** A controller whose prepared round is answered by `answer`; `seen` collects what it was asked and the work in progress then. */

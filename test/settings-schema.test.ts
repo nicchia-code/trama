@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseToHost } from "../extension/src/host/messages";
-import { planSettingChange, settingsSchema, settingTitle, settingValueError, shownAgentValue, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
+import { planSettingChange, settingsSchema, settingTitle, settingValueError, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
 import { groupSettings, numberFromText, workspaceOverride } from "../extension/src/webview/settings/logic";
 
 const manifest: ManifestPackage = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
@@ -49,13 +49,13 @@ test("every key the manifest declares belongs to exactly one group, and every gr
 test("the groups and their keys keep the order of the Settings tab", () => {
   expect(SETTING_GROUPS.map((group) => [group.title, [...group.keys]])).toEqual([
     ["Appearance", ["trama.theme"]],
-    ["Agent", ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"]],
+    ["omp", ["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"]],
     ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat"]],
+    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat", "trama.ompChatApproval"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
-    ["Agent", ["trama.autoExit", "trama.language"]],
+    ["omp", ["trama.autoExit", "trama.language"]],
     ["Models", ["trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
     ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution"]],
@@ -155,7 +155,7 @@ test("the default and an empty text remove the value from the user settings", ()
 });
 
 test("an unknown Trama key is refused in a setting change", () => {
-  expect(planSettingChange(schema, "trama.unknown", true, "omp").ok).toBe(false);
+  expect(planSettingChange(schema, "trama.unknown", true).ok).toBe(false);
 });
 
 test("the workspace value is named only when it differs from the user's", () => {
@@ -186,36 +186,38 @@ test("the host accepts a setting change only for a manifest key with a conformin
   expect(parseToHost({ type: "setSetting", key: "trama.autoExit", value: true }).ok).toBe(false);
 });
 
-test("a left-over chat or claude, or any other value, is shown as cursor; cursor and omp stay, unset stays unset", () => {
-  expect(shownAgentValue("chat")).toBe("cursor");
-  expect(shownAgentValue("claude")).toBe("cursor");
-  expect(shownAgentValue("nonsense")).toBe("cursor");
-  expect(shownAgentValue("cursor")).toBe("cursor");
-  expect(shownAgentValue("omp")).toBe("omp");
-  expect(shownAgentValue(undefined)).toBeUndefined();
-});
-
 test("the host no longer accepts a delegation message or the old Drift autopilot key", () => {
   expect(parseToHost({ type: "setDelegation", mode: "yolo" }).ok).toBe(false);
   expect(parseToHost({ type: "setSetting", key: "trama.driftAutoPilot", value: "yolo" }, schema).ok).toBe(false);
   expect(properties["trama.driftAutoPilot"]).toBeUndefined();
 });
 
-test("omp Chat is a checkbox last in Features, off by default, with its title and description", () => {
+test("omp Chat is a checkbox in Features after Sub-agents Context Sharing, on by default, with its title and description", () => {
   const chat = properties["trama.ompChat"];
   expect(chat?.type).toBe("boolean");
-  expect(chat?.default).toBe(false);
+  expect(chat?.default).toBe(true);
   expect(chat?.scope).toBe("application");
-  expect(chat?.markdownDescription).toBe("On, with omp: Trama's jobs open a conversation in the omp Chat view instead of a terminal. Every command runs without asking.");
+  expect(chat?.markdownDescription).toBe("Trama's jobs open a conversation in the omp Chat view instead of a terminal.");
   expect(settingTitle("trama.ompChat")).toBe("omp Chat");
   const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
-  expect(keys[keys.length - 1]).toBe("trama.ompChat");
   expect(keys.indexOf("trama.ompChat")).toBe(keys.indexOf("trama.subagentsContextSharing") + 1);
   expect(settingsSchema(manifest).find((s) => s.key === "trama.ompChat")?.control).toBe("boolean");
 });
 
-test("a write of trama.ompChat is refused unless the agent is omp", () => {
-  expect(planSettingChange(settingsSchema(manifest), "trama.ompChat", true, "cursor").ok).toBe(false);
-  expect(planSettingChange(settingsSchema(manifest), "trama.ompChat", true, "omp")).toEqual({ ok: true, writes: [{ key: "trama.ompChat", value: true }] });
-  expect(planSettingChange(settingsSchema(manifest), "trama.driftBlocker", true, "cursor").ok).toBe(true);
+test("a write of trama.ompChat is planned like any other", () => {
+  expect(planSettingChange(settingsSchema(manifest), "trama.ompChat", false)).toEqual({ ok: true, writes: [{ key: "trama.ompChat", value: false }] });
+  expect(planSettingChange(settingsSchema(manifest), "trama.driftBlocker", true).ok).toBe(true);
+});
+
+test("omp Chat Approval is a select right after omp Chat in Features: ask by default, ask or yolo, user scope, with its explicit title", () => {
+  const approval = properties["trama.ompChatApproval"];
+  expect(approval?.type).toBe("string");
+  expect(approval?.enum).toEqual(["ask", "yolo"]);
+  expect(approval?.default).toBe("ask");
+  expect(approval?.scope).toBe("application");
+  expect(approval?.markdownDescription).toContain("runs every command without asking");
+  expect(settingTitle("trama.ompChatApproval")).toBe("omp Chat Approval");
+  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
+  expect(keys.indexOf("trama.ompChatApproval")).toBe(keys.indexOf("trama.ompChat") + 1);
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.ompChatApproval")?.control).toBe("enum");
 });

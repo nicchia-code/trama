@@ -43,7 +43,7 @@ interface TaskData {
   /** True while the agent has taken the Task (it is working on it); absent in Tasks written before the mark existed, which are free. */
   agent: boolean;
   /**
-   * Who took it, kept in the `agent` field instead of `true`: the agent terminal's ID, or `cursor` for Cursor's chat.
+   * Who took it, kept in the `agent` field instead of `true`: the ID of the agent terminal that took it (an omp Chat conversation has the ID of the terminal it replaces).
    * Null when free, taken before the holder was recorded, taken from an unknown origin, or read from legacy `editor`;
    * any end releases it.
    */
@@ -116,19 +116,22 @@ function parseTask(raw: Raw, where: string): TaskData {
   return data;
 }
 
-/** The `agent` field: false, true, or the holder that took the Task (a terminal ID or `cursor`). */
+/**
+ * The `agent` field: false, true, or the holder that took the Task (an agent terminal's ID). The values `cursor` and
+ * `cursor:<conversation>` are no longer valid: reading a Task that has one is an error until the developer fixes the file.
+ */
 function agentField(raw: Raw, where: string): { agent: boolean; holder: string | null } {
   const v = raw["agent"];
   if (typeof v === "string" && v.trim() !== "") {
     const holder = v.trim();
+    if (holder === "cursor" || holder.startsWith("cursor:")) throw new TramaError(`${where}: "agent" cannot be ${JSON.stringify(holder)}: Cursor is no longer supported, so correct the file (false, true or a terminal ID)`);
     return { agent: true, holder: holder === "editor" ? null : holder };
   }
   return { agent: boolField(raw, "agent", false, where), holder: null };
 }
 
-/** Task ownership recognizes agent terminals and Cursor's chat: `cursor:<conversation>`, or `cursor` for the project's chat without a known conversation. */
-const holderOf = (origin: AgentOrigin): string | null =>
-  origin.terminal ?? (origin.chat === "cursor" ? (origin.conversation ? `cursor:${origin.conversation}` : "cursor") : null);
+/** Task ownership belongs to agent terminals only: a command with no recognized terminal takes the Task with no holder. */
+const holderOf = (origin: AgentOrigin): string | null => origin.terminal ?? null;
 
 /** A card ID field that is a single value or a list of values; absent or null is an empty list. */
 function idListField(raw: Raw, key: string, where: string): string[] {
@@ -553,14 +556,13 @@ function scopedTodo(p: Project, filter: ProposalFilter, taskIds?: string[]) {
 }
 
 /**
- * The agent's command ended in `origin` (an agent terminal or Cursor's chat), so that agent is no longer working: the
- * Tasks it took are released and go back to To do. Tasks taken without a recorded holder count as any origin's.
+ * The agent's command ended in `origin` (an agent terminal, or an omp Chat conversation as the terminal it replaces), so
+ * that agent is no longer working: the Tasks it took are released and go back to To do. Tasks taken without a recorded
+ * holder count as any origin's.
  */
 export function releaseTasks(p: Project, origin: AgentOrigin): Task[] {
   const holder = holderOf(origin);
-  // The project's chat holder (`cursor`) is released by any conversation's end.
-  const chatHolder = origin.chat === "cursor" && origin.terminal === undefined ? "cursor" : null;
-  return releaseTaken(p, (task) => task.data.holder === null || task.data.holder === holder || task.data.holder === chatHolder);
+  return releaseTaken(p, (task) => task.data.holder === null || task.data.holder === holder);
 }
 
 /**

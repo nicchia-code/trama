@@ -3,13 +3,14 @@ import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState,
 import type { SettingSchema } from "../../host/settings-schema";
 import { cn } from "../lib/utils";
 import type { OpenLink } from "../markdown";
+import { InstallOmpButton } from "../install-omp";
 import { SettingField } from "../settings/field";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import type { WizardController, WizardSnapshot } from "./controller";
-import { agentCheckLine, chosenAgent, confirmLabel, hasPrevious, ignoresInstructionFiles, nextBlock, STEP_SENTENCES, stepsOf, summaryRows, type WizardChoice, type WizardState, type WizardStep, visibleKeys } from "./logic";
+import { agentCheckLine, confirmLabel, hasPrevious, ignoresInstructionFiles, nextBlock, ompMissing, STEP_KEYS, STEP_SENTENCES, stepsOf, summaryRows, type WizardChoice, type WizardState, type WizardStep } from "./logic";
 import { FolderTree } from "./tree";
 
 const WAYS: { choice: WizardChoice; title: string; sentence: string }[] = [
@@ -110,8 +111,8 @@ function PathBody({ controller, snapshot, state }: BodyProps) {
 /** The fields of a step, in the same grid as the Settings tab. */
 function SettingsBody({ controller, snapshot, state, openLink, step }: BodyProps & { step: WizardStep }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const keys = visibleKeys(step, chosenAgent(snapshot.schema, state));
-  const check = step === "Agent" ? agentCheckLine(snapshot.check) : null;
+  const keys = STEP_KEYS[step] ?? [];
+  const check = step === "omp" ? agentCheckLine(snapshot.check) : null;
   const fields = keys.flatMap((key) => snapshot.schema.find((s) => s.key === key) ?? []);
   return (
     <div>
@@ -139,8 +140,9 @@ function SettingsBody({ controller, snapshot, state, openLink, step }: BodyProps
             <span>{check.text}</span>
           </p>
         )}
+        {step === "omp" && ompMissing(snapshot.check) ? <InstallOmpButton className="mt-2" onInstall={() => controller.installOmp()} /> : null}
       </div>
-      {step === "Agent" && snapshot.instructionFiles !== null && snapshot.instructionFiles.length > 0 ? (
+      {step === "omp" && snapshot.instructionFiles !== null && snapshot.instructionFiles.length > 0 ? (
         <div className="mt-4 rounded-md border border-amber-600/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
           <p className="m-0 flex items-start gap-2">
             <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
@@ -226,7 +228,7 @@ function StepBody(props: BodyProps) {
 /** The buttons of the wizard: Cancel, Back, Skip and Next, or the confirmation on the summary. Next that cannot be used says why in its tooltip. */
 function Buttons({ controller, snapshot, state }: BodyProps) {
   const { busy } = snapshot;
-  const block = nextBlock(snapshot.schema, state);
+  const block = nextBlock(snapshot.schema, state, snapshot.check);
   const summary = state.step === "Summary";
   const reasonId = useId();
   const next = summary ? (

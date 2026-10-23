@@ -76,7 +76,7 @@ const TOOL_ICONS = { read: FileText, search: Search, execute: SquareTerminal, ed
 /** omp runs a sub-agent through its `task` tool. */
 const SUBAGENT_TOOL = /^(task|subagent)$/i;
 
-function ToolIcon({ block }: { block: Extract<Block, { kind: "tool" }> }) {
+function ToolIcon({ block }: { block: Pick<Extract<Block, { kind: "tool" }>, "name" | "toolKind"> }) {
   const Icon = block.name !== undefined && SUBAGENT_TOOL.test(block.name) ? Bot : TOOL_ICONS[block.toolKind];
   return <Icon className="size-3.5 shrink-0 text-muted-foreground" />;
 }
@@ -121,6 +121,33 @@ export function ToolCall({ block, openFile }: { block: Extract<Block, { kind: "t
         </pre>
       ) : null}
     </div>
+  );
+}
+
+/** A permission request of omp: a box with the colour of warnings, the tool call as its compact row and a button per option, in omp's order. After the choice it stays, read-only. */
+export function Permission({ block, onChoose }: { block: Extract<Block, { kind: "permission" }>; onChoose: (optionId: string) => void }) {
+  const chosen = block.options.find((option) => option.optionId === block.answer);
+  return (
+    <section aria-label="omp asks permission" data-permission={block.requestId} className="flex flex-col gap-2 rounded-lg border-2 border-amber-500 p-3">
+      <p className="font-medium">omp asks permission</p>
+      <div className="flex items-center gap-1.5 text-sm">
+        <ToolIcon block={block} />
+        <span className="truncate">{block.title}</span>
+      </div>
+      {block.cancelled ? (
+        <p className="text-muted-foreground">Cancelled</p>
+      ) : chosen !== undefined ? (
+        <p className="text-muted-foreground">{chosen.name}</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {block.options.map((option) => (
+            <Button key={option.optionId} type="button" size="sm" variant={option.kind.startsWith("reject") ? "outline" : "default"} onClick={() => onChoose(option.optionId)}>
+              {option.name}
+            </Button>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -20,7 +20,7 @@ bun run harness          # extension/dist/harness.html: the webview in a plain b
 bun run package          # a .vsix per platform (linux-x64, darwin-arm64, win32-x64) with the CLI inside
 ```
 
-If the shell was launched as a Trama agent or by Cursor's chat agent, use `env -u TRAMA_AGENT -u CURSOR_AGENT bun test`: the isolated test fixtures exercise developer-only commands as well.
+If the shell was launched as a Trama agent, use `env -u TRAMA_AGENT bun test`: the isolated test fixtures exercise developer-only commands as well.
 
 Try the CLI on the example Model:
 
@@ -36,7 +36,7 @@ To run the extension, open `extension/` in VS Code and press F5 after `bun run b
 
 - `src/core`: Model, Requirements, Proposals, Tasks and Drifts. No dependency on Bun, so the extension reuses it.
 - `src/cli`: the `trama` command line.
-- `extension/`: the VS Code / Cursor extension.
+- `extension/`: the VS Code extension.
 - `skills/`: the agent skills `trama project new` installs.
 - `docs/`: [file format](./docs/model-format.md), [CLI](./docs/cli.md), [decisions](./docs/adr).
 

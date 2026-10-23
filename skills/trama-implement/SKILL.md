@@ -25,7 +25,7 @@ With the Advisor Scanner on, step 7 never runs: announce no Scanning phase, and 
 
 - NEVER edit `.trama/model/`, `.trama/requirements/` or the generated `trama-req-*` skills.
 - Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. A request to design, implement Tasks or prepare a Drift resolution does not by itself authorize deciding it.
-- Every question to the developer goes through `trama question new`, as the "Asking" section of `trama-design` says: never with your own question tool, and never as a round written in the conversation.
+- Every question to the developer goes through `trama question new`, as the "Asking" section of `trama-design` says, waiting rules included (`timeout: 0`, no timers or polling): never with your own question tool, and never as a round written in the conversation.
 - NEVER implement behaviour that contradicts the Model, or code that contradicts a Requirement, to get something working.
 - Do not touch code unrelated to the Task.
 
@@ -54,13 +54,13 @@ When the instruction asks you to write in a language, everything you generate fo
 
 This section applies only when the instruction says "The Advisor Scanner is on". Without that sentence, skip it and follow the steps as written.
 
-With it, the Run does not scan: the advisors check the code against the Model during the run instead. With omp they are omp's advisors. In Cursor's chat the advisor is Trama's `trama-advisor` sub-agent: act on every text that begins with `Trama's Advisor` at once, starting `trama-advisor` as that text asks: in the background, with `run_in_background: true`, for a round of continuous review, and in the foreground, waiting for its outcome, for the review of a Task or the final review; do not stop the turn before the review it asks for is done. A text of that kind may come with a tool result or as the follow-up that keeps your turn open.
+With it, the Run does not scan: the advisors check the code against the Model during the run instead. They are omp's advisors.
 
 - **No pre-flight.** Announce no check for it and run no `trama task list` with `runnable` and `scope`. Start at step 1.
 - **No targeted scan.** Step 7 never runs, and no Scanning phase is announced: after step 6 the check goes straight to step 8, History, and closes as the "Announcing the check" section says.
-- **Advisor notes.** When the advisor finds that the code of a Task departs from the Model, the Requirements or the Task, it sends a note. Correct that code before moving the Task to Done; do not file a Drift for it. Cursor delivers the outcome of a background round to you by itself, with its notes: correct the code accordingly, without stopping. Never wait for a round or check on it: no `sleep`, no polling, and never read its transcript or its output files in `~/.cursor/subagents/`. Ignore the outcome of a round that Cursor delivers after you were asked for the review of a Task or the final review: that review covers it.
+- **Advisor notes.** When the advisor finds that the code of a Task departs from the Model, the Requirements or the Task, it sends a note. Correct that code before moving the Task to Done; do not file a Drift for it.
 - **Drifts from the advisor.** The advisor files a Drift only for code outside the Tasks of this run. Such a Drift has no origin (no `task`) and carries no `notBlocking`: it blocks every Task not Done that concerns the same thing. A Task already In progress that it blocks is not stopped: finish it, and the Run goes on with the others. The advisor gives no blocker judgement, and you give none for its Drifts.
-- **Sub-agents.** A sub-agent that implements a Task has the advisor too; it does steps 2 to 5 for its Task as above. In Cursor's chat, tell each sub-agent that implements a Task that its Task is reviewed by `trama-advisor` before it finishes: it must act at once on every text that begins with `Trama's Advisor`, as you do, never wait for or check on a background round, correct the code when Cursor delivers a round's outcome, and ignore the outcome of a round that arrives after the review of its Task was asked for.
+- **Sub-agents.** A sub-agent that implements a Task has the advisor too; it does steps 2 to 5 for its Task as above.
 
 ## Steps
 
@@ -178,7 +178,7 @@ This section applies only when the instruction says "The Async Drift Resolver is
 
 With it, at the very end of the work (after the last archiving, the end-of-Run scan and the `nonBlocking` resolution of the Drift blocker, if any, and before the final report and the History entries), you prepare the question of every Drift this work filed, so Resolve opens at once. You alone do this, never a sub-agent that compares or implements.
 
-1. **Find the Drifts.** Run `trama drift list --input -` with `{"currentJob":true,"unprepared":true}`, in a terminal and in Cursor's chat alike; never read `TRAMA_JOB` by hand: the command reads it itself. It lists the open Drifts of this work, the advisor's included, with no valid prepared question and outside every resolution. A Drift already in a resolution (the `nonBlocking` one) is left out.
+1. **Find the Drifts.** Run `trama drift list --input -` with `{"currentJob":true,"unprepared":true}`; never read `TRAMA_JOB` by hand: the command reads it itself. It lists the open Drifts of this work, the advisor's included, with no valid prepared question and outside every resolution. A Drift already in a resolution (the `nonBlocking` one) is left out.
 2. **Prepare each.** Follow "Writing a prepared question" in the `trama-resolve-drifts` skill (read it first) for each Drift, with the sub-agents you have: hand the exploration to at most `trama.maxParallelAgents` of them at once (the number the instruction gives, 20 when it gives none), one Drift (or a few that concern the same thing) each, and have each record its questions with `trama drift edit`. Without sub-agents, one Drift at a time. A sub-agent asks the developer nothing and registers no other card.
 3. **Report.** The final report says how many Drifts were prepared and which were not (with the reason).
 

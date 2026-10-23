@@ -96,8 +96,6 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     store.set({ error: null, diagnostics: snapshot.diagnostics, decisions: boardDecisionCount(buildBoard(snapshot)) });
   } else if (message.type === "withdrawn") {
     board.withdrawn?.(message.announcements);
-  } else if (message.type === "finalReviewMissing") {
-    board.finalReviewMissing?.(message.reason);
   } else if (message.type === "stoppedFollowing") {
     board.stoppedFollowing?.(message.subject, message.reason);
   } else if (message.type === "error") {
@@ -108,8 +106,8 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     settings.receive(message);
     getStarted.receiveSettings(message);
   } else if (message.type === "modelSuggestions") {
-    // An answer for an agent the wizard asked about is the wizard's alone; the Settings tab and the Board take the ones for the saved agent.
-    if (message.agent !== undefined) {
+    // An answer for an omp path the wizard asked about is the wizard's alone; the Settings tab and the Board take the ones for the saved path.
+    if (message.ompPath !== undefined) {
       settings.receiveWizardModels(message);
       getStarted.receiveModels(message);
     } else {
@@ -119,6 +117,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   } else if (message.type === "workspaceFolders") getStarted.receiveFolders(message);
   else if (message.type === "guidedSetup") settings.openGuidedSetup(message);
   else if (message.type === "guidedSetupResult") settings.receiveResult(message);
+  else if (message.type === "ompStatus") settings.receiveOmpStatus(message);
   else if (message.type === "agentCheck") {
     settings.receiveAgentCheck(message);
     getStarted.receiveAgentCheck(message);

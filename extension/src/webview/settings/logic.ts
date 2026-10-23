@@ -2,6 +2,7 @@ import type { ModelSuggestion } from "../../host/model-lists";
 import type { ComboboxOption } from "../ui/combobox";
 import type { ThemeSetting } from "../theme";
 import type { SettingSchema, SettingsValues } from "../../host/settings-schema";
+import type { ToWebview } from "../../protocol";
 
 /** The settings grouped under their titles, in schema order. */
 export function groupSettings(schema: readonly SettingSchema[]): { title: string; settings: SettingSchema[] }[] {
@@ -41,4 +42,14 @@ export function themeSetting(value: unknown): ThemeSetting {
 /** The entries of a model field's list: the name typed in the field, and its readable name when it differs. */
 export function modelOptions(models: readonly ModelSuggestion[]): ComboboxOption[] {
   return models.map((model) => (model.label !== undefined && model.label !== model.value ? { value: model.value, label: model.label } : { value: model.value }));
+}
+
+/** The host's `ompStatus` message without its type; null while nothing has arrived, which reads as checking. */
+export type OmpStatus = Omit<Extract<ToWebview, { type: "ompStatus" }>, "type">;
+
+/** The line of the omp group: being checked, the version that answers, or the reason it does not (and `missing` for `Install omp`). */
+export function ompStatusLine(status: OmpStatus | null): { tone: "checking" | "ok" | "warning"; text: string; missing: boolean } {
+  if (status === null || status.state === "checking") return { tone: "checking", text: "Checking omp…", missing: false };
+  if (status.error !== undefined || status.version === undefined) return { tone: "warning", text: `${status.error ?? "omp did not answer"}. Trama cannot work without omp.`, missing: status.missing === true };
+  return { tone: "ok", text: `omp ${status.version}`, missing: false };
 }

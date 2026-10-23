@@ -1,14 +1,13 @@
 import { afterAll, beforeAll, describe, expect, mock, spyOn, test, vi } from "bun:test";
-import { basename, join, relative, isAbsolute, sep } from "node:path";
+import { basename, delimiter, join, relative, isAbsolute, sep } from "node:path";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 const { tmpdir } = os;
-// The editor writes the chat's sub-agent definition into the developer's home: a temporary one keeps the real home untouched.
+// Some host code reads the developer's home: a temporary one keeps the real home untouched.
 const home = mkdtempSync(join(tmpdir(), "trama-agent-home-"));
 mock.module("node:os", () => ({ ...os, homedir: () => home }));
 afterAll(() => rmSync(home, { recursive: true, force: true }));
 import { announce, listAnnouncements, withdrawAll } from "../src/core/announcements";
-import type { CursorHook } from "../src/core/cursor-chat";
 import { newProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { announcedGhosts } from "../extension/src/webview/board/logic";
@@ -78,7 +77,7 @@ const activateIntegration = (terminal: FakeTerminal): void => {
 /** The environment each fake terminal was created with, in the order created. */
 const environments: Record<string, string>[] = [];
 /** Every terminal Trama created, in order, including the folder, the name and where it opened. */
-const created: { name?: string; cwd?: string; env: Record<string, string>; location?: unknown }[] = [];
+const created: { name?: string; cwd?: string; shellPath?: string; env: Record<string, string>; location?: unknown }[] = [];
 /** The editor's tab groups by column. */
 const tabGroups = { columns: [1] };
 /** What `inspect` reports for a setting key. */
@@ -120,7 +119,7 @@ mock.module("vscode", () => ({
     onDidEndTerminalShellExecution: subscribe(listeners.end),
     onDidChangeTerminalShellIntegration: subscribe(listeners.integration),
     onDidCloseTerminal: subscribe(listeners.close),
-    createTerminal: (options: { name?: string; cwd?: string; env: Record<string, string>; location?: unknown }) => {
+    createTerminal: (options: { name?: string; cwd?: string; shellPath?: string; env: Record<string, string>; location?: unknown }) => {
       environments.push(options.env);
       created.push(options);
       const terminal: FakeTerminal = {
@@ -217,7 +216,10 @@ mock.module("vscode", () => ({
 mock.module("../extension/src/host/questions", () => ({ questionEndpoint: () => questionEndpoint(), questionWindowId: async () => "window-id", ownWindowId: () => undefined, EditorQuestions: class {}, askPreparedRound: async () => undefined }));
 
 let dir: string;
-beforeAll(() => {
+/** The omp the launches find: what `trama.ompPath` says, else `omp`; the check before a launch is tested in omp-launch.test.ts. */
+let ompFound: (ompPath: string) => Promise<string | undefined> = async (ompPath) => (ompPath === "" ? "omp" : ompPath);
+beforeAll(async () => {
+  (await import("../extension/src/host/omp-launch")).setOmpLauncher((ompPath) => ompFound(ompPath));
   dir = mkdtempSync(join(tmpdir(), "trama-terminals-"));
   cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
 });
@@ -362,39 +364,6 @@ describe("taken Tasks and the agent terminals", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
-
-  test("the end of a turn of a Trama conversation in Cursor's chat, however it ends, sends every taken Task back to To do", async () => {
-    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
-    const { watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const p = projectAt(dir);
-    const watching = watchAgentTerminal();
-    const hook = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ root: dir, conversation: "r1", ...h });
-    const take = () => {
-      const t = newTask(p, { title: "T", refs: ["order/Paid"], technical: false });
-      moveTask(p, t.id, "doing", "agent");
-      return t.id;
-    };
-    const taken = (id: string) => [getTask(p, id).data.column, getTask(p, id).data.agent];
-    try {
-      const a = take();
-      hook({ hook: "stop", status: "completed", conversation: "not-trama" });
-      hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
-      expect(taken(a)).toEqual(["doing", true]);
-      hook({ hook: "stop", status: "completed" });
-      expect(taken(a)).toEqual(["todo", false]);
-
-      const b = take();
-      hook({ hook: "stop", status: "error" });
-      expect(taken(b)).toEqual(["todo", false]);
-
-      const c = take();
-      hook({ hook: "sessionEnd", reason: "window_close" });
-      expect(taken(c)).toEqual(["todo", false]);
-    } finally {
-      watching.dispose();
-    }
-  });
 });
 
 describe("the identity of an agent terminal", () => {
@@ -479,7 +448,7 @@ describe("Quick Task", () => {
       expect(environments.at(-1)).toMatchObject({ TRAMA_AGENT: "1", TRAMA_TERMINAL: id });
       expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_ADVISOR_SCANNER");
       expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_JOB");
-      expect(terminal.line).toBe("omp --model 'fast'");
+      expect(terminal.line).toBe("'omp' --model 'fast'");
       expect(terminal.shown).toEqual([false]);
       expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["work", "Quick", id]]);
       listeners.end.forEach((fn) => fn(shell(terminal)));
@@ -489,13 +458,76 @@ describe("Quick Task", () => {
       settingValues.execution = "";
       await openQuickTask(dir);
       const second = terminals.at(-1) as FakeTerminal;
-      expect(second.line).toBe("omp");
+      expect(second.line).toBe("'omp'");
       expect(listAnnouncements(p)).toHaveLength(1);
       listeners.close.forEach((fn) => fn(second));
       expect(listAnnouncements(p)).toEqual([]);
     } finally {
       for (const key of Object.keys(settingValues)) delete settingValues[key];
       Object.assign(settingValues, saved);
+    }
+  });
+
+  test("Install omp opens a bare terminal in the home folder with the official installer, and the end of the command or the terminal tells it finished", async () => {
+    const { installOmp, INSTALL_OMP_COMMAND, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    const p = projectAt(dir);
+    withdrawAll(p);
+    inspected["terminalLocation"] = { globalValue: "editor" };
+    try {
+      let finished = 0;
+      const first = installOmp(() => void finished++, false) as unknown as FakeTerminal;
+      expect(created.at(-1)).toMatchObject({ name: "Install omp", cwd: os.homedir() });
+      expect(created.at(-1)?.location).toBeUndefined();
+      expect(created.at(-1)?.shellPath).toBeUndefined();
+      const env = created.at(-1)?.env ?? {};
+      expect(Object.keys(env).filter((key) => key.startsWith("TRAMA_"))).toEqual([]);
+      expect(first.line).toBe("curl -fsSL https://omp.sh/install | sh");
+      expect(first.line).toBe(INSTALL_OMP_COMMAND.posix);
+      expect(first.shown).toEqual([false]);
+      expect(listAnnouncements(p)).toEqual([]);
+      listeners.end.forEach((fn) => fn(shell(first, "unrelated command")));
+      expect(finished).toBe(0);
+      listeners.end.forEach((fn) => fn(shell(first)));
+      expect(finished).toBe(1);
+      listeners.close.forEach((fn) => fn(first));
+      listeners.end.forEach((fn) => fn(shell(first)));
+      expect(finished).toBe(1);
+
+      const second = installOmp(() => void finished++, true) as unknown as FakeTerminal;
+      expect(second).not.toBe(first);
+      expect(second.line).toBe("irm https://omp.sh/install.ps1 | iex");
+      expect(created.at(-1)?.shellPath).toMatch(/WindowsPowerShell.v1\.0.powershell\.exe$/);
+      listeners.close.forEach((fn) => fn(second));
+      expect(finished).toBe(2);
+    } finally {
+      delete inspected["terminalLocation"];
+      watching.dispose();
+    }
+  });
+
+  test("the controller's Install omp forgets the update outcome and checks omp again in the wizard and in Settings when the command ends", async () => {
+    const { setUpdateStore, OMP_UPDATE_KEY } = await import("../extension/src/host/omp-update");
+    const data = new Map<string, unknown>([[OMP_UPDATE_KEY, { checkedAt: 1 }]]);
+    setUpdateStore({ get: <T>(key: string) => data.get(key) as T | undefined, update: async (key: string, value: unknown) => void (value === undefined ? data.delete(key) : data.set(key, value)) } as never);
+    const { Controller } = await import("../extension/src/host/controller");
+    const controller = new Controller({ scheme: "file" } as never);
+    const calls: string[] = [];
+    const spied = controller as unknown as { checkAgent(path: string): Promise<void>; postOmpStatus(): Promise<void> };
+    spied.checkAgent = async () => void calls.push("checkAgent");
+    spied.postOmpStatus = async () => void calls.push("postOmpStatus");
+    const watching = (await import("../extension/src/host/agent")).watchAgentTerminal();
+    try {
+      controller.installOmp();
+      const terminal = terminals.at(-1) as FakeTerminal;
+      expect(calls).toEqual([]);
+      expect(data.has(OMP_UPDATE_KEY)).toBe(true);
+      listeners.close.forEach((fn) => fn(terminal));
+      expect(calls).toEqual(["checkAgent", "postOmpStatus"]);
+      expect(data.has(OMP_UPDATE_KEY)).toBe(false);
+    } finally {
+      setUpdateStore(undefined);
+      watching.dispose();
     }
   });
 
@@ -513,51 +545,42 @@ describe("Quick Task", () => {
     }
   });
 
-  test("with Cursor's chat only composer.createNew is called, with no text, and an error shows the message without deeplink or clipboard", async () => {
+  test("a `cursor` value left in trama.agent still opens the Quick terminal: no composer command, no clipboard, no message", async () => {
     const { openQuickTask } = await import("../extension/src/host/agent");
     const savedAgent = settingValues["agent"];
-    const savedHandler = commandHandler;
-    const calls: unknown[][] = [];
+    const before = { calls: editorCalls.length, terminals: terminals.length, clipboard: clipboard.length, errors: errorMessages.length };
     settingValues["agent"] = "cursor";
     editor.appName = "Cursor";
-    const before = { calls: editorCalls.length, terminals: terminals.length, clipboard: clipboard.length, errors: errorMessages.length };
     try {
-      commandHandler = (id, ...args) => void calls.push([id, ...args]);
-      settingValues["execution"] = "";
       await openQuickTask(dir);
-      settingValues["execution"] = " gpt ";
-      await openQuickTask(dir);
-      expect(calls).toEqual([
-        ["composer.createNew", { partialState: { unifiedMode: "agent" }, openInNewTab: true }],
-        ["composer.createNew", { partialState: { unifiedMode: "agent", modelConfig: { modelName: "gpt", maxMode: false } }, openInNewTab: true }],
-      ]);
-      commandHandler = () => { throw new Error("missing"); };
-      await openQuickTask(dir);
-      expect(errorMessages.slice(before.errors)).toEqual(["Trama: could not open a new Cursor chat."]);
-      expect(editorCalls.slice(before.calls)).toEqual(["composer.createNew", "composer.createNew", "composer.createNew"]);
-      expect(terminals).toHaveLength(before.terminals);
+      expect(terminals).toHaveLength(before.terminals + 1);
+      expect(created.at(-1)).toMatchObject({ name: "Quick", cwd: dir });
+      expect((terminals.at(-1) as FakeTerminal).line).toMatch(/^'?omp'?$/);
+      expect(editorCalls).toHaveLength(before.calls);
       expect(clipboard).toHaveLength(before.clipboard);
-      expect(listAnnouncements(projectAt(dir))).toEqual([]);
+      expect(errorMessages).toHaveLength(before.errors);
     } finally {
-      commandHandler = savedHandler;
       editor.appName = "Visual Studio Code";
       settingValues["agent"] = savedAgent;
-      delete settingValues["execution"];
+      withdrawAll(projectAt(dir));
     }
   });
-
-  test("outside Cursor with Cursor's chat chosen nothing opens and the clipboard is untouched", async () => {
+  test("the Quick terminal runs the configured omp program, quoted, with the options it had", async () => {
     const { openQuickTask } = await import("../extension/src/host/agent");
-    const savedAgent = settingValues["agent"];
-    settingValues["agent"] = "cursor";
-    const before = { calls: editorCalls.length, terminals: terminals.length, clipboard: clipboard.length };
+    const saved = { ...settingValues };
+    settingValues["execution"] = "fast";
+    inspected["ompPath"] = { globalValue: "  /opt/my omp/omp  " };
     try {
       await openQuickTask(dir);
-      expect(editorCalls).toHaveLength(before.calls);
-      expect(terminals).toHaveLength(before.terminals);
-      expect(clipboard).toHaveLength(before.clipboard);
+      expect((terminals.at(-1) as FakeTerminal).line).toBe("'/opt/my omp/omp' --model 'fast'");
+      inspected["ompPath"] = { workspaceValue: "/tmp/evil/omp" };
+      await openQuickTask(dir);
+      expect((terminals.at(-1) as FakeTerminal).line).toBe("'omp' --model 'fast'");
     } finally {
-      settingValues["agent"] = savedAgent;
+      delete inspected["ompPath"];
+      for (const key of Object.keys(settingValues)) delete settingValues[key];
+      Object.assign(settingValues, saved);
+      withdrawAll(projectAt(dir));
     }
   });
 });
@@ -586,9 +609,9 @@ describe("omp run hooks", () => {
       expect(secondId).not.toBe(firstId);
 
       for (const [terminal, id] of [[first, firstId], [second, secondId]] as const) {
-        expect(terminal.line).toContain(`omp --hook '${join(extensionPath, "dist", "omp-hook.js")}' --model 'haiku' `);
+        expect(terminal.line).toContain(`'omp' --hook '${join(extensionPath, "dist", "omp-hook.js")}' --model 'haiku' `);
         expect(id).toMatch(/^[a-z0-9]{6}$/);
-        expect(environments.find((env) => env["TRAMA_TERMINAL"] === id)?.["TRAMA_TERMINAL"]).toBe(id);
+        expect(environments.find((env) => env?.["TRAMA_TERMINAL"] === id)?.["TRAMA_TERMINAL"]).toBe(id);
       }
       expect(typed.slice(-2)).toEqual([first.line, second.line]);
       listeners.end.forEach((fn) => fn(shell(first)));
@@ -749,116 +772,17 @@ describe("automatic terminal exit", () => {
       delete settingValues.autoExit;
     }
   });
-  test("autoExit never closes chats", async () => {
-    const { launchAgent } = await import("../extension/src/host/agent");
-    const count = terminals.length;
-    const appName = editor.appName;
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    try {
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan")).toBe("sent");
-      expect(terminals).toHaveLength(count);
-    } finally {
-      settingValues.agent = "omp";
-      editor.appName = appName;
-    }
-  });
-  test("chat instructions include the user-scoped sub-agent limit", async () => {
-    const { launchAgent } = await import("../extension/src/host/agent");
-    const previousHandler = commandHandler;
-    const previousApp = editor.appName;
-    let query = "";
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    settingValues.maxParallelAgents = 6;
-    inspected.maxParallelAgents = { globalValue: 6, workspaceValue: 80 };
-    commandHandler = (id, ...args) => {
-      if (id === "composer.createNew") query = (args[0] as { partialState: { text: string } }).partialState.text;
-    };
-    try {
-      expect(await launchAgent(dir, "Use the trama-design skill. Add refunds.", "Design")).toBe("sent");
-      expect(query).toBe(`Use the trama-design skill. Add refunds. Run at most 6 sub-agents at once.\n${ASK_DEVELOPER_SENTENCE}`);
-    } finally {
-      commandHandler = previousHandler;
-      editor.appName = previousApp;
-      settingValues.agent = "omp";
-      delete settingValues.maxParallelAgents;
-      delete inspected.maxParallelAgents;
-    }
-  });
-  test("chat instructions carry the Drift blocker's sentence only for the instructions that may file Drifts, and only from the user setting", async () => {
-    const { launchAgent } = await import("../extension/src/host/agent");
-    const previousHandler = commandHandler;
-    const previousApp = editor.appName;
-    const sentence = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
-    const scan = "Use the trama-scan skill on the whole System.";
-    let query = "";
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    inspected.driftBlocker = { globalValue: true };
-    commandHandler = (id, ...args) => {
-      if (id === "composer.createNew") query = (args[0] as { partialState: { text: string } }).partialState.text;
-    };
-    try {
-      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence}\n${ASK_DEVELOPER_SENTENCE}`);
-      expect(await launchAgent(dir, "Use the trama-design skill. Add refunds.", "Design", undefined, undefined, undefined, undefined, { filesDrifts: false })).toBe("sent");
-      expect(query).not.toContain(sentence);
-      inspected.driftBlocker = { workspaceValue: true };
-      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.\n${ASK_DEVELOPER_SENTENCE}`);
-    } finally {
-      commandHandler = previousHandler;
-      editor.appName = previousApp;
-      settingValues.agent = "omp";
-      delete inspected.driftBlocker;
-    }
-  });
-  test("a Run sent to Cursor's chat with the Advisor Scanner on carries the chat advisor sentence after the limit and no comparison sentence, also on the clipboard", async () => {
-    const { launchAgent } = await import("../extension/src/host/agent");
-    const { ADVISOR_CHAT_SENTENCE } = await import("../src/core/advisors");
-    const previousHandler = commandHandler;
-    const previousApp = editor.appName;
-    const run = "Use the trama-implement skill on task abc12345.";
-    let query = "";
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    inspected.advisorScanner = { globalValue: true };
-    commandHandler = (id, ...args) => {
-      if (id === "composer.createNew") query = (args[0] as { partialState: { text: string } }).partialState.text;
-    };
-    try {
-      expect(await launchAgent(dir, run, "Implement", undefined, undefined, "run")).toBe("sent");
-      expect(query).toBe(`${run} Run at most 20 sub-agents at once. ${ADVISOR_CHAT_SENTENCE}\n${ASK_DEVELOPER_SENTENCE}`);
-      expect(query).not.toContain("Compare each Machine");
-      expect(await launchAgent(dir, run, "Implement")).toBe("sent");
-      expect(query).not.toContain(ADVISOR_CHAT_SENTENCE);
-    } finally {
-      // The Run's job never saw its conversation: end it, or the next conversation of the file would be watched by its Advisor.
-      const { endUnsentJob, localProjectJobs } = await import("../extension/src/host/drift-resolution");
-      for (const job of localProjectJobs(dir)) endUnsentJob(dir, job.id);
-      commandHandler = previousHandler;
-      editor.appName = previousApp;
-      settingValues.agent = "omp";
-      delete inspected.advisorScanner;
-    }
-  });
-  test("the Advisor Scanner is on only from the user value true, with every agent", async () => {
+  test("the Advisor Scanner is on only from the user value true", async () => {
     // Loaded after the editor and home mocks above are in place: a static import would run before them.
     const { configuredAdvisorScanner } = await import("../extension/src/host/agent");
     try {
-      settingValues.agent = "omp";
       inspected.advisorScanner = { globalValue: true };
       expect(configuredAdvisorScanner()).toBe(true);
       inspected.advisorScanner = { globalValue: "true" };
       expect(configuredAdvisorScanner()).toBe(false);
       inspected.advisorScanner = { workspaceValue: true };
       expect(configuredAdvisorScanner()).toBe(false);
-      inspected.advisorScanner = { globalValue: true };
-      settingValues.agent = "cursor";
-      expect(configuredAdvisorScanner()).toBe(true);
     } finally {
-      settingValues.agent = "omp";
       delete inspected.advisorScanner;
     }
   });
@@ -909,21 +833,13 @@ describe("automatic terminal exit", () => {
   });
   test("the Async Drift Resolver is on only from the user value true, and its sentence follows the Drift blocker's", async () => {
     const { configuredAsyncDriftResolver, launchAgent } = await import("../extension/src/host/agent");
-    const previousHandler = commandHandler;
-    const previousApp = editor.appName;
     const blocker = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
     const resolver = "The Async Drift Resolver is on: before finishing, prepare the resolution question of every Drift filed in this job, as your skill says.";
     const scan = "Use the trama-scan skill on the whole System.";
     const base = `${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.`;
-    let query = "";
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    commandHandler = (id, ...args) => {
-      const [chat] = args;
-      if (id === "composer.createNew" && typeof chat === "object" && chat !== null && "partialState" in chat) {
-        const state = chat.partialState;
-        if (typeof state === "object" && state !== null && "text" in state && typeof state.text === "string") query = state.text;
-      }
+    const send = async (instruction: string, name: string, filesDrifts: boolean) => {
+      await launchAgent(dir, instruction, name, undefined, undefined, undefined, undefined, { filesDrifts });
+      return typed.at(-1) ?? "";
     };
     try {
       expect(configuredAsyncDriftResolver()).toBe(false);
@@ -933,28 +849,19 @@ describe("automatic terminal exit", () => {
       expect(configuredAsyncDriftResolver()).toBe(false);
       inspected.asyncDriftResolver = { globalValue: true };
       expect(configuredAsyncDriftResolver()).toBe(true);
-      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${base} ${resolver}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${base} ${resolver} ${ASK_DEVELOPER_SENTENCE}'`);
       inspected.driftBlocker = { globalValue: true };
-      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${base} ${blocker} ${resolver}\n${ASK_DEVELOPER_SENTENCE}`);
-      expect(await launchAgent(dir, "Use the trama-design skill. Add refunds.", "Design", undefined, undefined, undefined, undefined, { filesDrifts: false })).toBe("sent");
-      expect(query).not.toContain(resolver);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${base} ${blocker} ${resolver} ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(await send("Use the trama-design skill. Add refunds.", "Design", false)).not.toContain(resolver);
       delete inspected.asyncDriftResolver;
-      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${base} ${blocker}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${base} ${blocker} ${ASK_DEVELOPER_SENTENCE}'`);
     } finally {
-      commandHandler = previousHandler;
-      editor.appName = previousApp;
-      settingValues.agent = "omp";
       delete inspected.asyncDriftResolver;
       delete inspected.driftBlocker;
     }
   });
   test("the Context Sharing sentence follows the Async Drift Resolver's, or the limit and blocker sentences, on every instruction with the limit", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
-    const previousHandler = commandHandler;
-    const previousApp = editor.appName;
     const sharing = 'The sub-agents context sharing is on: pass each sub-agent what you have already read that concerns its part, as the "Sub-agents context sharing" section of your skill says.';
     const blocker = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
     const resolver = "The Async Drift Resolver is on: before finishing, prepare the resolution question of every Drift filed in this job, as your skill says.";
@@ -962,74 +869,43 @@ describe("automatic terminal exit", () => {
     const design = "Use the trama-design skill. Add refunds.";
     const scanBase = `${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.`;
     const designBase = `${design} Run at most 20 sub-agents at once.`;
-    let query = "";
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    commandHandler = (id, ...args) => {
-      const [chat] = args;
-      if (id === "composer.createNew" && typeof chat === "object" && chat !== null && "partialState" in chat) {
-        const state = chat.partialState;
-        if (typeof state === "object" && state !== null && "text" in state && typeof state.text === "string") query = state.text;
-      }
+    const send = async (instruction: string, name: string, filesDrifts: boolean) => {
+      await launchAgent(dir, instruction, name, undefined, undefined, undefined, undefined, { filesDrifts });
+      return typed.at(-1) ?? "";
     };
     try {
       inspected.subagentsContextSharing = { globalValue: "true" };
-      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${scanBase}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${ASK_DEVELOPER_SENTENCE}'`);
       inspected.subagentsContextSharing = { workspaceValue: true };
-      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${scanBase}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${ASK_DEVELOPER_SENTENCE}'`);
       inspected.subagentsContextSharing = { globalValue: true };
-      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${scanBase} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
-      expect(await launchAgent(dir, design, "Design", undefined, undefined, undefined, undefined, { filesDrifts: false })).toBe("sent");
-      expect(query).toBe(`${designBase} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
-      expect(await launchAgent(dir, "Resolve the Drift.", "Resolve Drifts")).toBe("sent");
-      expect(query).toBe(`Resolve the Drift. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${sharing} ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(await send(design, "Design", false)).toBe(`'omp' '${designBase} ${sharing} ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(await send("Resolve the Drift.", "Resolve Drifts", false)).toBe(`'omp' 'Resolve the Drift. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sharing} ${ASK_DEVELOPER_SENTENCE}'`);
       inspected.driftBlocker = { globalValue: true };
-      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${scanBase} ${blocker} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${blocker} ${sharing} ${ASK_DEVELOPER_SENTENCE}'`);
       inspected.asyncDriftResolver = { globalValue: true };
-      expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
-      expect(query).toBe(`${scanBase} ${blocker} ${resolver} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${blocker} ${resolver} ${sharing} ${ASK_DEVELOPER_SENTENCE}'`);
     } finally {
-      commandHandler = previousHandler;
-      editor.appName = previousApp;
-      settingValues.agent = "omp";
       delete inspected.subagentsContextSharing;
       delete inspected.asyncDriftResolver;
       delete inspected.driftBlocker;
     }
   });
-  test("chat instructions are built when sent and not sent if delivery conditions change", async () => {
+  test("an instruction is built when it is sent, and is not sent if the delivery conditions change", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
-    const previousHandler = commandHandler;
-    const previousApp = editor.appName;
-    let scope = "the Drift open before preparation";
-    let query = "";
-    let canDeliver = true;
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    commandHandler = (id, ...args) => {
-      if (id === "composer.createNew") query = (args[0] as { partialState: { text: string } }).partialState.text;
-    };
-    try {
-      scope = "the Drift open at send time";
-      expect(await launchAgent(dir, () => `Resolve ${scope}.`, "Drifts")).toBe("sent");
-      expect(query).toBe(`Resolve the Drift open at send time. Run at most 20 sub-agents at once.\n${ASK_DEVELOPER_SENTENCE}`);
+    let scope = "the Drift open before the instruction is sent";
+    const sending = launchAgent(dir, () => `Resolve ${scope}.`, "Drifts");
+    scope = "the Drift open at send time";
+    expect(await sending).toBe("terminal");
+    expect(typed.at(-1)).toBe(`'omp' 'Resolve the Drift open at send time. Run at most 20 sub-agents at once. ${ASK_DEVELOPER_SENTENCE}'`);
 
-      editorCalls.length = 0;
-      query = "";
-      let checks = 0;
-      canDeliver = false;
-      expect(await launchAgent(dir, () => `Resolve ${scope}.`, "Resolve Drifts", undefined, () => checks++ < 2)).toBe("not-sent");
-      expect(editorCalls).toEqual([]);
-      expect(query).toBe("");
-    } finally {
-      commandHandler = previousHandler;
-      editor.appName = previousApp;
-      settingValues.agent = "omp";
-    }
+    const terminalCount = terminals.length;
+    const typedCount = typed.length;
+    let checks = 0;
+    expect(await launchAgent(dir, () => `Resolve ${scope}.`, "Resolve Drifts", undefined, () => checks++ < 2)).toBeUndefined();
+    expect(terminals).toHaveLength(terminalCount);
+    expect(typed).toHaveLength(typedCount);
   });
 });
 
@@ -1132,32 +1008,32 @@ describe("agent instruction settings", () => {
     const instruction = "Use the trama-scan skill on the whole System.";
 
     await launchAgent(dir, instruction, "Scan");
-    expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
+    expect(typed.at(-1)).toBe(`'omp' '${instruction} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
     settingValues["maxParallelAgents"] = 4;
     inspected["maxParallelAgents"] = { globalValue: 4, workspaceValue: 99 };
     await launchAgent(dir, instruction, "Scan");
-    expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
+    expect(typed.at(-1)).toBe(`'omp' '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
     delete inspected["maxParallelAgents"];
     for (const invalid of ["", 0, -2, 1.5, "3"]) {
       settingValues["maxParallelAgents"] = invalid;
       await launchAgent(dir, instruction, "Scan");
-      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(typed.at(-1)).toBe(`'omp' '${instruction} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
     }
 
     settingValues["language"] = " Italian ";
     try {
       settingValues["maxParallelAgents"] = 4;
       await launchAgent(dir, instruction, "Scan");
-      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} Write everything you generate in Italian, except code, which always stays in English.'`);
+      expect(typed.at(-1)).toBe(`'omp' '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} Write everything you generate in Italian, except code, which always stays in English.'`);
       expect(typed.at(-1)?.split("\\n")).toHaveLength(1);
 
       settingValues["language"] = "English";
       await launchAgent(dir, instruction, "Scan");
-      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} Write everything you generate in English, except code, which always stays in English.'`);
+      expect(typed.at(-1)).toBe(`'omp' '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} Write everything you generate in English, except code, which always stays in English.'`);
 
       settingValues["language"] = "   ";
       await launchAgent(dir, instruction, "Scan");
-      expect(typed.at(-1)).toBe(`omp '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(typed.at(-1)).toBe(`'omp' '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
     } finally {
       delete settingValues["language"];
       delete settingValues["maxParallelAgents"];
@@ -1173,9 +1049,9 @@ describe("agent instruction settings", () => {
     };
     inspected["driftBlocker"] = { globalValue: true };
     try {
-      expect(await send(scan, "Scan", true)).toBe(`omp '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
-      expect(await send("Use the trama-implement skill on Task abc.", "T3", true)).toBe(`omp 'Use the trama-implement skill on Task abc. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
-      expect(await send("Use the trama-import skill on this repository.", "Import", true)).toBe(`omp 'Use the trama-import skill on this repository. Run at most 20 sub-agents at once. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(await send("Use the trama-implement skill on Task abc.", "T3", true)).toBe(`'omp' 'Use the trama-implement skill on Task abc. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(await send("Use the trama-import skill on this repository.", "Import", true)).toBe(`'omp' 'Use the trama-import skill on this repository. Run at most 20 sub-agents at once. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
       expect((await send(buildPrompt({ kind: "implement-all" }), "All tasks", true)).endsWith(` ${sentence} ${ASK_DEVELOPER_SENTENCE}'`)).toBe(true);
       expect(await send("Use the trama-design skill. Add refunds.", "Design", false)).not.toContain(sentence);
       expect(await send("Use the trama-resolve-drifts skill on the open Drifts ab12cd34.", "Drifts", false)).not.toContain(sentence);
@@ -1192,7 +1068,7 @@ describe("agent instruction settings", () => {
 
       inspected["driftBlocker"] = { globalValue: true };
       settingValues["language"] = "Italian";
-      expect(await send(scan, "Scan", true)).toBe(`omp '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE} Write everything you generate in Italian, except code, which always stays in English.'`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE} Write everything you generate in Italian, except code, which always stays in English.'`);
     } finally {
       delete inspected["driftBlocker"];
       delete settingValues["language"];
@@ -1210,7 +1086,7 @@ describe("agent instruction settings", () => {
     };
     inspected["parallelExecution"] = { globalValue: true };
     try {
-      expect(await send(all, "All tasks", true)).toBe(`omp '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(await send(all, "All tasks", true)).toBe(`'omp' '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
       expect((await send(buildPrompt({ kind: "implement-all" }), "All tasks", true)).includes(` Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`)).toBe(true);
       expect(await send("Use the trama-implement skill on Task abc.", "T3", false)).not.toContain(sentence);
       expect(await send("Use the trama-scan skill on the whole System.", "Scan", false)).not.toContain(sentence);
@@ -1223,12 +1099,12 @@ describe("agent instruction settings", () => {
       inspected["parallelExecution"] = { workspaceValue: true };
       expect(await send(all, "All tasks", true)).not.toContain(sentence);
       delete inspected["parallelExecution"];
-      expect(await send(all, "All tasks", true)).toBe(`omp '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
+      expect(await send(all, "All tasks", true)).toBe(`'omp' '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
     } finally {
       delete inspected["parallelExecution"];
     }
   });
-  test("every instruction carries the ask sentence: on its line before the language in a terminal, on its own line in Cursor's chat and on the clipboard outside Cursor", async () => {
+  test("every instruction carries the ask sentence on its line, after the Drift blocker's sentence and before the language one", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const jobs: [string, string][] = [
       [buildPrompt({ kind: "written-design", request: "r" }), "Design"],
@@ -1239,121 +1115,84 @@ describe("agent instruction settings", () => {
       [buildPrompt({ kind: "import" }), "Import"],
       [buildPrompt({ kind: "resolve-drifts", drift: "ab12cd34" }), "Drifts"],
     ];
-    const previousHandler = commandHandler;
-    const previousApp = editor.appName;
     try {
+      for (const [instruction, name] of jobs) {
+        await launchAgent(dir, instruction, name);
+        expect(typed.at(-1)).toEndWith(` ${ASK_DEVELOPER_SENTENCE}'`);
+        expect(typed.at(-1)).not.toContain("\n");
+      }
       settingValues["language"] = "Italian";
       for (const [instruction, name] of jobs) {
         await launchAgent(dir, instruction, name);
-        expect(typed.at(-1)).toContain(`${ASK_DEVELOPER_SENTENCE} Write everything you generate in Italian, except code, which always stays in English.'`);
-      }
-      delete settingValues["language"];
-
-      settingValues.agent = "cursor";
-      editor.appName = "Cursor";
-      commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
-      for (const [instruction, name] of jobs) {
-        editorCalls.length = 0;
-        expect(await launchAgent(dir, instruction, name)).toBe("confirm");
-        expect(decodeURIComponent(String(editorCalls.at(-1)))).toContain(`\n${ASK_DEVELOPER_SENTENCE}`);
-      }
-
-      editor.appName = "Visual Studio Code";
-      for (const [instruction, name] of jobs) {
-        clipboard.length = 0;
-        editorCalls.length = 0;
-        expect(await launchAgent(dir, instruction, name)).toBe("clipboard");
-        expect(editorCalls).toEqual([]);
-        expect(clipboard.at(-1)).toContain(` ${ASK_DEVELOPER_SENTENCE}`);
-        expect(clipboard.at(-1)).not.toContain(`\n${ASK_DEVELOPER_SENTENCE}`);
+        expect(typed.at(-1)).toEndWith(` ${ASK_DEVELOPER_SENTENCE} Write everything you generate in Italian, except code, which always stays in English.'`);
+        expect(typed.at(-1)).not.toContain("\n");
       }
     } finally {
       delete settingValues["language"];
-      settingValues.agent = "omp";
-      editor.appName = previousApp;
-      commandHandler = previousHandler;
     }
   });
 });
 
-describe("choosing the agent", () => {
-  test("Cursor's chat is the default and legacy settings cannot redirect or configure a launch", async () => {
-    const { agentName, configuredAgent, launchAgent } = await import("../extension/src/host/agent");
+describe("the agent", () => {
+  test("every instruction goes to omp in a terminal in any editor: a trama.agent value left in the user settings, cursor included, and the legacy settings are not read, changed or warned about", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
     const instruction = "Use the trama-scan skill on the whole System.";
-    const createdBefore = created.length;
     const previousApp = editor.appName;
-    delete settingValues.agent;
+    const before = { clipboard: clipboard.length, offers: answerOffer.length, errors: errorMessages.length, warnings: warningMessages.length };
     settingValues.agentLauncher = "terminal";
     settingValues.terminalAgent = "codex";
     settingValues.agentCommand = "custom-agent {prompt}";
     updates.length = 0;
     editorCalls.length = 0;
-    editor.appName = "Cursor";
+    pick = () => {
+      throw new Error("unexpected agent-selection prompt");
+    };
     try {
-      expect(configuredAgent()).toBe("cursor");
-      expect(await launchAgent(dir, instruction, "Scan")).toBe("sent");
-      expect(editorCalls).toEqual(["composer.createNew"]);
-      expect(created).toHaveLength(createdBefore);
-      expect(updates).toEqual([]);
-      expect(agentName({ fromTramaTerminal: true })).toBeNull();
-      for (const old of ["chat", "claude", "anything"]) {
-        settingValues.agent = old;
-        expect(configuredAgent()).toBe("cursor");
-        editorCalls.length = 0;
-        expect(await launchAgent(dir, instruction, "Scan")).toBe("sent");
-        expect(editorCalls).toEqual(["composer.createNew"]);
-        expect(updates).toEqual([]);
+      for (const agent of [undefined, "cursor", "chat", "claude", "omp"]) {
+        for (const appName of ["Visual Studio Code", "Cursor"]) {
+          if (agent === undefined) delete settingValues.agent;
+          else settingValues.agent = agent;
+          editor.appName = appName;
+          const count = terminals.length;
+          expect(await launchAgent(dir, instruction, "Scan")).toBe("terminal");
+          expect(terminals).toHaveLength(count + 1);
+          expect(typed.at(-1)).toStartWith("'omp' ");
+        }
       }
+      expect(updates).toEqual([]);
+      expect(editorCalls).toEqual([]);
+      expect(clipboard).toHaveLength(before.clipboard);
+      expect(answerOffer).toHaveLength(before.offers);
+      expect(errorMessages).toHaveLength(before.errors);
+      expect(warningMessages).toHaveLength(before.warnings);
     } finally {
       editor.appName = previousApp;
       settingValues.agent = "omp";
       for (const key of ["agentLauncher", "terminalAgent", "agentCommand"]) delete settingValues[key];
+      pick = () => undefined;
     }
   });
 
-  test("with cursor outside Cursor nothing is tried or started: the terminal's prompt goes to the clipboard with an Open Settings message", async () => {
+  test("the command is the omp program Trama runs, quoted: trama.ompPath from the user settings without edge spaces, else omp from the PATH, and a workspace value never counts", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
-    const previousApp = editor.appName;
-    const count = terminals.length;
-    settingValues.agent = "cursor";
-    editor.appName = "Visual Studio Code";
-    clipboard.length = 0;
-    editorCalls.length = 0;
-    answerOffer.length = 0;
-    const p = projectAt(dir);
-    const announced = listAnnouncements(p).length;
+    const instruction = "Use the trama-scan skill on the whole System.";
+    const lineWith = async (value: { globalValue?: unknown; workspaceValue?: unknown } | undefined) => {
+      if (value === undefined) delete inspected["ompPath"];
+      else inspected["ompPath"] = value;
+      await launchAgent(dir, instruction, "Scan");
+      return typed.at(-1) ?? "";
+    };
     try {
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scan" }, () => true, "scan")).toBe("clipboard");
-      expect(clipboard).toEqual([`Use the trama-scan skill on the whole System. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}`]);
-      expect(editorCalls).toEqual([]);
-      expect(terminals).toHaveLength(count);
-      expect(listAnnouncements(p)).toHaveLength(announced);
-      answerOffer.at(-1)?.("Open Settings");
-      for (let turn = 0; turn < 5; turn++) await Promise.resolve();
-      expect(editorCalls).toEqual(["trama.openSettings"]);
+      expect(await lineWith(undefined)).toStartWith("'omp' ");
+      expect(await lineWith({ globalValue: "" })).toStartWith("'omp' ");
+      expect(await lineWith({ globalValue: "   " })).toStartWith("'omp' ");
+      expect(await lineWith({ globalValue: "  /opt/my omp/bin/omp  " })).toStartWith("'/opt/my omp/bin/omp' ");
+      expect(await lineWith({ globalValue: "/opt/it's/omp" })).toStartWith(`'/opt/it'\\''s/omp' `);
+      expect(await lineWith({ workspaceValue: "/tmp/evil/omp" })).toStartWith("'omp' ");
+      expect(await lineWith({ globalValue: "/opt/omp", workspaceValue: "/tmp/evil/omp" })).toStartWith("'/opt/omp' ");
+      expect(await lineWith({ globalValue: 7 })).toStartWith("'omp' ");
     } finally {
-      settingValues.agent = "omp";
-      editor.appName = previousApp;
-    }
-  });
-
-  test("the selected terminal agent launches without a prompt or settings migration", async () => {
-    const { launchAgent } = await import("../extension/src/host/agent");
-    settingValues.agent = "omp";
-    settingValues.terminalAgent = "codex";
-    settingValues.agentCommand = "legacy {prompt}";
-    updates.length = 0;
-    try {
-      pick = () => {
-        throw new Error("unexpected agent-selection prompt");
-      };
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan")).toBe("terminal");
-      expect(typed.at(-1)).toStartWith("omp '");
-      expect(updates).toEqual([]);
-    } finally {
-      settingValues.agent = "omp";
-      delete settingValues.terminalAgent;
-      delete settingValues.agentCommand;
+      delete inspected["ompPath"];
     }
   });
 });
@@ -1372,30 +1211,10 @@ describe("announcing a design request", () => {
     expect(ghosts.map((g) => g.column)).toEqual(["backlog"]);
     expect(ghosts.map((g) => g.card.title)).toEqual(["Add refunds"]);
   });
-
-  test("a design request sent to a chat announces a Proposal titled with the request, as the terminal does", async () => {
-    const { launchAgent } = await import("../extension/src/host/agent");
-    const p = projectAt(dir);
-    const before = listAnnouncements(p).length;
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    commandHandler = (id) => (id === "composer.createNew" ? { composerId: "c" } : undefined);
-    try {
-      expect(await launchAgent(dir, "Use the trama-design skill. Another change", "Design", "Another change")).toBe("sent");
-    } finally {
-      settingValues.agent = "omp";
-      editor.appName = "Visual Studio Code";
-      commandHandler = () => undefined;
-    }
-    expect(listAnnouncements(p).slice(before).map((a) => ({ kind: a.kind, source: a.source, title: a.title, terminal: a.terminal, proposal: a.proposal }))).toEqual([
-      { kind: "proposal", source: "request", title: "Another change", terminal: null, proposal: null },
-    ]);
-    expect(announcedGhosts(buildSnapshot(p).announcements, false).map((g) => g.card.title)).toContain("Another change");
-  });
 });
 
 describe("announcing every launch as its instruction starts", () => {
-  const announced = (p: Project, from: number) => listAnnouncements(p).slice(from).map((a) => ({ kind: a.kind, title: a.title, phase: a.phase, terminal: a.terminal, chat: a.chat, drifts: a.drifts }));
+  const announced = (p: Project, from: number) => listAnnouncements(p).slice(from).map((a) => ({ kind: a.kind, title: a.title, phase: a.phase, terminal: a.terminal, drifts: a.drifts }));
 
   test("a terminal scan, import and Resolve Drifts announce their card at once, and a Run announces nothing", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
@@ -1404,15 +1223,15 @@ describe("announcing every launch as its instruction starts", () => {
     try {
       let before = listAnnouncements(p).length;
       await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan");
-      expect(announced(p, before)).toEqual([{ kind: "check", title: "Scanning System", phase: "scanning", terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: [] }]);
+      expect(announced(p, before)).toEqual([{ kind: "check", title: "Scanning System", phase: "scanning", terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, drifts: [] }]);
 
       before = listAnnouncements(p).length;
       await launchAgent(dir, "Use the trama-import skill on this repository.", "Import", { kind: "work", title: "Importing from code" });
-      expect(announced(p, before)).toEqual([{ kind: "work", title: "Importing from code", phase: null, terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: [] }]);
+      expect(announced(p, before)).toEqual([{ kind: "work", title: "Importing from code", phase: null, terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, drifts: [] }]);
 
       before = listAnnouncements(p).length;
       await launchAgent(dir, "Use the trama-resolve-drifts skill on the Drifts.", "Drifts", { kind: "resolve", drifts: () => ["aaaa1111", "bbbb2222"] });
-      expect(announced(p, before)).toEqual([{ kind: "proposal", title: "Resolve Drifts", phase: null, terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, chat: null, drifts: ["aaaa1111", "bbbb2222"] }]);
+      expect(announced(p, before)).toEqual([{ kind: "proposal", title: "Resolve Drifts", phase: null, terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, drifts: ["aaaa1111", "bbbb2222"] }]);
 
       before = listAnnouncements(p).length;
       await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
@@ -1421,158 +1240,6 @@ describe("announcing every launch as its instruction starts", () => {
       // Ends the terminals the launches opened, so no Run or resolution is left open for the tests that follow.
       for (const terminal of terminals.slice(terminalCount)) listeners.close.forEach((fn) => fn(terminal));
     }
-  });
-
-  test("a chat launch announces only when its instruction is really sent: the clipboard and the confirmation step announce nothing", async () => {
-    const { launchAgent } = await import("../extension/src/host/agent");
-    // Dynamic: the module must load after mock.module replaced "vscode".
-    const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const p = projectAt(dir);
-    const previousHandler = commandHandler;
-    const previousApp = editor.appName;
-    const before = listAnnouncements(p).length;
-    settingValues.agent = "cursor";
-    try {
-      // Outside Cursor the instruction goes to the clipboard and nothing is announced.
-      editor.appName = "Visual Studio Code";
-      commandHandler = () => undefined;
-      expect(await launchAgent(dir, "Use the trama-resolve-drifts skill on the Drifts.", "Drifts", { kind: "resolve", drifts: () => ["cccc3333"] })).toBe("clipboard");
-      expect(listAnnouncements(p)).toHaveLength(before);
-
-      // Cursor's self-sending step is missing: the deeplink waits for the developer's Enter, so nothing is announced yet.
-      editor.appName = "Cursor";
-      commandHandler = (id) => { if (id === "composer.createNew") throw new Error("missing"); };
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan")).toBe("confirm");
-      expect(listAnnouncements(p)).toHaveLength(before);
-
-      // Sent by itself: the card is announced in the project's chat.
-      commandHandler = () => undefined;
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan")).toBe("sent");
-      expect(announced(p, before)).toEqual([{ kind: "check", title: "Scanning System", phase: "scanning", terminal: null, chat: "cursor", drifts: [] }]);
-    } finally {
-      // Ends the chat job of the last launch, so no Run or resolution is left open for the tests that follow.
-      receiveCursorHook({ root: dir, conversation: "announce-chat", hook: "beforeSubmitPrompt", tramaPrompt: true });
-      receiveCursorHook({ root: dir, conversation: "announce-chat", hook: "stop", status: "completed" });
-      commandHandler = previousHandler;
-      editor.appName = previousApp;
-      settingValues.agent = "omp";
-    }
-  });
-
-  test("a chat launch's card is already announced when its self-sending step runs, and is taken back silently when that step fails", async () => {
-    // Dynamic: the module must load after mock.module replaced "vscode".
-    const { launchAgent } = await import("../extension/src/host/agent");
-    const p = projectAt(dir);
-    const before = listAnnouncements(p).length;
-    const previousHandler = commandHandler;
-    const previousApp = editor.appName;
-    const previousAgent = settingValues.agent;
-    let seenDuringSend = -1;
-    settingValues.agent = "cursor";
-    try {
-      editor.appName = "Cursor";
-      commandHandler = (id) => {
-        if (id !== "composer.createNew") return undefined;
-        seenDuringSend = listAnnouncements(p).length;
-        throw new Error("missing");
-      };
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan")).toBe("confirm");
-      expect(seenDuringSend).toBe(before + 1);
-      expect(listAnnouncements(p)).toHaveLength(before);
-    } finally {
-      commandHandler = previousHandler;
-      editor.appName = previousApp;
-      settingValues.agent = previousAgent;
-    }
-  });
-});
-
-/** Runs `check` as if the editor ran on `platform`: the PATH line of Cursor's instruction depends on it. */
-function onPlatform(platform: string, check: () => void): void {
-  const original = Object.getOwnPropertyDescriptor(process, "platform");
-  try {
-    Object.defineProperty(process, "platform", { value: platform });
-    check();
-  } finally {
-    if (original) Object.defineProperty(process, "platform", original);
-  }
-}
-
-describe("the selected chat in Cursor", () => {
-  test("the chat tries self-sending, then the deeplink, then the clipboard, each once", async () => {
-    const { launchAgent } = await import("../extension/src/host/agent");
-    const typedBefore = typed.length;
-    editor.appName = "Cursor";
-    settingValues.agent = "cursor";
-    try {
-      editorCalls.length = 0;
-      commandHandler = (id) => (id === "composer.createNew" ? { composerId: "c" } : undefined);
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan")).toBe("sent");
-      expect(editorCalls).toEqual(["composer.createNew"]);
-
-      editorCalls.length = 0;
-      commandHandler = () => undefined;
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan")).toBe("sent");
-      expect(editorCalls).toEqual(["composer.createNew"]);
-      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", "Scan")).toBe("sent");
-
-      editorCalls.length = 0;
-      commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
-      expect(await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan")).toBe("confirm");
-      expect(editorCalls).toHaveLength(2);
-      expect(editorCalls[0]).toBe("composer.createNew");
-      expect(String(editorCalls[1])).toContain(`cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent("Use the trama-scan skill on the whole System.")}`);
-
-      editorCalls.length = 0;
-      clipboard.length = 0;
-      expect(await launchAgent(dir, "Use the trama-design skill. Read .env", "Design")).toBe("clipboard");
-      expect(editorCalls).toEqual(["composer.createNew"]);
-      expect(clipboard).toEqual([`Use the trama-design skill. Read .env Run at most 20 sub-agents at once.\n${ASK_DEVELOPER_SENTENCE}`]);
-      expect(typed.length).toBe(typedBefore);
-
-      editorCalls.length = 0;
-      clipboard.length = 0;
-      commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
-      expect(await launchAgent(dir, "Use the trama-scan skill on the Feature `checkout`.", "Scan", undefined, () => true, "scan")).toBe("confirm");
-      expect(editorCalls).toHaveLength(2);
-      expect(String(editorCalls[1])).toContain("cursor://anysphere.cursor-deeplink/prompt?");
-      editorCalls.length = 0;
-      expect(await launchAgent(dir, "Use the trama-scan skill. Read .env", "Scan", undefined, () => true, "scan")).toBe("clipboard");
-      expect(editorCalls).toEqual(["composer.createNew"]);
-      expect(clipboard).toHaveLength(1);
-    } finally {
-      settingValues.agent = "omp";
-      editor.appName = "Visual Studio Code";
-      commandHandler = () => undefined;
-    }
-  });
-
-  test("the instruction to Cursor's chat says where the shipped trama program is, and stays one line without one", async () => {
-    // Dynamic, as above: the module must load after mock.module replaced "vscode".
-    const { withTramaPath } = await import("../extension/src/host/cursor");
-    onPlatform("darwin", () => {
-      expect(withTramaPath("Use the trama-scan skill on the whole System. Write in Italian.", "/ext/bin/trama")).toBe(
-        'Use the trama-scan skill on the whole System. Write in Italian.\nThe trama command may not be on your PATH. Before anything else run: export PATH="/ext/bin:$PATH"',
-      );
-      expect(withTramaPath("Use the trama-scan skill on the whole System.")).toBe("Use the trama-scan skill on the whole System.");
-    });
-    onPlatform("win32", () => {
-      expect(withTramaPath("Use the trama-scan skill on the whole System. Write in Italian.", "C:\\ext\\bin\\trama.exe")).toBe(
-        "Use the trama-scan skill on the whole System. Write in Italian.\nThe trama command may not be on your PATH. Run it by its full path: C:\\ext\\bin\\trama.exe",
-      );
-    });
-  });
-
-  test("the ask line follows the PATH line in Cursor's instruction, or the instruction when there is no PATH line", async () => {
-    // Dynamic, as above: the module must load after mock.module replaced "vscode".
-    const { withAskLine, withTramaPath } = await import("../extension/src/host/cursor");
-    const ask = ASK_DEVELOPER_SENTENCE;
-    onPlatform("darwin", () => {
-      expect(withAskLine(withTramaPath("Use the trama-design skill on the design request in `.trama/requests/r.md`.", "/ext/bin/trama"))).toBe(
-        `Use the trama-design skill on the design request in \`.trama/requests/r.md\`.\nThe trama command may not be on your PATH. Before anything else run: export PATH="/ext/bin:$PATH"\n${ask}`,
-      );
-    });
-    expect(withAskLine("Use the trama-import skill on this repository.")).toBe(`Use the trama-import skill on this repository.\n${ask}`);
   });
 });
 
@@ -1612,30 +1279,6 @@ describe("withdrawing the ghosts", () => {
     listeners.close.forEach((fn) => fn({ ...closeTerminal }));
     listeners.end.forEach((fn) => fn(shell({ ...closeTerminal })));
     expect(listAnnouncements(p)).toHaveLength(1);
-    subscription.dispose();
-    withdrawAll(p);
-  });
-
-  test("the execution check closing a chat job withdraws only what belongs to it: a never-bound job gives up its launch announcement silently, a bound one its conversation's with the notice", async () => {
-    // Dynamic, as above: the module must load after mock.module replaced "vscode".
-    const { onAnnouncementsWithdrawn, withdrawForCheck } = await import("../extension/src/host/announcements");
-    const p = projectAt(dir);
-    const told: string[][] = [];
-    const subscription = onAnnouncementsWithdrawn((views) => told.push(views.map((v) => `${v.kind}:${v.title}`)));
-    withdrawAll(p);
-
-    const launch = announce(p, { kind: "proposal", title: "Launched", source: "request", chat: "cursor" });
-    announce(p, { kind: "drift", title: "Project chat", chat: "editor" });
-    announce(p, { kind: "task", title: "Other conversation", chat: "cursor", conversation: "other" });
-    announce(p, { kind: "task", title: "Terminal", terminal: "abc123" });
-    withdrawForCheck(dir, { announcement: launch.id });
-    expect(told).toEqual([]);
-    expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Project chat", "Other conversation", "Terminal"]);
-
-    announce(p, { kind: "task", title: "Mine", chat: "cursor", conversation: "mine" });
-    withdrawForCheck(dir, { conversation: "mine" });
-    expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Other conversation", "Terminal"]);
-    expect(told).toEqual([["drift:Project chat", "task:Mine"]]);
     subscription.dispose();
     withdrawAll(p);
   });
@@ -1796,7 +1439,7 @@ describe("withdrawing the ghosts", () => {
     const told: string[] = [];
     const subscription = onAnnouncementsWithdrawn((views) => told.push(...views.map((v) => `${v.phase}:${v.title}`)));
     withdrawAll(p);
-    newProposal(p, "Real title");
+    newProposal(p, "Real title", "", { origin: { terminal: "aaa111" } });
     withdrawWaiting(dir);
     subscription.dispose();
     expect(told).toEqual(["writing:Real title"]);
@@ -1812,7 +1455,7 @@ describe("synchronizing Writing titles", () => {
     const watching = watchAnnouncements(() => root);
     try {
       const a = announce(p, { kind: "proposal", title: "Planned", source: "request", terminal: "ab12cd" });
-      const draft = newProposal(p, "Initial", "", { announcement: a.id });
+      const draft = newProposal(p, "Initial", "", { announcement: a.id, origin: { terminal: "ab12cd" } });
       const boundTouched = listAnnouncements(p)[0]?.touched;
       const file = join(p.dir, "announcements", `${a.id}.md`);
       const proposalFile = join(draft.dir, "proposal.md");
@@ -1821,6 +1464,7 @@ describe("synchronizing Writing titles", () => {
       writeFileSync(proposalFile, proposal.replace("# Initial", "# Updated title è"));
       synchronizeAnnouncementTitles(p);
       expect(readFileSync(file, "utf8")).toBe(original.replace("# Initial", "# Updated title è"));
+      expect(readFileSync(file, "utf8")).toContain("Updated title è");
       expect(listAnnouncements(p)[0]?.touched).toBe(boundTouched);
 
       const old = new Date(Date.now() - 60_000);
@@ -1828,10 +1472,10 @@ describe("synchronizing Writing titles", () => {
       expect(statSync(file).mtimeMs).toBe(old.getTime());
 
       writeFileSync(proposalFile, "unreadable");
-      expect(readFileSync(file, "utf8")).toContain("# Planned");
+      expect(readFileSync(file, "utf8")).toContain("# Updated title è");
       writeFileSync(proposalFile, proposal.replace("status: draft", "status: open").replace("# Initial", "# Handed over"));
       synchronizeAnnouncementTitles(p);
-      expect(readFileSync(file, "utf8")).toContain("# Planned");
+      expect(readFileSync(file, "utf8")).toContain("# Updated title è");
       withdrawAll(p);
       writeFileSync(proposalFile, proposal.replace("# Initial", "# After withdrawal"));
       synchronizeAnnouncementTitles(p);
@@ -1839,86 +1483,6 @@ describe("synchronizing Writing titles", () => {
     } finally {
       watching.dispose();
       rmSync(root, { recursive: true, force: true });
-    }
-  });
-});
-
-describe("the ghosts of Cursor's chat agent", () => {
-  test("normal and interrupted turns withdraw chat ghosts with notice, closing withdraws silently", async () => {
-    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
-    const { onAnnouncementsWithdrawn, watchAnnouncements } = await import("../extension/src/host/announcements");
-    const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const p = projectAt(dir);
-    withdrawAll(p);
-    const watching = watchAnnouncements(() => undefined);
-    const told: string[] = [];
-    const subscription = onAnnouncementsWithdrawn((views) => told.push(...views.map((v) => v.title)));
-    const hook = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ conversation: "t", root: dir, ...h });
-    const chatGhost = (title: string) => announce(p, { kind: "task", title, chat: "cursor" });
-    try {
-      chatGhost("Chat");
-      announce(p, { kind: "task", title: "Terminal", terminal: "ab12cd" });
-      announce(p, { kind: "task", title: "Nobody's", source: "request" });
-      const titles = () => listAnnouncements(p).map((a) => a.title).sort();
-
-      hook({ hook: "stop", status: "aborted" }); // not yet a Trama conversation
-      hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
-      hook({ hook: "stop", status: "completed" });
-      expect(titles()).toEqual(["Nobody's", "Terminal"]);
-      expect(told).toEqual(["Chat"]);
-
-      chatGhost("Interrupted");
-      hook({ hook: "stop", status: "error" });
-      expect(titles()).toEqual(["Nobody's", "Terminal"]);
-      expect(told).toEqual(["Chat", "Interrupted"]);
-
-      chatGhost("Closed");
-      hook({ hook: "sessionEnd", reason: "user_close" });
-      expect(titles()).toEqual(["Nobody's", "Terminal"]);
-
-      // A `sessionEnd` that reports an abort or an error interrupts the turn like a `stop` would.
-      hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
-      chatGhost("Session aborted");
-      hook({ hook: "sessionEnd", reason: "aborted" });
-      expect(titles()).toEqual(["Nobody's", "Terminal"]);
-      expect(told).toEqual(["Chat", "Interrupted", "Session aborted"]);
-    } finally {
-      subscription.dispose();
-      watching.dispose();
-      withdrawAll(p);
-    }
-  });
-
-  test("a conversation's end withdraws only its own ghosts and those without a conversation", async () => {
-    const { onAnnouncementsWithdrawn, watchAnnouncements } = await import("../extension/src/host/announcements");
-    const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const p = projectAt(dir);
-    withdrawAll(p);
-    const watching = watchAnnouncements(() => undefined);
-    const told: string[] = [];
-    const subscription = onAnnouncementsWithdrawn((views) => told.push(...views.map((v) => v.title)));
-    const hook = (conversation: string, h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ conversation, root: dir, ...h });
-    try {
-      hook("a", { hook: "beforeSubmitPrompt", tramaPrompt: true });
-      hook("b", { hook: "beforeSubmitPrompt", tramaPrompt: true });
-      announce(p, { kind: "task", title: "Of A", chat: "cursor", conversation: "a" });
-      announce(p, { kind: "task", title: "Of B", chat: "cursor", conversation: "b" });
-      announce(p, { kind: "task", title: "No conversation", chat: "editor" });
-      const titles = () => listAnnouncements(p).map((a) => a.title).sort();
-
-      hook("a", { hook: "stop", status: "completed" });
-      expect(titles()).toEqual(["Of B"]);
-      expect(told.sort()).toEqual(["No conversation", "Of A"]);
-
-      hook("a", { hook: "stop", status: "error" });
-      expect(titles()).toEqual(["Of B"]);
-      hook("b", { hook: "sessionEnd", reason: "user_close" });
-      expect(titles()).toEqual([]);
-      expect(told.sort()).toEqual(["No conversation", "Of A"]);
-    } finally {
-      subscription.dispose();
-      watching.dispose();
-      withdrawAll(p);
     }
   });
 });
@@ -1932,18 +1496,16 @@ describe("starting the editor with Tasks an agent had taken", () => {
     cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
     try {
       const p = projectAt(root);
-      const take = (origin: { terminal?: string; chat?: "cursor" | "editor" }) => moveTask(p, newTask(p, { title: "Taken", refs: ["order/Paid"], technical: false }).id, "doing", "agent", origin).id;
+      const take = (origin: { terminal?: string }) => moveTask(p, newTask(p, { title: "Taken", refs: ["order/Paid"], technical: false }).id, "doing", "agent", origin).id;
       const byTerminal = take({ terminal: "aaa111" });
-      const byCursor = take({ chat: "cursor" });
-      const byEditor = take({ chat: "editor" });
+      const byEditor = take({});
       const byDeveloper = moveTask(p, newTask(p, { title: "Developer", refs: ["order/Paid"], technical: false }).id, "doing", "developer").id;
       announce(p, { kind: "task", title: "Left on disk", terminal: "aaa111" });
 
       const watching = watchAnnouncements(() => root);
       try {
         expect(listAnnouncements(p)).toEqual([]);
-        expect([byTerminal, byCursor, byEditor, byDeveloper].map((id) => [getTask(p, id).data.column, getTask(p, id).data.agent !== false])).toEqual([
-          ["doing", true],
+        expect([byTerminal, byEditor, byDeveloper].map((id) => [getTask(p, id).data.column, getTask(p, id).data.agent !== false])).toEqual([
           ["doing", true],
           ["doing", true],
           ["doing", false],
@@ -2136,24 +1698,10 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const { driftWork } = await import("../extension/src/host/drift-resolution");
-    const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
     const watching = watchAgentTerminal();
-    const queries: string[] = [];
+    const terminalCount = terminals.length;
+    const lines = () => terminals.slice(terminalCount).map((terminal) => terminal.line);
     let open = ["d1"];
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    commandHandler = async (id, ...args) => {
-      if (id === "composer.createNew") {
-        const options = args[0];
-        if (options && typeof options === "object" && "partialState" in options) {
-          const partialState = options.partialState;
-          if (partialState && typeof partialState === "object" && "text" in partialState && typeof partialState.text === "string")
-            queries.push(partialState.text);
-        }
-        return { composerId: "c" };
-      }
-    };
     const resolve = () => launchAgent(dir, () => `Resolve ${open.join(",")}`, "Resolve Drifts", undefined, () => !driftWork().resolving && !driftWork().running, "resolve");
     const run = () => launchAgent(dir, "Run", "Run", undefined, () => !driftWork().resolving, "run");
     try {
@@ -2161,297 +1709,69 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
       const first = resolve();
       open = ["d1", "d2"];
       const second = resolve();
-      expect(await Promise.all([first, second])).toEqual(["sent", "not-sent"]);
-      expect(queries).toHaveLength(1);
-      expect(queries[0]).toContain("Resolve d1,d2");
+      expect(await Promise.all([first, second])).toEqual(["terminal", undefined]);
+      expect(lines()).toHaveLength(1);
+      expect(lines()[0]).toContain("Resolve d1,d2");
       expect(driftWork().resolving).toBe(true);
-      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "c1"); // the chat starts the conversation of the job
 
       // A Run asked while Resolve Drifts works sends nothing.
       expect(await run()).toBeUndefined();
-      turn({ hook: "stop", status: "completed" }, "c1");
+      expect(lines()).toHaveLength(1);
+      const [resolving] = terminals.slice(terminalCount);
+      if (resolving !== undefined) listeners.close.forEach((fn) => fn(resolving));
       expect(driftWork()).toEqual({ resolving: false, running: false });
 
       // A Run and Resolve Drifts asked together: the first to send wins, the other sends nothing.
-      queries.length = 0;
       const runFirst = run();
       const resolveSecond = resolve();
-      expect(await Promise.all([runFirst, resolveSecond])).toEqual(["sent", "not-sent"]);
-      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "c2");
+      expect(await Promise.all([runFirst, resolveSecond])).toEqual(["terminal", undefined]);
       expect(driftWork()).toEqual({ resolving: false, running: true });
-      expect(queries).toHaveLength(1);
+      expect(lines()).toHaveLength(2);
     } finally {
-      turn({ hook: "stop", status: "completed" }, "c1");
-      turn({ hook: "stop", status: "completed" }, "c2");
-      settingValues.agent = "omp";
-      editor.appName = "Visual Studio Code";
-      commandHandler = () => undefined;
-      watching.dispose();
-    }
-  });
-  test("a terminal Run waits for a pending chat Resolve Drifts delivery before checking its conditions", async () => {
-    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { bindChatJob, driftWork, endChatJobs } = await import("../extension/src/host/drift-resolution");
-    const watching = watchAgentTerminal();
-    const previousHandler = commandHandler;
-    const previousApp = editor.appName;
-    let releaseNewChat!: () => void;
-    const newChatStarted = Promise.withResolvers<void>();
-    const preparing = new Promise<void>((resolve) => { releaseNewChat = resolve; });
-    let chat: Promise<unknown> | undefined;
-    let run: Promise<unknown> | undefined;
-    let terminalChecks = 0;
-    const terminalCount = terminals.length;
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    commandHandler = async (id) => {
-      if (id === "composer.createNew") {
-        newChatStarted.resolve();
-        await preparing;
-      }
-    };
-    editorCalls.length = 0;
-    try {
-      chat = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, () => true, "resolve");
-      await newChatStarted.promise;
-      expect(editorCalls).toContain("composer.createNew");
-
-      settingValues.agent = "omp";
-      run = launchAgent(dir, "Run", "Run", undefined, () => {
-        terminalChecks++;
-        return !driftWork().resolving;
-      }, "run");
-      await Promise.resolve();
-      expect(terminalChecks).toBe(0);
-
-      releaseNewChat();
-      expect(await chat).toBe("sent");
-      expect(driftWork().resolving).toBe(true);
-      expect(await run).toBeUndefined();
-      expect(terminalChecks).toBe(1);
-      expect(terminals).toHaveLength(terminalCount);
-    } finally {
-      releaseNewChat();
-      await chat?.catch(() => undefined);
-      await run?.catch(() => undefined);
       for (const terminal of terminals.slice(terminalCount)) listeners.close.forEach((fn) => fn(terminal));
-      bindChatJob(dir, "cross-destination");
-      endChatJobs(dir, "cross-destination");
-      settingValues.agent = "omp";
-      editor.appName = previousApp;
-      commandHandler = previousHandler;
       watching.dispose();
     }
   });
-  test("a chat Resolve Drifts waits for a pending terminal Run delivery before checking its conditions", async () => {
+  test("a Resolve Drifts waits for a pending Run delivery before checking its conditions", async () => {
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const { driftWork } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
-    const previousApp = editor.appName;
-    const previousHandler = commandHandler;
     const previousQuestionEndpoint = questionEndpoint;
     const waiting = Promise.withResolvers<void>();
     const delivery = Promise.withResolvers<string>();
     const terminalCount = terminals.length;
+    let resolveChecks = 0;
     let run: Promise<unknown> | undefined;
     let resolve: Promise<unknown> | undefined;
     questionEndpoint = () => {
       waiting.resolve();
       return delivery.promise;
     };
-    settingValues.agent = "omp";
-    editorCalls.length = 0;
     try {
       run = launchAgent(dir, "Run", "Run", undefined, () => !driftWork().resolving, "run");
       await waiting.promise;
 
-      settingValues.agent = "cursor";
-      editor.appName = "Cursor";
-      resolve = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, () => !driftWork().resolving && !driftWork().running, "resolve");
+      resolve = launchAgent(dir, "Resolve Drifts", "Resolve Drifts", undefined, () => {
+        resolveChecks++;
+        return !driftWork().resolving && !driftWork().running;
+      }, "resolve");
       await Promise.resolve();
-      expect(editorCalls).not.toContain("composer.createNew");
+      expect(resolveChecks).toBe(0);
 
       delivery.resolve("endpoint");
       expect(await run).toBe("terminal");
       expect(driftWork()).toEqual({ resolving: false, running: true });
-      expect(await resolve).toBe("not-sent");
-      expect(editorCalls).not.toContain("composer.createNew");
+      expect(await resolve).toBeUndefined();
+      expect(resolveChecks).toBe(1);
+      expect(terminals).toHaveLength(terminalCount + 1);
     } finally {
       delivery.resolve("endpoint");
       await run?.catch(() => undefined);
       await resolve?.catch(() => undefined);
       for (const terminal of terminals.slice(terminalCount)) listeners.close.forEach((fn) => fn(terminal));
-      settingValues.agent = "omp";
-      editor.appName = previousApp;
       questionEndpoint = previousQuestionEndpoint;
-      commandHandler = previousHandler;
       watching.dispose();
     }
-  });
-
-  test("a job in Cursor's chat begins only when the chat sends it by itself and ends with the first turn end, interruption or closing that follows", async () => {
-    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
-    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const { driftWork } = await import("../extension/src/host/drift-resolution");
-    const watching = watchAgentTerminal();
-    let conversation = "";
-    let loops = 0;
-    const hook = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ root: dir, conversation, ...h });
-    editor.appName = "Cursor";
-    settingValues.agent = "cursor";
-    try {
-      commandHandler = () => { throw new Error("command 'composer.createNew' not found"); };
-      expect(await launchAgent(dir, "Run", "Run", undefined, () => true, "run")).toBe("confirm");
-      clipboard.length = 0;
-      expect(await launchAgent(dir, "Read .env", "Run", undefined, () => true, "run")).toBe("clipboard");
-      expect(driftWork()).toEqual({ resolving: false, running: false });
-
-      commandHandler = () => undefined;
-      for (const end of [{ hook: "stop", status: "completed" }, { hook: "stop", status: "error" }, { hook: "sessionEnd", reason: "window_close" }] as const) {
-        conversation = `j${loops++}`; // each job's chat is a new conversation
-        expect(await launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve")).toBe("sent");
-        hook({ hook: "beforeSubmitPrompt", tramaPrompt: true });
-        expect(driftWork().resolving).toBe(true);
-        hook({ hook: "stop", status: "completed", conversation: "not-trama" });
-        expect(driftWork().resolving).toBe(true);
-        hook(end);
-        expect(driftWork()).toEqual({ resolving: false, running: false });
-      }
-    } finally {
-      editor.appName = "Visual Studio Code";
-      commandHandler = () => undefined;
-      watching.dispose();
-    }
-  });
-
-  test("a Cursor chat job binds only the conversation that starts after its send: a later prompt of a conversation already seen takes no job, and a first prompt that arrives just before its job waits for it", async () => {
-    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
-    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const { driftWork } = await import("../extension/src/host/drift-resolution");
-    const watching = watchAgentTerminal();
-    const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
-    const run = () => launchAgent(dir, "Run", "Run", undefined, () => true, "run");
-    const resolve = () => launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve");
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    let startComposer: () => void = () => {};
-    let finishComposer: () => void = () => {};
-    const composerStarted = new Promise<void>((resolve) => { startComposer = resolve; });
-    const composerRelease = new Promise<void>((resolve) => { finishComposer = resolve; });
-    commandHandler = async (id) => {
-      if (id === "composer.createNew") {
-        startComposer();
-        await composerRelease;
-      }
-    };
-    try {
-      // The prompt arrives after sending starts but before the chat job is registered.
-      const sending = run();
-      await composerStarted;
-      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "early");
-      finishComposer();
-      expect(await sending).toBe("sent");
-      turn({ hook: "stop", status: "completed" }, "early");
-      expect(driftWork()).toEqual({ resolving: false, running: false });
-
-      // A later prompt of a conversation already seen takes no job: the next new conversation does.
-      expect(await resolve()).toBe("sent");
-      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "p");
-      expect(await run()).toBe("sent");
-      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "p");
-      turn({ hook: "stop", status: "completed" }, "p");
-      expect(driftWork()).toEqual({ resolving: false, running: true });
-      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "q");
-      turn({ hook: "stop", status: "completed" }, "q");
-      expect(driftWork()).toEqual({ resolving: false, running: false });
-    } finally {
-      for (const c of ["early", "p", "q"]) turn({ hook: "sessionEnd", reason: "window_close" }, c);
-      settingValues.agent = "omp";
-      editor.appName = "Visual Studio Code";
-      commandHandler = () => undefined;
-      watching.dispose();
-    }
-  });
-
-  test("a chat job ends only with the turn of its own Trama conversation: another conversation's end, interruption or closing leaves it running", async () => {
-    // Dynamic, as above: the modules must load after mock.module replaced "vscode".
-    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
-    const { receiveCursorHook } = await import("../extension/src/host/cursor");
-    const { driftWork } = await import("../extension/src/host/drift-resolution");
-    const watching = watchAgentTerminal();
-    const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">, conversation: string) => receiveCursorHook({ root: dir, conversation, ...h });
-    const run = () => launchAgent(dir, "Run", "Run", undefined, () => true, "run");
-    const resolve = () => launchAgent(dir, "Resolve", "Resolve Drifts", undefined, () => true, "resolve");
-    const conversations: string[] = [];
-    settingValues.agent = "cursor";
-    editor.appName = "Cursor";
-    commandHandler = () => undefined;
-    const ends = [{ hook: "stop", status: "completed" }, { hook: "stop", status: "aborted" }, { hook: "sessionEnd", reason: "user_close" }] as const;
-    try {
-      // Two Runs, each in its own conversation: the end of one of them leaves the other running.
-      for (const [i, end] of ends.entries()) {
-        const [first, second] = [`${i}a`, `${i}b`];
-        conversations.push(first, second);
-        expect(await run()).toBe("sent");
-        turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, first);
-        expect(await run()).toBe("sent");
-        turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, second);
-        expect(driftWork()).toEqual({ resolving: false, running: true });
-        turn({ hook: "stop", status: "completed" }, "not-trama");
-        turn(end, first);
-        expect(driftWork()).toEqual({ resolving: false, running: true });
-        turn(end, second);
-        expect(driftWork()).toEqual({ resolving: false, running: false });
-      }
-
-      // Resolve Drifts keeps working when a Run's conversation ends, and ends only with its own.
-      conversations.push("r", "u");
-      expect(await resolve()).toBe("sent");
-      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "r");
-      expect(await run()).toBe("sent");
-      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true }, "u");
-      expect(driftWork().resolving).toBe(true);
-      turn({ hook: "stop", status: "completed" }, "u");
-      expect(driftWork().resolving).toBe(true);
-      turn({ hook: "stop", status: "error" }, "r");
-      expect(driftWork()).toEqual({ resolving: false, running: false });
-    } finally {
-      for (const c of conversations) turn({ hook: "sessionEnd", reason: "window_close" }, c);
-      settingValues.agent = "omp";
-      editor.appName = "Visual Studio Code";
-      commandHandler = () => undefined;
-      watching.dispose();
-    }
-  });
-
-  test("a chat job ignores prompts from chat preparation and binds only the first prompt after delivery starts", async () => {
-    const { bindChatJob, chatJobSendStarted, driftWork, endChatJobs, startJob } = await import("../extension/src/host/drift-resolution");
-    try {
-      bindChatJob(dir, "scan-before-send");
-      const sentAfter = chatJobSendStarted(dir, "cursor");
-      startJob("run", dir, { chat: "cursor" }, sentAfter);
-      expect(driftWork()).toEqual({ resolving: false, running: true });
-      bindChatJob(dir, "run-own");
-      endChatJobs(dir, "scan-before-send");
-      expect(driftWork()).toEqual({ resolving: false, running: true });
-      endChatJobs(dir, "run-own");
-      expect(driftWork()).toEqual({ resolving: false, running: false });
-    } finally {
-      endChatJobs(dir, "scan-before-send");
-      endChatJobs(dir, "run-own");
-    }
-  });
-  test("chat jobs without an observable conversation stay active until an end event", async () => {
-    const { bindChatJob, driftWork, endChatJobs, startJob } = await import("../extension/src/host/drift-resolution");
-    const project = join(dir, crypto.randomUUID());
-    startJob("run", project, { chat: "cursor" });
-    expect(driftWork()).toEqual({ resolving: false, running: true });
-    bindChatJob(project, "bound-conversation");
-    expect(driftWork()).toEqual({ resolving: false, running: true });
-    endChatJobs(project, "bound-conversation");
-    expect(driftWork()).toEqual({ resolving: false, running: false });
   });
 
   test("terminal jobs without an observable end stay active until the terminal closes", async () => {
@@ -2467,39 +1787,6 @@ describe("the Runs and Resolve Drifts a window has not seen end", () => {
     expect(driftWork()).toEqual({ resolving: false, running: false });
   });
 });
-test("a Cursor chat turn end also ends the filed work of an agent Trama did not start (holder editor)", async () => {
-  const { watchAgentTerminal } = await import("../extension/src/host/agent");
-  const { receiveCursorHook } = await import("../extension/src/host/cursor");
-  const { driftsFinishing, proposalsFinishing, receiveNotice, releaseFiledWork } = await import("../extension/src/host/drift-resolution");
-  const watching = watchAgentTerminal();
-  const turn = (h: Partial<CursorHook> & Pick<CursorHook, "hook">) => receiveCursorHook({ root: dir, conversation: "editor-work", ...h });
-  try {
-    for (const end of [{ hook: "stop", status: "completed" }, { hook: "stop", status: "aborted" }, { hook: "sessionEnd", reason: "user_close" }] as const) {
-      turn({ hook: "beforeSubmitPrompt", tramaPrompt: true });
-      receiveNotice({ type: "drift-filed", root: dir, drift: "0a1b2c3d", holder: "editor" });
-      receiveNotice({ type: "proposal-delivered", root: dir, proposal: "iwham416", holder: "editor" });
-      receiveNotice({ type: "drift-filed", root: dir, drift: "4e5f6a7b", holder: "terminal-9" });
-      expect(driftsFinishing(dir).sort()).toEqual(["0a1b2c3d", "4e5f6a7b"]);
-      turn(end);
-      expect(driftsFinishing(dir)).toEqual(["4e5f6a7b"]);
-      expect(proposalsFinishing(dir)).toEqual([]);
-      releaseFiledWork(dir, "terminal-9");
-    }
-  } finally {
-    watching.dispose();
-  }
-});
-
-test("a chat turn that starts without a skill prompt is followed from its first prompt until its stop", async () => {
-  const { receiveCursorHook } = await import("../extension/src/host/cursor");
-  const { followsAgent } = await import("../extension/src/host/drift-resolution");
-  const conversation = "plain-" + crypto.randomUUID();
-  receiveCursorHook({ root: dir, conversation, hook: "beforeSubmitPrompt", tramaPrompt: false });
-  expect(followsAgent(dir, "cursor", conversation)).toBe(true);
-  receiveCursorHook({ root: dir, conversation, hook: "stop", status: "completed" });
-  expect(followsAgent(dir, "cursor", conversation)).toBe(false);
-});
-
 describe("the agent command waits for the shell", () => {
   // The imports below are dynamic, as in the rest of this file: agent.ts must load after mock.module replaced "vscode".
   const longInstruction = `Use the trama-implement skill on Task abcd1234. ${"x".repeat(5000)}`;
@@ -2533,7 +1820,7 @@ describe("the agent command waits for the shell", () => {
       expect(terminal.writes).toEqual([]);
       activateIntegration(terminal);
       expect(terminal.writes).toEqual(["executeCommand"]);
-      expect(terminal.line).toStartWith("omp '");
+      expect(terminal.line).toStartWith("'omp' '");
       expect(terminal.line).toContain("x".repeat(5000));
       expect(terminal.line.split("\n")).toHaveLength(1);
 
@@ -2729,70 +2016,14 @@ describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
       announce(p, { kind: "check", title: "Final check", phase: "verifying", terminal: id });
       announce(p, { kind: "work", title: "Importing from code", terminal: id });
       announce(p, { kind: "task", title: "Elsewhere", terminal: "other1" });
-      announce(p, { kind: "task", title: "Chat", chat: "cursor", conversation: "c1" });
       await checkAgentTerminals();
-      expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Elsewhere", "Chat"]);
+      expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Elsewhere"]);
       expect(told).toEqual([["drift:Ghost", "check:Final check"]]);
       expect(terminal.disposals).toBe(1);
     } finally {
       subscription.dispose();
       watching.dispose();
       withdrawAll(projectAt(dir));
-    }
-  });
-});
-
-describe("the execution check of chat jobs", () => {
-  test("a chat Run no conversation binds is closed by the minute check, abnormally and with a notice; a bound one is left", async () => {
-    const { watchAgentTerminal, launchAgent } = await import("../extension/src/host/agent");
-    const { localProjectJobs, onStoppedFollowing, bindChatJob, endChatJobs } = await import("../extension/src/host/drift-resolution");
-    const watching = watchAgentTerminal();
-    const previousApp = editor.appName;
-    const previousAgent = settingValues["agent"];
-    editor.appName = "Cursor";
-    settingValues["agent"] = "cursor";
-    const notices: string[] = [];
-    const noticing = onStoppedFollowing((subject, reason) => notices.push(`${subject}: ${reason}`));
-    let clock: { mockRestore(): void } | undefined;
-    // Terminals of earlier tests may still be followed, with their real timer armed: closing them leaves the window with none.
-    for (const earlier of terminals) listeners.close.forEach((listener) => listener(earlier));
-    // Tasks left taken by earlier tests would be released (and reported) by the check: they are given back first.
-    for (const left of listTasks(projectAt(dir))) if (left.data.agent) moveTask(projectAt(dir), left.id, "todo", "agent");
-    vi.useFakeTimers();
-    const { startExecutionCheck } = await import("../extension/src/host/execution-check");
-    const scheduler = startExecutionCheck(() => dir, fakeFiles().watcher);
-    await flush();
-    try {
-      const ended: (string | undefined)[] = [];
-      const before = new Set(listAnnouncements(projectAt(dir)).map((a) => a.id));
-      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", { kind: "check", title: "Scanning System" }, () => true, "scan", undefined, { onEnd: (abnormal) => ended.push(abnormal) });
-      expect(listAnnouncements(projectAt(dir)).some((a) => !before.has(a.id))).toBe(true);
-      expect(localProjectJobs(dir)).toHaveLength(1);
-      vi.advanceTimersByTime(59_000);
-      for (let i = 0; i < 20; i++) await Promise.resolve();
-      expect(localProjectJobs(dir)).toHaveLength(1);
-      const real = Date.now();
-      clock = spyOn(Date, "now").mockReturnValue(real + 61_000);
-      vi.advanceTimersByTime(2_000);
-      for (let i = 0; i < 20; i++) await Promise.resolve();
-      expect(localProjectJobs(dir)).toHaveLength(0);
-      expect(ended).toEqual(["its chat never bound a conversation"]);
-      expect(notices).toEqual(["Scan: its chat never bound a conversation"]);
-      // The check withdrew the launch announcement of the job that never started, without telling the panel.
-      expect(listAnnouncements(projectAt(dir)).some((a) => !before.has(a.id))).toBe(false);
-      // A conversation that arrives after the close binds nothing.
-      bindChatJob(dir, "late-conversation");
-      expect(localProjectJobs(dir)).toHaveLength(0);
-      endChatJobs(dir, "late-conversation");
-    } finally {
-      clock?.mockRestore();
-      scheduler.dispose();
-      vi.useRealTimers();
-      noticing.dispose();
-      watching.dispose();
-      editor.appName = previousApp;
-      if (previousAgent === undefined) delete settingValues["agent"];
-      else settingValues["agent"] = previousAgent;
     }
   });
 });
@@ -2947,7 +2178,7 @@ describe("Unify Drifts", () => {
       expect(created.at(-1)?.name).toBe("Unify");
       expect(environments.at(-1)?.["TRAMA_JOB"]).toBeDefined();
       const file = join(extensionPath, "media", "unify-drifts.md");
-      expect(terminal.line).toContain(`omp --hook '${join(extensionPath, "dist", "omp-hook.js")}' --model 'opus' '@${file}' 'Unify the open Drifts \`${a}\`, \`${b}\`, \`${c}\` into one Drift, following the instructions above. Run at most 20 sub-agents at once.`);
+      expect(terminal.line).toContain(`'omp' --hook '${join(extensionPath, "dist", "omp-hook.js")}' --model 'opus' '@${file}' 'Unify the open Drifts \`${a}\`, \`${b}\`, \`${c}\` into one Drift, following the instructions above. Run at most 20 sub-agents at once.`);
       expect(terminal.line).not.toContain("--slow");
 
       const ghost = listAnnouncements(p).find((x) => x.kind === "drift");
@@ -3004,46 +2235,6 @@ describe("Unify Drifts", () => {
       tearDown(root);
     }
   });
-
-  test("Cursor's chat gets the instructions text, a blank line, then the Drifts line and the usual lines, on the analysis model; elsewhere the full text goes to the clipboard and nothing starts", async () => {
-    const { Controller } = await import("../extension/src/host/controller");
-    const { checkChatJobs } = await import("../extension/src/host/agent");
-    const { driftWork, unifyingDrifts } = await import("../extension/src/host/drift-resolution");
-    const { root, p, drift } = setUp("opus");
-    const controller = new Controller({ scheme: "file" } as never);
-    const launch = controller as unknown as { launchAction(project: Project, action: AgentAction): Promise<void> };
-    try {
-      const [a, b] = [drift("A"), drift("B")] as [string, string];
-      const line = `Unify the open Drifts \`${a}\`, \`${b}\` into one Drift, following the instructions above. Run at most 20 sub-agents at once.`;
-
-      editor.appName = "Visual Studio Code";
-      settingValues["agent"] = "cursor";
-      clipboard.length = 0;
-      await launch.launchAction(p, { kind: "unify-drifts" });
-      expect(clipboard).toEqual([`${instructions.trimEnd()}\n\n${line} ${ASK_DEVELOPER_SENTENCE}`]);
-      expect(driftWork(root).resolving).toBe(false);
-      expect(listAnnouncements(p)).toEqual([]);
-
-      editor.appName = "Cursor";
-      let sent: { partialState: { text: string; modelConfig?: { modelName: string } } } | undefined;
-      commandHandler = (id, ...args) => {
-        if (id === "composer.createNew") sent = args[0] as typeof sent;
-        return { composerId: "c" };
-      };
-      await launch.launchAction(p, { kind: "unify-drifts" });
-      expect(sent?.partialState.text).toBe(`${instructions.trimEnd()}\n\n${line}\n${ASK_DEVELOPER_SENTENCE}`);
-      expect(sent?.partialState.modelConfig?.modelName).toBe("opus");
-      expect(listAnnouncements(p).find((x) => x.kind === "drift")?.title).toBe("Unifying 2 Drifts");
-      expect(driftWork(root).resolving).toBe(true);
-      expect(unifyingDrifts(root)).toEqual([a, b]);
-      checkChatJobs(Date.now() + 120_000);
-      expect(driftWork(root).resolving).toBe(false);
-    } finally {
-      withdrawAll(p);
-      controller.dispose();
-      tearDown(root);
-    }
-  });
 });
 
 describe("Ask more", () => {
@@ -3090,7 +2281,7 @@ describe("Ask more", () => {
       expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_JOB");
       expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_ADVISOR_SCANNER");
       expect(terminal.line).toBe(
-        `omp --model 'opus' '@${join(extensionPath, "media", "ask-more.md")}' 'Ask more about the Task j6tlxyad. Text: Launch it. Write everything you generate in Italian, except code, which always stays in English.'`,
+        `'omp' --model 'opus' '@${join(extensionPath, "media", "ask-more.md")}' 'Ask more about the Task j6tlxyad. Text: Launch it. Write everything you generate in Italian, except code, which always stays in English.'`,
       );
       expect(terminal.line).not.toMatch(/--hook|--config|--slow|--advisor/);
       expect(terminal.shown).toEqual([false]);
@@ -3102,46 +2293,39 @@ describe("Ask more", () => {
       tearDown(root);
     }
   });
-
-  test("with Cursor's chat the fixed instructions come first in the same message, with the analysis model, through composer.createNew only: no job, no card, no ask sentence", async () => {
+  test("the Ask terminal runs the configured omp program, quoted, before the options it had", async () => {
     const { openAskMore } = await import("../extension/src/host/agent");
-    const { localProjectJobs } = await import("../extension/src/host/drift-resolution");
     const root = setUp();
-    const p = projectAt(root);
-    settingValues["agent"] = "cursor";
     settingValues["analysis"] = "opus";
-    editor.appName = "Cursor";
-    const calls: unknown[][] = [];
-    commandHandler = (id, ...args) => void calls.push([id, ...args]);
-    const before = { terminals: terminals.length, clipboard: clipboard.length, jobs: localProjectJobs(root).length };
+    inspected["ompPath"] = { globalValue: " /opt/my omp/omp " };
     try {
-      await openAskMore(root, "Ask question", "Ask more about a question.");
-      const pathLine = process.platform === "win32" ? `The trama command may not be on your PATH. Run it by its full path: ${join(extensionPath, "bin", "trama.exe")}` : `The trama command may not be on your PATH. Before anything else run: export PATH="${join(extensionPath, "bin")}:$PATH"`;
-      const message = `Trama: Ask more\n\nRead, then wait.\n\nAsk more about a question.\n${pathLine}`;
-      expect(calls).toEqual([["composer.createNew", { partialState: { text: message, richText: message, unifiedMode: "agent", modelConfig: { modelName: "opus", maxMode: false } }, openInNewTab: true, autoSubmit: true }]]);
-      expect(JSON.stringify(calls)).not.toContain("trama question new");
-      expect(terminals).toHaveLength(before.terminals);
-      expect(clipboard).toHaveLength(before.clipboard);
-      expect(localProjectJobs(root)).toHaveLength(before.jobs);
-      expect(listAnnouncements(p)).toEqual([]);
+      await openAskMore(root, "Ask T3", "Ask more about the Task.");
+      expect((terminals.at(-1) as FakeTerminal).line).toBe(`'/opt/my omp/omp' --model 'opus' '@${join(extensionPath, "media", "ask-more.md")}' 'Ask more about the Task.'`);
     } finally {
-      commandHandler = () => undefined;
-      editor.appName = "Visual Studio Code";
+      delete inspected["ompPath"];
+      withdrawAll(projectAt(root));
       tearDown(root);
     }
   });
 
-  test("outside Cursor with Cursor's chat chosen the instructions and the part go to the clipboard, and no chat or terminal opens", async () => {
-    const { openAskMore } = await import("../extension/src/host/agent");
+  test("a `cursor` value left in trama.agent still opens the Ask terminal: no composer command, no clipboard", async () => {
+    const { openAskMore, watchAgentTerminal } = await import("../extension/src/host/agent");
+    watchAgentTerminal();
     const root = setUp();
+    const p = projectAt(root);
+    withdrawAll(p);
     settingValues["agent"] = "cursor";
+    editor.appName = "Cursor";
     const before = { calls: editorCalls.length, terminals: terminals.length, clipboard: clipboard.length };
     try {
       await openAskMore(root, "Ask question", "Ask more about a question.");
-      expect(clipboard.slice(before.clipboard)).toEqual([`${instructions.trimEnd()}\n\nAsk more about a question.`]);
+      expect(terminals).toHaveLength(before.terminals + 1);
+      expect(created.at(-1)).toMatchObject({ name: "Ask question", cwd: root });
+      expect((terminals.at(-1) as FakeTerminal).line).toMatch(/^'?omp'? .*@.*ask-more\.md/);
       expect(editorCalls).toHaveLength(before.calls);
-      expect(terminals).toHaveLength(before.terminals);
+      expect(clipboard).toHaveLength(before.clipboard);
     } finally {
+      withdrawAll(p);
       tearDown(root);
     }
   });
@@ -3180,6 +2364,9 @@ describe("omp Chat conversations in place of terminals", () => {
       onTurn: none,
       onFormRequest: none,
       answerForm() {},
+      onPermissionRequest: none,
+      onPermissionCancelled: none,
+      answerPermission() {},
       models: async () => ({ available: [] }),
       setModel: async () => undefined,
     });
@@ -3241,7 +2428,8 @@ describe("omp Chat conversations in place of terminals", () => {
         const id = started?.launch.env["TRAMA_TERMINAL"] as string;
         expect(id).toMatch(/^[a-z0-9]{6}$/);
         expect(started?.launch.cwd).toBe(dir);
-        expect(started?.launch.args.slice(-2)).toEqual(["acp", "--yolo"]);
+        expect(started?.launch.args.slice(-1)).toEqual(["acp"]);
+        expect(started?.launch.args).not.toContain("--yolo");
         // Role scan: no --model of the execution role, the scan model for --slow, in the terminal's order.
         expect(started?.launch.args).toContain("--slow");
         expect(started?.launch.args[started.launch.args.indexOf("--slow") + 1]).toBe("slow-model");
@@ -3292,23 +2480,16 @@ describe("omp Chat conversations in place of terminals", () => {
     });
   });
 
-  test("with omp Chat off, or with another agent, the instruction goes to a terminal as before", async () => {
+  test("omp Chat is on unless the user value is false: false sends the instruction to a terminal, absent or a workspace value does not", async () => {
     await withOmpChat(async () => {
       const { launchAgent } = await import("../extension/src/host/agent");
-      delete inspected["ompChat"];
+      inspected["ompChat"] = { globalValue: false };
       expect(await launchAgent(dir, "Scan it.", "Scan", undefined, undefined, "scan")).toBe("terminal");
-      inspected["ompChat"] = { workspaceValue: true };
-      expect(await launchAgent(dir, "Scan it.", "Scan", undefined, undefined, "scan")).toBe("terminal");
-      inspected["ompChat"] = { globalValue: true };
-      settingValues["agent"] = "cursor";
-      editor.appName = "Cursor";
-      try {
-        await launchAgent(dir, "Scan it.", "Scan", undefined, undefined, "scan");
-        expect(processes).toEqual([]);
-      } finally {
-        editor.appName = "Visual Studio Code";
-      }
       expect(processes).toEqual([]);
+      inspected["ompChat"] = { workspaceValue: false };
+      expect(await launchAgent(dir, "Scan it.", "Scan", undefined, undefined, "scan")).toBe("conversation");
+      delete inspected["ompChat"];
+      expect(await launchAgent(dir, "Scan it.", "Scan", undefined, undefined, "scan")).toBe("conversation");
     });
   });
 
@@ -3352,7 +2533,7 @@ describe("omp Chat conversations in place of terminals", () => {
         await openQuickTask(dir);
         expect(terminals).toHaveLength(terminalCount);
         const id = processes[0]?.launch.env["TRAMA_TERMINAL"] as string;
-        expect(processes[0]?.launch.args).toEqual(["--model", "fast", "acp", "--yolo"]);
+        expect(processes[0]?.launch.args).toEqual(["--model", "fast", "acp"]);
         expect(processes[0]?.first).toBeUndefined();
         expect(Object.keys(processes[0]?.launch.env ?? {})).not.toContain("TRAMA_JOB");
         expect(tabs).toEqual([{ id, name: "Quick", focus: true }]);
@@ -3396,16 +2577,74 @@ describe("omp Chat conversations in place of terminals", () => {
       settingValues["analysis"] = " opus ";
       try {
         await openAskMore(root, "Ask T3", "Ask more about the Task.\nText:\nLaunch it.");
-        expect(processes[0]?.launch.args).toEqual(["--model", "opus", "acp", "--yolo"]);
+        expect(processes[0]?.launch.args).toEqual(["--model", "opus", "acp"]);
+        // `trama.ompChatApproval` is read when a conversation opens, from the user value only: yolo adds `--yolo`, a workspace value or an unknown one does not.
+        inspected["ompChatApproval"] = { workspaceValue: "yolo" };
+        await openAskMore(root, "Ask T4", "Ask more.");
+        expect(processes[1]?.launch.args).toEqual(["--model", "opus", "acp"]);
+        inspected["ompChatApproval"] = { globalValue: "bypass" };
+        await openAskMore(root, "Ask T5", "Ask more.");
+        expect(processes[2]?.launch.args).toEqual(["--model", "opus", "acp"]);
+        inspected["ompChatApproval"] = { globalValue: "yolo" };
+        await openAskMore(root, "Ask T6", "Ask more.");
+        expect(processes[3]?.launch.args).toEqual(["--model", "opus", "acp", "--yolo"]);
         expect(processes[0]?.launch.cwd).toBe(root);
         expect(processes[0]?.first).toEqual({ text: "Ask more about the Task.\nText:\nLaunch it.", attachment: join(extensionPath, "media", "ask-more.md") });
         expect(tabs[0]).toMatchObject({ name: "Ask T3", focus: true });
       } finally {
+        delete inspected["ompChatApproval"];
         extensionPath = "";
         delete settingValues["analysis"];
         withdrawAll(projectAt(root));
         rmSync(root, { recursive: true, force: true });
       }
     });
+  });
+});
+
+describe("omp before a launch", () => {
+  test("without omp no launch creates a terminal, a job or a ghost: the instruction, Quick Task and Ask more all stop", async () => {
+    const { launchAgent, openAskMore, openQuickTask } = await import("../extension/src/host/agent");
+    const { localProjectJobs } = await import("../extension/src/host/drift-resolution");
+    const p = projectAt(dir);
+    withdrawAll(p);
+    const terminalsBefore = created.length;
+    const jobsBefore = localProjectJobs(dir).length;
+    let sent = false;
+    ompFound = async () => undefined;
+    inspected["ompChat"] = { globalValue: false };
+    extensionPath = join(dir, "ext");
+    mkdirSync(join(extensionPath, "media"), { recursive: true });
+    writeFileSync(join(extensionPath, "media", "ask-more.md"), "Trama: Ask more\n");
+    try {
+      expect(await launchAgent(dir, "Use the trama-scan skill.", "Scan", { kind: "work", title: "Scan" }, () => true, "scan", () => void (sent = true))).toBeUndefined();
+      await openQuickTask(dir);
+      await openAskMore(dir, "Ask T3", "Ask more about the Task.");
+      expect(created.length).toBe(terminalsBefore);
+      expect(localProjectJobs(dir)).toHaveLength(jobsBefore);
+      expect(listAnnouncements(p)).toEqual([]);
+      expect(sent).toBe(false);
+    } finally {
+      delete inspected["ompChat"];
+      extensionPath = "";
+      ompFound = async (ompPath) => (ompPath === "" ? "omp" : ompPath);
+    }
+  });
+
+  test("the command and the PATH of the terminal use the program the check found, with the folders of omp and bun in front", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const found = join(dir, "found", "omp");
+    ompFound = async () => found;
+    inspected["ompChat"] = { globalValue: false };
+    try {
+      expect(await launchAgent(dir, "hello", "Scan")).toBe("terminal");
+      expect((terminals.at(-1) as FakeTerminal).line).toStartWith(`'${found}' `);
+      const path = (environments.at(-1) ?? {})[process.platform === "win32" ? "Path" : "PATH"] ?? "";
+      expect(path.split(delimiter).slice(0, 2)).toEqual([join(dir, "found"), join(os.homedir(), ".bun", "bin")]);
+    } finally {
+      delete inspected["ompChat"];
+      ompFound = async (ompPath) => (ompPath === "" ? "omp" : ompPath);
+      withdrawAll(projectAt(dir));
+    }
   });
 });

@@ -367,47 +367,45 @@ describe("Send to agent", () => {
   });
 
   test("an instruction that does not leave marks nothing and keeps the tab", async () => {
-    for (const result of [undefined, "not-sent"] as const) {
-      outcome = result;
-      await writeRequest("# Returns\n");
-      await requests.send();
-      expect(state.get<string[]>(SENT_KEY, [])).toEqual([]);
-      expect(closed).toHaveLength(0);
-      expect(lastContext()).toBe(true);
-    }
-    expect(launches).toHaveLength(2);
-  });
-
-  test("la chat che invia automaticamente segna la richiesta e chiude la scheda", async () => {
-    outcome = "sent";
-    const document = await writeRequest("# Resi\n");
+    outcome = undefined;
+    await writeRequest("# Returns\n");
     await requests.send();
-    expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
-    expect(tabs).toEqual([]);
-    expect(lastContext()).toBe(false);
+    expect(state.get<string[]>(SENT_KEY, [])).toEqual([]);
+    expect(closed).toHaveLength(0);
+    expect(lastContext()).toBe(true);
+    expect(launches).toHaveLength(1);
   });
 
-  for (const result of ["confirm", "clipboard"] as const) {
-    test(`la consegna ${result} conserva la scheda e permette di riprovare anche dopo un riavvio`, async () => {
+  for (const result of ["terminal", "conversation"] as const) {
+    test(`un'istruzione che parte (${result}) segna la richiesta e chiude la scheda`, async () => {
       outcome = result;
       const document = await writeRequest("# Resi\n");
       await requests.send();
-      expect(state.get<string[]>(SENT_KEY, [])).toEqual([]);
-      expect(tabs.map((tab) => tab.input.uri.fsPath)).toEqual([document.uri.fsPath]);
-      expect(lastContext()).toBe(true);
-      expect(readFileSync(document.uri.fsPath, "utf8")).toBe(document.text);
-
-      requests.dispose();
-      requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
-      expect(lastContext()).toBe(true);
-      outcome = "sent";
-      await requests.send();
-      expect(launches).toHaveLength(2);
       expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
       expect(tabs).toEqual([]);
       expect(lastContext()).toBe(false);
     });
   }
+
+  test("se l'istruzione non parte la scheda resta e si può riprovare anche dopo un riavvio", async () => {
+    outcome = undefined;
+    const document = await writeRequest("# Resi\n");
+    await requests.send();
+    expect(state.get<string[]>(SENT_KEY, [])).toEqual([]);
+    expect(tabs.map((tab) => tab.input.uri.fsPath)).toEqual([document.uri.fsPath]);
+    expect(lastContext()).toBe(true);
+    expect(readFileSync(document.uri.fsPath, "utf8")).toBe(document.text);
+
+    requests.dispose();
+    requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
+    expect(lastContext()).toBe(true);
+    outcome = "terminal";
+    await requests.send();
+    expect(launches).toHaveLength(2);
+    expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
+    expect(tabs).toEqual([]);
+    expect(lastContext()).toBe(false);
+  });
 
   test("a request is sent at most once", async () => {
     const document = await writeRequest("# Returns\n");
@@ -523,28 +521,26 @@ describe("closing the tab of a request", () => {
     expect(existsSync(document.uri.fsPath)).toBe(true);
   });
 
-  for (const result of ["confirm", "clipboard"] as const) {
-    test(`chiudere volontariamente con consegna ${result} lascia il file mai inviato e recuperabile`, async () => {
-      outcome = result;
-      const document = await writeRequest("# Resi\n");
-      await document.save();
-      closeTabs(tabsShowing(document));
-      await settle();
-      expect(tabs).toEqual([]);
-      expect(state.get<string[]>(SENT_KEY, [])).toEqual([]);
-      expect(readFileSync(document.uri.fsPath, "utf8")).toBe(document.text);
+  test("chiudere volontariamente senza che l'istruzione parta lascia il file mai inviato e recuperabile", async () => {
+    outcome = undefined;
+    const document = await writeRequest("# Resi\n");
+    await document.save();
+    closeTabs(tabsShowing(document));
+    await settle();
+    expect(tabs).toEqual([]);
+    expect(state.get<string[]>(SENT_KEY, [])).toEqual([]);
+    expect(readFileSync(document.uri.fsPath, "utf8")).toBe(document.text);
 
-      const reopened = openDocument(document.uri.fsPath);
-      tabs.push(tabOf(reopened));
-      focus(reopened);
-      expect(lastContext()).toBe(true);
-      outcome = "sent";
-      await requests.send();
-      expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
-      expect(launches).toHaveLength(2);
-      expect(tabs).toEqual([]);
-    });
-  }
+    const reopened = openDocument(document.uri.fsPath);
+    tabs.push(tabOf(reopened));
+    focus(reopened);
+    expect(lastContext()).toBe(true);
+    outcome = "terminal";
+    await requests.send();
+    expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
+    expect(launches).toHaveLength(2);
+    expect(tabs).toEqual([]);
+  });
 
   test("an empty text on disk deletes the file without a word and sends nothing", async () => {
     const document = await writeRequest("typed but never saved");
@@ -592,20 +588,20 @@ describe("closing the tab of a request", () => {
   });
 
   for (const dirty of [false, true]) {
-    test(`deletion while the real chat launcher is preparing cancels delivery and keeps only dirty tabs (${dirty})`, async () => {
-      requests.dispose();
-      requests = new DesignRequests(state as never, tramaFiles as never, () => p);
+    test(`deletion while the instruction is being prepared cancels delivery and keeps only dirty tabs (${dirty})`, async () => {
       let resume!: () => void;
       let ready!: () => void;
       const preparing = new Promise<void>((resolve) => { ready = resolve; });
       const waiting = new Promise<void>((resolve) => { resume = resolve; });
       const deliveries: string[] = [];
-      command = async (id) => {
-        if (id === "composer.createNew") {
-          ready();
-          await waiting;
-        } else deliveries.push(id);
-      };
+      requests.dispose();
+      requests = new DesignRequests(state as never, tramaFiles as never, () => p, async (_root, instruction, _name, _title, canSend) => {
+        ready();
+        await waiting;
+        if (canSend?.() === false) return undefined;
+        deliveries.push(instruction);
+        return "terminal";
+      });
       try {
         const document = await writeRequest("# Cancel before delivery\n");
         const sending = requests.send();

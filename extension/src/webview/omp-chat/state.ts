@@ -1,5 +1,5 @@
 import type { ConversationItem, FormAnswerMessage, ModelChoice, ToChatWebview } from "../../omp-chat-protocol";
-import { addError, addForm, addUserMessage, answerForm, applyUpdate, emptyTranscript, settle, start, type Transcript } from "./transcript";
+import { addError, addForm, addPermission, addUserMessage, answerForm, answerPermission, applyUpdate, cancelPermission, emptyTranscript, settle, start, type Transcript } from "./transcript";
 
 /** What the view knows of one conversation. */
 export interface ConversationView {
@@ -57,6 +57,10 @@ export function reduce(state: ChatState, message: ToChatWebview, now: number): C
       return change(state, message.id, (view) => ({ ...view, transcript: applyUpdate(view.transcript, message.update, now) }));
     case "formRequest":
       return change(state, message.id, (view) => ({ ...view, transcript: addForm(view.transcript, { requestId: message.requestId, message: message.message, schema: message.schema }, now) }));
+    case "permissionRequest":
+      return change(state, message.id, (view) => ({ ...view, transcript: addPermission(view.transcript, { requestId: message.requestId, toolCall: message.toolCall, options: message.options }, now) }));
+    case "permissionCancelled":
+      return change(state, message.id, (view) => ({ ...view, transcript: cancelPermission(view.transcript, message.requestId) }));
     case "models":
       return change(state, message.id, (view) => ({ ...view, models: message.available, ...(message.current === undefined ? {} : { currentModel: message.current }) }));
     case "conversationError":
@@ -74,6 +78,10 @@ export const sendMessage = (state: ChatState, id: string, text: string, now: num
 /** The developer answered a form (or skipped it). */
 export const answerFormIn = (state: ChatState, id: string, requestId: string, answer: FormAnswerMessage): ChatState =>
   change(state, id, (view) => ({ ...view, transcript: answerForm(view.transcript, requestId, answer) }));
+
+/** The developer chose an option of a permission request. */
+export const answerPermissionIn = (state: ChatState, id: string, requestId: string, optionId: string): ChatState =>
+  change(state, id, (view) => ({ ...view, transcript: answerPermission(view.transcript, requestId, optionId) }));
 
 export interface ChatStore {
   get(): ChatState;

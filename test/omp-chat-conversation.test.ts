@@ -22,11 +22,10 @@ import {
 const effects = (list: ConversationEffect[]) => list.map((e) => e.effect);
 
 describe("the choice between a terminal and a conversation", () => {
-  test("a conversation needs omp Chat on, the agent omp and omp Chat registered", () => {
-    expect(useOmpChat({ ompChat: true, agent: "omp", available: true })).toBe(true);
-    expect(useOmpChat({ ompChat: false, agent: "omp", available: true })).toBe(false);
-    expect(useOmpChat({ ompChat: true, agent: "cursor", available: true })).toBe(false);
-    expect(useOmpChat({ ompChat: true, agent: "omp", available: false })).toBe(false);
+  test("a conversation needs omp Chat on and registered", () => {
+    expect(useOmpChat({ ompChat: true, available: true })).toBe(true);
+    expect(useOmpChat({ ompChat: false, available: true })).toBe(false);
+    expect(useOmpChat({ ompChat: true, available: false })).toBe(false);
   });
 
   test("the failed start notice names the reason and the terminal", () => {

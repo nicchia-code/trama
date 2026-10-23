@@ -115,9 +115,10 @@ test("the messages of the setup wizard are checked: the choice, the agent, the f
   for (const choice of ["", "both", undefined, 1]) expect(parseToHost({ type: "openGuidedSetup", choice }).ok).toBe(false);
   expect(parseToHost({ type: "initialize", choice: "import" }).ok).toBe(false);
 
-  expect(ok({ type: "agentCheckWanted", agent: "omp", ompPath: "/bin/omp" })).toEqual({ type: "agentCheckWanted", agent: "omp", ompPath: "/bin/omp" });
-  for (const agent of ["chat", undefined, 1]) expect(parseToHost({ type: "agentCheckWanted", agent, ompPath: "" }).ok).toBe(false);
-  expect(parseToHost({ type: "agentCheckWanted", agent: "omp" }).ok).toBe(false);
+  expect(ok({ type: "agentCheckWanted", ompPath: "/bin/omp" })).toEqual({ type: "agentCheckWanted", ompPath: "/bin/omp" });
+  expect(ok({ type: "agentCheckWanted", ompPath: "" })).toEqual({ type: "agentCheckWanted", ompPath: "" });
+  for (const ompPath of [undefined, 1]) expect(parseToHost({ type: "agentCheckWanted", ompPath }).ok).toBe(false);
+  expect(ok({ type: "installOmp" })).toEqual({ type: "installOmp" });
 
   expect(ok({ type: "instructionFilesWanted" })).toEqual({ type: "instructionFilesWanted" });
   expect(ok({ type: "instructionFilesWanted", root: "/work/app" })).toEqual({ type: "instructionFilesWanted", root: "/work/app" });
@@ -126,8 +127,8 @@ test("the messages of the setup wizard are checked: the choice, the agent, the f
   for (const path of ["", 3, undefined]) expect(parseToHost({ type: "openInstructionFile", path }).ok).toBe(false);
 
   expect(ok({ type: "modelSuggestionsWanted" })).toEqual({ type: "modelSuggestionsWanted" });
-  expect(ok({ type: "modelSuggestionsWanted", agent: "cursor", ompPath: "" })).toEqual({ type: "modelSuggestionsWanted", agent: "cursor", ompPath: "" });
-  expect(parseToHost({ type: "modelSuggestionsWanted", agent: "cursor" }).ok).toBe(false);
+  expect(ok({ type: "modelSuggestionsWanted", ompPath: "/bin/omp" })).toEqual({ type: "modelSuggestionsWanted", ompPath: "/bin/omp" });
+  expect(parseToHost({ type: "modelSuggestionsWanted", ompPath: 3 }).ok).toBe(false);
 
   expect(ok({ type: "folderChildrenWanted", root: "/work/app", path: "" })).toEqual({ type: "folderChildrenWanted", root: "/work/app", path: "" });
   expect(ok({ type: "folderChildrenWanted", root: "/work/app", path: "src/core" })).toEqual({ type: "folderChildrenWanted", root: "/work/app", path: "src/core" });
@@ -139,10 +140,10 @@ test("confirmSetup carries the mode, the path, the folder, only wizard keys that
   const manifest = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
   const schema = settingsSchema(manifest);
   const parse = (message: Record<string, unknown>) => parseToHost({ type: "confirmSetup", values: [], excluded: [], ...message }, schema);
-  const good = parse({ mode: "first", choice: "import", root: "/work/app", values: [{ key: "trama.agent", value: "omp" }, { key: "trama.maxParallelAgents", value: 4 }], excluded: ["docs", "src/old"] });
+  const good = parse({ mode: "first", choice: "import", root: "/work/app", values: [{ key: "trama.ompPath", value: "/bin/omp" }, { key: "trama.maxParallelAgents", value: 4 }], excluded: ["docs", "src/old"] });
   expect(good).toEqual({
     ok: true,
-    message: { type: "confirmSetup", mode: "first", choice: "import", root: "/work/app", values: [{ key: "trama.agent", value: "omp" }, { key: "trama.maxParallelAgents", value: 4 }], excluded: ["docs", "src/old"] },
+    message: { type: "confirmSetup", mode: "first", choice: "import", root: "/work/app", values: [{ key: "trama.ompPath", value: "/bin/omp" }, { key: "trama.maxParallelAgents", value: 4 }], excluded: ["docs", "src/old"] },
   });
   expect(parse({ mode: "settings" })).toEqual({ ok: true, message: { type: "confirmSetup", mode: "settings", values: [], excluded: [] } });
   expect(parse({ mode: "empty-model", choice: "scratch" })).toEqual({ ok: true, message: { type: "confirmSetup", mode: "empty-model", choice: "scratch", values: [], excluded: [] } });
@@ -154,7 +155,7 @@ test("confirmSetup carries the mode, the path, the folder, only wizard keys that
   expect(parse({ mode: "settings", values: [{ key: "trama.language", value: "Italian" }] }).ok).toBe(false);
   expect(parse({ mode: "settings", values: [{ key: "trama.nope", value: 1 }] }).ok).toBe(false);
   expect(parse({ mode: "settings", values: [{ key: "trama.maxParallelAgents", value: 0 }] }).ok).toBe(false);
-  expect(parse({ mode: "settings", values: [{ key: "trama.agent", value: "claude" }] }).ok).toBe(false);
+  expect(parse({ mode: "settings", values: [{ key: "trama.terminalLocation", value: "nowhere" }] }).ok).toBe(false);
   // Excluded paths stay inside the folder and cannot break the quoted instruction.
   for (const path of ["../x", "/abs", "a/../b", "a`b", "a\nb", "", "a//b"]) expect(parse({ mode: "settings", excluded: [path] }).ok).toBe(false);
 });

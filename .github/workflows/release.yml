@@ -69,8 +69,6 @@ jobs:
           Set-Location smoke
           Expand-Archive package.zip -DestinationPath . -Force
           Invoke-Trama @("--help")
-          $answer = '{}' | & "./extension/bin/trama.exe" hook cursor
-          if ($LASTEXITCODE -ne 0 -or ($answer | Out-String).Trim() -ne "{}") { throw "hook cursor must answer {} with exit 0, got: $answer" }
           New-Item -ItemType Directory project | Out-Null
           Invoke-Trama @("--root", "project", "project", "new")
           Invoke-Trama @("--root", "project", "model", "check")
@@ -100,7 +98,7 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"; else tag="v$(jq -r .version package.json)"; fi
           notes="Install with: code --install-extension trama-<platform>-<version>.vsix"
           if ls packages/*win32-x64*.vsix > /dev/null 2>&1; then
-            notes="$notes"$'\n\n'"**Windows is untested by hand.** The win32-x64 package is built, tested (the full suite must pass) and smoke-tested (\`--help\`, \`project new\`, \`model check\`, \`hook cursor\`) on a Windows CI runner, but nobody has tried it by hand on a Windows machine, in Cursor or in VS Code. Cursor's hook form on Windows (\`& \"<trama.exe>\" hook cursor\`) is a guess. Expect rough edges and please report them."
+            notes="$notes"$'\n\n'"**Windows is untested by hand.** The win32-x64 package is built, tested (the full suite must pass) and smoke-tested (\`--help\`, \`project new\`, \`model check\`) on a Windows CI runner, but nobody has tried it by hand on a Windows machine, with VS Code and omp. Expect rough edges and please report them."
           fi
           gh release create "$tag" packages/*.vsix --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "Trama $tag" --prerelease --notes "$notes"

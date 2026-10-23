@@ -46,7 +46,7 @@ test("trama --help lists the objects with their verbs and leaves the hooks out; 
   expect(root).toMatch(/model\s+show, list, check/);
   expect(root).toMatch(/project\s+new, edit, show/);
   expect(root).toMatch(/question\s+new/);
-  expect(root).not.toMatch(/\bhook\b\s+cursor/);
+  expect(root).not.toMatch(/\bhook\b\s+(cursor|idle|start)/);
   expect(root).not.toContain("[developer only]");
   expect(run(["-h"], "/nonexistent")).toEqual({ out: root, exit: 0 });
   expect(run([], "/nonexistent").exit).toBe(2);
@@ -54,7 +54,7 @@ test("trama --help lists the objects with their verbs and leaves the hooks out; 
   expect(model).toContain("model show [<ref>]");
   expect(model).toContain("model check [<machine>]");
   // A hook is left out of the lists but has its own help.
-  expect(run(["hook", "cursor", "--help"], "/nonexistent").out).toContain("Usage: trama hook cursor");
+  expect(run(["hook", "idle", "--help"], "/nonexistent").out).toContain("Usage: trama hook idle");
 });
 
 test("decision commands are not labelled developer-only", () => {
@@ -65,7 +65,7 @@ test("decision commands are not labelled developer-only", () => {
 
 test("an existing command with wrong arguments gives its usage error, not Unknown command", () => {
   expect(() => run(["question", "new", "extra"], tmpdir())).toThrow("Usage: trama question new");
-  expect(() => run(["hook", "cursor", "extra"], tmpdir())).toThrow("Usage: trama hook cursor");
+  expect(() => run(["hook", "idle", "extra"], tmpdir())).toThrow("Usage: trama hook idle");
   expect(() => run(["model", "show", "a", "b"], tmpdir())).toThrow("Usage: trama model show [<ref>]");
   expect(() => run(["model", "show", "--bogus"], tmpdir())).toThrow("trama model show has no option --bogus");
 });

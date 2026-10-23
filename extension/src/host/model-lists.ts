@@ -1,5 +1,4 @@
 import { execFile, type ExecFileException } from "node:child_process";
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
@@ -8,9 +7,6 @@ export interface ModelSuggestion {
   value: string;
   label?: string;
 }
-
-/** Cursor keeps its list of models inside this entry of its state database, as JSON. */
-const CURSOR_STATE_KEY = "src.vs.platform.reactivestorage.browser.reactiveStorageServiceImpl.persistentStorage.applicationUser";
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -47,49 +43,13 @@ export function parseOmpModels(output: string): ModelSuggestion[] | undefined {
   );
 }
 
-/** The JSON of Cursor's state entry: its `availableDefaultModels2` lists the models, each with a `name` (the value) and a `clientDisplayName` (the label). */
-export function parseCursorModels(stateValue: unknown): ModelSuggestion[] {
-  if (typeof stateValue !== "string") return [];
-  let state: unknown;
-  try {
-    state = JSON.parse(stateValue);
-  } catch {
-    return [];
-  }
-  const list = record(state)?.["availableDefaultModels2"];
-  if (!Array.isArray(list)) return [];
-  return uniqueSuggestions(
-    list.flatMap((entry) => {
-      const name = text(record(entry)?.["name"]);
-      return name === undefined ? [] : [{ value: name, label: text(record(entry)?.["clientDisplayName"]) ?? name }];
-    }),
-  );
-}
-
-/** Reads Cursor's state entry, read-only, from `state.vscdb` next to the extension's `globalStorage` folder. A missing file, entry or database gives no list. */
-export async function cursorModels(globalStorageDir: string): Promise<ModelSuggestion[]> {
-  const stateFile = join(globalStorageDir, "..", "state.vscdb");
-  if (!existsSync(stateFile)) return [];
-  try {
-    // Dynamic on purpose: node:sqlite exists only in newer Node, and an older host then gets no list.
-    const { DatabaseSync } = await import("node:sqlite");
-    const db = new DatabaseSync(stateFile, { readOnly: true });
-    try {
-      const row = db.prepare("SELECT value FROM ItemTable WHERE key = ?").get(CURSOR_STATE_KEY) as { value?: unknown } | undefined;
-      return parseCursorModels(row?.value);
-    } finally {
-      db.close();
-    }
-  } catch {
-    return [];
-  }
-}
-
 /** What the Settings tab shows for omp's model names: the names, or the reason there are none. */
 export interface ModelList {
   models: ModelSuggestion[];
   /** The reason there is no list, in English, as the Settings tab shows it. */
   error?: string;
+  /** True when the program itself was not found (ENOENT): the only failure `Install omp` answers. */
+  missing?: true;
 }
 
 /** The reason omp gives no list: the program is missing, it did not answer in time, it exited with a failure code, or it printed no list. */
@@ -106,10 +66,11 @@ export function bunBinDir(env: NodeJS.ProcessEnv = process.env): string {
   return install !== undefined && install.trim() !== "" ? join(install, "bin") : join(homedir(), ".bun", "bin");
 }
 
-/** The PATH omp runs with: the editor's PATH with, in front, the folder of `ompPath` when it has one, else the folder of bun. */
+/** The PATH omp runs with: the editor's PATH with, in front, the folder of `ompPath` when it has one and then the folder of bun, each once. */
 export function ompPathVariable(ompPath: string, env: NodeJS.ProcessEnv = process.env): string {
-  const folder = ompPath === "" || dirname(ompPath) === "." ? bunBinDir(env) : dirname(ompPath);
-  return [folder, env["PATH"] ?? ""].filter((part) => part !== "").join(delimiter);
+  const own = ompPath === "" || dirname(ompPath) === "." ? undefined : dirname(ompPath);
+  const folders = [own, bunBinDir(env)].filter((folder): folder is string => folder !== undefined);
+  return [...new Set(folders), env["PATH"] ?? env["Path"] ?? ""].filter((part) => part !== "").join(delimiter);
 }
 
 /** `omp models --json`, run without a shell and with fixed arguments: `ompPath` when it is not empty, else `omp` from the editor's PATH. */
@@ -118,7 +79,7 @@ export function ompModels(ompPath: string, timeoutMs = 15_000, env: NodeJS.Proce
   const options = { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...env, PATH: ompPathVariable(ompPath, env) } };
   execFile(ompPath === "" ? "omp" : ompPath, ["models", "--json"], options, (error, stdout) => {
     const models = error === null ? parseOmpModels(stdout) : undefined;
-    resolve(models === undefined ? { models: [], error: ompError(error, ompPath, timeoutMs) } : { models });
+    resolve(models === undefined ? { models: [], error: ompError(error, ompPath, timeoutMs), ...(error?.code === "ENOENT" ? { missing: true as const } : {}) } : { models });
   });
   return promise;
 }

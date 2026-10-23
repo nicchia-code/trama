@@ -41,7 +41,7 @@ export interface WorkspaceFolderView {
   hasFiles: boolean;
 }
 
-/** An agent instruction file the wizard's Agent step warns about: the label is shown, the absolute path is what opening it asks for. */
+/** An agent instruction file the wizard's omp step warns about: the label is shown, the absolute path is what opening it asks for. */
 export interface InstructionFileView {
   label: string;
   path: string;
@@ -84,8 +84,8 @@ export type ToHost =
   | { type: "dismissDrift"; id: string }
   /** The developer chose «Rework with feedback…» on an open Drift: the host asks for the feedback in an input box, then launches the resolution agent on that one Drift with it. */
   | { type: "reworkDrift"; drift: string }
-  /** The Settings tab was opened: the host answers with the model names of the agent (`modelSuggestions`). With `agent` (and `ompPath`) they are for that agent instead of the saved one, and the answer says so: this is how the wizard suggests the models of an agent it has not saved yet. */
-  | { type: "modelSuggestionsWanted"; agent?: "cursor" | "omp"; ompPath?: string }
+  /** The Settings tab was opened: the host answers with the model names of omp (`modelSuggestions`). With `ompPath` they are for the omp at that path instead of the saved one, and the answer says so: this is how the wizard suggests the models of a path it has not saved yet. */
+  | { type: "modelSuggestionsWanted"; ompPath?: string }
   /** The developer changed a Trama setting in the Settings tab: the host checks it against the manifest and saves it in the user settings. */
   | { type: "setSetting"; key: string; value: SettingValue }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
@@ -94,11 +94,15 @@ export type ToHost =
   | { type: "openTaskImage"; task: string; name: string }
   /** Import from Code or Start from Scratch on the Diagram with the empty Model: the host shows the Settings tab with the wizard in the Empty Model mode and that choice. */
   | { type: "openGuidedSetup"; choice: SetupChoice }
-  /** The wizard's Agent step wants the chosen agent checked; the host answers with `agentCheck`. */
-  | { type: "agentCheckWanted"; agent: "cursor" | "omp"; ompPath: string }
-  /** The wizard's Agent step is shown: the host searches the agent instruction files of `root` (a workspace folder; absent means the project's folder) and answers with `instructionFiles`. */
+  /** The wizard's omp step wants omp checked at `ompPath`; the host answers with `agentCheck`. */
+  | { type: "agentCheckWanted"; ompPath: string }
+  /** Install omp: the host opens a visible terminal with omp's official installer; the message has no data. */
+  | { type: "installOmp" }
+  /** The Settings tab became visible: the host sends `ompStatus`. */
+  | { type: "ompStatusWanted" }
+  /** The wizard's omp step is shown: the host searches the agent instruction files of `root` (a workspace folder; absent means the project's folder) and answers with `instructionFiles`. */
   | { type: "instructionFilesWanted"; root?: string }
-  /** The developer followed a file of the warning on the Agent step: the host opens it only if it is in the last `instructionFiles` answer. */
+  /** The developer followed a file of the warning on the omp step: the host opens it only if it is in the last `instructionFiles` answer. */
   | { type: "openInstructionFile"; path: string }
   /** The wizard's tree opens `path` (relative to `root`, empty for the first level); the host answers with `folderChildren`. */
   | { type: "folderChildrenWanted"; root: string; path: string }
@@ -132,8 +136,6 @@ export type ToWebview =
   | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; scans: { advisorScanner: boolean } }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
-  /** A Run of the chat ended without the Advisor's final review: the Board shows a notice with the reason (`ui#chat-advisor`). */
-  | { type: "finalReviewMissing"; reason: string }
   /** The run control stopped following a job or released a Task: the Board shows `Trama stopped following <subject>: <reason>.` (`ui#agents`). */
   | { type: "stoppedFollowing"; subject: string; reason: string }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */
@@ -148,8 +150,11 @@ export type ToWebview =
   | { type: "workspaceFolders"; folders: WorkspaceFolderView[] }
   /** How the confirmation of the wizard of the modes Settings and Empty Model ended: closed on `ok`, otherwise left on the summary with `error`. */
   | { type: "guidedSetupResult"; ok: boolean; error: string | null }
-  /** The check of an agent for the wizard: omp answered (`models` is how many), or why it did not, or whether the editor is Cursor. */
-  | { type: "agentCheck"; agent: string; ompPath: string; ok: boolean; models?: number; error?: string }
+  /** The check of omp for the wizard: omp is being updated to `version`, or it is done (omp answered with `models` models and `version`, or `error` says why not; `updateError` is why a check or update failed). */
+  | { type: "agentCheck"; ompPath: string; state: "updating"; version: string }
+  | { type: "agentCheck"; ompPath: string; state: "done"; ok: boolean; missing: boolean; version?: string; models?: number; error?: string; updateError?: string }
+  /** The state of omp for the Settings tab: being checked, or done with the `version` that answers, or `error` saying why not (`missing` when the program was not found). */
+  | { type: "ompStatus"; state: "checking" | "done"; missing?: boolean; version?: string; error?: string }
   /** The agent instruction files found for `root`, with `path` absolute and `label` as it is shown. No content is sent. */
   | { type: "instructionFiles"; root: string; files: InstructionFileView[] }
   /** The entries of one folder of the wizard's tree, without the ones named with a dot or ignored by git. */
@@ -157,7 +162,7 @@ export type ToWebview =
   | ({ type: "navigate"; view: ViewName } & NavigateOptions)
   /** The question round being answered, drawn over the tabs; null when none is. */
   | { type: "questions"; round: QuestionRoundView | null }
-  /** The Trama settings: the schema from the manifest, per key the user value and (for keys not application-scoped) the workspace value, and the agent now in `trama.agent` (`omp` or `cursor`), which the omp-only controls follow. */
-  | { type: "settings"; schema: SettingSchema[]; values: Record<string, SettingsValues>; agent: "cursor" | "omp" }
-  /** Model names the Settings tab suggests for the three model roles, from the agent of `trama.agent`; an empty list means plain text, and `error` says why omp gives none. With `agent` (and `ompPath`) the list answers the wizard's request for that agent and only the wizard takes it. */
-  | { type: "modelSuggestions"; models: ModelSuggestion[]; error?: string; agent?: string; ompPath?: string };
+  /** The Trama settings: the schema from the manifest, per key the user value and (for keys not application-scoped) the workspace value. */
+  | { type: "settings"; schema: SettingSchema[]; values: Record<string, SettingsValues> }
+  /** Model names the Settings tab suggests for the three model roles, from omp; an empty list means plain text, and `error` says why omp gives none. With `ompPath` the list answers the wizard's request for the omp at that path and only the wizard takes it. */
+  | { type: "modelSuggestions"; models: ModelSuggestion[]; error?: string; ompPath?: string };

@@ -40,6 +40,8 @@ const press = (name: string | RegExp) => fireEvent.click(onView().getByRole("but
 const steps = () => within(onView().getByRole("list", { name: "Steps" })).getAllByRole("listitem").map((item) => item.textContent);
 
 /** The panel of the webview in miniature: Get Started and Settings in the shell, each with its own wizard, and the navigation the views ask for. */
+const OMP_OK = { type: "agentCheck", ompPath: "", state: "done", ok: true, missing: false, version: "18.12.6", models: 3 } as const;
+
 function panel(hasProject: boolean) {
   const posted: ToHost[] = [];
   const store = createShellStore({ view: hasProject ? "diagram" : "getstarted", hasProject, decisions: 0, error: null, diagnostics: [], views: {} as never, questions: null });
@@ -52,8 +54,8 @@ function panel(hasProject: boolean) {
   act(() => {
     settings.projectPresent(hasProject);
     getStarted.projectPresent(hasProject);
-    settings.receive({ type: "settings", schema, values: {}, agent: "cursor" });
-    getStarted.receiveSettings({ type: "settings", schema, values: {}, agent: "cursor" });
+    settings.receive({ type: "settings", schema, values: {} });
+    getStarted.receiveSettings({ type: "settings", schema, values: {} });
     getStarted.receiveFolders({ type: "workspaceFolders", folders: [FOLDER] });
   });
   const tab = (name: string | RegExp) => fireEvent.mouseDown(screen.getByRole("tab", { name }), { button: 0, ctrlKey: false });
@@ -67,7 +69,7 @@ test("in a folder without a project Get Started is the wizard of the first setup
   expect(heading()).toBe("Path");
   fireEvent.click(onView().getByRole("radio", { name: /Start from Scratch/ }));
   press("Next");
-  expect(heading()).toBe("Agent");
+  expect(heading()).toBe("omp");
   expect(onView().getByText(/Trama will create a/)).not.toBeNull();
   // The notice sits above the title of the step.
   const notice = onView().getByText(/Trama will create a/);
@@ -78,14 +80,14 @@ test("going to Settings and back to Get Started keeps the choices of the wizard"
   const { tab, store } = panel(false);
   fireEvent.click(onView().getByRole("radio", { name: /Import from Code/ }));
   press("Next");
-  expect(heading()).toBe("Agent");
+  expect(heading()).toBe("omp");
   tab("Settings");
   expect(store.get().view).toBe("settings");
   // Without a project the Settings tab has the form only: no Guided setup.
   expect(onView().queryByRole("button", { name: /Guided setup/ })).toBeNull();
   tab("Get Started");
   expect(store.get().view).toBe("getstarted");
-  expect(heading()).toBe("Agent");
+  expect(heading()).toBe("omp");
   expect(steps()).toContain("Folders");
   press("Back");
   expect((onView().getByRole("radio", { name: /Import from Code/ }) as HTMLInputElement).getAttribute("aria-checked")).toBe("true");
@@ -95,7 +97,7 @@ test("Guided setup opens the wizard of the settings in place of the form; Cancel
   const { settings, store } = panel(true);
   act(() => store.set({ view: "settings" }));
   press(/Guided setup/);
-  expect(steps()).toEqual(["Agent", "Models", "Project", "Advanced", "Summary"]);
+  expect(steps()).toEqual(["omp", "Models", "Project", "Advanced", "Summary"]);
   expect(onView().queryByRole("combobox", { name: "Theme" })).toBeNull();
   press("Cancel");
   expect(onView().getByRole("combobox", { name: "Theme" })).not.toBeNull();
@@ -103,7 +105,7 @@ test("Guided setup opens the wizard of the settings in place of the form; Cancel
 
   press(/Guided setup/);
   act(() => settings.openGuidedSetup({ type: "guidedSetup", mode: "settings" }));
-  expect(heading()).toBe("Agent");
+  expect(heading()).toBe("omp");
   // The host's answer to the confirmation of the mode Settings closes the wizard on the form.
   act(() => settings.receiveResult({ type: "guidedSetupResult", ok: true, error: null }));
   expect(onView().getByRole("combobox", { name: "Theme" })).not.toBeNull();
@@ -111,9 +113,10 @@ test("Guided setup opens the wizard of the settings in place of the form; Cancel
 });
 
 test("the wizard of the settings keeps its choices while another tab is shown", () => {
-  const { store, tab } = panel(true);
+  const { store, tab, settings } = panel(true);
   act(() => store.set({ view: "settings" }));
   press(/Guided setup/);
+  act(() => settings.receiveAgentCheck(OMP_OK));
   press("Next");
   expect(heading()).toBe("Models");
   tab("Requirements");
@@ -130,7 +133,7 @@ test("the Empty Model wizard opens in the Settings tab with the path chosen and 
     store.set({ view: "settings" });
     settings.openGuidedSetup({ type: "guidedSetup", mode: "empty-model", choice: "import", root: "/work/app" });
   });
-  expect(steps()).toEqual(["Agent", "Models", "Project", "Folders", "Advanced", "Summary"]);
+  expect(steps()).toEqual(["omp", "Models", "Project", "Folders", "Advanced", "Summary"]);
   // Nothing is initialized or launched by opening it.
   expect(posted.some((message) => message.type === "confirmSetup" || message.type === "launch")).toBe(false);
   press("Cancel");
@@ -141,7 +144,7 @@ test("the Empty Model wizard opens in the Settings tab with the path chosen and 
     store.set({ view: "settings" });
     settings.openGuidedSetup({ type: "guidedSetup", mode: "empty-model", choice: "scratch", root: "/work/app" });
   });
-  expect(steps()).toEqual(["Agent", "Models", "Project", "Advanced", "Summary"]);
+  expect(steps()).toEqual(["omp", "Models", "Project", "Advanced", "Summary"]);
   act(() => settings.receiveResult({ type: "guidedSetupResult", ok: true, error: null }));
   expect(store.get().view).toBe("diagram");
 });
@@ -152,6 +155,7 @@ test("a failed confirmation of the Empty Model wizard shows the reason in the su
     store.set({ view: "settings" });
     settings.openGuidedSetup({ type: "guidedSetup", mode: "empty-model", choice: "scratch", root: "/work/app" });
   });
+  act(() => settings.receiveAgentCheck(OMP_OK));
   act(() => {
     press("Next");
     press("Next");
@@ -171,12 +175,13 @@ test("opening the Empty Model wizard again keeps it on the same path and starts 
   press(/Guided setup/);
   open("import");
   expect(steps()).toContain("Folders");
+  act(() => settings.receiveAgentCheck(OMP_OK));
   press("Next");
   expect(heading()).toBe("Models");
   open("import");
   expect(heading()).toBe("Models");
   open("scratch");
-  expect(heading()).toBe("Agent");
+  expect(heading()).toBe("omp");
   expect(steps()).not.toContain("Folders");
 });
 
@@ -184,7 +189,7 @@ test("when the folder stops being a project the wizard of the Settings tab is fo
   const { settings, getStarted, store } = panel(true);
   act(() => store.set({ view: "settings" }));
   press(/Guided setup/);
-  expect(heading()).toBe("Agent");
+  expect(heading()).toBe("omp");
   act(() => {
     store.set({ hasProject: false, view: "getstarted" });
     settings.projectPresent(false);

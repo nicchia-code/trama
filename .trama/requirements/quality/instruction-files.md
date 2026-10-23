@@ -3,7 +3,7 @@ description: "Use for the security, privacy and reliability of finding agent ins
 ---
 # Quality of agent instruction files
 
-## setup-wizard/Agent
+## setup-wizard/omp
 - Riservatezza: la ricerca legge solo i percorsi elencati in `rules#setup-wizard` e, dei file, solo quanto basta per sapere se sono vuoti; il loro contenuto non entra nel webview, in un log o nell'overlay. Il webview riceve solo percorsi ed etichette, mostrati come testo, mai come markup.
 - Sicurezza: l'host apre soltanto un file dell'ultima ricerca; un percorso che il webview manda e che non vi compare è rifiutato. Il wizard non cancella né cambia mai un file di istruzioni.
 - Prestazioni: la ricerca non blocca il passo: i controlli si usano subito e il riquadro compare quando la risposta arriva. Non scende nelle sottocartelle del progetto.

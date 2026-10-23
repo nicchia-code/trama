@@ -56,12 +56,10 @@ test("a Task taken with no known holder says so and changes nothing", async () =
   const asked: string[] = [];
   await window((id) => { asked.push(id); return { result: "alive", holder: "x" }; });
   const anonymous = task();
-  const chat = task();
   moveTask(p, anonymous, "doing", "agent");
-  moveTask(p, chat, "doing", "agent", { chat: "cursor" });
-  const before = [anonymous, chat].map((id) => readFileSync(getTask(p, id).path, "utf8"));
-  for (const id of [anonymous, chat]) expect(await check(id, true)).toEqual({ out: { task: id, result: "unknown-holder" }, exit: 0 });
-  expect([anonymous, chat].map((id) => readFileSync(getTask(p, id).path, "utf8"))).toEqual(before);
+  const before = readFileSync(getTask(p, anonymous).path, "utf8");
+  expect(await check(anonymous, true)).toEqual({ out: { task: anonymous, result: "unknown-holder" }, exit: 0 });
+  expect(readFileSync(getTask(p, anonymous).path, "utf8")).toEqual(before);
   expect(asked).toEqual([]);
 });
 

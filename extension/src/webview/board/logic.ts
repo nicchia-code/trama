@@ -11,16 +11,10 @@ import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import { focusStepCount } from "../focus/steps";
 import { dismissBlocker } from "../dismiss";
 import { type CardName, cardNameOf, type CardNumbers, namerOf, noNumbers } from "../../../../src/core/card-names";
-import type { BoardModels, BoardProposalModel, ProposalAgent } from "../../host/proposal-models";
-
-/** How each agent of `trama.agent` is named in the texts of the model window and of its badge. */
-export const AGENT_NAMES: Record<ProposalAgent, string> = {
-  cursor: "Cursor's chat",
-  omp: "omp",
-};
+import type { BoardModels, BoardProposalModel } from "../../host/proposal-models";
 
 /** The models of no Proposal: the Board draws them as none chosen and none choosable. */
-export const NO_MODELS: BoardModels = { agent: "cursor", proposals: {} };
+export const NO_MODELS: BoardModels = { proposals: {} };
 
 /** The columns that hold cards. */
 export type CardColumnId = "backlog" | "active";
@@ -661,9 +655,6 @@ export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCa
 /** The sentence the notice of a withdrawn announcement shows: a check was not finished, a card was not delivered; a Resolve Drifts ghost is a Proposal. */
 export const withdrawnNotice = (a: AnnouncementView): string =>
   a.kind === "check" || a.kind === "scan" ? `The agent stopped before finishing ${a.title}.` : `The agent finished without delivering ${a.kind === "resolve" ? "Proposal" : ANNOUNCED_KIND_LABELS[a.kind]} ${a.title}.`;
-
-/** The sentence the notice of a Run that ended without the Advisor's final review shows; the reason is English whatever `trama.language` says. */
-export const finalReviewMissingNotice = (reason: string): string => `The Run finished without the Advisor's final review: ${reason}.`;
 
 /** The sentence the notice of a job or Task the run control stopped following shows; English whatever `trama.language` says. */
 export const stoppedFollowingNotice = (subject: string, reason: string): string => `Trama stopped following ${subject}: ${reason}.`;

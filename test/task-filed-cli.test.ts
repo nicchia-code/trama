@@ -41,16 +41,6 @@ test("a Task filed by an agent in a Trama terminal is relayed with its holder an
   expect(received).toEqual([{ type: "task-filed", root: projectRoot, task: id, holder: "abc123" }]);
 });
 
-test("a Task filed from a chat conversation is relayed with the chat and its conversation", async () => {
-  const received: Record<string, unknown>[] = [];
-  server = await createQuestionServer({ project: projectAt(projectRoot), runtimeDir, handler: async () => ({ status: "unavailable", reason: "No project coordinator is available." }), onCoordinatorMessage: (message) => { received.push(message); } });
-  const result = run(["task", "new", "--json", "--input", '{"title":"Filed by chat","technical":true}'], projectRoot, { TRAMA_AGENT: "1", CURSOR_AGENT: "1", TRAMA_CHAT: "conv-1" });
-  expect(result.exit).toBe(0);
-  const id = (JSON.parse(result.out) as { id: string }).id;
-  await settleCoordinatorMessages();
-  expect(received).toEqual([{ type: "task-filed", root: projectRoot, task: id, holder: "cursor", conversation: "conv-1" }]);
-});
-
 test("a Task filed without an agent sends nothing, and without a live editor the command still succeeds", () => {
   const result = run(["task", "new", "--json", "--input", '{"title":"Filed by a developer","technical":true}'], projectRoot, {});
   expect(result.exit).toBe(0);

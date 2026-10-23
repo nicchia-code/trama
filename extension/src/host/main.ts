@@ -4,17 +4,18 @@ import * as vscode from "vscode";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { ActivitiesItem, SHOW_ACTIVITIES_COMMAND } from "./activities-item";
 import { watchAnnouncements } from "./announcements";
-import { agentName, watchAgentTerminal, configuredSkillsDir, setBundledCliDir, setOmpChat, setOverlayStorage, settings, windowClosed } from "./agent";
+import { watchAgentTerminal, configuredOmpPath, configuredSkillsDir, setBundledCliDir, setOmpChat, setOverlayStorage, settings, windowClosed } from "./agent";
 import { Controller, describeError } from "./controller";
 import { startExecutionCheck } from "./execution-check";
 import { DesignRequests } from "./design-requests";
-import { bundledTrama } from "./cursor";
-import { findProject, installEditorHooks, removeCopilotPieces } from "./project";
+import { bundledTrama } from "./bundled";
+import { findProject, removeCopilotPieces } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
 import { CONVERSATIONS_KEY, readSavedConversations } from "../../../src/core/omp-chat-conversation";
 import { OmpClient } from "./omp-chat/client";
 import { OmpChatView } from "./omp-chat/view";
+import { findOmp, forgetUpdateCheck, setUpdateStore } from "./omp-update";
 
 const SKILL_SYNC_DEBOUNCE_MS = 300;
 
@@ -48,10 +49,11 @@ function homeView(): vscode.Disposable {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const session = new QuestionSession(() => trama.revealForQuestions(), agentName);
+  const session = new QuestionSession(() => trama.revealForQuestions());
   const questions = new EditorQuestions(() => findProject(), session);
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
   setOverlayStorage(context.globalStorageUri);
+  setUpdateStore(context.globalState);
   const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
   const requests = new DesignRequests(context.workspaceState, tramaFiles, undefined, undefined, () => trama.launch({ kind: "implement-all" }));
   const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri, requests, context.workspaceState);
@@ -63,7 +65,10 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBarItem(),
     homeView(),
     vscode.commands.registerCommand("trama.open", guarded(() => trama.open())),
+    // Internal: the missing-omp notice's Open Settings runs it; it is not in the palette.
     vscode.commands.registerCommand("trama.openSettings", guarded(() => trama.openSettings())),
+    // Internal: the missing-omp notice's Install omp runs it; it is not in the palette.
+    vscode.commands.registerCommand("trama.installOmp", guarded(async () => trama.installOmp())),
     vscode.commands.registerCommand("trama.sendDesignRequest", guarded((uri?: vscode.Uri) => requests.send(uri))),
     vscode.commands.registerCommand("trama.scan", guarded(() => trama.pickAndScan())),
     vscode.commands.registerCommand("trama.import", guarded(() => trama.importFromCode())),
@@ -78,30 +83,37 @@ export function activate(context: vscode.ExtensionContext): void {
     watchRequirements(),
     vscode.workspace.onDidChangeWorkspaceFolders(() => trama.workspaceFoldersChanged()),
     vscode.workspace.onDidChangeConfiguration((event) => {
+      // A changed `trama.ompPath` means another omp: the outcome of the last update check no longer holds.
+      if (event.affectsConfiguration("trama.ompPath")) forgetUpdateCheck();
       if (event.affectsConfiguration("trama")) trama.settingsChanged(event.affectsConfiguration("trama.ompPath"));
     }),
-    ...(vscode.lm === undefined ? [] : [vscode.lm.onDidChangeChatModels(() => void trama.postModelSuggestions())]),
   );
   exposeBundledCli(context);
   startOmpChat(context);
-  void guarded(() => installEditorHooks())();
-  // Earlier versions installed Copilot's hooks outside Cursor: an error in removing them shows nothing.
+  // Earlier versions installed Copilot's hooks: an error in removing them shows nothing.
   void removeCopilotPieces(context.globalStorageUri).catch(() => undefined);
 }
 
 /**
  * omp Chat: the view of the conversations and the ACP client they stand on. The conversations the window saved before resume once both exist, and the context key
- * that shows the view follows the settings (`trama.ompChat`, `trama.agent`) and the conversations from the start.
+ * that shows the view follows the settings (`trama.ompChat`) and the conversations from the start.
  */
 function startOmpChat(context: vscode.ExtensionContext): void {
   const savedIds = () => readSavedConversations(context.workspaceState.get(CONVERSATIONS_KEY)).entries.map((entry) => entry.id);
   const view = new OmpChatView(context.extensionUri, () => findProject()?.root, savedIds);
-  const client = new OmpClient({ ompPath: () => settings().get<string>("ompPath", "").trim() });
+  // `trama.ompPath` is application-scoped: only the user value counts, read by `configuredOmpPath`, as for every terminal and the model list.
+  // The program is the one the launches run: found as `findOmp` finds it (a conversation that resumes after a reload has had no launch before it).
+  const client = new OmpClient({
+    ompPath: async () => {
+      const wanted = configuredOmpPath();
+      return (await findOmp(wanted)) ?? wanted;
+    },
+  });
   context.subscriptions.push(
     view,
     view.register(),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration("trama.ompChat") || event.affectsConfiguration("trama.agent")) view.model.refresh();
+      if (event.affectsConfiguration("trama.ompChat")) view.model.refresh();
       if (event.affectsConfiguration("trama.theme")) view.model.themeChanged();
     }),
   );

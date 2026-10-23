@@ -1,5 +1,5 @@
 import type { PlanEntry, SessionNotification, ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
-import type { FirstMessage, FormAnswerMessage, FormView } from "../../omp-chat-protocol";
+import type { FirstMessage, FormAnswerMessage, FormView, PermissionView } from "../../omp-chat-protocol";
 
 // What the conversation shows, built from the notifications of ACP as they arrive (`ui#omp-chat-conversation`). Everything here is pure: the components draw
 // the blocks, and the tests feed notifications to `applyUpdate`.
@@ -17,7 +17,9 @@ export type Block =
   | { kind: "tool"; id: number; toolCallId: string; title: string; name?: string; toolKind: ToolKind; status: "pending" | "in_progress" | "completed" | "failed"; output?: string; places: FilePlace[] }
   | { kind: "error"; id: number; message: string }
   | { kind: "notice"; id: number; text: string }
-  | { kind: "form"; id: number; form: FormView; answer?: FormAnswerMessage };
+  | { kind: "form"; id: number; form: FormView; answer?: FormAnswerMessage }
+  /** A permission request: the tool call as a compact row and omp's options in omp's order; `answer` is the chosen option id, `cancelled` after Stop or closing. */
+  | { kind: "permission"; id: number; requestId: string; title: string; toolKind: ToolKind; name?: string; options: PermissionView["options"]; answer?: string; cancelled?: boolean };
 
 export interface Transcript {
   blocks: Block[];
@@ -92,6 +94,24 @@ export function addForm(t: Transcript, form: FormView, now: number): Transcript 
 /** The developer answered the form (or skipped it): it stays, read-only, with what was given. */
 export function answerForm(t: Transcript, requestId: string, answer: FormAnswerMessage): Transcript {
   return { ...t, blocks: t.blocks.map((block) => (block.kind === "form" && block.form.requestId === requestId ? { ...block, answer } : block)) };
+}
+
+/** A permission request of omp: the tool call it concerns shows with the title omp gives it (or the one of the call already in the conversation). */
+export function addPermission(t: Transcript, request: PermissionView, now: number): Transcript {
+  const known = t.blocks.find((block): block is Extract<Block, { kind: "tool" }> => block.kind === "tool" && block.toolCallId === request.toolCall.toolCallId);
+  const title = request.toolCall.title ?? known?.title ?? "Tool call";
+  const toolKind: ToolKind = request.toolCall.kind ?? known?.toolKind ?? "other";
+  return push(t, (id) => ({ kind: "permission", id, requestId: request.requestId, title, toolKind, ...(known?.name === undefined ? {} : { name: known.name }), options: request.options }), now);
+}
+
+/** The developer chose an option: the request stays, read-only, with it. */
+export function answerPermission(t: Transcript, requestId: string, optionId: string): Transcript {
+  return { ...t, blocks: t.blocks.map((block) => (block.kind === "permission" && block.requestId === requestId && block.answer === undefined && !block.cancelled ? { ...block, answer: optionId } : block)) };
+}
+
+/** Stop or the closing answered the request `cancelled`. */
+export function cancelPermission(t: Transcript, requestId: string): Transcript {
+  return { ...t, blocks: t.blocks.map((block) => (block.kind === "permission" && block.requestId === requestId && block.answer === undefined ? { ...block, cancelled: true } : block)) };
 }
 
 /** The text of the content blocks of a tool call, and nothing for a diff (the conversation shows no diff) or a terminal. */

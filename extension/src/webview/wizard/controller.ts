@@ -5,7 +5,6 @@ import type { FolderEntry, InstructionFileView, ToHost, ToWebview, WorkspaceFold
 import {
   type AgentCheckResult,
   changedWrites,
-  chosenAgent,
   chosenOmpPath,
   exclusions,
   nextBlock,
@@ -32,11 +31,11 @@ export interface WizardSnapshot {
   /** The user and workspace values the settings have now, which the summary compares with. */
   current: Readonly<Record<string, SettingsValues>>;
   folders: readonly WorkspaceFolderView[];
-  /** The model names suggested for the agent chosen now; null until they arrive. */
+  /** The model names suggested for the omp chosen now; null until they arrive. */
   models: { list: ModelSuggestion[]; error: string | null } | null;
-  /** The instruction files found the last time the Agent step was shown; null while the search runs or before it started. */
+  /** The instruction files found the last time the omp step was shown; null while the search runs or before it started. */
   instructionFiles: readonly InstructionFileView[] | null;
-  /** The check of the agent chosen now; null while it is being checked. */
+  /** The check of the omp chosen now; null while it is being checked. */
   check: AgentCheckResult | null;
   /** The confirmation is under way: no button can be pressed. */
   busy: boolean;
@@ -68,7 +67,7 @@ export class WizardController {
   private models: WizardSnapshot["models"] = null;
   private check: AgentCheckResult | null = null;
   private instructionFiles: readonly InstructionFileView[] | null = null;
-  /** The folder the last instruction-files search was asked for (null: the project's folder), while the Agent step is on view. */
+  /** The folder the last instruction-files search was asked for (null: the project's folder), while the omp step is on view. */
   private instructionRoot: string | null | undefined = undefined;
   private busy = false;
   private error: string | null = null;
@@ -189,22 +188,23 @@ export class WizardController {
 
   receiveModels(message: Extract<ToWebview, { type: "modelSuggestions" }>): void {
     const state = this.state;
-    if (state === null || message.agent === undefined) return;
-    if (message.agent !== chosenAgent(this.schema, state) || (message.ompPath ?? "") !== chosenOmpPath(this.schema, state)) return;
+    if (state === null || message.ompPath === undefined) return;
+    if (message.ompPath !== chosenOmpPath(this.schema, state)) return;
     this.models = { list: message.models, error: message.error ?? null };
     this.emit();
   }
 
   receiveAgentCheck(message: Extract<ToWebview, { type: "agentCheck" }>): void {
     const state = this.state;
-    if (state === null || message.agent !== chosenAgent(this.schema, state) || message.ompPath !== chosenOmpPath(this.schema, state)) return;
-    this.check = { agent: message.agent, ompPath: message.ompPath, ok: message.ok, ...(message.models === undefined ? {} : { models: message.models }), ...(message.error === undefined ? {} : { error: message.error }) };
+    if (state === null || message.ompPath !== chosenOmpPath(this.schema, state)) return;
+    const { type: _type, ...result } = message;
+    this.check = result;
     this.emit();
   }
 
   receiveInstructionFiles(message: Extract<ToWebview, { type: "instructionFiles" }>): void {
     const state = this.state;
-    if (state === null || state.step !== "Agent" || this.instructionRoot === undefined || (this.instructionRoot !== null && message.root !== this.instructionRoot)) return;
+    if (state === null || state.step !== "omp" || this.instructionRoot === undefined || (this.instructionRoot !== null && message.root !== this.instructionRoot)) return;
     this.instructionFiles = message.files;
     this.emit();
   }
@@ -212,6 +212,11 @@ export class WizardController {
   /** The warning's link: the host opens the file when it is in its last answer. */
   openInstructionFile(path: string): void {
     this.callbacks.post({ type: "openInstructionFile", path });
+  }
+
+  /** `Install omp`: the host opens a terminal with omp's official installer. */
+  installOmp(): void {
+    this.callbacks.post({ type: "installOmp" });
   }
 
   receiveFolderChildren(message: Extract<ToWebview, { type: "folderChildren" }>): void {
@@ -248,7 +253,7 @@ export class WizardController {
   }
 
   next(): void {
-    this.act((state) => (nextBlock(this.schema, state) === null ? nextStep(state) : state));
+    this.act((state) => (nextBlock(this.schema, state, this.check) === null ? nextStep(state) : state));
   }
 
   back(): void {
@@ -328,20 +333,20 @@ export class WizardController {
   private ask(): void {
     const state = this.state;
     if (state === null) return;
-    const agent = chosenAgent(this.schema, state);
     const ompPath = chosenOmpPath(this.schema, state);
-    const key = `${agent}\0${ompPath}`;
-    if (state.step === "Agent" && this.checkKey !== key) {
-      this.checkKey = key;
+    // The check is made again each time the omp step is shown and each time its path changes.
+    if (state.step !== "omp") this.checkKey = null;
+    if (state.step === "omp" && this.checkKey !== ompPath) {
+      this.checkKey = ompPath;
       this.check = null;
-      this.callbacks.post({ type: "agentCheckWanted", agent: agent === "omp" ? "omp" : "cursor", ompPath });
+      this.callbacks.post({ type: "agentCheckWanted", ompPath });
     }
-    if (state.step === "Models" && this.modelsKey !== key) {
-      this.modelsKey = key;
+    if (state.step === "Models" && this.modelsKey !== ompPath) {
+      this.modelsKey = ompPath;
       this.models = null;
-      this.callbacks.post({ type: "modelSuggestionsWanted", agent: agent === "omp" ? "omp" : "cursor", ompPath });
+      this.callbacks.post({ type: "modelSuggestionsWanted", ompPath });
     }
-    if (state.step !== "Agent") this.instructionRoot = undefined;
+    if (state.step !== "omp") this.instructionRoot = undefined;
     else if (this.instructionRoot === undefined) {
       this.instructionRoot = state.mode === "first" ? state.root : null;
       this.instructionFiles = null;

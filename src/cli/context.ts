@@ -9,9 +9,9 @@ import { syncShortNumbers } from "../core/short-numbers";
 export interface Context {
   cwd: string;
   rootOption?: string;
-  /** True when the command runs as the agent: in the terminal Trama started for it (`TRAMA_AGENT`) or in Cursor's chat (`CURSOR_AGENT`). */
+  /** True when the command runs as the agent: in the terminal Trama started for it (`TRAMA_AGENT`). */
   byAgent: boolean;
-  /** The agent terminal (`TRAMA_TERMINAL`) or the chat (`CURSOR_AGENT`) the command runs in, when either is known. */
+  /** The agent terminal (`TRAMA_TERMINAL`) the command runs in, when it is known. */
   origin: AgentOrigin;
   /** The job this agent terminal was started for (`TRAMA_JOB`), when there is one: it groups the timings of the phases. */
   job?: string;

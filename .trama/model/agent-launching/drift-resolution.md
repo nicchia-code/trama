@@ -30,16 +30,13 @@ Almeno un Run è in corso. Resolve aspetta, anche su un Drift con una domanda pr
 - `agent-hook.IDLE` → Free: termina l'ultimo Run.
 - `terminal.COMMAND_ENDED` → Free: termina l'ultimo Run; una fine anomala conserva i risultati.
 - `terminal.CLOSED` → Free: viene chiuso l'ultimo Run.
-- `editor-chat.AGENT_STOPPED` → Free: termina il turno dell'ultimo Run.
-- `editor-chat.AGENT_INTERRUPTED` → Free: viene interrotto l'ultimo Run.
-- `editor-chat.CONVERSATION_CLOSED` → Free: viene chiusa la conversazione dell'ultimo Run.
-- `time.CHECK_DUE` → Free: il controllo di esecuzione chiude l'ultimo Run: il suo agente di omp non c'è più (vedi l'Agent terminal), oppure nella chat il Run non si è legato a nessuna conversazione entro il primo controllo fatto almeno un minuto dopo l'invio, e finisce come se non fosse mai partito. È una fine anomala: una sequenza di Run all si ferma senza lanciare altri Run. In cima alla Board l'avviso dice che Trama ha smesso di seguire quel Run e perché.
+- `time.CHECK_DUE` → Free: il controllo di esecuzione chiude l'ultimo Run: il suo agente di omp non c'è più (vedi l'Agent terminal). È una fine anomala: una sequenza di Run all si ferma senza lanciare altri Run. In cima alla Board l'avviso dice che Trama ha smesso di seguire quel Run e perché.
 
 ### Answering a prepared question
 Il developer risponde alla domanda pronta del Drift scelto; nessun agente lavora. Conta come una risoluzione in corso: nessun Run parte, nessun altro Resolve parte, Unify Drifts non parte e Dismiss Drift è indisponibile finché la domanda è aperta.
 - `question-round.ROUND_CLOSED` → Free: il developer ha scelto una Fix option, con o senza testo libero, che ne diventa la nota; oppure ha scelto, senza testo libero, di chiudere senza cambiare nulla o di tenere il comportamento che il codice ha già. Trama scrive da sé la risoluzione con quella decisione, con le modifiche della Proposal allegata al Drift quando la decisione è di adeguare il Modello, e la consegna; la scheda gialla compare subito in Backlog.
 - `question-round.ROUND_CLOSED` → Resolving: il developer ha scritto un testo libero insieme a un'opzione che non è una Fix option, oppure la risoluzione scritta da Trama non ha passato i controlli della consegna (per esempio perché la Proposal allegata non si applica più al Modello di adesso), e l'istruzione parte davvero. Trama lancia l'agente di risoluzione su quel Drift con la risposta già data; l'agente non rifà la domanda e scrive la risoluzione da quella risposta.
-- `question-round.ROUND_CLOSED` → Free: la risposta richiedeva l'agente ma l'istruzione non parte davvero (lasciata pronta nella chat o negli appunti). Nessuna risoluzione nasce, il Drift resta aperto con la sua domanda pronta.
+- `question-round.ROUND_CLOSED` → Free: la risposta richiedeva l'agente ma l'istruzione non parte davvero. Nessuna risoluzione nasce, il Drift resta aperto con la sua domanda pronta.
 - `question-round.ROUND_CLOSED` → Free: il developer ha saltato la domanda. Nessuna risoluzione nasce; il Drift resta aperto e la sua domanda resta pronta per il prossimo Resolve.
 - `editor.DISCONNECTED` → Free: la finestra che mostrava la domanda è persa. Non si scrive nulla; il Drift resta aperto con la sua domanda pronta.
 
@@ -48,9 +45,6 @@ Un solo agente prepara la risoluzione dei Drift raccolti: il Drift scelto con Re
 - `agent-hook.IDLE` → Free: l'agente della risoluzione ha finito. Una Proposal consegnata ma non decisa continua a impedire un altro Resolve, se non è nata da una domanda pronta.
 - `terminal.COMMAND_ENDED` → Free: è finito il comando della risoluzione.
 - `terminal.CLOSED` → Free: è stato chiuso il terminale della risoluzione; nessun Run parte da una chiusura.
-- `editor-chat.AGENT_STOPPED` → Free: è finito il turno della risoluzione.
-- `editor-chat.AGENT_INTERRUPTED` → Free: è stato interrotto il turno della risoluzione; nessun Run parte dall'interruzione.
-- `editor-chat.CONVERSATION_CLOSED` → Free: è stata chiusa la conversazione della risoluzione.
 - `time.CHECK_DUE` → Free: il controllo di esecuzione chiude il lavoro della risoluzione, alle stesse condizioni dei Run; nessun Run parte da questa fine, e l'avviso compare come per un Run.
 
 ### Unifying
@@ -58,9 +52,6 @@ Un solo agente unisce i Drift raccolti da Unify Drifts. Conta come una risoluzio
 - `agent-hook.IDLE` → Free: l'agente dell'unificazione ha finito. Se non ha registrato il Drift unificato, nessun Drift è cambiato.
 - `terminal.COMMAND_ENDED` → Free: è finito il comando dell'unificazione.
 - `terminal.CLOSED` → Free: è stato chiuso il terminale dell'unificazione; nessun Run parte da una chiusura.
-- `editor-chat.AGENT_STOPPED` → Free: è finito il turno dell'unificazione.
-- `editor-chat.AGENT_INTERRUPTED` → Free: è stato interrotto il turno dell'unificazione; nessun Run parte dall'interruzione.
-- `editor-chat.CONVERSATION_CLOSED` → Free: è stata chiusa la conversazione dell'unificazione.
 - `time.CHECK_DUE` → Free: il controllo di esecuzione chiude il lavoro dell'unificazione, alle stesse condizioni dei Run; nessun Run parte da questa fine, e l'avviso compare come per un Run.
 
 ## Events

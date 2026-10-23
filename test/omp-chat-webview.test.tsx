@@ -312,3 +312,66 @@ test("a form's fields come from the schema: single and multiple choice, text, bo
     ["count", "number", false],
   ]);
 });
+
+const permissionOptions = [
+  { optionId: "once", name: "Allow once", kind: "allow_once" as const },
+  { optionId: "always", name: "Allow always", kind: "allow_always" as const },
+  { optionId: "no", name: "Reject", kind: "reject_once" as const },
+];
+
+test("a permission request shows in the flow with the warnings border, the tool row and a button per option in omp's order", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "waiting-permission")], selected: "a" });
+  host({ type: "permissionRequest", id: "a", requestId: "p1", toolCall: { toolCallId: "t", title: "Run rm -rf build", kind: "execute" }, options: permissionOptions });
+  const box = document.querySelector('[data-permission="p1"]');
+  expect(box?.className).toContain("border-amber-500");
+  expect(within(box as HTMLElement).getByText("omp asks permission")).not.toBeNull();
+  expect(within(box as HTMLElement).getByText("Run rm -rf build")).not.toBeNull();
+  const buttons = within(box as HTMLElement).getAllByRole("button");
+  expect(buttons.map((button) => button.textContent)).toEqual(["Allow once", "Allow always", "Reject"]);
+  expect(buttons.map((button) => button.className.includes("border bg-background"))).toEqual([false, false, true]);
+});
+
+test("choosing an option posts the answer and leaves the request read-only with that option", () => {
+  const { host, posted } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "waiting-permission")], selected: "a" });
+  host({ type: "permissionRequest", id: "a", requestId: "p1", toolCall: { toolCallId: "t", title: "Run ls" }, options: permissionOptions });
+  fireEvent.click(screen.getByRole("button", { name: "Allow always" }));
+  expect(posted).toEqual([{ type: "permissionAnswer", id: "a", requestId: "p1", optionId: "always" }]);
+  expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+  expect(screen.getByText("Allow always")).not.toBeNull();
+});
+
+test("a request cancelled by Stop or by the end of the process says Cancelled and keeps no buttons", () => {
+  const { host, posted } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "waiting-permission")], selected: "a" });
+  host({ type: "permissionRequest", id: "a", requestId: "p1", toolCall: { toolCallId: "t", title: "Run ls" }, options: permissionOptions });
+  host({ type: "permissionCancelled", id: "a", requestId: "p1" });
+  expect(screen.getByText("Cancelled")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+  expect(posted).toEqual([]);
+});
+
+test("the tool row takes the title of the call already in the conversation when the request has none", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
+  host({ type: "conversationUpdate", id: "a", update: { sessionId: "s", update: { sessionUpdate: "tool_call", toolCallId: "t", title: "Edit a.ts", kind: "edit", status: "pending" } } });
+  host({ type: "permissionRequest", id: "a", requestId: "p1", toolCall: { toolCallId: "t" }, options: permissionOptions });
+  const box = document.querySelector('[data-permission="p1"]') as HTMLElement;
+  expect(within(box).getByText("Edit a.ts")).not.toBeNull();
+});
+
+test("a tab waiting for a permission has the warnings dot, not the animated one", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "waiting-permission")], selected: "a" });
+  const dot = screen.getAllByRole("tab")[0]?.querySelector('[data-dot="waiting-permission"]');
+  expect(dot?.className).toContain("bg-amber-500");
+  expect(dot?.className).not.toContain("animate-pulse");
+});
+
+test("Stop stays available while a permission request waits", () => {
+  const { host, posted } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "waiting-permission")], selected: "a" });
+  fireEvent.click(screen.getByRole("button", { name: "Stop the agent" }));
+  expect(posted).toEqual([{ type: "stopAgent", id: "a" }]);
+});

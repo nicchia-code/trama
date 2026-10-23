@@ -1,6 +1,6 @@
 # Time
 
-Il tempo che passa, visto dal controllo di esecuzione di Trama: un controllo piccolissimo ed economico che ogni finestra dell'editor fa da sé, per non lasciare in corso un lavoro di cui nessun segnale dirà più la fine. Il controllo guarda soltanto fatti certi: se il processo dell'agente di omp esiste ancora, se il terminale esiste ancora, se un lavoro della chat di Cursor si è legato alla sua conversazione, se qualche finestra aperta del progetto segue ancora chi tiene un Task. Non misura l'inattività e non ha soglie: un agente vivo ma fermo resta in corso, come un agente che lavora a lungo.
+Il tempo che passa, visto dal controllo di esecuzione di Trama: un controllo piccolissimo ed economico che ogni finestra dell'editor fa da sé, per non lasciare in corso un lavoro di cui nessun segnale dirà più la fine. Il controllo guarda soltanto fatti certi: se il processo dell'agente di omp esiste ancora, se il terminale esiste ancora, se qualche finestra aperta del progetto segue ancora chi tiene un Task. Non misura l'inattività e non ha soglie: un agente vivo ma fermo resta in corso, come un agente che lavora a lungo.
 
 ## Events
 

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { advisorScannerFromEnv } from "../core/advisors";
-import { CURSOR_AGENT_ENV, originFromEnv } from "../core/announcements";
+import { originFromEnv } from "../core/announcements";
 import { UsageError } from "../core/errors";
 import { sendActivity } from "../core/question-channel";
 import { REGISTRY } from "./commands";
@@ -20,12 +20,11 @@ export interface Outcome {
 export const AGENT_ENV = "TRAMA_AGENT";
 
 /**
- * The variable that makes a command the agent's, or undefined for the developer: `TRAMA_AGENT` in the terminal Trama
- * started, `CURSOR_AGENT=1` in the shell of Cursor's chat agent (ADR 0010). A guard against mistakes, not a boundary (ADR 0005).
+ * The variable that makes a command the agent's, or undefined for the developer: `TRAMA_AGENT`, set in the terminal Trama
+ * started. A guard against mistakes, not a boundary (ADR 0005).
  */
 export function agentVariable(env: Record<string, string | undefined>): string | undefined {
-  if (env[AGENT_ENV]) return AGENT_ENV;
-  return env[CURSOR_AGENT_ENV] === "1" ? CURSOR_AGENT_ENV : undefined;
+  return env[AGENT_ENV] ? AGENT_ENV : undefined;
 }
 
 /** The error for a command that does not exist: an old name, a mistyped verb or an object without a verb. */

@@ -1,14 +1,13 @@
-// The ACP client of omp Chat: it spawns `omp acp --yolo` and talks to it over the process's stdio with `ClientSideConnection` of @agentclientprotocol/sdk.
+// The ACP client of omp Chat: it spawns `omp acp` (with `--yolo` only when `trama.ompChatApproval` is `yolo`) and talks to it over the process's stdio with `ClientSideConnection` of @agentclientprotocol/sdk.
 //
 // Verified with omp 18.12.6, which `omp acp` honours the options given before `acp`: `--hook` loads Trama's module (`trama hook start` is called with the
 // process's pid), `--config` applies the overlay, `--advisor` turns the advisors on, and `--model` and `--slow` choose the models. So the options of a
-// job are passed as they are in front of `acp --yolo` (`ompArguments` in `terminal-agent.ts`) and nothing has to be sent another way.
+// job are passed as they are in front of `acp` (`ompArguments` in `terminal-agent.ts`) and nothing has to be sent another way.
 //
 // What omp declares and this client uses: `_meta.steering.supported` in `initialize` (a message sent in the middle of a turn goes through the `_session/steering`
 // extension method; a second `session/prompt` would cancel the running turn), the select of category `model` in the session's configuration options
 // (`session/set_config_option`), and `loadSession` or `sessionCapabilities.resume` to reopen a saved session.
 import { type ChildProcess, spawn } from "node:child_process";
-import { delimiter, dirname } from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
   type Client,
@@ -26,7 +25,7 @@ import {
 import { modelChoices, type ModelChoices, permissionOutcome, promptBlocks, reopenMethod, type StartProblem, startFailureReason, steeringSupported } from "../../../../src/core/omp-acp";
 import { type AcpMcpServer, readMcpServers } from "../../../../src/core/omp-mcp";
 import { RESUME_TIMEOUT_MS, ResumeTimeout, within } from "../../../../src/core/omp-chat-conversation";
-import { type ModelList, ompModels } from "../model-lists";
+import { type ModelList, ompModels, ompPathVariable } from "../model-lists";
 import {
   type Disposable,
   type FormAnswer,
@@ -37,14 +36,15 @@ import {
   type OmpPrompt,
   OmpStartFailure,
   type OmpSessionPort,
+  type PermissionRequest,
 } from "./ports";
 
 /** The grace a stopped process has before it is killed. */
 export const STOP_GRACE_MS = 3000;
 
 export interface OmpClientDeps {
-  /** `trama.ompPath`, read at every start; empty means `omp` from the editor's PATH. */
-  ompPath(): string;
+  /** The omp program, read at every start: the one found for `trama.ompPath`; empty means `omp` from the editor's PATH. */
+  ompPath(): string | Promise<string>;
   /** The models omp lists (`omp models --json`), for a session that declares none. */
   models?(ompPath: string): Promise<ModelList>;
   /** The MCP servers of the project's native files. */
@@ -76,9 +76,13 @@ class OmpSession implements OmpSessionPort, Client {
   private readonly updateListeners: Listeners<SessionNotification> = new Set();
   private readonly turnListeners: Listeners<boolean> = new Set();
   private readonly formListeners: Listeners<FormRequest> = new Set();
+  private readonly permissionListeners: Listeners<PermissionRequest> = new Set();
   private readonly exitListeners: Listeners<OmpExit> = new Set();
   private readonly forms = new Map<string, { request: FormRequest; resolve: (answer: FormAnswer) => void }>();
+  private readonly permissions = new Map<string, { request: PermissionRequest; resolve: (response: RequestPermissionResponse) => void }>();
+  private readonly cancelledListeners: Listeners<string> = new Set();
   private formCount = 0;
+  private permissionCount = 0;
 
   private turn: Promise<void> | undefined;
   private busy = false;
@@ -93,6 +97,8 @@ class OmpSession implements OmpSessionPort, Client {
     private readonly child: ChildProcess,
     private readonly deps: OmpClientDeps,
     private readonly cwd: string,
+    /** `--yolo`: omp runs without asking, and a request that comes anyway is answered with an allow option. Otherwise every request waits for the developer. */
+    private readonly yolo: boolean,
   ) {
     child.stdin?.on("error", () => {});
     child.stderr?.resume();
@@ -123,6 +129,7 @@ class OmpSession implements OmpSessionPort, Client {
     if (this.starting) return this.failure?.(problem);
     if (problem.kind !== "exit") return;
     this.refuseForms();
+    this.cancelPermissions();
     if (this.stopping === undefined && this.exit !== undefined) for (const listener of [...this.exitListeners]) listener(this.exit);
   }
 
@@ -160,8 +167,14 @@ class OmpSession implements OmpSessionPort, Client {
     for (const listener of [...this.updateListeners]) listener(params);
   }
 
-  requestPermission(params: RequestPermissionRequest): RequestPermissionResponse {
-    return { outcome: permissionOutcome(params.options) };
+  requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
+    if (this.yolo) return Promise.resolve({ outcome: permissionOutcome(params.options) });
+    const requestId = `permission-${++this.permissionCount}`;
+    const { promise, resolve } = Promise.withResolvers<RequestPermissionResponse>();
+    const request: PermissionRequest = { requestId, toolCall: params.toolCall, options: params.options };
+    this.permissions.set(requestId, { request, resolve });
+    for (const listener of [...this.permissionListeners]) listener(request);
+    return promise;
   }
 
   createElicitation(params: CreateElicitationRequest): Promise<CreateElicitationResponse> {
@@ -241,12 +254,14 @@ class OmpSession implements OmpSessionPort, Client {
   }
 
   cancel(): void {
+    this.cancelPermissions();
     void this.connection.cancel({ sessionId: this.sessionId }).catch(() => {});
   }
 
   stop(): Promise<void> {
     if (this.stopping !== undefined) return this.stopping;
     this.refuseForms();
+    this.cancelPermissions();
     const done = Promise.withResolvers<void>();
     this.stopping = done.promise;
     if (this.child.pid === undefined || this.exit !== undefined || this.child.exitCode !== null || this.child.signalCode !== null) {
@@ -287,6 +302,31 @@ class OmpSession implements OmpSessionPort, Client {
     form.resolve(answer);
   }
 
+  onPermissionRequest(listener: (request: PermissionRequest) => void): Disposable {
+    for (const { request } of [...this.permissions.values()]) listener(request);
+    return disposer(this.permissionListeners, listener);
+  }
+
+  answerPermission(requestId: string, optionId: string): void {
+    const pending = this.permissions.get(requestId);
+    if (pending === undefined || !pending.request.options.some((option) => option.optionId === optionId)) return;
+    this.permissions.delete(requestId);
+    pending.resolve({ outcome: { outcome: "selected", optionId } });
+  }
+
+  onPermissionCancelled(listener: (requestId: string) => void): Disposable {
+    return disposer(this.cancelledListeners, listener);
+  }
+
+  /** The requests still waiting are answered `cancelled`: Stop, the closing of the conversation or the end of the process. */
+  private cancelPermissions(): void {
+    for (const [id, pending] of [...this.permissions]) {
+      this.permissions.delete(id);
+      pending.resolve({ outcome: { outcome: "cancelled" } });
+      for (const listener of [...this.cancelledListeners]) listener(id);
+    }
+  }
+
   /** The forms still waiting are refused: the conversation is closing or its process ended. */
   private refuseForms(): void {
     for (const [id, form] of [...this.forms]) {
@@ -297,7 +337,7 @@ class OmpSession implements OmpSessionPort, Client {
 
   async models(): Promise<{ available: { id: string; name: string }[]; current?: string }> {
     if (this.choices !== undefined) return { available: this.choices.available, ...(this.choices.current === undefined ? {} : { current: this.choices.current }) };
-    const listed = await (this.deps.models ?? ompModels)(this.deps.ompPath());
+    const listed = await (this.deps.models ?? ompModels)(await this.deps.ompPath());
     return { available: listed.models.map((model) => ({ id: model.value, name: model.label ?? model.value })) };
   }
 
@@ -315,14 +355,7 @@ class OmpSession implements OmpSessionPort, Client {
   }
 }
 
-/** The PATH of omp's process: the launch's own, with the folder of `trama.ompPath` behind it when it has one, so a script of omp finds its runtime. */
-function pathOf(base: string | undefined, ompPath: string): string | undefined {
-  const folder = ompPath === "" || dirname(ompPath) === "." ? undefined : dirname(ompPath);
-  const parts = (base ?? "").split(delimiter).filter((part) => part !== "");
-  return folder === undefined || parts.includes(folder) ? base : [...parts, folder].join(delimiter);
-}
-
-/** The ACP client of omp: one process of `omp acp --yolo` for each session. */
+/** The ACP client of omp: one process of `omp acp` (with `--yolo` for the yolo approval) for each session. */
 export class OmpClient implements OmpClientPort {
   constructor(private readonly deps: OmpClientDeps) {}
 
@@ -335,12 +368,12 @@ export class OmpClient implements OmpClientPort {
   }
 
   private async open(launch: OmpLaunch, reopen: string | undefined, first?: OmpPrompt): Promise<OmpSessionPort> {
-    const ompPath = this.deps.ompPath();
+    const ompPath = await this.deps.ompPath();
     const env = { ...process.env, ...launch.env };
-    const path = pathOf(env["PATH"], ompPath);
-    if (path !== undefined) env["PATH"] = path;
+    // The folder of the omp program and the folder of bun go in front of the launch's PATH, so a script of omp finds its runtime.
+    env["PATH"] = ompPathVariable(ompPath, env);
     const child = spawn(ompPath === "" ? "omp" : ompPath, launch.args, { cwd: launch.cwd, env, shell: false, stdio: "pipe" });
-    const session = new OmpSession(child, this.deps, launch.cwd);
+    const session = new OmpSession(child, this.deps, launch.cwd, launch.args.includes("--yolo"));
     const failed = session.watchStart();
     try {
       session.connect();

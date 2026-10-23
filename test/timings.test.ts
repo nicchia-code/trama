@@ -29,19 +29,15 @@ describe("recording timings", () => {
     expect(existsSync(join(p.dir, "timings"))).toBe(false);
   });
 
-  test("two Cursor conversations never write in the same job, and the project's chat has its own", () => {
-    const a = { chat: "cursor" as const, conversation: "conv-a" };
-    const b = { chat: "cursor" as const, conversation: "conv-b" };
-    recordTiming(p, a, { event: "task-start", task: "t1", title: "A" }, {}, at(0));
-    recordTiming(p, b, { event: "task-start", task: "t2", title: "B" }, {}, at(1));
-    recordTiming(p, a, { event: "task-end", task: "t1", title: "A", outcome: "done" }, {}, at(2));
-    recordTiming(p, { chat: "cursor" }, { event: "task-start", task: "t3", title: "C" }, {}, at(3));
+  test("each terminal has its own job, and an agent without a terminal records nothing", () => {
+    recordTiming(p, { terminal: "def456" }, { event: "task-start", task: "t1", title: "A" }, {}, at(0));
+    recordTiming(p, { terminal: "def456" }, { event: "task-end", task: "t1", title: "A", outcome: "done" }, {}, at(1));
+    recordTiming(p, origin, { event: "task-start", task: "t2", title: "B" }, {}, at(2));
+    recordTiming(p, {}, { event: "task-start", task: "t3", title: "C" }, {}, at(3));
     const lines = (suffix: string) => readFileSync(join(p.dir, "timings", jobFiles().find((f) => f.endsWith(`-${suffix}.jsonl`))!), "utf8").trim().split("\n").map((l) => JSON.parse(l));
-    expect(jobFiles()).toHaveLength(3);
-    expect(lines("cursor-conv-a").map((r) => r.task)).toEqual(["t1", "t1"]);
-    expect(lines("cursor-conv-a")[0].conversation).toBe("conv-a");
-    expect(lines("cursor-conv-b").map((r) => r.task)).toEqual(["t2"]);
-    expect(lines("cursor").map((r) => r.task)).toEqual(["t3"]);
+    expect(jobFiles()).toHaveLength(2);
+    expect(lines("def456").map((r) => r.task)).toEqual(["t1", "t1"]);
+    expect(lines("abc123").map((r) => r.task)).toEqual(["t2"]);
   });
 
   test("starts a job file with its own .gitignore, and appends the events of the job to it", () => {
@@ -133,7 +129,7 @@ describe("trama timing new", () => {
     expect(existsSync(join(p.dir, "timings"))).toBe(false);
   });
 
-  test("outside a Trama terminal or chat it writes nothing, says so and exits with 0", () => {
+  test("outside a Trama terminal it writes nothing, says so and exits with 0", () => {
     const [a, b] = tasks() as [string, string];
     const out = run(input({ kind: "order", tasks: [a, b], reason: "The second needs the first." }), dir, {});
     expect(out.exit).toBe(0);

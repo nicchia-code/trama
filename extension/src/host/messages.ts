@@ -66,8 +66,6 @@ function parseQuestionAction(value: unknown): QuestionAction | string {
   }
 }
 
-const isAgent = (value: unknown): value is "cursor" | "omp" => value === "cursor" || value === "omp";
-
 /** `confirmSetup`: the mode, the path (always but in the mode Settings), the folder (only the first setup), the changed keys of the wizard's steps and the excluded paths. */
 function parseConfirmSetup(raw: Raw, settings: readonly SettingSchema[]): Parsed {
   const mode = raw["mode"];
@@ -116,14 +114,17 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
     case "openQuickTask":
       return { ok: true, message: { type } };
     case "modelSuggestionsWanted": {
-      if (raw["agent"] === undefined && raw["ompPath"] === undefined) return { ok: true, message: { type } };
-      if (!isAgent(raw["agent"]) || typeof raw["ompPath"] !== "string" || raw["ompPath"].length > MAX_PATH_TEXT) return bad("modelSuggestionsWanted needs both an agent (cursor or omp) and an omp path, or neither");
-      return { ok: true, message: { type, agent: raw["agent"], ompPath: raw["ompPath"] } };
+      if (raw["ompPath"] === undefined) return { ok: true, message: { type } };
+      if (typeof raw["ompPath"] !== "string" || raw["ompPath"].length > MAX_PATH_TEXT) return bad("modelSuggestionsWanted needs an omp path as text, or none");
+      return { ok: true, message: { type, ompPath: raw["ompPath"] } };
     }
     case "agentCheckWanted":
-      return isAgent(raw["agent"]) && typeof raw["ompPath"] === "string" && raw["ompPath"].length <= MAX_PATH_TEXT
-        ? { ok: true, message: { type, agent: raw["agent"], ompPath: raw["ompPath"] } }
-        : bad("agentCheckWanted needs an agent (cursor or omp) and an omp path");
+      return typeof raw["ompPath"] === "string" && raw["ompPath"].length <= MAX_PATH_TEXT
+        ? { ok: true, message: { type, ompPath: raw["ompPath"] } }
+        : bad("agentCheckWanted needs an omp path");
+    case "ompStatusWanted":
+    case "installOmp":
+      return { ok: true, message: { type } };
     case "instructionFilesWanted":
       if (raw["root"] === undefined) return { ok: true, message: { type } };
       return typeof raw["root"] === "string" && raw["root"] !== "" && raw["root"].length <= MAX_PATH_TEXT

@@ -33,15 +33,15 @@ afterEach(() => {
 
 const MODELS: ModelSuggestion[] = [{ value: "anthropic/claude-opus-5-5", label: "Claude Opus 5.5" }, { value: "openai/gpt-5" }];
 
-function setup(values: Record<string, SettingsValues> = {}, models: ModelSuggestion[] = [], listError: string | null = null, agent: "cursor" | "omp" = "omp") {
+function setup(values: Record<string, SettingsValues> = {}, models: ModelSuggestion[] = [], listError: string | null = null) {
   const posted: ToHost[] = [];
-  const utils = render(<SettingsPage schema={schema} values={values} generation={1} agent={agent} models={models} listError={listError} post={(message) => posted.push(message)} openLink={() => {}} />);
+  const utils = render(<SettingsPage schema={schema} values={values} generation={1} models={models} listError={listError} post={(message) => posted.push(message)} openLink={() => {}} />);
   return { posted, ...utils };
 }
 
 test("the settings are in five groups, Appearance first, each with its title", () => {
   setup();
-  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Appearance", "Agent", "Models", "Project", "Features"]);
+  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Appearance", "omp", "Models", "Project", "Features"]);
   expect(screen.getByRole("combobox", { name: "Theme" })).not.toBeNull();
   expect(screen.getByRole("checkbox", { name: "Auto Exit" })).not.toBeNull();
 });
@@ -52,7 +52,7 @@ test("a change of Theme changes the theme class of the panel, with auto followin
   const page = render(<></>);
   const view = mountSettings((node) => page.rerender(<>{node}</>), { post: () => {}, navigate: () => {}, openLink: () => {} }, theme);
   const html = document.documentElement;
-  const send = (user: unknown) => act(() => view.receive({ type: "settings", schema, values: { "trama.theme": { user } }, agent: "omp" }));
+  const send = (user: unknown) => act(() => view.receive({ type: "settings", schema, values: { "trama.theme": { user } } }));
 
   send(undefined);
   expect(html.classList.contains("dark")).toBe(false);
@@ -171,7 +171,7 @@ test("trama.theme is declared in the manifest as the only setting of Appearance"
 
 test("with a project the Settings tab has «Guided setup» at the top right, with its tooltip in the name; without one there is none", () => {
   const opened: string[] = [];
-  const page = render(<SettingsPage schema={schema} values={{}} generation={1} agent="omp" models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => opened.push("open")} />);
+  const page = render(<SettingsPage schema={schema} values={{}} generation={1} models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => opened.push("open")} />);
   const button = screen.getByRole("button", { name: "Guided setup. Review the main settings step by step" });
   fireEvent.click(button);
   expect(opened).toEqual(["open"]);
@@ -181,46 +181,68 @@ test("with a project the Settings tab has «Guided setup» at the top right, wit
 });
 
 test("while the wizard is open it takes the place of the button and of the form", () => {
-  render(<SettingsPage schema={schema} values={{}} generation={1} agent="omp" models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => {}} wizard={<p>The wizard</p>} />);
+  render(<SettingsPage schema={schema} values={{}} generation={1} models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => {}} wizard={<p>The wizard</p>} />);
   expect(screen.getByText("The wizard")).not.toBeNull();
   expect(screen.queryByRole("button", { name: /Guided setup/ })).toBeNull();
   expect(screen.queryByRole("combobox", { name: "Theme" })).toBeNull();
 });
 
-test("omp Chat is an active checkbox with omp, without the note", () => {
-  const { posted } = setup({}, [], null, "omp");
+test("omp Chat is an active checkbox, without a note", () => {
+  const { posted } = setup({});
   const box = screen.getByRole("checkbox", { name: "omp Chat" });
   expect(box.hasAttribute("disabled")).toBe(false);
   expect(screen.queryByText("Only with omp")).toBeNull();
   fireEvent.click(box);
-  expect(posted).toEqual([{ type: "setSetting", key: "trama.ompChat", value: true }]);
+  expect(posted).toEqual([{ type: "setSetting", key: "trama.ompChat", value: false }]);
 });
 
-test("with cursor omp Chat is disabled, shows its saved value and the note tied to it", () => {
-  const { posted } = setup({ "trama.ompChat": { user: true } }, [], null, "cursor");
-  const box = screen.getByRole("checkbox", { name: "omp Chat" });
-  expect(box.hasAttribute("disabled")).toBe(true);
-  expect(box.getAttribute("aria-checked")).toBe("true");
-  const note = screen.getByText("Only with omp");
-  expect(box.getAttribute("aria-describedby")?.split(" ")).toContain(note.id);
-  fireEvent.click(box);
-  expect(posted).toEqual([]);
+function ompRow(omp: React.ComponentProps<typeof SettingsPage>["omp"]) {
+  const posted: ToHost[] = [];
+  render(<SettingsPage schema={schema} values={{}} generation={1} models={[]} listError={null} omp={omp} post={(message) => posted.push(message)} openLink={() => {}} />);
+  const region = document.querySelector('[aria-live="polite"]') as HTMLElement;
+  return { posted, region };
+}
+
+test("the omp group opens with its status line, before the settings, saying omp is being checked", () => {
+  const { region } = ompRow({ state: "checking" });
+  expect(region.textContent).toBe("Checking omp…");
+  expect(region.querySelector("svg.animate-spin")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: /Install omp/ })).toBeNull();
+  const section = region.closest("section") as HTMLElement;
+  expect(section.querySelector("h2")?.textContent).toBe("omp");
+  expect(region.compareDocumentPosition(screen.getByRole("textbox", { name: "Omp Path" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
-test("a new agent in the settings message turns omp Chat on or off at once, keeping its value", () => {
+test("omp that answers shows its version and no button", () => {
+  const { region } = ompRow({ state: "done", missing: false, version: "14.2.1" });
+  expect(region.textContent).toBe("omp 14.2.1");
+  expect(region.querySelector("svg.lucide-circle-check")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: /Install omp/ })).toBeNull();
+});
+
+test("omp that does not answer shows the reason and that Trama cannot work, without the button", () => {
+  const { region } = ompRow({ state: "done", missing: false, error: "omp exited with code 1" });
+  expect(region.textContent).toBe("omp exited with code 1. Trama cannot work without omp.");
+  expect(region.querySelector("svg.lucide-triangle-alert")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: /Install omp/ })).toBeNull();
+});
+
+test("omp that is missing adds Install omp, which sends installOmp", () => {
+  const { region, posted } = ompRow({ state: "done", missing: true, error: "omp not found at the editor PATH" });
+  expect(region.textContent).toContain("omp not found at the editor PATH. Trama cannot work without omp.");
+  fireEvent.click(within(region).getByRole("button", { name: /Install omp/ }));
+  expect(posted).toEqual([{ type: "installOmp" }]);
+});
+
+test("the mounted tab takes the host's ompStatus, and asks again when it becomes visible", () => {
+  const posted: ToHost[] = [];
   const page = render(<></>);
-  const theme = startTheme();
-  const view = mountSettings((node) => page.rerender(<>{node}</>), { post: () => {}, navigate: () => {}, openLink: () => {} }, theme);
-  const send = (agent: "cursor" | "omp") => act(() => view.receive({ type: "settings", schema, values: { "trama.ompChat": { user: true } }, agent }));
-  send("cursor");
-  expect(screen.getByRole("checkbox", { name: "omp Chat" }).hasAttribute("disabled")).toBe(true);
-  expect(screen.getByText("Only with omp")).not.toBeNull();
-  send("omp");
-  expect(screen.getByRole("checkbox", { name: "omp Chat" }).hasAttribute("disabled")).toBe(false);
-  expect(screen.getByRole("checkbox", { name: "omp Chat" }).getAttribute("aria-checked")).toBe("true");
-  expect(screen.queryByText("Only with omp")).toBeNull();
-  send("cursor");
-  expect(screen.getByRole("checkbox", { name: "omp Chat" }).hasAttribute("disabled")).toBe(true);
-  expect(screen.getByRole("checkbox", { name: "omp Chat" }).getAttribute("aria-checked")).toBe("true");
-  theme.dispose();
+  const view = mountSettings((node) => page.rerender(<>{node}</>), { post: (m) => posted.push(m), navigate: () => {}, openLink: () => {} }, startTheme());
+  act(() => view.receive({ type: "settings", schema, values: {} }));
+  expect(screen.getByText("Checking omp…")).not.toBeNull();
+  act(() => view.receiveOmpStatus({ type: "ompStatus", state: "done", missing: false, version: "1.0.0" }));
+  expect(screen.getByText("omp 1.0.0")).not.toBeNull();
+  view.show({});
+  expect(posted).toContainEqual({ type: "modelSuggestionsWanted" });
+  expect(posted).toContainEqual({ type: "ompStatusWanted" });
 });

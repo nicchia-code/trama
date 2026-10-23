@@ -9,14 +9,9 @@ import type { RunModel } from "./terminal-agent";
 /** The workspace state key of the models the developer chose for Proposals. */
 export const PROPOSAL_MODELS_KEY = "trama.proposalModels";
 
-/** The agents `trama.agent` can be; a model is chosen for one of them. */
-export const PROPOSAL_AGENTS = ["cursor", "omp"] as const;
-export type ProposalAgent = (typeof PROPOSAL_AGENTS)[number];
-
-/** The model chosen for a Proposal and the agent that was set in `trama.agent` when it was chosen. */
+/** The model chosen for a Proposal. */
 export interface ProposalModel {
   model: string;
-  agent: ProposalAgent;
 }
 
 /** The models by Proposal identity. */
@@ -28,21 +23,20 @@ export interface ModelMemory {
   update(key: string, value: unknown): Thenable<void>;
 }
 
-/** Only an entry of exactly this shape counts: a non-empty model without spaces around it, and a known agent (`chat`, written by an earlier version, counts as `cursor`). */
-function validEntry(value: unknown): value is { model: string; agent: ProposalAgent | "chat" } {
+/** Only an entry of exactly `{ model }` counts: a non-empty model without spaces around it. An entry with any other field (an `agent` written by an earlier version) is invalid. */
+function validEntry(value: unknown): value is { model: string } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  if (Object.keys(value).sort().join(",") !== "agent,model") return false;
-  const { model, agent } = value as Record<string, unknown>;
-  return typeof model === "string" && model !== "" && model === model.trim()
-    && typeof agent === "string" && (agent === "chat" || (PROPOSAL_AGENTS as readonly string[]).includes(agent));
+  if (Object.keys(value).join(",") !== "model") return false;
+  const { model } = value as Record<string, unknown>;
+  return typeof model === "string" && model !== "" && model === model.trim();
 }
 
-/** The models the developer chose, by Proposal identity. An entry of another shape is left out, and the next write drops it; an entry of agent `chat` is read as `cursor`, and the next write saves it so. */
+/** The models the developer chose, by Proposal identity. An entry of another shape is left out, and the next write drops it. */
 export function proposalModels(memory: ModelMemory): ProposalModels {
   const raw = memory.get(PROPOSAL_MODELS_KEY);
   const models: ProposalModels = {};
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return models;
-  for (const [id, value] of Object.entries(raw)) if (validEntry(value)) models[id] = { model: value.model, agent: value.agent === "chat" ? "cursor" : value.agent };
+  for (const [id, value] of Object.entries(raw)) if (validEntry(value)) models[id] = { model: value.model };
   return models;
 }
 
@@ -51,7 +45,7 @@ export function proposalModels(memory: ModelMemory): ProposalModels {
  * the Settings roles apply again. Only an open Proposal that carries Tasks and is not attached to a Drift has a model to
  * choose. No project file changes: the choice lives in the workspace state only.
  */
-export async function chooseProposalModel(memory: ModelMemory, p: Project, id: string, text: string, agent: ProposalAgent): Promise<void> {
+export async function chooseProposalModel(memory: ModelMemory, p: Project, id: string, text: string): Promise<void> {
   const proposal = getProposal(p, id);
   const label = cardName(p, "proposal", proposal.id);
   if (proposal.data.status !== "open") throw new TramaError(`Refused: Proposal ${label} is ${proposal.data.status}, not waiting for the developer: only an open Proposal has a model to choose`);
@@ -61,7 +55,7 @@ export async function chooseProposalModel(memory: ModelMemory, p: Project, id: s
   const model = text.trim();
   const models = proposalModels(memory);
   if (model === "") delete models[proposal.id];
-  else models[proposal.id] = { model, agent };
+  else models[proposal.id] = { model };
   await memory.update(PROPOSAL_MODELS_KEY, models);
 }
 
@@ -92,54 +86,48 @@ export async function forgetProposalModels(memory: ModelMemory, p: Project): Pro
   await memory.update(PROPOSAL_MODELS_KEY, kept);
 }
 
-/** What the Board shows of one Proposal's model: the model chosen for it, and whether that model was chosen for the agent of `trama.agent` now. */
+/** What the Board shows of one Proposal's model: the model chosen for it. */
 export interface BoardProposalModel {
   name: string;
-  agent: ProposalAgent;
-  applies: boolean;
 }
 
 /**
- * The models of the Board: for each Proposal that carries Tasks (a key of `proposals`), the model chosen for it or null, and
- * the agent of `trama.agent` now. A Proposal without Tasks has no key: it has no model to choose.
+ * The models of the Board: for each Proposal that carries Tasks (a key of `proposals`), the model chosen for it or null.
+ * A Proposal without Tasks has no key: it has no model to choose.
  */
 export interface BoardModels {
-  agent: ProposalAgent;
   proposals: Record<string, BoardProposalModel | null>;
 }
 
 /** The Board's models for the Proposals of its Backlog: `proposals` are the open Proposals the Board lists. */
-export function boardModels(memory: ModelMemory, proposals: readonly { id: string; tasks: readonly unknown[] }[], agent: ProposalAgent): BoardModels {
+export function boardModels(memory: ModelMemory, proposals: readonly { id: string; tasks: readonly unknown[] }[]): BoardModels {
   const chosen = proposalModels(memory);
   const byProposal: Record<string, BoardProposalModel | null> = {};
   for (const proposal of proposals) {
     if (proposal.tasks.length === 0) continue;
     const entry = chosen[proposal.id];
-    byProposal[proposal.id] = entry === undefined ? null : { name: entry.model, agent: entry.agent, applies: entry.agent === agent };
+    byProposal[proposal.id] = entry === undefined ? null : { name: entry.model };
   }
-  return { agent, proposals: byProposal };
+  return { proposals: byProposal };
 }
 
-/**
- * The Proposals whose model applies to `agent` now, with the model and the name a run takes it by (`Proposal <label>`).
- * Read at the launch: a Proposal whose model was chosen for another agent takes no part, and the Settings roles apply to it.
- */
-export function appliedProposalModels(memory: ModelMemory, p: Project, agent: ProposalAgent): AppliedModel[] {
+/** The Proposals that have a model chosen, with the model and the name a run takes it by (`Proposal <label>`). Read at the launch. */
+export function appliedProposalModels(memory: ModelMemory, p: Project): AppliedModel[] {
   const chosen = proposalModels(memory);
   const applied: AppliedModel[] = [];
   for (const proposal of listProposals(p)) {
     const entry = chosen[proposal.id];
-    if (entry === undefined || entry.agent !== agent) continue;
+    if (entry === undefined) continue;
     applied.push({ id: proposal.id, run: { model: entry.model } });
   }
   return applied;
 }
 
 /**
- * The model a run of Proposal `proposalId` (null: none) uses in place of its role: the model chosen for it, when that model
- * was chosen for `agent`, the agent of `trama.agent` now. Otherwise undefined, and the Settings roles apply. Read once, at launch.
+ * The model a run of Proposal `proposalId` (null: none) uses in place of its role: the model chosen for it. Otherwise
+ * undefined, and the Settings roles apply. Read once, at launch.
  */
-export function proposalRunModel(memory: ModelMemory, p: Project, proposalId: string | null, agent: ProposalAgent): RunModel | undefined {
+export function proposalRunModel(memory: ModelMemory, p: Project, proposalId: string | null): RunModel | undefined {
   if (proposalId === null) return undefined;
-  return appliedProposalModels(memory, p, agent).find((entry) => entry.id === proposalId)?.run;
+  return appliedProposalModels(memory, p).find((entry) => entry.id === proposalId)?.run;
 }

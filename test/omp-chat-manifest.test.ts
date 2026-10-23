@@ -6,17 +6,15 @@ const root = join(import.meta.dir, "../extension");
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const contributes = manifest.contributes;
 
-// Cursor refuses every extension container in the secondary sidebar ("reserved for Cursor's agent UI") and VS Code accepts it from 1.106: each editor
-// gets its own container and view, both on one provider, and `trama.ompChatVisible` says which one is shown (`tech#omp-chat`).
-test("each editor's omp Chat view has its own container with the Trama logo: the secondary sidebar, and the panel for Cursor", () => {
+test("omp Chat's view has its own container with the Trama logo, in the secondary sidebar only", () => {
   expect(contributes.viewsContainers.secondarySidebar).toEqual([{ id: "trama-omp-chat-sidebar", title: "omp Chat", icon: "media/trama-icon-dark.svg" }]);
-  expect(contributes.viewsContainers.panel).toEqual([{ id: "trama-omp-chat", title: "omp Chat", icon: "media/trama-icon-dark.svg" }]);
+  expect(contributes.viewsContainers.panel).toBeUndefined();
   expect(existsSync(join(root, "media/trama-icon-dark.svg"))).toBe(true);
 });
 
-test("each container holds one webview view, shown only while the context key names its editor", () => {
-  expect(contributes.views["trama-omp-chat-sidebar"]).toEqual([{ id: "trama.ompChatSidebar", name: "omp Chat", type: "webview", when: "trama.ompChatVisible == 'sidebar'" }]);
-  expect(contributes.views["trama-omp-chat"]).toEqual([{ id: "trama.ompChat", name: "omp Chat", type: "webview", when: "trama.ompChatVisible == 'panel'" }]);
+test("the container holds one webview view, shown while the boolean context key is true", () => {
+  expect(contributes.views["trama-omp-chat-sidebar"]).toEqual([{ id: "trama.ompChatSidebar", name: "omp Chat", type: "webview", when: "trama.ompChatVisible" }]);
+  expect(contributes.views["trama-omp-chat"]).toBeUndefined();
 });
 
 test("the view's script is shipped in the package", () => {

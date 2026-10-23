@@ -1,37 +1,34 @@
-import type { SetupChoice, SetupMode } from "../../protocol";
+import type { SetupChoice, SetupMode, ToWebview } from "../../protocol";
 import { type SettingSchema, type SettingsValues, type SettingValue, settingValueError, storedValue } from "../../host/settings-schema";
 
 /** Which wizard is open: the first setup of a folder without a project (Get Started), the settings of a project, or a project with an empty Model that carries on with a path. */
 export type WizardMode = SetupMode;
 /** How Trama starts in the folder. */
 export type WizardChoice = SetupChoice;
-export type WizardStep = "Path" | "Agent" | "Models" | "Project" | "Folders" | "Advanced" | "Summary";
+export type WizardStep = "Path" | "omp" | "Models" | "Project" | "Folders" | "Advanced" | "Summary";
 
 /** The steps a mode and a path show, in order (`rules#setup-wizard`). Folders only with Import from Code, and never in the mode of the settings. */
 export function stepsFor(mode: WizardMode, choice: WizardChoice | null): WizardStep[] {
   const steps: WizardStep[] = mode === "first" ? ["Path"] : [];
-  steps.push("Agent", "Models", "Project");
+  steps.push("omp", "Models", "Project");
   if (mode !== "settings" && choice === "import") steps.push("Folders");
   steps.push("Advanced", "Summary");
   return steps;
 }
 
-export const AGENT_KEY = "trama.agent";
 export const IGNORE_INSTRUCTION_FILES_KEY = "trama.ignoreInstructionFiles";
-/** The keys that mean something only with the agent `omp`. */
-export const OMP_ONLY_KEYS: readonly string[] = ["trama.ompPath", "trama.terminalLocation", IGNORE_INSTRUCTION_FILES_KEY];
 
 /** The keys each step asks for, in order. */
 export const STEP_KEYS: Readonly<Partial<Record<WizardStep, readonly string[]>>> = {
-  Agent: [AGENT_KEY, "trama.ompPath", "trama.terminalLocation", IGNORE_INSTRUCTION_FILES_KEY],
+  omp: ["trama.ompPath", "trama.terminalLocation", IGNORE_INSTRUCTION_FILES_KEY],
   Models: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"],
   Project: ["trama.skillsDir"],
-  Advanced: ["trama.theme", "trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing"],
+  Advanced: ["trama.theme", "trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat", "trama.ompChatApproval"],
 };
 
 export const STEP_SENTENCES: Readonly<Record<WizardStep, string>> = {
   Path: "Choose how Trama starts in this folder.",
-  Agent: "Choose the coding agent Trama works with.",
+  omp: "omp is required: Trama runs every agent with omp.",
   Models: "Choose the model for each kind of work. Analysis works best with your most capable model, Execution with a mid-range one, Scan with a fast, light one.",
   Project: "Choose where Trama installs the agent skills.",
   Folders: "Uncheck the folders the agent should not import.",
@@ -71,10 +68,10 @@ export interface WizardState {
 /** The wizard as it opens: on its first step, with the user values of the settings and, for the first setup, no path. */
 export function openWizard(mode: WizardMode, choice: WizardChoice | null, values: Readonly<Record<string, SettingsValues>>, root: string | null): WizardState {
   const initial: Record<string, SettingValue | undefined> = {};
-  for (const step of ["Agent", "Models", "Project", "Advanced"] as const) {
+  for (const step of ["omp", "Models", "Project", "Advanced"] as const) {
     for (const key of STEP_KEYS[step] ?? []) initial[key] = values[key]?.user as SettingValue | undefined;
   }
-  const state: WizardState = { mode, choice, root, step: "Agent", initial, values: initial, invalid: [], excluded: [], tree: {} };
+  const state: WizardState = { mode, choice, root, step: "omp", initial, values: initial, invalid: [], excluded: [], tree: {} };
   return { ...state, step: stepsFor(mode, choice)[0] as WizardStep };
 }
 
@@ -83,11 +80,6 @@ export const stepsOf = (state: WizardState): WizardStep[] => stepsFor(state.mode
 /** The wizard value of `key` as the field shows it: the default when there is no value. */
 export const wizardValue = (setting: SettingSchema, state: WizardState): unknown => state.values[setting.key] ?? setting.default;
 
-/** The agent the wizard has chosen now. */
-export function chosenAgent(schema: readonly SettingSchema[], state: WizardState): string {
-  const setting = schema.find((s) => s.key === AGENT_KEY);
-  return String((setting === undefined ? undefined : wizardValue(setting, state)) ?? "cursor");
-}
 
 /** The path of omp the wizard has chosen, trimmed; empty means omp from the editor's PATH. */
 export function chosenOmpPath(schema: readonly SettingSchema[], state: WizardState): string {
@@ -96,15 +88,10 @@ export function chosenOmpPath(schema: readonly SettingSchema[], state: WizardSta
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** Whether the Agent step says that omp jobs ignore the instruction files: the wizard's agent is `omp` and `trama.ignoreInstructionFiles` is on. */
+/** Whether the omp step says that omp jobs ignore the instruction files: `trama.ignoreInstructionFiles` is on in the wizard's values. */
 export function ignoresInstructionFiles(schema: readonly SettingSchema[], state: WizardState): boolean {
   const setting = schema.find((s) => s.key === IGNORE_INSTRUCTION_FILES_KEY);
-  return chosenAgent(schema, state) === "omp" && setting !== undefined && wizardValue(setting, state) === true;
-}
-
-/** The keys a step shows: the ones only omp uses go when the agent is another. */
-export function visibleKeys(step: WizardStep, agent: string): string[] {
-  return (STEP_KEYS[step] ?? []).filter((key) => agent === "omp" || !OMP_ONLY_KEYS.includes(key));
+  return setting !== undefined && wizardValue(setting, state) === true;
 }
 
 export function setChoice(state: WizardState, choice: WizardChoice): WizardState {
@@ -228,9 +215,12 @@ export function visibleRows(tree: Tree, open: ReadonlySet<string>): { path: stri
 
 // ---- Validity ----
 
-/** Why Next of the step is not available; null when it is. */
-export function nextBlock(schema: readonly SettingSchema[], state: WizardState): string | null {
+/** Why Next of the step is not available; null when it is. `check` is the answer of the host to the check of omp, null while there is none. */
+export function nextBlock(schema: readonly SettingSchema[], state: WizardState, check: AgentCheckResult | null): string | null {
   switch (state.step) {
+    case "omp":
+      // Only an answer that says omp responds, for the path of the step, lets Next go; a failed update does not stop it.
+      return check !== null && check.state === "done" && check.ok && check.ompPath === chosenOmpPath(schema, state) ? null : "omp must answer before you go on.";
     case "Path":
       return state.choice === null ? "Choose how to start" : state.root === null ? "No folder to initialize" : null;
     case "Models": {
@@ -282,7 +272,6 @@ const PATH_NAMES: Record<WizardChoice, string> = { import: "Import from Code", s
 /** The rows of the summary, grouped by step in order, from the values and the current user values. */
 export function summaryRows(schema: readonly SettingSchema[], state: WizardState, current: Readonly<Record<string, SettingsValues>>, folders: readonly { name: string; root: string }[]): SummaryRow[] {
   const rows: SummaryRow[] = [];
-  const agent = chosenAgent(schema, state);
   for (const step of stepsOf(state)) {
     if (step === "Path") {
       rows.push({ step, title: "Path", value: state.choice === null ? "" : PATH_NAMES[state.choice], mono: false, isDefault: false, changed: false, was: null });
@@ -291,7 +280,7 @@ export function summaryRows(schema: readonly SettingSchema[], state: WizardState
     } else if (step === "Folders") {
       rows.push({ step, title: "Excluded folders", value: state.excluded.length === 0 ? "None" : state.excluded.join(", "), mono: state.excluded.length > 0, isDefault: false, changed: false, was: null });
     } else if (step !== "Summary") {
-      for (const key of visibleKeys(step, agent)) {
+      for (const key of STEP_KEYS[step] ?? []) {
         const setting = schema.find((s) => s.key === key);
         if (setting === undefined) continue;
         const wizard = state.values[key];
@@ -316,9 +305,8 @@ export function summaryRows(schema: readonly SettingSchema[], state: WizardState
 /** The writes of the confirmation, in the order of the steps: only the shown keys whose value changed. */
 export function changedWrites(schema: readonly SettingSchema[], state: WizardState, current: Readonly<Record<string, SettingsValues>>): { key: string; value: SettingValue }[] {
   const writes: { key: string; value: SettingValue }[] = [];
-  const agent = chosenAgent(schema, state);
   for (const step of stepsOf(state)) {
-    for (const key of visibleKeys(step, agent)) {
+    for (const key of STEP_KEYS[step] ?? []) {
       const setting = schema.find((s) => s.key === key);
       if (setting === undefined || !isChanged(setting, state.values[key], current[key]?.user)) continue;
       // An absent value (the default) is written as the default: the host removes the user value for it.
@@ -335,24 +323,20 @@ export function confirmLabel(state: WizardState): string {
   return state.choice === "import" ? "Save and import" : "Save and start";
 }
 
-/** The check of the agent the Agent step shows, as a sentence with its tone; null while nothing is known. */
-export interface AgentCheckResult {
-  agent: string;
-  ompPath: string;
-  ok: boolean;
-  models?: number;
-  error?: string;
+/** The answer of the host to the check of omp: `updating` while omp is updated, `done` with the outcome. */
+type AgentCheckMessage = Extract<ToWebview, { type: "agentCheck" }>;
+export type AgentCheckResult = AgentCheckMessage extends infer M ? (M extends unknown ? Omit<M, "type"> : never) : never;
+
+/** The line under the controls of the omp step. `result` is the answer for the omp path of now, or null while it is being checked. */
+export function agentCheckLine(result: AgentCheckResult | null): { tone: "checking" | "ok" | "warning"; text: string } {
+  if (result === null) return { tone: "checking", text: "Checking omp…" };
+  if (result.state === "updating") return { tone: "checking", text: `Updating omp to ${result.version}…` };
+  if (!result.ok) return { tone: "warning", text: `${result.error ?? "omp did not answer"}. Trama cannot work without omp.` };
+  const answered = `omp${result.version === undefined ? "" : ` ${result.version}`} answered with ${result.models ?? 0} models.`;
+  return result.updateError === undefined ? { tone: "ok", text: answered } : { tone: "warning", text: `Could not update omp (${result.updateError}). ${answered}` };
 }
 
-const LATER = "You can go on and fix it later.";
-
-/** The line under the controls of the Agent step. `result` is the answer for the agent and path of now, or null while it is being checked. */
-export function agentCheckLine(result: AgentCheckResult | null): { tone: "checking" | "ok" | "warning"; text: string } {
-  if (result === null) return { tone: "checking", text: "Checking the agent…" };
-  if (result.agent === "omp") {
-    return result.ok
-      ? { tone: "ok", text: `omp answered with ${result.models ?? 0} models.` }
-      : { tone: "warning", text: `${result.error ?? "omp did not answer"}. ${LATER}` };
-  }
-  return result.ok ? { tone: "ok", text: "Cursor's chat is available." } : { tone: "warning", text: `Cursor's chat works only in Cursor. ${LATER}` };
+/** Whether the host found omp missing (the program was not found, not a timeout or a failure code): the only case where `Install omp` shows. */
+export function ompMissing(result: AgentCheckResult | null): boolean {
+  return result !== null && result.state === "done" && !result.ok && result.missing;
 }

@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import * as os from "node:os";
@@ -55,7 +55,7 @@ mock.module("../src/cli/main", () => ({
     args.includes("edit") ? { out: updateOutput } : { out: "", exit: 0 },
 }));
 
-const { installEditorHooks, removeCopilotPieces, updateSkills } = await import("../extension/src/host/project");
+const { removeCopilotPieces, updateSkills } = await import("../extension/src/host/project");
 
 function setup(): void {
   storage = mkdtempSync(join(tmpdir(), "trama-hook-storage-"));
@@ -81,7 +81,7 @@ function copilotAgent(): string {
   return file;
 }
 
-test("outside Cursor, removal deletes the Copilot hooks file and only its entry in chat.hookFilesLocations", async () => {
+test("removal deletes the Copilot hooks file and only its entry in chat.hookFilesLocations", async () => {
   setup();
   const file = join(storage, "copilot-hooks.json");
   writeFileSync(file, "{}");
@@ -102,21 +102,15 @@ test("without a Copilot entry the setting is not touched", async () => {
   expect(removed).toHaveLength(1);
 });
 
-test("Copilot's agent file is removed in every editor, but the hooks file is kept in Cursor", async () => {
+test("removal in any editor deletes Copilot's agent file and hooks file together", async () => {
   setup();
   const agent = copilotAgent();
   const file = join(storage, "copilot-hooks.json");
   writeFileSync(file, "{}");
-  editor.appName = "Cursor";
-  try {
-    const removed = await removeCopilotPieces({ fsPath: storage } as never);
-    expect(existsSync(agent)).toBe(false);
-    expect(existsSync(file)).toBe(true);
-    expect(updates).toHaveLength(0);
-    expect(removed).toHaveLength(1);
-  } finally {
-    editor.appName = "Visual Studio Code";
-  }
+  const removed = await removeCopilotPieces({ fsPath: storage } as never);
+  expect(existsSync(agent)).toBe(false);
+  expect(existsSync(file)).toBe(false);
+  expect(removed).toHaveLength(2);
 });
 
 test("with nothing to remove it returns nothing", async () => {
@@ -148,36 +142,4 @@ test("updating skills reports why the trama-specs skill was kept", async () => {
   updateOutput = "Updated skills\nRequirement skills: one skill per fragment (budget 100/4000 characters).\nThe trama-specs skill was not updated, because Specs is not valid: line 3: unknown key `colour`";
   await updateSkills({ root: "/project" } as never, { fsPath: storage } as never);
   expect(errors.at(-1)).toContain("The trama-specs skill was not updated, because Specs is not valid: line 3: unknown key `colour`");
-});
-
-test("activation writes Cursor's hooks in the developer's own hooks file, rewriting only when the entries change", async () => {
-  setup();
-  editor.appName = "Cursor";
-  const cursorDir = join(home, ".cursor");
-  rmSync(cursorDir, { recursive: true, force: true });
-  try {
-    await installEditorHooks();
-    const program = join(extensionPath, "bin", bundledName);
-    const hooks = JSON.parse(readFileSync(join(cursorDir, "hooks.json"), "utf8")).hooks;
-    expect(hooks.stop).toEqual([{ command: `${process.platform === "win32" ? "& " : ""}"${program}" hook cursor`, loop_limit: null }]);
-    expect(existsSync(join(storage, "copilot-hooks.json"))).toBe(false);
-  } finally {
-    editor.appName = "Visual Studio Code";
-  }
-});
-
-test("activation reports an invalid Cursor hooks file and leaves it untouched", async () => {
-  setup();
-  editor.appName = "Cursor";
-  const cursorDir = join(home, ".cursor");
-  rmSync(cursorDir, { recursive: true, force: true });
-  mkdirSync(cursorDir);
-  writeFileSync(join(cursorDir, "hooks.json"), "{ broken");
-  try {
-    await installEditorHooks();
-    expect(errors[0]).toContain("could not write Cursor's hooks");
-    expect(readFileSync(join(cursorDir, "hooks.json"), "utf8")).toBe("{ broken");
-  } finally {
-    editor.appName = "Visual Studio Code";
-  }
 });

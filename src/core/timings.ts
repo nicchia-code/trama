@@ -1,7 +1,10 @@
 import { appendFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentOrigin, Chat, CheckPhase } from "./announcements";
+import type { AgentOrigin, CheckPhase } from "./announcements";
 import { type Project, readTextLf, writeFileEnsuringDir } from "./store";
+
+/** The `chat` of a record written when an agent without a terminal could record: read, never written. */
+type LegacyChat = "editor";
 
 /*
  * Phase timings: one JSON line per event of an agent's work, in `.trama/timings/`. A job file is named by the instant its
@@ -32,7 +35,7 @@ export type TimingEvent =
   | { event: "choice"; kind: ParallelChoiceKind; tasks: { id: string; title: string }[]; reason: string };
 
 /** One line of a job file. */
-export type TimingRecord = TimingEvent & { at: string; terminal?: string; chat?: Chat; conversation?: string; job?: string };
+export type TimingRecord = TimingEvent & { at: string; terminal?: string; chat?: LegacyChat; job?: string };
 
 export interface RecordOptions {
   /** The job the event belongs to, when the agent runs one. */
@@ -61,19 +64,19 @@ function jobFiles(dir: string): JobFile[] {
 
 /**
  * Appends an event to the current job of its holder, starting a new job file when `startsJob` is set or the holder has
- * none, and then keeps only the newest jobs. Does nothing without a terminal or chat, and never throws: a failed write
+ * none, and then keeps only the newest jobs. Does nothing without a terminal, and never throws: a failed write
  * must not change the command that records it.
  */
 export function recordTiming(p: Project, origin: AgentOrigin, event: TimingEvent, options: RecordOptions = {}, now = new Date()): void {
-  // The holder of a job is the terminal, the Cursor conversation or, without one, the project's chat.
-  const holder = origin.terminal ?? (origin.chat === "cursor" && origin.conversation !== undefined ? `cursor-${origin.conversation.replace(/[^A-Za-z0-9-]/g, "_")}` : origin.chat);
+  // The holder of a job is the agent terminal; an agent without one records nothing.
+  const holder = origin.terminal;
   if (holder === undefined) return;
   try {
     const dir = join(p.dir, "timings");
     const current = jobFiles(dir).filter((f) => f.holder === holder).at(-1);
     const record: TimingRecord = {
       at: now.toISOString(),
-      ...(origin.terminal !== undefined ? { terminal: origin.terminal } : { chat: origin.chat, ...(origin.conversation === undefined ? {} : { conversation: origin.conversation }) }),
+      terminal: holder,
       ...(options.job ? { job: options.job } : {}),
       ...event,
     };
@@ -140,7 +143,7 @@ export interface ParallelChoice {
 
 export interface JobTiming {
   terminal: string | null;
-  chat: Chat | null;
+  chat: LegacyChat | null;
   job: string | null;
   start: string;
   /** When the next job of the same holder started; null while it is the holder's latest. */

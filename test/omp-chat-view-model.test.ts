@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { type ChatSurface, ChatViewModel } from "../extension/src/host/omp-chat/view-model";
 import { parseChatMessage } from "../extension/src/host/omp-chat/messages";
-import type { Disposable, FormAnswer, FormRequest, OmpExit, OmpPrompt, OmpSessionPort } from "../extension/src/host/omp-chat/ports";
+import type { Disposable, FormAnswer, FormRequest, OmpExit, OmpPrompt, OmpSessionPort, PermissionRequest } from "../extension/src/host/omp-chat/ports";
 import type { ToChatWebview } from "../extension/src/omp-chat-protocol";
 
 class FakeSession implements OmpSessionPort {
@@ -15,6 +15,10 @@ class FakeSession implements OmpSessionPort {
   private updateListeners: ((n: SessionNotification) => void)[] = [];
   private turnListeners: ((inTurn: boolean) => void)[] = [];
   private formListeners: ((request: FormRequest) => void)[] = [];
+  private permissionListeners: ((request: PermissionRequest) => void)[] = [];
+  private cancelledListeners: ((requestId: string) => void)[] = [];
+  permissionAnswers: { requestId: string; optionId: string }[] = [];
+  waiting: PermissionRequest[] = [];
   history: SessionNotification[] = [];
   constructor(readonly sessionId = "s1") {}
   async sendPrompt(prompt: OmpPrompt): Promise<void> {
@@ -40,6 +44,26 @@ class FakeSession implements OmpSessionPort {
   }
   answerForm(requestId: string, answer: FormAnswer): void {
     this.answers.push({ requestId, answer });
+  }
+  onPermissionRequest(listener: (request: PermissionRequest) => void): Disposable {
+    this.permissionListeners.push(listener);
+    for (const request of this.waiting) listener(request);
+    return { dispose: () => void (this.permissionListeners = this.permissionListeners.filter((each) => each !== listener)) };
+  }
+  onPermissionCancelled(listener: (requestId: string) => void): Disposable {
+    this.cancelledListeners.push(listener);
+    return { dispose: () => void (this.cancelledListeners = this.cancelledListeners.filter((each) => each !== listener)) };
+  }
+  answerPermission(requestId: string, optionId: string): void {
+    this.permissionAnswers.push({ requestId, optionId });
+  }
+  requestPermission(request: PermissionRequest): void {
+    this.waiting.push(request);
+    for (const listener of this.permissionListeners) listener(request);
+  }
+  cancelPermission(requestId: string): void {
+    this.waiting = this.waiting.filter((request) => request.requestId !== requestId);
+    for (const listener of this.cancelledListeners) listener(requestId);
   }
   async models() {
     return { available: [{ id: "m1", name: "Model one" }], current: "m1" };
@@ -197,6 +221,37 @@ describe("opening, selecting and closing", () => {
     model.setWorking("a", false);
     expect(lastConversations(fake)?.items[0]?.state).toBe("idle");
   });
+
+  test("a permission request is posted with omp's options and turns the dot to waiting-permission until it is answered or cancelled", () => {
+    const { model, fake } = setup();
+    model.webviewReady();
+    model.open({ id: "a", name: "T3" }, session, { focus: false });
+    session.turn(true);
+    const options = [{ optionId: "no", name: "No", kind: "reject_once" as const }, { optionId: "yes", name: "Yes", kind: "allow_once" as const }];
+    session.requestPermission({ requestId: "p1", toolCall: { toolCallId: "t", title: "Run ls" }, options });
+    expect(fake.posted).toContainEqual({ type: "permissionRequest", id: "a", requestId: "p1", toolCall: { toolCallId: "t", title: "Run ls" }, options });
+    expect(lastConversations(fake)?.items[0]?.state).toBe("waiting-permission");
+    session.cancelPermission("p1");
+    expect(fake.posted).toContainEqual({ type: "permissionCancelled", id: "a", requestId: "p1" });
+    expect(lastConversations(fake)?.items[0]?.state).toBe("running");
+  });
+
+  test("an answer reaches the session once, and only for an option omp offered; a message written meanwhile does not answer", () => {
+    const { model, fake } = setup();
+    model.webviewReady();
+    model.open({ id: "a", name: "T3" }, session, { focus: false });
+    session.requestPermission({ requestId: "p1", toolCall: { toolCallId: "t" }, options: [{ optionId: "yes", name: "Yes", kind: "allow_once" }] });
+    model.receive({ type: "sendMessage", id: "a", text: "meanwhile" });
+    model.receive({ type: "permissionAnswer", id: "a", requestId: "p1", optionId: "other" });
+    model.receive({ type: "permissionAnswer", id: "a", requestId: "unknown", optionId: "yes" });
+    expect(session.permissionAnswers).toEqual([]);
+    expect(lastConversations(fake)?.items[0]?.state).toBe("waiting-permission");
+    model.receive({ type: "permissionAnswer", id: "a", requestId: "p1", optionId: "yes" });
+    model.receive({ type: "permissionAnswer", id: "a", requestId: "p1", optionId: "yes" });
+    expect(session.permissionAnswers).toEqual([{ requestId: "p1", optionId: "yes" }]);
+    expect(session.prompts).toEqual([{ text: "meanwhile" }]);
+    expect(lastConversations(fake)?.items[0]?.state).toBe("idle");
+  });
 });
 
 describe("the webview", () => {
@@ -308,6 +363,7 @@ describe("validation of what the webview sends", () => {
       { type: "setModel", id: "a", model: "m" },
       { type: "formAnswer", id: "a", requestId: "r", answer: { action: "accept", content: { one: "x", two: ["a", "b"], three: true, four: 4 } } },
       { type: "formAnswer", id: "a", requestId: "r", answer: { action: "decline" } },
+      { type: "permissionAnswer", id: "a", requestId: "p", optionId: "once" },
       { type: "openFile", path: "a.ts" },
       { type: "openLink", url: "https://x.y" },
     ]) {
@@ -319,5 +375,8 @@ describe("validation of what the webview sends", () => {
     expect(parseChatMessage({ type: "sendMessage", id: 1, text: "x" })).toBeUndefined();
     expect(parseChatMessage({ type: "sendMessage", id: "a", text: "x".repeat(300_000) })).toBeUndefined();
     expect(parseChatMessage({ type: "formAnswer", id: "a", requestId: "r", answer: { action: "accept", content: { a: { nested: 1 } } } })).toBeUndefined();
+    expect(parseChatMessage({ type: "permissionAnswer", id: "a", requestId: "p" })).toBeUndefined();
+    expect(parseChatMessage({ type: "permissionAnswer", id: "a", requestId: "p", optionId: "" })).toBeUndefined();
+    expect(parseChatMessage({ type: "permissionAnswer", id: "a", requestId: "p", optionId: "o", extra: 1 })).toBeUndefined();
   });
 });

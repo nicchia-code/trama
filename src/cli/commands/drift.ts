@@ -101,7 +101,7 @@ const create = defineCommand({
       previous: input.previous === undefined ? undefined : getDrift(project, input.previous, true).id,
     });
     if (origin !== undefined) recordTiming(project, ctx.origin, { event: "task-end", task: origin, title: getTask(project, origin, true).title, outcome: "drift", drift: d.id }, { job: ctx.job });
-    // The agent that files a Drift keeps «Dismiss Drift» from it until its turn ends: the editor learns who holds it here. An agent Trama did not start and that does not say where it comes from files as the `editor` holder.
+    // The agent that files a Drift keeps «Dismiss Drift» from it until its turn ends: the editor learns who holds it here. A Drift filed without a terminal waits for no agent.
     const filed = filingOrigin(ctx.origin);
     if (filed.holder !== undefined)
       sendCoordinatorMessageSoon(project, { type: "drift-filed", root: project.root, drift: d.id, ...filed }, (reason) => {
@@ -131,7 +131,7 @@ const list = defineCommand({
   verb: "list",
   mode: "immediate",
   summary: "The open Drifts, or every Drift.",
-  description: "With `all: true`, every Drift. `refs` keeps only the Drifts that concern the same thing as one of the given references, as the Task blocks do; a reference that does not resolve is refused. `job` keeps the Drifts filed by that job (`TRAMA_JOB`). `currentJob: true` keeps the Drifts filed by the job of this command (its `TRAMA_JOB`, in a terminal and in Cursor's chat alike); without `TRAMA_JOB` it lists nothing, says so and exits with 0, and together with `job` it is a usage error. `unprepared: true` keeps the open Drifts that have no valid prepared question and are in no resolution being written or open. The filters combine. Read-only.",
+  description: "With `all: true`, every Drift. `refs` keeps only the Drifts that concern the same thing as one of the given references, as the Task blocks do; a reference that does not resolve is refused. `job` keeps the Drifts filed by that job (`TRAMA_JOB`). `currentJob: true` keeps the Drifts filed by the job of this command (its `TRAMA_JOB`); without `TRAMA_JOB` it lists nothing, says so and exits with 0, and together with `job` it is a usage error. `unprepared: true` keeps the open Drifts that have no valid prepared question and are in no resolution being written or open. The filters combine. Read-only.",
   input: z.strictObject({
     all: z.boolean().optional().describe("Every Drift, not only the open ones."),
     refs: z.array(z.string().min(1)).optional().describe("Only the Drifts that concern the same thing as one of these references."),

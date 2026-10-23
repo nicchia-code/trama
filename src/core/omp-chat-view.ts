@@ -7,8 +7,8 @@
 export type ChatViewState = "hidden" | "empty" | "with-conversations";
 
 /**
- * `omp-chat` State: `inUse` is omp Chat on in the user settings with `trama.agent` on omp (`rules#omp-chat`); `conversations` the window's conversations, open
- * or saved and waiting to be resumed. Open conversations keep the view after omp Chat is turned off or the agent changes, until the last one closes.
+ * `omp-chat` State: `inUse` is omp Chat on (not turned off in the user settings, `rules#omp-chat`); `conversations` the window's conversations, open
+ * or saved and waiting to be resumed. Open conversations keep the view after omp Chat is turned off, until the last one closes.
  */
 export function chatViewState(facts: { inUse: boolean; conversations: number }): ChatViewState {
   if (facts.conversations > 0) return "with-conversations";
@@ -17,16 +17,6 @@ export function chatViewState(facts: { inUse: boolean; conversations: number }):
 
 /** The value of the context key `trama.ompChatVisible`: the view is there in Empty and With conversations, not in Hidden. */
 export const ompChatVisible = (facts: { inUse: boolean; conversations: number }): boolean => chatViewState(facts) !== "hidden";
-
-/**
- * The value `trama.ompChatVisible` takes (`tech#omp-chat`): `panel` in Cursor, `sidebar` in every other editor while the view is there, `false` otherwise. Each
- * editor has one view for it: `trama.ompChat` in the panel for Cursor, which refuses extension containers in the secondary sidebar, and `trama.ompChatSidebar`.
- */
-export type ChatVisibleKey = "panel" | "sidebar" | false;
-export const ompChatKey = (visible: boolean, cursor: boolean): ChatVisibleKey => (!visible ? false : cursor ? "panel" : "sidebar");
-
-/** The command that shows the view of the editor in use: the only command Trama runs to open it. */
-export const ompChatFocusCommand = (cursor: boolean): string => (cursor ? "trama.ompChat.focus" : "trama.ompChatSidebar.focus");
 
 /**
  * The tab shown after `closed` leaves `order` (the ids in order of opening): `selected` when it is still there, otherwise the neighbour that now sits where the

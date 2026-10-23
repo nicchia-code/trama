@@ -20,10 +20,9 @@ Your rules (tech stack, design, data, business rules) live next to the map as **
 
 ## Requirements
 
-- VS Code 1.106 or later, or Cursor.
+- VS Code 1.106 or later with the Trama extension: it is the only editor Trama supports.
 - Linux (x64), macOS (Apple silicon) or Windows (x64, preview).
-- An agent: Cursor's chat (in Cursor only), or omp installed and on your `PATH` (in any of the editors above).
-- With the Advisor Scanner on in Cursor's chat, Cursor 3.27.6 or later: its review rounds run in the background while the agent keeps working, and Cursor delivers each result and its notes to the agent. Trama reports the notes again in the review of the Task or the final review. Earlier versions are not recognised.
+- omp, the only agent Trama supports. It is required: Trama finds it in `trama.ompPath` or, when that is empty, in your `PATH`, then in `~/.bun/bin` and `~/.local/bin`; when it is missing Trama offers to install it with omp's official installer, and before every launch it checks for a newer omp and updates it by itself.
 
 The `trama` command line comes inside the extension: there's nothing else to install.
 
@@ -40,7 +39,7 @@ code --install-extension trama-<platform>-<version>.vsix
 ## Use
 
 1. **Open your project** and click the Trama logo in the Activity Bar, then **Open Trama**.
-2. **Set it up.** In a folder without a Trama project the panel opens on **Get Started**: choose **Import from Code** (the agent maps the app you already have) or **Start from Scratch**, then your agent and its models. Nothing is written until you confirm the summary.
+2. **Set it up.** In a folder without a Trama project the panel opens on **Get Started**: choose **Import from Code** (the agent maps the app you already have) or **Start from Scratch**, then the models omp uses. Nothing is written until you confirm the summary.
 3. **Ask for a change.** On the Board, click **+ Add Work Item**, write what you want in the tab that opens, and send it with **Send to agent** (closing the tab sends it too).
 4. **Decide.** Answer the agent's questions, then **Approve** or **Reject** its Proposal.
 5. **Build.** Click **Run all** and the agent implements the Tasks.
@@ -50,11 +49,11 @@ Every setting is in the **Settings** tab of the panel, which saves to your user 
 
 ## Optional features
 
-The **Features** group of the Settings tab holds features that are off by default. One of them is **omp Chat**:
+The **Features** group of the Settings tab holds optional features, off by default except **omp Chat**:
 
-- It works only with omp (`trama.agent` set to `omp`) and only from your user settings, so a cloned repository cannot turn it on.
-- With it on, the jobs Trama starts open as conversations in the **omp Chat** view, one conversation per job, instead of omp terminals. In VS Code, and in every editor that is not Cursor, the view sits in its own container of the secondary sidebar, on the right like the VS Code chat (VS Code 1.106 or later). Cursor reserves that bar for its own chat, so there the view sits in the bottom panel; to bring it to the right, use Move View and «New Secondary Side Bar Entry», and the editor remembers it. Cursor logs an error at start-up ("View containers cannot be contributed to the Secondary Side Bar in Cursor"): it is expected and harmless. Trama never opens, closes or moves a side bar by itself, except to show the view when a conversation opens.
-- **Every command runs without asking**: omp runs in yolo mode there, so it executes commands that a terminal would ask you to approve. Turn the feature on only if you accept that. The omp terminal and omp sessions you start by hand are not affected.
+- It is on by default and stays on until you turn it off in your user settings (`trama.ompChat` set to `false`); a value in the workspace settings does not count, so a cloned repository cannot change it.
+- With it on, the jobs Trama starts open as conversations in the **omp Chat** view, one conversation per job, instead of omp terminals. The view sits in its own container of the secondary sidebar of VS Code, on the right like the VS Code chat (VS Code 1.106 or later). Trama never opens, closes or moves a side bar by itself, except to show the view when a conversation opens.
+- **Approval**: the **omp Chat Approval** setting (`trama.ompChatApproval`, user settings only) is `ask` by default: omp asks permission as in the terminal, and each request shows in the conversation with a button per option. With `yolo`, **omp runs every command without asking**, even those it would ask you to approve in the terminal; choose it only if you accept that. The setting applies to omp Chat conversations only: the omp terminal and omp sessions you start by hand are not affected.
 - The session receives only the MCP servers of omp's own files (`.omp/mcp.json` in the project and `~/.omp/agent/mcp.json`); the files of other tools are not read.
 - If omp cannot be reached (not found, exits at start, does not answer), the job starts in the omp terminal as it does with the feature off, and a notice says why.
 

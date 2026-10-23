@@ -2,9 +2,7 @@ import { stringify } from "yaml";
 import { ADVISOR_SCANNER_ENV, ADVISOR_SCANNER_ON } from "../../../src/core/advisors";
 import { TERMINAL_ENV } from "../../../src/core/announcements";
 import { QUESTION_ENDPOINT_ENV } from "../../../src/core/question-channel";
-import { quote, type ShellFamily } from "./quote";
-
-export type TerminalAgent = "omp";
+import { quote, quoteProgram, type ShellFamily } from "./quote";
 
 /** The model roles (`trama.analysis`, `trama.scan`, `trama.execution`), trimmed; empty leaves the agent's default. */
 export interface Models {
@@ -45,22 +43,26 @@ export function ompOptions(scanning: boolean, models: { model: string; scan: str
 /** The options of a Quick Task or an Ask more: `--model <m>` only when the role has a model; no hook, overlay, `--slow` or `--advisor`. */
 export const quickOptions = (model: string): string[][] => (model === "" ? [] : [["--model", model]]);
 
-/** The arguments of a conversation's `omp` process: the job's options as they are, then `acp --yolo`. */
-export const ompArguments = (options: string[][]): string[] => [...options.flat(), "acp", "--yolo"];
+/** The approval of an omp Chat conversation: `ask` (omp asks permission, the default) or `yolo`. */
+export type OmpApproval = "ask" | "yolo";
+
+/** The arguments of a conversation's `omp` process: the job's options as they are, then `acp`, and `--yolo` only with the `yolo` approval. */
+export const ompArguments = (options: string[][], approval: OmpApproval): string[] => [...options.flat(), "acp", ...(approval === "yolo" ? ["--yolo"] : [])];
 
 const quoted = (family: ShellFamily, options: string[][]): string[] => options.flatMap(([flag, value]) => (value === undefined ? [flag as string] : [flag as string, quote(family, value)]));
 
 /**
- * The template of omp's command line, with `{prompt}` where the quoted prompt goes: the options of `ompOptions`, quoted for the shell. `attachment` is the absolute
- * path of a file omp attaches to the first message with `@<path>` (Unify Drifts' instructions), given before the prompt.
+ * The template of omp's command line, with `{prompt}` where the quoted prompt goes: `omp` (the program Trama runs, quoted for the shell as a command) and the options
+ * of `ompOptions`, quoted for the shell. `attachment` is the absolute path of a file omp attaches to the first message with `@<path>` (Unify Drifts' instructions),
+ * given before the prompt.
  */
-export function agentTemplate(scanning: boolean, models: { model: string; scan: string }, family: ShellFamily, ompHook?: string, config?: string, advisor = false, attachment?: string): string {
-  const words = ["omp", ...quoted(family, ompOptions(scanning, models, ompHook, config, advisor))];
+export function agentTemplate(omp: string, scanning: boolean, models: { model: string; scan: string }, family: ShellFamily, ompHook?: string, config?: string, advisor = false, attachment?: string): string {
+  const words = [quoteProgram(family, omp), ...quoted(family, ompOptions(scanning, models, ompHook, config, advisor))];
   return [...words, ...(attachment === undefined ? [] : [quote(family, `@${attachment}`)]), "{prompt}"].join(" ");
 }
 
-/** The command line of a Quick Task's terminal: `omp`, with `--model <m>` only when the execution role has a model; no hook, overlay, `--slow`, `--advisor` or prompt. */
-export const quickCommandLine = (model: string, family: ShellFamily): string => ["omp", ...quoted(family, quickOptions(model))].join(" ");
+/** The command line of a Quick Task's terminal: `omp` (the program Trama runs, quoted), with `--model <m>` only when the execution role has a model; no hook, overlay, `--slow`, `--advisor` or prompt. */
+export const quickCommandLine = (omp: string, model: string, family: ShellFamily): string => [quoteProgram(family, omp), ...quoted(family, quickOptions(model))].join(" ");
 
 /** What an omp launch overlay holds: the advisor role and advisors of a Run with the Advisor Scanner on, and the instruction files omp must not read. */
 export interface LaunchOverlay {

@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import type { ToChatHost, ToChatWebview } from "../../omp-chat-protocol";
 import { TooltipProvider } from "../ui/tooltip";
 import { Conversation, type ConversationActions } from "./conversation";
-import { answerFormIn, type ChatStore, reduce, selectedOf, selectTab, sendMessage } from "./state";
+import { answerFormIn, answerPermissionIn, type ChatStore, reduce, selectedOf, selectTab, sendMessage } from "./state";
 import { ConversationTabs } from "./tabs";
 
 /** What the view does with a message of the host, and what its controls ask of it. */
@@ -30,6 +30,10 @@ export function createChatController(store: ChatStore, post: (message: ToChatHos
     answer(id, requestId, answer) {
       store.set(answerFormIn(store.get(), id, requestId, answer));
       post({ type: "formAnswer", id, requestId, answer });
+    },
+    choose(id, requestId, optionId) {
+      store.set(answerPermissionIn(store.get(), id, requestId, optionId));
+      post({ type: "permissionAnswer", id, requestId, optionId });
     },
     openFile: (path) => post({ type: "openFile", path }),
     openLink: (url) => post({ type: "openLink", url }),

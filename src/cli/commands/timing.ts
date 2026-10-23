@@ -25,7 +25,7 @@ const create = defineCommand({
   mode: "immediate",
   summary: "Record a choice of the parallel execution.",
   description:
-    "Records in the timings of the job a choice of the parallel run: `release` (Tasks started together although the free-places rule keeps them apart), `order` (the first Task waits for the others to be Done) or `conflict` (the sub-agent of the first Task stopped because it clashed with the others). `tasks` names at least two existing Tasks; `reason` is one line. Writes only from a Trama terminal or chat: elsewhere it writes nothing, says so and exits with 0.",
+    "Records in the timings of the job a choice of the parallel run: `release` (Tasks started together although the free-places rule keeps them apart), `order` (the first Task waits for the others to be Done) or `conflict` (the sub-agent of the first Task stopped because it clashed with the others). `tasks` names at least two existing Tasks; `reason` is one line. Writes only from a Trama terminal: elsewhere it writes nothing, says so and exits with 0.",
   input: z.strictObject({
     kind: z.enum(PARALLEL_CHOICE_KINDS).describe("`release`, `order` or `conflict`."),
     tasks: z.array(z.string().min(1)).min(2).describe("At least two Tasks: IDs, unique prefixes or short numbers; the first is the one the choice is about."),
@@ -39,10 +39,10 @@ const create = defineCommand({
     const ids = taskIds(ctx, input.tasks);
     if (ids.length < 2) throw new UsageError("tasks: needs at least two different Tasks");
     const named = ids.map((id) => ({ id, title: getTask(project, id).title }));
-    // Like the Task moves that are timed, only the agent's own commands are recorded: a Trama terminal or a chat.
-    const recorded = ctx.byAgent || ctx.origin.terminal !== undefined;
+    // Like the Task moves that are timed, only the agent's own commands are recorded: a Trama terminal.
+    const recorded = ctx.origin.terminal !== undefined;
     const json = { recorded, kind: input.kind, tasks: ids, reason: input.reason };
-    if (!recorded) return text("Nothing recorded: this is not a Trama terminal or chat.", json);
+    if (!recorded) return text("Nothing recorded: this is not a Trama terminal.", json);
     recordTiming(project, ctx.origin, { event: "choice", kind: input.kind, tasks: named, reason: input.reason }, { job: ctx.job });
     return text(`Recorded ${input.kind} choice for ${ids.length} Tasks`, json);
   },

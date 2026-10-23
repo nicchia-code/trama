@@ -17,8 +17,8 @@ export const RESUME_TIMEOUT_MS = 30_000;
 /** The key of `workspaceState` the open conversations are saved under. */
 export const CONVERSATIONS_KEY = "trama.ompChat.conversations";
 
-/** Whether an instruction opens a conversation: omp Chat is on (user settings), the agent is omp and omp Chat can start. Read at every instruction. */
-export const useOmpChat = (facts: { ompChat: boolean; agent: string; available: boolean }): boolean => facts.ompChat && facts.agent === "omp" && facts.available;
+/** Whether an instruction opens a conversation: omp Chat is on (not turned off in the user settings) and can start. Read at every instruction. */
+export const useOmpChat = (facts: { ompChat: boolean; available: boolean }): boolean => facts.ompChat && facts.available;
 
 /** The warning shown when omp does not start and the instruction goes to a terminal. */
 export const startFailureNotice = (reason: string): string => `Trama: omp Chat could not start omp (${reason}); the job runs in a terminal.`;

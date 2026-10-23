@@ -1,4 +1,4 @@
-import type { ElicitationSchema, SessionNotification } from "@agentclientprotocol/sdk";
+import type { ElicitationSchema, PermissionOption, SessionNotification, ToolCallUpdate } from "@agentclientprotocol/sdk";
 
 // The two things the conversations of omp Chat stand on, as the host sees them. The ACP client (Task «Client ACP di omp») implements `OmpClientPort`
 // and the view in the secondary sidebar (Task «Vista omp Chat») implements `ChatViewPort`; the conversations (`conversations.ts`) are written against these
@@ -10,7 +10,7 @@ export interface Disposable {
 
 /** How a process of omp starts: what the client spawns and talks to. */
 export interface OmpLaunch {
-  /** The arguments after the `omp` program: the job's options, then `acp --yolo`. No shell is involved: they are array elements, never quoted. */
+  /** The arguments after the `omp` program: the job's options, then `acp`, and `--yolo` only with the yolo approval. No shell is involved: they are array elements, never quoted. */
   args: string[];
   /** The variables added to the editor's own environment: the marks of Trama's agents, the question endpoint, the conversation's identity and the PATH with Trama's `trama` first. */
   env: Record<string, string>;
@@ -56,6 +56,12 @@ export interface OmpSessionPort {
   onFormRequest(listener: (request: FormRequest) => void): Disposable;
   /** Answers the form `requestId` (`decline` is a Skip); an unknown request is ignored. */
   answerForm(requestId: string, answer: FormAnswer): void;
+  /** A permission request of omp (`session/request_permission`); with `--yolo` none arrives. The ones still waiting are replayed to a new listener. */
+  onPermissionRequest(listener: (request: PermissionRequest) => void): Disposable;
+  /** Answers the permission request `requestId` with the offered option `optionId`; an unknown request or an option that was not offered is ignored. */
+  answerPermission(requestId: string, optionId: string): void;
+  /** A waiting permission request was answered `cancelled` (Stop, closing, the process ended). */
+  onPermissionCancelled(listener: (requestId: string) => void): Disposable;
   /** The models the session can use and the one it uses now, from omp's session options or, without them, from the models omp lists. */
   models(): Promise<{ available: { id: string; name: string }[]; current?: string }>;
   /** Changes the session's model from the next turn; rejects with omp's message when it refuses. */
@@ -70,6 +76,13 @@ export interface FormRequest {
 }
 
 export type FormAnswer = { action: "accept"; content: Record<string, unknown> } | { action: "decline" };
+
+/** A permission request of omp: the tool call it concerns and the options as omp gives them. It waits without a time limit; Stop and the closing of the conversation answer `cancelled`. */
+export interface PermissionRequest {
+  requestId: string;
+  toolCall: ToolCallUpdate;
+  options: PermissionOption[];
+}
 
 export interface OmpClientPort {
   /**

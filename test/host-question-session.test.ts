@@ -14,17 +14,17 @@ const request = (id = "q"): QuestionRequest => ({
 function session() {
   let reveals = 0;
   const seen: (QuestionRoundView | null)[] = [];
-  const s = new QuestionSession(() => void reveals++, (c) => (c.fromCursorChat ? "Cursor" : null));
+  const s = new QuestionSession(() => void reveals++);
   s.onChange((round) => seen.push(round));
   return { s, seen, reveals: () => reveals };
 }
 
 test("a round entering Asking reveals the panel, and the developer's actions deliver only confirmed answers", async () => {
   const { s, seen, reveals } = session();
-  const answered = s.present(request(), { signal: new AbortController().signal, fromCursorChat: true });
+  const answered = s.present(request(), { signal: new AbortController().signal, prepared: true });
   expect(reveals()).toBe(1);
   const round = s.current();
-  expect(round?.agent).toBe("Cursor");
+  expect(round?.agent).toBe("Prepared question");
   expect(round?.state.drafts[0]).toEqual({ selected: [0], text: "" });
   const id = round?.id as number;
 
@@ -37,6 +37,21 @@ test("a round entering Asking reveals the panel, and the developer's actions del
   expect(await answered).toEqual({ status: "answered", answers: { q1: { status: "answered", selected: ["A"], text: "because" }, q2: { status: "skipped" } } });
   expect(s.current()).toBeNull();
   expect(seen.at(-1)).toBeNull();
+});
+
+test("the round names the agent that asked it: Prepared question for a round Trama asks itself, omp for one from a terminal of Trama, none otherwise", () => {
+  const { s } = session();
+  const signal = new AbortController().signal;
+  void s.present(request(), { signal, fromTramaTerminal: true });
+  expect(s.current()?.agent).toBe("omp");
+  const named = (context: { prepared?: boolean; fromTramaTerminal?: boolean }) => {
+    const other = session().s;
+    void other.present(request(), { signal: new AbortController().signal, ...context });
+    return other.current()?.agent;
+  };
+  expect(named({ prepared: true })).toBe("Prepared question");
+  expect(named({ fromTramaTerminal: false })).toBeNull();
+  expect(named({})).toBeNull();
 });
 
 test("an incomplete send from the panel is refused and the round stays open", () => {

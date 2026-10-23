@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AGENT_ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, CHECK_START_PHASES, type CheckPhase, changeCheckPhase, checkOutcome, declareNote, forgetCheck, getAnnouncement, NOTE_LENGTH } from "../../core/announcements";
-import { UsageError } from "../../core/errors";
+import { TramaError, UsageError } from "../../core/errors";
 import { recordTiming } from "../../core/timings";
 import { defineCommand } from "../registry";
 import { text } from "../result";
@@ -13,7 +13,7 @@ const create = defineCommand({
   mode: "immediate",
   summary: "Announce a card, or a check, that you are about to create.",
   description:
-    "Announce a card (`proposal`, `task` or `drift`) as soon as you know you will create it, so the Board shows a ghost of it; pass the printed ID as `announcement` when you create the card. Announce a final check or a scan with `kind: check` and its `phase` (`verifying` or `scanning`): it stays in In progress until `trama announcement move <id> delivered` or `failed`. `phase` is required for a check and refused for the other kinds. With `phase: scanning`, a scan check Trama announced at launch for this terminal or chat and still waiting is taken instead of creating one. Prints the announcement's ID. Never wait for the ghost to show.",
+    "Announce a card (`proposal`, `task` or `drift`) as soon as you know you will create it, so the Board shows a ghost of it; pass the printed ID as `announcement` when you create the card. Announce a final check or a scan with `kind: check` and its `phase` (`verifying` or `scanning`): it stays in In progress until `trama announcement move <id> delivered` or `failed`. `phase` is required for a check and refused for the other kinds. With `phase: scanning`, a scan check Trama announced at launch for this terminal and still waiting is taken instead of creating one. The announcement belongs to the agent terminal (`TRAMA_TERMINAL`); only an agent started by Trama can announce, so without the variable the command is refused with an error and writes nothing. Prints the announcement's ID. Never wait for the ghost to show.",
   input: z
     .strictObject({
       kind: z.enum(AGENT_ANNOUNCEMENT_KINDS as readonly [AnnouncementKind, ...AnnouncementKind[]]).describe("What is announced: `proposal`, `task`, `drift` or `check`."),
@@ -28,6 +28,7 @@ const create = defineCommand({
   example: { kind: "check", title: "Final check after all Tasks", phase: "verifying" },
   effects: { writes: true, activity: true },
   run(ctx, input) {
+    if (ctx.origin.terminal === undefined) throw new TramaError("Refused: only an agent started by Trama can announce, and this command does not run in a Trama terminal (TRAMA_TERMINAL is not set); nothing was written.");
     const project = ctx.project();
     const announcement = announce(project, { kind: input.kind, title: input.title, ...(input.phase ? { phase: input.phase } : {}), ...ctx.origin });
     if (input.kind === "check" && announcement.phase)
@@ -84,8 +85,8 @@ const edit = defineCommand({
   mode: "immediate",
   summary: "Declare a note on the ghost of the work you are doing.",
   description:
-    `Declares \`note\`, one short line about what you are doing and why, so the developer reads it on the ghost. With the announcement's ID the note goes only to that announcement, of any kind, comparisons included; without an ID it goes to every announcement still waiting that belongs to your terminal or your Cursor chat conversation, comparisons excepted (an agent with neither is the project's chat). Line breaks become spaces and the ends are trimmed; an empty note is a usage error and saves nothing. A note over ${NOTE_LENGTH} characters is saved cut to the first ${NOTE_LENGTH - 1} followed by \`…\`, and the output says so. An announcement keeps its last 6 notes, each with the instant it arrived; a note equal to the previous one only renews that instant. A note changes nothing else (phase, title, delivery or withdrawal) and does not count as the agent's activity. With no announcement to go to the command says so and exits with 0; an unknown ID is an error and saves nothing.`,
-  positionals: [{ name: "id", optional: true, description: "The announcement to write the note on; without it, every announcement waiting for your terminal or chat except comparisons." }],
+    `Declares \`note\`, one short line about what you are doing and why, so the developer reads it on the ghost. With the announcement's ID the note goes only to that announcement, of any kind, comparisons included; without an ID it goes to every announcement still waiting that belongs to your terminal (\`TRAMA_TERMINAL\`), comparisons excepted; an agent without a terminal has no announcements. Line breaks become spaces and the ends are trimmed; an empty note is a usage error and saves nothing. A note over ${NOTE_LENGTH} characters is saved cut to the first ${NOTE_LENGTH - 1} followed by \`…\`, and the output says so. An announcement keeps its last 6 notes, each with the instant it arrived; a note equal to the previous one only renews that instant. A note changes nothing else (phase, title, delivery or withdrawal) and does not count as the agent's activity. With no announcement to go to the command says so and exits with 0; an unknown ID is an error and saves nothing.`,
+  positionals: [{ name: "id", optional: true, description: "The announcement to write the note on; without it, every announcement waiting for your terminal except comparisons." }],
   input: z.strictObject({ note: z.string().describe(`One short line: what you are doing and why, for the developer. Cut to ${NOTE_LENGTH} characters.`) }),
   output: z.object({ announcements: z.array(z.string()).describe("The IDs of the announcements the note went to."), truncated: z.boolean().describe("True when the note was cut.") }),
   example: { note: "Compares the order Machine with its code before the Tasks run." },

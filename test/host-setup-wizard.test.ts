@@ -213,17 +213,38 @@ test("the Empty Model mode, in a project, saves the keys and carries on with the
   expect(String(launched[0]?.instruction)).toContain("Do not import these paths and do not ask which folders to import: `a`.");
 });
 
-test("the chosen agent is checked: omp that is not found says where it looked, and the editor decides for Cursor's chat", async () => {
-  await send({ type: "agentCheckWanted", agent: "omp", ompPath: join(root, "no-such-omp") });
-  expect(messages.find((m) => m["type"] === "agentCheck")).toEqual({ type: "agentCheck", agent: "omp", ompPath: join(root, "no-such-omp"), ok: false, models: 0, error: `omp not found at ${join(root, "no-such-omp")}` });
-  messages.length = 0;
-  await send({ type: "agentCheckWanted", agent: "cursor", ompPath: "" });
-  expect(messages.find((m) => m["type"] === "agentCheck")).toEqual({ type: "agentCheck", agent: "cursor", ompPath: "", ok: false });
+test("omp is checked at the given path: omp that is not found says where it looked", async () => {
+  await send({ type: "agentCheckWanted", ompPath: join(root, "no-such-omp") });
+  expect(messages.find((m) => m["type"] === "agentCheck")).toEqual({ type: "agentCheck", ompPath: join(root, "no-such-omp"), state: "done", ok: false, missing: true, error: `omp not found at ${join(root, "no-such-omp")}` });
 });
 
-test("the model names for the wizard answer for the agent it asked about and say so", async () => {
-  await send({ type: "modelSuggestionsWanted", agent: "cursor", ompPath: "" });
-  expect(messages.find((m) => m["type"] === "modelSuggestions")).toEqual({ type: "modelSuggestions", models: [], agent: "cursor", ompPath: "" });
+test("the model names for the wizard answer for the omp path it asked about and say so", async () => {
+  await send({ type: "modelSuggestionsWanted", ompPath: join(root, "no-such-omp") });
+  expect(messages.find((m) => m["type"] === "modelSuggestions")).toEqual({ type: "modelSuggestions", models: [], error: `omp not found at ${join(root, "no-such-omp")}`, missing: true, ompPath: join(root, "no-such-omp") });
+});
+
+test("the omp status says checking, then that omp is not found at the path set", async () => {
+  userSettings.set("ompPath", join(root, "no-such-omp"));
+  await send({ type: "ompStatusWanted" });
+  await Bun.sleep(50);
+  expect(messages.filter((m) => m["type"] === "ompStatus")).toEqual([
+    { type: "ompStatus", state: "checking" },
+    { type: "ompStatus", state: "done", missing: true, error: `omp not found at ${join(root, "no-such-omp")}` },
+  ]);
+});
+
+test("a change of the omp path sends the status again; the status of omp that answers carries its version", async () => {
+  const program = join(root, "omp");
+  writeFileSync(program, "#!/bin/sh\necho 'omp/14.2.1'\n", { mode: 0o755 });
+  userSettings.set("ompPath", program);
+  await send({ type: "ompStatusWanted" });
+  messages.length = 0;
+  controller.settingsChanged(true);
+  await Bun.sleep(300);
+  expect(messages.filter((m) => m["type"] === "ompStatus")).toEqual([
+    { type: "ompStatus", state: "checking" },
+    { type: "ompStatus", state: "done", missing: false, version: "14.2.1" },
+  ]);
 });
 
 test("a folder outside the workspace is refused, and the workspace folders are sent without a project", async () => {

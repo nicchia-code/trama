@@ -155,14 +155,10 @@ export interface FieldProps {
   openLink: OpenLink;
   /** The wizard asks to hear whether a whole-number field holds a value that cannot be saved; the field reports it as the developer types and clears it when it goes away. */
   onInvalid?: (key: string, invalid: boolean) => void;
-  /** The control is shown with its saved value but cannot be changed (a setting that works only with omp, while the agent is not omp). */
-  disabled?: boolean;
-  /** A secondary text after the «i», tied to the control with `aria-describedby`. */
-  note?: string;
 }
 
 /** One setting: its title with the «i», the control that fits it, and the messages under the control. */
-export function SettingField({ setting, values, generation, models, listError, openKey, setOpenKey, send, openLink, onInvalid, disabled, note }: FieldProps) {
+export function SettingField({ setting, values, generation, models, listError, openKey, setOpenKey, send, openLink, onInvalid }: FieldProps) {
   const id = `st-${setting.key.replace(/\./g, "-")}`;
   const { key } = setting;
   const saved = effectiveValue(setting, values);
@@ -188,7 +184,6 @@ export function SettingField({ setting, values, generation, models, listError, o
     chosen !== undefined && setting.values?.includes(chosen) ? `${id}-value-${setting.values.indexOf(chosen)}` : null,
     editable.error !== null ? `${id}-error` : null,
     listNote !== null ? `${id}-note` : null,
-    note !== undefined ? `${id}-hint` : null,
   ]
     .filter((part) => part !== null)
     .join(" ");
@@ -240,7 +235,6 @@ export function SettingField({ setting, values, generation, models, listError, o
         aria-label={setting.title}
         aria-describedby={describedBy}
         className="justify-self-start"
-        disabled={disabled === true}
         checked={(picked ?? saved) === true}
         onCheckedChange={(checked) => {
           setPicked(checked === true);
@@ -318,11 +312,6 @@ export function SettingField({ setting, values, generation, models, listError, o
           onClose={() => openKey === key && setOpenKey(null)}
           openLink={openLink}
         />
-        {note !== undefined && (
-          <span id={`${id}-hint`} className="text-sm text-muted-foreground">
-            {note}
-          </span>
-        )}
       </div>
       <div className="row-start-2 min-w-0">{control}</div>
       {editable.error !== null && (

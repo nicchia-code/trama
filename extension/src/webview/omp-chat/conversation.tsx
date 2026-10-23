@@ -6,7 +6,7 @@ import { Combobox } from "../ui/combobox";
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../lib/utils";
-import { AgentMessage, ErrorMessage, Notice, Thought, ToolCall, UserMessage } from "./blocks";
+import { AgentMessage, ErrorMessage, Notice, Permission, Thought, ToolCall, UserMessage } from "./blocks";
 import { Form } from "./form";
 import { panelId, tabId } from "./tabs";
 import type { ConversationView } from "./state";
@@ -18,6 +18,7 @@ export interface ConversationActions {
   stop(id: string): void;
   setModel(id: string, model: string): void;
   answer(id: string, requestId: string, answer: FormAnswerMessage): void;
+  choose(id: string, requestId: string, optionId: string): void;
   openFile(path: string): void;
   openLink(url: string): void;
 }
@@ -92,7 +93,7 @@ function Composer({ item, view, actions }: { item: ConversationItem; view: Conve
             send();
           }}
         />
-        {running ? (
+        {item.state !== "idle" ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button type="button" variant="outline" size="icon" aria-label="Stop the agent" onClick={() => actions.stop(item.id)}>
@@ -178,6 +179,8 @@ export function Conversation({ item, view, selected, actions }: { item: Conversa
               return <Notice key={block.id} text={block.text} />;
             case "form":
               return <Form key={block.id} form={block.form} answer={block.answer} onAnswer={(answer) => actions.answer(item.id, block.form.requestId, answer)} />;
+            case "permission":
+              return <Permission key={block.id} block={block} onChoose={(optionId) => actions.choose(item.id, block.requestId, optionId)} />;
           }
         })}
         <div aria-live="polite" className="sr-only">

@@ -21,8 +21,6 @@ export interface View {
   show(options: NavigateOptions): void;
   /** Called when announced cards were withdrawn without being delivered, so the view tells the developer. */
   withdrawn?(announcements: AnnouncementView[]): void;
-  /** Called when a Run of the chat ended without the Advisor's final review, so the view tells the developer why. */
-  finalReviewMissing?(reason: string): void;
   /** Called when the run control stopped following a job or a Task, so the view tells the developer what and why. */
   stoppedFollowing?(subject: string, reason: string): void;
 }

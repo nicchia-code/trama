@@ -1,11 +1,8 @@
 import { expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { bunBinDir, cursorModels, ompModels, ompPathVariable, parseCursorModels, parseOmpModels } from "../extension/src/host/model-lists";
-
-const CURSOR_KEY = "src.vs.platform.reactivestorage.browser.reactiveStorageServiceImpl.persistentStorage.applicationUser";
+import { bunBinDir, ompModels, ompPathVariable, parseOmpModels } from "../extension/src/host/model-lists";
 
 test("omp suggests each model's selector, labelled by its name only when they differ", () => {
   const output = JSON.stringify({
@@ -25,47 +22,6 @@ test("omp output that is not the models list gives no list; an empty list is a l
   expect(parseOmpModels(JSON.stringify({ models: [] }))).toEqual([]);
 });
 
-test("Cursor suggests each default model's name as the value and its clientDisplayName as the label, in order and once each", () => {
-  const state = JSON.stringify({
-    mcpServers: [],
-    availableDefaultModels2: [
-      { name: "claude-opus-5-5", clientDisplayName: "Claude Opus 5.5" },
-      { name: "gpt-5" },
-      { name: "claude-opus-5-5", clientDisplayName: "Claude Opus 5.5" },
-      { clientDisplayName: "no name" },
-    ],
-  });
-  expect(parseCursorModels(state)).toEqual([{ value: "claude-opus-5-5", label: "Claude Opus 5.5" }, { value: "gpt-5" }]);
-});
-
-test("Cursor state without a usable model list gives no suggestions", () => {
-  expect(parseCursorModels(undefined)).toEqual([]);
-  expect(parseCursorModels("{not json")).toEqual([]);
-  expect(parseCursorModels(JSON.stringify({ availableDefaultModels2: { name: "gpt-5" } }))).toEqual([]);
-});
-
-test("cursorModels reads the list from Cursor's state database, and gives none when the file or the entry is missing", async () => {
-  const root = mkdtempSync(join(tmpdir(), "trama-models-"));
-  try {
-    const globalStorage = join(root, "globalStorage");
-    mkdirSync(join(globalStorage, "trama-dev.trama"), { recursive: true });
-    const db = new DatabaseSync(join(globalStorage, "state.vscdb"));
-    db.exec("CREATE TABLE ItemTable (key TEXT UNIQUE, value TEXT)");
-    db.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(CURSOR_KEY, JSON.stringify({ availableDefaultModels2: [{ name: "auto-smart", clientDisplayName: "Auto" }, { name: "claude-sonnet" }] }));
-    db.close();
-
-    const extensionStorage = join(globalStorage, "trama-dev.trama");
-    expect(await cursorModels(extensionStorage)).toEqual([{ value: "auto-smart", label: "Auto" }, { value: "claude-sonnet" }]);
-
-    // node:sqlite keeps the file open until a statement is collected; Windows cannot delete it before that.
-    Bun.gc(true);
-    rmSync(join(globalStorage, "state.vscdb"));
-    expect(await cursorModels(extensionStorage)).toEqual([]);
-  } finally {
-    rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
-  }
-});
-
 // Windows has no `#!/bin/sh` programs, so the tests that run a fake omp are skipped there.
 const posix = process.platform === "win32" ? test.skip : test;
 
@@ -80,7 +36,7 @@ test("omp models names a missing program, with the path it used", async () => {
   const root = mkdtempSync(join(tmpdir(), "trama-omp-"));
   try {
     const program = join(root, "no-such-omp");
-    expect(await ompModels(program)).toEqual({ models: [], error: `omp not found at ${program}` });
+    expect(await ompModels(program)).toEqual({ models: [], error: `omp not found at ${program}`, missing: true });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -117,10 +73,11 @@ posix("omp models names the exit code when omp fails, and never reads a list fro
   }
 });
 
-test("omp runs with the folder of trama.ompPath in front of the PATH, or else the folder of bun", () => {
-  expect(ompPathVariable("/opt/omp/bin/omp", { PATH: "/usr/bin" })).toBe(["/opt/omp/bin", "/usr/bin"].join(delimiter));
+test("omp runs with the folder of trama.ompPath in front of the PATH, then the folder of bun", () => {
+  expect(ompPathVariable("/opt/omp/bin/omp", { PATH: "/usr/bin" })).toBe(["/opt/omp/bin", bunBinDir({ PATH: "/usr/bin" }), "/usr/bin"].join(delimiter));
   expect(ompPathVariable("", { PATH: "/usr/bin", BUN_INSTALL: "/srv/bun" })).toBe([join("/srv/bun", "bin"), "/usr/bin"].join(delimiter));
   expect(ompPathVariable("", { PATH: "/usr/bin", BUN_INSTALL: "" })).toBe([join(homedir(), ".bun", "bin"), "/usr/bin"].join(delimiter));
+  expect(ompPathVariable(join("/srv/bun", "bin", "omp"), { PATH: "/usr/bin", BUN_INSTALL: "/srv/bun" })).toBe([join("/srv/bun", "bin"), "/usr/bin"].join(delimiter));
   expect(bunBinDir({ BUN_INSTALL: "/srv/bun" })).toBe(join("/srv/bun", "bin"));
 });
 

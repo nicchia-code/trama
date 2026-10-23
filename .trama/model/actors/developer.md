@@ -62,7 +62,7 @@ L'import dal comando Import from Code è questo Event solo con un Modello che no
 Il developer sceglie Unify Drifts dal menu che si apre dalla freccetta di + Add Work Item, in fondo alla colonna Backlog, per far unire dall'agente tutti i Drift aperti fuori da ogni risoluzione in un unico Drift, che poi risolve con Resolve come ogni Drift. Serve quando più Drift toccano le stesse cose o si contraddicono, e risolverli uno alla volta li farebbe tornare. Non scrive nulla prima: l'agente gli chiede soltanto i conflitti fra i Drift (vedi Drift resolution).
 
 ### ASK_MORE
-Il developer preme Ask more per chiedere a un agente spiegazioni su una sola cosa, senza scriverne da sé il contesto: una Proposal, un Task o un Drift, dalla finestra dei loro dettagli sulla Board, oppure la domanda in vista di un round di domande aperto. Trama apre una chat nuova con l'agente scelto, che riceve ciò che serve per leggere quella cosa e aspetta le domande del developer.
+Il developer preme Ask more per chiedere a un agente spiegazioni su una sola cosa, senza scriverne da sé il contesto: una Proposal, un Task o un Drift, dalla finestra dei loro dettagli sulla Board, oppure la domanda in vista di un round di domande aperto. Trama apre una chat nuova con omp, che riceve ciò che serve per leggere quella cosa e aspetta le domande del developer.
 
 ### OPEN_QUICK_TASK
 Il developer sceglie Add Quick Task dal menu che si apre dalla freccetta di + Add Work Item, in fondo alla colonna Backlog, per affidare all'agente un lavoro rapido e di fiducia, per esempio «committa il codice», senza richiesta scritta, senza scan e senza schede. Non scrive nulla prima: scrive direttamente nella chat che Trama apre.
@@ -105,7 +105,10 @@ The developer switches to the Requirements tab, or follows a link to a Requireme
 Il developer passa alla scheda Specs del pannello.
 
 ### SHOW_SETTINGS
-Il developer passa alla scheda Settings del pannello, dalla sua barra delle schede o con Open Settings nell'avviso che la chat di Cursor esiste solo in Cursor, che apre il pannello se è chiuso.
+Il developer passa alla scheda Settings del pannello, dalla sua barra delle schede o con Open Settings nell'avviso che omp non è installato, che apre il pannello se è chiuso.
+
+### INSTALL_OMP
+Il developer preme Install omp: nel passo omp del wizard di setup, nel gruppo omp della scheda Settings o nell'avviso che omp non è installato, quando omp manca. Trama apre un terminale visibile con l'installer ufficiale di omp (vedi Agent launching).
 
 ### CHANGE_SETTING
 Il developer cambia un'impostazione di Trama dalla scheda Settings: sceglie un valore in un menu, spunta o toglie una casella, oppure conferma un campo di testo o numerico.

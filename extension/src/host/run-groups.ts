@@ -14,7 +14,7 @@ export interface PlanTask {
   proposal: string | null;
 }
 
-/** A Proposal whose model applies to the agent of `trama.agent` now, with the model and the name a run takes it by. */
+/** A Proposal with a model, with the model and the name a run takes it by. */
 export interface AppliedModel {
   id: string;
   run: RunModel;

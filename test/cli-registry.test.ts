@@ -25,7 +25,6 @@ test("every command is declared with its object and verb, and an input that refu
   for (const command of REGISTRY.commands) {
     expect(OBJECTS).toContain(command.object);
     if (command.object !== "hook") expect(VERBS as readonly string[]).toContain(command.verb);
-    if (command.verb === "review") expect(command.object).toBe("advisor");
     expect(command.summary.length).toBeGreaterThan(0);
     const probe = command.input.safeParse({ __unknown__: true });
     expect(probe.success).toBe(false);
@@ -114,10 +113,9 @@ test("the commands that count as the agent's activity are the ones declared with
 
 test("a hook answers whatever happens and exits with 0, and a hook that fails prints what its agent expects", async () => {
   const nothing = { env: {}, stdin: async () => "" };
-  expect(await execute(["hook", "cursor", "--root", join(dir, "none")], dir, { ...nothing, stdin: async () => "not json" })).toEqual({ out: "{}", exit: 0 });
   expect(await execute(["hook", "idle"], dir, nothing)).toEqual({ out: "", exit: 0 });
-  // Copilot's and Claude Code's hooks no longer exist: unknown commands are a usage error.
-  for (const gone of ["copilot", "claude-question-tool"]) await expect(execute(["hook", gone], dir, nothing)).rejects.toThrow(/Unknown command/);
+  // Cursor's, Copilot's and Claude Code's hooks no longer exist: unknown commands are a usage error.
+  for (const gone of ["cursor", "copilot", "claude-question-tool"]) await expect(execute(["hook", gone], dir, nothing)).rejects.toThrow(/Unknown command/);
 });
 
 test("a command that waits for the editor does not run through the synchronous entry point", () => {

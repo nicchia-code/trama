@@ -16,7 +16,7 @@ import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
 import { DriftDetailsDialog, type ModelList, GhostDetailsDialog, ModelDialog, ProposalBodyDialog, TaskDetailsDialog } from "./dialogs";
 import { HistoryEntryView } from "./history";
-import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, finalReviewMissingNotice, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, NO_MODELS, type ProposalCard, stoppedFollowingNotice, withdrawnNotice } from "./logic";
+import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, NO_MODELS, type ProposalCard, stoppedFollowingNotice, withdrawnNotice } from "./logic";
 import { BoardButton, BoardEnvContext, type BoardEnv, Tip } from "./parts";
 
 /** The state of Resolve Drifts and of the Runs the host gives with each picture. */
@@ -47,7 +47,7 @@ export interface BoardPageProps {
   unify?: UnifyState;
   /** Whether the Advisor Scanner is on: the Scan System button is then disabled. */
   advisorScanner: boolean;
-  /** The models chosen for the Proposals that carry Tasks, and the agent of `trama.agent`. */
+  /** The models chosen for the Proposals that carry Tasks. */
   models: BoardModels;
   /** The model names the agent offers to the model window. */
   modelList: ModelList;
@@ -332,7 +332,7 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
           <TaskDetailsDialog card={taskCard} onClose={() => setTaskOf(null)} />
           <DriftDetailsDialog card={driftCard} onClose={() => setDriftOf(null)} />
           <GhostDetailsDialog card={ghostCard} onClose={() => setGhostOf(null)} restoreFocus={(key) => (ghostFromBar ? focusBacklog() : root.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus())} />
-          <ModelDialog card={modelChoosable} agent={models.agent} list={modelList} onClose={() => setModelOf(null)} />
+          <ModelDialog card={modelChoosable} list={modelList} onClose={() => setModelOf(null)} />
         </div>
       </TooltipProvider>
     </BoardEnvContext.Provider>
@@ -346,9 +346,9 @@ export interface BoardView extends View {
 }
 
 /**
- * Switch for the yellow notices of withdrawn ghosts (the agent finished or stopped without delivering) and of the Run
- * that ended without the Advisor's final review. Off: the host still prepares them (`extension/src/host/controller.ts`
- * is unchanged) but the Board does not draw them. Set it back to `true` to show them again.
+ * Switch for the yellow notices of withdrawn ghosts (the agent finished or stopped without delivering). Off: the host
+ * still prepares them (`extension/src/host/controller.ts` is unchanged) but the Board does not draw them. Set it back
+ * to `true` to show them again.
  */
 export const SHOW_WITHDRAWN_NOTICES = false;
 
@@ -384,11 +384,6 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
     withdrawn(gone: AnnouncementView[]) {
       if (!SHOW_WITHDRAWN_NOTICES) return;
       page = { ...page, notices: [...page.notices, ...gone.map((a) => ({ id: nextNotice++, text: withdrawnNotice(a) }))] };
-      render();
-    },
-    finalReviewMissing(reason: string) {
-      if (!SHOW_WITHDRAWN_NOTICES) return;
-      page = { ...page, notices: [...page.notices, { id: nextNotice++, text: finalReviewMissingNotice(reason) }] };
       render();
     },
     stoppedFollowing(subject: string, reason: string) {

@@ -36,12 +36,15 @@ function setup(options: { mode?: "first" | "settings" | "empty-model"; choice?: 
   const utils = render(<Wizard controller={controller} openLink={() => {}} notice={<p>The notice</p>} />);
   const mode = options.mode ?? "first";
   act(() => {
-    controller.receiveSettings({ type: "settings", schema, values: options.values ?? {}, agent: "cursor" });
+    controller.receiveSettings({ type: "settings", schema, values: options.values ?? {} });
     controller.receiveFolders(options.folders ?? [FOLDER]);
     controller.open(mode, options.choice ?? null, mode === "first" ? null : "/work/app");
   });
   return { posted, closed, controller, ...utils };
 }
+
+/** The answer of the host that says omp responds for `ompPath`. */
+const answered = (controller: WizardController, ompPath = "") => act(() => controller.receiveAgentCheck({ type: "agentCheck", ompPath, state: "done", ok: true, missing: false, version: "18.12.6", models: 3 }));
 
 const press = (name: string | RegExp) => fireEvent.click(screen.getByRole("button", { name }));
 const heading = () => screen.getByRole("heading", { level: 2 }).textContent;
@@ -52,7 +55,7 @@ test("the first setup opens on Path with the notice on top, the step indicator a
   expect(heading()).toBe("Path");
   expect(screen.getByText("Choose how Trama starts in this folder.")).not.toBeNull();
   const steps = screen.getByRole("list", { name: "Steps" });
-  expect(within(steps).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Path", "Agent", "Models", "Project", "Advanced", "Summary"]);
+  expect(within(steps).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Path", "omp", "Models", "Project", "Advanced", "Summary"]);
   expect(steps.querySelector('[aria-current="step"]')?.textContent).toBe("Path");
   expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
@@ -97,41 +100,60 @@ test("with several folders Path offers a select with the name of each, the first
   expect(select.textContent).toBe("app");
 });
 
-test("the Agent step moves the focus to its title, checks the agent and shows the answer without blocking", () => {
+test("the omp step moves the focus to its title, checks omp and shows the answer without blocking", () => {
   const { posted } = setup();
   fireEvent.click(screen.getByRole("radio", { name: /Start from Scratch/ }));
   press("Next");
-  expect(heading()).toBe("Agent");
+  expect(heading()).toBe("omp");
   expect(document.activeElement).toBe(screen.getByRole("heading", { level: 2 }));
-  expect(posted).toContainEqual({ type: "agentCheckWanted", agent: "cursor", ompPath: "" });
-  expect(screen.getByText("Checking the agent…")).not.toBeNull();
+  expect(posted).toContainEqual({ type: "agentCheckWanted", ompPath: "" });
+  expect(screen.getByText("Checking omp…")).not.toBeNull();
 });
 
-test("an answer of the check for another agent is ignored; with omp the failure is a warning and Next stays available", () => {
-  const { controller, posted } = setup({ mode: "settings", values: { "trama.agent": { user: "omp" }, "trama.ompPath": { user: "/x/omp" } } });
-  expect(heading()).toBe("Agent");
-  expect(posted).toContainEqual({ type: "agentCheckWanted", agent: "omp", ompPath: "/x/omp" });
-  act(() => controller.receiveAgentCheck({ type: "agentCheck", agent: "cursor", ompPath: "", ok: true }));
-  expect(screen.getByText("Checking the agent…")).not.toBeNull();
-  act(() => controller.receiveAgentCheck({ type: "agentCheck", agent: "omp", ompPath: "/x/omp", ok: false, error: "omp not found at /x/omp" }));
-  expect(screen.getByText("omp not found at /x/omp. You can go on and fix it later.")).not.toBeNull();
-  expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false);
-  // Only with omp the path and the terminal show.
+test("an answer of the check for another omp path is ignored; Next waits for omp, and a failed update does not stop it", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
+  const next = () => screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
+  expect(heading()).toBe("omp");
+  expect(posted).toContainEqual({ type: "agentCheckWanted", ompPath: "/x/omp" });
+  expect(next().disabled).toBe(true);
+  expect(next().getAttribute("aria-describedby")).not.toBeNull();
+  answered(controller, "");
+  expect(screen.getByText("Checking omp…")).not.toBeNull();
+  act(() => controller.receiveAgentCheck({ type: "agentCheck", ompPath: "/x/omp", state: "updating", version: "18.13.0" }));
+  expect(screen.getByText("Updating omp to 18.13.0…")).not.toBeNull();
+  expect(next().disabled).toBe(true);
+  act(() => controller.receiveAgentCheck({ type: "agentCheck", ompPath: "/x/omp", state: "done", ok: false, missing: true, error: "omp not found at /x/omp" }));
+  expect(screen.getByText("omp not found at /x/omp. Trama cannot work without omp.")).not.toBeNull();
+  expect(screen.getByRole("button", { name: "Install omp" })).not.toBeNull();
+  expect(next().disabled).toBe(true);
   expect(screen.getByLabelText("Omp Path")).not.toBeNull();
   expect(screen.getByLabelText("Terminal Location")).not.toBeNull();
+  act(() => controller.receiveAgentCheck({ type: "agentCheck", ompPath: "/x/omp", state: "done", ok: true, missing: false, version: "18.12.6", models: 12, updateError: "omp update exited with code 1" }));
+  expect(screen.getByText("Could not update omp (omp update exited with code 1). omp 18.12.6 answered with 12 models.")).not.toBeNull();
+  expect(next().disabled).toBe(false);
+  answered(controller, "/x/omp");
+  expect(screen.getByText("omp 18.12.6 answered with 3 models.")).not.toBeNull();
 });
 
-test("the Models step suggests the models of the agent chosen in the wizard before it is saved, and blocks Next with an invalid number of sub-agents", () => {
+test("leaving the omp step and coming back checks omp again", () => {
   const { controller, posted } = setup({ mode: "settings" });
-  fireEvent.click(screen.getByRole("combobox", { name: "Agent" }));
-  fireEvent.click(screen.getByRole("option", { name: "omp" }));
+  answered(controller);
+  press("Next");
+  press("Back");
+  expect(posted.filter((m) => m.type === "agentCheckWanted")).toHaveLength(2);
+  expect(screen.getByText("Checking omp…")).not.toBeNull();
+});
+
+test("the Models step suggests the models of the omp path chosen in the wizard before it is saved, and blocks Next with an invalid number of sub-agents", () => {
+  const { controller, posted } = setup({ mode: "settings" });
+  answered(controller);
   press("Next");
   expect(heading()).toBe("Models");
-  expect(posted).toContainEqual({ type: "modelSuggestionsWanted", agent: "omp", ompPath: "" });
-  // An answer for the saved agent (without `agent`) is not the wizard's; the one for omp is.
+  expect(posted).toContainEqual({ type: "modelSuggestionsWanted", ompPath: "" });
+  // An answer for the saved path (without `ompPath`) is not the wizard's; the one for the path of the step is.
   act(() => controller.receiveModels({ type: "modelSuggestions", models: [{ value: "x" }] }));
   expect(controller.getSnapshot().models).toBeNull();
-  act(() => controller.receiveModels({ type: "modelSuggestions", agent: "omp", ompPath: "", models: [{ value: "openai/gpt-5" }] }));
+  act(() => controller.receiveModels({ type: "modelSuggestions", ompPath: "", models: [{ value: "openai/gpt-5" }] }));
   expect(controller.getSnapshot().models?.list).toEqual([{ value: "openai/gpt-5" }]);
 
   const input = screen.getByLabelText("Max Parallel Agents") as HTMLInputElement;
@@ -245,7 +267,7 @@ test("the first setup confirms with the folder, the path and the excluded folder
 
 test("a value changed from outside while the wizard is open does not change what the wizard holds", () => {
   const { controller } = setup({ mode: "settings", values: { "trama.scan": { user: "gpt-5" } } });
-  act(() => controller.receiveSettings({ type: "settings", schema, values: { "trama.scan": { user: "other" } }, agent: "cursor" }));
+  act(() => controller.receiveSettings({ type: "settings", schema, values: { "trama.scan": { user: "other" } } }));
   act(() => controller.openStep("Models"));
   expect((screen.getByLabelText("Scan") as HTMLInputElement).value).toBe("gpt-5");
 });
@@ -268,7 +290,7 @@ test("Get Started mounts the wizard in the first-setup mode only without a proje
   const view = mountGetStarted((node) => page.rerender(<>{node}</>), { post: (message) => posted.push(message), navigate: () => {}, openLink: () => {} });
   act(() => {
     view.projectPresent(false);
-    view.receiveSettings({ type: "settings", schema, values: {}, agent: "cursor" });
+    view.receiveSettings({ type: "settings", schema, values: {} });
     view.receiveFolders({ type: "workspaceFolders", folders: [FOLDER] });
   });
   expect(screen.getByText(/Trama will create a/)).not.toBeNull();
@@ -286,13 +308,14 @@ const FILES = [
 const wanted = (posted: ToHost[]) => posted.filter((m) => m.type === "instructionFilesWanted");
 
 test("the Models step shows the advice in words", () => {
-  setup({ mode: "settings" });
+  const { controller } = setup({ mode: "settings" });
+  answered(controller);
   press("Next");
   expect(heading()).toBe("Models");
   expect(screen.getByText("Choose the model for each kind of work. Analysis works best with your most capable model, Execution with a mid-range one, Scan with a fast, light one.")).not.toBeNull();
 });
 
-test("the Agent step searches the instruction files of the project folder, shows no box before the answer or without files, and never blocks Next", () => {
+test("the omp step searches the instruction files of the project folder, shows no box before the answer or without files", () => {
   const { controller, posted } = setup({ mode: "settings" });
   expect(wanted(posted)).toEqual([{ type: "instructionFilesWanted" }]);
   expect(screen.queryByText(/Agent instruction files found/)).toBeNull();
@@ -301,7 +324,6 @@ test("the Agent step searches the instruction files of the project folder, shows
   act(() => controller.receiveInstructionFiles({ type: "instructionFiles", root: "/work/app", files: FILES }));
   expect(screen.getByText("Agent instruction files found. The agent loads them in every Trama job: remove them from the repository, or check that they do not conflict with Trama.")).not.toBeNull();
   expect(screen.getAllByRole("button", { name: /^Open / }).map((item) => item.textContent)).toEqual(["AGENTS.md", "~/.claude/CLAUDE.md"]);
-  expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false);
   expect(screen.queryByText("Trama's omp jobs ignore these files.")).toBeNull();
 });
 
@@ -313,8 +335,8 @@ test("following a file asks the host to open it; labels are text, never markup",
   expect(posted).toContainEqual({ type: "openInstructionFile", path: "/work/app/x.md" });
 });
 
-test("the note about ignored files follows the wizard's agent and setting at once, without a new search", () => {
-  const { controller, posted } = setup({ mode: "settings", values: { "trama.agent": { user: "omp" } } });
+test("the note about ignored files follows the wizard's setting at once, without a new search", () => {
+  const { controller, posted } = setup({ mode: "settings" });
   act(() => controller.receiveInstructionFiles({ type: "instructionFiles", root: "/work/app", files: FILES }));
   expect(screen.queryByText("Trama's omp jobs ignore these files.")).toBeNull();
   const ignore = schema.find((s) => s.key === "trama.ignoreInstructionFiles");
@@ -324,24 +346,24 @@ test("the note about ignored files follows the wizard's agent and setting at onc
   act(() => controller.setValue(ignore!, false));
   expect(screen.queryByText("Trama's omp jobs ignore these files.")).toBeNull();
   act(() => controller.setValue(ignore!, true));
-  act(() => controller.setValue(schema.find((s) => s.key === "trama.agent")!, "cursor"));
-  expect(screen.queryByText("Trama's omp jobs ignore these files.")).toBeNull();
+  expect(screen.getByText("Trama's omp jobs ignore these files.")).not.toBeNull();
   expect(wanted(posted)).toHaveLength(1);
 });
 
-test("the search is asked again each time the Agent step is shown; in the first setup it is for the folder chosen in Path and an answer for another folder is ignored", () => {
+test("the search is asked again each time the omp step is shown; in the first setup it is for the folder chosen in Path and an answer for another folder is ignored", () => {
   const { controller, posted } = setup();
   fireEvent.click(screen.getByRole("radio", { name: /Start from Scratch/ }));
   press("Next");
-  expect(heading()).toBe("Agent");
+  expect(heading()).toBe("omp");
   expect(wanted(posted)).toEqual([{ type: "instructionFilesWanted", root: "/work/app" }]);
   act(() => controller.receiveInstructionFiles({ type: "instructionFiles", root: "/work/other", files: FILES }));
   expect(screen.queryByText(/Agent instruction files found/)).toBeNull();
   act(() => controller.receiveInstructionFiles({ type: "instructionFiles", root: "/work/app", files: FILES }));
   expect(screen.getByText(/Agent instruction files found/)).not.toBeNull();
+  answered(controller);
   press("Next");
   press("Back");
-  expect(heading()).toBe("Agent");
+  expect(heading()).toBe("omp");
   expect(wanted(posted)).toHaveLength(2);
   expect(screen.queryByText(/Agent instruction files found/)).toBeNull();
 });

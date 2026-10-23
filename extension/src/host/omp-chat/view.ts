@@ -4,16 +4,13 @@ import { isAbsolute, relative, resolve } from "node:path";
 import * as vscode from "vscode";
 import { safeLink } from "../../../../src/core/links";
 import { useOmpChat } from "../../../../src/core/omp-chat-conversation";
-import { ompChatFocusCommand, ompChatKey } from "../../../../src/core/omp-chat-view";
 import type { ToChatWebview } from "../../omp-chat-protocol";
 import type { ThemeSetting } from "../../webview/theme";
-import { configuredAgent, settings } from "../agent";
-import { isCursor } from "../cursor";
+import { settings } from "../agent";
 import { webviewHtml } from "../html";
 import { type ChatSurface, ChatViewModel } from "./view-model";
 
-/** The identities of the two views, one per editor, and of the context key (`tech#omp-chat`): the panel view for Cursor, the secondary sidebar view for the rest. */
-export const OMP_CHAT_PANEL_VIEW = "trama.ompChat";
+/** The identities of the view and of the context key (`tech#omp-chat`). */
 export const OMP_CHAT_SIDEBAR_VIEW = "trama.ompChatSidebar";
 export const OMP_CHAT_VISIBLE_KEY = "trama.ompChatVisible";
 
@@ -25,11 +22,11 @@ const configuredTheme = (): ThemeSetting => {
   return value === "light" || value === "dark" ? value : "auto";
 };
 
-/** Whether omp Chat is in use now: `trama.ompChat` on in the user settings and `trama.agent` on omp (`rules#omp-chat`). */
-export const ompChatOn = (): boolean => useOmpChat({ ompChat: settings().inspect<unknown>("ompChat")?.globalValue === true, agent: configuredAgent(), available: true });
+/** Whether omp Chat is in use now: `trama.ompChat` not turned off in the user settings (`rules#omp-chat`). */
+export const ompChatOn = (): boolean => useOmpChat({ ompChat: settings().inspect<unknown>("ompChat")?.globalValue !== false, available: true });
 
 /**
- * The view of omp Chat (in the secondary sidebar, or in the panel in Cursor): a `WebviewViewProvider` kept alive while hidden (`retainContextWhenHidden`). It is the `ChatViewPort` of the
+ * The view of omp Chat (in the secondary sidebar): a `WebviewViewProvider` kept alive while hidden (`retainContextWhenHidden`). It is the `ChatViewPort` of the
  * conversations; the context key `trama.ompChatVisible` follows its state. `root` is the project's folder, `pending` the ids of the conversations the window
  * has saved and waits to resume.
  */
@@ -45,13 +42,9 @@ export class OmpChatView implements vscode.WebviewViewProvider, vscode.Disposabl
     this.model = new ChatViewModel(this.surface(), ompChatOn, pending);
   }
 
-  /** Registers the provider for both views; only the one of the editor in use is ever shown (`trama.ompChatVisible`). */
+  /** Registers the provider for the view. */
   register(): vscode.Disposable {
-    const options = { webviewOptions: { retainContextWhenHidden: true } };
-    return vscode.Disposable.from(
-      vscode.window.registerWebviewViewProvider(OMP_CHAT_PANEL_VIEW, this, options),
-      vscode.window.registerWebviewViewProvider(OMP_CHAT_SIDEBAR_VIEW, this, options),
-    );
+    return vscode.window.registerWebviewViewProvider(OMP_CHAT_SIDEBAR_VIEW, this, { webviewOptions: { retainContextWhenHidden: true } });
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -80,9 +73,9 @@ export class OmpChatView implements vscode.WebviewViewProvider, vscode.Disposabl
   private surface(): ChatSurface {
     return {
       post: (message: ToChatWebview) => void this.view?.webview.postMessage(message),
-      setVisible: (visible) => void vscode.commands.executeCommand("setContext", OMP_CHAT_VISIBLE_KEY, ompChatKey(visible, isCursor())),
+      setVisible: (visible) => void vscode.commands.executeCommand("setContext", OMP_CHAT_VISIBLE_KEY, visible),
       // Shows the view and nothing else: the one command Trama runs to open it.
-      reveal: (preserveFocus) => void vscode.commands.executeCommand(ompChatFocusCommand(isCursor()), { preserveFocus }),
+      reveal: (preserveFocus) => void vscode.commands.executeCommand(`${OMP_CHAT_SIDEBAR_VIEW}.focus`, { preserveFocus }),
       theme: configuredTheme,
       readText: (path) => {
         try {

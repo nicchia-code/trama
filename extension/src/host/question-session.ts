@@ -2,6 +2,12 @@ import type { CompletedQuestionRound, PresentationContext, QuestionPresenter } f
 import { questionAborted, type QuestionRequest } from "../../../src/core/questions";
 import { applyQuestionAction, type QuestionAction, type QuestionRoundState, startRound } from "./question-state";
 
+/** The agent name of a round Trama asks itself (a prepared Drift question): its one question's ID is the identity of that Drift. */
+export const PREPARED_QUESTION_AGENT = "Prepared question";
+
+/** The agent that asked a round, when it can be told: `Prepared question` for a round Trama asks itself, `omp` for one started in a terminal of Trama. */
+const roundAgent = (context: PresentationContext): string | null => (context.prepared === true ? PREPARED_QUESTION_AGENT : context.fromTramaTerminal === true ? "omp" : null);
+
 /** The round being answered, as the panel draws it. */
 export interface QuestionRoundView {
   /** Changes with every round, so an action meant for a round that has closed is ignored. */
@@ -31,14 +37,8 @@ export class QuestionSession {
   /** The identity of the window's project. A round admitted for another project stays out of sight until the window is back on it. */
   private project: string | undefined;
 
-  /**
-   * `reveal` opens the panel in front, on the Diagram, or brings it to the front keeping its tab (the round entered
-   * Asking). `agentName` names the agent that asked, when it can be told.
-   */
-  constructor(
-    private readonly reveal: () => void | Promise<void>,
-    private readonly agentName: (context: PresentationContext) => string | null = () => null,
-  ) {}
+  /** `reveal` opens the panel in front, on the Diagram, or brings it to the front keeping its tab (the round entered Asking). */
+  constructor(private readonly reveal: () => void | Promise<void>) {}
 
   /** A round that belongs to no project: shown while the window has none. */
   readonly present: QuestionPresenter = (request, context) => this.admit(request, context, undefined);
@@ -54,7 +54,7 @@ export class QuestionSession {
       reject(context.signal.reason ?? questionAborted());
       return promise;
     }
-    const round: ActiveRound = { id: this.nextId++, agent: this.agentName(context), state: startRound(request.questions), context, resolve, owner };
+    const round: ActiveRound = { id: this.nextId++, agent: roundAgent(context), state: startRound(request.questions), context, resolve, owner };
     const close = () => {
       if (this.active !== round) return;
       // The agent stopped waiting or the editor was lost: nothing is delivered and the overlay or the bar closes.

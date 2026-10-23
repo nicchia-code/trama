@@ -1,11 +1,11 @@
-import type { ElicitationSchema, SessionNotification } from "@agentclientprotocol/sdk";
+import type { ElicitationSchema, PermissionOption, SessionNotification, ToolCallUpdate } from "@agentclientprotocol/sdk";
 import type { ThemeSetting } from "./webview/theme";
 
 // The messages between the host and the webview of the omp Chat view (`tech#omp-chat`). The webview is untrusted input: the host validates every message it
 // receives with zod (`host/omp-chat/messages.ts`) and ignores the ones that do not fit.
 
-/** `running` while the agent is in a turn, `waiting-form` while a form of the agent waits for the developer, `idle` otherwise. */
-export type ConversationRunState = "running" | "idle" | "waiting-form";
+/** `running` while the agent is in a turn, `waiting-form` while a form of the agent waits for the developer, `waiting-permission` while a permission request waits, `idle` otherwise. */
+export type ConversationRunState = "running" | "idle" | "waiting-form" | "waiting-permission";
 
 export interface ConversationItem {
   id: string;
@@ -33,6 +33,13 @@ export interface FormView {
   schema: ElicitationSchema;
 }
 
+/** What a permission request shows: the tool call it concerns and the options as omp gives them, in omp's order. */
+export interface PermissionView {
+  requestId: string;
+  toolCall: ToolCallUpdate;
+  options: PermissionOption[];
+}
+
 /** What the developer answers a form. */
 export type FormAnswerMessage = { action: "accept"; content: Record<string, string | number | boolean | string[]> } | { action: "decline" };
 
@@ -48,6 +55,9 @@ export type ToChatWebview =
   /** A `session/update` notification of ACP, as it arrived. */
   | { type: "conversationUpdate"; id: string; update: SessionNotification }
   | { type: "formRequest"; id: string; requestId: string; message: string; schema: ElicitationSchema }
+  | { type: "permissionRequest"; id: string; requestId: string; toolCall: ToolCallUpdate; options: PermissionOption[] }
+  /** A waiting permission request was answered `cancelled` (Stop, or the process ended). */
+  | { type: "permissionCancelled"; id: string; requestId: string }
   | { type: "models"; id: string; available: ModelChoice[]; current?: string }
   /** An error of omp (a message that was not sent, a model that was not changed) shown in the conversation. */
   | { type: "conversationError"; id: string; message: string };
@@ -61,6 +71,7 @@ export type ToChatHost =
   | { type: "closeConversation"; id: string }
   | { type: "setModel"; id: string; model: string }
   | { type: "formAnswer"; id: string; requestId: string; answer: FormAnswerMessage }
+  | { type: "permissionAnswer"; id: string; requestId: string; optionId: string }
   /** A file an edit touched, to open in the editor. */
   | { type: "openFile"; path: string }
   | { type: "openLink"; url: string };

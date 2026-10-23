@@ -16,7 +16,6 @@ import {
   resolutionTitle,
   newTerminalId,
   terminalFromEnv,
-  bindConversation,
   originFromEnv,
   checkOutcome,
   forgetCheck,
@@ -42,11 +41,13 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 /** `trama announcement new` with this input. */
-const announcementNew = (input: Record<string, unknown>, env: Record<string, string | undefined> = {}) => run(["announcement", "new", "--input", JSON.stringify(input)], dir, env);
+const announcementNew = (input: Record<string, unknown>, env: Record<string, string | undefined> = { TRAMA_TERMINAL: "ab12cd" }) => run(["announcement", "new", "--input", JSON.stringify(input)], dir, env);
 /** `trama announcement move` of a check. */
 const announcementMove = (id: string, state: string, env: Record<string, string | undefined> = {}, ...common: string[]) => run([...common, "announcement", "move", id, state], dir, env);
 
 const t = (minutes: number) => new Date(Date.UTC(2026, 0, 1, 12, minutes));
+/** A Draft made in an agent terminal. */
+const own = { origin: { terminal: "ab12cd" } };
 
 describe("announcing", () => {
   test("keeps the announcements in the order announced, with an ID of six letters and digits", () => {
@@ -58,13 +59,9 @@ describe("announcing", () => {
     expect(getAnnouncement(p, b.id)?.kind).toBe("task");
   });
 
-  test("terminal origin wins; otherwise announcements distinguish Cursor and editor chat", () => {
-    expect(originFromEnv({ TRAMA_TERMINAL: "abc123", CURSOR_AGENT: "1" })).toEqual({ terminal: "abc123" });
-    expect(originFromEnv({ CURSOR_AGENT: "1" })).toEqual({ chat: "cursor" });
-    expect(originFromEnv({})).toEqual({ chat: "editor" });
-    expect(announce(p, { kind: "check", title: "Editor check", phase: "verifying" }).chat).toBe("editor");
-    expect(announce(p, { kind: "task", title: "Cursor task", chat: "cursor" }).chat).toBe("cursor");
-    expect(announce(p, { kind: "task", title: "Terminal task", terminal: "abc123" })).toMatchObject({ terminal: "abc123", chat: null });
+  test("an announcement made in a terminal carries its terminal", () => {
+    expect(announce(p, { kind: "task", title: "Terminal task", terminal: "abc123" })).toMatchObject({ terminal: "abc123" });
+    expect(announce(p, { kind: "check", title: "Check", phase: "verifying" }).terminal).toBeNull();
   });
 
   test("the folder ignores itself, so nothing in it is versioned", () => {
@@ -79,9 +76,9 @@ describe("announcing", () => {
   });
 
   test("a comparison keeps its ghost and its title while its Drafts join its list, and it counts as no card", () => {
-    const comparison = announce(p, { kind: "comparison", title: "Comparing Refunds", machine: "Refunds", chat: "editor" });
+    const comparison = announce(p, { kind: "comparison", title: "Comparing Refunds", machine: "Refunds", terminal: "ab12cd" });
     expect(comparison).toMatchObject({ kind: "comparison", machine: "Refunds", proposals: [], phase: null, proposal: null });
-    const draft = newProposal(p, "Lighter comparison", "", { announcement: comparison.id, origin: { chat: "editor" } });
+    const draft = newProposal(p, "Lighter comparison", "", { announcement: comparison.id, origin: { terminal: "ab12cd" } });
     expect(getAnnouncement(p, comparison.id)).toMatchObject({ title: "Comparing Refunds", proposals: [draft.id], proposal: null });
     expect(listAnnouncements(p)).toHaveLength(1);
     expect(announcementNote(p, comparison.id, "proposal")).toBeNull();
@@ -105,10 +102,10 @@ describe("announcing", () => {
     expect(() => announce(p, { kind: "task", title: "Not a Proposal", drifts: ["a1b2c3d4"] })).toThrow(/Only a Proposal names Drifts/);
   });
 
-  test("a request is announced in the chat that made it, and a request with no origin in no chat", () => {
-    expect(announce(p, { kind: "proposal", title: "Chat design", source: "request", chat: "cursor" }).chat).toBe("cursor");
-    expect(announce(p, { kind: "check", title: "Scanning System", phase: "scanning", source: "request" }).chat).toBeNull();
-    expect(announce(p, { kind: "work", title: "Importing from code", source: "request", chat: "cursor" }).chat).toBe("cursor");
+  test("a request is announced for the terminal that made it", () => {
+    expect(announce(p, { kind: "proposal", title: "Terminal design", source: "request", terminal: "ab12cd" }).terminal).toBe("ab12cd");
+    expect(announce(p, { kind: "check", title: "Scanning System", phase: "scanning", source: "request" }).terminal).toBeNull();
+    expect(announce(p, { kind: "work", title: "Importing from code", source: "request", terminal: "ab12cd" }).terminal).toBe("ab12cd");
   });
 
   test("an agent's scan takes over the scan Trama announced for its terminal and keeps its title", () => {
@@ -158,13 +155,11 @@ describe("a Draft and its announcement", () => {
     expect(getAnnouncement(p, requestA.id)?.proposal).toBeNull();
   });
 
-  test("chat and unknown origins cannot claim a terminal request", () => {
+  test("a Draft without a terminal cannot claim a terminal request", () => {
     const request = announce(p, { kind: "proposal", title: "Terminal request", source: "request", terminal: "ab12cd" });
-    const chatDraft = newProposal(p, "Chat design", "", { origin: { chat: "editor" } });
     const unknownDraft = newProposal(p, "Unknown design");
     expect(getAnnouncement(p, request.id)?.proposal).toBeNull();
-    expect(listAnnouncements(p).filter((a) => a.proposal === chatDraft.id)).toMatchObject([{ kind: "proposal", title: "Chat design", chat: "editor" }]);
-    expect(listAnnouncements(p).filter((a) => a.proposal === unknownDraft.id)).toMatchObject([{ kind: "proposal", title: "Unknown design" }]);
+    expect(listAnnouncements(p).filter((a) => a.proposal === unknownDraft.id)).toEqual([]);
   });
 
   test("an explicit ID from another origin stays unbound without creating a replacement ghost", () => {
@@ -180,11 +175,11 @@ describe("a Draft and its announcement", () => {
     expect(listAnnouncements(p)).toMatchObject([{ kind: "proposal", title: "Terminal design", terminal: "ab12cd", proposal: prop.id }]);
     expect(buildSnapshot(p).announcements[0]?.phase).toBe("writing");
   });
-  test("with nothing waiting, the Draft makes its own announcement, already Writing", () => {
-    const prop = newProposal(p, "Chat design");
-    const [only] = buildSnapshot(p).announcements;
-    expect(only).toMatchObject({ kind: "proposal", title: "Chat design", phase: "writing" });
-    expect(getAnnouncement(p, only?.id as string)?.proposal).toBe(prop.id);
+  test("a Draft made without a terminal has no announcement, and no error", () => {
+    const prop = newProposal(p, "Outside design");
+    expect(getProposal(p, prop.id).data.status).toBe("draft");
+    expect(listAnnouncements(p)).toEqual([]);
+    expect(buildSnapshot(p).announcements).toEqual([]);
   });
 
   for (const waiting of [false, true]) {
@@ -193,15 +188,15 @@ describe("a Draft and its announcement", () => {
       (invalid) => {
         let id = "zzzzzz";
         if (invalid !== "unknown") {
-          const a = announce(p, { kind: invalid === "wrong kind" ? "task" : "proposal", title: "Named announcement", chat: "editor" });
+          const a = announce(p, { kind: invalid === "wrong kind" ? "task" : "proposal", title: "Named announcement", terminal: "ab12cd" });
           id = a.id;
-          if (invalid === "delivered") submitProposal(p, newProposal(p, "Delivered", "", { announcement: id, origin: { chat: "editor" } }).id);
+          if (invalid === "delivered") submitProposal(p, newProposal(p, "Delivered", "", { announcement: id, origin: { terminal: "ab12cd" } }).id);
           if (invalid === "withdrawn") withdrawAll(p, [id]);
-          if (invalid === "already bound") newProposal(p, "Existing Draft", "", { announcement: id, origin: { chat: "editor" } });
+          if (invalid === "already bound") newProposal(p, "Existing Draft", "", { announcement: id, origin: { terminal: "ab12cd" } });
         }
         if (waiting) announce(p, { kind: "proposal", title: "Waiting request", source: "request", terminal: "ab12cd" });
         const before = buildSnapshot(p).announcements;
-        const result = run(["--json", "proposal", "new", "--input", JSON.stringify({ title: "Without ghost", announcement: id })], dir, { CURSOR_AGENT: "0" });
+        const result = run(["--json", "proposal", "new", "--input", JSON.stringify({ title: "Without ghost", announcement: id })], dir, {});
         expect(result.exit).toBe(0);
         const created = JSON.parse(result.out);
         expect(created.id).toBeString();
@@ -213,14 +208,14 @@ describe("a Draft and its announcement", () => {
   }
 
   test("handing the Draft over delivers its card, and the ghost is gone", () => {
-    const prop = newProposal(p, "Empty change");
+    const prop = newProposal(p, "Empty change", "", own);
     expect(listAnnouncements(p)).toHaveLength(1);
     submitProposal(p, prop.id);
     expect(listAnnouncements(p)).toHaveLength(0);
   });
 
   test("a refused hand-over leaves the ghost", () => {
-    const prop = newProposal(p, "Unregistered");
+    const prop = newProposal(p, "Unregistered", "", own);
     mkdirSync(join(prop.dir, "model/checkout"), { recursive: true });
     writeFileSync(join(prop.dir, "model/checkout/stray.md"), "# stray");
     expect(() => submitProposal(p, prop.id)).toThrow();
@@ -228,11 +223,11 @@ describe("a Draft and its announcement", () => {
   });
 
   test("discarding the Draft withdraws its ghost, and sending an open Proposal back to Draft does not bring one back", () => {
-    const gone = newProposal(p, "Given up");
+    const gone = newProposal(p, "Given up", "", own);
     discardProposal(p, gone.id);
     expect(listAnnouncements(p)).toHaveLength(0);
 
-    const kept = newProposal(p, "Handed over");
+    const kept = newProposal(p, "Handed over", "", own);
     submitProposal(p, kept.id);
     editInProposal(p, kept.id, "checkout/order.md");
     expect(getProposal(p, kept.id).data.status).toBe("draft");
@@ -240,7 +235,7 @@ describe("a Draft and its announcement", () => {
   });
 
   test("editing a Draft does not change announcement metadata", () => {
-    const prop = newProposal(p, "Edited");
+    const prop = newProposal(p, "Edited", "", own);
     const before = listAnnouncements(p)[0]?.touched;
     editInProposal(p, prop.id, "checkout/order.md");
     expect(listAnnouncements(p)[0]?.touched).toBe(before);
@@ -281,9 +276,9 @@ describe("ending announcements", () => {
   });
 
   test("a Draft named with a Drift announcement binds to it: it stays a Drift, keeps its title, and only the Drift delivers it", () => {
-    const a = announce(p, { kind: "drift", title: "Drift title", chat: "editor" });
+    const a = announce(p, { kind: "drift", title: "Drift title", terminal: "ab12cd" });
     expect(announcementNote(p, a.id, "proposal")).toBeNull();
-    const prop = newProposal(p, "Draft title", "", { announcement: a.id, origin: { chat: "editor" } });
+    const prop = newProposal(p, "Draft title", "", { announcement: a.id, origin: { terminal: "ab12cd" } });
     const all = listAnnouncements(p);
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ id: a.id, kind: "drift", title: "Drift title", proposal: prop.id });
@@ -296,8 +291,8 @@ describe("ending announcements", () => {
   });
 
   test("discarding a Draft bound to a Drift announcement withdraws it", () => {
-    const a = announce(p, { kind: "drift", title: "Drift title", chat: "editor" });
-    const prop = newProposal(p, "Draft title", "", { announcement: a.id, origin: { chat: "editor" } });
+    const a = announce(p, { kind: "drift", title: "Drift title", terminal: "ab12cd" });
+    const prop = newProposal(p, "Draft title", "", { announcement: a.id, origin: { terminal: "ab12cd" } });
     discardProposal(p, prop.id);
     expect(listAnnouncements(p)).toHaveLength(0);
   });
@@ -350,11 +345,19 @@ describe("the terminal an announcement belongs to", () => {
   test("the command line announces from the agent's terminal, and a Draft with no waiting announcement makes its own there", async () => {
     const id = announcementNew({ kind: "task", title: "From a terminal" }, { TRAMA_TERMINAL: "ab12cd" }).out;
     expect(getAnnouncement(p, id)?.terminal).toBe("ab12cd");
-    expect(getAnnouncement(p, announcementNew({ kind: "task", title: "Outside" }).out)?.terminal).toBeNull();
 
     withdrawAll(p);
     run(["proposal", "new", "--input", JSON.stringify({ title: "Own ghost" })], dir, { TRAMA_TERMINAL: "ab12cd" });
     expect(listAnnouncements(p).map((a) => [a.title, a.terminal])).toEqual([["Own ghost", "ab12cd"]]);
+  });
+
+  test("a proposal new without TRAMA_TERMINAL creates the Proposal without an announcement and without an error", () => {
+    const waiting = announce(p, { kind: "proposal", title: "Request", source: "request", terminal: "ab12cd" });
+    const result = run(["--json", "proposal", "new", "--input", JSON.stringify({ title: "No ghost" })], dir, {});
+    expect(result.exit).toBe(0);
+    const created = JSON.parse(result.out);
+    expect(getProposal(p, created.id).data.status).toBe("draft");
+    expect(listAnnouncements(p).map((a) => [a.id, a.proposal])).toEqual([[waiting.id, null]]);
   });
 
   test("an announced Task or Drift is delivered by creating it with --announcement, and an unknown ID only adds a note", () => {
@@ -378,25 +381,6 @@ describe("the terminal an announcement belongs to", () => {
       ["Draft", true, "zz99yy"],
     ]);
     expect(getAnnouncement(p, request.id)?.proposal).toBeNull();
-  });
-});
-
-describe("an announcement made by Cursor's chat agent", () => {
-  test("carries chat: cursor only without TRAMA_TERMINAL, writes the field only when set, and reads old files", () => {
-    const chat = announcementNew({ kind: "task", title: "From the chat" }, { CURSOR_AGENT: "1" }).out;
-    const both = announcementNew({ kind: "task", title: "Terminal wins" }, { CURSOR_AGENT: "1", TRAMA_TERMINAL: "ab12cd" }).out;
-    const neither = announcementNew({ kind: "task", title: "Developer" }, { CURSOR_AGENT: "0" }).out;
-    expect([chat, both, neither].map((id) => [getAnnouncement(p, id)?.chat, getAnnouncement(p, id)?.terminal])).toEqual([["cursor", null], [null, "ab12cd"], ["editor", null]]);
-    expect(readFileSync(join(announcementsDir(p), `${chat}.md`), "utf8")).toContain("chat: cursor");
-    expect(readFileSync(join(announcementsDir(p), `${both}.md`), "utf8")).not.toContain("chat");
-
-    withdrawAll(p);
-    run(["proposal", "new", "--input", JSON.stringify({ title: "Own ghost" })], dir, { CURSOR_AGENT: "1" });
-    expect(listAnnouncements(p).map((a) => [a.title, a.chat])).toEqual([["Own ghost", "cursor"]]);
-
-    // Written before the field existed: no `chat` line at all.
-    writeFileSync(join(announcementsDir(p), "old001.md"), "---\nkind: task\nsource: agent\nproposal: null\ntouched: 2026-01-01T10:00:00.000Z\n---\n# Old\n");
-    expect(getAnnouncement(p, "old001")?.chat).toBeNull();
   });
 });
 
@@ -438,7 +422,7 @@ describe("a check", () => {
   test("a finished check hands its outcome to the caller, and forgetting it leaves nothing to finish", () => {
     const id = announcementNew({ kind: "check", title: "Final check after completed Task", phase: "verifying" }, { TRAMA_TERMINAL: "ab12cd" }).out;
     const touched = getAnnouncement(p, id)!.touched;
-    expect(checkOutcome(p, id, true)).toEqual({ id, title: "Final check after completed Task", phase: "verifying", terminal: "ab12cd", chat: null, touched, failed: true });
+    expect(checkOutcome(p, id, true)).toEqual({ id, title: "Final check after completed Task", phase: "verifying", terminal: "ab12cd", touched, failed: true });
     forgetCheck(p, id);
     expect(checkOutcome(p, id)).toBeNull();
   });
@@ -500,9 +484,9 @@ describe("a Draft attached to an open Drift", () => {
   const opts = [{ title: "Change the code", text: "Make the code do it." }, { title: "Other", text: "Another way." }];
 
   test("its Proposal ghost is drawn nowhere, but the ghost of a Drift bound to a Draft stays", () => {
-    const a = announce(p, { kind: "proposal", title: "Design", chat: "editor" });
-    const draft = newProposal(p, "Archived with a Drift", "", { origin: { chat: "editor" } });
-    bindDraft(p, draft, a.id, { chat: "editor" });
+    const a = announce(p, { kind: "proposal", title: "Design", terminal: "ab12cd" });
+    const draft = newProposal(p, "Archived with a Drift", "", { origin: { terminal: "ab12cd" } });
+    bindDraft(p, draft, a.id, { terminal: "ab12cd" });
     const ghosts = () => buildSnapshot(p).announcements.map((v) => v.id);
     expect(ghosts()).toContain(a.id);
     newDrift(p, { where: "src/refund.ts", title: "D", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: opts, proposal: draft.id });
@@ -523,60 +507,45 @@ describe("a Draft attached to an open Drift", () => {
   });
 });
 
-describe("announcements with the conversation", () => {
-  const scanningRequest = (extra: Record<string, unknown>, minutes: number) =>
-    announce(p, { kind: "check", title: "Scanning System", phase: "scanning", source: "request", ...extra }, t(minutes));
-
-  test("TRAMA_CHAT gives a Cursor chat announcement its conversation, and the file keeps it", () => {
-    expect(originFromEnv({ CURSOR_AGENT: "1", TRAMA_CHAT: "conv-1" })).toEqual({ chat: "cursor", conversation: "conv-1" });
-    expect(originFromEnv({ TRAMA_CHAT: "conv-1" })).toEqual({ chat: "editor" });
-    expect(originFromEnv({ TRAMA_TERMINAL: "abc123", CURSOR_AGENT: "1", TRAMA_CHAT: "conv-1" })).toEqual({ terminal: "abc123" });
-    const id = announcementNew({ kind: "task", title: "From chat" }, { CURSOR_AGENT: "1", TRAMA_CHAT: "conv-1" }).out.trim();
-    expect(getAnnouncement(p, id)).toMatchObject({ chat: "cursor", conversation: "conv-1", terminal: null });
-    expect(readFileSync(join(dir, ".trama/announcements", `${id}.md`), "utf8")).toContain("conversation: conv-1");
-    const plain = announcementNew({ kind: "task", title: "No conversation" }, { CURSOR_AGENT: "1" }).out.trim();
-    expect(getAnnouncement(p, plain)?.conversation).toBeNull();
-    expect(readFileSync(join(dir, ".trama/announcements", `${plain}.md`), "utf8")).not.toContain("\nconversation:");
+describe("an announcement belongs to a terminal only", () => {
+  test("announcement new is refused without TRAMA_TERMINAL, whatever the kind, and writes nothing", () => {
+    for (const input of [{ kind: "task", title: "Outside" }, { kind: "check", title: "Final check", phase: "verifying" }]) {
+      expect(() => announcementNew(input, {})).toThrow(/only an agent started by Trama can announce/);
+      expect(() => announcementNew(input, { TRAMA_TERMINAL: "not a terminal" })).toThrow(/only an agent started by Trama can announce/);
+    }
+    expect(existsSync(announcementsDir(p))).toBe(false);
+    expect(listAnnouncements(p)).toEqual([]);
   });
 
-  test("a conversation takes its own scan check, or a Trama one with no conversation yet, never another conversation's", () => {
-    const other = scanningRequest({ chat: "cursor", conversation: "conv-2" }, 1);
-    const unbound = scanningRequest({ chat: "cursor" }, 2);
-    const mine = scanningRequest({ chat: "cursor", conversation: "conv-1" }, 3);
-    // The oldest of its own or of the chat with no conversation: the unbound one, which learns the conversation.
-    const first = announce(p, { kind: "check", title: "Scan", phase: "scanning", chat: "cursor", conversation: "conv-1" }, t(4));
-    expect(first.id).toBe(unbound.id);
-    expect(getAnnouncement(p, unbound.id)).toMatchObject({ conversation: "conv-1", title: "Scanning System", touched: t(4).toISOString() });
-    expect(getAnnouncement(p, other.id)?.touched).toBe(t(1).toISOString());
-    expect(getAnnouncement(p, mine.id)?.touched).toBe(t(3).toISOString());
-    expect(listAnnouncements(p)).toHaveLength(3);
+  test("the origin of a command is its terminal, and an announcement keeps no chat or conversation", () => {
+    expect(originFromEnv({ TRAMA_TERMINAL: "abc123" })).toEqual({ terminal: "abc123" });
+    expect(originFromEnv({})).toEqual({});
+    expect(originFromEnv({ TRAMA_CHAT: "conv-1" })).toEqual({});
+    const id = announcementNew({ kind: "task", title: "From a terminal" }, { TRAMA_TERMINAL: "abc123" }).out;
+    const file = readFileSync(join(announcementsDir(p), `${id}.md`), "utf8");
+    expect(file).toContain("terminal: abc123");
+    expect(file).not.toMatch(/chat|conversation/);
+    expect(Object.keys(getAnnouncement(p, id) as object)).not.toContain("chat");
+    expect(Object.keys(getAnnouncement(p, id) as object)).not.toContain("conversation");
   });
 
-  test("a conversation never takes another conversation's check, and creates its own check instead", () => {
-    const other = scanningRequest({ chat: "cursor", conversation: "conv-2" }, 1);
-    const own = announce(p, { kind: "check", title: "Scan", phase: "scanning", chat: "cursor", conversation: "conv-1" }, t(2));
-    expect(own.id).not.toBe(other.id);
-    expect(own.conversation).toBe("conv-1");
-    expect(getAnnouncement(p, other.id)?.touched).toBe(t(1).toISOString());
-  });
-
-  test("a chat command without conversation takes only a Trama check with no conversation", () => {
-    const other = scanningRequest({ chat: "cursor", conversation: "conv-2" }, 1);
-    const unbound = scanningRequest({ chat: "cursor" }, 2);
-    const taken = announce(p, { kind: "check", title: "Scan", phase: "scanning", chat: "cursor" }, t(3));
-    expect(taken.id).toBe(unbound.id);
-    expect(getAnnouncement(p, unbound.id)?.conversation).toBeNull();
-    expect(getAnnouncement(p, other.id)?.touched).toBe(t(1).toISOString());
-  });
-
-  test("bindConversation writes the conversation only into a waiting Cursor announcement that has none", () => {
-    const a = announce(p, { kind: "proposal", title: "Design", source: "request", chat: "cursor" });
-    expect(bindConversation(p, a.id, "conv-1")).toBe(true);
-    expect(getAnnouncement(p, a.id)).toMatchObject({ conversation: "conv-1", title: "Design" });
-    expect(bindConversation(p, a.id, "conv-2")).toBe(false);
-    expect(bindConversation(p, "zzzzzz", "conv-1")).toBe(false);
-    const terminal = announce(p, { kind: "work", title: "Import", source: "request", terminal: "ab12cd" });
-    expect(bindConversation(p, terminal.id, "conv-1")).toBe(false);
+  test("a file that still has `chat` or `conversation` is a reading error: it is skipped, and Trama neither converts nor deletes it", () => {
+    const good = announce(p, { kind: "task", title: "Good", terminal: "ab12cd" });
+    const front = "kind: task\nsource: agent\nproposal: null\ntouched: 2026-01-01T10:00:00.000Z\nterminal: null";
+    const legacy: [string, string][] = [
+      ["chat001", `---\n${front}\nchat: editor\n---\n# Chat\n`],
+      ["chat002", `---\n${front}\nchat: cursor\n---\n# Cursor chat\n`],
+      ["conv01", `---\n${front}\nconversation: abc\n---\n# Conversation\n`],
+    ];
+    for (const [name, text] of legacy) writeFileSync(join(announcementsDir(p), `${name}.md`), text);
+    expect(listAnnouncements(p).map((a) => a.id)).toEqual([good.id]);
+    for (const [name] of legacy) expect(getAnnouncement(p, name)).toBeNull();
+    expect(buildSnapshot(p).announcements.map((a) => a.id)).toEqual([good.id]);
+    withdrawAll(p);
+    for (const [name, text] of legacy) expect(readFileSync(join(announcementsDir(p), `${name}.md`), "utf8")).toBe(text);
+    // The same file without the field is a valid announcement.
+    writeFileSync(join(announcementsDir(p), "ok0001.md"), `---\n${front}\n---\n# Old\n`);
+    expect(getAnnouncement(p, "ok0001")).toMatchObject({ title: "Old", terminal: null });
   });
 });
 
@@ -655,27 +624,23 @@ describe("notes on announcements", () => {
     const check = announce(p, { kind: "check", title: "Check", phase: "verifying", terminal: "ab12cd" }, t(2));
     const comparison = announce(p, { kind: "comparison", title: "Comparing order", machine: "order", terminal: "ab12cd" }, t(3));
     const other = announce(p, { kind: "task", title: "Other terminal", terminal: "zz99zz" }, t(4));
-    const chat = announce(p, { kind: "task", title: "Chat", chat: "cursor" }, t(5));
     const out = noteCommand({ note: "Starts" }, { TRAMA_TERMINAL: "ab12cd" });
     expect(out.out.split("\n")).toEqual([`Note saved on ${mine.id}: Mine`, `Note saved on ${check.id}: Check`]);
     expect(JSON.parse(noteCommand({ note: "Next" }, { TRAMA_TERMINAL: "ab12cd" }, "--json").out)).toEqual({ announcements: [mine.id, check.id], truncated: false });
-    for (const untouched of [comparison, other, chat]) expect(getAnnouncement(p, untouched.id)?.notes).toEqual([]);
+    for (const untouched of [comparison, other]) expect(getAnnouncement(p, untouched.id)?.notes).toEqual([]);
     expect(getAnnouncement(p, mine.id)?.notes.map((n) => n.text)).toEqual(["Starts", "Next"]);
     // A comparison gets the note when it is named.
     noteCommand({ note: "Reads the code" }, { TRAMA_TERMINAL: "ab12cd" }, comparison.id);
     expect(getAnnouncement(p, comparison.id)?.notes.map((n) => n.text)).toEqual(["Reads the code"]);
   });
 
-  test("a conversation reaches its own announcements and those of the project's chat; a chat without conversation only those that name none", () => {
-    const own = announce(p, { kind: "task", title: "Own", chat: "cursor", conversation: "conv-1" }, t(1));
-    const unbound = announce(p, { kind: "proposal", title: "Unbound", source: "request", chat: "cursor" }, t(2));
-    const another = announce(p, { kind: "task", title: "Another", chat: "cursor", conversation: "conv-2" }, t(3));
-    const editor = announce(p, { kind: "task", title: "Editor" }, t(4));
-    const terminal = announce(p, { kind: "task", title: "Terminal", terminal: "ab12cd" }, t(5));
-    expect(JSON.parse(noteCommand({ note: "Writes" }, { CURSOR_AGENT: "1", TRAMA_CHAT: "conv-1" }, "--json").out).announcements).toEqual([own.id, unbound.id]);
-    expect(JSON.parse(noteCommand({ note: "Writes again" }, { CURSOR_AGENT: "1" }, "--json").out).announcements).toEqual([unbound.id, editor.id]);
-    expect(JSON.parse(noteCommand({ note: "Plain" }, {}, "--json").out).announcements).toEqual([unbound.id, editor.id]);
-    for (const untouched of [another, terminal]) expect(getAnnouncement(p, untouched.id)?.notes).toEqual([]);
+  test("without a terminal the note goes to no announcement, says so, exits with 0 and writes nothing", () => {
+    announce(p, { kind: "task", title: "Editor" }, t(1));
+    announce(p, { kind: "task", title: "Terminal", terminal: "ab12cd" }, t(2));
+    const before = readdirSync(announcementsDir(p)).map((f) => (f === ".gitignore" ? "" : readFileSync(join(announcementsDir(p), f), "utf8")));
+    expect(noteCommand({ note: "Nobody hears" }, {}).out).toBe("No announcement is waiting here; the note was not saved.");
+    expect(JSON.parse(noteCommand({ note: "Nobody hears" }, {}, "--json").out)).toEqual({ announcements: [], truncated: false });
+    expect(readdirSync(announcementsDir(p)).map((f) => (f === ".gitignore" ? "" : readFileSync(join(announcementsDir(p), f), "utf8")))).toEqual(before);
   });
 
   test("with no announcement to go to the command says so, exits with 0 and writes nothing", () => {

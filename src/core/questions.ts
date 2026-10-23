@@ -12,8 +12,6 @@ export interface QuestionContext {
   signal?: AbortSignal;
   /** The round comes from an agent in a terminal Trama started: it reached the window by the address Trama put in that terminal, not by discovery. */
   fromTramaTerminal?: boolean;
-  /** The round comes from Cursor's chat agent (`CURSOR_AGENT=1`); it reached the most recently active window of the project. */
-  fromCursorChat?: boolean;
   /** The round is asked by Trama itself, with no agent waiting: a Drift's prepared question opened by Resolve. */
   prepared?: boolean;
 }
@@ -73,13 +71,11 @@ export function parseQuestionRequest(value: unknown): QuestionRequest {
 /** The message that refuses an agent's own question tool in Trama's work; the agent hooks reply with it. */
 export const QUESTION_TOOL_REFUSAL = "In Trama's work, ask the developer only with `trama question new --root <project>`, as the Trama skill says. This question tool is disabled here.";
 
-/** The reason of an initial unavailability: the agent stops and asks the developer to open the editor; from Cursor's sandbox it first asks once more outside it. */
-export function unavailableQuestions(fromCursorSandbox = false): QuestionResult {
+/** The reason of an initial unavailability: the agent stops and asks the developer to open the editor. */
+export function unavailableQuestions(): QuestionResult {
   return {
     status: "unavailable",
-    reason: fromCursorSandbox
-      ? "Editor not reachable from Cursor's sandbox. Run the same trama question new once more outside the sandbox; if the editor is still unavailable, stop and tell the developer to open the project in the editor with Trama."
-      : "Editor not available for this project. Do not ask in any other way: stop, tell the developer to open the project in the editor with Trama, and run the same trama question new again when they say to continue.",
+    reason: "Editor not available for this project. Do not ask in any other way: stop, tell the developer to open the project in the editor with Trama, and run the same trama question new again when they say to continue.",
   };
 }
 
