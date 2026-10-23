@@ -4,11 +4,11 @@ description: "Usa quando mostri Get Started, il wizard di setup, Guided setup, S
 # Get Started e wizard di setup
 
 ## panel/Get Started
-- Le schede del pannello sono solo Get Started e Settings. Il titolo della scheda del pannello è il nome della prima cartella dell'area di lavoro.
+- Il pannello mostra soltanto Get Started e Settings, che il developer sceglie dal menu laterale (`ui#menu-laterale`). Il titolo della scheda del pannello è il nome della prima cartella dell'area di lavoro.
 - La scheda mostra il wizard di setup (`ui#setup-wizard`). In cima a ogni passo, sopra il titolo del passo, l'avviso: «Trama will create a `.trama` folder that describes this project. It holds no secrets and is meant to be committed. It also writes the agent skills and the Trama sub-agent definition into this project, which are meant to be committed too.»
 
 ## panel/Diagram
-- Con il Modello vuoto, sotto le schede, il testo «The Model is empty. Import the existing code or start from scratch; later, design changes from the Board.», in cui «Board» è un collegamento con nome accessibile e tooltip «Open the Board».
+- Con il Modello vuoto, in cima al Diagramma, il testo «The Model is empty. Import the existing code or start from scratch; later, design changes from the Board.», in cui «Board» è un collegamento con nome accessibile e tooltip «Open the Board».
 - Sotto il testo due pulsanti uno accanto all'altro, nello stile dei pulsanti del pannello: «Import from Code», con tooltip «Open the guided setup to describe the existing code as Proposals», e «Start from Scratch», con tooltip «Open the guided setup to describe the project you want to build».
 
 ## project

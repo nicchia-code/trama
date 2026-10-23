@@ -8,50 +8,45 @@ afterEach(cleanup);
 
 function setup(initial: Partial<Parameters<typeof createShellStore>[0]> = {}) {
   const views = {} as Record<ViewName, ReactNode>;
-  for (const name of ["getstarted", "diagram", "board", "requirements", "specs", "settings"] as const) views[name] = <p data-view={name}>{`view ${name}`}</p>;
-  const store = createShellStore({ view: "diagram", hasProject: true, decisions: 0, error: null, diagnostics: [], views, questions: null, ...initial });
-  const visited: string[] = [];
+  for (const name of ["getstarted", "diagram", "board", "requirements", "specs", "history", "settings"] as const) views[name] = <p data-view={name}>{`view ${name}`}</p>;
+  const store = createShellStore({ view: "board", hasProject: true, error: null, diagnostics: [], views, questions: null, ...initial });
   const opened: string[] = [];
-  const utils = render(<Shell store={store} navigate={(view) => { visited.push(view); store.set({ view }); }} openModelFile={(path) => opened.push(path)} />);
-  return { store, visited, opened, ...utils };
+  const utils = render(<Shell store={store} openModelFile={(path) => opened.push(path)} />);
+  return { store, opened, ...utils };
 }
 
-test("with a project the tabs are every one but Get Started, and Settings is an icon-only tab", () => {
+const shown = () => [...document.querySelectorAll("[data-view-name]:not([hidden])")].map((node) => node.getAttribute("data-view-name"));
+const mountedViews = () => [...document.querySelectorAll("[data-view-name]")].map((node) => node.getAttribute("data-view-name"));
+
+test("the panel has no tab bar, no Settings wheel and no number on the Board", () => {
   setup();
-  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Board", "Diagram", "Requirements", "Specs", ""]);
-  const settings = screen.getByRole("tab", { name: "Settings" });
-  expect(settings.textContent).toBe("");
-  expect(settings.querySelector("svg")).not.toBeNull();
+  expect(screen.queryByRole("tab")).toBeNull();
+  expect(screen.queryByRole("tablist")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
+  expect(document.querySelector("[data-badge]")).toBeNull();
 });
 
-test("without a project the tabs are Get Started and Settings", () => {
+test("with a project every view but Get Started is mounted; without one only Get Started and Settings", () => {
+  const { unmount } = setup();
+  expect(mountedViews()).toEqual(["board", "diagram", "requirements", "specs", "history", "settings"]);
+  unmount();
   setup({ hasProject: false, view: "getstarted" });
-  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Get Started", ""]);
+  expect(mountedViews()).toEqual(["getstarted", "settings"]);
 });
 
-test("every tab stays mounted with what its view drew, and only the current one shows", () => {
-  setup();
-  const tab = (name: ViewName) => document.querySelector(`[data-view="${name}"]`) as HTMLElement;
-  for (const name of ["board", "diagram", "requirements", "specs", "settings"] as const) expect(tab(name).isConnected).toBe(true);
-  const visible = (name: ViewName) => !(tab(name).closest("[hidden]") ?? tab(name).closest('[data-state="inactive"]'));
-  expect(visible("diagram")).toBe(true);
-  expect(visible("board")).toBe(false);
+test("every view stays mounted with what it drew, and only the current one shows", () => {
+  const { store } = setup();
+  for (const name of ["board", "diagram", "requirements", "specs", "history", "settings"] as const) expect(document.querySelector(`[data-view="${name}"]`)?.isConnected).toBe(true);
+  expect(shown()).toEqual(["board"]);
+  act(() => store.set({ view: "history" }));
+  expect(shown()).toEqual(["history"]);
+  expect(document.querySelector('[data-view="board"]')?.isConnected).toBe(true);
 });
 
-test("a view that draws again changes its tab in place", () => {
+test("a view that draws again changes in place", () => {
   const { store } = setup();
   act(() => store.set({ views: { ...store.get().views, diagram: <p data-view="diagram">drawn again</p> } }));
   expect(screen.getByText("drawn again")).not.toBeNull();
-});
-
-test("choosing a tab navigates, and the Board tab shows its decision count", () => {
-  const { store, visited } = setup({ decisions: 3 });
-  expect(screen.getByRole("tab", { name: /Board/ }).textContent).toBe("Board3");
-  fireEvent.mouseDown(screen.getByRole("tab", { name: /Requirements/ }), { button: 0, ctrlKey: false });
-  expect(new Set(visited)).toEqual(new Set(["requirements"]));
-  expect(store.get().view).toBe("requirements");
-  act(() => store.set({ decisions: 0 }));
-  expect(screen.getByRole("tab", { name: /Board/ }).textContent).toBe("Board");
 });
 
 test("an error shows and can be dismissed; a Model error opens its file", () => {

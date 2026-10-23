@@ -17,7 +17,7 @@ export const OMP_CHAT_VISIBLE_KEY = "trama.ompChatVisible";
 /** An attachment is shown whole up to this many bytes; a larger file shows as its name only. */
 const MAX_ATTACHMENT_BYTES = 200_000;
 
-const configuredTheme = (): ThemeSetting => {
+export const configuredTheme = (): ThemeSetting => {
   const value = settings().get<string>("theme");
   return value === "light" || value === "dark" ? value : "auto";
 };

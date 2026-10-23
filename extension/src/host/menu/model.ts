@@ -1,0 +1,100 @@
+import { z } from "zod";
+import { MENU_VIEWS, type MenuSituation, type MenuState, type MenuViewName, type ToMenuHost, type ToMenuWebview } from "../../menu-protocol";
+import type { ViewName } from "../../protocol";
+import type { ThemeSetting } from "../../webview/theme";
+
+/** What the side menu needs of the editor; `vscode` stays out of the logic. */
+export interface MenuSurface {
+  /** Posts a message to the webview, when there is one. */
+  post(message: ToMenuWebview): void;
+  /** Sets the badge of the icon (`WebviewView.badge`); undefined takes it off. */
+  setBadge(badge: { value: number; tooltip: string } | undefined): void;
+  /** The `trama.theme` setting. */
+  theme(): ThemeSetting;
+  /** No folder open, a folder that is no project (the one that counts for the panel), or a project. */
+  situation(): MenuSituation;
+  /** The numbers of the project's Snapshot, read now with `src/core`; undefined when the files cannot be read. */
+  facts(): { decisions: number; tasksSinceScan: number } | undefined;
+  /** Whether the Advisor Scanner is on (`trama.advisorScanner`). */
+  advisorScanner(): boolean;
+  /** The view the panel shows, or undefined with the panel closed. */
+  panelView(): ViewName | undefined;
+  /** The entry of a view: the same as the command `Trama: Show <view>`. */
+  show(view: MenuViewName): void;
+  /** Scan System, as the Board's button launched it. */
+  scan(): void;
+  /** The editor's choice of a folder to open. */
+  openFolder(): void;
+}
+
+const messages = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("ready") }),
+  z.strictObject({ type: z.literal("show"), view: z.enum(MENU_VIEWS) }),
+  z.strictObject({ type: z.literal("scan") }),
+  z.strictObject({ type: z.literal("openFolder") }),
+]);
+
+/** A message from the menu webview, or undefined when it does not fit the protocol: it is ignored. */
+export function parseMenuMessage(raw: unknown): ToMenuHost | undefined {
+  const parsed = messages.safeParse(raw);
+  return parsed.success ? (parsed.data as ToMenuHost) : undefined;
+}
+
+/** The tooltip of the icon's badge: `N cards await a decision`, `1 card awaits a decision` for one. */
+export const badgeTooltip = (decisions: number): string => (decisions === 1 ? "1 card awaits a decision" : `${decisions} cards await a decision`);
+
+/** The badge of the icon: the cards that wait for a decision in a Trama project, nothing with zero or outside a project. */
+export function menuBadge(state: Pick<MenuState, "situation" | "decisions">): { value: number; tooltip: string } | undefined {
+  return state.situation === "project" && state.decisions > 0 ? { value: state.decisions, tooltip: badgeTooltip(state.decisions) } : undefined;
+}
+
+/**
+ * The side menu of one window (`menu-laterale`): computes the state it shows from the files, the panel and the settings, sends it with the badge of the
+ * icon, and carries out the three things the menu asks.
+ */
+export class MenuModel {
+  /** The numbers of the last Snapshot that could be read: they stay when the files cannot be read for a moment. */
+  private last = { decisions: 0, tasksSinceScan: 0 };
+
+  constructor(private readonly surface: MenuSurface) {}
+
+  /** The state now: the Snapshot is read only inside a project. */
+  state(): MenuState {
+    const situation = this.surface.situation();
+    if (situation === "project") this.last = this.surface.facts() ?? this.last;
+    const facts = situation === "project" ? this.last : { decisions: 0, tasksSinceScan: 0 };
+    return { situation, ...facts, advisorScanner: this.surface.advisorScanner(), panelView: this.surface.panelView() ?? null };
+  }
+
+  /** Computes the state and sends it to the menu and the badge to the icon: after a change of the files, the panel, the folders or the settings, and when the menu is shown. */
+  refresh(): void {
+    const state = this.state();
+    this.surface.setBadge(menuBadge(state));
+    this.surface.post({ type: "menuState", ...state });
+  }
+
+  themeChanged(): void {
+    this.surface.post({ type: "theme", setting: this.surface.theme() });
+  }
+
+  /** A message from the webview. */
+  receive(raw: unknown): void {
+    const message = parseMenuMessage(raw);
+    if (message === undefined) return;
+    switch (message.type) {
+      case "ready":
+        this.themeChanged();
+        this.refresh();
+        return;
+      case "show":
+        this.surface.show(message.view);
+        return;
+      case "scan":
+        this.surface.scan();
+        return;
+      case "openFolder":
+        this.surface.openFolder();
+        return;
+    }
+  }
+}

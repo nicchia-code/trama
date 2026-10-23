@@ -132,9 +132,9 @@ describe("drift candidates", () => {
     expect(driftCandidates(p, ["order/Paid"], []).map((t) => t.id)).toEqual([paid]);
   });
 
-  test("a reference that does not resolve, or an origin that is not a Task, is refused", () => {
+  test("a reference that does not resolve is refused; an origin Task that no longer exists blocks nothing", () => {
     expect(() => driftCandidates(p, ["order/Nope"], [])).toThrow();
-    expect(() => driftCandidates(p, ["order/Paid"], ["zzzzzzzz"])).toThrow();
+    expect(driftCandidates(p, ["order/Paid"], ["zzzzzzzz"])).toEqual([]);
   });
 });
 

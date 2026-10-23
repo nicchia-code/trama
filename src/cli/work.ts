@@ -257,7 +257,10 @@ export function driftShowView(p: Project, drift: Drift): Result {
   const numbers = syncShortNumbers(p);
   const sides = driftSides(drift);
   const closed = closedUnchanged(p, drift);
-  const freed = freedTasks(drift, listTasks(p));
+  const tasks = listTasks(p);
+  const freed = freedTasks(drift, tasks);
+  // A Task deleted with Clear is shown by its permanent identity and `no longer exists`.
+  const taskName = (id: string): string => (tasks.some((t) => t.id === id) ? numbers.name("task", id) : `${id} (no longer exists)`);
   const bodyText = driftBody(drift);
   const status = preparedStatus(p, drift, project);
   const prepared = preparedBlock(status, driftOptions(drift));
@@ -274,7 +277,7 @@ export function driftShowView(p: Project, drift: Drift): Result {
   const decision = [
     ...(drift.data.option !== null ? ["", "## Chosen option", "", `${drift.data.option}${chosen ? `. ${chosen.title}` : ""}`] : []),
     ...(drift.data.note ? ["", "## Note", "", drift.data.note] : []),
-    ...(closed ? ["", "## Check note", "", closed.note ?? "The Task left Done; its note is gone."] : []),
+    ...(closed ? ["", "## Check note", "", tasks.some((t) => t.id === closed.task) ? (closed.note ?? "The Task left Done; its note is gone.") : `Task ${closed.task} no longer exists.`] : []),
   ];
   const attached = drift.data.proposal;
   let attachedLine = "";
@@ -307,7 +310,7 @@ export function driftShowView(p: Project, drift: Drift): Result {
   const md = [
     `# ${drift.title}`,
     ...(unifiedLine === "" ? [] : [unifiedLine]),
-    ...(closed ? [`Dismissed by Task ${numbers.name("task", closed.task)} without changes`] : []),
+    ...(closed ? [`Dismissed by Task ${taskName(closed.task)} without changes`] : []),
     "",
     ...(followsLines.length === 0 ? [] : [...followsLines, ""]),
     ...description,
@@ -318,7 +321,7 @@ export function driftShowView(p: Project, drift: Drift): Result {
     `Status: **${drift.data.status}**${drift.data.resolution ? ` (${drift.data.resolution})` : ""}`,
     attachedLine,
     resolutionLine,
-    drift.data.task ? `Task: ${numbers.name("task", drift.data.task)}` : "",
+    drift.data.task ? `Task: ${taskName(drift.data.task)}` : "",
     ...prepared.md,
     "",
     "## References",

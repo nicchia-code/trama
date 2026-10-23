@@ -1,6 +1,6 @@
 # Third-party notices
 
-The panel and the omp Chat view (the webviews of the extension) are built with the libraries below. Their code is bundled into `dist/webview.js`, `dist/omp-chat.js` and their stylesheet.
+The panel, the omp Chat view and the side menu (the webviews of the extension) are built with the libraries below. Their code is bundled into `dist/webview.js`, `dist/omp-chat.js`, `dist/menu.js` and their stylesheet.
 
 ## lucide
 

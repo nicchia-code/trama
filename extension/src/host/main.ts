@@ -15,6 +15,8 @@ import { EditorQuestions } from "./questions";
 import { CONVERSATIONS_KEY, readSavedConversations } from "../../../src/core/omp-chat-conversation";
 import { OmpClient } from "./omp-chat/client";
 import { OmpChatView } from "./omp-chat/view";
+import { MenuView } from "./menu/view";
+import { SHOW_COMMANDS } from "../menu-protocol";
 import { findOmp, forgetUpdateCheck, setUpdateStore } from "./omp-update";
 
 const SKILL_SYNC_DEBOUNCE_MS = 300;
@@ -43,11 +45,6 @@ function statusBarItem(): vscode.StatusBarItem {
   return item;
 }
 
-/** The view of the Activity Bar icon: a tree that never has elements, so its welcome content (with the Open Trama button) always shows. */
-function homeView(): vscode.Disposable {
-  return vscode.window.registerTreeDataProvider<never>("trama.home", { getChildren: () => [], getTreeItem: (element) => element });
-}
-
 export function activate(context: vscode.ExtensionContext): void {
   const session = new QuestionSession(() => trama.revealForQuestions());
   const questions = new EditorQuestions(() => findProject(), session);
@@ -60,11 +57,15 @@ export function activate(context: vscode.ExtensionContext): void {
   controller = trama;
   // The item of the ghosts with no Board column lives with the extension, so it shows with the panel closed too.
   const activities = new ActivitiesItem(() => findProject()?.root, tramaFiles, (announcement) => trama.openGhostDetails(announcement));
+  // The side menu of the Activity Bar icon: it follows the same watcher, so it stays up to date with the panel closed.
+  const menu = new MenuView(context.extensionUri, trama, tramaFiles);
   context.subscriptions.push(
     tramaFiles,
     statusBarItem(),
-    homeView(),
+    menu,
+    menu.register(),
     vscode.commands.registerCommand("trama.open", guarded(() => trama.open())),
+    ...Object.entries(SHOW_COMMANDS).map(([command, view]) => vscode.commands.registerCommand(command, guarded(() => trama.show(view)))),
     // Internal: the missing-omp notice's Open Settings runs it; it is not in the palette.
     vscode.commands.registerCommand("trama.openSettings", guarded(() => trama.openSettings())),
     // Internal: the missing-omp notice's Install omp runs it; it is not in the palette.

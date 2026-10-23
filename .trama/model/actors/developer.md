@@ -51,6 +51,9 @@ Il developer chiude, dalla riga di comando, un Task di correzione senza cambiare
 ### TAKE_BACK_TASK
 The developer takes back a Task that the agent has taken, with the command of the same name; the Board has no button for it. The Task stays In progress and is the developer's again.
 
+### CLEAR_DONE
+Il developer preme Clear in fondo alla colonna Done della Board, per cancellare per sempre i Task finiti che la colonna mostra. Non chiede conferma e non ha un comando della riga di comando.
+
 ### ASK_AGENT
 The developer asks the coding agent to work, from a button or a command: design a change (with a written request), scan the whole System or one Feature, implement one Task, implement every Task in To do, resolve one open Drift with Resolve, or import the existing code as Proposals.
 
@@ -84,28 +87,37 @@ The developer opens the Trama panel, or brings it to the front.
 
 Anche il pulsante Reopen della notifica di domande in attesa chiede questa apertura ordinaria: se il round esiste ancora e la finestra è sul suo progetto, l'overlay si ripristina; altrimenti si apre soltanto il pannello. Senza un progetto il pannello si apre su Get Started, senza il round, che resta in attesa finché il suo progetto torna nella finestra.
 
-Il developer lo chiede con il comando Open Trama, con il pulsante Open Trama della vista di Trama nella barra laterale, che si apre dall'icona di Trama nella barra delle attività a sinistra, oppure con il logo di Trama nella barra di stato in basso a sinistra. L'icona e la sua vista si trovano in ogni finestra con almeno una cartella aperta, anche dove non c'è ancora un progetto: lì il pulsante porta a Get Started. La barra laterale segue le regole dell'editor: Trama non la apre e non la chiude da sola. Con il pannello già aperto il pulsante e il logo, come il comando, lo portano in primo piano tenendo la sua scheda.
+Il developer lo chiede con il comando Open Trama, con la voce Get Started del menu laterale in una cartella che non è un progetto Trama (vedi il Menu laterale), oppure con il logo di Trama nella barra di stato in basso a sinistra. Le voci delle viste del menu laterale e i comandi Show … aprono invece il pannello su una vista precisa (SHOW_BOARD, SHOW_DIAGRAM, SHOW_REQUIREMENTS, SHOW_SPECS, SHOW_HISTORY, SHOW_SETTINGS). Con il pannello già aperto il logo, come il comando, lo porta in primo piano tenendo la sua vista.
 
 ### CLOSE_PANEL
 The developer closes the Trama panel.
 
+### OPEN_SIDE_MENU
+Il developer mostra il menu laterale di Trama, cliccando l'icona di Trama nella barra delle attività a sinistra o in un altro modo che l'editor offre per mostrare una vista della barra laterale. L'icona c'è in ogni finestra, anche senza cartelle e senza progetto Trama.
+
+### CLOSE_SIDE_MENU
+Il developer smette di mostrare il menu laterale: chiude la barra laterale o vi mostra un'altra vista.
+
 ### SHOW_DIAGRAM
-The developer switches to the Diagram tab, or follows a link from another tab to an element. I pulsanti View on diagram e i chip dei riferimenti aprono invece un focus (FOCUS_PROPOSAL, FOCUS_TASK, FOCUS_REF).
+Il developer passa alla vista Diagram del pannello, dal menu laterale o con il comando Show Diagram, che aprono il pannello se è chiuso, or follows a link from another view to an element. I pulsanti View on diagram e i chip dei riferimenti aprono invece un focus (FOCUS_PROPOSAL, FOCUS_TASK, FOCUS_REF).
 
 ### SHOW_BOARD
-The developer switches to the Board tab.
+Il developer passa alla Board, dal menu laterale o con il comando Show Board, che aprono il pannello se è chiuso, o seguendo un collegamento alla Board.
 
 ### OPEN_GHOST_DETAILS
 Il developer sceglie un ghost senza colonna dall'elenco che apre cliccando l'elemento dei ghost nella barra di stato dell'editor, o clicca quell'elemento quando riassume un solo ghost, per vederne i dettagli.
 
 ### SHOW_REQUIREMENTS
-The developer switches to the Requirements tab, or follows a link to a Requirement. I pulsanti View requirements e i chip dei riferimenti aprono invece un focus (FOCUS_PROPOSAL, FOCUS_TASK, FOCUS_REF).
+Il developer passa alla vista Requirements del pannello, dal menu laterale o con il comando Show Requirements, che aprono il pannello se è chiuso, or follows a link to a Requirement. I pulsanti View requirements e i chip dei riferimenti aprono invece un focus (FOCUS_PROPOSAL, FOCUS_TASK, FOCUS_REF).
 
 ### SHOW_SPECS
-Il developer passa alla scheda Specs del pannello.
+Il developer passa alla vista Specs del pannello, dal menu laterale o con il comando Show Specs, che aprono il pannello se è chiuso.
+
+### SHOW_HISTORY
+Il developer passa alla vista History del pannello, dal menu laterale o con il comando Show History, che aprono il pannello se è chiuso.
 
 ### SHOW_SETTINGS
-Il developer passa alla scheda Settings del pannello, dalla sua barra delle schede o con Open Settings nell'avviso che omp non è installato, che apre il pannello se è chiuso.
+Il developer passa alla scheda Settings del pannello, dal menu laterale, con il comando Show Settings o con Open Settings nell'avviso che omp non è installato, che aprono il pannello se è chiuso, anche in una finestra senza cartelle.
 
 ### INSTALL_OMP
 Il developer preme Install omp: nel passo omp del wizard di setup, nel gruppo omp della scheda Settings o nell'avviso che omp non è installato, quando omp manca. Trama apre un terminale visibile con l'installer ufficiale di omp (vedi Agent launching).
@@ -162,7 +174,7 @@ Il developer preme View on diagram o View requirements sulla scheda di una Propo
 Il developer preme View on diagram o View requirements sulla scheda di un Task in Active, per vedere nel Diagramma o nei Requisiti ciò che il Task nomina.
 
 ### FOCUS_REF
-Il developer segue un chip di riferimento: sulla scheda di un Task, sulla scheda di un Drift o fra i Task dei dettagli di una voce di History. Un chip di un elemento del Modello porta al Diagramma, uno di un Requisito ai Requisiti, uno delle Specs alle Specs.
+Il developer segue un chip di riferimento: sulla scheda di un Task in Active o in Done, sulla scheda di un Drift o fra i Task dei dettagli di una voce di History. Un chip di un elemento del Modello porta al Diagramma, uno di un Requisito ai Requisiti, uno delle Specs alle Specs.
 
 ### STEP_FOCUS
 Il developer passa al passo precedente o al successivo del focus della scheda, con le frecce della barra del focus.

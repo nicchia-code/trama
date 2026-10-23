@@ -173,3 +173,10 @@ test("askMore needs a Task, Proposal or Drift identity, and a question action ne
   expect(ok({ type: "questionAction", round: 3, action: { type: "askMore", id: "q1" } })).toEqual({ type: "questionAction", round: 3, action: { type: "askMore", id: "q1" } });
   expect(parseToHost({ type: "questionAction", round: 3, action: { type: "askMore", id: "" } }).ok).toBe(false);
 });
+
+test("viewChanged needs the name of a view of the panel", () => {
+  expect(ok({ type: "viewChanged", view: "specs" })).toEqual({ type: "viewChanged", view: "specs" });
+  expect(ok({ type: "viewChanged", view: "getstarted" })).toEqual({ type: "viewChanged", view: "getstarted" });
+  expect(ok({ type: "viewChanged", view: "history" })).toEqual({ type: "viewChanged", view: "history" });
+  for (const view of ["nowhere", "", 3, undefined, null]) expect(parseToHost({ type: "viewChanged", view }).ok).toBe(false);
+});

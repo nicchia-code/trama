@@ -1,22 +1,19 @@
-import { ChevronLeft, ChevronRight, ChevronUp, Play, Plus, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, Play, Plus, Trash2, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { namerOf, noNumbers } from "../../../../src/core/card-names";
-import { joinReasons, runBlocker } from "../../../../src/core/design";
+import { joinReasons, RUN_IN_PROGRESS, runBlocker } from "../../../../src/core/design";
 import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
 import type { ModelSuggestion } from "../../host/model-lists";
 import type { BoardModels } from "../../host/proposal-models";
 import { cn } from "../lib/utils";
-import { scanButtonLabel } from "../scan-label";
 import type { Slot, View, ViewContext } from "../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SplitButton } from "../split-button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
 import { DriftDetailsDialog, type ModelList, GhostDetailsDialog, ModelDialog, ProposalBodyDialog, TaskDetailsDialog } from "./dialogs";
-import { HistoryEntryView } from "./history";
-import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, NO_MODELS, type ProposalCard, stoppedFollowingNotice, withdrawnNotice } from "./logic";
+import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, doneGroups, EMPTY_HINTS, interleave, NO_MODELS, type ProposalCard, stoppedFollowingNotice, type TaskCard, withdrawnNotice } from "./logic";
 import { BoardButton, BoardEnvContext, type BoardEnv, Tip } from "./parts";
 
 /** The state of Resolve Drifts and of the Runs the host gives with each picture. */
@@ -45,8 +42,6 @@ export interface BoardPageProps {
   resolve: ResolveState;
   /** Unify Drifts: why its menu item is disabled and which Drifts its agent works on. */
   unify?: UnifyState;
-  /** Whether the Advisor Scanner is on: the Scan System button is then disabled. */
-  advisorScanner: boolean;
   /** The models chosen for the Proposals that carry Tasks. */
   models: BoardModels;
   /** The model names the agent offers to the model window. */
@@ -100,13 +95,55 @@ function CardColumn({ column, ghosts, foot }: { column: BoardColumn; ghosts: { i
   );
 }
 
-/** The Board: three columns of cards, a bar with the one Scan button, and the notices of cards that never came. */
-export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, advisorScanner, models, modelList, notices, closeNotice, context, ghostRequest }: BoardPageProps) {
+/**
+ * The Done column: a Task per card, grouped by the day it finished, with `Clear` at its foot. It is collapsible with the chevron of its heading; collapsed it is a narrow
+ * strip with the chevron and its title written downwards, and nothing else.
+ */
+function DoneColumn({ cards, open, toggle, chevron, clear, now }: { cards: Card[]; open: boolean; toggle: () => void; chevron: React.RefObject<HTMLButtonElement | null>; clear: ReactNode; now: Date }) {
+  const title = open ? "Collapse Done column" : "Expand Done column";
+  return (
+    <section data-column="done" aria-labelledby="board-column-done" tabIndex={-1} className={cn(COLUMN_CLASS, "outline-none", !open && "items-center")}>
+      <div className={cn("flex items-center gap-2 px-2.5 py-2", open ? "border-b" : "flex-col px-1.5")}>
+        <Tip text={title}>
+          <Button ref={chevron} variant="ghost" size="icon" className="size-6" aria-label={title} aria-expanded={open} onClick={toggle}>
+            {open ? <ChevronRight aria-hidden="true" focusable="false" className="size-4" /> : <ChevronLeft aria-hidden="true" focusable="false" className="size-4" />}
+          </Button>
+        </Tip>
+        <h2 id="board-column-done" className={cn("text-xs font-semibold tracking-wide uppercase", !open && "[writing-mode:vertical-rl] tracking-normal normal-case")}>
+          {COLUMN_TITLES.done}
+        </h2>
+        {open ? (
+          <Badge variant="secondary" className="px-1.5 py-0 tabular-nums">
+            {cards.length}
+          </Badge>
+        ) : null}
+      </div>
+      {open ? (
+        <>
+          <ColumnBody>
+            {cards.length === 0 ? <Hint id="done" /> : null}
+            {doneGroups(cards, now).map((group) => (
+              <div key={group.key} className="flex flex-col gap-2">
+                <h3 className="mt-1 text-[11px] font-semibold text-muted-foreground">{group.heading}</h3>
+                {group.cards.map((card) => (
+                  <CardView key={card.key} card={card} now={now} />
+                ))}
+              </div>
+            ))}
+          </ColumnBody>
+          <div className="flex flex-col gap-2 px-2 pb-2">{clear}</div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+/** The Board: three columns of cards (Backlog, Active, Done), and the notices at its top. */
+export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, models, modelList, notices, closeNotice, context, ghostRequest }: BoardPageProps) {
   const root = useRef<HTMLDivElement>(null);
-  /** The period of the History column. Kept while the panel lives, so a refresh does not reset it. */
-  const [period, setPeriod] = useState<HistoryPeriod>("week");
-  /** Whether the History column is open. It starts collapsed; kept while the panel lives, so a refresh does not reopen it. */
-  const [historyOpen, setHistoryOpen] = useState(false);
+  /** Whether the Done column is open. It starts collapsed; kept while the panel lives, so a refresh or a change of view does not reopen it. */
+  const [doneOpen, setDoneOpen] = useState(false);
+  const doneChevron = useRef<HTMLButtonElement>(null);
   const [bodyOf, setBodyOf] = useState<string | null>(null);
   const [taskOf, setTaskOf] = useState<string | null>(null);
   const [driftOf, setDriftOf] = useState<string | null>(null);
@@ -129,7 +166,8 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
   const columnCard = <K extends "task" | "drift">(column: ColumnId, kind: K, id: string | null): Extract<Card, { kind: K }> | undefined =>
     id === null ? undefined : columns.find((c) => c.id === column)?.cards.find((card): card is Extract<Card, { kind: K }> => card.kind === kind && card.id === id);
   const bodyCard = backlogCard(bodyOf);
-  const taskCard = columnCard("active", "task", taskOf);
+  // The details of a Task follow it from Active to Done, and close when it is in neither (cleared).
+  const taskCard = columnCard("active", "task", taskOf) ?? columnCard("done", "task", taskOf);
   const driftCard = columnCard("backlog", "drift", driftOf);
   const modelCard = backlogCard(modelOf);
   const placedGhosts = useMemo(() => announcedGhosts(snapshot?.announcements ?? [], asking), [snapshot, asking]);
@@ -196,10 +234,10 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
   if (snapshot === null) return <div ref={root} />;
 
   const ghosts = placedGhosts.map((g) => ({ item: <GhostCard key={g.card.key} card={g.card} />, index: g.index, column: g.column }));
-  const scanLabel = scanButtonLabel("Scan System", snapshot.tasksSinceScan, advisorScanner);
-  const history = historyGroups(snapshot.history, period);
-  const historyCount = history.reduce((n, group) => n + group.entries.length, 0);
   const now = new Date();
+  const doneCards = columns.find((column) => column.id === "done")?.cards ?? [];
+  const clearable = doneCards.filter((card) => card.kind === "task" && card.keptBy.length === 0);
+  const clearReason = joinReasons([resolve.running === true ? RUN_IN_PROGRESS : null, clearable.length === 0 ? "Nothing to clear" : null]);
   const foot = (id: ColumnId): ReactNode => {
     if (id === "backlog")
       return (
@@ -242,22 +280,26 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
       );
     return null;
   };
-  const historyTitle = historyOpen ? "Collapse History column" : "Expand History column";
+  const clear = (
+    <BoardButton
+      icon={Trash2}
+      label="Clear"
+      aria="Delete the Tasks in Done for good"
+      full
+      disabled={clearReason !== null}
+      tooltip={clearReason ?? "Delete the Tasks in Done for good"}
+      description={clearReason}
+      onClick={() => {
+        context.post({ type: "clearDone", tasks: doneCards.map((card) => card.id) });
+        doneChevron.current?.focus();
+      }}
+    />
+  );
 
   return (
     <BoardEnvContext.Provider value={env}>
       <TooltipProvider>
         <div ref={root} className="flex h-full min-h-0 flex-col">
-          <div role="toolbar" aria-label="Board actions" className="flex flex-wrap gap-1.5 border-b px-3 py-2">
-            <BoardButton
-              icon={Search}
-              label={scanLabel.text}
-              aria={scanLabel.ariaLabel}
-              disabled={scanLabel.disabled}
-              tooltip={scanLabel.tooltip}
-              onClick={() => context.post({ type: "launch", action: { kind: "scan" } })}
-            />
-          </div>
           {notices.length > 0 && (
             <div role="status" className="flex flex-col gap-1 px-3">
               {notices.map((notice) => (
@@ -273,60 +315,15 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
           )}
           <div
             className="grid min-h-0 flex-1 [grid-template-rows:minmax(0,1fr)] gap-2.5 overflow-x-auto p-2.5"
-            style={{ gridTemplateColumns: historyOpen ? "repeat(3, minmax(250px, 1fr))" : "repeat(2, minmax(250px, 1fr)) 40px" }}
+            style={{ gridTemplateColumns: doneOpen ? "repeat(3, minmax(250px, 1fr))" : "repeat(2, minmax(250px, 1fr)) 40px" }}
           >
-            {columns.map((column) => (
-              <CardColumn key={column.id} column={column} ghosts={ghosts} foot={foot(column.id)} />
-            ))}
-            <section data-column="history" aria-labelledby="board-column-history" className={cn(COLUMN_CLASS, !historyOpen && "items-center")}>
-              <div className={cn("flex items-center gap-2 px-2.5 py-2", historyOpen ? "border-b" : "flex-col px-1.5")}>
-                <Tip text={historyTitle}>
-                  <Button variant="ghost" size="icon" className="size-6" aria-label={historyTitle} aria-expanded={historyOpen} onClick={() => setHistoryOpen(!historyOpen)}>
-                    {historyOpen ? <ChevronRight aria-hidden="true" focusable="false" /> : <ChevronLeft aria-hidden="true" focusable="false" />}
-                  </Button>
-                </Tip>
-                <h2 id="board-column-history" className={cn("text-xs font-semibold tracking-wide uppercase", !historyOpen && "[writing-mode:vertical-rl] tracking-normal normal-case")}>
-                  {COLUMN_TITLES.history}
-                </h2>
-                {historyOpen ? (
-                  <Badge variant="secondary" className="px-1.5 py-0 tabular-nums">
-                    {historyCount}
-                  </Badge>
-                ) : null}
-              </div>
-              {historyOpen ? (
-                <>
-                  <div className="px-2 pt-2">
-                    <Select value={period} onValueChange={(value) => setPeriod(value as HistoryPeriod)}>
-                      <SelectTrigger aria-label="History period" className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {HISTORY_PERIODS.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <ColumnBody key={ghostRequest?.n ?? 0}>
-                    {history.length === 0 ? (
-                      <Hint id="history" />
-                    ) : (
-                      history.map((group) => (
-                        <div key={group.key} className="flex flex-col gap-2">
-                          <h3 className="mt-1 text-[11px] font-semibold text-muted-foreground">{group.heading}</h3>
-                          {group.entries.map((entry) => (
-                            <HistoryEntryView key={entry.id} entry={entry} now={now} />
-                          ))}
-                        </div>
-                      ))
-                    )}
-                  </ColumnBody>
-                </>
-              ) : null}
-            </section>
+            {columns.map((column) =>
+              column.id === "done" ? (
+                <DoneColumn key={column.id} cards={column.cards} open={doneOpen} toggle={() => setDoneOpen(!doneOpen)} chevron={doneChevron} clear={clear} now={now} />
+              ) : (
+                <CardColumn key={column.id} column={column} ghosts={ghosts} foot={foot(column.id)} />
+              ),
+            )}
           </div>
           <ProposalBodyDialog card={bodyCard} onClose={() => setBodyOf(null)} />
           <TaskDetailsDialog card={taskCard} onClose={() => setTaskOf(null)} />
@@ -340,8 +337,8 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
 }
 
 /** The Board: its view, and the model names the Board's model window offers. */
-export interface BoardView extends View {
-  update(next: Snapshot, isAsking?: boolean, resolveState?: ResolveState, scans?: { advisorScanner: boolean }, models?: BoardModels, unify?: UnifyState): void;
+export interface BoardView extends Omit<View, "update"> {
+  update(next: Snapshot, isAsking?: boolean, resolveState?: ResolveState, models?: BoardModels, unify?: UnifyState): void;
   receiveModels(message: { models: ModelSuggestion[]; error?: string }): void;
 }
 
@@ -359,7 +356,6 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
     asking: false,
     resolve: NO_RESOLVE_STATE,
     unify: NO_UNIFY_STATE,
-    advisorScanner: false,
     models: NO_MODELS,
     modelList: { models: [], error: null },
     notices: [],
@@ -373,8 +369,8 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
   render();
 
   return {
-    update(next, isAsking = false, resolveState = NO_RESOLVE_STATE, scans = { advisorScanner: false }, models = NO_MODELS, unify = NO_UNIFY_STATE) {
-      page = { ...page, snapshot: next, asking: isAsking, resolve: resolveState, unify, advisorScanner: scans.advisorScanner, models };
+    update(next, isAsking = false, resolveState = NO_RESOLVE_STATE, models = NO_MODELS, unify = NO_UNIFY_STATE) {
+      page = { ...page, snapshot: next, asking: isAsking, resolve: resolveState, unify, models };
       render();
     },
     receiveModels(message) {
@@ -388,6 +384,10 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
     },
     stoppedFollowing(subject: string, reason: string) {
       page = { ...page, notices: [...page.notices, { id: nextNotice++, text: stoppedFollowingNotice(subject, reason) }] };
+      render();
+    },
+    notice(text: string) {
+      page = { ...page, notices: [...page.notices, { id: nextNotice++, text }] };
       render();
     },
     show(options) {

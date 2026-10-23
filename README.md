@@ -38,7 +38,7 @@ code --install-extension trama-<platform>-<version>.vsix
 
 ## Use
 
-1. **Open your project** and click the Trama logo in the Activity Bar, then **Open Trama**.
+1. **Open your project** and click the Trama logo in the Activity Bar: the Trama menu opens in the side bar. Choose **Board**, **Diagram** or any other entry to open the panel on it (the same entries are the `Trama: Show …` commands of the palette).
 2. **Set it up.** In a folder without a Trama project the panel opens on **Get Started**: choose **Import from Code** (the agent maps the app you already have) or **Start from Scratch**, then the models omp uses. Nothing is written until you confirm the summary.
 3. **Ask for a change.** On the Board, click **+ Add Work Item**, write what you want in the tab that opens, and send it with **Send to agent** (closing the tab sends it too).
 4. **Decide.** Answer the agent's questions, then **Approve** or **Reject** its Proposal.

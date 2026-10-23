@@ -8,6 +8,8 @@ import type { ToHost } from "../extension/src/protocol";
 import { BoardPage, type BoardPageProps, mountBoard } from "../extension/src/webview/board";
 import { CardView, GhostCard } from "../extension/src/webview/board/cards";
 import { HistoryEntryView } from "../extension/src/webview/board/history";
+import { mountHistory } from "../extension/src/webview/history";
+import type { ViewContext } from "../extension/src/webview/types";
 import { type BoardEnv, BoardEnvContext } from "../extension/src/webview/board/parts";
 import { announcedCard, type DriftCard, NO_MODELS, type ProposalCard, type TaskCard } from "../extension/src/webview/board/logic";
 import { DriftDetailsDialog, TaskDetailsDialog } from "../extension/src/webview/board/dialogs";
@@ -83,7 +85,7 @@ const proposal: ProposalCard = {
 const task: TaskCard = {
   kind: "task", key: "task:liveTask", id: "liveTask", name: { text: "T3", isNumber: true }, title: "A task", technical: false,
   refs: [], drift: "liveDrift", driftName: "D4", proposal: null, proposalTag: null, proposalName: null, agent: false, progress: null, blockedByDrifts: [{ id: "liveDrift", key: "drift:liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late" }], waitingFor: [],
-  blockedBy: [], body: "", images: [], file: "task.md", column: "todo", finishing: null, views: { diagram: false, requirements: false },
+  blockedBy: [], body: "", images: [], file: "task.md", column: "todo", finishing: null, views: { diagram: false, requirements: false }, finished: null, unchanged: null, keptBy: [],
 };
 const resolved = (over: Partial<ProposalCard["resolves"][number]> = {}): ProposalCard["resolves"][number] => ({
   drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", blocked: [], notBlocking: [], ...over,
@@ -92,7 +94,7 @@ const resolved = (over: Partial<ProposalCard["resolves"][number]> = {}): Proposa
 /** An open Drift card of the Board, with the decisions of its card set to work. */
 const driftCardOf = (over: Partial<DriftCard> = {}): DriftCard => ({
   kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null,
-  drift: { id: "d", created: null, job: null, prepared: null, title: "T", body: "", previous: [], origin: [], unifies: [], unifiedInto: null, refs: [], proposal: null, sides: { happens: "It refunds late.", should: "It refunds at once.", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [] },
+  drift: { id: "d", created: null, job: null, prepared: null, title: "T", body: "", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, refs: [], proposal: null, sides: { happens: "It refunds late.", should: "It refunds at once.", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [] },
   dismissBlocker: null, reworkBlocker: null, resolving: false, unifying: false, resolveBlocker: null, blocked: [], notBlocking: [], ...over,
 });
 
@@ -222,10 +224,10 @@ describe("Board card rendering", () => {
     ]);
   });
 
-  test("a Task in Active has the View buttons before Run and Open, each only when its tab has a step, and they open the focus of the Task", () => {
+  test("a Task in Active has the View buttons before Run and no button to open its file, each only when its tab has a step, and they open the focus of the Task", () => {
     const calls = draw(<CardView card={{ ...task, blockedByDrifts: [], views: { diagram: true, requirements: true } }} />);
     const names = screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent);
-    expect(names).toEqual(["A task", "Show what T3 touches on the diagram", "Show what T3 touches in Requirements", "Run task T3", "Open file of task T3"]);
+    expect(names).toEqual(["A task", "Show what T3 touches on the diagram", "Show what T3 touches in Requirements", "Run task T3"]);
     fireEvent.click(screen.getByRole("button", { name: "Show what T3 touches on the diagram" }));
     fireEvent.click(screen.getByRole("button", { name: "Show what T3 touches in Requirements" }));
     expect(calls.navigated).toEqual([["diagram", { focus: { kind: "task", id: "liveTask" } }], ["requirements", { focus: { kind: "task", id: "liveTask" } }]]);
@@ -419,35 +421,82 @@ describe("Announced ghost rendering", () => {
 });
 
 describe("History entry details", () => {
-  const task = (over: Partial<HistoryTaskView>): HistoryTaskView => ({ id: "task0000", exists: true, title: "A task", column: "done", unchanged: null, finished: null, refs: [], proposalTag: null, created: null, ...over });
+  const task = (over: Partial<HistoryTaskView>): HistoryTaskView => ({ id: "task0000", exists: true, cleared: false, title: "A task", column: "done", unchanged: null, finished: null, refs: [], proposalTag: null, created: null, ...over });
   const now = new Date("2026-10-17T12:00:00Z");
 
-  test("the «i» of an entry lists its Tasks by creation, and a Task that is gone says so; Esc closes the dialog", () => {
+  test("the card of an entry lists its Tasks by creation, and a Task that is gone says so; Esc closes the dialog and the focus goes back to the title", async () => {
     const entry: HistoryView = {
       id: "hist0001", title: "Returns refunded", summary: "Refunds now **arrive** on time.", body: "", created: "2026-10-01T00:00:00.000Z", updated: "2026-10-16T08:30:00.000Z", file: "history/hist0001-returns.md",
       tasks: [
         task({ id: "late0003", title: "Third", created: "2026-10-03T00:00:00.000Z" }),
         task({ id: "gone0009", exists: false, title: null, column: null }),
+        task({ id: "clear001", exists: false, cleared: true, title: "Deleted one", column: "done", finished: "2026-10-05T10:00:00.000Z", refs: [], proposalTag: { text: "Refunds", proposal: "prop0001", title: "Refunds Proposal" }, created: null }),
         task({ id: "early001", title: "First", created: "2026-10-01T00:00:00.000Z" }),
       ],
     };
     draw(<HistoryEntryView entry={entry} now={now} />);
     expect(document.querySelector("article")?.textContent).toContain("Refunds now arrive on time.");
-    fireEvent.click(screen.getByRole("button", { name: "Show the Tasks of Returns refunded" }));
+    expect(screen.queryByRole("button", { name: /^Show the Tasks of/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Returns refunded" }));
     const dialog = screen.getByRole("dialog");
     const rows = within(dialog).getAllByRole("listitem");
-    expect(rows.length).toBe(3);
+    expect(rows.length).toBe(4);
     expect(rows[0]?.textContent).toContain("First");
     expect(rows[1]?.textContent).toContain("Third");
-    expect(rows[2]?.textContent).toContain("no longer exists");
+    expect(rows[2]?.textContent).toContain("Deleted one");
+    expect(rows[2]?.textContent).toContain("clear001");
+    expect(rows[2]?.textContent).toContain("Refunds");
+    expect(rows[2]?.textContent).toContain("cleared");
+    expect(rows[3]?.textContent).toContain("no longer exists");
+    expect(rows[3]?.textContent).toContain("gone0009");
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Returns refunded" })));
+  });
+
+  test("the references of a cleared Task go to the Diagram from its copy, closing the dialog", () => {
+    const cleared = task({ id: "clear002", exists: false, cleared: true, title: "Deleted two", finished: "2026-10-05T10:00:00.000Z", refs: ["order/Paid"] });
+    const entry: HistoryView = { id: "hist0006", title: "Refunds", summary: "", body: "", created: "2026-10-01T00:00:00.000Z", updated: "2026-10-16T08:30:00.000Z", file: "history/hist0006.md", tasks: [cleared] };
+    const calls = draw(<HistoryEntryView entry={entry} now={now} />);
+    fireEvent.click(screen.getByRole("button", { name: "Refunds" }));
+    expect(screen.getByText("cleared")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "order/Paid" }));
+    expect(calls.navigated).toEqual([["diagram", { focus: { kind: "ref", ref: "order/Paid" } }]]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  test("with references, the dialog focuses a chip whose tooltip takes the first Esc; the second closes the dialog", async () => {
+    const entry: HistoryView = { id: "hist0007", title: "Refunds", summary: "", body: "", created: "2026-10-01T00:00:00.000Z", updated: "2026-10-16T08:30:00.000Z", file: "history/hist0007.md", tasks: [task({ refs: ["order/Paid"] })] };
+    draw(<HistoryEntryView entry={entry} now={now} />);
+    fireEvent.click(screen.getByRole("button", { name: "Refunds" }));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  test("a click anywhere on the card opens the details, and a click inside the dialog does not reopen it", () => {
+    const entry: HistoryView = { id: "hist0004", title: "Refunds", summary: "Summary text.", body: "", created: "2026-10-01T00:00:00.000Z", updated: "2026-10-16T08:30:00.000Z", file: "history/hist0004.md", tasks: [task({})] };
+    draw(<HistoryEntryView entry={entry} now={now} />);
+    expect(document.querySelector("article")?.className).toContain("cursor-pointer");
+    fireEvent.click(screen.getByText("Summary text."));
+    expect(screen.getByRole("dialog")).not.toBeNull();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  test("Enter and Space on the title open the details", () => {
+    const entry: HistoryView = { id: "hist0005", title: "Refunds", summary: "", body: "", created: "2026-10-01T00:00:00.000Z", updated: "2026-10-16T08:30:00.000Z", file: "history/hist0005.md", tasks: [task({})] };
+    draw(<HistoryEntryView entry={entry} now={now} />);
+    const title = screen.getByRole("button", { name: "Refunds" });
+    expect(title.tagName).toBe("BUTTON");
   });
 
   test("a link to the Diagram from the details closes the dialog and goes there", () => {
     const entry: HistoryView = { id: "hist0003", title: "Refunds", summary: "", body: "Long text.", created: "2026-10-01T00:00:00.000Z", updated: "2026-10-16T08:30:00.000Z", file: "history/hist0003.md", tasks: [task({ refs: ["order/Paid"] })] };
     const calls = draw(<HistoryEntryView entry={entry} now={now} />);
-    fireEvent.click(screen.getByRole("button", { name: "Show the Tasks of Refunds" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refunds" }));
     expect(within(screen.getByRole("dialog")).getByText("Long text.")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "order/Paid" }));
     expect(calls.navigated).toEqual([["diagram", { focus: { kind: "ref", ref: "order/Paid" } }]]);
@@ -460,14 +509,14 @@ const proposalView = (over: Partial<ProposalView> = {}): ProposalView => ({
   tasks: [{ id: "t1", title: "Do it", refs: [], technical: true, body: "", images: [] }], removals: [], changes: [], machines: [], actors: [], areas: [], specs: EMPTY_SPECS, specsChange: { entries: [], notesBefore: null }, scope: [], ...over,
 });
 const taskView = (over: Partial<TaskView> = {}): TaskView => ({ id: "liveTask", created: "2026-10-01T10:00:00.000Z", title: "A task", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], file: "tasks/liveTask.md", images: [], ...over });
-const driftView = (over: Partial<DriftView> = {}): DriftView => ({ id: "liveDrift", created: "2026-10-01T10:00:00.000Z", job: null, prepared: null, title: "Code refunds late", body: "", previous: [], origin: [], unifies: [], unifiedInto: null, refs: [], proposal: null, sides: { happens: "A", should: "B", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
+const driftView = (over: Partial<DriftView> = {}): DriftView => ({ id: "liveDrift", created: "2026-10-01T10:00:00.000Z", job: null, prepared: null, title: "Code refunds late", body: "", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, refs: [], proposal: null, sides: { happens: "A", should: "B", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], unifiedDrifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
 
 function page(snap: Snapshot | null, over: Partial<BoardPageProps> = {}) {
   const posted: ToHost[] = [];
   const props: BoardPageProps = {
     snapshot: snap, asking: false, resolve: { blocker: null, runReason: null, drifts: {}, resolving: [] },
-    advisorScanner: false, models: NO_MODELS, modelList: { models: [], error: null }, notices: [], closeNotice: () => {},
+    models: NO_MODELS, modelList: { models: [], error: null }, notices: [], closeNotice: () => {},
     context: { post: (message) => posted.push(message), navigate: () => {}, openLink: () => {} }, ...over,
   };
   const utils = render(<BoardPage {...props} />);
@@ -475,23 +524,24 @@ function page(snap: Snapshot | null, over: Partial<BoardPageProps> = {}) {
 }
 
 describe("The Board page", () => {
-  test("the three columns come in order with their empty texts, and the first two end with their one action", () => {
+  test("the three columns come in order with their empty texts, the first two end with their one action, and there is no bar above them", () => {
     page(snapshot());
-    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Backlog", "Active", "History"]);
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Backlog", "Active", "Done"]);
     expect(screen.getByText("Nothing to decide")).not.toBeNull();
     expect(screen.getByText("Nothing active")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Add Work Item" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Run all the Tasks in To do" })).not.toBeNull();
-    expect(screen.getByRole("toolbar", { name: "Board actions" }).querySelectorAll("button").length).toBe(1);
+    expect(screen.queryByRole("toolbar")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Scan/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /History/ })).toBeNull();
   });
 
-  test("Add Work Item, Run all and Scan System ask the host, and no Resolve all exists", () => {
+  test("Add Work Item and Run all ask the host, and no Resolve all exists", () => {
     const { posted } = page(snapshot({ tasks: [taskView()], drifts: [driftView()] }));
     fireEvent.click(screen.getByRole("button", { name: "Add Work Item" }));
     fireEvent.click(screen.getByRole("button", { name: "Run all the Tasks in To do" }));
     expect(screen.queryByRole("button", { name: /Resolve all/ })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Scan System" }));
-    expect(posted).toEqual([{ type: "writeDesignRequest" }, { type: "launch", action: { kind: "implement-all" } }, { type: "launch", action: { kind: "scan" } }]);
+    expect(posted).toEqual([{ type: "writeDesignRequest" }, { type: "launch", action: { kind: "implement-all" } }]);
   });
 
   describe("ghost details", () => {
@@ -761,14 +811,6 @@ describe("The Board page", () => {
     expect(backlog.querySelector("h2 + [data-slot=badge]")?.textContent).toBe("0");
   });
 
-  test("the Scan System button carries the number of finished Tasks, and is disabled with the Advisor Scanner", () => {
-    page(snapshot({ tasksSinceScan: 2 }));
-    expect(screen.getByRole("button", { name: "Scan System · 2. 2 Tasks finished since the last scan of the System" }).textContent).toBe("Scan System · 2");
-    cleanup();
-    page(snapshot({ tasksSinceScan: 2 }), { advisorScanner: true });
-    expect((screen.getByRole("button", { name: /^Scan System\./ }) as HTMLButtonElement).disabled).toBe(true);
-  });
-
   test("the notices of cards the agent never delivered close one by one", () => {
     const closed: number[] = [];
     page(snapshot(), { notices: [{ id: 1, text: "The agent finished without delivering Proposal Returns." }], closeNotice: (id) => closed.push(id) });
@@ -801,25 +843,225 @@ describe("The Board page", () => {
     view.unmount();
   });
 
-  test("History is collapsed first; the chevron opens it, with its period menu and its count, and closes it again", () => {
-    const entry: HistoryView = { id: "h1", title: "Returns refunded", summary: "Done.", body: "", created: new Date().toISOString(), updated: new Date().toISOString(), file: "history/h1.md", tasks: [] };
-    page(snapshot({ history: [entry] }));
-    const expand = screen.getByRole("button", { name: "Expand History column" });
-    expect(expand.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByRole("combobox", { name: "History period" })).toBeNull();
-    expect(screen.queryByText("Returns refunded")).toBeNull();
-    fireEvent.click(expand);
-    expect(screen.getByRole("combobox", { name: "History period" }).textContent).toBe("Last 7 days");
-    expect(screen.getByText("Returns refunded")).not.toBeNull();
-    expect(screen.getByText("Today · 1")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Collapse History column" }));
-    expect(screen.queryByText("Returns refunded")).toBeNull();
+});
+
+describe("The Done column", () => {
+  const now = new Date();
+  const finishedToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 30).toISOString();
+  const doneView = (over: Partial<TaskView> = {}) => taskView({ id: "liveTask", title: "Finished one", column: "done", finished: finishedToday, ...over });
+  const column = () => document.querySelector('[data-column="done"]') as HTMLElement;
+  const open = () => fireEvent.click(screen.getByRole("button", { name: "Expand Done column" }));
+
+  test("it is a strip first: the chevron and the title written downwards, with no card, number, hint or Clear", () => {
+    page(snapshot({ tasks: [doneView()] }));
+    const chevron = screen.getByRole("button", { name: "Expand Done column" });
+    expect(chevron.getAttribute("aria-expanded")).toBe("false");
+    expect(chevron.textContent).toBe("");
+    expect(column().querySelector("h2")?.textContent).toBe("Done");
+    expect(column().querySelector("h2")?.className).toContain("vertical-rl");
+    expect(within(column()).queryByRole("article")).toBeNull();
+    expect(within(column()).queryByText("Nothing done yet")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete the Tasks in Done for good" })).toBeNull();
+    expect(column().querySelector("[data-slot=badge]")).toBeNull();
+    expect((document.querySelector('[data-column="done"]')?.parentElement as HTMLElement).style.gridTemplateColumns).toBe("repeat(2, minmax(250px, 1fr)) 40px");
   });
 
-  test("an empty period says Nothing done in this period", () => {
-    page(snapshot());
-    fireEvent.click(screen.getByRole("button", { name: "Expand History column" }));
+  test("the chevron opens it, with the number of cards, groups by day and the card of the Task; it keeps the focus and closes it again", () => {
+    page(snapshot({ tasks: [doneView(), doneView({ id: "other", title: "Other", finished: new Date(now.getFullYear() - 1, 0, 5, 8, 0).toISOString() }), doneView({ id: "undated", title: "No instant", finished: null })] }));
+    open();
+    const chevron = screen.getByRole("button", { name: "Collapse Done column" });
+    expect(chevron.getAttribute("aria-expanded")).toBe("true");
+    expect(chevron.querySelector("svg")?.getAttribute("class")).toContain("lucide-chevron-right");
+    expect(column().querySelector("h2 + [data-slot=badge]")?.textContent).toBe("3");
+    expect([...column().querySelectorAll("h3")].filter((h) => h.className.includes("text-[11px]")).map((h) => h.textContent)).toEqual(["Today · 1", `${new Date(now.getFullYear() - 1, 0, 5).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })} · 1`, "Earlier · 1"]);
+    expect(within(column()).getAllByRole("article").map((a) => a.getAttribute("aria-label"))).toEqual(["Task T3: Finished one", "Task other: Other", "Task undated: No instant"]);
+    fireEvent.click(chevron);
+    expect(within(column()).queryByRole("article")).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand Done column" })).not.toBeNull();
+  });
+
+  test("an empty column says Nothing done yet, with Clear below the text; the open choice is kept while the Board refreshes", () => {
+    const { props, rerender } = page(snapshot());
+    open();
+    const hint = within(column()).getByText("Nothing done yet");
+    const clear = within(column()).getByRole("button", { name: "Delete the Tasks in Done for good" });
+    expect(hint.compareDocumentPosition(clear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    rerender(<BoardPage {...props} snapshot={snapshot({ tasks: [doneView()] })} />);
+    expect(screen.getByRole("button", { name: "Collapse Done column" })).not.toBeNull();
+  });
+
+  test("the card has the dot, the number, the Proposal tag with its tooltip, the end time and the references, and no button but its title and chips", () => {
+    const calls = page(snapshot({ tasks: [doneView({ proposal: "prop1", proposalTag: { text: "Refunds", proposal: "prop1", title: "Refunds Proposal" }, refs: ["order/Paid"], created: "2026-10-01T10:00:00.000Z" })] }));
+    open();
+    const card = within(column()).getByRole("article", { name: "Task T3: Finished one" });
+    expect(within(card).getByRole("img", { name: "Done" })).not.toBeNull();
+    expect(within(card).getByText("T3")).not.toBeNull();
+    expect(within(card).getByRole("img", { name: "From Proposal prop1: Refunds Proposal" }).textContent).toBe("Refunds");
+    const time = card.querySelector("time") as HTMLElement;
+    expect(time.textContent).toMatch(/^\d{2}:\d{2}/);
+    expect(time.getAttribute("title")).toBe(new Date(finishedToday).toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" }));
+    expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(["Finished one", "order/Paid"]);
+    expect(card.className).not.toContain("board-working");
+    expect(within(card).queryByRole("button", { name: /Run|View|Open/ })).toBeNull();
+    void calls;
+  });
+
+  test("unchanged and kept are badges with their words as tooltip and accessible name, kept naming the open Drifts by number, and a kept Task is no longer kept once no Drift names it", () => {
+    const numbers2 = { ...numbers, drift: { d3: "D3", d7: "D7" } };
+    const drifts = [driftView({ id: "d7", created: "2026-10-02T10:00:00.000Z", origin: ["liveTask"] }), driftView({ id: "d3", created: "2026-10-01T10:00:00.000Z", task: "liveTask" })];
+    const { props, rerender } = page(snapshot({ numbers: numbers2, drifts, tasks: [doneView({ unchanged: "Already so" })] }));
+    open();
+    expect(within(column()).getByRole("img", { name: "Closed without changes" }).textContent).toBe("unchanged");
+    expect(within(column()).getByRole("img", { name: "Kept while Drift D3, D7 is open" }).textContent).toBe("kept");
+    rerender(<BoardPage {...props} snapshot={snapshot({ numbers: numbers2, tasks: [doneView({ unchanged: "Already so" })] })} />);
+    expect(within(column()).queryByRole("img", { name: /Kept while/ })).toBeNull();
+  });
+
+  test("a click on the card outside its chips and badges, or its title, opens the details with Ask more and Close, and closing keeps the Task there", () => {
+    const { posted } = page(snapshot({ tasks: [doneView({ body: "Done body.", refs: ["order/Paid"] })] }));
+    open();
+    const card = within(column()).getByRole("article", { name: "Task T3: Finished one" });
+    expect(card.className).toContain("cursor-pointer");
+    fireEvent.click(within(card).getByRole("button", { name: "order/Paid" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(card);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("Done body.");
+    expect(within(dialog).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["order/Paid", "Ask more about T3", "Close"]);
+    expect(within(dialog).queryByRole("button", { name: /Open/ })).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ask more about T3" }));
+    expect(posted).toContainEqual({ type: "askMore", kind: "task", id: "liveTask" });
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  test("the details of a Task follow it from Active to Done and close only when it is in neither", () => {
+    const { props, rerender } = page(snapshot({ tasks: [taskView({ id: "liveTask", body: "Body." })] }));
+    fireEvent.click(screen.getByRole("button", { name: "A task" }));
+    expect(screen.getByRole("dialog")).not.toBeNull();
+    rerender(<BoardPage {...props} snapshot={snapshot({ tasks: [doneView({ title: "A task", body: "Body." })] })} />);
+    expect(screen.getByRole("dialog").textContent).toContain("Body.");
+    rerender(<BoardPage {...props} snapshot={snapshot()} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  describe("Clear", () => {
+    const clearName = "Delete the Tasks in Done for good";
+    const clearButton = () => screen.getByRole("button", { name: clearName }) as HTMLButtonElement;
+
+    test("it is the last thing of the column, an outline button as wide as the column with a trash icon, and asks the host for the Tasks shown, with the focus on the chevron", () => {
+      const { posted } = page(snapshot({ tasks: [doneView({ id: "a1" }), doneView({ id: "a2", title: "Second", finished: new Date(now.getFullYear() - 1, 0, 5, 8, 0).toISOString() }), taskView({ id: "live" })] }));
+      open();
+      const clear = clearButton();
+      expect(clear.textContent).toBe("Clear");
+      expect(clear.className).toContain("border");
+      expect(clear.className).not.toContain("bg-primary");
+      expect(clear.className).toContain("w-full");
+      expect(clear.querySelector("svg")?.getAttribute("class")).toContain("lucide-trash-2");
+      expect(clear.compareDocumentPosition(within(column()).getAllByRole("article").at(-1) as HTMLElement) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+      expect(clear.disabled).toBe(false);
+      fireEvent.click(clear);
+      expect(posted).toEqual([{ type: "clearDone", tasks: ["a1", "a2"] }]);
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Collapse Done column" }));
+    });
+
+    test("a Run launched by Trama disables it with A run is in progress as its description, and an empty or all-kept column with Nothing to clear; both give both, the run first", () => {
+      const kept = [driftView({ origin: ["a1"] })];
+      const { props, rerender } = page(snapshot({ tasks: [doneView({ id: "a1" })] }), { resolve: { blocker: null, runReason: "Drifts are being resolved. A run is in progress", running: true, drifts: {}, resolving: [] } });
+      open();
+      expect(clearButton().disabled).toBe(true);
+      expect(clearButton().getAttribute("aria-description")).toBe("A run is in progress");
+      rerender(<BoardPage {...props} snapshot={snapshot({ drifts: kept, tasks: [doneView({ id: "a1" })] })} resolve={{ blocker: null, runReason: null, drifts: {}, resolving: [] }} />);
+      expect(clearButton().disabled).toBe(true);
+      expect(clearButton().getAttribute("aria-description")).toBe("Nothing to clear");
+      rerender(<BoardPage {...props} snapshot={snapshot()} />);
+      expect(clearButton().getAttribute("aria-description")).toBe("A run is in progress. Nothing to clear");
+      rerender(<BoardPage {...props} snapshot={snapshot({ tasks: [doneView({ id: "a1" })] })} resolve={{ blocker: null, runReason: null, drifts: {}, resolving: [] }} />);
+      expect(clearButton().disabled).toBe(false);
+      expect(clearButton().getAttribute("aria-description")).toBeNull();
+    });
+
+    test("a Task kept by an open Drift is sent with the others, as the host rechecks which can go", () => {
+      const { posted } = page(snapshot({ drifts: [driftView({ origin: ["a1"] })], tasks: [doneView({ id: "a1" }), doneView({ id: "a2", title: "Second", finished: new Date(now.getFullYear() - 1, 0, 5, 8, 0).toISOString() })] }));
+      open();
+      fireEvent.click(clearButton());
+      expect(posted).toEqual([{ type: "clearDone", tasks: ["a1", "a2"] }]);
+    });
+
+    test("a refused or failed Clear shows its notice at the top of the Board, with Close, and the Tasks stay", () => {
+      let slotted: ReactNode = null;
+      const board = mountBoard((node) => { slotted = node; }, { post: () => {}, navigate: () => {}, openLink: () => {} });
+      board.update(snapshot({ tasks: [doneView()] }));
+      board.notice?.("Trama could not clear the Done column: disk full.");
+      const { rerender } = render(<TooltipProvider>{slotted}</TooltipProvider>);
+      expect(screen.getByRole("status").textContent).toContain("Trama could not clear the Done column: disk full.");
+      fireEvent.click(screen.getByRole("button", { name: "Close the notice: Trama could not clear the Done column: disk full." }));
+      rerender(<TooltipProvider>{slotted}</TooltipProvider>);
+      expect(screen.queryByRole("status")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Expand Done column" }));
+      expect(screen.getByRole("article", { name: "Task T3: Finished one" })).not.toBeNull();
+    });
+  });
+});
+
+describe("The History view", () => {
+  const entry = (over: Partial<HistoryView> = {}): HistoryView => {
+    const at = new Date().toISOString();
+    return { id: "h1", title: "Returns refunded", summary: "Done **now**.", body: "", created: at, updated: at, file: "history/h1.md", tasks: [], ...over };
+  };
+  const mount = (snap: Snapshot, context: Partial<ViewContext> = {}) => {
+    let slotted: ReactNode = null;
+    const view = mountHistory((node) => { slotted = node; }, { post: () => {}, navigate: () => {}, openLink: () => {}, ...context });
+    view.update(snap);
+    const utils = render(<TooltipProvider>{slotted}</TooltipProvider>);
+    const redraw = (next: Snapshot) => { view.update(next); utils.rerender(<TooltipProvider>{slotted}</TooltipProvider>); };
+    return { view, redraw, ...utils };
+  };
+
+  test("the title, the number of entries and the period menu come first, then one column of entries grouped by day", () => {
+    const old = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    mount(snapshot({ history: [entry(), entry({ id: "h2", title: "Older", updated: old, created: old })] }));
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("History");
+    expect(document.querySelector("h2 + [data-slot=badge]")?.textContent).toBe("2");
+    const period = screen.getByRole("combobox", { name: "History period" });
+    expect(period.textContent).toBe("Last 7 days");
+    expect(period.querySelector("svg:not(.lucide-chevron-down)")).toBeNull();
+    expect(screen.getByText("Today · 1")).not.toBeNull();
+    expect(screen.getAllByRole("article").map((a) => a.querySelector("h4")?.textContent)).toEqual(["Returns refunded", "Older"]);
+  });
+
+  test("an entry has no button but its title and no info icon, and opens its details wherever it is clicked", () => {
+    mount(snapshot({ history: [entry({ tasks: [{ id: "t1", exists: true, cleared: false, title: "A task", column: "done", unchanged: null, finished: null, refs: [], proposalTag: null, created: null }] })] }));
+    const article = screen.getByRole("article");
+    expect(within(article).getAllByRole("button").map((b) => b.textContent)).toEqual(["Returns refunded"]);
+    expect(within(article).getByRole("button").getAttribute("aria-label") ?? "").toBe("");
+    fireEvent.click(article.querySelector("time") as HTMLElement);
+    expect(screen.getByRole("dialog")).not.toBeNull();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  test("an empty period says Nothing done in this period, and the period is kept while the view refreshes and while another view is shown", async () => {
+    const { redraw, view } = mount(snapshot({ history: [] }));
     expect(screen.getByText("Nothing done in this period")).not.toBeNull();
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "History period" }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "All" }));
+    expect(screen.getByRole("combobox", { name: "History period" }).textContent).toBe("All");
+    redraw(snapshot({ history: [entry()] }));
+    expect(screen.getByRole("combobox", { name: "History period" }).textContent).toBe("All");
+    view.hide?.();
+    expect(screen.getByRole("combobox", { name: "History period" }).textContent).toBe("All");
+    expect(screen.getByText("Returns refunded")).not.toBeNull();
+  });
+
+  test("leaving the view closes an open details window", () => {
+    const { view, redraw } = mount(snapshot({ history: [entry()] }));
+    fireEvent.click(screen.getByRole("button", { name: "Returns refunded" }));
+    expect(screen.getByRole("dialog")).not.toBeNull();
+    view.hide?.();
+    redraw(snapshot({ history: [entry()] }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 
@@ -899,7 +1141,7 @@ describe("Model window of a Proposal", () => {
 });
 
 describe("Ask more in the details windows", () => {
-  test("a click on a Task card opens its window; Ask more asks the host and leaves it open; the window closes when the Task leaves Active", () => {
+  test("a click on a Task card opens its window; Ask more asks the host and leaves it open; the window follows the Task into Done and closes when it is in neither", () => {
     const { posted, props, rerender } = page(snapshot({ tasks: [taskView({ body: "Body." })] }));
     expect(screen.queryByRole("button", { name: /details/ })).toBeNull();
     fireEvent.click(screen.getByRole("article", { name: "Task T3: A task" }));

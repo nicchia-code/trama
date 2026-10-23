@@ -5,6 +5,7 @@ import { type SettingSchema, type SettingValue, settingValueError } from "./sett
 import { safeLink } from "../../../src/core/links";
 import { isSafeRelativePath } from "./folder-tree";
 import { STEP_KEYS } from "../webview/wizard/logic";
+import { PANEL_VIEWS } from "../menu-protocol";
 
 /** The settings the wizard may write: the keys of its steps. */
 const WIZARD_KEYS: readonly string[] = Object.values(STEP_KEYS).flat();
@@ -125,6 +126,10 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
     case "ompStatusWanted":
     case "installOmp":
       return { ok: true, message: { type } };
+    case "viewChanged": {
+      const view = PANEL_VIEWS.find((name) => name === raw["view"]);
+      return view === undefined ? bad("viewChanged needs the name of a view") : { ok: true, message: { type, view } };
+    }
     case "instructionFilesWanted":
       if (raw["root"] === undefined) return { ok: true, message: { type } };
       return typeof raw["root"] === "string" && raw["root"] !== "" && raw["root"].length <= MAX_PATH_TEXT

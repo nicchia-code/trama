@@ -1,24 +1,20 @@
-import { Settings, X } from "lucide-react";
+import { X } from "lucide-react";
 import { type ReactNode, useSyncExternalStore } from "react";
 import type { Snapshot } from "../../../src/core/snapshot";
 import type { ViewName } from "../protocol";
-import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { TooltipProvider } from "./ui/tooltip";
 
 /** What the shell shows, kept outside React so the message handlers can change it. */
 export interface ShellState {
   view: ViewName;
   /** Whether the folder has a Trama project; null until the host says. */
   hasProject: boolean | null;
-  /** Tasks and Proposals waiting for a decision, on the Board tab; 0 shows no badge. */
-  decisions: number;
   error: string | null;
   diagnostics: Snapshot["diagnostics"];
-  /** What each view drew last: the tabs keep it mounted, so a hidden tab keeps its state. */
+  /** What each view drew last: every view stays mounted, so a hidden one keeps its state. */
   views: Partial<Record<ViewName, ReactNode>>;
-  /** The question overlay: its bar sits above the tabs and its dialog opens above everything. */
+  /** The question overlay: its bar sits above the view and its dialog opens above everything. */
   questions: ReactNode;
 }
 
@@ -44,55 +40,24 @@ export function createShellStore(initial: ShellState): ShellStore {
   };
 }
 
-const TABS: { view: ViewName; label: string }[] = [
-  { view: "getstarted", label: "Get Started" },
-  { view: "board", label: "Board" },
-  { view: "diagram", label: "Diagram" },
-  { view: "requirements", label: "Requirements" },
-  { view: "specs", label: "Specs" },
-];
+/** The views of a project, in the order of the side menu. */
+const PROJECT_VIEWS = ["board", "diagram", "requirements", "specs", "history", "settings"] as const;
 
+/** The panel: the alerts, the diagnostics and the question bar above the view the developer chose. It has no tab bar: the side menu, the commands and the links choose the view. */
 export function Shell({
   store,
-  navigate,
   openModelFile,
 }: {
   store: ShellStore;
-  navigate: (view: ViewName) => void;
   openModelFile: (path: string) => void;
 }) {
   const state = useSyncExternalStore(store.subscribe, store.get);
   const present = state.hasProject === true;
-  const tabs = TABS.filter((tab) => (tab.view === "getstarted" ? !present : present));
-  const views = [...tabs.map((tab) => tab.view), "settings" as const];
+  // Without a project the views are Get Started and Settings; with one, every view but Get Started.
+  const views = present ? PROJECT_VIEWS : (["getstarted", "settings"] as const);
   return (
     <TooltipProvider>
-      <Tabs value={state.view} onValueChange={(view) => navigate(view as ViewName)} className="h-full gap-0">
-        <div className="flex items-center gap-1 border-b px-2.5 py-1.5">
-          <TabsList>
-            {tabs.map((tab) => (
-              <TabsTrigger key={tab.view} value={tab.view}>
-                {tab.label}
-                {tab.view === "board" && state.decisions > 0 ? (
-                  <Badge variant="secondary" className="ml-1.5 px-1.5 py-0" data-badge>
-                    {state.decisions}
-                  </Badge>
-                ) : null}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          <span className="flex-1" />
-          <TabsList>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <TabsTrigger value="settings" aria-label="Settings">
-                  <Settings />
-                </TabsTrigger>
-              </TooltipTrigger>
-              <TooltipContent>Settings</TooltipContent>
-            </Tooltip>
-          </TabsList>
-        </div>
+      <div className="flex h-full flex-col">
         {state.error !== null ? (
           <div role="alert" className="flex items-start gap-2 border-b border-destructive/50 bg-destructive/15 px-2.5 py-1.5 whitespace-pre-wrap">
             <span>{state.error}</span>
@@ -120,12 +85,13 @@ export function Shell({
         ) : null}
         <div className="relative min-h-0 flex-1">
           {views.map((view) => (
-            <TabsContent key={view} value={view} forceMount className="absolute inset-0 overflow-auto data-[state=inactive]:hidden">
+            // Every view stays mounted, so a hidden one keeps what the developer was looking at.
+            <div key={view} data-view-name={view} hidden={view !== state.view} className="absolute inset-0 overflow-auto">
               {state.views[view]}
-            </TabsContent>
+            </div>
           ))}
         </div>
-      </Tabs>
+      </div>
     </TooltipProvider>
   );
 }

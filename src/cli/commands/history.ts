@@ -86,7 +86,16 @@ const show = defineCommand({
     summary: z.string(),
     body: z.string(),
     file: z.string(),
-    tasks: z.array(z.object({ id: z.string(), number: z.string().describe("The short number, or the ID when the Task has none."), exists: z.boolean(), title: z.string().nullable(), column: z.enum(COLUMNS).nullable(), unchanged: z.string().nullable() })),
+    tasks: z.array(z.object({
+      id: z.string(),
+      number: z.string().describe("The short number, or the ID when the Task has none."),
+      exists: z.boolean(),
+      cleared: z.boolean().describe("True when the Task was deleted with Clear and the entry keeps its copy."),
+      title: z.string().nullable(),
+      column: z.enum(COLUMNS).nullable(),
+      unchanged: z.string().nullable(),
+      copy: z.object({ title: z.string(), proposal: z.string().nullable(), tag: z.string().nullable(), finished: z.string().nullable(), refs: z.array(z.string()) }).nullable().describe("The copy Clear kept of a deleted Task; null otherwise."),
+    })),
   }),
   exampleArgs: ["a1b2c3d4"],
   run(ctx, _input, [id]) {
@@ -96,9 +105,10 @@ const show = defineCommand({
     const numbers = syncShortNumbers(project);
     const cited = entry.tasks.map((taskId) => {
       const t = all.find((x) => x.id === taskId);
-      return { id: taskId, number: numbers.name("task", taskId), exists: t !== undefined, title: t?.title ?? null, column: t?.data.column ?? null, unchanged: t?.data.unchanged ?? null };
+      const copy = t === undefined ? entry.cleared[taskId] ?? null : null;
+      return { id: taskId, number: numbers.name("task", taskId), exists: t !== undefined, cleared: copy !== null, title: t?.title ?? copy?.title ?? null, column: t?.data.column ?? null, unchanged: t?.data.unchanged ?? null, copy };
     });
-    const lines = cited.map((c) => (c.exists ? `- ${numbers.name("task", c.id)}: ${c.title} (${c.column}${c.unchanged === null ? "" : ", no changes"})` : `- ${c.id}: Task no longer exists`));
+    const lines = cited.map((c) => (c.exists ? `- ${numbers.name("task", c.id)}: ${c.title} (${c.column}${c.unchanged === null ? "" : ", no changes"})` : c.cleared ? `- ${c.id}: ${c.title} (cleared)` : `- ${c.id}: Task no longer exists`));
     const md = [`# ${entry.title}`, `Updated ${entry.updated}, created ${entry.created}`, "", entry.summary, "", entry.body, "", "## Tasks", ...(lines.length === 0 ? ["_No Tasks._"] : lines)];
     return text(md.join("\n").trim(), { id: entry.id, title: entry.title, created: entry.created, updated: entry.updated, summary: entry.summary, body: entry.body, file: `history/${entry.name}`, tasks: cited });
   },

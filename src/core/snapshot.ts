@@ -13,7 +13,7 @@ import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
 import { syncShortNumbers } from "./short-numbers";
 import { readTaskImages, type TaskImage } from "./task-images";
-import { readLastScan } from "./last-scan";
+import { clearedSince, readLastScan } from "./last-scan";
 import { attachedDrift, closedUnchanged, type Column, type Drift, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, type FollowedDrift, followedDrifts, freedTasks, type FreedTask, listDrifts, listTasks, taskProgress, unifiedDrifts, unifiedInto } from "./work";
 import { preparedFlag, preparedStatus } from "./prepared";
 import { type Specs, type SpecsChange, specsChange } from "./specs";
@@ -144,6 +144,8 @@ export interface DriftView {
   previous: FollowedDrift[];
   /** The Tasks this Drift remembers as its origin, by identity: none, one, or several for a unified Drift. */
   origin: string[];
+  /** The Task that fixes the code of this Drift, by identity; null when none. With the origin Tasks, the Tasks Clear keeps in Done while the Drift is open. */
+  task: string | null;
   /** The Drifts a unified Drift merged, in creation order, each as identity and title; empty for any other Drift. */
   unifies: { id: string; title: string }[];
   /** The unified Drift this one was merged into, as identity and title; null unless its resolution is unified. */
@@ -226,6 +228,8 @@ export interface AnnouncementView {
 export interface HistoryTaskView {
   id: string;
   exists: boolean;
+  /** True when the Task was deleted with Clear and the entry keeps its copy: `title`, `proposalTag`, `finished` and `refs` come from that copy. */
+  cleared: boolean;
   title: string | null;
   column: Column | null;
   unchanged: string | null;
@@ -417,7 +421,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
   const taskById = new Map(tasks.map((t) => [t.id, t]));
   const history = readHistory(p);
   const scanInstant = Date.parse(readLastScan(p));
-  const tasksSinceScan = tasks.filter((t) => t.data.column === "done" && t.data.finished !== null && t.data.unchanged === null && Date.parse(t.data.finished) > scanInstant).length;
+  const tasksSinceScan = tasks.filter((t) => t.data.column === "done" && t.data.finished !== null && t.data.unchanged === null && Date.parse(t.data.finished) > scanInstant).length + clearedSince(p, scanInstant);
   const drifts = listDrifts(p);
   const blocked = computeBlocked(project, tasks, drifts);
 
@@ -432,6 +436,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
     title: d.title,
     previous: followedDrifts(p, d),
     origin: d.data.origin,
+    task: d.data.task,
     unifies: unifiedDrifts(p, d),
     unifiedInto: unifiedInto(p, d),
     closedUnchanged: closedUnchanged(p, d),
@@ -495,10 +500,16 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
       file: `history/${e.name}`,
       tasks: e.tasks.map((id): HistoryTaskView => {
         const t = taskById.get(id);
-        if (!t) return { id, exists: false, title: null, column: null, unchanged: null, finished: null, refs: [], proposalTag: null, created: null };
+        if (!t) {
+          const copy = e.cleared[id];
+          if (copy === undefined) return { id, exists: false, cleared: false, title: null, column: null, unchanged: null, finished: null, refs: [], proposalTag: null, created: null };
+          const tag = copy.tag === null ? null : { text: copy.tag, proposal: copy.proposal ?? "", title: (copy.proposal !== null && proposalById.get(copy.proposal)?.title) || copy.tag };
+          return { id, exists: false, cleared: true, title: copy.title, column: "done", unchanged: null, finished: copy.finished, refs: copy.refs, proposalTag: tag, created: null };
+        }
         return {
           id,
           exists: true,
+          cleared: false,
           title: t.title,
           created: t.data.created,
           column: t.data.column,
@@ -514,7 +525,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
 }
 
 /** The tag of a Task's Proposal: its label in full, or else its title shortened past 30 characters; null when the Task has no Proposal or the Proposal is gone. */
-function proposalTagOf(id: string | null, proposalById: ReadonlyMap<string, Proposal>): ProposalTag | null {
+export function proposalTagOf(id: string | null, proposalById: ReadonlyMap<string, Proposal>): ProposalTag | null {
   if (id === null) return null;
   const proposal = proposalById.get(id);
   if (proposal === undefined) return null;

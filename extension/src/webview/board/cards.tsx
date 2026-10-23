@@ -1,4 +1,4 @@
-import { Ban, Check, FileInput, ListChecks, Network, Play, Settings, WandSparkles, X } from "lucide-react";
+import { Ban, Check, ListChecks, Network, Play, Settings, WandSparkles, X } from "lucide-react";
 import { Fragment, type ReactNode, useRef, useState } from "react";
 import type { FocusRequest } from "../../protocol";
 import { cardNameOf, ID_NAMES } from "../../../../src/core/card-names";
@@ -10,7 +10,7 @@ import { Card } from "../ui/card";
 import { SplitButton } from "../split-button";
 import { Progress } from "../ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { type AnnouncedCard, blockedReason, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
+import { type AnnouncedCard, blockedReason, historyWhen, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
 import { BoardButton, Head, RefChips, StatusDot, Tip, TipBadge, TaskProposalTag, useBoardEnv } from "./parts";
 
 /**
@@ -416,7 +416,6 @@ function TaskCardView({ card }: { card: TaskCard }) {
         {runnable ? (
           <BoardButton icon={Play} label="Run" aria={`Run task ${card.name.text}`} variant="default" disabled={runReason !== null} tooltip={runReason} onClick={() => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } })} />
         ) : null}
-        <BoardButton icon={FileInput} label="Open" aria={`Open file of task ${card.name.text}`} variant="ghost" onClick={() => env.context.post({ type: "openFile", path: card.file })} />
       </Actions>
       {card.progress !== null ? (
         <Progress
@@ -431,10 +430,60 @@ function TaskCardView({ card }: { card: TaskCard }) {
   );
 }
 
-export function CardView({ card }: { card: BoardCard }) {
+/**
+ * A Task in the Done column: its status dot, number or identity, Proposal tag and finish time on top, its title (the button that is reached by keyboard), the
+ * `unchanged` and `kept` badges, and its reference chips. It has no buttons and no animated border; a click on the card outside its chips and badges opens the same
+ * details as a Task in Active.
+ */
+function DoneCardView({ card, now }: { card: TaskCard; now: Date }) {
+  const env = useBoardEnv();
+  const when = card.finished === null ? null : historyWhen(card.finished, now);
+  const kept = card.keptBy.length === 0 ? null : `Kept while Drift ${card.keptBy.map((d) => d.text).join(", ")} is open`;
+  return (
+    <Shell
+      card={card}
+      kind="task"
+      label={`Task ${card.name.text}: ${card.title}`}
+      className="cursor-pointer border-l-border"
+      onClick={(event) => {
+        if (leavesCardAlone(event)) return;
+        env.openTask(card.id);
+      }}
+    >
+      <Head>
+        <StatusDot task={card} />
+        <IdTag name={card.name} className="text-[11px] font-semibold text-muted-foreground" />
+        <TaskProposalTag card={card} />
+        {when === null ? null : (
+          <time dateTime={when.time} title={when.title} className="ml-auto text-[11px] text-muted-foreground">
+            {when.text}
+          </time>
+        )}
+      </Head>
+      <h3 className="flex flex-wrap items-center gap-x-1.5 gap-y-1 font-semibold break-words">
+        <button type="button" className="rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => env.openTask(card.id)}>
+          {card.title}
+        </button>
+        {card.unchanged === null ? null : (
+          <TipBadge tone="info" tooltip="Closed without changes" label="Closed without changes">
+            unchanged
+          </TipBadge>
+        )}
+        {kept === null ? null : (
+          <TipBadge tone="warning" tooltip={kept} label={kept}>
+            kept
+          </TipBadge>
+        )}
+      </h3>
+      {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
+    </Shell>
+  );
+}
+
+export function CardView({ card, now = new Date() }: { card: BoardCard; now?: Date }) {
   if (card.kind === "proposal") return <ProposalCardView card={card} />;
   if (card.kind === "drift") return <DriftCardView card={card} />;
-  return <TaskCardView card={card} />;
+  return card.column === "done" ? <DoneCardView card={card} now={now} /> : <TaskCardView card={card} />;
 }
 
 /**

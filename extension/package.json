@@ -44,6 +44,36 @@
         "category": "Trama"
       },
       {
+        "command": "trama.showBoard",
+        "title": "Show Board",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.showDiagram",
+        "title": "Show Diagram",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.showRequirements",
+        "title": "Show Requirements",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.showSpecs",
+        "title": "Show Specs",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.showHistory",
+        "title": "Show History",
+        "category": "Trama"
+      },
+      {
+        "command": "trama.showSettings",
+        "title": "Show Settings",
+        "category": "Trama"
+      },
+      {
         "command": "trama.scan",
         "title": "Scan System",
         "category": "Trama"
@@ -80,7 +110,7 @@
         {
           "id": "trama.home",
           "name": "Trama",
-          "when": "workspaceFolderCount > 0"
+          "type": "webview"
         }
       ],
       "trama-omp-chat-sidebar": [
@@ -92,12 +122,6 @@
         }
       ]
     },
-    "viewsWelcome": [
-      {
-        "view": "trama.home",
-        "contents": "Model, Board and Requirements of your project, in one panel.\n[Open Trama](command:trama.open)"
-      }
-    ],
     "icons": {
       "trama-logo": {
         "description": "Trama logo",

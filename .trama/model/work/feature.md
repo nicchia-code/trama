@@ -2,7 +2,7 @@
 
 The work that comes out of comparing the Model with the code, shown on the Board. Un Task o un Drift nuovo non prende l'identità da un contatore condiviso: ne ha una propria, così due branch che lo creano non si assegnano la stessa. A Task is a unit of work for the agent that the developer can see and ask the agent to run, but not move on the Board. A Drift is a difference between code and Model, or between code and Requirements, that only the developer can decide on. While the agent is preparing a card, an announcement lets the Board show a ghost of it in the card's column; what the agent is doing without a card to deliver shows as a ghost in the editor's status bar.
 
-Il lavoro finito non resta sulla Board come Task: alla fine di ogni corsa l'agente lo racconta in voci di History, una per macro-funzionalità, che la colonna History mostra con la loro data.
+Il lavoro finito resta sulla Board nella colonna Done, solo da guardare, finché il developer non la svuota con Clear, che cancella quei Task per sempre. Alla fine di ogni corsa l'agente lo racconta anche in voci di History, una per macro-funzionalità, che la vista History del pannello mostra con la loro data e che conservano una copia dei Task cancellati che citano.
 
 Le decisioni sui Drift restano del developer: nessuna risoluzione si prepara, si approva o si realizza da sola.
 

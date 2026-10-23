@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
 import type { DriftCard, TaskCard } from "../extension/src/webview/board/logic";
 import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
-import { announcedCard, announcedGhosts, approveBlocker, blockedReason, boardDecisionCount, buildBoard, createsText, driftReworkBlocker, ghostExplanation, NO_MODELS, finishingBlocker, noteTime, runningFor, stoppedFollowingNotice, formatCounts, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { boardDecisionCount } from "../src/core/board-decisions";
+import { announcedCard, announcedGhosts, approveBlocker, blockedReason, buildBoard, createsText, doneGroups, driftReworkBlocker, ghostExplanation, NO_MODELS, finishingBlocker, noteTime, runningFor, stoppedFollowingNotice, formatCounts, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
 import { runBlocker } from "../src/core/design";
 import { dismissBlocker } from "../extension/src/webview/dismiss";
@@ -35,7 +36,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   specsChange: { entries: [], notesBefore: null }, scope: [],
   ...over,
 });
-const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, job: null, prepared: null, title: "Code refunds late", body: "line one\n\nline two\nline three", previous: [], origin: [], unifies: [], unifiedInto: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
+const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, job: null, prepared: null, title: "Code refunds late", body: "line one\n\nline two\nline three", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", created: null, title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], file: "tasks/0012-refunds.md", images: [], ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], unifiedDrifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
@@ -48,10 +49,11 @@ test("groups the snapshot into card columns: Backlog holds the Proposals and the
       tasks: [task({ id: "0001", column: "done" }), task({ id: "0002", column: "todo" }), task({ id: "0003", column: "doing" }), task({ id: "0004", column: "todo" })],
     }),
   );
-  expect(board.map((c) => c.title)).toEqual(["Backlog", "Active"]);
-  expect(board.map((c) => c.id)).toEqual(["backlog", "active"]);
+  expect(board.map((c) => c.title)).toEqual(["Backlog", "Active", "Done"]);
+  expect(board.map((c) => c.id)).toEqual(["backlog", "active", "done"]);
   expect(board[0]?.cards.map((c) => c.key)).toEqual(["proposal:0007", "drift:0003", "proposal:0009"]);
   expect(board[1]?.cards.map((c) => c.key)).toEqual(["task:0002", "task:0003", "task:0004"]);
+  expect(board[2]?.cards.map((c) => c.key)).toEqual(["task:0001"]);
 });
 
 test("a handed-over resolution replaces only its listed open Drift cards", () => {
@@ -64,10 +66,10 @@ test("a handed-over resolution replaces only its listed open Drift cards", () =>
   expect(returnedToDraft[0]!.cards.map((card) => card.key)).toEqual(["proposal:res", "drift:0003", "drift:0004"]);
 });
 
-test("an empty snapshot gives two empty card columns with a hint each", () => {
+test("an empty snapshot gives three empty card columns with a hint each", () => {
   const board = buildBoard(snapshot());
   expect(board.every((c) => c.cards.length === 0 && c.hint.length > 0)).toBe(true);
-  expect(board.map((c) => c.hint)).toEqual(["Nothing to decide", "Nothing active"]);
+  expect(board.map((c) => c.hint)).toEqual(["Nothing to decide", "Nothing active", "Nothing done yet"]);
 });
 
 test("keys differ across kinds that share an ID", () => {
@@ -195,11 +197,12 @@ const design = (id: string, column: TaskView["column"], proposal: string | null 
 const cardsOf = (tasks: TaskView[]) => buildBoard(snapshot({ tasks })).map((c) => c.cards.map((card) => card.key));
 
 
-test("a Task alone from its Proposal, and a Task with no Proposal, stay cards of their own in their own column, carrying their Proposal's tag; a Done one has none", () => {
+test("a Task alone from its Proposal, and a Task with no Proposal, stay cards of their own in their own column, carrying their Proposal's tag, a Done one included (it has no View buttons)", () => {
   const board = buildBoard(snapshot({ tasks: [design("0001", "done", "0005"), design("0002", "doing", "0006"), design("0003", "todo"), task({ id: "0004", column: "todo" })] }));
-  expect(board.map((c) => c.cards.map((card) => card.key))).toEqual([[], ["task:0002", "task:0003", "task:0004"]]);
+  expect(board.map((c) => c.cards.map((card) => card.key))).toEqual([[], ["task:0002", "task:0003", "task:0004"], ["task:0001"]]);
   expect(board[1]?.cards[1]).toMatchObject({ kind: "task", proposal: "0007", proposalTag: { text: "Returns" } });
   expect(board[1]?.cards[2]).toMatchObject({ kind: "task", proposal: null, proposalTag: null });
+  expect(board[2]?.cards[0]).toMatchObject({ kind: "task", proposal: "0005", proposalTag: { text: "Returns" }, views: { diagram: false, requirements: false } });
 });
 
 test("a tag's colour is stable for its label and is one of the six Tailwind colours", () => {
@@ -231,7 +234,7 @@ test("Run all is unavailable while a Task is taken, when no Task is in To do, an
 test("a blocked Task keeps its card in Active, in order, and sits under the Drift on the Drift's card unless an agent has taken it", () => {
   const blockedBy: TaskView["blockedBy"] = [{ kind: "drift", drift: "0003", title: "Refunds differ" }];
   const board = buildBoard(snapshot({ drifts: [drift({ id: "0003" })], tasks: [task({ id: "0001", column: "todo", blockedBy }), task({ id: "0002", column: "todo", blockedBy, agent: true })] }));
-  expect(board.map((c) => c.cards.map((card) => card.key))).toEqual([["drift:0003"], ["task:0001", "task:0002"]]);
+  expect(board.map((c) => c.cards.map((card) => card.key))).toEqual([["drift:0003"], ["task:0001", "task:0002"], []]);
   expect(board[1]?.cards[0]).toMatchObject({ kind: "task", blockedByDrifts: [{ id: "0003", key: "drift:0003" }] });
   expect(board[0]?.cards[0]).toMatchObject({ kind: "drift", blocked: [{ key: "task:0001" }] });
 });
@@ -239,22 +242,22 @@ test("a blocked Task keeps its card in Active, in order, and sits under the Drif
 test("a Task waiting for a fix Task stays in Active with the fix Task, and no card stands for the wait", () => {
   const fix: TaskView["blockedBy"] = [{ kind: "fix", task: "0009", title: "Fix refunds", drift: "0004", driftTitle: "Refunds differ" }];
   const board = buildBoard(snapshot({ tasks: [task({ id: "0001", column: "todo", blockedBy: fix }), task({ id: "0009", column: "doing" })] }));
-  expect(board.map((c) => c.cards.map((card) => card.key))).toEqual([[], ["task:0001", "task:0009"]]);
+  expect(board.map((c) => c.cards.map((card) => card.key))).toEqual([[], ["task:0001", "task:0009"], []]);
   expect(board[1]?.cards[0]).toMatchObject({ kind: "task", waitingFor: [{ id: "0009", column: "doing" }] });
 });
 
-test("the Board tab counts the Backlog cards (Proposals and red Drift cards), not Active, or the Drifts a delivered resolution lists", () => {
+test("the number of cards that wait for a decision counts the Backlog cards (Proposals and red Drift cards), not Active, or the Drifts a delivered resolution lists", () => {
   const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0005", title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", note: null, notBlocking: [] }] });
   const fix: TaskView["blockedBy"] = [{ kind: "fix", task: "0009", title: "Fix refunds", drift: "0004", driftTitle: "Refunds differ" }];
-  const columns = buildBoard(
-    snapshot({
-      proposals: [proposal({ id: "0007", created: "2026-10-01T10:00:00.000Z" }), resolution],
-      drifts: [drift({ id: "0003", created: "2026-10-03T10:00:00.000Z" }), drift({ id: "0004", created: "2026-10-04T10:00:00.000Z" }), drift({ id: "0005" })],
-      tasks: [task({ id: "0001", column: "todo", blockedBy: fix }), task({ id: "0002", column: "todo" }), task({ id: "0009", column: "doing" })],
-    }),
-  );
+  const snap = snapshot({
+    proposals: [proposal({ id: "0007", created: "2026-10-01T10:00:00.000Z" }), resolution],
+    drifts: [drift({ id: "0003", created: "2026-10-03T10:00:00.000Z" }), drift({ id: "0004", created: "2026-10-04T10:00:00.000Z" }), drift({ id: "0005" })],
+    tasks: [task({ id: "0001", column: "todo", blockedBy: fix }), task({ id: "0002", column: "todo" }), task({ id: "0009", column: "doing" })],
+  });
+  const columns = buildBoard(snap);
   expect(columns[0]?.cards.map((card) => card.key)).toEqual(["proposal:0007", "proposal:res", "drift:0003", "drift:0004"]);
-  expect(boardDecisionCount(columns)).toBe(4);
+  expect(boardDecisionCount(snap)).toBe(4);
+  expect(boardDecisionCount(snap)).toBe(columns[0]?.cards.length ?? 0);
 });
 
 const announcement = (over: Partial<AnnouncementView> = {}): AnnouncementView => ({ id: "abc123", kind: "proposal", title: "Refunds", phase: "preparing", notes: [], announced: "2026-01-01T10:00:00.000Z", ...over });
@@ -381,7 +384,7 @@ test("the notice of a withdrawn Resolve Drifts ghost names a Proposal, and a wit
 
 test("ghosts are not cards: the columns and what awaits a decision ignore them", () => {
   const snap = snapshot({ announcements: [announcement(), announcement({ id: "t00001", kind: "task" })] });
-  expect(buildBoard(snap).map((c) => c.cards.length)).toEqual([0, 0]);
+  expect(buildBoard(snap).map((c) => c.cards.length)).toEqual([0, 0, 0]);
 });
 
 const NUMBERS = { proposal: { "0007": "P1" }, task: { "0012": "T3", "0013": "T4" }, drift: { "0003": "D2" } };
@@ -416,7 +419,7 @@ test("an open resolution's rows list its Drifts, and no card is made for those D
   expect(cards[0]).toMatchObject({ resolves: [{ drift: "0003" }, { drift: "0044" }] });
 });
 
-test("a live card is written by its short number; a Done Task has no card on the Board", () => {
+test("a live card is written by its short number; a Done Task keeps the number it still has, or its identity", () => {
   const board = buildBoard(
     snapshot({
       numbers: NUMBERS,
@@ -425,13 +428,14 @@ test("a live card is written by its short number; a Done Task has no card on the
       tasks: [task({ id: "0012" }), task({ id: "0099", column: "done" })],
     }),
   );
-  const [backlog, active] = board;
+  const [backlog, active, done] = board;
   expect(backlog?.cards.map((c) => (c.kind === "proposal" || c.kind === "drift" ? { heading: c.heading, name: c.name } : null))).toEqual([
     { heading: "Proposal P1", name: { text: "P1", isNumber: true } },
     { heading: "Drift D2", name: { text: "D2", isNumber: true } },
   ]);
   expect(active?.cards[0]).toMatchObject({ kind: "task", id: "0012", name: { text: "T3", isNumber: true } });
-  expect(board).toHaveLength(2);
+  expect(done?.cards[0]).toMatchObject({ kind: "task", id: "0099", name: { text: "0099", isNumber: false } });
+  expect(board).toHaveLength(3);
 });
 
 test("blockers, requirements and the reasons that name them use the numbers, while their targets stay the identities", () => {
@@ -586,4 +590,55 @@ test("the worst Resolve and Dismiss disabling reasons of a Drift card stay withi
 test("a note at local midnight reads 00:05, never 24:05", () => {
   const midnight = new Date(2026, 0, 2, 0, 5).toISOString();
   expect(noteTime(midnight, "en-GB")).toBe("00:05");
+});
+
+describe("the Done column", () => {
+  const done = (id: string, finished: string | null, over: Partial<TaskView> = {}) => task({ id, column: "done", finished, created: `2026-09-${id.slice(-2)}T10:00:00.000Z`, ...over });
+  const keys = (tasks: TaskView[], drifts: DriftView[] = []) => buildBoard(snapshot({ tasks, drifts }))[2]?.cards.map((card) => card.key);
+
+  test("lists every Done Task, the latest arrival first, and those with no instant after all the others in reverse creation order", () => {
+    expect(
+      keys([
+        done("0010", null),
+        done("0011", "2026-10-01T10:00:00.000Z"),
+        done("0012", "2026-10-03T10:00:00.000Z"),
+        done("0013", null),
+        done("0014", "2026-10-02T10:00:00.000Z"),
+        done("0015", "2026-10-03T10:00:00.000Z"),
+        task({ id: "0016", column: "todo" }),
+      ]),
+    ).toEqual(["task:0015", "task:0012", "task:0014", "task:0011", "task:0013", "task:0010"]);
+  });
+
+  test("a Task closed without changes is a card too, and carries its note", () => {
+    const [card] = buildBoard(snapshot({ tasks: [done("0010", "2026-10-01T10:00:00.000Z", { unchanged: "Already done" })] }))[2]?.cards ?? [];
+    expect(card).toMatchObject({ kind: "task", unchanged: "Already done", finished: "2026-10-01T10:00:00.000Z", keptBy: [] });
+  });
+
+  test("a Task an open Drift names as origin or as the Task that fixes its code is kept while that Drift is open, the Drifts in creation order", () => {
+    const numbers = { proposal: {}, task: {}, drift: { "0003": "D3", "0007": "D7" } };
+    const board = buildBoard(
+      snapshot({
+        numbers,
+        tasks: [done("0010", "2026-10-01T10:00:00.000Z"), done("0011", "2026-10-01T11:00:00.000Z"), done("0012", "2026-10-01T12:00:00.000Z")],
+        drifts: [drift({ id: "0007", created: "2026-10-02T10:00:00.000Z", origin: ["0010"], task: "0011" }), drift({ id: "0003", created: "2026-10-01T10:00:00.000Z", origin: ["0010"] })],
+      }),
+    );
+    const names = (id: string) => board[2]?.cards.find((card) => card.id === id && card.kind === "task");
+    expect(names("0010")).toMatchObject({ keptBy: [{ text: "D3" }, { text: "D7" }] });
+    expect(names("0011")).toMatchObject({ keptBy: [{ text: "D7" }] });
+    expect(names("0012")).toMatchObject({ keptBy: [] });
+    // Once no open Drift names the Task, the badge is gone.
+    expect(buildBoard(snapshot({ numbers, tasks: [done("0010", null)], drifts: [] }))[2]?.cards[0]).toMatchObject({ keptBy: [] });
+  });
+
+  test("doneGroups groups by local day of the end with the headings of the History, and Tasks with no instant go last under Earlier", () => {
+    const now = new Date(2026, 9, 20, 15, 0);
+    const at = (day: number, hour: number) => new Date(2026, 9, day, hour, 0).toISOString();
+    const cards = buildBoard(snapshot({ tasks: [done("0010", at(20, 9)), done("0011", at(20, 8)), done("0012", at(19, 12)), done("0013", at(3, 12)), done("0014", null)] }))[2]?.cards ?? [];
+    const groups = doneGroups(cards, now, "en-US");
+    expect(groups.map((g) => g.heading)).toEqual(["Today · 2", "Yesterday · 1", "October 3, 2026 · 1", "Earlier · 1"]);
+    expect(groups.map((g) => g.cards.map((c) => c.id))).toEqual([["0010", "0011"], ["0012"], ["0013"], ["0014"]]);
+    expect(doneGroups([], now)).toEqual([]);
+  });
 });

@@ -56,8 +56,9 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnica del controllo di esecuzione** (`execution-check.md`): Usa quando costruisci nell'estensione il controllo di esecuzione, la registrazione del processo di omp, la domanda fra finestre su chi segue un Task o `trama task check`. Sections: `time`, `agent.CHECK_TASK`.
 - **Tecnologia generale** (`general.md`): Usa sempre quando lavori sulla tecnologia: vincoli generali e piattaforme. Sections: `General`.
 - **Tecnologia delle note dei ghost** (`ghost-notes.md`): Usa quando lavori al codice delle note dei ghost: scrittura nel nucleo, quadro della Board, modale dei dettagli e skill. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
-- **Tecnologia della History** (`history.md`): Usa quando costruisci le voci di History: comandi, lettura nel quadro, modale dei dettagli e skill che le scrivono. Sections: `voce-history`.
+- **Tecnologia della History** (`history.md`): Usa quando costruisci le voci di History (comandi, quadro, modale, skill che le scrivono) o Clear della colonna Done. Sections: `voce-history`, `developer.CLEAR_DONE`.
 - **Tecnologia dei file di istruzioni** (`instruction-files.md`): Usa quando lavori al codice che esclude i file di istruzioni degli agenti nei lanci di omp: overlay di configurazione e ricerca dei file. Sections: `agent-terminal/Agent running`.
+- **Tecnologia del menu laterale** (`menu-laterale.md`): Usa per la tecnologia del menu laterale di Trama: vista webview, messaggi con l'host, badge e comandi delle viste. Sections: `menu-laterale`.
 - **Tecnologia di agenti e modelli** (`models.md`): Usa per agenti del terminale, ruoli dei modelli, limite dei sotto-agenti e advisor di omp. Sections: `agent-launching`.
 - **omp Chat** (`omp-chat.md`): Usa quando costruisci o cambi omp Chat: il client ACP verso omp, la vista della barra laterale secondaria e la sua impostazione. Sections: `omp-chat`, `omp-chat-conversation`.
 - **Tecnologia del pannello** (`panel.md`): Usa per la tecnologia del pannello e degli ingressi di Trama nell'editor: barra delle attività, barra di stato, icone. Sections: `panel`.

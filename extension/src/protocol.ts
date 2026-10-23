@@ -82,6 +82,8 @@ export type ToHost =
   | { type: "setProposalModel"; proposal: string; model: string }
   /** The developer pressed «Dismiss Drift»: the host asks for confirmation in a modal dialog, then closes the Drift without changes, discarding its attached Proposal. */
   | { type: "dismissDrift"; id: string }
+  /** Clear, at the bottom of the Done column: the host deletes those Tasks (by permanent identity) that are still Done. Refused while a Run launched by Trama is going, and the host never asks for confirmation. */
+  | { type: "clearDone"; tasks: string[] }
   /** The developer chose «Rework with feedback…» on an open Drift: the host asks for the feedback in an input box, then launches the resolution agent on that one Drift with it. */
   | { type: "reworkDrift"; drift: string }
   /** The Settings tab was opened: the host answers with the model names of omp (`modelSuggestions`). With `ompPath` they are for the omp at that path instead of the saved one, and the answer says so: this is how the wizard suggests the models of a path it has not saved yet. */
@@ -110,9 +112,12 @@ export type ToHost =
    * The developer confirmed the summary of the wizard. `values` holds only the keys that changed, in the order of the steps; `excluded` the
    * paths left out of the import. The host saves the keys, then (first setup) initializes `root`, then carries on with `choice`.
    */
-  | { type: "confirmSetup"; mode: SetupMode; choice?: SetupChoice; root?: string; values: { key: string; value: SettingValue }[]; excluded: string[] };
+  | { type: "confirmSetup"; mode: SetupMode; choice?: SetupChoice; root?: string; values: { key: string; value: SettingValue }[]; excluded: string[] }
+  /** The panel now shows `view`: the host tells the side menu, which highlights that entry. */
+  | { type: "viewChanged"; view: ViewName };
 
-export type ViewName = "getstarted" | "diagram" | "board" | "requirements" | "specs" | "settings";
+/** The views of the panel, which has no tab bar: the side menu, the commands `Trama: Show <view>` and the internal links choose among them. Without a project only `getstarted` and `settings` exist. */
+export type ViewName = "getstarted" | "diagram" | "board" | "requirements" | "specs" | "history" | "settings";
 
 /** What a View button or a reference chip asks a tab to focus: a Proposal in Backlog, a Task in Active, or one reference (the focus of a Task that had only that reference). */
 export type FocusRequest = { kind: "proposal"; id: string } | { kind: "task"; id: string } | { kind: "ref"; ref: string };
@@ -133,11 +138,13 @@ export interface NavigateOptions {
 /** Host -> webview. */
 export type ToWebview =
   /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `unify.blockers` are all the reasons Unify Drifts is unavailable, in order (empty when it works), and `unify.unifying` the open Drifts the running Unify Drifts agent works on. `models` carries the models chosen for the Proposals that carry Tasks. `scans.advisorScanner`: the Advisor Scanner is on, so the Scan buttons are disabled. */
-  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; scans: { advisorScanner: boolean } }
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; scans: { advisorScanner: boolean } }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** The run control stopped following a job or released a Task: the Board shows `Trama stopped following <subject>: <reason>.` (`ui#agents`). */
   | { type: "stoppedFollowing"; subject: string; reason: string }
+  /** A notice at the top of the Board, closable like the others: a Clear that was refused or failed says why. */
+  | { type: "notice"; text: string }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */
   | { type: "error"; message: string }
   /** Whether the folder has a Trama project: without one only Get Started and Settings are shown. */

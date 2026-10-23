@@ -67,8 +67,8 @@ export function ProposalBodyDialog({ card, onClose }: { card: ProposalCard | und
 }
 
 /**
- * The read-only details of a Task in Active: its title with its short number, its Proposal's tag, its references as links,
- * its body (or that it has none) and its image previews. It follows the Task: it closes when the Task leaves Active.
+ * The read-only details of a Task in Active or Done: its title with its short number, its Proposal's tag, its references as links,
+ * its body (or that it has none) and its image previews. It follows the Task from Active to Done: it closes when the Task is in neither (Clear deleted it).
  */
 export function TaskDetailsDialog({ card, onClose }: { card: TaskCard | undefined; onClose: () => void }) {
   const env = useBoardEnv();

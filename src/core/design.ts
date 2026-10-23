@@ -34,6 +34,9 @@ export function runBlocker(tasks: { id: string; column: TaskColumn; agent: boole
   return joinReasons([takenBlocker(tasks, name), idle]);
 }
 
+/** Why every Run is disabled while one launched by Trama is going; the Board's Clear says it too. */
+export const RUN_IN_PROGRESS = "A run is in progress";
+
 /** The reasons that hold, in the order given, as one text (each reason a sentence); null when none holds. */
 export function joinReasons(reasons: readonly (string | null)[]): string | null {
   const held = reasons.filter((r): r is string => r !== null);

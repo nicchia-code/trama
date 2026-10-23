@@ -7,6 +7,18 @@ import { canonicalCardId, instantField, type Raw, stringList } from "./schema";
 import { createdNow, newCardId, type Project, readDocument, slugify } from "./store";
 import { getTask, type Task } from "./work";
 
+/** The copy of a Task that Clear deleted, kept by each History entry that cites it: what the entry shows once the Task is gone. */
+export interface ClearedTask {
+  title: string;
+  /** The Proposal the Task came from; null when it had none. */
+  proposal: string | null;
+  /** The text of the tag the Board showed on the Task; null when it showed none. */
+  tag: string | null;
+  /** When the Task arrived in Done, UTC ISO 8601; null when unknown. */
+  finished: string | null;
+  refs: string[];
+}
+
 /** A History entry: a macro-feature summary of the Tasks finished for it. */
 export interface HistoryEntry {
   id: string;
@@ -19,6 +31,8 @@ export interface HistoryEntry {
   summary: string;
   /** Identities of the Tasks cited, in the order they were added. */
   tasks: string[];
+  /** The copies Clear wrote, by Task identity; every key is also in `tasks`. Empty until Clear deletes a cited Task. */
+  cleared: Record<string, ClearedTask>;
 }
 
 /** A History file that cannot be read; the other entries stay readable. */
@@ -34,7 +48,7 @@ export interface HistoryRead {
 
 const SUMMARY_MAX = 280;
 const ID = /^[a-z0-9]{8}$/;
-const FIELDS = ["created", "updated", "summary", "tasks"];
+const FIELDS = ["created", "updated", "summary", "tasks", "cleared"];
 
 const historyDir = (p: Project) => join(p.dir, "history");
 
@@ -57,6 +71,30 @@ function summaryProblems(summary: string): string[] {
 
 function refusal(what: string, problems: string[]): TramaError {
   return new TramaError(`${what}:\n${problems.map((x) => `- ${x}`).join("\n")}`);
+}
+
+/** The `cleared` field: a map from a Task identity the entry cites to its copy; absent is none. */
+function clearedField(raw: unknown, tasks: readonly string[], path: string): Record<string, ClearedTask> {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new TramaError(`${path}: "cleared" must map Task identities to their copies`);
+  const out: Record<string, ClearedTask> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const id = canonicalCardId(key);
+    if (!tasks.includes(id)) throw new TramaError(`${path}: "cleared" holds Task ${key}, which "tasks" does not cite`);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TramaError(`${path}: the copy of Task ${key} must be a map`);
+    const copy = value as Raw;
+    for (const field of Object.keys(copy)) if (!["title", "proposal", "tag", "finished", "refs"].includes(field)) throw new TramaError(`${path}: the copy of Task ${key} has an unknown field "${field}"`);
+    const title = copy["title"];
+    if (typeof title !== "string") throw new TramaError(`${path}: the copy of Task ${key} needs a "title" as text`);
+    const text = (field: string): string | null => {
+      const v = copy[field];
+      if (v === undefined || v === null) return null;
+      if (typeof v !== "string") throw new TramaError(`${path}: "${field}" of the copy of Task ${key} must be text`);
+      return v;
+    };
+    out[id] = { title, proposal: text("proposal"), tag: text("tag"), finished: instantField(copy, "finished", path), refs: stringList(copy, "refs", path) };
+  }
+  return out;
 }
 
 function readEntry(path: string, name: string): HistoryEntry {
@@ -87,6 +125,7 @@ function readEntry(path: string, name: string): HistoryEntry {
     updated,
     summary: summary.trim(),
     tasks,
+    cleared: clearedField(doc.data["cleared"], tasks, path),
   };
 }
 
@@ -154,7 +193,12 @@ function resolveTasks(p: Project, refs: string[], cited: readonly string[]): { i
 
 /** Writes an entry to its own file, atomically; the identity and the file name are kept as they are. */
 export function saveHistory(entry: HistoryEntry): void {
-  const yaml = stringify({ created: entry.created, updated: entry.updated, summary: entry.summary, tasks: entry.tasks }, { lineWidth: 0 }).trimEnd();
+  const data: Record<string, unknown> = { created: entry.created, updated: entry.updated, summary: entry.summary, tasks: entry.tasks };
+  if (Object.keys(entry.cleared).length > 0)
+    data["cleared"] = Object.fromEntries(
+      Object.entries(entry.cleared).map(([id, c]) => [id, { title: c.title, ...(c.proposal === null ? {} : { proposal: c.proposal }), ...(c.tag === null ? {} : { tag: c.tag }), ...(c.finished === null ? {} : { finished: c.finished }), refs: c.refs }]),
+    );
+  const yaml = stringify(data, { lineWidth: 0 }).trimEnd();
   const text = `---\n${yaml}\n---\n# ${entry.title}\n${entry.body === "" ? "" : `\n${entry.body}\n`}`;
   mkdirSync(dirname(entry.path), { recursive: true });
   writeFileAtomic(entry.path, text);
@@ -173,7 +217,7 @@ export function addHistory(p: Project, input: { title: string; summary: string; 
   const name = `${id}-${slugify(title)}.md`;
   const path = join(historyDir(p), name);
   const body = (input.body ?? "").trim();
-  const entry: HistoryEntry = { id, name, path, title, body, created: now, updated: now, summary, tasks: resolved.ids };
+  const entry: HistoryEntry = { id, name, path, title, body, created: now, updated: now, summary, tasks: resolved.ids, cleared: {} };
   saveHistory(entry);
   return entry;
 }

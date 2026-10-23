@@ -33,8 +33,8 @@ beforeAll(() => {
 
 afterEach(cleanup);
 
-// Every tab stays mounted and only the current one shows, so the queries look at the tab on view.
-const onView = () => within(document.querySelector('[role="tabpanel"][data-state="active"]') as HTMLElement);
+// Every view stays mounted and only the current one shows, so the queries look at the view on show.
+const onView = () => within(document.querySelector("[data-view-name]:not([hidden])") as HTMLElement);
 const heading = () => onView().getByRole("heading", { level: 2 }).textContent;
 const press = (name: string | RegExp) => fireEvent.click(onView().getByRole("button", { name }));
 const steps = () => within(onView().getByRole("list", { name: "Steps" })).getAllByRole("listitem").map((item) => item.textContent);
@@ -44,13 +44,13 @@ const OMP_OK = { type: "agentCheck", ompPath: "", state: "done", ok: true, missi
 
 function panel(hasProject: boolean) {
   const posted: ToHost[] = [];
-  const store = createShellStore({ view: hasProject ? "diagram" : "getstarted", hasProject, decisions: 0, error: null, diagnostics: [], views: {} as never, questions: null });
+  const store = createShellStore({ view: hasProject ? "board" : "getstarted", hasProject, error: null, diagnostics: [], views: {} as never, questions: null });
   const slotOf = (view: ViewName) => (node: ReactNode) => store.set({ views: { ...store.get().views, [view]: node } });
   const navigate = (view: ViewName) => store.set({ view });
   const context: ViewContext = { post: (message) => posted.push(message), navigate, openLink: () => {} };
   const settings = mountSettings(slotOf("settings"), context, startTheme());
   const getStarted = mountGetStarted(slotOf("getstarted"), context);
-  render(<Shell store={store} navigate={navigate} openModelFile={() => {}} />);
+  render(<Shell store={store} openModelFile={() => {}} />);
   act(() => {
     settings.projectPresent(hasProject);
     getStarted.projectPresent(hasProject);
@@ -58,13 +58,15 @@ function panel(hasProject: boolean) {
     getStarted.receiveSettings({ type: "settings", schema, values: {} });
     getStarted.receiveFolders({ type: "workspaceFolders", folders: [FOLDER] });
   });
-  const tab = (name: string | RegExp) => fireEvent.mouseDown(screen.getByRole("tab", { name }), { button: 0, ctrlKey: false });
+  /** The side menu or a command choosing a view. */
+  const tab = (name: string) => act(() => store.set({ view: ({ "Get Started": "getstarted", Settings: "settings", Requirements: "requirements" } as Record<string, ViewName>)[name] as ViewName }));
   return { posted, store, settings, getStarted, tab };
 }
 
 test("in a folder without a project Get Started is the wizard of the first setup with the notice on top of every step", () => {
   panel(false);
-  expect(screen.getByRole("tab", { name: "Get Started" })).not.toBeNull();
+  expect(screen.queryByRole("tab")).toBeNull();
+  expect(document.querySelector("[data-view-name]:not([hidden])")?.getAttribute("data-view-name")).toBe("getstarted");
   expect(onView().getByText(/Trama will create a/)).not.toBeNull();
   expect(heading()).toBe("Path");
   fireEvent.click(onView().getByRole("radio", { name: /Start from Scratch/ }));
@@ -112,7 +114,7 @@ test("Guided setup opens the wizard of the settings in place of the form; Cancel
   expect(store.get().view).toBe("settings");
 });
 
-test("the wizard of the settings keeps its choices while another tab is shown", () => {
+test("the wizard of the settings keeps its choices while another view is shown", () => {
   const { store, tab, settings } = panel(true);
   act(() => store.set({ view: "settings" }));
   press(/Guided setup/);
@@ -125,7 +127,7 @@ test("the wizard of the settings keeps its choices while another tab is shown", 
   expect(heading()).toBe("Models");
 });
 
-test("the Empty Model wizard opens in the Settings tab with the path chosen and no Path step; Cancel and a successful confirmation go back to the Diagram", () => {
+test("the Empty Model wizard opens in the Settings tab with the path chosen and no Path step; Cancel and a successful confirmation go back to the Board", () => {
   const { settings, store, posted } = panel(true);
   const navigated: string[] = [];
   store.subscribe(() => navigated.push(store.get().view));
@@ -137,7 +139,7 @@ test("the Empty Model wizard opens in the Settings tab with the path chosen and 
   // Nothing is initialized or launched by opening it.
   expect(posted.some((message) => message.type === "confirmSetup" || message.type === "launch")).toBe(false);
   press("Cancel");
-  expect(store.get().view).toBe("diagram");
+  expect(store.get().view).toBe("board");
   expect(onView().queryByRole("list", { name: "Steps" })).toBeNull();
 
   act(() => {
@@ -146,7 +148,7 @@ test("the Empty Model wizard opens in the Settings tab with the path chosen and 
   });
   expect(steps()).toEqual(["omp", "Models", "Project", "Advanced", "Summary"]);
   act(() => settings.receiveResult({ type: "guidedSetupResult", ok: true, error: null }));
-  expect(store.get().view).toBe("diagram");
+  expect(store.get().view).toBe("board");
 });
 
 test("a failed confirmation of the Empty Model wizard shows the reason in the summary and stays in the Settings tab", () => {

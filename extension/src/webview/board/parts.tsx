@@ -11,11 +11,15 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { type TagColour, tagColour, type TaskCard } from "./logic";
 
-/** What every card of the Board needs from the page that holds it. */
-export interface BoardEnv {
+/** What the parts shared by the Board and the History view (reference chips, History entries) need from the view that holds them. */
+export interface ViewEnv {
   context: ViewContext;
   /** The short numbers of the snapshot being drawn. */
   numbers: CardNumbers;
+}
+
+/** What every card of the Board needs from the page that holds it. */
+export interface BoardEnv extends ViewEnv {
   /** Why a single Task's Run is disabled beyond its own waiting: a Run in progress or Drift resolution. Null when none holds. */
   runReason: string | null;
   /** Scrolls to a card, by its key, and focuses it. */
@@ -35,6 +39,18 @@ export interface BoardEnv {
 }
 
 export const BoardEnvContext = createContext<BoardEnv | null>(null);
+
+/** Given by the views that have no Board around them (History). */
+export const ViewEnvContext = createContext<ViewEnv | null>(null);
+
+/** The environment of a part used by the Board and by other views: the view's own, or the Board's. */
+export function useViewEnv(): ViewEnv {
+  const view = useContext(ViewEnvContext);
+  const board = useContext(BoardEnvContext);
+  const env = view ?? board;
+  if (env === null) throw new Error("A part of the Board is drawn outside its view");
+  return env;
+}
 
 export function useBoardEnv(): BoardEnv {
   const env = useContext(BoardEnvContext);
@@ -162,7 +178,7 @@ export function TaskProposalTag({ card }: { card: TaskCard }) {
 
 /** Links to the Diagram, to Requirements or to Specs, one chip per reference, each opening that tab with the focus of the reference. `navigate` replaces the page's own navigation. */
 export function RefChips({ refs, navigate }: { refs: string[]; navigate?: ViewContext["navigate"] }) {
-  const { context } = useBoardEnv();
+  const { context } = useViewEnv();
   const go = navigate ?? context.navigate;
   return (
     <div className="flex flex-wrap gap-1">

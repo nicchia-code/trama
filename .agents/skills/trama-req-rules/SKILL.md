@@ -50,5 +50,5 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole del wizard di setup** (`setup-wizard.md`): Usa quando implementi i passi, i salvataggi, le cartelle escluse e la conferma del wizard di setup. Sections: `setup-wizard`.
 - **Task progress rules** (`task-progress.md`): Use when implementing the percentage the agent declares on a Task it has taken. Sections: `task/Taken by the agent`.
 - **Regole dei Task** (`tasks.md`): Usa quando implementi le regole dei Task. Sections: `task`.
-- **Regole dell'attesa del turno e della History** (`turn-history.md`): Usa per l'attesa del turno sulle schede e le voci di History. Sections: `voce-history`, `panel/Board`.
+- **Regole dell'attesa del turno, della History e di Clear** (`turn-history.md`): Usa per l'attesa del turno sulle schede, le voci di History e Clear della colonna Done. Sections: `voce-history`, `panel/Board`, `developer.CLEAR_DONE`.
 - **Unify Drifts** (`unify-drifts.md`): Usa quando implementi Unify Drifts: quali Drift si uniscono, quando si può lanciare, l'istruzione all'agente, ciò che l'agente fa e le regole del Drift unificato e dei Drift uniti. Sections: `developer.UNIFY_DRIFTS`, `agent.UNIFY_DRIFTS`.

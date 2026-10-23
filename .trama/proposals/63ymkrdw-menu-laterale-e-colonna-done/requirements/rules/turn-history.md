@@ -1,0 +1,25 @@
+---
+description: "Usa per l'attesa del turno sulle schede, le voci di History e Clear della colonna Done."
+---
+# Regole dell'attesa del turno, della History e di Clear
+
+## voce-history
+- Una voce si scrive o si aggiorna solo con i comandi `trama history` (vedi `tech#voce-history`); non è riservata al developer e la scrive l'agente. Trama non scrive mai voci da sola e non ne scrive per il lavoro finito prima che History esistesse.
+- Scrittura e aggiornamento sono rifiutati, senza cambiare nulla e nominando ogni problema, quando: il titolo è vuoto o su più righe; il riassunto è vuoto, su più righe o più lungo di 280 caratteri; nessun Task è citato (solo per una voce nuova); un Task citato non esiste, non è Done o è chiuso senza modifiche (`unchanged`). Un Task può essere citato da più voci. Il testo completo può essere vuoto.
+- L'aggiornamento può cambiare titolo, riassunto e testo e aggiunge i Task nominati a quelli già citati, senza doppioni; non toglie mai un Task. La data della voce, scritta o aggiornata, è l'istante del comando; anche un aggiornamento che non cambia nulla rinnova la data.
+- Alla fine di una corsa, la skill `trama-implement` considera i Task portati in Done dalla corsa senza `unchanged` e li racconta tutti, almeno una volta: per ognuno o lo cita in una voce nuova o in una voce esistente aggiornata. Raggruppa per macro-funzionalità leggendo titoli, corpi, Proposal dei Task e le voci già scritte (`trama history list`); quando una voce racconta già la stessa funzionalità la aggiorna invece di scriverne una nuova. Scrive titolo, riassunto e testo nella lingua che l'istruzione chiede. Vale per ogni corsa, anche con la verifica fallita; una corsa interrotta prima di questo passo non scrive voci.
+- Le voci non contano nel numero della voce Board del menu laterale e non hanno un numero breve.
+- Un aggiornamento non tocca le copie dei Task cancellati da Clear che la voce conserva; un Task cancellato non si può aggiungere a nessuna voce, perché non esiste più.
+
+## panel/Board
+- Una scheda consegnata da un agente aspetta la fine del turno di quell'agente: una Proposal quando è consegnata (anche dopo essere tornata a Draft), un Drift o un Task quando è archiviato. L'agente è quello del terminale da cui arriva il comando (`TRAMA_TERMINAL`), con i suoi sotto-agenti; una conversazione di omp Chat vale come il terminale che sostituisce. La fine del turno è l'hook a riposo, la fine del comando che Trama ha scritto (o del processo della conversazione) o la chiusura di quel terminale (o della conversazione). È una fine anche il controllo di esecuzione che smette di seguire quel terminale (`rules#time`). I segnali ripetuti non cambiano nulla.
+- Una scheda non aspetta, e i suoi pulsanti seguono soltanto le loro regole di prima, quando il terminale da cui arriva è un terminale di Trama senza hook (il modulo di omp manca), quando arriva senza terminale, o quando l'editor che la vede nascere non è quello che segue l'agente. L'attesa non ha timer di inattività e non sopravvive alla chiusura dell'editor.
+- Mentre una scheda aspetta, sono indisponibili: `Approve` e `Reject` della Proposal, sulla Board e nei dettagli del Diagramma; `Resolve` e `Dismiss Drift` del Drift, e `Dismiss Drift` nei dettagli del Diagramma; il `Run` del Task. Il motivo `The agent is still finishing` viene prima di ogni altro motivo dello stesso pulsante. `Run all` e `+ Add Work Item` non cambiano, e una richiesta dal pannello che arriva comunque all'editor per una scheda che aspetta è rifiutata con lo stesso motivo. La riga di comando non aspetta mai.
+
+## developer.CLEAR_DONE
+- Clear vale solo dal pannello, dal pulsante in fondo alla colonna Done; nessun comando della riga di comando cancella un Task. Non chiede conferma.
+- Clear cancella ogni Task Done che la colonna mostrava al clic, chiuso senza modifiche compreso, tranne quelli nominati da un Drift aperto (non risolto, non dismesso e non unito in un altro) come origine (`task`, o una delle origini di un Drift unificato) o come Task di correzione. Un Task che nel frattempo ha lasciato Done non è cancellato.
+- Mentre un Run lanciato da Trama non è finito, Clear non cancella nulla: il pulsante è disabilitato e una richiesta che arriva comunque all'editor è rifiutata con il motivo `A run is in progress`. Le altre attività dell'agente (scan, design, import, risoluzione, unificazione, Quick Task, Ask more) non fermano Clear.
+- Prima di cancellare un Task, Clear scrive la sua copia in ogni voce di History che lo cita (`data#voce-history`); un Task che non riesce a copiare non è cancellato.
+- Un Task cancellato che era finito dopo l'ultimo lancio dello scan del Sistema continua a contare nel numero di `Scan System` finché il prossimo lancio non riporta il numero a zero, come se fosse ancora in Done; un Task con `unchanged` non conta, come prima.
+- Clear libera il numero breve di ogni Task cancellato. Un Task cancellato non torna: nessun comando lo ripristina, salvo il controllo di versione del progetto.

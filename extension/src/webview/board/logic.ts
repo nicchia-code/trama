@@ -3,6 +3,7 @@ import type { FileChange } from "../../../../src/core/diff";
 import { ghostColumn } from "../../../../src/core/ghost-column";
 import { formatDiagnostic } from "../../../../src/core/model";
 import { compareByCreation } from "../../../../src/core/schema";
+import { driftsWithCard } from "../../../../src/core/board-decisions";
 import { joinReasons } from "../../../../src/core/design";
 import type { Blocker } from "../../../../src/core/blocking";
 import type { AnnouncementView, DriftView, HistoryView, ProposalTag, ProposalView, Snapshot, TaskImageView, TaskView } from "../../../../src/core/snapshot";
@@ -16,26 +17,29 @@ import type { BoardModels, BoardProposalModel } from "../../host/proposal-models
 /** The models of no Proposal: the Board draws them as none chosen and none choosable. */
 export const NO_MODELS: BoardModels = { proposals: {} };
 
-/** The columns that hold cards. */
-export type CardColumnId = "backlog" | "active";
+/** The columns of the Board, in order: all hold cards. */
+export type CardColumnId = "backlog" | "active" | "done";
 
-export type ColumnId = CardColumnId | "history";
+export type ColumnId = CardColumnId;
 
-export const CARD_COLUMNS: readonly CardColumnId[] = ["backlog", "active"];
+export const CARD_COLUMNS: readonly CardColumnId[] = ["backlog", "active", "done"];
 
-export const COLUMN_ORDER: readonly ColumnId[] = ["backlog", "active", "history"];
+export const COLUMN_ORDER: readonly ColumnId[] = CARD_COLUMNS;
 
 export const COLUMN_TITLES: Record<ColumnId, string> = {
   backlog: "Backlog",
   active: "Active",
-  history: "History",
+  done: "Done",
 };
 
 export const EMPTY_HINTS: Record<ColumnId, string> = {
   backlog: "Nothing to decide",
   active: "Nothing active",
-  history: "Nothing done in this period",
+  done: "Nothing done yet",
 };
+
+/** The empty text of the History view for the period it shows. */
+export const HISTORY_EMPTY = "Nothing done in this period";
 
 /** The key of a card on the Board: its kind and its ID. */
 const cardKey = (kind: "drift" | "task", id: string) => `${kind}:${id}`;
@@ -242,6 +246,12 @@ export interface TaskCard {
   column: Column;
   /** Which View buttons the card has: each shows only when its tab would have at least one step of the Task's focus (`rules#focus`). */
   views: FocusViews;
+  /** When the Task arrived in Done, UTC ISO 8601; null outside Done and on Tasks that reached Done before the instant was kept. */
+  finished: string | null;
+  /** The note of a Task closed without changes; null otherwise. */
+  unchanged: string | null;
+  /** The open Drifts that name the Task as their origin or as the Task that fixes their code, in creation order: Clear leaves the Task in Done while any is open. */
+  keptBy: CardName[];
 }
 
 export type Card = ProposalCard | DriftCard | TaskCard;
@@ -378,7 +388,7 @@ export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers, dismis
   };
 }
 
-export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, finishing: string | null = null, views: FocusViews = NO_VIEWS, peers: readonly TaskView[] = []): TaskCard {
+export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, finishing: string | null = null, views: FocusViews = NO_VIEWS, peers: readonly TaskView[] = [], keptBy: CardName[] = []): TaskCard {
   const name = namerOf(numbers);
   const blockedByDrifts = t.blockedBy.flatMap((b): DriftBlocker[] => (b.kind === "drift" ? [{ id: b.drift, key: cardKey("drift", b.drift), name: cardNameOf(numbers, "drift", b.drift), title: b.title }] : []));
   const waitingFor = t.blockedBy.flatMap((b): FixWait[] => {
@@ -410,6 +420,9 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, finishin
     column: t.column,
     finishing,
     views,
+    finished: t.finished,
+    unchanged: t.unchanged,
+    keptBy,
   };
 }
 
@@ -454,16 +467,37 @@ export function resolveBlocker(driftId: string, finishingDrifts: readonly string
 /** Sorts items by creation, oldest first, as the Board Requirement says. */
 const byCreation = <T extends { id: string; created: string | null }>(items: T[]): T[] => items.sort(compareByCreation);
 
+/** The open Drifts (given in the order the Snapshot carries them) by the Tasks they name, as origin or as the Task that fixes their code: each Task maps to the Drifts' names in creation order. */
+export function keptTasks(drifts: readonly DriftView[], numbers: CardNumbers): Map<string, CardName[]> {
+  const kept = new Map<string, CardName[]>();
+  for (const drift of [...drifts].sort(compareByCreation)) {
+    for (const task of new Set([...drift.origin, ...(drift.task === null ? [] : [drift.task])])) kept.set(task, [...(kept.get(task) ?? []), cardNameOf(numbers, "drift", drift.id)]);
+  }
+  return kept;
+}
+
+/** The cards of the Done column: the latest arrival first (`finished`); the Tasks with no instant come after all the others, in reverse creation order. A tie is broken by reverse creation order too. */
+function doneCards(all: readonly TaskView[], cards: ReadonlyMap<string, TaskCard>): TaskCard[] {
+  const done = all.filter((t) => t.column === "done");
+  const finishedAt = (t: TaskView) => (t.finished === null ? Number.NaN : Date.parse(t.finished));
+  return [...done]
+    .sort((a, b) => {
+      const [x, y] = [finishedAt(a), finishedAt(b)];
+      if (Number.isNaN(x) !== Number.isNaN(y)) return Number.isNaN(x) ? 1 : -1;
+      return (Number.isNaN(x) ? 0 : y - x) || compareByCreation(b, a);
+    })
+    .flatMap((t) => cards.get(t.id) ?? []);
+}
+
 /**
  * The card columns of the Board. Backlog holds the open Proposals and the red cards of the open Drifts outside a delivered resolution, in one creation order;
- * Active every Task in To do or In progress, blocked ones included. Done Tasks have no card,
- * and the History column lists them apart.
+ * Active every Task in To do or In progress, blocked ones included; Done every Task in Done, the latest first.
  */
 export function buildBoard(snapshot: Snapshot, resolve: BoardResolve = NO_RESOLVE, models: BoardModels = NO_MODELS): BoardColumn[] {
   const numbers = snapshot.numbers ?? noNumbers;
-  // A Drift a delivered resolution lists is decided on that Proposal's card, so it has no card of its own.
-  const delivered = new Set(snapshot.proposals.filter((p) => p.kind === "resolution").flatMap((p) => p.resolves.map((r) => r.drift)));
-  const tasks = new Map<string, TaskCard>(snapshot.tasks.map((t): [string, TaskCard] => [t.id, taskCard(t, numbers, finishingBlocker(t.id, snapshot.finishingTasks), t.column === "done" ? NO_VIEWS : focusViews(snapshot, { kind: "task", id: t.id }), snapshot.tasks)]));
+  // A Drift a delivered resolution lists is decided on that Proposal's card, so it has no card of its own (`driftsWithCard`).
+  const keptBy = keptTasks(snapshot.drifts, numbers);
+  const tasks = new Map<string, TaskCard>(snapshot.tasks.map((t): [string, TaskCard] => [t.id, taskCard(t, numbers, finishingBlocker(t.id, snapshot.finishingTasks), t.column === "done" ? NO_VIEWS : focusViews(snapshot, { kind: "task", id: t.id }), snapshot.tasks, keptBy.get(t.id) ?? [])]));
   // The Tasks blocked by an open Drift and not taken by the agent, by the Drift they wait for.
   const underDrift = new Map<string, TaskCard[]>();
   for (const card of tasks.values()) {
@@ -474,8 +508,7 @@ export function buildBoard(snapshot: Snapshot, resolve: BoardResolve = NO_RESOLV
   }
   const backlog = byCreation<{ id: string; created: string | null; card: Card }>([
     ...snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, underDrift, snapshot.finishingProposals, models, focusViews(snapshot, { kind: "proposal", id: p.id }), resolve.blocker) as Card })),
-    ...snapshot.drifts
-      .filter((d) => !delivered.has(d.id))
+    ...driftsWithCard(snapshot)
       .map((d) => ({ id: d.id, created: d.created, card: driftCard(d, numbers, dismissBlocker(d.id, snapshot.resolutionDrifts, resolve.blocker, snapshot.finishingDrifts), { blocker: resolveBlocker(d.id, snapshot.finishingDrifts, resolve), hostReason: resolve.drifts[d.id] ?? null, resolving: resolve.resolving.includes(d.id), unifying: resolve.unifying?.includes(d.id) === true }, underDrift.get(d.id) ?? []) as Card })),
   ]);
   // A blocked Task keeps its card in Active, with its blocked and waiting badges.
@@ -483,13 +516,9 @@ export function buildBoard(snapshot: Snapshot, resolve: BoardResolve = NO_RESOLV
   const cards: Record<CardColumnId, Card[]> = {
     backlog: backlog.map((x) => x.card),
     active,
+    done: doneCards(snapshot.tasks, tasks),
   };
   return CARD_COLUMNS.map((id) => ({ id, title: COLUMN_TITLES[id], hint: EMPTY_HINTS[id], cards: cards[id] }));
-}
-
-/** The number on the Board tab: the cards of Backlog. Ghosts do not count. */
-export function boardDecisionCount(columns: readonly BoardColumn[]): number {
-  return columns.find((column) => column.id === "backlog")?.cards.length ?? 0;
 }
 
 export type HistoryPeriod = "today" | "week" | "month" | "all";
@@ -514,8 +543,12 @@ export interface HistoryGroup {
 /** Start of the local day `back` days before `d`. */
 const dayStart = (d: Date, back = 0) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - back).getTime();
 
+/** The heading of a local day, as the History and the Done column group by it: `Today`, `Yesterday`, then the date in full. */
+const dayLabel = (day: number, now: Date, locale?: string): string =>
+  day === dayStart(now) ? "Today" : day === dayStart(now, 1) ? "Yesterday" : new Date(day).toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric" });
+
 /**
- * The History column for a period: the entries whose `updated` day the period lets through, the latest updated first
+ * The History view for a period: the entries whose `updated` day the period lets through, the latest updated first
  * (ties: reverse creation order), grouped by local day. Entries with no valid date are left out.
  */
 export function historyGroups(entries: HistoryView[], period: HistoryPeriod, now: Date = new Date(), locale?: string): HistoryGroup[] {
@@ -526,18 +559,13 @@ export function historyGroups(entries: HistoryView[], period: HistoryPeriod, now
     .map((entry) => ({ entry, time: Date.parse(entry.updated) }))
     .filter(({ time }) => !Number.isNaN(time) && time >= from && time < until)
     .sort((a, b) => b.time - a.time || Date.parse(b.entry.created) - Date.parse(a.entry.created) || b.entry.id.localeCompare(a.entry.id));
-  const today = dayStart(now);
-  const yesterday = dayStart(now, 1);
   const groups: { key: string; label: string; entries: HistoryView[] }[] = [];
   for (const { entry, time } of dated) {
     const day = dayStart(new Date(time));
     const key = `day:${day}`;
     const last = groups[groups.length - 1];
     if (last?.key === key) last.entries.push(entry);
-    else {
-      const label = day === today ? "Today" : day === yesterday ? "Yesterday" : new Date(day).toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric" });
-      groups.push({ key, label, entries: [entry] });
-    }
+    else groups.push({ key, label: dayLabel(day, now, locale), entries: [entry] });
   }
   return groups.map((g) => ({ key: g.key, heading: `${g.label} · ${g.entries.length}`, entries: g.entries }));
 }
@@ -552,6 +580,34 @@ export function historyWhen(updated: string, now: Date = new Date(), locale?: st
   const recent = day === dayStart(now) || day === dayStart(now, 1);
   const text = recent ? at.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) : at.toLocaleString(locale, { dateStyle: "long", timeStyle: "short" });
   return { text, time: at.toISOString(), title: at.toLocaleString(locale, { dateStyle: "full", timeStyle: "medium" }) };
+}
+
+/** One day of the Done column: its heading (`Today · 3`, `Earlier · 2` for the Tasks with no instant) and its cards. */
+export interface DoneGroup {
+  key: string;
+  heading: string;
+  cards: TaskCard[];
+}
+
+/** The cards of the Done column (already latest first) grouped by the local day they finished, with the headings of the History; the Tasks with no instant go last, under `Earlier`. An empty group is not listed. */
+export function doneGroups(cards: readonly Card[], now: Date = new Date(), locale?: string): DoneGroup[] {
+  const groups: { key: string; label: string; cards: TaskCard[] }[] = [];
+  const earlier: TaskCard[] = [];
+  for (const card of cards) {
+    if (card.kind !== "task") continue;
+    const time = card.finished === null ? Number.NaN : Date.parse(card.finished);
+    if (Number.isNaN(time)) {
+      earlier.push(card);
+      continue;
+    }
+    const day = dayStart(new Date(time));
+    const key = `day:${day}`;
+    const last = groups[groups.length - 1];
+    if (last?.key === key) last.cards.push(card);
+    else groups.push({ key, label: dayLabel(day, now, locale), cards: [card] });
+  }
+  if (earlier.length > 0) groups.push({ key: "earlier", label: "Earlier", cards: earlier });
+  return groups.map((g) => ({ key: g.key, heading: `${g.label} · ${g.cards.length}`, cards: g.cards }));
 }
 
 /** A card the agent is about to create, or a check it is doing, as the Board draws its ghost. */

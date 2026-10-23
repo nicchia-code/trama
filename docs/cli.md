@@ -666,7 +666,7 @@ Output (`--json`):
 - summary: string, required
 - body: string, required
 - file: string, required
-- tasks: { id: string, number: string, exists: boolean, title: string | null, column: "todo" | "doing" | "done" | null, unchanged: string | null }[], required
+- tasks: { id: string, number: string, exists: boolean, cleared: boolean, title: string | null, column: "todo" | "doing" | "done" | null, unchanged: string | null, copy: { title: string, proposal: string | null, tag: string | null, finished: string | null, refs: string[] } | null }[], required
 
 Runs at once; read-only.
 

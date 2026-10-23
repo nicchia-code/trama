@@ -1,5 +1,5 @@
 import { TramaError } from "./errors";
-import { joinReasons } from "./design";
+import { joinReasons, RUN_IN_PROGRESS } from "./design";
 import { copyProposalFiles, type DriftDecision, type DriftDecisionKind, discardProposal, getProposal, listProposals, newProposal, type Proposal, requireEditable, resolutionHolding, save, submitProposal, touch, withProposalLock } from "./proposals";
 import { cardName } from "./short-numbers";
 import type { Project } from "./store";
@@ -185,7 +185,7 @@ export interface WindowWork { resolving: boolean; running: boolean }
 export function runWindowBlocker(work: WindowWork): string | null {
   return joinReasons([
     work.resolving ? "Drifts are being resolved" : null,
-    work.running ? "A run is in progress" : null,
+    work.running ? RUN_IN_PROGRESS : null,
   ]);
 }
 

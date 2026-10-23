@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { randomBytes, randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
+import { clearDoneTasks } from "../../../src/core/clear-done";
 import { findInstructionFiles } from "../../../src/core/instruction-files";
 import { approveProposal, getProposal, rejectProposal, resolutionHolding } from "../../../src/core/proposals";
 import { type PreparedQuestion, preparedOutcome, preparedStatus } from "../../../src/core/prepared";
@@ -16,6 +17,7 @@ import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
 import type { AgentAction, NavigateOptions, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
+import type { MenuViewName } from "../menu-protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
 import { configuredAdvisorScanner, configuredAsyncDriftResolver, configuredModels, configuredOmpPath, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, openAskMore, openQuickTask, settings, startHeldJob } from "./agent";
 import { bundledUnifyInstructions } from "./bundled";
@@ -101,6 +103,9 @@ export class Controller implements vscode.Disposable {
   private pendingView: { view: ViewName; options: NavigateOptions } | undefined;
   /** The wizard a panel just created opens in its Settings tab once its webview is ready. */
   private pendingGuided: Extract<ToWebview, { type: "guidedSetup" }> | undefined;
+  /** The view the panel shows now, as its webview last reported it; undefined while no panel is open. */
+  private panelView: ViewName | undefined;
+  private readonly shownViewListeners = new Set<(view: ViewName | undefined) => void>();
   /** The newest request of model suggestions made by the wizard: an answer that arrives after a newer one is dropped. */
   private wizardSuggestionsRequest = 0;
   /** The paths of the newest `instructionFiles` answer: the only ones the wizard may ask to open. */
@@ -119,14 +124,11 @@ export class Controller implements vscode.Disposable {
   ) {}
 
   /**
-   * Opens the panel in front on the Settings tab, or brings it forward and puts it there. A panel just created is sent the
-   * `navigate` once its webview is ready, so the tab shows and asks for the model suggestions at once.
+   * Opens the panel in front on the Settings view, or brings it forward and puts it there, also in a window without folders (the panel then
+   * shows only the settings). A panel just created is sent the `navigate` once its webview is ready, so the view shows and asks for the model
+   * suggestions at once.
    */
   async openSettings(guided?: Extract<ToWebview, { type: "guidedSetup" }>): Promise<void> {
-    if (!vscode.workspace.workspaceFolders?.length) {
-      void vscode.window.showInformationMessage("Trama: open a folder to use Trama.");
-      return;
-    }
     this.questions?.restore();
     if (this.revealPanel()) {
       this.post({ type: "navigate", view: "settings" });
@@ -209,6 +211,44 @@ export class Controller implements vscode.Disposable {
     this.questions?.restore();
     if (!this.revealPanel()) this.create();
     this.checkSkillsInBackground();
+  }
+
+  /**
+   * An entry of the side menu or a command `Trama: Show <view>`: opens the panel on `view`, or brings it forward and moves it there, and checks the installed
+   * skills as an ordinary opening does (only a project has any). Settings opens without a folder and in a folder that is no project too; Get Started opens
+   * the panel on Get Started; every other view does the ordinary opening when the folder is no Trama project.
+   */
+  async show(view: MenuViewName): Promise<void> {
+    if (view !== "settings" && view !== "getstarted" && findProject() === undefined) return this.open();
+    if (view !== "settings" && !vscode.workspace.workspaceFolders?.length) {
+      void vscode.window.showInformationMessage("Trama: open a folder to use Trama.");
+      return;
+    }
+    this.questions?.restore();
+    if (this.revealPanel()) {
+      this.post({ type: "navigate", view });
+    } else {
+      this.pendingView = { view, options: {} };
+      this.create();
+    }
+    this.checkSkillsInBackground();
+  }
+
+  /** The view the open panel shows, or undefined with the panel closed. */
+  get shownView(): ViewName | undefined {
+    return this.panelView;
+  }
+
+  /** Calls `listener` when the panel changes view or closes (undefined). */
+  onDidChangeShownView(listener: (view: ViewName | undefined) => void): { dispose(): void } {
+    this.shownViewListeners.add(listener);
+    return { dispose: () => void this.shownViewListeners.delete(listener) };
+  }
+
+  private setPanelView(view: ViewName | undefined): void {
+    if (view === this.panelView) return;
+    this.panelView = view;
+    for (const listener of [...this.shownViewListeners]) listener(view);
   }
 
   /** Checks the installed skills of the project the panel opens, once at a time and without holding the panel back. */
@@ -504,6 +544,7 @@ export class Controller implements vscode.Disposable {
   dispose(): void {
     this.disposed = true;
     this.panel?.dispose();
+    this.shownViewListeners.clear();
     clearTimeout(this.timer);
   }
 
@@ -539,6 +580,7 @@ export class Controller implements vscode.Disposable {
       for (const subscription of subscriptions) subscription.dispose();
       clearTimeout(this.timer);
       this.panel = undefined;
+      this.setPanelView(undefined);
       this.pendingView = undefined;
       this.pendingGuided = undefined;
       // The round stays open and the agent keeps waiting; the developer is offered a way back to it.
@@ -590,7 +632,9 @@ export class Controller implements vscode.Disposable {
 
 
   private projectTitle(project = findProject()): string {
-    const fallback = basename(project?.root ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd());
+    const folder = project?.root ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    // A window without folders has no System to name: the panel, which shows only the settings there, keeps the product's name.
+    const fallback = folder === undefined ? "Trama" : basename(folder);
     try {
       return project ? loadModel(project).system.name.trim() || fallback : fallback;
     } catch {
@@ -625,7 +669,7 @@ export class Controller implements vscode.Disposable {
       const drifts = Object.fromEntries(listDrifts(project).filter((d) => d.data.status === "open").map((d) => [d.id, resolveDriftBlocker(project, work, this.namedByResolution.has(d.id), asyncResolver && snapshot.drifts.find((x) => x.id === d.id)?.prepared?.valid === true)]));
       // The open Drifts the running resolution is working on: those this window asked an agent to resolve.
       const resolving = work.resolving ? Object.keys(drifts).filter((id) => this.namedByResolution.has(id)) : [];
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, scans: { advisorScanner: configuredAdvisorScanner() } });
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, scans: { advisorScanner: configuredAdvisorScanner() } });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -720,6 +764,10 @@ export class Controller implements vscode.Disposable {
       await this.confirmSetup(message);
       return;
     }
+    if (message.type === "viewChanged") {
+      this.setPanelView(message.view);
+      return;
+    }
     if (message.type === "ready") {
       this.refresh();
       this.postSettings();
@@ -807,6 +855,9 @@ export class Controller implements vscode.Disposable {
         this.refresh();
         return;
       }
+      case "clearDone":
+        this.clearDone(project, message.tasks);
+        return;
       case "dismissDrift":
         await this.dismissDriftAfterConfirm(project, message.id);
         return;
@@ -817,6 +868,23 @@ export class Controller implements vscode.Disposable {
         await this.reworkProposalWithFeedback(project, message.proposal);
         return;
     }
+  }
+
+  /**
+   * Clear of the Done column: no confirmation and no message of success, the cards just go at the next picture. Refused while a Run
+   * launched by Trama is going; otherwise one core function rechecks every Task of the message. A refusal or a failure reaches the Board as a notice.
+   */
+  private clearDone(project: Project, tasks: string[]): void {
+    if (ownWindowRuns(project.root)) {
+      this.post({ type: "notice", text: "Trama could not clear the Done column: A run is in progress." });
+      return;
+    }
+    try {
+      clearDoneTasks(project, tasks);
+    } catch (err) {
+      this.post({ type: "notice", text: `Trama could not clear the Done column: ${describeError(err)}` });
+    }
+    this.refresh();
   }
 
   /** Approve and Reject wait for the end of the turn of the agent that delivered the Proposal: while that turn is held the action is refused, and a message says why. Returns true when refused. */

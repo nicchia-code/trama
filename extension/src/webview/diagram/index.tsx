@@ -257,7 +257,7 @@ export function DiagramView({ store, context }: { store: DiagramStore; context: 
           >
             <DiagramCanvas store={store} stage={stage} canvasRef={canvasRef} />
             {scene && isEmptyModel(scene) ? (
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center text-muted-foreground">
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-start gap-3 p-6 text-center text-muted-foreground">
                 <p className="pointer-events-auto max-w-[60ch]">
                   The Model is empty. Import the existing code or start from scratch; later, design changes from the{" "}
                   <Tooltip>

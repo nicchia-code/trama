@@ -271,6 +271,11 @@ export function getTask(p: Project, id: string, asArgument = false): Task {
   return load(tasksDir(p), findCard(tasksDir(p), cited ?? id, "Task", "file", asArgument && cited === null), parseTask);
 }
 
+/** The Task `id` names, or null when it no longer exists (a Task deleted with Clear); a file that does not read still fails. */
+export function getTaskOrNull(p: Project, id: string): Task | null {
+  return listCards(tasksDir(p), "file").some((card) => card.id === id) ? getTask(p, id) : null;
+}
+
 /** A Task checked and built but not written: what `newTask` writes, and what `trama comparison move` checks for every card before it writes any. */
 export interface PlannedTask {
   title: string;
@@ -615,7 +620,10 @@ export function getDrift(p: Project, id: string, asArgument = false): Drift {
  * the origins belong to different designs. The design a fix Task joins, and whose model Resolve uses.
  */
 export function originDesign(p: Project, origins: string[]): string | null {
-  const designs = new Set(origins.map((id) => getTask(p, id).data.proposal));
+  const designs = new Set(origins.flatMap((id) => {
+    const origin = getTaskOrNull(p, id);
+    return origin === null ? [] : [origin.data.proposal];
+  }));
   const [only] = designs;
   return designs.size === 1 && only !== undefined ? only : null;
 }
@@ -805,10 +813,9 @@ export function freedTasks(drift: Drift, tasks: Task[]): FreedTask[] {
   return drift.data.notBlocking.map((n) => ({ ...n, title: tasks.find((t) => t.id === n.task)?.title ?? null }));
 }
 
-/** The live Tasks a new Drift with these references and this origin would block: what `trama drift new` with `dryRun` lists. Refuses references that do not resolve and an origin that is not a Task. */
+/** The live Tasks a new Drift with these references and this origin would block: what `trama drift new` with `dryRun` lists. Refuses references that do not resolve; an origin Task that no longer exists (deleted with Clear) blocks nothing. */
 export function driftCandidates(p: Project, refs: string[], origin: string[]): Task[] {
   checkRefs(p, refs);
-  for (const id of origin) getTask(p, id);
   return blockedByDrift(loadProject(p), listTasks(p), refs, origin);
 }
 
@@ -943,7 +950,7 @@ const unifiedOrigins = (unified: Drift[]): string[] => [...new Set(unified.flatM
  */
 function unifiedPrevious(p: Project, unified: Drift[], origin: string[]): string[] {
   const fixed = origin.flatMap((id) => {
-    const drift = getTask(p, id).data.drift;
+    const drift = getTaskOrNull(p, id)?.data.drift ?? null;
     if (drift === null) return [];
     try {
       const resolution = getDrift(p, drift).data.resolution;
@@ -1142,7 +1149,8 @@ function fixCode(p: Project, drift: Drift, optionNumber: number | undefined, not
   // Each Task the Drift came from goes back to To do and, until the fix Task is Done, is blocked (see computeBlocked);
   // an origin the Drift left free is not held by it, so it stays where it is.
   for (const id of drift.data.origin) {
-    const origin = getTask(p, id);
+    const origin = getTaskOrNull(p, id);
+    if (origin === null) continue;
     if (origin.data.column === "done" || drift.data.notBlocking.some((n) => n.task === origin.id)) continue;
     origin.data.column = "todo";
     origin.data.agent = false;

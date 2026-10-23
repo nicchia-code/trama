@@ -127,9 +127,9 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
   let hasProject = false;
   const wizard = new WizardController({
     post: context.post,
-    // The wizard of the Empty Model mode comes from the Diagram, so it goes back there; the one of the settings leaves the form.
+    // The wizard of the Empty Model mode ends on the Board, confirmed or cancelled; the one of the settings leaves the form.
     onClose: (_reason, mode) => {
-      if (mode === "empty-model") context.navigate("diagram");
+      if (mode === "empty-model") context.navigate("board");
     },
   });
   const render = () =>
