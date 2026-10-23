@@ -1,4 +1,5 @@
 import type { AgentAction, RunGroup } from "../protocol";
+import type { Question } from "../../../src/core/questions";
 
 /** An action whose free text has been collected. */
 export type ResolvedAction =
@@ -182,4 +183,102 @@ export function withAsyncDriftResolver(prompt: string, on: boolean): string {
 /** Ends an instruction with the Context Sharing sentence, on the same line, when `on`; otherwise the instruction is exactly as built. */
 export function withContextSharing(prompt: string, on: boolean): string {
   return on ? `${prompt} ${CONTEXT_SHARING_SENTENCE}` : prompt;
+}
+
+/** A card or a question Ask more is about, read when the developer presses it. Every identity is permanent; `number` is the short number of the card in this working copy, for the developer only. */
+export interface AskMoreLink {
+  id: string;
+  title: string;
+}
+
+export type AskMoreSubject =
+  | { kind: "task"; id: string; number: string; title: string; body: string; refs: string[]; images: string[]; proposal: AskMoreLink | null; drift: AskMoreLink | null }
+  | { kind: "proposal"; id: string; number: string; title: string; status: string; proposalKind: string; body: string; tasks: (AskMoreLink & { refs: string[] })[]; drifts: (AskMoreLink & { decision: string | null; option: number | null })[] }
+  | { kind: "drift"; id: string; number: string; title: string; status: string; happens: string; should: string; where: string | null; refs: string[]; notBlocking: { task: string; reason: string }[]; proposal: AskMoreLink | null; task: AskMoreLink | null; previous: AskMoreLink[]; unifies: AskMoreLink[] }
+  /** A question of an open round: the one in view in full, then every question of the round. `drift` is set for the prepared question of a Drift. */
+  | { kind: "question"; question: Question; round: Question[]; drift: AskMoreLink | null };
+
+const commandText = (command: string) => `\`${command}\``;
+const linkText = (link: AskMoreLink) => `\`${link.id}\` — ${link.title}`;
+const listOrNone = (items: string[]) => (items.length === 0 ? "none" : items.map((item) => `- ${item}`).join("\n"));
+const refsText = (refs: string[]) => (refs.length === 0 ? "none" : refs.map((ref) => `\`${ref}\``).join(", "));
+const modelReads = (refs: string[]) => refs.map((ref) => commandText(`trama model show ${ref}`));
+
+/** The part of an Ask more instruction that describes the thing the developer chose, with the commands that read it. Never contains answers, choices or skips of a question. */
+export function askMorePart(subject: AskMoreSubject): string {
+  switch (subject.kind) {
+    case "task": {
+      const reads = [commandText(`trama task show ${subject.id}`), ...(subject.proposal ? [commandText(`trama proposal show ${subject.proposal.id}`)] : []), ...(subject.drift ? [commandText(`trama drift show ${subject.drift.id}`)] : []), ...modelReads(subject.refs)];
+      return [
+        `Ask more about the Task ${subject.id}: "${subject.title}". Its short number in this working copy is ${subject.number}, for the developer only: use the identity in every command.`,
+        "",
+        "The Task's text:",
+        subject.body.trim() === "" ? "(no text)" : subject.body.trim(),
+        "",
+        `References: ${refsText(subject.refs)}`,
+        `Images: ${subject.images.length === 0 ? "none" : subject.images.map((path) => `\`${path}\``).join(", ")}`,
+        `Proposal it belongs to: ${subject.proposal ? linkText(subject.proposal) : "none"}`,
+        `Drift it comes from: ${subject.drift ? linkText(subject.drift) : "none"}`,
+        "",
+        `Read with: ${reads.join(", ")}.`,
+      ].join("\n");
+    }
+    case "proposal": {
+      const reads = [commandText(`trama proposal show ${subject.id}`), ...subject.tasks.map((task) => commandText(`trama task show ${task.id}`)), ...subject.drifts.map((drift) => commandText(`trama drift show ${drift.id}`)), ...modelReads([...new Set(subject.tasks.flatMap((task) => task.refs))])];
+      const decisions = subject.drifts.map((drift) => `${linkText(drift)}: ${drift.decision ?? "undecided"}${drift.option === null ? "" : ` (option ${drift.option})`}`);
+      return [
+        `Ask more about the Proposal ${subject.id}: "${subject.title}". Its short number in this working copy is ${subject.number}, for the developer only: use the identity in every command.`,
+        `Status: ${subject.status}. Kind: ${subject.proposalKind}.`,
+        "",
+        "The Proposal's text:",
+        subject.body.trim() === "" ? "(no text)" : subject.body.trim(),
+        "",
+        "Its Tasks:",
+        listOrNone(subject.tasks.map(linkText)),
+        ...(subject.proposalKind === "resolution" ? ["", "The Drifts it resolves, with the developer's decision:", listOrNone(decisions)] : []),
+        "",
+        `Read with: ${reads.join(", ")}.`,
+      ].join("\n");
+    }
+    case "drift": {
+      const reads = [commandText(`trama drift show ${subject.id}`), ...(subject.proposal ? [commandText(`trama proposal show ${subject.proposal.id}`)] : []), ...(subject.task ? [commandText(`trama task show ${subject.task.id}`)] : []), ...subject.notBlocking.map((free) => commandText(`trama task show ${free.task}`)), ...subject.previous.map((d) => commandText(`trama drift show ${d.id}`)), ...subject.unifies.map((d) => commandText(`trama drift show ${d.id}`)), ...modelReads(subject.refs)];
+      return [
+        `Ask more about the Drift ${subject.id}: "${subject.title}". Its short number in this working copy is ${subject.number}, for the developer only: use the identity in every command. Status: ${subject.status}.`,
+        "",
+        `What happens: ${subject.happens.trim() || "(not written)"}`,
+        `What should happen: ${subject.should.trim() || "(not written)"}`,
+        `Where in the code: ${subject.where?.trim() || "none"}`,
+        `References: ${refsText(subject.refs)}`,
+        "",
+        "Tasks it leaves free, with the reason:",
+        listOrNone(subject.notBlocking.map((free) => `\`${free.task}\` — ${free.reason}`)),
+        "",
+        `Proposal attached: ${subject.proposal ? linkText(subject.proposal) : "none"}`,
+        `Task it comes from: ${subject.task ? linkText(subject.task) : "none"}`,
+        `Drifts it follows: ${subject.previous.length === 0 ? "none" : subject.previous.map(linkText).join("; ")}`,
+        `Drifts it unites: ${subject.unifies.length === 0 ? "none" : subject.unifies.map(linkText).join("; ")}`,
+        "",
+        `Read with: ${reads.join(", ")}.`,
+      ].join("\n");
+    }
+    case "question": {
+      const describe = (question: Question) => [
+        `Question: ${question.question}`,
+        ...(question.context ? [`Context: ${question.context}`] : []),
+        `Choice: ${question.multi ? "several options may be chosen" : "one option"}`,
+        "Options:",
+        ...question.options.map((option, index) => `${index + 1}. ${option.label}${index === question.recommended ? " (recommended)" : ""}: ${option.description}${option.details ? ` Details: ${option.details}` : ""}`),
+      ];
+      return [
+        "Ask more about a question of an open question round. The round is still open and the agent that asked it is still waiting: you do not answer it for the developer, and the developer answers it in Trama.",
+        "",
+        "The question in view:",
+        ...describe(subject.question),
+        "",
+        "All the questions of the round, in order, the one in view marked (none of them is answered):",
+        ...subject.round.map((item) => `- ${item.id === subject.question.id ? "(in view) " : ""}${item.question}${item.options.map((option) => ` [${option.label}: ${option.description}]`).join("")}`),
+        ...(subject.drift === null ? [] : ["", `This is the prepared question of the Drift ${subject.drift.id} ("${subject.drift.title}"). Read it with ${commandText(`trama drift show ${subject.drift.id}`)}.`]),
+      ].join("\n");
+    }
+  }
 }

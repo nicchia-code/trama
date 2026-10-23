@@ -42,6 +42,7 @@ function parseAction(value: unknown): AgentAction | string {
 
 const BARE_QUESTION_ACTIONS: readonly string[] = ["next", "skip", "back", "openSummary", "closeQuestions", "cancelSkipAll", "confirmSkipAll", "send", "minimize", "restore"];
 const TEXT_LIMIT = 100_000;
+const MAX_QUESTION_ID = 200;
 
 function parseQuestionAction(value: unknown): QuestionAction | string {
   if (typeof value !== "object" || value === null) return "questionAction needs an action";
@@ -58,6 +59,8 @@ function parseQuestionAction(value: unknown): QuestionAction | string {
       return Number.isInteger(raw["index"]) ? { type, index: raw["index"] as number } : "openQuestion needs a question index";
     case "setText":
       return typeof raw["text"] === "string" && raw["text"].length <= TEXT_LIMIT ? { type, text: raw["text"] } : "setText needs a text";
+    case "askMore":
+      return typeof raw["id"] === "string" && raw["id"] !== "" && raw["id"].length <= MAX_QUESTION_ID ? { type, id: raw["id"] } : "askMore needs the question's ID";
     default:
       return `unknown question action "${type}"`;
   }
@@ -162,6 +165,10 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
     }
     case "dismissDrift":
       return id === undefined ? bad("dismissDrift needs a valid Drift ID") : { ok: true, message: { type, id } };
+    case "askMore":
+      return (raw["kind"] === "task" || raw["kind"] === "proposal" || raw["kind"] === "drift") && id !== undefined
+        ? { ok: true, message: { type, kind: raw["kind"], id } }
+        : bad("askMore needs a Task, Proposal or Drift identity");
     case "setProposalModel": {
       const proposal = typeof raw["proposal"] === "string" && ID.test(raw["proposal"]) ? raw["proposal"] : undefined;
       if (proposal === undefined) return bad("setProposalModel needs a valid Proposal ID");

@@ -52,8 +52,8 @@ function panel(hasProject: boolean) {
   act(() => {
     settings.projectPresent(hasProject);
     getStarted.projectPresent(hasProject);
-    settings.receive({ type: "settings", schema, values: {} });
-    getStarted.receiveSettings({ type: "settings", schema, values: {} });
+    settings.receive({ type: "settings", schema, values: {}, agent: "cursor" });
+    getStarted.receiveSettings({ type: "settings", schema, values: {}, agent: "cursor" });
     getStarted.receiveFolders({ type: "workspaceFolders", folders: [FOLDER] });
   });
   const tab = (name: string | RegExp) => fireEvent.mouseDown(screen.getByRole("tab", { name }), { button: 0, ctrlKey: false });

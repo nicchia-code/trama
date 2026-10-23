@@ -121,9 +121,9 @@ This applies only when the instruction carries the sentence "The developer alrea
 - Do steps 1, 2, 4 and 5 of "Steps" for that Drift only, with that answer as the answer of the round: decide from it as step 4 says and write the resolution as step 5 says, with one difference: create the Proposal with `"prepared":true` in `trama proposal new --input -` (`kind` `resolution`).
 - Hand it over as step 7 says and report.
 
-## Experimental context sharing
+## Sub-agents context sharing
 
-This section applies only when the instruction says "The experimental context sharing is on: …". Without that sentence, skip it and work as written above.
+This section applies only when the instruction says "The sub-agents context sharing is on: …". Without that sentence, skip it and work as written above.
 
 With it, when you hand a part of the work to a sub-agent, in whatever way your agent starts sub-agents, you pass it what you have already read that concerns its part, so it does not look for it again and does not read it again.
 

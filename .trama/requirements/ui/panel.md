@@ -42,7 +42,8 @@ description: "Usa sempre quando lavori sull'interfaccia: regole generali, pannel
   - `Dismiss Drift`: `Ban`; la sua freccetta, a sola icona: `ChevronDown`; la voce `Rework with feedback…` del suo menu: nessuna icona.
   - `Open` di un Task: `FileInput`.
   - `Show details`: `ChevronDown`; `Hide details`: `ChevronUp`.
-  - `Close` di un avviso, della modale di una voce di History e della modale del corpo di una Proposal: `X`.
+  - `Close` di un avviso, della modale di una voce di History, della modale del corpo di una Proposal e delle modali dei dettagli di Task e Drift: `X`.
+  - `Ask more`: `MessageCircleQuestion`.
   - La «i» di una voce di History: `Info`, a sola icona.
 - L'icona è grande 16 px, come quelle in fondo alle colonne, e resta a sinistra del testo anche quando lo spazio è poco: il testo non sparisce mai e il pulsante va a capo o si stringe come senza icona. Quando l'etichetta cambia (`Scan System · N`, `Show details` che diventa `Hide details`) l'icona resta, e cambia solo dove la mappa dà un'icona diversa.
 - L'icona ha il colore del testo del pulsante, anche nei pulsanti primari e in quelli disabilitati; nessuna icona ha un colore proprio.

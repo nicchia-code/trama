@@ -15,13 +15,14 @@ import { namerOf } from "../../../src/core/card-names";
 import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
-import type { AgentAction, SetupChoice, ToHost, ToWebview, WorkspaceFolderView } from "../protocol";
+import type { AgentAction, NavigateOptions, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAdvisorScanner, configuredAgent, configuredAsyncDriftResolver, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, launchAgent, launched, openQuickTask, settings, startHeldJob } from "./agent";
+import { configuredAdvisorScanner, configuredAgent, configuredAsyncDriftResolver, configuredModels, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, launchAgent, launched, openAskMore, openQuickTask, PREPARED_QUESTION_AGENT, settings, startHeldJob } from "./agent";
 import { bundledUnifyInstructions, isCursor } from "./cursor";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onFinalReviewMissing, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing, unifyingDrifts } from "./drift-resolution";
 import { askPreparedRound } from "./questions";
+import { askMoreSubject, askMoreTerminalName } from "./ask-more";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { taskImagePath, withImageUris } from "./task-images";
@@ -34,11 +35,12 @@ import { AGENT_KEY, planSettingChange, settingsSchema, settingTitle, shownAgentV
 import { resolveMarkdownFile } from "./paths";
 import { checkSkills, fileFolders, findProject, initializeProject, NO_PROJECT_WARNING, updateSkills } from "./project";
 import { folderChildren, folderInside, gitIgnored, type RawEntry } from "./folder-tree";
+import { askMoreTarget } from "./question-state";
 import type { QuestionSession } from "./question-session";
 import type { DesignRequests } from "./design-requests";
 
 import { writeLastScan } from "../../../src/core/last-scan";
-import { buildPrompt, mayFileDrifts, PREPARED_ANSWER_SENTENCE, reworkPrompt, terminalName, type ResolvedAction } from "./prompts";
+import { askMorePart, buildPrompt, mayFileDrifts, PREPARED_ANSWER_SENTENCE, reworkPrompt, terminalName, type ResolvedAction } from "./prompts";
 
 const DEBOUNCE_MS = 150;
 
@@ -96,8 +98,8 @@ export class Controller implements vscode.Disposable {
   private suggestedAgent: string | undefined;
   /** Whether a check of the installed skills is under way: another opening does not start a second. */
   private checkingSkills = false;
-  /** The tab a panel just created goes to once its webview is ready (`openSettings`). */
-  private pendingView: "settings" | undefined;
+  /** The tab a panel just created goes to once its webview is ready (`openSettings`, `openGhostDetails`), with the options of the `navigate`. */
+  private pendingView: { view: ViewName; options: NavigateOptions } | undefined;
   /** The wizard a panel just created opens in its Settings tab once its webview is ready. */
   private pendingGuided: Extract<ToWebview, { type: "guidedSetup" }> | undefined;
   /** The newest request of model suggestions made by the wizard: an answer that arrives after a newer one is dropped. */
@@ -131,11 +133,30 @@ export class Controller implements vscode.Disposable {
       this.post({ type: "navigate", view: "settings" });
       if (guided) this.post(guided);
     } else {
-      this.pendingView = "settings";
+      this.pendingView = { view: "settings", options: {} };
       this.pendingGuided = guided;
       this.create();
     }
     this.checkSkillsInBackground();
+  }
+
+  /**
+   * The status bar item chose a ghost: the panel opens in front, or comes to the front, on the Board with the details of the
+   * ghost of `announcement`. A panel just created is sent the `navigate` once its webview is ready. A ghost that is gone shows
+   * the Board without a window.
+   */
+  openGhostDetails(announcement: string): void {
+    if (!vscode.workspace.workspaceFolders?.length) {
+      void vscode.window.showInformationMessage("Trama: open a folder to use Trama.");
+      return;
+    }
+    this.questions?.restore();
+    if (this.revealPanel()) {
+      this.post({ type: "navigate", view: "board", ghost: announcement });
+    } else {
+      this.pendingView = { view: "board", options: { ghost: announcement } };
+      this.create();
+    }
   }
 
   /** The command Import from Code: with an empty Model the wizard opens on the Settings tab with Import from Code chosen; with a Model it launches the import as before, leaving no folder out. */
@@ -223,7 +244,7 @@ export class Controller implements vscode.Disposable {
     try {
       const schema = this.manifestSettings();
       for (const { key, value } of message.values) {
-        const plan = planSettingChange(schema, key, value);
+        const plan = planSettingChange(schema, key, value, configuredAgent());
         if (!plan.ok) {
           this.postSettings();
           finish(plan.reason);
@@ -400,7 +421,7 @@ export class Controller implements vscode.Disposable {
         ? { user: setting.key === AGENT_KEY ? shownAgentValue(inspected?.globalValue) : inspected?.globalValue }
         : { user: inspected?.globalValue, workspace: inspected?.workspaceValue };
     }
-    this.post({ type: "settings", schema, values });
+    this.post({ type: "settings", schema, values, agent: configuredAgent() });
   }
 
   /**
@@ -621,7 +642,8 @@ export class Controller implements vscode.Disposable {
   private async dispatch(message: ToHost): Promise<void> {
     // The question overlay works without a project: it is what the panel shows when a round opens it.
     if (message.type === "questionAction") {
-      this.questions?.act(message.round, message.action);
+      if (message.action.type === "askMore") await this.askMoreQuestion(message.round, message.action.id);
+      else this.questions?.act(message.round, message.action);
       return;
     }
     if (message.type === "modelSuggestionsWanted") {
@@ -654,7 +676,7 @@ export class Controller implements vscode.Disposable {
       this.postSettings();
       if (this.questions) this.post({ type: "questions", round: this.questions.current() });
       if (this.pendingView !== undefined) {
-        this.post({ type: "navigate", view: this.pendingView });
+        this.post({ type: "navigate", view: this.pendingView.view, ...this.pendingView.options });
         this.pendingView = undefined;
       }
       if (this.pendingGuided !== undefined) {
@@ -664,7 +686,7 @@ export class Controller implements vscode.Disposable {
       return;
     }
     if (message.type === "setSetting") {
-      await this.applyPlan(planSettingChange(this.manifestSettings(), message.key, message.value));
+      await this.applyPlan(planSettingChange(this.manifestSettings(), message.key, message.value, configuredAgent()));
       return;
     }
     if (message.type === "writeDesignRequest") {
@@ -680,6 +702,14 @@ export class Controller implements vscode.Disposable {
       case "openQuickTask":
         try {
           await openQuickTask(project.root);
+        } catch (err) {
+          this.post({ type: "error", message: describeError(err) });
+        }
+        return;
+      case "askMore":
+        try {
+          const subject = askMoreSubject(project, message.kind, message.id);
+          await openAskMore(project.root, askMoreTerminalName(project, message.kind, message.id), askMorePart(subject));
         } catch (err) {
           this.post({ type: "error", message: describeError(err) });
         }
@@ -839,6 +869,26 @@ export class Controller implements vscode.Disposable {
     if (!configuredAsyncDriftResolver()) return null;
     const status = preparedStatus(project, getDrift(project, drift));
     return status?.state === "valid" ? status.value : null;
+  }
+
+  /**
+   * Ask more on question `question` of the open round `round`: a new chat about it and the other questions of the round, with the
+   * Drift it prepares when Trama asked it. Only the question in view of an open question counts: any other is ignored. The round
+   * stays as it was; a round that has closed is ignored.
+   */
+  private async askMoreQuestion(round: number, question: string): Promise<void> {
+    const project = findProject();
+    const current = this.questions?.current();
+    if (!project || !current || current.id !== round) return;
+    const asked = askMoreTarget(current.state, question);
+    if (!asked) return;
+    try {
+      // A prepared question's ID is the identity of its Drift (Trama writes it so), and only a round Trama asks itself is one.
+      const drift = current.agent === PREPARED_QUESTION_AGENT ? { id: asked.id, title: getDrift(project, asked.id).title } : null;
+      await openAskMore(project.root, "Ask question", askMorePart({ kind: "question", question: asked, round: current.state.questions, drift }));
+    } catch (err) {
+      this.post({ type: "error", message: describeError(err) });
+    }
   }
 
   /**

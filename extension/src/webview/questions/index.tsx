@@ -1,4 +1,4 @@
-import { Check, Minus, SkipForward, TriangleAlert, X } from "lucide-react";
+import { Check, Minus, MessageCircleQuestion, SkipForward, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Question } from "../../../../src/core/questions";
 import type { QuestionRoundView } from "../../host/question-session";
@@ -239,15 +239,27 @@ function QuestionView({
   const reason = "Choose an option or write an answer first";
   return (
     <div className="flex flex-col">
-      <div
-        ref={focusRef as RefObject<HTMLDivElement>}
-        id="qo-question"
-        role="heading"
-        aria-level={3}
-        tabIndex={-1}
-        className="mb-1.5 text-base font-semibold outline-none [overflow-wrap:anywhere]"
-      >
-        <Markdown source={question.question} openLink={openLink} />
+      <div className="mb-1.5 flex items-start gap-2">
+        <div
+          ref={focusRef as RefObject<HTMLDivElement>}
+          id="qo-question"
+          role="heading"
+          aria-level={3}
+          tabIndex={-1}
+          className="min-w-0 flex-1 text-base font-semibold outline-none [overflow-wrap:anywhere]"
+        >
+          <Markdown source={question.question} openLink={openLink} />
+        </div>
+        {/* Ask more opens a chat about this question; it sits outside the heading so the heading's name stays the question. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="sm" className="shrink-0" aria-label="Ask more about this question" onClick={() => act({ type: "askMore", id: question.id })}>
+              <MessageCircleQuestion aria-hidden="true" />
+              Ask more
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Ask an agent about this question</TooltipContent>
+        </Tooltip>
       </div>
       {question.context !== undefined ? (
         <div className="mb-2.5 text-muted-foreground">

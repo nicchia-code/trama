@@ -25,9 +25,11 @@ function setup(questions: Question[]) {
   let state: QuestionRoundState = startRound(questions);
   const delivered: unknown[] = [];
   const actions: string[] = [];
+  const messages: ToHost[] = [];
   const view = (): QuestionRoundView => ({ id: 1, agent: "omp", state });
   const ui = render(<QuestionOverlay round={view()} openLink={() => {}} post={onPost} />);
   function onPost(message: ToHost) {
+    messages.push(message);
     if (message.type !== "questionAction") return;
     actions.push(message.action.type);
     const step = applyQuestionAction(state, message.action);
@@ -39,10 +41,11 @@ function setup(questions: Question[]) {
     }
     ui.rerender(<QuestionOverlay round={view()} openLink={() => {}} post={onPost} />);
   }
-  return { ...ui, delivered, actions, state: () => state };
+  return { ...ui, delivered, actions, messages, state: () => state };
 }
 
 const click = (name: string | RegExp) => act(() => void fireEvent.click(screen.getByRole("button", { name })));
+const askMoreButton = () => screen.queryByRole("button", { name: "Ask more about this question" });
 
 test("the dialog has its title, the agent and the position, and the focus is on the text of the question", () => {
   setup([q("one"), q("two")]);
@@ -148,4 +151,35 @@ test("digits choose options outside the text area, and Show details opens the de
   expect(screen.getByRole("button", { name: "Show details" })).not.toBeNull();
   click("Show details");
   expect(screen.getByRole("button", { name: "Hide details" })).not.toBeNull();
+});
+
+test("Ask more on a question sends its ID and leaves the round and the overlay as they were", () => {
+  const { messages, state, actions } = setup([q("one"), q("two")]);
+  click("Skip");
+  const before = state();
+  expect(askMoreButton()).not.toBeNull();
+  click("Ask more about this question");
+  expect(messages.at(-1)).toEqual({ type: "questionAction", round: 1, action: { type: "askMore", id: "two" } });
+  expect(actions.at(-1)).toBe("askMore");
+  expect(state()).toBe(before);
+  expect(screen.getByRole("dialog", { name: "Questions from the agent" })).not.toBeNull();
+  expect(screen.getByText("Question 2 of 2")).not.toBeNull();
+  expect(screen.getByRole("heading", { name: "two?" })).not.toBeNull();
+});
+
+test("Ask more keeps the choice and the written answer of the question in view", () => {
+  const { state } = setup([q("one")]);
+  act(() => void fireEvent.keyDown(document.body, { key: "2" }));
+  fireEvent.change(screen.getByLabelText("Your answer (optional)"), { target: { value: "a note" } });
+  click("Ask more about this question");
+  expect(state().drafts[0]).toEqual({ selected: [1], text: "a note" });
+  expect((screen.getByLabelText("Your answer (optional)") as HTMLTextAreaElement).value).toBe("a note");
+  expect((screen.getAllByRole("radio") as HTMLInputElement[]).map((r) => r.checked)).toEqual([false, true]);
+});
+
+test("Ask more is not on the summary", () => {
+  setup([q("one")]);
+  click("Review");
+  expect(screen.getByRole("heading", { name: "Summary" })).not.toBeNull();
+  expect(askMoreButton()).toBeNull();
 });

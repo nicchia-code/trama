@@ -14,9 +14,9 @@ import { SplitButton } from "../split-button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
-import { type ModelList, GhostDetailsDialog, ModelDialog, ProposalBodyDialog } from "./dialogs";
+import { DriftDetailsDialog, type ModelList, GhostDetailsDialog, ModelDialog, ProposalBodyDialog, TaskDetailsDialog } from "./dialogs";
 import { HistoryEntryView } from "./history";
-import { announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, finalReviewMissingNotice, GHOST_COLUMN, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, NO_MODELS, type ProposalCard, stoppedFollowingNotice, withdrawnNotice } from "./logic";
+import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, EMPTY_HINTS, finalReviewMissingNotice, HISTORY_PERIODS, type HistoryPeriod, historyGroups, interleave, NO_MODELS, type ProposalCard, stoppedFollowingNotice, withdrawnNotice } from "./logic";
 import { BoardButton, BoardEnvContext, type BoardEnv, Tip } from "./parts";
 
 /** The state of Resolve Drifts and of the Runs the host gives with each picture. */
@@ -54,6 +54,8 @@ export interface BoardPageProps {
   notices: Notice[];
   closeNotice(id: number): void;
   context: ViewContext;
+  /** The ghost the status bar asked for (`navigate` with `ghost`): its details open, replacing any other details window. `n` tells one request from the next for the same ghost. */
+  ghostRequest?: { id: string; n: number };
 }
 
 const COLUMN_CLASS = "flex min-h-0 flex-col rounded-lg border bg-muted/40";
@@ -83,30 +85,35 @@ const ColumnBody = ({ children }: { children: ReactNode }) => <div className="fl
 
 const Hint = ({ id }: { id: ColumnId }) => <p className="my-3 text-center text-muted-foreground italic">{EMPTY_HINTS[id]}</p>;
 
-function CardColumn({ column, ghosts, foot }: { column: BoardColumn; ghosts: { item: ReactNode; index: number }[]; foot: ReactNode }) {
+function CardColumn({ column, ghosts, foot }: { column: BoardColumn; ghosts: { item: ReactNode; index: number; column: ColumnId }[]; foot: ReactNode }) {
   const cards = interleave<ReactNode>(
     column.cards.map((card: Card) => <CardView key={card.key} card={card} />),
-    column.id === GHOST_COLUMN ? ghosts : [],
+    ghosts.filter((g) => g.column === column.id),
   );
   return (
-    <Column id={column.id} count={column.id === GHOST_COLUMN ? undefined : column.cards.length} foot={foot}>
-      <ColumnBody>{cards.length > 0 ? cards : <Hint id={column.id} />}</ColumnBody>
+    <Column id={column.id} count={column.cards.length} foot={foot}>
+      <ColumnBody>
+        {column.cards.length === 0 ? <Hint id={column.id} /> : null}
+        {cards}
+      </ColumnBody>
     </Column>
   );
 }
 
-/** The Board: four columns of cards, a bar with the one Scan button, and the notices of cards that never came. */
-export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, advisorScanner, models, modelList, notices, closeNotice, context }: BoardPageProps) {
+/** The Board: three columns of cards, a bar with the one Scan button, and the notices of cards that never came. */
+export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, advisorScanner, models, modelList, notices, closeNotice, context, ghostRequest }: BoardPageProps) {
   const root = useRef<HTMLDivElement>(null);
-  /** Task details the developer left open. Kept while the panel lives, so a refresh does not close them. */
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   /** The period of the History column. Kept while the panel lives, so a refresh does not reset it. */
   const [period, setPeriod] = useState<HistoryPeriod>("week");
   /** Whether the History column is open. It starts collapsed; kept while the panel lives, so a refresh does not reopen it. */
   const [historyOpen, setHistoryOpen] = useState(false);
   const [bodyOf, setBodyOf] = useState<string | null>(null);
+  const [taskOf, setTaskOf] = useState<string | null>(null);
+  const [driftOf, setDriftOf] = useState<string | null>(null);
   const [modelOf, setModelOf] = useState<string | null>(null);
   const [ghostOf, setGhostOf] = useState<string | null>(null);
+  /** Whether the open ghost details came from the status bar: closing them sends the focus to Backlog, as that ghost may have no column to go back to. */
+  const [ghostFromBar, setGhostFromBar] = useState(false);
 
   const numbers = snapshot?.numbers ?? noNumbers;
   const runReason = snapshot === null ? null : joinReasons([resolve.runReason, runBlocker(snapshot.tasks, namerOf(numbers))]);
@@ -118,34 +125,54 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
 
   const backlogCard = (proposal: string | null): ProposalCard | undefined =>
     proposal === null ? undefined : columns.find((column) => column.id === "backlog")?.cards.find((card): card is ProposalCard => card.kind === "proposal" && card.id === proposal);
+  /** The card of a Task in Active or a Drift in Backlog, by identity; undefined once it has left its column. */
+  const columnCard = <K extends "task" | "drift">(column: ColumnId, kind: K, id: string | null): Extract<Card, { kind: K }> | undefined =>
+    id === null ? undefined : columns.find((c) => c.id === column)?.cards.find((card): card is Extract<Card, { kind: K }> => card.kind === kind && card.id === id);
   const bodyCard = backlogCard(bodyOf);
+  const taskCard = columnCard("active", "task", taskOf);
+  const driftCard = columnCard("backlog", "drift", driftOf);
   const modelCard = backlogCard(modelOf);
   const placedGhosts = useMemo(() => announcedGhosts(snapshot?.announcements ?? [], asking), [snapshot, asking]);
-  const ghostCard = ghostOf === null ? undefined : placedGhosts.find((g) => g.card.key === ghostOf)?.card;
+  // A ghost asked from the status bar is looked for among all the ghosts of the snapshot, the ones standing in no column included.
+  const ghostCard = useMemo(
+    () => (ghostOf === null ? undefined : (snapshot?.announcements ?? []).map((a) => announcedCard(a, asking)).find((card) => card.key === ghostOf)),
+    [ghostOf, snapshot, asking],
+  );
+  // The column the open ghost stands in, remembered so the focus can go back to it once the ghost is gone.
+  const ghostColumn = useRef<ColumnId>("backlog");
+  const placedGhost = ghostOf === null ? undefined : placedGhosts.find((g) => g.card.key === ghostOf);
+  if (placedGhost !== undefined) ghostColumn.current = placedGhost.column;
   const modelChoosable = modelCard?.choosable === true ? modelCard : undefined;
   // A window follows its Proposal: it closes when the card is gone, and stays closed if the card comes back.
   useEffect(() => {
     if (bodyOf !== null && bodyCard === undefined) setBodyOf(null);
+    if (taskOf !== null && taskCard === undefined) setTaskOf(null);
+    if (driftOf !== null && driftCard === undefined) setDriftOf(null);
     if (modelOf !== null && modelChoosable === undefined) setModelOf(null);
-  }, [bodyOf, bodyCard, modelOf, modelChoosable]);
-  // The details of a ghost follow it: when the ghost goes away, delivered or withdrawn, they close and the focus goes back to the column.
+  }, [bodyOf, bodyCard, taskOf, taskCard, driftOf, driftCard, modelOf, modelChoosable]);
+  // A ghost asked from the status bar replaces every other details window of the Board, the History entries' included (their column is drawn anew).
+  useEffect(() => {
+    if (ghostRequest === undefined) return;
+    setBodyOf(null);
+    setTaskOf(null);
+    setDriftOf(null);
+    setModelOf(null);
+    setGhostFromBar(true);
+    setGhostOf(`announced:${ghostRequest.id}`);
+  }, [ghostRequest]);
+  const focusBacklog = () => root.current?.querySelector<HTMLElement>('[data-column="backlog"]')?.focus();
+  // The details of a ghost follow it: when the ghost goes away, delivered or withdrawn, they close and the focus goes back to the column it stood in (Backlog when the status bar opened them).
   useEffect(() => {
     if (ghostOf === null || ghostCard !== undefined) return;
     setGhostOf(null);
-    root.current?.querySelector<HTMLElement>(`[data-column="${GHOST_COLUMN}"]`)?.focus();
+    if (ghostFromBar) focusBacklog();
+    else root.current?.querySelector<HTMLElement>(`[data-column="${ghostColumn.current}"]`)?.focus();
   }, [ghostOf, ghostCard]);
 
   const env: BoardEnv = {
     context,
     numbers,
     runReason: resolve.runReason,
-    isExpanded: (key) => expanded.has(key),
-    toggleExpanded: (key) =>
-      setExpanded((now) => {
-        const next = new Set(now);
-        if (!next.delete(key)) next.add(key);
-        return next;
-      }),
     showCard(key) {
       const card = [...(root.current?.querySelectorAll<HTMLElement>("[data-key]") ?? [])].find((node) => node.dataset["key"] === key);
       card?.scrollIntoView?.({ block: "nearest" });
@@ -157,13 +184,18 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
       context.post({ type: "modelSuggestionsWanted" });
     },
     openProposal: (proposal) => setBodyOf(proposal),
-    openGhost: (key) => setGhostOf(key),
+    openTask: (task) => setTaskOf(task),
+    openDrift: (drift) => setDriftOf(drift),
+    openGhost: (key) => {
+      setGhostFromBar(false);
+      setGhostOf(key);
+    },
     openTaskImage: (task, name) => context.post({ type: "openTaskImage", task, name }),
   };
 
   if (snapshot === null) return <div ref={root} />;
 
-  const ghosts = placedGhosts.map((g) => ({ item: <GhostCard key={g.card.key} card={g.card} />, index: g.index }));
+  const ghosts = placedGhosts.map((g) => ({ item: <GhostCard key={g.card.key} card={g.card} />, index: g.index, column: g.column }));
   const scanLabel = scanButtonLabel("Scan System", snapshot.tasksSinceScan, advisorScanner);
   const history = historyGroups(snapshot.history, period);
   const historyCount = history.reduce((n, group) => n + group.entries.length, 0);
@@ -241,7 +273,7 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
           )}
           <div
             className="grid min-h-0 flex-1 [grid-template-rows:minmax(0,1fr)] gap-2.5 overflow-x-auto p-2.5"
-            style={{ gridTemplateColumns: historyOpen ? "repeat(4, minmax(250px, 1fr))" : "repeat(3, minmax(250px, 1fr)) 40px" }}
+            style={{ gridTemplateColumns: historyOpen ? "repeat(3, minmax(250px, 1fr))" : "repeat(2, minmax(250px, 1fr)) 40px" }}
           >
             {columns.map((column) => (
               <CardColumn key={column.id} column={column} ghosts={ghosts} foot={foot(column.id)} />
@@ -278,7 +310,7 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
                       </SelectContent>
                     </Select>
                   </div>
-                  <ColumnBody>
+                  <ColumnBody key={ghostRequest?.n ?? 0}>
                     {history.length === 0 ? (
                       <Hint id="history" />
                     ) : (
@@ -297,7 +329,9 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, a
             </section>
           </div>
           <ProposalBodyDialog card={bodyCard} onClose={() => setBodyOf(null)} />
-          <GhostDetailsDialog card={ghostCard} onClose={() => setGhostOf(null)} restoreFocus={(key) => root.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus()} />
+          <TaskDetailsDialog card={taskCard} onClose={() => setTaskOf(null)} />
+          <DriftDetailsDialog card={driftCard} onClose={() => setDriftOf(null)} />
+          <GhostDetailsDialog card={ghostCard} onClose={() => setGhostOf(null)} restoreFocus={(key) => (ghostFromBar ? focusBacklog() : root.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus())} />
           <ModelDialog card={modelChoosable} agent={models.agent} list={modelList} onClose={() => setModelOf(null)} />
         </div>
       </TooltipProvider>
@@ -361,6 +395,10 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
       page = { ...page, notices: [...page.notices, { id: nextNotice++, text: stoppedFollowingNotice(subject, reason) }] };
       render();
     },
-    show() {},
+    show(options) {
+      if (options.ghost === undefined) return;
+      page = { ...page, ghostRequest: { id: options.ghost, n: (page.ghostRequest?.n ?? 0) + 1 } };
+      render();
+    },
   };
 };

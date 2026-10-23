@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, win32 } from "node:path";
+import { basename, delimiter, join, win32 } from "node:path";
 import { announce, newTerminalId, type AgentOrigin, withdrawAll } from "../../../src/core/announcements";
 import { ADVISOR_CHAT_SENTENCE, ADVISOR_SENTENCE } from "../../../src/core/advisors";
 import { writeFileAtomic } from "../../../src/core/atomic-write";
@@ -10,17 +10,20 @@ import { developerExclusions, findInstructionFiles, instructionExclusions, merge
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
 import { releaseTasks } from "../../../src/core/work";
-import { questionProjectId, sendCoordinatorMessage } from "../../../src/core/question-channel";
+import { QUESTION_ENDPOINT_ENV, questionProjectId, sendCoordinatorMessage } from "../../../src/core/question-channel";
 import { processAlive, readAgentProcess, removeAgentProcess, writeAgentProcess } from "../../../src/core/agent-processes";
 import { terminalVerdict } from "../../../src/core/terminal-check";
-import { bundledOmpHook, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, withAskLine, withTramaPath } from "./cursor";
+import { startFailureNotice, type SavedJob, useOmpChat } from "../../../src/core/omp-chat-conversation";
+import { bundledAskMoreInstructions, bundledOmpHook, type ChatDelivery, isCursor, onCursorChatEvent, openCursorChat, withAskLine, withTramaPath } from "./cursor";
 import { withdrawForCheck, withdrawWaiting } from "./announcements";
 import { bindChatJob, chatJobSendStarted, chatTurnEnded, endChatJobs, endHeldJob as endHeldJobs, endTerminalJobs, endUnboundChatJobs, endUnsentJob, followsAgent, isHooked, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, onAgentStarted, releaseFiledWork, reportStoppedFollowing, setHooked, startJob } from "./drift-resolution";
-import { agentCommandLine, isSupportedShell, programName, type ShellFamily, shellFamily } from "./quote";
+import { agentCommandLine, isSupportedShell, programName, quote, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint } from "./questions";
 import { pruneAgentProcesses, releaseUnfollowedTasks } from "./task-release";
 import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
-import { agentTemplate, canScan, launchOverlay, type Models, quickCommandLine, type Role, roleOf, type RunModel, type TerminalAgent, terminalEnv } from "./terminal-agent";
+import { agentTemplate, canScan, launchOverlay, type Models, ompArguments, ompOptions, quickCommandLine, quickOptions, type Role, roleOf, type RunModel, type TerminalAgent, terminalEnv } from "./terminal-agent";
+import { type ConversationInfo, type ConversationStore, type OpenConversation, OmpConversations } from "./omp-chat/conversations";
+import type { ChatViewPort, OmpClientPort, OmpLaunch, OmpPrompt } from "./omp-chat/ports";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
 
@@ -56,12 +59,15 @@ export const configuredMaxParallelAgents = (): number => {
 const withAgentLimit = (instruction: string, limit = configuredMaxParallelAgents()): string =>
   instruction.replaceAll("{maxParallelAgents}", String(limit)) + ` Run at most ${limit} sub-agents at once.`;
 
+/** The agent name of a round Trama asks itself (a prepared Drift question): its one question's ID is the identity of that Drift. */
+export const PREPARED_QUESTION_AGENT = "Prepared question";
+
 /**
  * The agent that asked a question round, when it can be told: `Prepared question` for a round Trama asks itself, Cursor's chat agent, or the program of the agent command
  * for one started in a terminal of Trama.
  */
 export function agentName(context: { fromTramaTerminal?: boolean; fromCursorChat?: boolean; prepared?: boolean }): string | null {
-  if (context.prepared === true) return "Prepared question";
+  if (context.prepared === true) return PREPARED_QUESTION_AGENT;
   if (context.fromCursorChat === true) return "Cursor";
   if (context.fromTramaTerminal !== true) return null;
   const agent = configuredAgent();
@@ -93,6 +99,72 @@ const agentTerminals = new Map<vscode.Terminal, { id: string; jobId?: string; ro
 
 /** Agent terminals left open at rest with `trama.autoExit` off: no longer followed, remembered until they close. */
 const idleTerminals = new Map<vscode.Terminal, { id: string; jobId?: string; root: string; line: string; since: number }>();
+
+/** The conversations of omp Chat of this window; absent until the ACP client and the view are registered (`setOmpChat`), so nothing opens before they can. */
+let chatConversations: OmpConversations | undefined;
+
+/** The folder of the `trama` program the extension ships, put first on the PATH of a conversation's process like on its terminals'. */
+let bundledCliDir: string | undefined;
+export function setBundledCliDir(dir: string | undefined): void {
+  bundledCliDir = dir;
+}
+
+/** Whether `trama.ompChat` is on in the user's settings, read at every instruction. */
+const configuredOmpChat = (): boolean => settings().inspect<unknown>("ompChat")?.globalValue === true;
+
+/** Whether an instruction opens a conversation of omp Chat instead of a terminal: omp Chat on, the agent omp (read now) and omp Chat registered. */
+const ompChatInUse = (): boolean => useOmpChat({ ompChat: configuredOmpChat(), agent: configuredAgent(), available: chatConversations !== undefined });
+
+/** The PATH of a conversation's process: the shipped `trama` first, as on the terminals'; nothing to add without it. */
+const conversationPath = (): Record<string, string> => (bundledCliDir === undefined ? {} : { PATH: `${bundledCliDir}${delimiter}${process.env["PATH"] ?? ""}` });
+
+/** The process of a conversation: the terminal's environment with the PATH `trama` is found on, and the arguments of its options. */
+function conversationLaunch(root: string, options: string[][], endpoint: string, terminalId: string, jobId?: string, advisor = false): OmpLaunch {
+  return { args: ompArguments(options), env: { ...terminalEnv(endpoint, terminalId, jobId, advisor), ...conversationPath() }, cwd: root };
+}
+
+/** Opens the conversation; false, after the warning, when omp does not start: the caller's instruction then goes to a terminal. */
+async function openConversation(spec: OpenConversation): Promise<boolean> {
+  const opened = await chatConversations?.open(spec);
+  if (opened?.opened === true) return true;
+  void vscode.window.showWarningMessage(startFailureNotice(opened === undefined ? "omp Chat is not available" : opened.reason));
+  return false;
+}
+
+const endInfo = (conversation: ConversationInfo) => ({ id: conversation.id, ...(conversation.jobId === undefined ? {} : { jobId: conversation.jobId }), root: conversation.root, line: "", since: conversation.since });
+
+/**
+ * Registers the ACP client and the view of omp Chat for this window and resumes the conversations it saved before (`store` is `workspaceState`, `projectRoot`
+ * the project the window has open). Called once when the extension activates, by the code that creates the two.
+ */
+export function setOmpChat(ports: { client: OmpClientPort; view: ChatViewPort }, store: ConversationStore, projectRoot: () => string | undefined): Promise<void> {
+  chatConversations = new OmpConversations(ports.client, ports.view, store, {
+    autoExit: () => settings().get<boolean>("autoExit", true),
+    endWork: (conversation, abnormal) => endAgentWork(endInfo(conversation), abnormal),
+    reportStopped: reportStoppedFollowing,
+    registerProcess: (conversation, pid) => writeAgentProcess(questionProjectId(projectAt(conversation.root)), conversation.id, pid),
+    registeredProcess: (conversation) => readAgentProcess(questionProjectId(projectAt(conversation.root)), conversation.id)?.pid,
+    processAlive,
+    follow: setHooked,
+    restoreJob: (conversation, job) => {
+      launchedRoots.add(conversation.root);
+      startJob(job.kind, conversation.root, { terminal: conversation.id }, undefined, job.id, undefined, false, job.drifts ?? []);
+    },
+    projectRoot,
+    resumeLaunch: async (root, args, env) => {
+      const endpoint = await questionEndpoint(root);
+      if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
+      return { args, env: { ...env, [QUESTION_ENDPOINT_ENV]: endpoint, ...conversationPath() }, cwd: root };
+    },
+    confirm: async (message, detail, button) => (await vscode.window.showWarningMessage(message, { modal: true, detail }, button)) === button,
+  });
+  return chatConversations.resume();
+}
+
+/** `editor.WINDOW_CLOSED`: the extension stops, and every conversation's process with it; their jobs and saved entries wait for the resume. Resolves when the processes are gone. */
+export async function windowClosed(): Promise<void> {
+  await chatConversations?.windowClosed();
+}
 
 function releaseTakenTasks(root: string, origin: AgentOrigin): void {
   try {
@@ -152,12 +224,14 @@ export function watchAgentTerminal(): vscode.Disposable {
         finishAgentTerminal(tracked, info);
         break;
       }
+      chatConversations?.agentIdle(terminal);
     }),
     onAgentStarted((terminal, pid, root) => {
       // Only a terminal followed in Agent running registers its agent's process; nothing else changes.
       for (const info of agentTerminals.values()) {
         if (info.id === terminal && info.root === root) writeAgentProcess(questionProjectId(projectAt(root)), terminal, pid);
       }
+      chatConversations?.agentStarted(terminal, pid, root);
     }),
     vscode.window.onDidCloseTerminal((terminal) => {
       const info = agentTerminals.get(terminal);
@@ -237,6 +311,7 @@ export async function checkAgentTerminals(only?: string): Promise<{ id: string; 
       finishAgentTerminal(terminal, info, "the agent's process is gone");
     }
   }
+  checked.push(...(chatConversations?.check(only) ?? []));
   return checked;
 }
 
@@ -265,7 +340,7 @@ export function checkChatJobs(now: number = Date.now()): string[] {
 const launchedRoots = new Set<string>();
 
 /** Whether this window follows an agent terminal, whether or not a job is registered for it: the check has it to look at. */
-export const hasFollowedTerminals = (): boolean => agentTerminals.size > 0;
+export const hasFollowedTerminals = (): boolean => agentTerminals.size > 0 || chatConversations?.following === true;
 
 /** This window stops following `terminal`. */
 function unfollowTerminal(terminal: vscode.Terminal): void {
@@ -384,15 +459,17 @@ function announceSend(root: string, announcement: DesignAnnouncement | LaunchAnn
 
 
 /** How an instruction left Trama: chat delivery or an integrated agent terminal. */
-export type Launch = ChatDelivery | "terminal";
+export type Launch = ChatDelivery | "terminal" | "conversation";
 /** Whether the chat received the prompt automatically or an integrated terminal received the command. */
-export const launched = (launch: Launch | undefined): boolean => launch === "sent" || launch === "terminal";
+export const launched = (launch: Launch | undefined): boolean => launch === "sent" || launch === "terminal" || launch === "conversation";
 /** The agent command template and prompt are built when sent. */
 interface TerminalRun {
   template: (family: ShellFamily) => string;
   prompt: () => string;
   /** Whether the run's hook follows it: omp with its hook module in the package. Without it the command ends the run, as for any other agent. */
   hooked: boolean;
+  /** The options of the omp process, unquoted: the terminal quotes them in `template`, a conversation passes them as arguments. */
+  options: string[][];
 }
 
 /** An instruction, or a function that builds it at the moment it is sent (the Drifts a resolution covers are those open then). */
@@ -444,6 +521,7 @@ function terminalRun(instruction: Instruction, role: Role, filesDrifts: boolean,
   const hook = bundledOmpHook();
   const models = { model, scan: configuredModels().scan };
   return {
+    options: ompOptions(canScan(role) && !advisor, models, hook, overlay, advisor),
     template: (family) => agentTemplate(canScan(role) && !advisor, models, family, hook, overlay, advisor, attachment),
     prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, false, advisor ? ADVISOR_SENTENCE : undefined),
     hooked: hook !== undefined,
@@ -597,8 +675,27 @@ export async function launchAgent(
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
-    const asTab = settings().inspect<string>("terminalLocation")?.globalValue === "editor";
     const terminalId = newTerminalId();
+    // With omp Chat in use the instruction opens a conversation; its card and job are written first, under the identity a terminal would have, so a failed start hands them to that terminal.
+    let writtenFor: "conversation" | undefined;
+    if (ompChatInUse()) {
+      const prompt = run.prompt();
+      launchedRoots.add(root);
+      setHooked(terminalId, run.hooked);
+      const cardId = announceProposal === undefined ? undefined : announceLaunch(root, announceProposal, { terminal: terminalId });
+      onSent?.(Date.now());
+      let savedJob: SavedJob | undefined;
+      if (job !== undefined && jobId !== undefined) {
+        const drifts = jobOptions.drifts?.() ?? [];
+        const started = startJob(job, root, { terminal: terminalId }, undefined, jobId, undefined, false, drifts);
+        if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
+        savedJob = { id: jobId, kind: job, name, ...(cardId === undefined ? {} : { announcement: cardId }), ...(drifts.length === 0 ? {} : { drifts: [...drifts] }) };
+      }
+      const opened = await openConversation({ id: terminalId, root, name, launch: conversationLaunch(root, run.options, endpoint, terminalId, jobId, advisor), first: { text: prompt, ...(jobOptions.attachment === undefined ? {} : { attachment: jobOptions.attachment.file }) }, focus: false, ...(savedJob === undefined ? {} : { job: savedJob }) });
+      if (opened) return "conversation";
+      writtenFor = "conversation";
+    }
+    const asTab = settings().inspect<string>("terminalLocation")?.globalValue === "editor";
     const defaultShell = vscode.env.shell;
     // On Windows a default shell other than Windows PowerShell 5.1, PowerShell 7 or Git Bash is replaced for this terminal only.
     const replaced = !isSupportedShell(defaultShell);
@@ -617,12 +714,15 @@ export async function launchAgent(
     launchedRoots.add(root);
     setHooked(terminalId, run.hooked);
     if (asTab) terminal.show(true);
-    const startedAt = Date.now();
-    if (announceProposal !== undefined) announceLaunch(root, announceProposal, { terminal: terminalId });
-    onSent?.(startedAt);
-    if (job !== undefined && jobId !== undefined) {
-      const started = startJob(job, root, { terminal: terminalId }, undefined, jobId, undefined, false, jobOptions.drifts?.() ?? []);
-      if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
+    // After a failed conversation start the card, the job and the sent instant already stand: they are the terminal's now.
+    if (writtenFor === undefined) {
+      const startedAt = Date.now();
+      if (announceProposal !== undefined) announceLaunch(root, announceProposal, { terminal: terminalId });
+      onSent?.(startedAt);
+      if (job !== undefined && jobId !== undefined) {
+        const started = startJob(job, root, { terminal: terminalId }, undefined, jobId, undefined, false, jobOptions.drifts?.() ?? []);
+        if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
+      }
     }
     // Last step: the job, the announcement and the sent instant already stand when the command is written.
     writeWhenShellReady(terminal, line);
@@ -654,26 +754,73 @@ export async function openQuickTask(root: string): Promise<void> {
     }
     return;
   }
+  await openFocusedTerminal(root, "Quick", (family) => quickCommandLine(model, family), { options: quickOptions(model) });
+}
+
+/**
+ * A new agent named `name` with no job, no hook and no instruction of its own: with omp Chat in use a conversation (`conversation` has its options and first message,
+ * when it has one), which takes the focus in its message field; otherwise, or when omp does not start, a terminal, where `lineOf` builds the command for the
+ * shell it runs in, written when the shell is ready. The terminal takes the focus. The card is announced as work either way.
+ */
+async function openFocusedTerminal(root: string, name: string, lineOf: (family: ShellFamily) => string, conversation: { options: string[][]; first?: OmpPrompt }): Promise<void> {
   const endpoint = await questionEndpoint(root);
   if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
-  const asTab = settings().inspect<string>("terminalLocation")?.globalValue === "editor";
   const terminalId = newTerminalId();
+  let announced = false;
+  if (ompChatInUse()) {
+    announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
+    announced = true;
+    launchedRoots.add(root);
+    setHooked(terminalId, false);
+    if (await openConversation({ id: terminalId, root, name, launch: conversationLaunch(root, conversation.options, endpoint, terminalId), ...(conversation.first === undefined ? {} : { first: conversation.first }), focus: true })) return;
+  }
+  const asTab = settings().inspect<string>("terminalLocation")?.globalValue === "editor";
   const defaultShell = vscode.env.shell;
   const replaced = !isSupportedShell(defaultShell);
   const shellPath = replaced ? win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : undefined;
   const terminal = vscode.window.createTerminal({
-    name: "Quick",
+    name,
     cwd: root,
     shellPath,
     env: terminalEnv(endpoint, terminalId),
     ...(asTab ? { location: { viewColumn: vscode.ViewColumn.Active, preserveFocus: false } } : {}),
   });
+  if (!announced) announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
   if (replaced) warnShellReplaced(defaultShell);
-  const line = quickCommandLine(model, shellFamily(shellPath ?? defaultShell));
+  const line = lineOf(shellFamily(shellPath ?? defaultShell));
   agentTerminals.set(terminal, { id: terminalId, root, line, since: Date.now() });
   launchedRoots.add(root);
   setHooked(terminalId, false);
   terminal.show(false);
-  announceLaunch(root, { kind: "work", title: "Quick" }, { terminal: terminalId });
   writeWhenShellReady(terminal, line);
+}
+
+/**
+ * Ask more: a new, bare chat with the agent about one thing, `part` (the card or question chosen, read when pressed), named `name`
+ * and on the analysis role's model (`trama.analysis`, read now). Trama's fixed instructions (`media/ask-more.md`) come first: omp
+ * gets them as a file attached with `@`, Cursor's chat gets them in the same message before the part. No job and no
+ * announcement but the terminal's work card; the only sentences added are the language one and, in Cursor's chat, the PATH line.
+ */
+export async function openAskMore(root: string, name: string, part: string): Promise<void> {
+  const file = bundledAskMoreInstructions();
+  if (file === undefined) throw new TramaError("Ask more is unavailable: its instructions are missing from the extension's package.");
+  const instructions = readFileSync(file, "utf8").trimEnd();
+  const model = configuredModels().analysis;
+  const prompt = withLanguage(part, configuredLanguage());
+  if (configuredAgent() === "cursor") {
+    // Cursor's chat only exists in Cursor: elsewhere nothing is opened, the prompt goes to the clipboard.
+    if (!isCursor()) {
+      await vscode.env.clipboard.writeText(`${instructions}\n\n${prompt}`);
+      void Promise.resolve(vscode.window.showInformationMessage(
+        "Trama: Cursor's chat is only available in Cursor. The prompt is on the clipboard; choose omp in Trama's Settings to run the agent in a terminal.",
+        "Open Settings",
+      )).then((choice) => (choice === "Open Settings" ? vscode.commands.executeCommand("trama.openSettings") : undefined));
+      return;
+    }
+    await openCursorChat(root, withTramaPath(`${instructions}\n\n${prompt}`), () => true, model);
+    return;
+  }
+  // The command is one line: the part's own line breaks become spaces.
+  const oneLine = prompt.replace(/\s*\n\s*/g, " ");
+  await openFocusedTerminal(root, name, (family) => `${quickCommandLine(model, family)} ${quote(family, `@${file}`)} ${quote(family, oneLine)}`, { options: quickOptions(model), first: { text: prompt, attachment: file } });
 }

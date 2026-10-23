@@ -62,6 +62,8 @@ export type ToHost =
   | { type: "writeDesignRequest" }
   /** Add Quick Task (the arrow of + Add Work Item): the host opens a new, empty chat with the agent. */
   | { type: "openQuickTask" }
+  /** Ask more on a card of the Board's details windows: the host reads the card from its files at the click and opens a new chat about it. Never refused for other work. */
+  | { type: "askMore"; kind: "task" | "proposal" | "drift"; id: string }
   /** What the developer did on the overlay of question round `round`; the host answers with the new state. */
   | { type: "questionAction"; round: number; action: QuestionAction }
   /** Tracked path: relative to `.trama/model/`, or `requirements/<area>.md`. */
@@ -120,6 +122,8 @@ export interface NavigateOptions {
   drift?: string;
   /** Focus to open in the tab arrived at from a View button or a chip; it replaces the focus and the drawn Proposal that tab had. */
   focus?: FocusRequest;
+  /** Identity of an announcement: the Board opens the details of its ghost, replacing any other details window, and closing it puts the focus on the Backlog column. */
+  ghost?: string;
 }
 
 /** Host -> webview. */
@@ -153,7 +157,7 @@ export type ToWebview =
   | ({ type: "navigate"; view: ViewName } & NavigateOptions)
   /** The question round being answered, drawn over the tabs; null when none is. */
   | { type: "questions"; round: QuestionRoundView | null }
-  /** The Trama settings: the schema from the manifest and, per key, the user value and (for keys not application-scoped) the workspace value. */
-  | { type: "settings"; schema: SettingSchema[]; values: Record<string, SettingsValues> }
+  /** The Trama settings: the schema from the manifest, per key the user value and (for keys not application-scoped) the workspace value, and the agent now in `trama.agent` (`omp` or `cursor`), which the omp-only controls follow. */
+  | { type: "settings"; schema: SettingSchema[]; values: Record<string, SettingsValues>; agent: "cursor" | "omp" }
   /** Model names the Settings tab suggests for the three model roles, from the agent of `trama.agent`; an empty list means plain text, and `error` says why omp gives none. With `agent` (and `ompPath`) the list answers the wizard's request for that agent and only the wizard takes it. */
   | { type: "modelSuggestions"; models: ModelSuggestion[]; error?: string; agent?: string; ompPath?: string };

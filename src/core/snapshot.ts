@@ -1,5 +1,6 @@
 import type { CardNumbers } from "./card-names";
-import { type Announcement, type AnnouncementKind, type AnnouncementNote, type CheckPhase, listAnnouncements, resolutionTitle } from "./announcements";
+import { type Announcement, type AnnouncementNote, type CheckPhase, listAnnouncements, resolutionTitle } from "./announcements";
+import type { GhostKind } from "./ghost-column";
 import type { FileChange } from "./diff";
 import { type Change, type MergedMachine, mergeMachine } from "./merge";
 import { scanScope } from "./scan-scope";
@@ -206,11 +207,11 @@ export interface TaskView {
   images: TaskImageView[];
 }
 
-/** A card the agent is about to create, drawn as a ghost in the column it will land in, or a check drawn in In progress. */
+/** A card the agent is about to create, drawn as a ghost at the bottom of the column it will land in (see `ghostColumn`), or a work with no column, shown in the status bar. */
 export interface AnnouncementView {
   id: string;
   /** A manual scan is a check announced by Trama, shown as Scan. */
-  kind: AnnouncementKind | "scan" | "resolve" | "unify";
+  kind: GhostKind;
   /** The Draft's own title once a Draft is bound to it, the announced title before. */
   title: string;
   /** A card: Preparing until a Draft exists, then Writing (a Proposal) or Writing the Proposal (a Drift's Draft). A check: its own phase. An import has none. */

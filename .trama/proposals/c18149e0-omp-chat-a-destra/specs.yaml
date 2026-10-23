@@ -1,0 +1,58 @@
+languages:
+  - name: TypeScript
+    version: "7"
+    note: strict mode, ES2022, ES modules, `noUncheckedIndexedAccess`; type-checked with `tsc --noEmit`
+frameworks:
+  - name: Bun
+    version: "1.4"
+    note: runtime, package manager, test runner and compiler of the `trama` binary
+  - name: VS Code extension API
+    version: "^1.106.0"
+    note: the extension host runs in Node, bundled as CommonJS
+  - name: React
+    version: "19"
+    note: the panel webview, with `react-dom`
+  - name: shadcn/ui
+    note: components copied into the webview source, zinc base colour with a blue primary, light and dark
+  - name: Radix UI
+    note: the primitives under the shadcn/ui components
+  - name: Tailwind CSS
+    version: "4"
+    note: compiled at build time into one stylesheet of the webview
+  - name: class-variance-authority
+    chosenByAgent: used by the shadcn/ui components for their variants
+  - name: clsx
+    chosenByAgent: used by the shadcn/ui components to join class names
+  - name: tailwind-merge
+    chosenByAgent: used by the shadcn/ui components to merge Tailwind classes
+  - name: lucide-react
+    note: the icons of the panel, as inline SVG components
+  - name: cmdk
+    note: the Command list under the shadcn/ui Combobox of the model fields
+  - name: cytoscape
+    note: draws the Diagram on a canvas, hosted in a React component
+  - name: elkjs
+    note: lays out the Diagram
+  - name: yaml
+    note: front matter and settings files
+  - name: zod
+    version: "4"
+    note: input schemas of the command line
+  - name: Agent Client Protocol SDK
+    note: "`@agentclientprotocol/sdk`, the client side of ACP that omp Chat uses to talk to `omp acp`, bundled into the extension host"
+  - name: fantasticon
+    note: development dependency, used only by `scripts/icon-font.ts`
+    chosenByAgent: turns the logo SVG into the one-glyph icon font of the status bar button, in a single step
+testing:
+  - name: bun test
+    note: the whole suite, also with `--isolate`
+  - name: happy-dom
+    note: the DOM of the webview component tests
+  - name: Testing Library
+    note: "`@testing-library/react`, interactions as the user does them"
+ci:
+  - name: GitHub Actions
+    note: tagged releases on Bun 1.4.0, one `.vsix` per platform
+deployment:
+  - name: VS Code Marketplace package
+    note: one `.vsix` per platform (`linux-x64`, `darwin-arm64`, `win32-x64`), with the `trama` binary inside

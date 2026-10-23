@@ -54,16 +54,20 @@ export const SETTING_GROUPS: readonly { title: string; keys: readonly string[] }
   { title: "Agent", keys: ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"] },
   { title: "Models", keys: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"] },
   { title: "Project", keys: ["trama.skillsDir"] },
-  { title: "Features", keys: ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing"] },
+  { title: "Features", keys: ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat"] },
 ];
 
 /** Titles that the key does not give: the Settings tab and the wizard show the same one. */
 const EXPLICIT_TITLES: Readonly<Record<string, string>> = {
   "trama.subagentsContextSharing": "Sub-agents Context Sharing",
+  "trama.ompChat": "omp Chat",
 };
 
 /** The agent setting: the agents are Cursor's chat and omp. */
 export const AGENT_KEY = "trama.agent";
+
+/** The setting that works only with omp: the host refuses a write to it while the agent is not omp. */
+export const OMP_CHAT_KEY = "trama.ompChat";
 
 /**
  * The user value of `trama.agent` as the Settings tab shows it: a value that is neither `cursor` nor `omp` (a left-over `chat` or
@@ -145,9 +149,10 @@ export type SettingPlan =
   | { ok: false; reason: string }
   | { ok: true; writes: { key: string; value: SettingValue | undefined }[] };
 
-/** Plans a change to one setting. */
-export function planSettingChange(schema: readonly SettingSchema[], key: string, value: SettingValue): SettingPlan {
+/** Plans a change to one setting; `agent` is the agent now in `trama.agent`, and `trama.ompChat` is refused unless it is `omp`. */
+export function planSettingChange(schema: readonly SettingSchema[], key: string, value: SettingValue, agent: string): SettingPlan {
   const setting = schema.find((s) => s.key === key);
   if (setting === undefined) return { ok: false, reason: `Unknown Trama setting ${key}` };
+  if (key === OMP_CHAT_KEY && agent !== "omp") return { ok: false, reason: `${setting.title} works only with omp.` };
   return { ok: true, writes: [{ key, value: storedValue(setting, value) }] };
 }

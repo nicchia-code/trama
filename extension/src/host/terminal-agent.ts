@@ -32,20 +32,35 @@ export const roleOf = (name: string): Role => (name === "Design" || name === "Se
 export const canScan = (role: Role): boolean => role !== "analysis";
 
 /**
- * The template of omp's command line, with `{prompt}` where the quoted prompt goes: `--model` is the run's model; for
- * instructions that can scan, `--slow` is `scan`, the scan model. `ompHook` tells omp when it is idle. `config` is the
- * overlay file omp loads with `--config` (only when it has content); `advisor` is a Run with the Advisor Scanner on, which
- * adds `--advisor` and which the caller launches without `--slow`. `attachment` is the absolute path of a file omp attaches
- * to the first message with `@<path>` (Unify Drifts' instructions), given before the prompt.
+ * The options of an omp job in the order of the command line, each as its flag and, when it has one, its value, unquoted: `--hook <module>` (`ompHook` tells omp
+ * when it is idle), `--advisor` (a Run with the Advisor Scanner on, launched without `--slow`), `--config <overlay>` (the overlay file, only when it has content),
+ * `--model <m>` (the run's model) and, for instructions that can scan, `--slow <scan model>`. The terminal quotes the values for its shell (`agentTemplate`);
+ * a conversation of omp Chat passes them as array elements (`ompArguments`).
+ */
+export function ompOptions(scanning: boolean, models: { model: string; scan: string }, ompHook?: string, config?: string, advisor = false): string[][] {
+  const option = (flag: string, value: string) => (value === "" ? [] : [[flag, value]]);
+  return [...(ompHook === undefined ? [] : [["--hook", ompHook]]), ...(advisor ? [["--advisor"]] : []), ...(config === undefined ? [] : [["--config", config]]), ...option("--model", models.model), ...(scanning ? option("--slow", models.scan) : [])];
+}
+
+/** The options of a Quick Task or an Ask more: `--model <m>` only when the role has a model; no hook, overlay, `--slow` or `--advisor`. */
+export const quickOptions = (model: string): string[][] => (model === "" ? [] : [["--model", model]]);
+
+/** The arguments of a conversation's `omp` process: the job's options as they are, then `acp --yolo`. */
+export const ompArguments = (options: string[][]): string[] => [...options.flat(), "acp", "--yolo"];
+
+const quoted = (family: ShellFamily, options: string[][]): string[] => options.flatMap(([flag, value]) => (value === undefined ? [flag as string] : [flag as string, quote(family, value)]));
+
+/**
+ * The template of omp's command line, with `{prompt}` where the quoted prompt goes: the options of `ompOptions`, quoted for the shell. `attachment` is the absolute
+ * path of a file omp attaches to the first message with `@<path>` (Unify Drifts' instructions), given before the prompt.
  */
 export function agentTemplate(scanning: boolean, models: { model: string; scan: string }, family: ShellFamily, ompHook?: string, config?: string, advisor = false, attachment?: string): string {
-  const option = (flag: string, value: string) => (value === "" ? [] : [flag, quote(family, value)]);
-  const words = ["omp", ...(ompHook === undefined ? [] : ["--hook", quote(family, ompHook)]), ...(advisor ? ["--advisor"] : []), ...(config === undefined ? [] : ["--config", quote(family, config)]), ...option("--model", models.model), ...(scanning ? option("--slow", models.scan) : [])];
+  const words = ["omp", ...quoted(family, ompOptions(scanning, models, ompHook, config, advisor))];
   return [...words, ...(attachment === undefined ? [] : [quote(family, `@${attachment}`)]), "{prompt}"].join(" ");
 }
 
 /** The command line of a Quick Task's terminal: `omp`, with `--model <m>` only when the execution role has a model; no hook, overlay, `--slow`, `--advisor` or prompt. */
-export const quickCommandLine = (model: string, family: ShellFamily): string => ["omp", ...(model === "" ? [] : ["--model", quote(family, model)])].join(" ");
+export const quickCommandLine = (model: string, family: ShellFamily): string => ["omp", ...quoted(family, quickOptions(model))].join(" ");
 
 /** What an omp launch overlay holds: the advisor role and advisors of a Run with the Advisor Scanner on, and the instruction files omp must not read. */
 export interface LaunchOverlay {

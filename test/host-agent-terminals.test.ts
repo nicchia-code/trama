@@ -11,7 +11,7 @@ import { announce, listAnnouncements, withdrawAll } from "../src/core/announceme
 import type { CursorHook } from "../src/core/cursor-chat";
 import { newProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
-import { announcedGhosts, GHOST_COLUMN } from "../extension/src/webview/board/logic";
+import { announcedGhosts } from "../extension/src/webview/board/logic";
 import { projectAt } from "../src/core/store";
 import { dismissDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask } from "../src/core/work";
 import { FIX_OPTIONS } from "./fix-options";
@@ -104,6 +104,7 @@ let workspaceRoots: string[] | undefined;
 type FileUri = { scheme: string; fsPath: string };
 const requirementEvents = { create: [] as Listener<FileUri>[], change: [] as Listener<FileUri>[], delete: [] as Listener<FileUri>[] };
 const errorMessages: string[] = [];
+const warningMessages: string[] = [];
 /** The answers to the offer to initialize a project, in the order the offers were shown. */
 const answerOffer: Array<(choice: string | undefined) => void> = [];
 let panelsCreated = 0;
@@ -153,7 +154,7 @@ mock.module("vscode", () => ({
     showErrorMessage: (message: string) => void errorMessages.push(message),
     showQuickPick: async (items: { label: string; description?: string }[], options: { title?: string }) => pick(items, options),
     showInputBox: async () => typeIn(),
-    showWarningMessage: () => undefined,
+    showWarningMessage: (message: string) => void warningMessages.push(message),
     showInformationMessage: () => {
       const offer = Promise.withResolvers<string | undefined>();
       answerOffer.push(offer.resolve);
@@ -1366,9 +1367,9 @@ describe("announcing a design request", () => {
     expect(listAnnouncements(p)).toEqual([]);
     await launchAgent(dir, "Use the trama-design skill. Add refunds", "Design", "Add refunds");
     expect(listAnnouncements(p).map((a) => ({ kind: a.kind, source: a.source, title: a.title, proposal: a.proposal }))).toEqual([{ kind: "proposal", source: "request", title: "Add refunds", proposal: null }]);
-    // The ghost of the launch stands in System Activities and carries the request's title.
+    // The ghost of the launch stands at the bottom of Backlog and carries the request's title.
     const ghosts = announcedGhosts(buildSnapshot(p).announcements, false);
-    expect(GHOST_COLUMN).toBe("system");
+    expect(ghosts.map((g) => g.column)).toEqual(["backlog"]);
     expect(ghosts.map((g) => g.card.title)).toEqual(["Add refunds"]);
   });
 
@@ -3042,5 +3043,369 @@ describe("Unify Drifts", () => {
       controller.dispose();
       tearDown(root);
     }
+  });
+});
+
+describe("Ask more", () => {
+  const instructions = "Trama: Ask more\n\nRead, then wait.\n";
+  /** A copy of the shop project with the extension's package beside it: the fixed instructions Ask more carries. */
+  const setUp = () => {
+    const root = mkdtempSync(join(tmpdir(), "trama-ask-more-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    extensionPath = join(root, "ext");
+    mkdirSync(join(extensionPath, "media"), { recursive: true });
+    mkdirSync(join(extensionPath, "bin"), { recursive: true });
+    writeFileSync(join(extensionPath, "media", "ask-more.md"), instructions);
+    writeFileSync(join(extensionPath, "bin", "trama"), "");
+    return root;
+  };
+  const tearDown = (root: string) => {
+    extensionPath = "";
+    settingValues["agent"] = "omp";
+    delete settingValues["analysis"];
+    delete settingValues["language"];
+    editor.appName = "Visual Studio Code";
+    commandHandler = () => undefined;
+    rmSync(root, { recursive: true, force: true });
+  };
+
+  test("with omp a bare terminal named after the card takes the focus, on the analysis model with the fixed instructions attached; no hook, no job, one work card", async () => {
+    const { openAskMore, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { localProjectJobs } = await import("../extension/src/host/drift-resolution");
+    watchAgentTerminal();
+    const root = setUp();
+    const p = projectAt(root);
+    withdrawAll(p);
+    settingValues["analysis"] = " opus ";
+    settingValues["language"] = "Italian";
+    const terminalCount = terminals.length;
+    const jobsBefore = localProjectJobs(root).length;
+    try {
+      await openAskMore(root, "Ask T3", "Ask more about the Task j6tlxyad.\nText:\nLaunch it.");
+      const terminal = terminals.at(-1) as FakeTerminal;
+      const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      expect(terminals).toHaveLength(terminalCount + 1);
+      expect(created.at(-1)).toMatchObject({ name: "Ask T3", cwd: root });
+      expect(environments.at(-1)).toMatchObject({ TRAMA_AGENT: "1", TRAMA_TERMINAL: id });
+      expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_JOB");
+      expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_ADVISOR_SCANNER");
+      expect(terminal.line).toBe(
+        `omp --model 'opus' '@${join(extensionPath, "media", "ask-more.md")}' 'Ask more about the Task j6tlxyad. Text: Launch it. Write everything you generate in Italian, except code, which always stays in English.'`,
+      );
+      expect(terminal.line).not.toMatch(/--hook|--config|--slow|--advisor/);
+      expect(terminal.shown).toEqual([false]);
+      expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["work", "Ask T3", id]]);
+      expect(localProjectJobs(root)).toHaveLength(jobsBefore);
+      listeners.end.forEach((fn) => fn(shell(terminal)));
+      expect(listAnnouncements(p)).toEqual([]);
+    } finally {
+      tearDown(root);
+    }
+  });
+
+  test("with Cursor's chat the fixed instructions come first in the same message, with the analysis model, through composer.createNew only: no job, no card, no ask sentence", async () => {
+    const { openAskMore } = await import("../extension/src/host/agent");
+    const { localProjectJobs } = await import("../extension/src/host/drift-resolution");
+    const root = setUp();
+    const p = projectAt(root);
+    settingValues["agent"] = "cursor";
+    settingValues["analysis"] = "opus";
+    editor.appName = "Cursor";
+    const calls: unknown[][] = [];
+    commandHandler = (id, ...args) => void calls.push([id, ...args]);
+    const before = { terminals: terminals.length, clipboard: clipboard.length, jobs: localProjectJobs(root).length };
+    try {
+      await openAskMore(root, "Ask question", "Ask more about a question.");
+      const pathLine = `The trama command may not be on your PATH. Before anything else run: export PATH="${join(extensionPath, "bin")}:$PATH"`;
+      const message = `Trama: Ask more\n\nRead, then wait.\n\nAsk more about a question.\n${pathLine}`;
+      expect(calls).toEqual([["composer.createNew", { partialState: { text: message, richText: message, unifiedMode: "agent", modelConfig: { modelName: "opus", maxMode: false } }, openInNewTab: true, autoSubmit: true }]]);
+      expect(JSON.stringify(calls)).not.toContain("trama question new");
+      expect(terminals).toHaveLength(before.terminals);
+      expect(clipboard).toHaveLength(before.clipboard);
+      expect(localProjectJobs(root)).toHaveLength(before.jobs);
+      expect(listAnnouncements(p)).toEqual([]);
+    } finally {
+      commandHandler = () => undefined;
+      editor.appName = "Visual Studio Code";
+      tearDown(root);
+    }
+  });
+
+  test("outside Cursor with Cursor's chat chosen the instructions and the part go to the clipboard, and no chat or terminal opens", async () => {
+    const { openAskMore } = await import("../extension/src/host/agent");
+    const root = setUp();
+    settingValues["agent"] = "cursor";
+    const before = { calls: editorCalls.length, terminals: terminals.length, clipboard: clipboard.length };
+    try {
+      await openAskMore(root, "Ask question", "Ask more about a question.");
+      expect(clipboard.slice(before.clipboard)).toEqual([`${instructions.trimEnd()}\n\nAsk more about a question.`]);
+      expect(editorCalls).toHaveLength(before.calls);
+      expect(terminals).toHaveLength(before.terminals);
+    } finally {
+      tearDown(root);
+    }
+  });
+});
+
+describe("omp Chat conversations in place of terminals", () => {
+  /** One process of omp that the fake client started. */
+  interface FakeProcess {
+    launch: { args: string[]; env: Record<string, string>; cwd: string };
+    first?: { text: string; attachment?: string };
+    stops: number;
+  }
+  let processes: FakeProcess[];
+  let failStart: string | undefined;
+  let tabs: { id: string; name: string; focus: boolean }[];
+  let closedTabs: string[];
+  const saved = new Map<string, unknown>();
+
+  const register = async () => {
+    const { setOmpChat } = await import("../extension/src/host/agent");
+    processes = [];
+    tabs = [];
+    closedTabs = [];
+    failStart = undefined;
+    saved.clear();
+    const none = () => ({ dispose() {} });
+    const session = (process: FakeProcess) => ({
+      sessionId: `s${processes.length}`,
+      pid: 5000 + processes.length,
+      inTurn: true,
+      sendPrompt: async () => undefined,
+      cancel() {},
+      stop: async () => void process.stops++,
+      onExit: none,
+      onUpdate: none,
+      onTurn: none,
+      onFormRequest: none,
+      answerForm() {},
+      models: async () => ({ available: [] }),
+      setModel: async () => undefined,
+    });
+    await setOmpChat(
+      {
+        client: {
+          start: async (launch, first) => {
+            if (failStart !== undefined) throw new Error(failStart);
+            const process: FakeProcess = { launch, ...(first === undefined ? {} : { first }), stops: 0 };
+            processes.push(process);
+            return session(process);
+          },
+          resume: async () => {
+            throw new Error("not used");
+          },
+        },
+        view: {
+          open: (tab, _session, options) => void tabs.push({ ...tab, focus: options.focus }),
+          setWorking() {},
+          close: (id) => void closedTabs.push(id),
+          onStopRequested: () => ({ dispose() {} }),
+          onCloseRequested: () => ({ dispose() {} }),
+        },
+      },
+      { get: (key) => saved.get(key), update: async (key, value) => void saved.set(key, value) },
+      () => undefined,
+    );
+  };
+  const withOmpChat = async (body: () => Promise<void>) => {
+    await register();
+    const previous = { agent: settingValues["agent"], inspected: inspected["ompChat"] };
+    settingValues["agent"] = "omp";
+    inspected["ompChat"] = { globalValue: true };
+    warningMessages.length = 0;
+    try {
+      await body();
+    } finally {
+      delete inspected["ompChat"];
+      if (previous.inspected !== undefined) inspected["ompChat"] = previous.inspected;
+      if (previous.agent === undefined) delete settingValues["agent"];
+      else settingValues["agent"] = previous.agent;
+    }
+  };
+
+  test("an instruction opens a conversation with the options, the environment and the identity of the terminal it replaces, and the instruction as its first message", async () => {
+    await withOmpChat(async () => {
+      const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+      const { localProjectJobs } = await import("../extension/src/host/drift-resolution");
+      watchAgentTerminal();
+      const p = projectAt(dir);
+      withdrawAll(p);
+      const terminalCount = terminals.length;
+      const saveSettings = { ...settingValues };
+      Object.assign(settingValues, { execution: " fast ", scan: "slow-model" });
+      try {
+        expect(await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan")).toBe("conversation");
+        expect(terminals).toHaveLength(terminalCount);
+        const [started] = processes;
+        const id = started?.launch.env["TRAMA_TERMINAL"] as string;
+        expect(id).toMatch(/^[a-z0-9]{6}$/);
+        expect(started?.launch.cwd).toBe(dir);
+        expect(started?.launch.args.slice(-2)).toEqual(["acp", "--yolo"]);
+        // Role scan: no --model of the execution role, the scan model for --slow, in the terminal's order.
+        expect(started?.launch.args).toContain("--slow");
+        expect(started?.launch.args[started.launch.args.indexOf("--slow") + 1]).toBe("slow-model");
+        expect(started?.launch.env).toMatchObject({ TRAMA_AGENT: "1", TRAMA_TERMINAL: id, TRAMA_QUESTION_ENDPOINT: "endpoint" });
+        expect(Object.keys(started?.launch.env ?? {})).toContain("TRAMA_JOB");
+        expect(started?.first?.text).toContain("Scan it.");
+        expect(started?.first?.text).toContain("Compare each Machine with the trama-analysis sub-agent.");
+        expect(tabs).toEqual([{ id, name: "Scan", focus: false }]);
+        // Registered as the terminal would be: its job and its card, under the same identity.
+        expect(localProjectJobs(dir).map((job) => ("terminal" in job.place ? job.place.terminal : undefined))).toContain(id);
+        expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["check", "Scan", id]]);
+        expect(saved.get("trama.ompChat.conversations")).toEqual([expect.objectContaining({ id, name: "Scan", sessionId: "s1", state: "running", job: expect.objectContaining({ kind: "scan", name: "Scan" }) })]);
+      } finally {
+        for (const key of Object.keys(settingValues)) delete settingValues[key];
+        Object.assign(settingValues, saveSettings);
+      }
+    });
+  });
+
+  test("the hook at rest ends the conversation's job and card like a terminal's, and with autoExit off it stays", async () => {
+    await withOmpChat(async () => {
+      const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+      const { localProjectJobs, receiveAgentIdle } = await import("../extension/src/host/drift-resolution");
+      watchAgentTerminal();
+      const p = projectAt(dir);
+      withdrawAll(p);
+      const jobsBefore = localProjectJobs(dir).length;
+      await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan");
+      const id = processes[0]?.launch.env["TRAMA_TERMINAL"] as string;
+      expect(localProjectJobs(dir)).toHaveLength(jobsBefore + 1);
+      receiveAgentIdle(id, dir);
+      expect(localProjectJobs(dir)).toHaveLength(jobsBefore);
+      expect(listAnnouncements(p)).toEqual([]);
+      expect(processes[0]?.stops).toBe(1);
+      expect(closedTabs).toEqual([id]);
+
+      settingValues["autoExit"] = false;
+      try {
+        await launchAgent(dir, "Scan again.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan");
+        const second = processes[1]?.launch.env["TRAMA_TERMINAL"] as string;
+        receiveAgentIdle(second, dir);
+        expect(localProjectJobs(dir)).toHaveLength(jobsBefore);
+        expect(processes[1]?.stops).toBe(0);
+        expect(closedTabs).toEqual([id]);
+      } finally {
+        delete settingValues["autoExit"];
+      }
+    });
+  });
+
+  test("with omp Chat off, or with another agent, the instruction goes to a terminal as before", async () => {
+    await withOmpChat(async () => {
+      const { launchAgent } = await import("../extension/src/host/agent");
+      delete inspected["ompChat"];
+      expect(await launchAgent(dir, "Scan it.", "Scan", undefined, undefined, "scan")).toBe("terminal");
+      inspected["ompChat"] = { workspaceValue: true };
+      expect(await launchAgent(dir, "Scan it.", "Scan", undefined, undefined, "scan")).toBe("terminal");
+      inspected["ompChat"] = { globalValue: true };
+      settingValues["agent"] = "cursor";
+      editor.appName = "Cursor";
+      try {
+        await launchAgent(dir, "Scan it.", "Scan", undefined, undefined, "scan");
+        expect(processes).toEqual([]);
+      } finally {
+        editor.appName = "Visual Studio Code";
+      }
+      expect(processes).toEqual([]);
+    });
+  });
+
+  test("a start that fails opens no conversation, warns, and the same instruction runs in a terminal with the same card, job and identity", async () => {
+    await withOmpChat(async () => {
+      const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+      const { localProjectJobs } = await import("../extension/src/host/drift-resolution");
+      watchAgentTerminal();
+      const p = projectAt(dir);
+      withdrawAll(p);
+      const jobsBefore = localProjectJobs(dir).length;
+      const terminalCount = terminals.length;
+      failStart = "omp not found at omp";
+      let sentAt: number | undefined;
+      expect(await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan", (at) => (sentAt = at))).toBe("terminal");
+      expect(warningMessages).toEqual(["Trama: omp Chat could not start omp (omp not found at omp); the job runs in a terminal."]);
+      expect(tabs).toEqual([]);
+      expect(terminals).toHaveLength(terminalCount + 1);
+      const terminal = terminals.at(-1) as FakeTerminal;
+      const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      expect(terminal.line).toContain("Scan it.");
+      expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["check", "Scan", id]]);
+      expect(localProjectJobs(dir)).toHaveLength(jobsBefore + 1);
+      expect(sentAt).toBeNumber();
+      expect(saved.get("trama.ompChat.conversations")).toBeUndefined();
+      listeners.end.forEach((fn) => fn(shell(terminal)));
+      expect(localProjectJobs(dir)).toHaveLength(jobsBefore);
+      expect(listAnnouncements(p)).toEqual([]);
+    });
+  });
+
+  test("Quick Task opens a bare conversation on the execution model with the focus, no hook and no first message, announced as work", async () => {
+    await withOmpChat(async () => {
+      const { openQuickTask, watchAgentTerminal } = await import("../extension/src/host/agent");
+      watchAgentTerminal();
+      const p = projectAt(dir);
+      withdrawAll(p);
+      const terminalCount = terminals.length;
+      settingValues["execution"] = " fast ";
+      try {
+        await openQuickTask(dir);
+        expect(terminals).toHaveLength(terminalCount);
+        const id = processes[0]?.launch.env["TRAMA_TERMINAL"] as string;
+        expect(processes[0]?.launch.args).toEqual(["--model", "fast", "acp", "--yolo"]);
+        expect(processes[0]?.first).toBeUndefined();
+        expect(Object.keys(processes[0]?.launch.env ?? {})).not.toContain("TRAMA_JOB");
+        expect(tabs).toEqual([{ id, name: "Quick", focus: true }]);
+        expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["work", "Quick", id]]);
+        // Close the tab's process: the work card ends with the conversation.
+      } finally {
+        delete settingValues["execution"];
+      }
+    });
+  });
+
+  test("a Quick Task whose omp does not start opens its terminal with the one card", async () => {
+    await withOmpChat(async () => {
+      const { openQuickTask, watchAgentTerminal } = await import("../extension/src/host/agent");
+      watchAgentTerminal();
+      const p = projectAt(dir);
+      withdrawAll(p);
+      failStart = "omp exited with code 1";
+      const terminalCount = terminals.length;
+      await openQuickTask(dir);
+      expect(warningMessages).toEqual(["Trama: omp Chat could not start omp (omp exited with code 1); the job runs in a terminal."]);
+      expect(terminals).toHaveLength(terminalCount + 1);
+      const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["work", "Quick", id]]);
+      listeners.close.forEach((fn) => fn(terminals.at(-1) as FakeTerminal));
+      expect(listAnnouncements(p)).toEqual([]);
+    });
+  });
+
+  test("Ask more opens a conversation with the fixed instructions as the attached file and the part as the first message", async () => {
+    await withOmpChat(async () => {
+      const { openAskMore, watchAgentTerminal } = await import("../extension/src/host/agent");
+      watchAgentTerminal();
+      const root = mkdtempSync(join(tmpdir(), "trama-ask-chat-"));
+      cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+      extensionPath = join(root, "ext");
+      mkdirSync(join(extensionPath, "media"), { recursive: true });
+      mkdirSync(join(extensionPath, "bin"), { recursive: true });
+      writeFileSync(join(extensionPath, "media", "ask-more.md"), "Trama: Ask more\n");
+      writeFileSync(join(extensionPath, "bin", "trama"), "");
+      settingValues["analysis"] = " opus ";
+      try {
+        await openAskMore(root, "Ask T3", "Ask more about the Task.\nText:\nLaunch it.");
+        expect(processes[0]?.launch.args).toEqual(["--model", "opus", "acp", "--yolo"]);
+        expect(processes[0]?.launch.cwd).toBe(root);
+        expect(processes[0]?.first).toEqual({ text: "Ask more about the Task.\nText:\nLaunch it.", attachment: join(extensionPath, "media", "ask-more.md") });
+        expect(tabs[0]).toMatchObject({ name: "Ask T3", focus: true });
+      } finally {
+        extensionPath = "";
+        delete settingValues["analysis"];
+        withdrawAll(projectAt(root));
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 });

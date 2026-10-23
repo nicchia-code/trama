@@ -33,6 +33,13 @@ export function bundledUnifyInstructions(extensionPath = vscode.extensions.getEx
   return existsSync(file) ? file : undefined;
 }
 
+/** The fixed instructions of Ask more, shipped in this extension's package (`media/ask-more.md`); undefined when the package has none. */
+export function bundledAskMoreInstructions(extensionPath = vscode.extensions.getExtension("trama-dev.trama")?.extensionPath): string | undefined {
+  if (extensionPath === undefined) return undefined;
+  const file = join(extensionPath, "media", "ask-more.md");
+  return existsSync(file) ? file : undefined;
+}
+
 /**
  * Cursor starts its agent's commands without the PATH the extension adds to the editor's terminals, so the instruction
  * gets a second line saying where the shipped trama program is; without one for this platform it stays one line.

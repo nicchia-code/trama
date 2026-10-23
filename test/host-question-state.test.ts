@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Question } from "../src/core/questions";
-import { applyQuestionAction, type QuestionAction, type QuestionRoundState, type QuestionStep, startRound } from "../extension/src/host/question-state";
+import { applyQuestionAction, askMoreTarget, type QuestionAction, type QuestionRoundState, type QuestionStep, startRound } from "../extension/src/host/question-state";
 
 const question = (id: string, multi = false, recommended = 1): Question => ({
   id,
@@ -191,4 +191,26 @@ describe("minimizing", () => {
     const summary = run(s, { type: "openSummary" });
     expect(run(summary, { type: "closeQuestions" }, { type: "minimize" }, { type: "restore" })).toEqual(summary);
   });
+});
+
+test("Ask more changes nothing in the round: the choices, the text and the answers stay as they were", () => {
+  const start = run(round(), { type: "toggleOption", option: 2 }, { type: "setText", text: "a note" }, { type: "next" });
+  expect(applyQuestionAction(start, { type: "askMore", id: "two" })).toEqual({ kind: "state", state: start });
+  const onQuestion = run(start, { type: "skip" });
+  expect(applyQuestionAction(onQuestion, { type: "askMore", id: "three" })).toEqual({ kind: "state", state: onQuestion });
+  const minimized = run(onQuestion, { type: "minimize" });
+  expect(applyQuestionAction(minimized, { type: "askMore", id: "three" })).toEqual({ kind: "refused", reason: "Ask more is about the question in view" });
+});
+
+test("Ask more is about the question in view only: not another question, the summary, the confirmation or the reduced bar", () => {
+  const start = run(round(), { type: "next" });
+  expect(askMoreTarget(start, "two")?.id).toBe("two");
+  expect(askMoreTarget(start, "one")).toBeNull();
+  const summary = run(start, { type: "openSummary" });
+  expect(askMoreTarget(summary, "two")).toBeNull();
+  const confirming = run(start, { type: "closeQuestions" });
+  expect(askMoreTarget(confirming, "two")).toBeNull();
+  const minimized = run(start, { type: "minimize" });
+  expect(askMoreTarget(minimized, "two")).toBeNull();
+  expect(applyQuestionAction(summary, { type: "askMore", id: "two" })).toEqual({ kind: "refused", reason: "Ask more is about the question in view" });
 });

@@ -287,6 +287,23 @@ test("the command Import from Code with the panel already open and an empty Mode
   expect(setups).toBe(0);
 });
 
+test("opening ghost details with the panel already open brings the Board forward with that announcement", async () => {
+  await send({ type: "ready" });
+  messages.length = 0;
+  controller.openGhostDetails("c00001");
+  await settled();
+  expect(messages).toContainEqual({ type: "navigate", view: "board", ghost: "c00001" });
+});
+
+test("opening ghost details with no panel creates it and sends the navigate once its webview is ready", async () => {
+  controller.openGhostDetails("c00002");
+  await settled();
+  expect(messages.some((m) => m["type"] === "navigate")).toBe(false);
+  receive?.({ type: "ready" });
+  await settled();
+  expect(messages).toContainEqual({ type: "navigate", view: "board", ghost: "c00002" });
+});
+
 test("the Diagram's buttons with a Model that is not empty carry out the path as before and open no wizard", async () => {
   mkdirSync(join(root, ".trama", "model", "shop"), { recursive: true });
   writeFileSync(join(root, ".trama", "model", "system.md"), "# App\n\nx\n");

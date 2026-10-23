@@ -4,6 +4,8 @@
 !THIRD-PARTY-NOTICES.md
 !dist/host.js
 !dist/webview.js
+!dist/omp-chat.js
 !dist/omp-hook.js
 !bin/**
 !media/**
+!README.md

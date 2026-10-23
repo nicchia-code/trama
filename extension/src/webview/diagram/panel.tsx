@@ -150,7 +150,7 @@ export function RecurringBadge({ previous }: { previous: readonly { id: string; 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Badge variant="outline" aria-label={recurringLabel(previous)}>
+        <Badge variant="outline" aria-label={recurringLabel(previous)} data-badge>
           recurring
         </Badge>
       </TooltipTrigger>

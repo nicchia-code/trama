@@ -61,6 +61,9 @@ L'import dal comando Import from Code è questo Event solo con un Modello che no
 ### UNIFY_DRIFTS
 Il developer sceglie Unify Drifts dal menu che si apre dalla freccetta di + Add Work Item, in fondo alla colonna Backlog, per far unire dall'agente tutti i Drift aperti fuori da ogni risoluzione in un unico Drift, che poi risolve con Resolve come ogni Drift. Serve quando più Drift toccano le stesse cose o si contraddicono, e risolverli uno alla volta li farebbe tornare. Non scrive nulla prima: l'agente gli chiede soltanto i conflitti fra i Drift (vedi Drift resolution).
 
+### ASK_MORE
+Il developer preme Ask more per chiedere a un agente spiegazioni su una sola cosa, senza scriverne da sé il contesto: una Proposal, un Task o un Drift, dalla finestra dei loro dettagli sulla Board, oppure la domanda in vista di un round di domande aperto. Trama apre una chat nuova con l'agente scelto, che riceve ciò che serve per leggere quella cosa e aspetta le domande del developer.
+
 ### OPEN_QUICK_TASK
 Il developer sceglie Add Quick Task dal menu che si apre dalla freccetta di + Add Work Item, in fondo alla colonna Backlog, per affidare all'agente un lavoro rapido e di fiducia, per esempio «committa il codice», senza richiesta scritta, senza scan e senza schede. Non scrive nulla prima: scrive direttamente nella chat che Trama apre.
 
@@ -91,6 +94,9 @@ The developer switches to the Diagram tab, or follows a link from another tab to
 
 ### SHOW_BOARD
 The developer switches to the Board tab.
+
+### OPEN_GHOST_DETAILS
+Il developer sceglie un ghost senza colonna dall'elenco che apre cliccando l'elemento dei ghost nella barra di stato dell'editor, o clicca quell'elemento quando riassume un solo ghost, per vederne i dettagli.
 
 ### SHOW_REQUIREMENTS
 The developer switches to the Requirements tab, or follows a link to a Requirement. I pulsanti View requirements e i chip dei riferimenti aprono invece un focus (FOCUS_PROPOSAL, FOCUS_TASK, FOCUS_REF).
@@ -193,3 +199,9 @@ Il developer riduce l'overlay delle domande a una barra per guardare il pannello
 
 ### RESTORE_QUESTIONS
 Il developer riapre l'overlay delle domande in attesa dalla barra nel pannello già aperto. Il pulsante Reopen della notifica dell'editor chiede invece OPEN_PANEL.
+
+### STOP_CHAT_AGENT
+Il developer preme Stop nel campo del messaggio di una conversazione di omp Chat in cui l'agente lavora e lo conferma nel dialogo modale. Annullare il dialogo non produce nulla.
+
+### CLOSE_CHAT_CONVERSATION
+Il developer chiude la scheda di una conversazione di omp Chat. Se l'agente della conversazione è in un turno, gli viene chiesto prima di confermare nello stesso dialogo modale di Stop; annullarlo non produce nulla.

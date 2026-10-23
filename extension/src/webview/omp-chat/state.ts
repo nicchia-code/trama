@@ -1,0 +1,98 @@
+import type { ConversationItem, FormAnswerMessage, ModelChoice, ToChatWebview } from "../../omp-chat-protocol";
+import { addError, addForm, addUserMessage, answerForm, applyUpdate, emptyTranscript, settle, start, type Transcript } from "./transcript";
+
+/** What the view knows of one conversation. */
+export interface ConversationView {
+  transcript: Transcript;
+  models: ModelChoice[];
+  currentModel?: string;
+  /** Grows each time the host asks for the focus in the message field. */
+  focusToken: number;
+}
+
+export interface ChatState {
+  items: ConversationItem[];
+  selected: string | undefined;
+  conversations: Record<string, ConversationView>;
+}
+
+export const initialChatState = (): ChatState => ({ items: [], selected: undefined, conversations: {} });
+
+const fresh = (): ConversationView => ({ transcript: emptyTranscript(), models: [], focusToken: 0 });
+
+function change(state: ChatState, id: string, edit: (view: ConversationView) => ConversationView): ChatState {
+  const view = state.conversations[id] ?? fresh();
+  return { ...state, conversations: { ...state.conversations, [id]: edit(view) } };
+}
+
+/** The tab in view: the one the host chose, or the first when it chose none that is still there. */
+export function selectedOf(state: ChatState): string | undefined {
+  return state.items.some((item) => item.id === state.selected) ? state.selected : state.items[0]?.id;
+}
+
+/** Applies a message of the host. `now` is read once by the caller so the reducer stays pure. */
+export function reduce(state: ChatState, message: ToChatWebview, now: number): ChatState {
+  switch (message.type) {
+    case "reset":
+      return initialChatState();
+    case "theme":
+      return state;
+    case "conversations": {
+      const kept: Record<string, ConversationView> = {};
+      for (const item of message.items) {
+        const view = state.conversations[item.id] ?? fresh();
+        const before = state.items.find((each) => each.id === item.id);
+        // The agent's turn ended: what was open in the conversation closes.
+        kept[item.id] = before?.state === "running" && item.state !== "running" ? { ...view, transcript: settle(view.transcript, now) } : view;
+      }
+      return { items: message.items, selected: message.selected, conversations: kept };
+    }
+    case "conversationStart":
+      return change(state, message.id, (view) => ({
+        ...view,
+        transcript: start(view.transcript, message.first, message.notice, now),
+        focusToken: message.focus ? view.focusToken + 1 : view.focusToken,
+      }));
+    case "conversationUpdate":
+      return change(state, message.id, (view) => ({ ...view, transcript: applyUpdate(view.transcript, message.update, now) }));
+    case "formRequest":
+      return change(state, message.id, (view) => ({ ...view, transcript: addForm(view.transcript, { requestId: message.requestId, message: message.message, schema: message.schema }, now) }));
+    case "models":
+      return change(state, message.id, (view) => ({ ...view, models: message.available, ...(message.current === undefined ? {} : { currentModel: message.current }) }));
+    case "conversationError":
+      return change(state, message.id, (view) => ({ ...view, transcript: addError(view.transcript, message.message, now) }));
+  }
+}
+
+/** The developer chose a tab: shown at once, before the host confirms. */
+export const selectTab = (state: ChatState, id: string): ChatState => (state.items.some((item) => item.id === id) ? { ...state, selected: id } : state);
+
+/** The developer sent a message from the view. */
+export const sendMessage = (state: ChatState, id: string, text: string, now: number): ChatState =>
+  change(state, id, (view) => ({ ...view, transcript: addUserMessage(view.transcript, text, now) }));
+
+/** The developer answered a form (or skipped it). */
+export const answerFormIn = (state: ChatState, id: string, requestId: string, answer: FormAnswerMessage): ChatState =>
+  change(state, id, (view) => ({ ...view, transcript: answerForm(view.transcript, requestId, answer) }));
+
+export interface ChatStore {
+  get(): ChatState;
+  subscribe(listener: () => void): () => void;
+  set(next: ChatState): void;
+}
+
+export function createChatStore(initial: ChatState = initialChatState()): ChatStore {
+  let state = initial;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => state,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+    set(next) {
+      state = next;
+      for (const listener of listeners) listener();
+    },
+  };
+}

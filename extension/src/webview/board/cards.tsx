@@ -1,12 +1,10 @@
-import { Ban, Check, ChevronDown, ChevronUp, FileInput, ListChecks, Network, Play, Settings, WandSparkles, X } from "lucide-react";
+import { Ban, Check, FileInput, ListChecks, Network, Play, Settings, WandSparkles, X } from "lucide-react";
 import { Fragment, type ReactNode, useRef, useState } from "react";
 import type { FocusRequest } from "../../protocol";
 import { cardNameOf, ID_NAMES } from "../../../../src/core/card-names";
 import { joinReasons } from "../../../../src/core/design";
-import { DriftCompare, IdTag, RecurringBadge, UnifiedBadge, UnifiesList } from "../diagram/panel";
+import { IdTag, RecurringBadge, UnifiedBadge } from "../diagram/panel";
 import { cn } from "../lib/utils";
-import { Markdown } from "../markdown";
-import { previewable, TaskImages } from "../task-images";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { SplitButton } from "../split-button";
@@ -14,6 +12,19 @@ import { Progress } from "../ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { AGENT_NAMES, type AnnouncedCard, blockedReason, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
 import { BoardButton, Head, RefChips, StatusDot, Tip, TipBadge, TaskProposalTag, useBoardEnv } from "./parts";
+
+/**
+ * What a click on a card leaves to its own parts: its buttons, badges, tags and links. A click anywhere else on the card
+ * opens its details window.
+ */
+const OWN_CLICK = "button, a, [data-badge], [data-tag]";
+
+/**
+ * Whether a click on a card leaves the card alone: a click on its own parts, or in a popup or menu it opened. Those are
+ * portals, outside the card's element, though React still passes their clicks up to the card.
+ */
+const leavesCardAlone = (event: React.MouseEvent<HTMLElement>): boolean =>
+  !event.currentTarget.contains(event.target as Node) || (event.target instanceof Element && event.target.closest(OWN_CLICK) !== null);
 
 /** The shell of a card of the Board: its key, so a link can find it, and its accessible name. */
 function Shell({ card, kind, label, className, children, onClick }: { card: { key: string }; kind: string; label: string; className?: string; children: ReactNode; onClick?: (event: React.MouseEvent<HTMLElement>) => void }) {
@@ -182,7 +193,7 @@ function ModelControls({ card }: { card: ProposalCard }) {
 }
 
 /** The line `Not blocking: T3, T5` under a Drift's Tasks: each one has its reason as tooltip and accessible name, and opens nothing. */
-function NotBlocking({ items }: { items: NotBlockingItem[] }) {
+export function NotBlocking({ items }: { items: NotBlockingItem[] }) {
   if (items.length === 0) return null;
   return (
     <p className="text-xs text-muted-foreground">
@@ -256,7 +267,7 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
       className={cn("cursor-pointer", card.resolution ? "border-l-amber-500 dark:border-l-amber-400" : "border-l-blue-600 dark:border-l-blue-400")}
       // A click on the card, outside its buttons, badges and links, opens its body too.
       onClick={(event) => {
-        if (event.target instanceof Element && event.target.closest("button, a, [data-badge]") !== null) return;
+        if (leavesCardAlone(event)) return;
         env.openProposal(card.id);
       }}
     >
@@ -315,32 +326,31 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
 
 function DriftCardView({ card }: { card: DriftCard }) {
   const env = useBoardEnv();
-  const previous = card.drift.previous;
-  const key = `${card.key}:details`;
-  const open = env.isExpanded(key);
-  const detailsId = `board-details-${card.key.replace(":", "-")}`;
-  const toggle = `${open ? "Hide" : "Show"} details`;
   return (
-    <Shell card={card} kind="drift" label={`${card.heading}: ${card.title}`} className="border-l-red-600 dark:border-l-red-400">
+    <Shell
+      card={card}
+      kind="drift"
+      label={`${card.heading}: ${card.title}`}
+      className="cursor-pointer border-l-red-600 dark:border-l-red-400"
+      // A click on the card, outside its buttons and badges, opens its details window too.
+      onClick={(event) => {
+        if (leavesCardAlone(event)) return;
+        env.openDrift(card.id);
+      }}
+    >
       <Head kind="Drift">
         <IdTag name={card.name} className="text-[11px] font-semibold text-muted-foreground" />
         {card.drift.unifies.length > 0 ? <UnifiedBadge count={card.drift.unifies.length} /> : null}
-        {previous.length > 0 ? <RecurringBadge previous={previous} /> : null}
+        {card.drift.previous.length > 0 ? <RecurringBadge previous={card.drift.previous} /> : null}
         {card.resolving ? <ResolvingBadge /> : null}
         {card.unifying ? <UnifyingBadge /> : null}
       </Head>
-      <h3 className="font-semibold break-words">{card.title}</h3>
-      <div id={detailsId} hidden={!open} className="flex flex-col gap-2">
-        {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
-        <DriftCompare drift={card.drift} openLink={env.context.openLink} />
-        {card.drift.unifies.length > 0 ? <UnifiesList unifies={card.drift.unifies} numbers={env.numbers} show={(drift) => env.context.navigate("diagram", { drift })} /> : null}
-        <NotBlocking items={card.notBlocking} />
-      </div>
+      <h3 className="font-semibold break-words">
+        <button type="button" className="rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => env.openDrift(card.id)}>
+          {card.title}
+        </button>
+      </h3>
       <Actions>
-        <Button variant="ghost" size="sm" aria-label={`${toggle} of drift ${card.name.text}`} aria-expanded={open} aria-controls={detailsId} onClick={() => env.toggleExpanded(key)}>
-          {open ? <ChevronUp aria-hidden="true" focusable="false" /> : <ChevronDown aria-hidden="true" focusable="false" />}
-          {toggle}
-        </Button>
         <BoardButton
           icon={WandSparkles}
           label="Resolve"
@@ -369,15 +379,20 @@ function DriftCardView({ card }: { card: DriftCard }) {
 
 function TaskCardView({ card }: { card: TaskCard }) {
   const env = useBoardEnv();
-  const key = `${card.key}:details`;
-  const open = env.isExpanded(key);
-  const detailsId = `board-details-${card.id}`;
   const runnable = card.column !== "done" && !card.agent;
   const runReason = joinReasons([card.finishing, env.runReason, blockedReason(card.blockedByDrifts, card.waitingFor)]);
-  const toggle = `${open ? "Hide" : "Show"} details`;
-  const hasDetails = card.body !== "" || previewable(card.images).length > 0;
   return (
-    <Shell card={card} kind="task" label={`Task ${card.name.text}: ${card.title}`} className={cn("border-l-border", card.agent && "board-working")}>
+    <Shell
+      card={card}
+      kind="task"
+      label={`Task ${card.name.text}: ${card.title}`}
+      className={cn("cursor-pointer border-l-border", card.agent && "board-working")}
+      // A click on the card, outside its buttons, badges, tags and links, opens its details window too.
+      onClick={(event) => {
+        if (leavesCardAlone(event)) return;
+        env.openTask(card.id);
+      }}
+    >
       <Head>
         <StatusDot task={card} />
         <IdTag name={card.name} className="text-[11px] font-semibold text-muted-foreground" />
@@ -393,26 +408,18 @@ function TaskCardView({ card }: { card: TaskCard }) {
         ))}
         {card.progress !== null ? <span className="text-[11px] font-medium text-cyan-700 tabular-nums dark:text-cyan-400">{card.progress}%</span> : null}
       </Head>
-      <h3 className="font-semibold break-words">{card.title}</h3>
+      <h3 className="font-semibold break-words">
+        <button type="button" className="rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => env.openTask(card.id)}>
+          {card.title}
+        </button>
+      </h3>
       {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
       {card.drift !== null ? (
         <p className="text-xs text-muted-foreground">
           from Drift <IdTag name={cardNameOf(env.numbers, "drift", card.drift)} />
         </p>
       ) : null}
-      {hasDetails ? (
-        <div id={detailsId} hidden={!open} className="text-muted-foreground">
-          {card.body ? <Markdown source={card.body} openLink={env.context.openLink} /> : null}
-          <TaskImages images={card.images} open={(name) => env.openTaskImage(card.id, name)} />
-        </div>
-      ) : null}
       <Actions>
-        {hasDetails ? (
-          <Button variant="ghost" size="sm" aria-label={`${toggle} of task ${card.name.text}`} aria-expanded={open} aria-controls={detailsId} onClick={() => env.toggleExpanded(key)}>
-            {open ? <ChevronUp aria-hidden="true" focusable="false" /> : <ChevronDown aria-hidden="true" focusable="false" />}
-            {toggle}
-          </Button>
-        ) : null}
         {card.views.diagram ? <ViewButton kind="diagram" focus={{ kind: "task", id: card.id }} verb="touches" name={card.name.text} /> : null}
         {card.views.requirements ? <ViewButton kind="requirements" focus={{ kind: "task", id: card.id }} verb="touches" name={card.name.text} /> : null}
         {runnable ? (

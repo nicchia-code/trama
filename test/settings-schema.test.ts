@@ -52,7 +52,7 @@ test("the groups and their keys keep the order of the Settings tab", () => {
     ["Agent", ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"]],
     ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing"]],
+    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["Agent", ["trama.autoExit", "trama.language"]],
@@ -155,7 +155,7 @@ test("the default and an empty text remove the value from the user settings", ()
 });
 
 test("an unknown Trama key is refused in a setting change", () => {
-  expect(planSettingChange(schema, "trama.unknown", true).ok).toBe(false);
+  expect(planSettingChange(schema, "trama.unknown", true, "omp").ok).toBe(false);
 });
 
 test("the workspace value is named only when it differs from the user's", () => {
@@ -199,4 +199,23 @@ test("the host no longer accepts a delegation message or the old Drift autopilot
   expect(parseToHost({ type: "setDelegation", mode: "yolo" }).ok).toBe(false);
   expect(parseToHost({ type: "setSetting", key: "trama.driftAutoPilot", value: "yolo" }, schema).ok).toBe(false);
   expect(properties["trama.driftAutoPilot"]).toBeUndefined();
+});
+
+test("omp Chat is a checkbox last in Features, off by default, with its title and description", () => {
+  const chat = properties["trama.ompChat"];
+  expect(chat?.type).toBe("boolean");
+  expect(chat?.default).toBe(false);
+  expect(chat?.scope).toBe("application");
+  expect(chat?.markdownDescription).toBe("On, with omp: Trama's jobs open a conversation in the omp Chat view instead of a terminal. Every command runs without asking.");
+  expect(settingTitle("trama.ompChat")).toBe("omp Chat");
+  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
+  expect(keys[keys.length - 1]).toBe("trama.ompChat");
+  expect(keys.indexOf("trama.ompChat")).toBe(keys.indexOf("trama.subagentsContextSharing") + 1);
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.ompChat")?.control).toBe("boolean");
+});
+
+test("a write of trama.ompChat is refused unless the agent is omp", () => {
+  expect(planSettingChange(settingsSchema(manifest), "trama.ompChat", true, "cursor").ok).toBe(false);
+  expect(planSettingChange(settingsSchema(manifest), "trama.ompChat", true, "omp")).toEqual({ ok: true, writes: [{ key: "trama.ompChat", value: true }] });
+  expect(planSettingChange(settingsSchema(manifest), "trama.driftBlocker", true, "cursor").ok).toBe(true);
 });

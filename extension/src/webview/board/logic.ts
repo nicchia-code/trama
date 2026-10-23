@@ -1,5 +1,6 @@
 // Pure logic of the Board: no DOM. Turns a Snapshot into columns of cards.
 import type { FileChange } from "../../../../src/core/diff";
+import { ghostColumn } from "../../../../src/core/ghost-column";
 import { formatDiagnostic } from "../../../../src/core/model";
 import { compareByCreation } from "../../../../src/core/schema";
 import { joinReasons } from "../../../../src/core/design";
@@ -22,25 +23,23 @@ export const AGENT_NAMES: Record<ProposalAgent, string> = {
 export const NO_MODELS: BoardModels = { agent: "cursor", proposals: {} };
 
 /** The columns that hold cards. */
-export type CardColumnId = "backlog" | "active" | "system";
+export type CardColumnId = "backlog" | "active";
 
 export type ColumnId = CardColumnId | "history";
 
-export const CARD_COLUMNS: readonly CardColumnId[] = ["backlog", "active", "system"];
+export const CARD_COLUMNS: readonly CardColumnId[] = ["backlog", "active"];
 
-export const COLUMN_ORDER: readonly ColumnId[] = ["backlog", "active", "system", "history"];
+export const COLUMN_ORDER: readonly ColumnId[] = ["backlog", "active", "history"];
 
 export const COLUMN_TITLES: Record<ColumnId, string> = {
   backlog: "Backlog",
   active: "Active",
-  system: "System Activities",
   history: "History",
 };
 
 export const EMPTY_HINTS: Record<ColumnId, string> = {
   backlog: "Nothing to decide",
   active: "Nothing active",
-  system: "Nothing running",
   history: "Nothing done in this period",
 };
 
@@ -463,7 +462,7 @@ const byCreation = <T extends { id: string; created: string | null }>(items: T[]
 
 /**
  * The card columns of the Board. Backlog holds the open Proposals and the red cards of the open Drifts outside a delivered resolution, in one creation order;
- * Active every Task in To do or In progress, blocked ones included; System Activities no real card (only the ghosts stand there). Done Tasks have no card,
+ * Active every Task in To do or In progress, blocked ones included. Done Tasks have no card,
  * and the History column lists them apart.
  */
 export function buildBoard(snapshot: Snapshot, resolve: BoardResolve = NO_RESOLVE, models: BoardModels = NO_MODELS): BoardColumn[] {
@@ -490,7 +489,6 @@ export function buildBoard(snapshot: Snapshot, resolve: BoardResolve = NO_RESOLV
   const cards: Record<CardColumnId, Card[]> = {
     backlog: backlog.map((x) => x.card),
     active,
-    system: [],
   };
   return CARD_COLUMNS.map((id) => ({ id, title: COLUMN_TITLES[id], hint: EMPTY_HINTS[id], cards: cards[id] }));
 }
@@ -672,16 +670,21 @@ export const stoppedFollowingNotice = (subject: string, reason: string): string 
 
 export interface PlacedGhost {
   card: AnnouncedCard;
+  /** The column the ghost stands in. */
+  column: CardColumnId;
   /** Among the column's real cards: the ghost stands before the real card at this position, or last when it is past the end. */
   index: number;
 }
 
-/** The column the ghosts stand in: System Activities, which has no real card. */
-export const GHOST_COLUMN: ColumnId = "system";
+/** An index past the end of any column: the ghost stands after the real cards. */
+const AT_THE_BOTTOM = Number.MAX_SAFE_INTEGER;
 
-/** The ghosts of all the announced cards, whatever their kind, in the order announced, in `GHOST_COLUMN`. */
+/** The ghosts of the announced cards that have a column (see `ghostColumn`), at the bottom of that column, in the order announced; the ghosts with no column are left out. */
 export function announcedGhosts(announcements: AnnouncementView[], asking: boolean): PlacedGhost[] {
-  return announcements.map((a) => ({ card: announcedCard(a, asking), index: 0 }));
+  return announcements.flatMap((a) => {
+    const column = ghostColumn(a.kind);
+    return column === "none" ? [] : [{ card: announcedCard(a, asking), column, index: AT_THE_BOTTOM }];
+  });
 }
 
 /** `real` with each extra put before the real item at its index (last when past the end); extras with one index keep their order. */

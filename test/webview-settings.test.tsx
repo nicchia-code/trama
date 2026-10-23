@@ -33,9 +33,9 @@ afterEach(() => {
 
 const MODELS: ModelSuggestion[] = [{ value: "anthropic/claude-opus-5-5", label: "Claude Opus 5.5" }, { value: "openai/gpt-5" }];
 
-function setup(values: Record<string, SettingsValues> = {}, models: ModelSuggestion[] = [], listError: string | null = null) {
+function setup(values: Record<string, SettingsValues> = {}, models: ModelSuggestion[] = [], listError: string | null = null, agent: "cursor" | "omp" = "omp") {
   const posted: ToHost[] = [];
-  const utils = render(<SettingsPage schema={schema} values={values} generation={1} models={models} listError={listError} post={(message) => posted.push(message)} openLink={() => {}} />);
+  const utils = render(<SettingsPage schema={schema} values={values} generation={1} agent={agent} models={models} listError={listError} post={(message) => posted.push(message)} openLink={() => {}} />);
   return { posted, ...utils };
 }
 
@@ -52,7 +52,7 @@ test("a change of Theme changes the theme class of the panel, with auto followin
   const page = render(<></>);
   const view = mountSettings((node) => page.rerender(<>{node}</>), { post: () => {}, navigate: () => {}, openLink: () => {} }, theme);
   const html = document.documentElement;
-  const send = (user: unknown) => act(() => view.receive({ type: "settings", schema, values: { "trama.theme": { user } } }));
+  const send = (user: unknown) => act(() => view.receive({ type: "settings", schema, values: { "trama.theme": { user } }, agent: "omp" }));
 
   send(undefined);
   expect(html.classList.contains("dark")).toBe(false);
@@ -171,7 +171,7 @@ test("trama.theme is declared in the manifest as the only setting of Appearance"
 
 test("with a project the Settings tab has «Guided setup» at the top right, with its tooltip in the name; without one there is none", () => {
   const opened: string[] = [];
-  const page = render(<SettingsPage schema={schema} values={{}} generation={1} models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => opened.push("open")} />);
+  const page = render(<SettingsPage schema={schema} values={{}} generation={1} agent="omp" models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => opened.push("open")} />);
   const button = screen.getByRole("button", { name: "Guided setup. Review the main settings step by step" });
   fireEvent.click(button);
   expect(opened).toEqual(["open"]);
@@ -181,8 +181,46 @@ test("with a project the Settings tab has «Guided setup» at the top right, wit
 });
 
 test("while the wizard is open it takes the place of the button and of the form", () => {
-  render(<SettingsPage schema={schema} values={{}} generation={1} models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => {}} wizard={<p>The wizard</p>} />);
+  render(<SettingsPage schema={schema} values={{}} generation={1} agent="omp" models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => {}} wizard={<p>The wizard</p>} />);
   expect(screen.getByText("The wizard")).not.toBeNull();
   expect(screen.queryByRole("button", { name: /Guided setup/ })).toBeNull();
   expect(screen.queryByRole("combobox", { name: "Theme" })).toBeNull();
+});
+
+test("omp Chat is an active checkbox with omp, without the note", () => {
+  const { posted } = setup({}, [], null, "omp");
+  const box = screen.getByRole("checkbox", { name: "omp Chat" });
+  expect(box.hasAttribute("disabled")).toBe(false);
+  expect(screen.queryByText("Only with omp")).toBeNull();
+  fireEvent.click(box);
+  expect(posted).toEqual([{ type: "setSetting", key: "trama.ompChat", value: true }]);
+});
+
+test("with cursor omp Chat is disabled, shows its saved value and the note tied to it", () => {
+  const { posted } = setup({ "trama.ompChat": { user: true } }, [], null, "cursor");
+  const box = screen.getByRole("checkbox", { name: "omp Chat" });
+  expect(box.hasAttribute("disabled")).toBe(true);
+  expect(box.getAttribute("aria-checked")).toBe("true");
+  const note = screen.getByText("Only with omp");
+  expect(box.getAttribute("aria-describedby")?.split(" ")).toContain(note.id);
+  fireEvent.click(box);
+  expect(posted).toEqual([]);
+});
+
+test("a new agent in the settings message turns omp Chat on or off at once, keeping its value", () => {
+  const page = render(<></>);
+  const theme = startTheme();
+  const view = mountSettings((node) => page.rerender(<>{node}</>), { post: () => {}, navigate: () => {}, openLink: () => {} }, theme);
+  const send = (agent: "cursor" | "omp") => act(() => view.receive({ type: "settings", schema, values: { "trama.ompChat": { user: true } }, agent }));
+  send("cursor");
+  expect(screen.getByRole("checkbox", { name: "omp Chat" }).hasAttribute("disabled")).toBe(true);
+  expect(screen.getByText("Only with omp")).not.toBeNull();
+  send("omp");
+  expect(screen.getByRole("checkbox", { name: "omp Chat" }).hasAttribute("disabled")).toBe(false);
+  expect(screen.getByRole("checkbox", { name: "omp Chat" }).getAttribute("aria-checked")).toBe("true");
+  expect(screen.queryByText("Only with omp")).toBeNull();
+  send("cursor");
+  expect(screen.getByRole("checkbox", { name: "omp Chat" }).hasAttribute("disabled")).toBe(true);
+  expect(screen.getByRole("checkbox", { name: "omp Chat" }).getAttribute("aria-checked")).toBe("true");
+  theme.dispose();
 });

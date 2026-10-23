@@ -402,15 +402,15 @@ Needs the real omp agent configured in S2 for row 6; the other rows need none.
 Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `"trama.autoExit": false` in your **user** settings; ↻ and reload the window. `j` below is the verification shell's.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Board: **Add Work Item…**, type `Add refunds after pickup`, close the tab (it is sent). Note the Work Items count and the number on the Board tab | Within about a second a dashed, translucent skeleton appears in Work Items after the last real Proposal and before the first Drift: kind `Proposal`, title `Add refunds after pickup`, the line `Preparing`, and a shimmer on its text lines | ☐ |
-| 2 | Look at the Work Items count and the number on the Board tab again | Both are as in row 1: a ghost is not counted | ☐ |
+| 1 | Board: **Add Work Item…**, type `Add refunds after pickup`, close the tab (it is sent). Note the Backlog count and the number on the Board tab | Within about a second a dashed, translucent skeleton appears at the bottom of Backlog, after the last real card and before **+ Add Work Item**: kind `Proposal`, title `Add refunds after pickup`, the line `Preparing`, and a shimmer on its text lines | ☐ |
+| 2 | Look at the Backlog count and the number on the Board tab again | Both are as in row 1: a ghost is not counted | ☐ |
 | 3 | Press Tab through the Board, then click the ghost | Focus never lands on it, the click does nothing, it has no buttons or links and cannot be dragged. Its accessible name is `Proposal the agent is creating, preparing: Add refunds after pickup` | ☐ |
 | 4 | `ls -A $D/announcements` and `cat $D/announcements/*.md`, then `T=$(sed -n 's/^terminal: //p' $D/announcements/*.md)` | `.gitignore` and one `<id>.md` with `kind: proposal`, `source: request`, a `terminal:` line with six lowercase letters and digits (kept in `$T`) and the H1 `Add refunds after pickup`; `cat $D/announcements/.gitignore` prints `*` | ☐ |
 | 5 | `j proposal new "Refunds after pickup"`; note the ID it prints, `<P>` | No note in the output. The same ghost (no second one) now reads title `Refunds after pickup` and the line `Writing` | ☐ |
 | 6 | `j proposal submit <P>` | The ghost disappears and the real card of that Proposal stands in its place; the count and the badge go up by one; no notice appears | ☐ |
-| 7 | `A=$(j announcement new --input - <<<'{"kind":"task","title":"Refund prepared orders"}')` | A ghost of kind `Task` and line `Preparing` stands in Ready after the real cards, with the count of Ready unchanged | ☐ |
+| 7 | `A=$(j announcement new --input - <<<'{"kind":"task","title":"Refund prepared orders"}')` | A ghost of kind `Task` and line `Preparing` stands at the bottom of Active, after the real cards and before **Run all**, with the count of Active unchanged | ☐ |
 | 8 | `j task new "Refund prepared orders" --ref order/Refunding --announcement $A` | The ghost gives way to the real card, at the same place; `ls -A $D/announcements` shows only `.gitignore` | ☐ |
-| 9 | `j announcement new --input - <<<'{"kind":"drift","title":"Cart differs"}'` | A `Drift` ghost stands in Work Items after the last real Drift. It belongs to no terminal (`terminal: null` in its file) | ☐ |
+| 9 | `j announcement new --input - <<<'{"kind":"drift","title":"Cart differs"}'` | A `Drift` ghost stands at the bottom of Backlog, after the last real card. It belongs to no terminal (`terminal: null` in its file) | ☐ |
 | 10 | `j task new "Unannounced" --ref order --announcement zzzzzz` | The Task is created and the output adds `No announcement "zzzzzz" was found …`; no ghost appears or is left | ☐ |
 | 11 | `TRAMA_TERMINAL=$T j announcement new --input - <<<'{"kind":"task","title":"Left behind"}'`, then in the **Design** terminal press Ctrl+C | The `Task` ghost disappears at once. At the top of the Board one notice, `The agent finished without delivering Task Left behind.`, with a **Close** button. The `Drift` ghost of row 9 stays: it belongs to no terminal | ☐ |
 | 12 | Click **Close** on the notice, switch to the Diagram tab and back | The notice is gone; closing the Trama tab and opening it again shows none | ☐ |
@@ -420,7 +420,7 @@ Needs an omp agent that does not end by itself. Set `"trama.agent": "omp"` and `
 | 16 | `j proposal new "From the chat"` | A `Writing` ghost titled `From the chat` appears: with chat, the ghost starts with the Draft | ☐ |
 | 17 | 🪙 With a real agent (section I) ask for a design that needs questions | While its question round is open every ghost reads `Waiting for your answers`; they go back to `Preparing` or `Writing` when the round closes | ☐ |
 | 18 | Restore S2. ↻, then `j task move 1 doing` | The card moves to In progress without ever looking busy; no dashed copy of it appears in In progress at any moment | ☐ |
-| 19 | `C=$(j announcement new --input - <<<'{"kind":"check","title":"Final check after all Tasks","phase":"verifying"}')` | In In progress, dopo le schede vere, un ghost `Check` intitolato `Final check after all Tasks` con la riga `Verifying (tests, lint, build)`; il numero della colonna non cambia | ☐ |
+| 19 | `C=$(j announcement new --input - <<<'{"kind":"check","title":"Final check after all Tasks","phase":"verifying"}')` | La Board non mostra nessun ghost per il controllo (non ha una colonna: sta nella barra di stato); nessun numero cambia | ☐ |
 | 20 | `j announcement move $C scanning`, poi di nuovo lo stesso comando | Il ghost passa a `Scanning`; il secondo comando dice che il controllo è già in Scanning | ☐ |
 | 21 | `j announcement move $C delivered` | Il ghost sparisce e **nessun** avviso compare | ☐ |
 
@@ -885,6 +885,30 @@ Drifts are never resolved on their own: there is no delegation, no automatic app
 |---|---|---|---|
 | Y1 | Start a Run, then look at Run all and a Task's Run button while the Run is in progress; with `"trama.submitWhileRunning": true` left in the user settings, look again | Run all and the Run button of a Task are disabled while the Run is in progress, with `A run is in progress`, and a launch is refused with `A run cannot start: A run is in progress.`, with or without the leftover value; the value is ignored and not rewritten. Scan System, Resolve Drifts and Add Quick Task stay available | ☐ |
 | Y2 | With several open Drifts, press **Resolve** on the card of one of them | Only that Drift is gathered: the agent asks the decisions and hands over a resolution to review; nothing is approved or run until you decide, and the Tasks that come out of it start by hand | ☐ |
+
+---
+
+## Z. omp Chat
+
+Written from `quality#omp-chat-conversation`. Use omp 18.12.6 or later with ACP protocol 1, with `"trama.agent": "omp"` and `"trama.ompChat": true` in the **user** settings (the workspace setting is ignored); try the view in VS Code 1.106 or later (secondary sidebar) and in Cursor 3.27.6 (bottom panel), each of them for every step below. Compatibility: proven with omp 18.12.6 (`omp acp`, ACP protocol 1); the open checks are redone with every omp version that changes ACP. Remove the settings at the end. 🪙 steps need a real agent.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| Z1 | Reload the window with omp Chat on and no conversation, in VS Code 1.106 or later and in Cursor 3.27.6; in Cursor, then bring the view to the right with Move View and «New Secondary Side Bar Entry» and reload again | The `omp Chat` view exists in the secondary sidebar in VS Code and in the bottom panel in Cursor (after the manual move, where you left it), with the Trama logo, and shows `Trama's jobs with omp open here, one conversation each.`; no other sidebar or panel is opened, closed or moved | ☐ |
+| Z2 | 🪙 Send a design request, click **Scan System**, and start a Run with `"trama.advisorScanner": true` | Each job opens a conversation named like the terminal it replaces (`Design`, `Scan`, `T3`/`All tasks`), without taking the focus (the cursor and the keyboard stay where they were), the view being shown on it where it is, in both editors; the process is `omp … acp --yolo` | ☐ |
+| Z3 | 🪙 Let a job finish with `"trama.autoExit": true`, then with `false` | On: the conversation disappears when the agent is idle and its process ends. Off: it stays, idle, and you can keep talking to the agent | ☐ |
+| Z4 | Click **Add Quick Task** and **Ask more** on a Proposal | Each opens a conversation (`Quick`, `Ask P<n>`) and takes the focus, in the message field, in both editors | ☐ |
+| Z5 | 🪙 In a Quick Task ask the agent to use its question tool | The question shows in the conversation as a form with options, a text field, `Submit` and `Skip`; after `Submit` it stays read-only with the answers | ☐ |
+| Z6 | 🪙 While the agent works, press **Stop**, then confirm; start another turn and close its tab with the `X` | A modal asks `Stop the agent in <name>?` and, on closing, `Close <name> and stop its agent?`; **Cancel** does nothing; confirmed, the turn stops and the conversation closes. A stopped conversation closes without a dialog | ☐ |
+| Z7 | 🪙 Send a message while the agent works; change the model in the selector | The message reaches the agent without stopping it (or waits for the end of the turn if omp has no steering); the new model applies from the next turn and is not saved in the roles or in the Proposal | ☐ |
+| Z8 | 🪙 Put a server in `<project>/.omp/mcp.json` and ask the agent which MCP tools it has; then put one only in `.mcp.json` | The first is visible to the agent; the second is not read | ☐ |
+| Z9 | 🪙 Kill the omp process of a working conversation with `kill -9` | Within about one minute the job ends with the notice of a vanished agent and its Task, if taken, is released | ☐ |
+| Z10 | 🪙 Reload the window during a Run | The conversation comes back, shows `The window reloaded; the agent continues its work.` and the fixed message that tells the agent to continue; the Task stays taken. The omp Chat view is shown on the conversation without taking the focus, in both editors | ☐ |
+| Z11 | 🪙 Delete the omp session of an open conversation (omp's session folder), then reload the window | The conversation is removed, its job ends with `the agent's session could not be resumed`, and no half conversation is left | ☐ |
+| Z12 | Set `"trama.ompPath"` to a wrong path and click **Scan System** | The scan starts in an omp terminal and the notice `Trama: omp Chat could not start omp (omp not found at <path>); the job runs in a terminal.` appears, with the same announcement | ☐ |
+| Z13 | Turn `trama.ompChat` off while a conversation is working | The conversation keeps working and the view disappears only when the last one closes | ☐ |
+| Z14 | Set `"trama.agent": "cursor"` and open the Settings tab | The `omp Chat` checkbox is disabled, with a note that it needs omp | ☐ |
+| Z15 | Put `"trama.ompChat": true` in the workspace settings only and reload | omp Chat stays off: the setting is read only from the user settings | ☐ |
 
 ---
 

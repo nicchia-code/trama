@@ -102,7 +102,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     board.stoppedFollowing?.(message.subject, message.reason);
   } else if (message.type === "error") {
     store.set({ error: message.message });
-  } else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal });
+  } else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal, ghost: message.ghost });
   else if (message.type === "questions") questions.update(message.round);
   else if (message.type === "settings") {
     settings.receive(message);

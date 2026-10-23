@@ -1,6 +1,6 @@
 import { Route } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import type { SettingSchema, SettingsValues, SettingValue } from "../../host/settings-schema";
+import { OMP_CHAT_KEY, type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
 import type { ToHost, ToWebview } from "../../protocol";
 import type { OpenLink } from "../markdown";
@@ -40,6 +40,8 @@ export interface SettingsPageProps {
   schema: readonly SettingSchema[];
   values: Record<string, SettingsValues>;
   generation: number;
+  /** The agent now in `trama.agent`: the omp-only settings are disabled unless it is `omp`. */
+  agent: "cursor" | "omp";
   models: ModelSuggestion[];
   /** Why omp gives no model names, from the newest list; null when there is nothing to show. */
   listError: string | null;
@@ -52,7 +54,7 @@ export interface SettingsPageProps {
 }
 
 /** The page: every setting the manifest declares, in groups, each saved to the user settings when the developer confirms it. */
-export function SettingsPage({ schema, values, generation, models, listError, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
+export function SettingsPage({ schema, values, generation, agent, models, listError, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
   /** The only bubble open at a time. */
   const [openKey, setOpenKey] = useState<string | null>(null);
   const send = (key: string, value: SettingValue) => post({ type: "setSetting", key, value });
@@ -89,6 +91,7 @@ export function SettingsPage({ schema, values, generation, models, listError, po
                   setOpenKey={setOpenKey}
                   send={send}
                   openLink={openLink}
+                  {...(setting.key === OMP_CHAT_KEY && agent !== "omp" ? { disabled: true, note: "Only with omp" } : {})}
                 />
               ))}
             </div>
@@ -101,7 +104,7 @@ export function SettingsPage({ schema, values, generation, models, listError, po
 
 /** Mounts the Settings tab in `slot`; the panel's theme follows `trama.theme` as the host sends it, also while the tab is hidden. */
 export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeController): SettingsView => {
-  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, post: context.post, openLink: context.openLink };
+  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, agent: "cursor", models: [], listError: null, post: context.post, openLink: context.openLink };
   let hasProject = false;
   const wizard = new WizardController({
     post: context.post,
@@ -130,7 +133,7 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
       context.post({ type: "modelSuggestionsWanted" });
     },
     receive(message) {
-      page = { ...page, schema: message.schema, values: message.values, generation: page.generation + 1 };
+      page = { ...page, schema: message.schema, values: message.values, agent: message.agent, generation: page.generation + 1 };
       theme.setSetting(themeSetting(message.values[THEME_KEY]?.user));
       wizard.receiveSettings(message);
       render();

@@ -36,7 +36,7 @@ function setup(options: { mode?: "first" | "settings" | "empty-model"; choice?: 
   const utils = render(<Wizard controller={controller} openLink={() => {}} notice={<p>The notice</p>} />);
   const mode = options.mode ?? "first";
   act(() => {
-    controller.receiveSettings({ type: "settings", schema, values: options.values ?? {} });
+    controller.receiveSettings({ type: "settings", schema, values: options.values ?? {}, agent: "cursor" });
     controller.receiveFolders(options.folders ?? [FOLDER]);
     controller.open(mode, options.choice ?? null, mode === "first" ? null : "/work/app");
   });
@@ -245,7 +245,7 @@ test("the first setup confirms with the folder, the path and the excluded folder
 
 test("a value changed from outside while the wizard is open does not change what the wizard holds", () => {
   const { controller } = setup({ mode: "settings", values: { "trama.scan": { user: "gpt-5" } } });
-  act(() => controller.receiveSettings({ type: "settings", schema, values: { "trama.scan": { user: "other" } } }));
+  act(() => controller.receiveSettings({ type: "settings", schema, values: { "trama.scan": { user: "other" } }, agent: "cursor" }));
   act(() => controller.openStep("Models"));
   expect((screen.getByLabelText("Scan") as HTMLInputElement).value).toBe("gpt-5");
 });
@@ -268,7 +268,7 @@ test("Get Started mounts the wizard in the first-setup mode only without a proje
   const view = mountGetStarted((node) => page.rerender(<>{node}</>), { post: (message) => posted.push(message), navigate: () => {}, openLink: () => {} });
   act(() => {
     view.projectPresent(false);
-    view.receiveSettings({ type: "settings", schema, values: {} });
+    view.receiveSettings({ type: "settings", schema, values: {}, agent: "cursor" });
     view.receiveFolders({ type: "workspaceFolders", folders: [FOLDER] });
   });
   expect(screen.getByText(/Trama will create a/)).not.toBeNull();

@@ -163,3 +163,12 @@ test("reworkDrift needs a Drift identity", () => {
   expect(parseToHost({ type: "reworkDrift", drift: "0001" })).toEqual({ ok: true, message: { type: "reworkDrift", drift: "0001" } });
   for (const drift of [undefined, "", "../secret", 3]) expect(parseToHost({ type: "reworkDrift", drift }).ok).toBe(false);
 });
+
+test("askMore needs a Task, Proposal or Drift identity, and a question action needs its question's ID", () => {
+  expect(ok({ type: "askMore", kind: "task", id: "j6tlxyad" })).toEqual({ type: "askMore", kind: "task", id: "j6tlxyad" });
+  expect(ok({ type: "askMore", kind: "drift", id: "d1d1d1d1" })).toEqual({ type: "askMore", kind: "drift", id: "d1d1d1d1" });
+  expect(parseToHost({ type: "askMore", kind: "question", id: "j6tlxyad" }).ok).toBe(false);
+  expect(parseToHost({ type: "askMore", kind: "drift" }).ok).toBe(false);
+  expect(ok({ type: "questionAction", round: 3, action: { type: "askMore", id: "q1" } })).toEqual({ type: "questionAction", round: 3, action: { type: "askMore", id: "q1" } });
+  expect(parseToHost({ type: "questionAction", round: 3, action: { type: "askMore", id: "" } }).ok).toBe(false);
+});

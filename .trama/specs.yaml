@@ -7,7 +7,7 @@ frameworks:
     version: "1.4"
     note: runtime, package manager, test runner and compiler of the `trama` binary
   - name: VS Code extension API
-    version: "^1.95.0"
+    version: "^1.106.0"
     note: the extension host runs in Node, bundled as CommonJS
   - name: React
     version: "19"
@@ -38,6 +38,8 @@ frameworks:
   - name: zod
     version: "4"
     note: input schemas of the command line
+  - name: Agent Client Protocol SDK
+    note: "`@agentclientprotocol/sdk`, the client side of ACP that omp Chat uses to talk to `omp acp`, bundled into the extension host"
   - name: fantasticon
     note: development dependency, used only by `scripts/icon-font.ts`
     chosenByAgent: turns the logo SVG into the one-glyph icon font of the status bar button, in a single step

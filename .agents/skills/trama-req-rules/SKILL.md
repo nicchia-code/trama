@@ -29,6 +29,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole di avvio dell'agente** (`agent-terminal.md`): Usa quando implementi come Trama avvia l'agente e gestisce le richieste di design. Sections: `agent-terminal`.
 - **Regole degli annunci** (`announcements.md`): Usa per annunci, ghost, controlli e confronti. Sections: `announcement`.
 - **Regole dell'approvazione** (`approvals.md`): Usa quando implementi ciò che succede all'approvazione di una Proposal. Sections: `proposal/Approved`.
+- **Regole di Ask more** (`ask-more.md`): Usa quando implementi l'istruzione di Ask more, ciò che riceve l'agente e cosa può fare la sua chat. Sections: `developer.ASK_MORE`.
 - **Regole dell'Advisor della chat** (`chat-advisor.md`): Usa per l'Advisor della chat di Cursor: quando rivede, i testi per l'agente, le note e l'avviso della revisione finale mancata. Sections: `chat-advisor`.
 - **Regole delle Proposal** (`decisions.md`): Usa quando implementi le regole delle Proposal, dalla scrittura all'approvazione. Sections: `proposal`.
 - **Regole della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts, decidi quando una risoluzione o un Run sono in corso, scrivi una risoluzione `nonBlocking` o prepari e usi le domande pronte dell'Async Drift Resolver. Sections: `drift-resolution`.
@@ -39,6 +40,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Note dei ghost** (`ghost-notes.md`): Usa quando implementi le note che l'agente dichiara sui ghost: a chi vanno, lunghezza, quante se ne tengono, quando le skill le scrivono. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
 - **Regole dei file di istruzioni** (`instruction-files.md`): Usa quando implementi l'esclusione dei file di istruzioni degli agenti nei lanci di omp. Sections: `agent-terminal/Agent running`.
 - **Regole di agenti e modelli** (`models.md`): Usa per scelta dell'agente, ruoli dei modelli e istruzioni all'agente. Sections: `agent-launching`.
+- **omp Chat** (`omp-chat.md`): Usa quando implementi quando omp Chat si usa, come nascono, finiscono e riprendono le sue conversazioni e quali server MCP riceve omp. Sections: `omp-chat`, `omp-chat-conversation`.
 - **Regole del progetto** (`project.md`): Usa quando implementi init, aggiornamento delle skill e skill dei Requisiti. Sections: `project`.
 - **Regole dei round di domande** (`questions-notices.md`): Usa quando implementi i round di domande. Sections: `question-round`.
 - **Quick Task rules** (`quick-task.md`): Usa quando implementi cosa apre Add Quick Task, con quale modello, cosa segue Trama e cosa non blocca. Sections: `developer.OPEN_QUICK_TASK`.

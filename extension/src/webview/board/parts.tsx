@@ -18,15 +18,16 @@ export interface BoardEnv {
   numbers: CardNumbers;
   /** Why a single Task's Run is disabled beyond its own waiting: a Run in progress or Drift resolution. Null when none holds. */
   runReason: string | null;
-  /** Whether a Task's details were left open; kept while the panel lives, so a refresh does not close them. */
-  isExpanded(key: string): boolean;
-  toggleExpanded(key: string): void;
   /** Scrolls to a card, by its key, and focuses it. */
   showCard(key: string): void;
   /** Opens the model window of a Proposal that carries Tasks. */
   chooseModel(proposal: string): void;
   /** Opens the body window of a Proposal in Backlog. */
   openProposal(proposal: string): void;
+  /** Opens the details window of a Task in Active. */
+  openTask(task: string): void;
+  /** Opens the details window of a Drift in Backlog. */
+  openDrift(drift: string): void;
   /** Opens the whole image `name` of a Task in an editor tab. */
   openTaskImage(task: string, name: string): void;
   /** Opens the read-only details of the ghost with this key (`AnnouncedCard.key`). */
@@ -140,7 +141,7 @@ const TAG: Record<TagColour, string> = {
 function TagChip({ text, tooltip }: { text: string; tooltip: string }) {
   return (
     <Tip text={tooltip}>
-      <span role="img" aria-label={tooltip} className={cn("max-w-full min-w-0 truncate rounded-sm border px-1.5 text-[11px] leading-[18px]", TAG[tagColour(text)])}>
+      <span role="img" data-tag="" aria-label={tooltip} className={cn("max-w-full min-w-0 truncate rounded-sm border px-1.5 text-[11px] leading-[18px]", TAG[tagColour(text)])}>
         {text}
       </span>
     </Tip>

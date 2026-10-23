@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ASK_DEVELOPER_SENTENCE, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, importPrompt, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, askMorePart, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, importPrompt, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
@@ -118,4 +118,88 @@ test("the Rework instruction of a rejected Proposal follows its kind, binds it w
   const resolution = { kind: "rework-resolution", proposal: "ab12cd34", drifts: ["aaaaaaaa", "bbbbbbbb"] } as const;
   expect(buildPrompt({ ...resolution, drifts: [...resolution.drifts] })).toBe("Use the trama-resolve-drifts skill to rework the rejected resolution ab12cd34 with the developer's feedback, on the Drifts `aaaaaaaa`, `bbbbbbbb`. Bind the resolution you open to it with the `reworks` field.");
   expect(terminalName({ ...resolution, drifts: [...resolution.drifts] }, name)).toBe("Drifts");
+});
+
+test("the Ask more part of a Task names only permanent identities in its commands, with its text, references, images and linked cards", () => {
+  const part = askMorePart({
+    kind: "task",
+    id: "j6tlxyad",
+    number: "T1",
+    title: "Lancio di Ask more",
+    body: "Launch the chat.",
+    refs: ["developer.ASK_MORE", "agent-launching"],
+    images: ["/p/.trama/task-images/j6tlxyad/a.png"],
+    proposal: { id: "x6bguwt0", title: "Ask more" },
+    drift: null,
+  });
+  expect(part).toContain('Ask more about the Task j6tlxyad: "Lancio di Ask more". Its short number in this working copy is T1, for the developer only');
+  expect(part).toContain("Launch the chat.");
+  expect(part).toContain("References: `developer.ASK_MORE`, `agent-launching`");
+  expect(part).toContain("Images: `/p/.trama/task-images/j6tlxyad/a.png`");
+  expect(part).toContain("Proposal it belongs to: `x6bguwt0` — Ask more");
+  expect(part).toContain("Drift it comes from: none");
+  expect(part).toContain("`trama task show j6tlxyad`, `trama proposal show x6bguwt0`, `trama model show developer.ASK_MORE`, `trama model show agent-launching`");
+  expect(part).not.toMatch(/trama (task|proposal|drift|model) show T1/);
+});
+
+test("the Ask more part of a Drift lists its sides, the Tasks it leaves free, its origin and the Drifts it unites", () => {
+  const part = askMorePart({
+    kind: "drift",
+    id: "d1d1d1d1",
+    number: "D2",
+    title: "Refund gap",
+    status: "open",
+    happens: "The refund ignores the coupon.",
+    should: "The refund follows the coupon.",
+    where: "src/refund.ts",
+    refs: ["order"],
+    notBlocking: [{ task: "t2t2t2t2", reason: "touches only the menu" }],
+    proposal: null,
+    task: { id: "t1t1t1t1", title: "Fix refund" },
+    previous: [],
+    unifies: [{ id: "d3d3d3d3", title: "Coupon" }],
+  });
+  expect(part).toContain("What happens: The refund ignores the coupon.");
+  expect(part).toContain("What should happen: The refund follows the coupon.");
+  expect(part).toContain("Where in the code: src/refund.ts");
+  expect(part).toContain("`t2t2t2t2` — touches only the menu");
+  expect(part).toContain("Task it comes from: `t1t1t1t1` — Fix refund");
+  expect(part).toContain("Drifts it unites: `d3d3d3d3` — Coupon");
+  expect(part).toContain("`trama drift show d1d1d1d1`");
+  expect(part).toContain("`trama task show t2t2t2t2`");
+  expect(part).toContain("`trama drift show d3d3d3d3`");
+});
+
+test("the Ask more part of a resolution Proposal lists the decision on each Drift it resolves", () => {
+  const part = askMorePart({
+    kind: "proposal",
+    id: "p1p1p1p1",
+    number: "P1",
+    title: "Resolve Drifts",
+    status: "open",
+    proposalKind: "resolution",
+    body: "Resolves two Drifts.",
+    tasks: [],
+    drifts: [{ id: "d1d1d1d1", title: "Refund gap", decision: "fix-code", option: 1 }, { id: "d2d2d2d2", title: "Menu", decision: null, option: null }],
+  });
+  expect(part).toContain("Status: open. Kind: resolution.");
+  expect(part).toContain("`d1d1d1d1` — Refund gap: fix-code (option 1)");
+  expect(part).toContain("`d2d2d2d2` — Menu: undecided");
+  expect(part).toContain("Its Tasks:\nnone");
+});
+
+test("the Ask more part of a question holds the question in view in full and the round in order, with no answer or choice", () => {
+  const first = { id: "q1", question: "Which way?", context: "Two ways exist.", options: [{ label: "A", description: "the first", details: "more on A" }, { label: "B", description: "the second" }], recommended: 0, multi: false };
+  const second = { id: "q2", question: "Which places?", options: [{ label: "C", description: "the third" }], recommended: 0, multi: true };
+  const part = askMorePart({ kind: "question", question: first, round: [first, second], drift: { id: "d9d9d9d9", title: "Prepared" } });
+  expect(part).toContain("Question: Which way?");
+  expect(part).toContain("Context: Two ways exist.");
+  expect(part).toContain("Choice: one option");
+  expect(part).toContain("1. A (recommended): the first Details: more on A");
+  expect(part).toContain("2. B: the second");
+  expect(part).toContain("- (in view) Which way? [A: the first]");
+  expect(part).toContain("- Which places? [C: the third]");
+  expect(part).toContain("`trama drift show d9d9d9d9`");
+  expect(part).toContain("the developer answers it in Trama");
+  expect(part).not.toMatch(/selected|skipped|Your answer/i);
 });

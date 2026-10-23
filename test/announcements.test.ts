@@ -23,6 +23,7 @@ import {
   withdrawAll,
   removeBoundTo,
 } from "../src/core/announcements";
+import { ghostColumn } from "../src/core/ghost-column";
 import { cardName } from "../src/core/short-numbers";
 import { discardProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
@@ -714,5 +715,19 @@ describe("notes on announcements", () => {
     const { countsAsActivity } = await import("../src/cli/main");
     expect(countsAsActivity(["announcement", "edit", "--input", "{}"])).toBe(false);
     expect(countsAsActivity(["announcement", "new"])).toBe(true);
+  });
+});
+
+describe("ghostColumn", () => {
+  test("Proposals, resolutions, Drifts and unifications stand in Backlog", () => {
+    for (const kind of ["proposal", "resolve", "drift", "unify"] as const) expect(ghostColumn(kind)).toBe("backlog");
+  });
+
+  test("Tasks stand in Active", () => {
+    expect(ghostColumn("task")).toBe("active");
+  });
+
+  test("checks, scans, comparisons and works have no column", () => {
+    for (const kind of ["check", "scan", "comparison", "work"] as const) expect(ghostColumn(kind)).toBe("none");
   });
 });

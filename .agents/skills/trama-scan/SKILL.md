@@ -103,9 +103,9 @@ The developer reads a Drift at a glance, as a programmer, but not as a code revi
 - **Fix options reach what should happen** without changing the Model or any Requirement, and respect every Requirement that applies to the elements of the Drift, not only those it names. An option that asks for an exception to, or a change of, the Model or a Requirement is not a fix option: that way goes to a Drift with a Proposal.
 - **Use short Markdown:** short paragraphs, a bulleted list when there are several separate points, **bold** for the one or two terms that carry the difference. No headings inside a section, no tables, about 100 words per side.
 
-## Experimental Drift blocker
+## Drift blocker
 
-This section applies only when the instruction says "The experimental Drift blocker is on". Without that sentence, never name a Task in `notBlocking`, and skip this section.
+This section applies only when the instruction says "The Drift blocker is on". Without that sentence, never name a Task in `notBlocking`, and skip this section.
 
 When it applies, do this before each `trama drift new`:
 
@@ -115,7 +115,7 @@ When it applies, do this before each `trama drift new`:
 
 The judgement is made once, at filing: a Drift keeps the Tasks it leaves free and blocks every other one, including the Tasks created later about the same thing.
 
-When you start sub-agents for Machines, pass them the sentence "The experimental Drift blocker is on"; they follow the same section of `trama-compare`, and each reports the permanent IDs of the cards it filed and, for each Drift, whether it blocks any Task.
+When you start sub-agents for Machines, pass them the sentence "The Drift blocker is on"; they follow the same section of `trama-compare`, and each reports the permanent IDs of the cards it filed and, for each Drift, whether it blocks any Task.
 
 ### Final resolution of the Drifts that block nothing
 
@@ -133,7 +133,7 @@ Never approve or reject this resolution, and never start a Run because of it: th
 
 This section applies only when the instruction says "The Async Drift Resolver is on: …". Without that sentence, skip it.
 
-With it, at the very end of the work (after the last archiving and the `nonBlocking` resolution of the experimental Drift blocker, if any, and before the final report), you prepare the question of every Drift this work filed, so Resolve opens at once. You alone do this, never a sub-agent that compares or implements.
+With it, at the very end of the work (after the last archiving and the `nonBlocking` resolution of the Drift blocker, if any, and before the final report), you prepare the question of every Drift this work filed, so Resolve opens at once. You alone do this, never a sub-agent that compares or implements.
 
 1. **Find the Drifts.** Run `trama drift list --input -` with `{"currentJob":true,"unprepared":true}`, in a terminal and in Cursor's chat alike; never read `TRAMA_JOB` by hand: the command reads it itself. It lists the open Drifts of this work, the advisor's included, with no valid prepared question and outside every resolution. A Drift already in a resolution (the `nonBlocking` one) is left out.
 2. **Prepare each.** Follow "Writing a prepared question" in the `trama-resolve-drifts` skill (read it first) for each Drift, with the sub-agents you have: hand the exploration to at most `trama.maxParallelAgents` of them at once (the number the instruction gives, 20 when it gives none), one Drift (or a few that concern the same thing) each, and have each record its questions with `trama drift edit`. Without sub-agents, one Drift at a time. A sub-agent asks the developer nothing and registers no other card.
@@ -145,9 +145,9 @@ With it, at the very end of the work (after the last archiving and the `nonBlock
 - Inside a `trama-implement` Run, use that Run's existing check; do not create another. Sub-agents never announce checks.
 - Scanning or importing does not authorize resolving any Drift: the decision is the developer's.
 
-## Experimental context sharing
+## Sub-agents context sharing
 
-This section applies only when the instruction says "The experimental context sharing is on: …". Without that sentence, skip it and work as written above.
+This section applies only when the instruction says "The sub-agents context sharing is on: …". Without that sentence, skip it and work as written above.
 
 With it, when you hand a part of the work to a sub-agent, in whatever way your agent starts sub-agents, you pass it what you have already read that concerns its part, so it does not look for it again and does not read it again.
 

@@ -13,7 +13,7 @@ The technologies this project is built, tested and released with, from the devel
 ## Frameworks and libraries
 
 - Bun 1.4: runtime, package manager, test runner and compiler of the `trama` binary
-- VS Code extension API ^1.95.0: the extension host runs in Node, bundled as CommonJS
+- VS Code extension API ^1.106.0: the extension host runs in Node, bundled as CommonJS
 - React 19: the panel webview, with `react-dom`
 - shadcn/ui: components copied into the webview source, zinc base colour with a blue primary, light and dark
 - Radix UI: the primitives under the shadcn/ui components
@@ -27,6 +27,7 @@ The technologies this project is built, tested and released with, from the devel
 - elkjs: lays out the Diagram
 - yaml: front matter and settings files
 - zod 4: input schemas of the command line
+- Agent Client Protocol SDK: `@agentclientprotocol/sdk`, the client side of ACP that omp Chat uses to talk to `omp acp`, bundled into the extension host
 - fantasticon: development dependency, used only by `scripts/icon-font.ts` (chosen by the agent: turns the logo SVG into the one-glyph icon font of the status bar button, in a single step)
 
 ## Testing

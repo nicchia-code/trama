@@ -2,8 +2,9 @@ import { existsSync, watch, type FSWatcher } from "node:fs";
 import { delimiter, dirname } from "node:path";
 import * as vscode from "vscode";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
+import { ActivitiesItem, SHOW_ACTIVITIES_COMMAND } from "./activities-item";
 import { watchAnnouncements } from "./announcements";
-import { agentName, watchAgentTerminal, configuredSkillsDir, setOverlayStorage } from "./agent";
+import { agentName, watchAgentTerminal, configuredSkillsDir, setBundledCliDir, setOmpChat, setOverlayStorage, settings, windowClosed } from "./agent";
 import { Controller, describeError } from "./controller";
 import { startExecutionCheck } from "./execution-check";
 import { DesignRequests } from "./design-requests";
@@ -11,6 +12,9 @@ import { bundledTrama } from "./cursor";
 import { findProject, installEditorHooks, removeCopilotPieces } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
+import { CONVERSATIONS_KEY, readSavedConversations } from "../../../src/core/omp-chat-conversation";
+import { OmpClient } from "./omp-chat/client";
+import { OmpChatView } from "./omp-chat/view";
 
 const SKILL_SYNC_DEBOUNCE_MS = 300;
 
@@ -52,6 +56,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const requests = new DesignRequests(context.workspaceState, tramaFiles, undefined, undefined, () => trama.launch({ kind: "implement-all" }));
   const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri, requests, context.workspaceState);
   controller = trama;
+  // The item of the ghosts with no Board column lives with the extension, so it shows with the panel closed too.
+  const activities = new ActivitiesItem(() => findProject()?.root, tramaFiles, (announcement) => trama.openGhostDetails(announcement));
   context.subscriptions.push(
     tramaFiles,
     statusBarItem(),
@@ -64,6 +70,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("trama.updateSkills", guarded(async () => trama.updateSkills())),
     watchAgentTerminal(),
     watchAnnouncements(() => findProject()?.root),
+    activities,
+    vscode.commands.registerCommand(SHOW_ACTIVITIES_COMMAND, () => activities.show()),
     startExecutionCheck(() => findProject()?.root, tramaFiles),
     questions,
     requests,
@@ -75,9 +83,29 @@ export function activate(context: vscode.ExtensionContext): void {
     ...(vscode.lm === undefined ? [] : [vscode.lm.onDidChangeChatModels(() => void trama.postModelSuggestions())]),
   );
   exposeBundledCli(context);
+  startOmpChat(context);
   void guarded(() => installEditorHooks())();
   // Earlier versions installed Copilot's hooks outside Cursor: an error in removing them shows nothing.
   void removeCopilotPieces(context.globalStorageUri).catch(() => undefined);
+}
+
+/**
+ * omp Chat: the view of the conversations and the ACP client they stand on. The conversations the window saved before resume once both exist, and the context key
+ * that shows the view follows the settings (`trama.ompChat`, `trama.agent`) and the conversations from the start.
+ */
+function startOmpChat(context: vscode.ExtensionContext): void {
+  const savedIds = () => readSavedConversations(context.workspaceState.get(CONVERSATIONS_KEY)).entries.map((entry) => entry.id);
+  const view = new OmpChatView(context.extensionUri, () => findProject()?.root, savedIds);
+  const client = new OmpClient({ ompPath: () => settings().get<string>("ompPath", "").trim() });
+  context.subscriptions.push(
+    view,
+    view.register(),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("trama.ompChat") || event.affectsConfiguration("trama.agent")) view.model.refresh();
+      if (event.affectsConfiguration("trama.theme")) view.model.themeChanged();
+    }),
+  );
+  void guarded(() => setOmpChat({ client, view: view.model }, context.workspaceState, () => findProject()?.root))().finally(() => view.model.refresh());
 }
 
 /**
@@ -120,11 +148,14 @@ function exposeBundledCli(context: vscode.ExtensionContext): void {
   const env = context.environmentVariableCollection;
   env.clear();
   if (!executable) return;
+  setBundledCliDir(dirname(executable));
   env.description = "Puts the trama CLI shipped with the Trama extension on the PATH, for agents.";
   env.prepend("PATH", `${dirname(executable)}${delimiter}`);
 }
 
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
   controller?.dispose();
   controller = undefined;
+  // The window closes or reloads: the processes of omp Chat's conversations stop with it, and their work waits for the resume.
+  await windowClosed();
 }

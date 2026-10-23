@@ -23,12 +23,14 @@ This is the index of the Area's Requirements. The General Requirements are below
 ## Fragments
 
 - **Interfaccia del lavoro dell'agente** (`agents.md`): Usa quando mostri richieste di design, terminale dell'agente, agente e modelli, gli avvisi dell'Advisor della chat e quelli del controllo di esecuzione. Sections: `design-request`, `agent-terminal`, `agent-launching`, `chat-advisor`, `time`.
+- **Interfaccia di Ask more** (`ask-more.md`): Usa quando costruisci o cambi Ask more, le modali dei dettagli di Task e Drift sulla Board o il pulsante Ask more nelle domande. Sections: `developer.ASK_MORE`.
 - **Board interface** (`board.md`): Usa quando mostri le colonne, le schede e i pulsanti della Board. Sections: `panel/Board`.
 - **Livelli del Diagramma** (`diagram.md`): Usa quando costruisci o cambi i livelli del Diagramma: la radice, Whole System, il livello di un Actor, il breadcrumb e il riquadro al passaggio del puntatore. Sections: `diagram`, `diagram/System level`, `diagram/Whole System level`, `diagram/Actor level`.
 - **Interfaccia del focus** (`focus.md`): Usa quando mostri il focus nel Diagramma, nei Requisiti o nelle Specs, o i pulsanti View e i chip che lo aprono. Sections: `focus`.
 - **Get Started e wizard di setup** (`get-started.md`): Usa quando mostri Get Started, il wizard di setup, Guided setup, Start from Scratch, Import from Code o il Diagramma con il Modello vuoto. Sections: `panel/Get Started`, `panel/Diagram`, `project`, `setup-wizard`.
 - **Ghost e avvisi** (`ghosts.md`): Usa quando mostri i ghost degli annunci e i loro avvisi nella Board. Sections: `announcement`.
 - **Interfaccia della History** (`history.md`): Usa quando mostri le voci di History: la colonna, la modale dei dettagli e i comandi che le elencano. Sections: `voce-history`.
+- **omp Chat** (`omp-chat.md`): Usa quando costruisci o cambi la vista omp Chat della barra laterale secondaria e le sue conversazioni. Sections: `omp-chat`, `omp-chat-conversation`.
 - **Interfaccia generale e pannello** (`panel.md`): Usa sempre quando lavori sull'interfaccia: regole generali, pannello, Board e Requisiti. Sections: `General`, `panel`, `panel/Requirements`.
 - **Interfaccia dei round di domande** (`questions-notices.md`): Usa quando mostri i round di domande. Sections: `question-round`.
 - **Quick Task interface** (`quick-task.md`): Usa quando costruisci o cambi il pulsante diviso + Add Work Item, il suo menu (Unify Drifts e Add Quick Task) e ciò che il Quick Task mostra. Sections: `developer.OPEN_QUICK_TASK`.

@@ -45,7 +45,9 @@ export type QuestionAction =
   | { type: "confirmSkipAll" }
   | { type: "send" }
   | { type: "minimize" }
-  | { type: "restore" };
+  | { type: "restore" }
+  /** Ask more on the question `id`: opens a new chat about it and changes nothing in the round. */
+  | { type: "askMore"; id: string };
 
 export type QuestionStep =
   | { kind: "state"; state: QuestionRoundState }
@@ -106,8 +108,20 @@ function deliver(state: QuestionRoundState, confirmed: ConfirmedAnswer[]): Quest
 const ok = (state: QuestionRoundState): QuestionStep => ({ kind: "state", state });
 const refused = (reason: string): QuestionStep => ({ kind: "refused", reason });
 
+/**
+ * The question Ask more may ask about: the one in view, on an open question (not the summary, not the confirmation of Skip all,
+ * not the reduced bar); null otherwise, so a message that arrives after the view changed asks about nothing.
+ */
+export function askMoreTarget(state: QuestionRoundState, id: string): Question | null {
+  if (state.minimized || state.view !== "question" || state.confirming !== null) return null;
+  const question = state.questions[state.current];
+  return question !== undefined && question.id === id ? question : null;
+}
+
 /** Applies one developer action. Anything the overlay should not have offered is refused, even if the panel sent it. */
 export function applyQuestionAction(state: QuestionRoundState, action: QuestionAction): QuestionStep {
+  // Ask more changes nothing in the round: the host opens the chat and the overlay stays as it was.
+  if (action.type === "askMore") return askMoreTarget(state, action.id) ? ok(state) : refused("Ask more is about the question in view");
   if (action.type === "minimize") return ok({ ...state, minimized: true, confirming: null });
   if (action.type === "restore") return ok({ ...state, minimized: false });
   if (state.minimized) return refused("the questions are minimized");

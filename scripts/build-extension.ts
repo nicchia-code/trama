@@ -35,6 +35,17 @@ const webview = await Bun.build({
   define: { "process.env.NODE_ENV": '"production"' },
   sourcemap: "linked",
 });
+/** The omp Chat view: a second entry point of the same React build, with the same stylesheet. */
+const ompChat = await Bun.build({
+  entrypoints: ["extension/src/webview/omp-chat/main.tsx"],
+  outdir: "extension/dist",
+  naming: "omp-chat.js",
+  target: "browser",
+  format: "iife",
+  plugins: [tailwind],
+  define: { "process.env.NODE_ENV": '"production"' },
+  sourcemap: "linked",
+});
 const ompHook = await Bun.build({
   entrypoints: ["extension/src/omp/trama-hook.ts"],
   outdir: "extension/dist",
@@ -44,9 +55,9 @@ const ompHook = await Bun.build({
 });
 
 let failed = false;
-for (const result of [host, webview, ompHook]) {
+for (const result of [host, webview, ompChat, ompHook]) {
   for (const log of result.logs) console.error(String(log));
   failed ||= !result.success;
 }
 if (failed) process.exit(1);
-console.log("built extension/dist/host.js, webview.js and omp-hook.js");
+console.log("built extension/dist/host.js, webview.js, omp-chat.js and omp-hook.js");

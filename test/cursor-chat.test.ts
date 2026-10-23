@@ -35,6 +35,8 @@ test("the hook names the first workspace folder with a Trama Model, and keeps on
   expect(parseCursorHook(prompt("Trama: Unify Drifts\n\nUnite the Drifts into one.\n\nUnify the open Drifts `a`, `b`."))?.tramaPrompt).toBe(true);
   expect(parseCursorHook(prompt("Trama: Unify Drifts\r\n\r\nUnite the Drifts."))?.tramaPrompt).toBe(true);
   expect(parseCursorHook(prompt("Please read Trama: Unify Drifts and more"))?.tramaPrompt).toBe(false);
+  // The fixed instructions of Ask more begin with their own line and name no skill: the chat they open is not Trama's.
+  expect(parseCursorHook(prompt("Trama: Ask more\n\nRead, then wait.\n\nAsk more about the Task j6tlxyad."))?.tramaPrompt).toBe(false);
   expect(parseCursorHook({ ...prompt("x"), workspace_roots: [join(root, "other")] })).toBeNull();
   expect(parseCursorHook({ ...prompt("x"), hook_event_name: "notAHook" })).toBeNull();
 });

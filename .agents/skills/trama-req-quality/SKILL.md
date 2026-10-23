@@ -15,3 +15,4 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Quality of agent launching** (`agents.md`): Use for the security, privacy and reliability of launching agents, the agent terminal and the editor chat hooks. Sections: `editor-chat`, `agent-launching`, `agent-terminal`.
 - **Quality of agent instruction files** (`instruction-files.md`): Use for the security, privacy and reliability of finding agent instruction files in the setup wizard and of leaving them out of omp launches. Sections: `setup-wizard/Agent`, `agent-terminal/Agent running`.
 - **Quality** (`main.md`): Use for performance, security, privacy, accessibility, offline, localisation or reliability. Sections: `task`, `drift-resolution`, `panel/Settings`.
+- **omp Chat** (`omp-chat.md`): Usa quando lavori alla sicurezza, all'affidabilità, alla compatibilità o all'accettazione di omp Chat. Sections: `omp-chat-conversation`.

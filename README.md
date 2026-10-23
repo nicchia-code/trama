@@ -20,7 +20,7 @@ Your rules (tech stack, design, data, business rules) live next to the map as **
 
 ## Requirements
 
-- VS Code 1.95 or later, or Cursor.
+- VS Code 1.106 or later, or Cursor.
 - Linux (x64), macOS (Apple silicon) or Windows (x64, preview).
 - An agent: Cursor's chat (in Cursor only), or omp installed and on your `PATH` (in any of the editors above).
 - With the Advisor Scanner on in Cursor's chat, Cursor 3.27.6 or later: its review rounds run in the background while the agent keeps working, and Cursor delivers each result and its notes to the agent. Trama reports the notes again in the review of the Task or the final review. Earlier versions are not recognised.
@@ -47,6 +47,16 @@ code --install-extension trama-<platform>-<version>.vsix
 6. **Keep the map honest.** **Trama: Scan System** has the agent compare the code with the map. Each Drift it finds offers ways to fix the code: **Resolve** it or **Dismiss Drift**.
 
 Every setting is in the **Settings** tab of the panel, which saves to your user settings; **Guided setup** there walks you through the main ones again.
+
+## Optional features
+
+The **Features** group of the Settings tab holds features that are off by default. One of them is **omp Chat**:
+
+- It works only with omp (`trama.agent` set to `omp`) and only from your user settings, so a cloned repository cannot turn it on.
+- With it on, the jobs Trama starts open as conversations in the **omp Chat** view, one conversation per job, instead of omp terminals. In VS Code, and in every editor that is not Cursor, the view sits in its own container of the secondary sidebar, on the right like the VS Code chat (VS Code 1.106 or later). Cursor reserves that bar for its own chat, so there the view sits in the bottom panel; to bring it to the right, use Move View and «New Secondary Side Bar Entry», and the editor remembers it. Cursor logs an error at start-up ("View containers cannot be contributed to the Secondary Side Bar in Cursor"): it is expected and harmless. Trama never opens, closes or moves a side bar by itself, except to show the view when a conversation opens.
+- **Every command runs without asking**: omp runs in yolo mode there, so it executes commands that a terminal would ask you to approve. Turn the feature on only if you accept that. The omp terminal and omp sessions you start by hand are not affected.
+- The session receives only the MCP servers of omp's own files (`.omp/mcp.json` in the project and `~/.omp/agent/mcp.json`); the files of other tools are not read.
+- If omp cannot be reached (not found, exits at start, does not answer), the job starts in the omp terminal as it does with the feature off, and a notice says why.
 
 ## Learn more
 
