@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import { expandVariables, mcpFiles, mergeMcpEntries, parseMcpFile, readMcpServers } from "../src/core/omp-mcp";
 
 const file = (servers: Record<string, unknown>) => JSON.stringify({ mcpServers: servers });
@@ -53,22 +54,22 @@ describe("merging the project's file and the user's", () => {
 
 describe("where the files are", () => {
   test("project and default user file", () => {
-    expect(mcpFiles("/p", {}, "/h")).toEqual({ project: "/p/.omp/mcp.json", user: "/h/.omp/agent/mcp.json" });
+    expect(mcpFiles("/p", {}, "/h")).toEqual({ project: join("/p", ".omp", "mcp.json"), user: join("/h", ".omp", "agent", "mcp.json") });
   });
   test("an active profile has its own agent folder", () => {
-    expect(mcpFiles("/p", { OMP_PROFILE: "work" }, "/h").user).toBe("/h/.omp/profiles/work/agent/mcp.json");
-    expect(mcpFiles("/p", { PI_PROFILE: "default" }, "/h").user).toBe("/h/.omp/agent/mcp.json");
+    expect(mcpFiles("/p", { OMP_PROFILE: "work" }, "/h").user).toBe(join("/h", ".omp", "profiles", "work", "agent", "mcp.json"));
+    expect(mcpFiles("/p", { PI_PROFILE: "default" }, "/h").user).toBe(join("/h", ".omp", "agent", "mcp.json"));
   });
   test("PI_CODING_AGENT_DIR moves the default profile's agent folder", () => {
-    expect(mcpFiles("/p", { PI_CODING_AGENT_DIR: "/agent" }, "/h").user).toBe("/agent/mcp.json");
+    expect(mcpFiles("/p", { PI_CODING_AGENT_DIR: "/agent" }, "/h").user).toBe(join("/agent", "mcp.json"));
   });
 });
 
 describe("the servers of a project", () => {
   test("missing files give no server and present ones are merged", () => {
     const files: Record<string, string> = {
-      "/p/.omp/mcp.json": file({ one: { command: "p" } }),
-      "/h/.omp/agent/mcp.json": file({ one: { command: "u" }, two: { command: "u2" } }),
+      [join("/p", ".omp", "mcp.json")]: file({ one: { command: "p" } }),
+      [join("/h", ".omp", "agent", "mcp.json")]: file({ one: { command: "u" }, two: { command: "u2" } }),
     };
     const read = (path: string) => files[path] ?? "";
     expect(readMcpServers("/p", {}, "/h", read).map((server) => ("command" in server ? server.command : ""))).toEqual(["p", "u2"]);

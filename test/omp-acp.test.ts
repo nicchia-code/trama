@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { modelChoices, permissionOutcome, promptBlocks, reopenMethod, startFailureReason, steeringSupported } from "../src/core/omp-acp";
 
 describe("the answer to a permission request", () => {
@@ -51,8 +54,9 @@ describe("a prompt's blocks", () => {
     expect(promptBlocks("do it")).toEqual([{ type: "text", text: "do it" }]);
   });
   test("an attachment is a resource_link on the file, before the text", () => {
-    expect(promptBlocks("go", "/tmp/a b.md")).toEqual([
-      { type: "resource_link", name: "a b.md", uri: "file:///tmp/a%20b.md" },
+    const file = join(tmpdir(), "a b.md");
+    expect(promptBlocks("go", file)).toEqual([
+      { type: "resource_link", name: "a b.md", uri: pathToFileURL(file).href },
       { type: "text", text: "go" },
     ]);
   });

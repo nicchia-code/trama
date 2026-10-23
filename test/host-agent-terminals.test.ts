@@ -3116,7 +3116,7 @@ describe("Ask more", () => {
     const before = { terminals: terminals.length, clipboard: clipboard.length, jobs: localProjectJobs(root).length };
     try {
       await openAskMore(root, "Ask question", "Ask more about a question.");
-      const pathLine = `The trama command may not be on your PATH. Before anything else run: export PATH="${join(extensionPath, "bin")}:$PATH"`;
+      const pathLine = process.platform === "win32" ? `The trama command may not be on your PATH. Run it by its full path: ${join(extensionPath, "bin", "trama.exe")}` : `The trama command may not be on your PATH. Before anything else run: export PATH="${join(extensionPath, "bin")}:$PATH"`;
       const message = `Trama: Ask more\n\nRead, then wait.\n\nAsk more about a question.\n${pathLine}`;
       expect(calls).toEqual([["composer.createNew", { partialState: { text: message, richText: message, unifiedMode: "agent", modelConfig: { modelName: "opus", maxMode: false } }, openInNewTab: true, autoSubmit: true }]]);
       expect(JSON.stringify(calls)).not.toContain("trama question new");
