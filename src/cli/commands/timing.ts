@@ -23,7 +23,7 @@ const create = defineCommand({
   object: "timing",
   verb: "new",
   mode: "immediate",
-  summary: "Record a choice of the experimental parallel execution.",
+  summary: "Record a choice of the parallel execution.",
   description:
     "Records in the timings of the job a choice of the parallel run: `release` (Tasks started together although the free-places rule keeps them apart), `order` (the first Task waits for the others to be Done) or `conflict` (the sub-agent of the first Task stopped because it clashed with the others). `tasks` names at least two existing Tasks; `reason` is one line. Writes only from a Trama terminal or chat: elsewhere it writes nothing, says so and exits with 0.",
   input: z.strictObject({

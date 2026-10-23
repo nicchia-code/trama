@@ -11,7 +11,7 @@ Read nothing else about the project. Do not run `trama task list`, `trama drift 
 
 ## Briefing
 
-1. Run `trama comparison new <machine> --input -` with a JSON object on standard input, for example `trama comparison new <machine> --input - <<'JSON'` and `{"refs":["<ref>"],"candidates":true}` and `JSON`. `refs` are the references your instruction gives (none: the whole Machine); each must belong to the Machine. `candidates` only when the experimental Drift blocker is on (see below). The command announces the comparison and prints its ID first, then the references, the State tree, the Events with their receivers, the Transitions, the Requirement sections that apply, the `analyze` warnings, the open and resolved cards on those references, and, with `candidates`, for each reference the Tasks an open Drift there would block.
+1. Run `trama comparison new <machine> --input -` with a JSON object on standard input, for example `trama comparison new <machine> --input - <<'JSON'` and `{"refs":["<ref>"],"candidates":true}` and `JSON`. `refs` are the references your instruction gives (none: the whole Machine); each must belong to the Machine. `candidates` only when the Drift blocker is on (see below). The command announces the comparison and prints its ID first, then the references, the State tree, the Events with their receivers, the Transitions, the Requirement sections that apply, the `analyze` warnings, the open and resolved cards on those references, and, with `candidates`, for each reference the Tasks an open Drift there would block.
 2. Keep the comparison ID: you pass it to `comparison move`.
 3. If the command refuses (unknown Machine or reference), report it and stop.
 
@@ -65,9 +65,9 @@ Only for an important case the Model forgot. Before `comparison move`:
 
 After `comparison move` succeeds, run `trama proposal move <draft id> open` once and read its output. If it is refused, fix the reported problems with `trama proposal edit <id>` and hand over again.
 
-### Experimental Drift blocker
+### Drift blocker
 
-Only when your instruction contains the sentence "The experimental Drift blocker is on". Then use `candidates` in the briefing. For each Drift, leave free the candidate Tasks the difference does not touch, and list them in the Drift as `notBlocking` (a list of `{"task":"<id>","reason":"<one line>"}`), each with a one-line reason. Never use `notBlocking` without that sentence.
+Only when your instruction contains the sentence "The Drift blocker is on". Then use `candidates` in the briefing. For each Drift, leave free the candidate Tasks the difference does not touch, and list them in the Drift as `notBlocking` (a list of `{"task":"<id>","reason":"<one line>"}`), each with a one-line reason. Never use `notBlocking` without that sentence.
 
 ## File the cards
 
@@ -100,9 +100,9 @@ When the instruction asks you to write in a language, everything you generate fo
 - **A language changes nothing already written.** When you edit a file written in another language, keep its existing text and write only the new or rewritten text in the chosen language.
 - **No first person in Trama's texts.** In what you write for Trama (questions, contexts and options of rounds, titles and bodies of Tasks and Drifts, History entries), Trama is always "Trama" and you are "the agent": no "I", "me", "my", "we", "our", and in Italian no "io", "noi" or first-person verbs. Your replies in the conversation are not Trama's texts and do not change. Text already written is not rewritten.
 
-## Experimental context sharing
+## Sub-agents context sharing
 
-This section applies only when your instruction says "The experimental context sharing is on: …". Without that sentence, skip it and work as written above.
+This section applies only when your instruction says "The sub-agents context sharing is on: …". Without that sentence, skip it and work as written above.
 
 With it, the agent that gave you the Machine may also pass you, besides the Machine and its `refs`, the places in the code it already knows for those references, one line per reference, ``- `<ref>` — <where in the code>``, and the reason each entry of the scope is there (`changed`, `leads into a change`, `removed, its container`).
 

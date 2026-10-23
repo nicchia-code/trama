@@ -145,23 +145,23 @@ test("Skip on Advanced goes back to the values of the start and shows the summar
   const { controller } = setup({ mode: "settings", values: { "trama.theme": { user: "dark" } } });
   act(() => controller.openStep("Advanced"));
   expect(heading()).toBe("Advanced");
-  fireEvent.click(screen.getByRole("checkbox", { name: "Submit While Running" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Drift Blocker" }));
   press("Skip");
   expect(heading()).toBe("Summary");
   expect(screen.getByText("Check your choices, then confirm.")).not.toBeNull();
   expect(screen.queryByText("changed")).toBeNull();
   press("Back");
   expect(heading()).toBe("Advanced");
-  expect((screen.getByRole("checkbox", { name: "Submit While Running" }) as HTMLElement).getAttribute("aria-checked")).toBe("false");
+  expect((screen.getByRole("checkbox", { name: "Drift Blocker" }) as HTMLElement).getAttribute("aria-checked")).toBe("false");
 });
 
 test("the summary shows every value with the changed ones marked, and each row goes back to its step", () => {
   const { controller } = setup({ mode: "settings", values: { "trama.scan": { user: "gpt-5" } } });
   act(() => controller.openStep("Advanced"));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Submit While Running" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Drift Blocker" }));
   press("Next");
   expect(heading()).toBe("Summary");
-  const row = screen.getByRole("button", { name: "Edit Submit While Running" });
+  const row = screen.getByRole("button", { name: "Edit Drift Blocker" });
   expect(row.textContent).toContain("On");
   expect(row.textContent).toContain("changed");
   expect(row.textContent).toContain("was Off");
@@ -175,10 +175,10 @@ test("the summary shows every value with the changed ones marked, and each row g
 test("the confirmation sends only the changed keys, disables every button while it runs and, when it fails, shows the reason and keeps its text", () => {
   const { controller, posted } = setup({ mode: "settings" });
   act(() => controller.openStep("Advanced"));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Submit While Running" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Drift Blocker" }));
   press("Next");
   press("Save settings");
-  expect(posted.at(-1)).toEqual({ type: "confirmSetup", mode: "settings", values: [{ key: "trama.submitWhileRunning", value: true }], excluded: [] });
+  expect(posted.at(-1)).toEqual({ type: "confirmSetup", mode: "settings", values: [{ key: "trama.driftBlocker", value: true }], excluded: [] });
   for (const button of screen.getAllByRole("button") as HTMLButtonElement[]) expect(button.disabled).toBe(true);
   act(() => controller.receiveResult({ type: "guidedSetupResult", ok: false, error: "Could not save Theme: boom." }));
   expect(screen.getByRole("alert").textContent).toBe("Could not save Theme: boom.");

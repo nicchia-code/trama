@@ -216,12 +216,17 @@ test("trama-implement skips the pre-flight and the targeted scan when the Adviso
   expect(skill).toContain("A Task already In progress that it blocks is not stopped: finish it");
   expect(skill).toContain("Correct that code before moving the Task to Done; do not file a Drift for it.");
   expect(skill).toContain("act on every text that begins with `Trama's Advisor` at once");
+  expect(skill).toContain("in the background, with `run_in_background: true`, for a round of continuous review, and in the foreground, waiting for its outcome, for the review of a Task or the final review");
+  expect(skill).toContain("Never wait for a round or check on it: no `sleep`, no polling, and never read its transcript or its output files in `~/.cursor/subagents/`.");
+  expect(skill).toContain("Cursor delivers the outcome of a background round to you by itself, with its notes: correct the code accordingly");
+  expect(skill).toContain("Ignore the outcome of a round that Cursor delivers after you were asked for the review of a Task or the final review");
+  expect(skill).toContain("ignore the outcome of a round that arrives after the review of its Task was asked for");
 });
 
-test("trama-implement has the Experimental parallel execution section: plan from the text, limits, records, revision, conflicts and report", () => {
+test("trama-implement has the Parallel execution section: plan from the text, limits, records, revision, conflicts and report", () => {
   const skill = SKILLS["trama-implement/SKILL.md"] as string;
-  expect(skill).toContain("## Experimental parallel execution");
-  expect(skill).toContain("This section applies only when the instruction says \"The experimental parallel execution is on: follow the \\\"Experimental parallel execution\\\" section of the trama-implement skill.\"");
+  expect(skill).toContain("## Parallel execution");
+  expect(skill).toContain("This section applies only when the instruction says \"The parallel execution is on: follow the \\\"Parallel execution\\\" section of the trama-implement skill.\"");
   expect(skill).toContain("`runnable: true`, `max: <N>`, `heldBack: true` and the filters of the Run");
   expect(skill).toContain("Do not open the code to decide.");
   expect(skill).toContain("Never start a blocked Task");
@@ -234,11 +239,11 @@ test("trama-implement has the Experimental parallel execution section: plan from
   expect(skill).toContain("section \"Parallel choices\"");
 });
 
-test("the skills that start sub-agents or are started by one have the Experimental context sharing section, valid only with the sentence, with no change to the rest", () => {
+test("the skills that start sub-agents or are started by one have the Sub-agents context sharing section, valid only with the sentence, with no change to the rest", () => {
   for (const name of ["trama-design", "trama-scan", "trama-implement", "trama-import", "trama-resolve-drifts"]) {
     const skill = SKILLS[`${name}/SKILL.md`] as string;
-    expect(skill).toContain("## Experimental context sharing");
-    expect(skill).toContain('This section applies only when the instruction says "The experimental context sharing is on: …". Without that sentence, skip it');
+    expect(skill).toContain("## Sub-agents context sharing");
+    expect(skill).toContain('This section applies only when the instruction says "The sub-agents context sharing is on: …". Without that sentence, skip it');
     expect(skill).toContain("in whatever way your agent starts sub-agents");
     expect(skill).toContain("Never code, never everything you gathered, and nothing you read only to pass it on.");
     expect(skill).toContain("``- `<ref>` — <where in the code>``");
@@ -257,8 +262,8 @@ test("the skills that start sub-agents or are started by one have the Experiment
   expect(SKILLS["trama-implement/SKILL.md"]).toContain("skips `trama task show` only if it received that text");
   expect(SKILLS["trama-implement/SKILL.md"]).toContain("The pre-flight and the end-of-Run scan.");
   const compare = SKILLS["trama-compare/SKILL.md"] as string;
-  expect(compare).toContain("## Experimental context sharing");
-  expect(compare).toContain('This section applies only when your instruction says "The experimental context sharing is on: …". Without that sentence, skip it');
+  expect(compare).toContain("## Sub-agents context sharing");
+  expect(compare).toContain('This section applies only when your instruction says "The sub-agents context sharing is on: …". Without that sentence, skip it');
   expect(compare).toContain("Take nothing from the briefing.");
   expect(compare).toContain("you still run `trama comparison new` and `trama comparison move`");
   expect(compare).toContain("Report back");

@@ -28,6 +28,8 @@ export interface CursorHook {
   file?: string;
   /** afterShellExecution of a watched agent: what `git status` shows after the command, with each file's content hash. Absent otherwise. */
   snapshot?: ChangedFile[];
+  /** afterFileEdit, afterShellExecution and postToolUse: the main conversation's transcript, when Cursor gives a non-empty path (sub-agents get none). Only the path, never the content. */
+  transcript?: string;
   /** subagentStart: the conversation that launched the sub-agent. */
   parent?: string;
   /** subagentStart and subagentStop: the sub-agent's kind and the identity of its call. */
@@ -58,6 +60,8 @@ export interface CursorChatEvent {
   /** AGENT_INTERRUPTED from `sessionEnd`: why Cursor ended the session (`aborted` or `error`), as Cursor gave it. A `stop` interruption carries none. */
   sessionReason?: "aborted" | "error";
   snapshot?: ChangedFile[];
+  /** FILES_CHANGED and TOOL_FINISHED: the transcript path the hook carried, if any. */
+  transcript?: string;
   /** SUBAGENT_STOPPED and SUBAGENT_INTERRUPTED: the sub-agent that ended. */
   subagent?: { type?: string; call?: string; child?: string; modifiedFiles: string[] };
 }
@@ -146,6 +150,10 @@ export function parseCursorHook(input: unknown): CursorHook | null {
     out.tramaWork = registersAgentWork(command);
     const taken = takenTask(command);
     if (taken !== undefined) out.takenTask = taken;
+  }
+  if (hook === "afterFileEdit" || hook === "afterShellExecution" || hook === "postToolUse") {
+    const transcript = text(raw["transcript_path"]);
+    if (transcript !== undefined && transcript !== "") out.transcript = transcript;
   }
   if (hook === "afterFileEdit") {
     const file = projectRelative(root, text(raw["file_path"]));
@@ -535,7 +543,7 @@ export class CursorConversations {
     if (h.hook === "beforeSubmitPrompt" && h.tramaPrompt) this.trama.add(h.conversation);
     // A command that registers the agent's work makes its conversation Trama's too.
     if (h.hook === "afterShellExecution" && h.tramaWork) this.trama.add(h.conversation);
-    const event = (name: CursorChatEventName): CursorChatEvent => ({ event: name, conversation: h.conversation, root: h.root });
+    const event = (name: CursorChatEventName): CursorChatEvent => ({ event: name, conversation: h.conversation, root: h.root, ...(h.transcript === undefined ? {} : { transcript: h.transcript }) });
     // The hooks of the watched agents (a conversation or a sub-agent) reach a window only when its state file names them.
     switch (h.hook) {
       case "afterFileEdit":

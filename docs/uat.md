@@ -799,7 +799,7 @@ Use the [question request contract](./cli.md#question-rounds) with `trama questi
 
 ## R. Cursor
 
-Run R1–R4 on **every new Cursor version** before declaring it supported (smoke test). Tested: 3.22.12 and 3.23.12. Open the demo with the packaged extension in Cursor's editor window (not the Agents Window), select `trama.agent="cursor"` in user settings, and run **Trama: Update Agent Skills** once.
+Run R1–R4 and R11 on **every new Cursor version** before declaring it supported (smoke test). Cursor 3.27.6 is the first version proven this way for the chat Advisor's background rounds. A version where one piece does not work stays supported, with that piece falling back as `rules#chat-advisor` says. Open the demo with the packaged extension in Cursor's editor window (not the Agents Window), select `trama.agent="cursor"` in user settings, and run **Trama: Update Agent Skills** once.
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
@@ -815,6 +815,7 @@ Run R1–R4 on **every new Cursor version** before declaring it supported (smoke
 | R9 | In a Trama conversation (a prompt that names a Trama skill), let the agent call its own question tool | The tool is refused with the message `In Trama's work, ask the developer only with \`trama question new --root <project>\`, as the Trama skill says. This question tool is disabled here.`; no question appears in the editor. Confirm that `AskQuestion` is the name of Cursor's question tool: if Cursor does not accept the matcher, the entry has no matcher and the hook decides from `tool_name` | ☐ |
 | R10 | In a chat that is not Trama's (a prompt without a Trama skill), let the agent call its question tool | The tool runs as usual | ☐ |
 | R10a | In a Trama conversation, let the agent run `trama task list` (and, in a sub-agent, the same) on Cursor 3.22.12 and 3.23.12; on Windows also check the PowerShell form | The command runs with `TRAMA_CHAT` set to the conversation (the main one, also from a sub-agent) and `TRAMA_JOB` when it has a job, and Cursor still asks for the approval it would ask for without the hook | ☐ |
+| R11 | Run a Task with the Advisor Scanner on in Cursor's chat, letting the agent change files, and read the chat | The Run makes at least one round of continuous review and one final review. Each round starts in the background (`run_in_background`) and the agent neither waits for it nor checks it: no `sleep`, no reading of the round's transcript or of `~/.cursor/subagents/`. The round's result reaches the agent by itself, delivered by Cursor. The round's request carries the agent's transcript with a byte position. The text Trama adds to tool results only asks for a round and never holds the round's notes | ☐ |
 
 ## U. Short numbers
 
@@ -871,7 +872,7 @@ Written from the Requirements; these settings only count in your **user** settin
 | X8 | `trama project edit` (or **Trama: Update Agent Skills**), then inspect `/tmp/trama-demo/shop/.omp/agents/trama-analysis.md` and check for `trama-triage.md` | The `trama-analysis` definition has `model: "@slow"` and names `trama-scan`; the obsolete triage file is absent | ☐ |
 | X9 | With omp, put `"trama.ignoreInstructionFiles": true` in user settings. In the project add an `AGENTS.md` and `.cursor/rules/style.mdc` with some text; click **Scan System** | The omp command has `--config '<extension storage>/launch.yml'` and no `--advisor`; that file lists `disabledExtensions` with `"context-file:project:AGENTS.md"` and `"rule:style"`, and nothing in the repository changes | ☐ |
 | X10 | In `<project>/.omp/config.yml` put `disabledExtensions: [my-ext]`, then repeat X9 | `launch.yml` lists `"my-ext"` first, then Trama's identities, with no duplicates | ☐ |
-| X11 | 🪙 With omp 18.12, repeat X9 with a task that starts a sub-agent (`task`, `trama-analysis`) and, with `"trama.experimentalAdvisorScanner": true`, a Run | The agent, its sub-agents and the advisors do not mention the rules of `AGENTS.md` or `style.mdc`; with the Advisor Scanner the command also has `--advisor` and `TRAMA_ADVISOR_SCANNER=1` is in the terminal | ☐ |
+| X11 | 🪙 With omp 18.12, repeat X9 with a task that starts a sub-agent (`task`, `trama-analysis`) and, with `"trama.advisorScanner": true`, a Run | The agent, its sub-agents and the advisors do not mention the rules of `AGENTS.md` or `style.mdc`; with the Advisor Scanner the command also has `--advisor` and `TRAMA_ADVISOR_SCANNER=1` is in the terminal | ☐ |
 | X12 | Delete `AGENTS.md` and the rule (or turn the setting off) and click **Scan System** | With no instruction file found the command has no `--config` (without the Advisor Scanner); with the setting off or with Cursor's chat the launch is as before | ☐ |
 
 ---
@@ -882,7 +883,7 @@ Drifts are never resolved on their own: there is no delegation, no automatic app
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| Y1 | Leave `"trama.submitWhileRunning"` unset or `false` (default); start a Run, then look at Run all and a Task's Run button while the Run is in progress; tick the setting (`true`) and look again | With `false`, those Run buttons are disabled while the Run is in progress, and a launch is refused with `A run cannot start: A run is in progress.`; with `true` they are available. Scan System and Resolve Drifts are not affected by the setting | ☐ |
+| Y1 | Start a Run, then look at Run all and a Task's Run button while the Run is in progress; with `"trama.submitWhileRunning": true` left in the user settings, look again | Run all and the Run button of a Task are disabled while the Run is in progress, with `A run is in progress`, and a launch is refused with `A run cannot start: A run is in progress.`, with or without the leftover value; the value is ignored and not rewritten. Scan System, Resolve Drifts and Add Quick Task stay available | ☐ |
 | Y2 | With several open Drifts, press **Resolve** on the card of one of them | Only that Drift is gathered: the agent asks the decisions and hands over a resolution to review; nothing is approved or run until you decide, and the Tasks that come out of it start by hand | ☐ |
 
 ---

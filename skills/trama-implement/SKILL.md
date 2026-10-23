@@ -54,13 +54,13 @@ When the instruction asks you to write in a language, everything you generate fo
 
 This section applies only when the instruction says "The Advisor Scanner is on". Without that sentence, skip it and follow the steps as written.
 
-With it, the Run does not scan: the advisors check the code against the Model during the run instead. With omp they are omp's advisors. In Cursor's chat the advisor is Trama's `trama-advisor` sub-agent: act on every text that begins with `Trama's Advisor` at once, starting `trama-advisor` (in the background when the text says so, otherwise waiting for its outcome) as that text asks, and do not stop the turn before the review it asks for is done. A text of that kind may come with a tool result or as the follow-up that keeps your turn open.
+With it, the Run does not scan: the advisors check the code against the Model during the run instead. With omp they are omp's advisors. In Cursor's chat the advisor is Trama's `trama-advisor` sub-agent: act on every text that begins with `Trama's Advisor` at once, starting `trama-advisor` as that text asks: in the background, with `run_in_background: true`, for a round of continuous review, and in the foreground, waiting for its outcome, for the review of a Task or the final review; do not stop the turn before the review it asks for is done. A text of that kind may come with a tool result or as the follow-up that keeps your turn open.
 
 - **No pre-flight.** Announce no check for it and run no `trama task list` with `runnable` and `scope`. Start at step 1.
 - **No targeted scan.** Step 7 never runs, and no Scanning phase is announced: after step 6 the check goes straight to step 8, History, and closes as the "Announcing the check" section says.
-- **Advisor notes.** When the advisor finds that the code of a Task departs from the Model, the Requirements or the Task, it sends a note. Correct that code before moving the Task to Done; do not file a Drift for it.
+- **Advisor notes.** When the advisor finds that the code of a Task departs from the Model, the Requirements or the Task, it sends a note. Correct that code before moving the Task to Done; do not file a Drift for it. Cursor delivers the outcome of a background round to you by itself, with its notes: correct the code accordingly, without stopping. Never wait for a round or check on it: no `sleep`, no polling, and never read its transcript or its output files in `~/.cursor/subagents/`. Ignore the outcome of a round that Cursor delivers after you were asked for the review of a Task or the final review: that review covers it.
 - **Drifts from the advisor.** The advisor files a Drift only for code outside the Tasks of this run. Such a Drift has no origin (no `task`) and carries no `notBlocking`: it blocks every Task not Done that concerns the same thing. A Task already In progress that it blocks is not stopped: finish it, and the Run goes on with the others. The advisor gives no blocker judgement, and you give none for its Drifts.
-- **Sub-agents.** A sub-agent that implements a Task has the advisor too; it does steps 2 to 5 for its Task as above. In Cursor's chat, tell each sub-agent that implements a Task that its Task is reviewed by `trama-advisor` before it finishes: it must act at once on every text that begins with `Trama's Advisor`, as you do.
+- **Sub-agents.** A sub-agent that implements a Task has the advisor too; it does steps 2 to 5 for its Task as above. In Cursor's chat, tell each sub-agent that implements a Task that its Task is reviewed by `trama-advisor` before it finishes: it must act at once on every text that begins with `Trama's Advisor`, as you do, never wait for or check on a background round, correct the code when Cursor delivers a round's outcome, and ignore the outcome of a round that arrives after the review of its Task was asked for.
 
 ## Steps
 
@@ -129,9 +129,9 @@ The developer reads a Drift at a glance, as a programmer, but not as a code revi
 - **Fix options reach what should happen** without changing the Model or any Requirement, and respect every Requirement that applies to the elements of the Drift, not only those it names. An option that asks for an exception to, or a change of, the Model or a Requirement is not a fix option: that way goes to a Drift with a Proposal.
 - **Use short Markdown:** short paragraphs, a bulleted list when there are several separate points, **bold** for the one or two terms that carry the difference. No headings inside a section, no tables, about 100 words per side.
 
-## Experimental Drift blocker
+## Drift blocker
 
-This section applies only when the instruction says "The experimental Drift blocker is on". Without that sentence, never name a Task in `notBlocking`, and skip this section.
+This section applies only when the instruction says "The Drift blocker is on". Without that sentence, never name a Task in `notBlocking`, and skip this section.
 
 When it applies, do this before each `trama drift new`:
 
@@ -141,7 +141,7 @@ When it applies, do this before each `trama drift new`:
 
 The judgement is made once, at filing: a Drift keeps the Tasks it leaves free and blocks every other one, including the Tasks created later about the same thing.
 
-When you start sub-agents, pass them the sentence "The experimental Drift blocker is on" together with this section, and ask each one to report the permanent IDs of the Drifts it registered and, for each, whether it blocks any Task.
+When you start sub-agents, pass them the sentence "The Drift blocker is on" together with this section, and ask each one to report the permanent IDs of the Drifts it registered and, for each, whether it blocks any Task.
 
 ### Final resolution of the Drifts that block nothing
 
@@ -155,9 +155,9 @@ When the work is over (after the final check and the end-of-Run scan, if there i
 
 Never approve or reject this resolution, and never start a Run because of it: the developer decides it, as any manual resolution.
 
-## Experimental parallel execution
+## Parallel execution
 
-This section applies only when the instruction says "The experimental parallel execution is on: follow the \"Experimental parallel execution\" section of the trama-implement skill.", and only for the main agent of a run over several Tasks that can start sub-agents. Without that sentence, without sub-agents, or for a Task asked by name, skip it and follow the steps as written.
+This section applies only when the instruction says "The parallel execution is on: follow the \"Parallel execution\" section of the trama-implement skill.", and only for the main agent of a run over several Tasks that can start sub-agents. Without that sentence, without sub-agents, or for a Task asked by name, skip it and follow the steps as written.
 
 With it, the rule of the free places (`trama task list` with `max` never gives two Tasks that concern the same thing) stays the base, but you plan beyond it from the text of the Tasks, never from the code.
 
@@ -176,15 +176,15 @@ With it, the rule of the free places (`trama task list` with `max` never gives t
 
 This section applies only when the instruction says "The Async Drift Resolver is on: …". Without that sentence, skip it.
 
-With it, at the very end of the work (after the last archiving, the end-of-Run scan and the `nonBlocking` resolution of the experimental Drift blocker, if any, and before the final report and the History entries), you prepare the question of every Drift this work filed, so Resolve opens at once. You alone do this, never a sub-agent that compares or implements.
+With it, at the very end of the work (after the last archiving, the end-of-Run scan and the `nonBlocking` resolution of the Drift blocker, if any, and before the final report and the History entries), you prepare the question of every Drift this work filed, so Resolve opens at once. You alone do this, never a sub-agent that compares or implements.
 
 1. **Find the Drifts.** Run `trama drift list --input -` with `{"currentJob":true,"unprepared":true}`, in a terminal and in Cursor's chat alike; never read `TRAMA_JOB` by hand: the command reads it itself. It lists the open Drifts of this work, the advisor's included, with no valid prepared question and outside every resolution. A Drift already in a resolution (the `nonBlocking` one) is left out.
 2. **Prepare each.** Follow "Writing a prepared question" in the `trama-resolve-drifts` skill (read it first) for each Drift, with the sub-agents you have: hand the exploration to at most `trama.maxParallelAgents` of them at once (the number the instruction gives, 20 when it gives none), one Drift (or a few that concern the same thing) each, and have each record its questions with `trama drift edit`. Without sub-agents, one Drift at a time. A sub-agent asks the developer nothing and registers no other card.
 3. **Report.** The final report says how many Drifts were prepared and which were not (with the reason).
 
-## Experimental context sharing
+## Sub-agents context sharing
 
-This section applies only when the instruction says "The experimental context sharing is on: …". Without that sentence, skip it and work as written above.
+This section applies only when the instruction says "The sub-agents context sharing is on: …". Without that sentence, skip it and work as written above.
 
 With it, when you hand a part of the work to a sub-agent, in whatever way your agent starts sub-agents, you pass it what you have already read that concerns its part, so it does not look for it again and does not read it again.
 
@@ -195,7 +195,7 @@ With it, when you hand a part of the work to a sub-agent, in whatever way your a
 
 In this skill:
 
-- **Implementing a Task.** A sub-agent receives the text of `trama task show` when you have already read it (with the experimental parallel execution) and the places in the code the pre-flight found. It still takes the Task with `trama task move <id> doing`, and skips `trama task show` only if it received that text.
+- **Implementing a Task.** A sub-agent receives the text of `trama task show` when you have already read it (with the parallel execution) and the places in the code the pre-flight found. It still takes the Task with `trama task move <id> doing`, and skips `trama task show` only if it received that text.
 - **The pre-flight and the end-of-Run scan.** Each `trama-analysis` sub-agent receives, with its Machine and `refs`, only the places in the code already known for those references and the reason of each entry of the scope. Lists of cards and the General Requirements stay out, as without this feature. Reuse the places the sub-agents report in `## Already present` and for the sub-agents that follow.
 - **Preparing the questions (Async Drift Resolver).** For each Drift, pass the output of `trama drift show`, the Proposal attached to it, the chain of its `previous` Drifts and where the code is. The code at its Where in the code is read again before deciding. A unified Drift can follow several Drifts: pass every chain.
 

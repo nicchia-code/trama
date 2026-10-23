@@ -95,12 +95,12 @@ test("Next of Path needs a path, Next of Models a valid number of sub-agents, Ne
 
 test("Skip brings the keys of Advanced back to the values the step started with, then goes to the summary", () => {
   let state: WizardState = { ...open("settings", { "trama.theme": { user: "dark" } }), step: "Advanced" };
-  state = setValue(setValue(state, "trama.theme", "light"), "trama.experimentalDriftBlocker", true);
+  state = setValue(setValue(state, "trama.theme", "light"), "trama.driftBlocker", true);
   state = setValue(state, "trama.scan", "gpt-5");
   const skipped = skipAdvanced(state);
   expect(skipped.step).toBe("Summary");
   expect(skipped.values["trama.theme"]).toBe("dark");
-  expect(skipped.values["trama.experimentalDriftBlocker"]).toBeUndefined();
+  expect(skipped.values["trama.driftBlocker"]).toBeUndefined();
   expect(skipped.values["trama.scan"]).toBe("gpt-5");
 });
 
@@ -118,7 +118,7 @@ test("the keys of omp show only with omp, and the language is never in the wizar
   expect(visibleKeys("Agent", "omp")).toEqual(["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles"]);
   expect(visibleKeys("Models", "cursor")).toEqual(["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]);
   expect(visibleKeys("Advanced", "cursor")[0]).toBe("trama.theme");
-  expect(visibleKeys("Advanced", "cursor")).toHaveLength(7);
+  expect(visibleKeys("Advanced", "cursor")).toHaveLength(6);
   for (const step of ["Agent", "Models", "Project", "Advanced"] as const) for (const key of visibleKeys(step, "omp")) expect(schema.some((s) => s.key === key)).toBe(true);
 });
 
@@ -178,12 +178,12 @@ test("the keys of omp are in the summary and the writes only with omp", () => {
 
 test("the writes are the changed keys in the order of the steps; a repeated confirmation writes only what still differs", () => {
   let state = open("settings");
-  state = setValue(state, "trama.experimentalDriftBlocker", true);
+  state = setValue(state, "trama.driftBlocker", true);
   state = setValue(state, "trama.skillsDir", ".claude/skills");
   state = setValue(state, "trama.scan", "gpt-5");
-  expect(changedWrites(schema, state, {}).map((w) => w.key)).toEqual(["trama.scan", "trama.skillsDir", "trama.experimentalDriftBlocker"]);
+  expect(changedWrites(schema, state, {}).map((w) => w.key)).toEqual(["trama.scan", "trama.skillsDir", "trama.driftBlocker"]);
   const afterFailure = { "trama.scan": { user: "gpt-5" }, "trama.skillsDir": { user: ".claude/skills" } } satisfies Record<string, SettingsValues>;
-  expect(changedWrites(schema, state, afterFailure)).toEqual([{ key: "trama.experimentalDriftBlocker", value: true }]);
+  expect(changedWrites(schema, state, afterFailure)).toEqual([{ key: "trama.driftBlocker", value: true }]);
 });
 
 test("the summary shows the path, the folder only with several folders, and the excluded folders", () => {

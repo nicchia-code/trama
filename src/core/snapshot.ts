@@ -93,7 +93,7 @@ export interface ProposalView {
   title: string;
   body: string;
   kind: ProposalKind;
-  /** A resolution the experimental Drift blocker filed: its Drifts block no Task. Approving it changes nothing else. */
+  /** A resolution the Drift blocker filed: its Drifts block no Task. Approving it changes nothing else. */
   nonBlocking: boolean;
   /** A resolution born from the answer to a Drift's prepared question: it does not stop Resolve while it awaits a decision. */
   prepared: boolean;

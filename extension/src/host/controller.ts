@@ -63,7 +63,7 @@ function runTasks(project: Project) {
   return listTasks(project).map((t) => ({ id: t.id, proposal: t.data.proposal, column: t.data.column, agent: t.data.agent, blockedBy: blocked.get(t.id) ?? [] }));
 }
 
-/** Whether a Run launched by Trama is going in this editor window: the Run controls (`trama.submitWhileRunning`) never see the Runs of other windows. */
+/** Whether a Run launched by Trama is going in this editor window: the Run controls never see the Runs of other windows. */
 const ownWindowRuns = (root: string): boolean => localProjectJobs(root).some((job) => job.kind === "run");
 
 const QUESTIONS_WAITING = "Trama has questions from the agent waiting.";
@@ -563,7 +563,7 @@ export class Controller implements vscode.Disposable {
       const drifts = Object.fromEntries(listDrifts(project).filter((d) => d.data.status === "open").map((d) => [d.id, resolveDriftBlocker(project, work, this.namedByResolution.has(d.id), asyncResolver && snapshot.drifts.find((x) => x.id === d.id)?.prepared?.valid === true)]));
       // The open Drifts the running resolution is working on: those this window asked an agent to resolve.
       const resolving = work.resolving ? Object.keys(drifts).filter((id) => this.namedByResolution.has(id)) : [];
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }, settings().get<boolean>("submitWhileRunning", false) === true), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, scans: { advisorScanner: configuredAdvisorScanner() } });
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, scans: { advisorScanner: configuredAdvisorScanner() } });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -959,8 +959,7 @@ export class Controller implements vscode.Disposable {
       }
       if (action.kind === "scan" && configuredAdvisorScanner()) return "Scan is unavailable: the Advisor Scanner is on.";
       const isRun = action.kind === "implement" || action.kind === "implement-all";
-      const submitWhileRunning = settings().get<boolean>("submitWhileRunning", false) === true;
-      const runBlock = isRun ? runWindowBlocker({ resolving: driftWork(project.root).resolving, running: ownWindowRuns(project.root) }, submitWhileRunning) : null;
+      const runBlock = isRun ? runWindowBlocker({ resolving: driftWork(project.root).resolving, running: ownWindowRuns(project.root) }) : null;
       if (runBlock !== null) return `A run cannot start: ${runBlock}.`;
       if (action.kind === "implement-all") {
         const blocker = runBlocker(runTasks(project), namerOf(syncShortNumbers(project).all()));

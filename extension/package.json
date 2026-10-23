@@ -166,11 +166,6 @@
           "scope": "application",
           "markdownDescription": "With omp: Trama's jobs ignore agent instruction files (AGENTS.md, CLAUDE.md, Cursor rules, .omp/RULES.md) in the project and your user folders. Off by default."
         },
-        "trama.submitWhileRunning": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Let a run start while another run started by Trama is in progress. Off by default."
-        },
         "trama.analysis": {
           "type": "string",
           "default": "",
@@ -212,35 +207,35 @@
           "default": "",
           "markdownDescription": "Language the agent writes in, for example `Italian`; code stays in English. Empty (the default) asks nothing about language."
         },
-        "trama.experimentalDriftBlocker": {
+        "trama.driftBlocker": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Experimental. On: a new Drift blocks only the Tasks it really affects; one that blocks none arrives as a resolution Proposal."
+          "markdownDescription": "On: a new Drift blocks only the Tasks it really affects; one that blocks none arrives as a resolution Proposal."
         },
-        "trama.experimentalAdvisorScanner": {
+        "trama.advisorScanner": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Experimental. On: during every Run an advisor, using the Scan model, checks the code against the Model and files Drifts; all scans are off."
+          "markdownDescription": "On: during every Run an advisor, using the Scan model, checks the code against the Model and files Drifts; all scans are off."
         },
-        "trama.experimentalParallelExecution": {
+        "trama.parallelExecution": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Experimental. On: in a run of several Tasks the agent may start together Tasks that concern the same thing, giving a reason."
+          "markdownDescription": "On: in a run of several Tasks the agent may start together Tasks that concern the same thing, giving a reason."
         },
-        "trama.experimentalAsyncDriftResolver": {
+        "trama.asyncDriftResolver": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Experimental. On: the agent prepares each Drift's resolution question, so `Resolve` asks it at once without starting an agent."
+          "markdownDescription": "On: the agent prepares each Drift's resolution question, so `Resolve` asks it at once without starting an agent."
         },
-        "trama.experimentalContextSharing": {
+        "trama.subagentsContextSharing": {
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Experimental. On: the agent passes its sub-agents what it has already read about their work, so they do not read it again."
+          "markdownDescription": "On: the agent passes its sub-agents what it has already read about their work, so they do not read it again."
         }
       }
     }

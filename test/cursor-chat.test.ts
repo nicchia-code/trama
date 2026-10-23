@@ -339,6 +339,15 @@ test("the new hooks are read with project-relative paths and never keep the edit
   expect(parseCursorHook({ hook_event_name: "subagentStart", conversation_id: "a", workspace_roots: [project], parent_conversation_id: "p", subagent_type: "task", subagent_id: "call1", task: "Secret" })).toEqual({ hook: "subagentStart", conversation: "a", root: project, parent: "p", subagentType: "task", call: "call1" });
   expect(parseCursorHook({ hook_event_name: "subagentStop", conversation_id: "a", workspace_roots: [project], status: "error", subagent_type: "task", subagent_id: "call1", child_conversation_id: "kid", modified_files: [join(project, "x.ts"), "/etc/passwd"] })).toEqual({ hook: "subagentStop", conversation: "a", root: project, status: "error", subagentType: "task", call: "call1", child: "kid", modifiedFiles: ["x.ts"] });
   expect(parseCursorHook({ hook_event_name: "postToolUse", conversation_id: "a", workspace_roots: [project], tool_name: "Shell", tool_output: "Secret" })).toEqual({ hook: "postToolUse", conversation: "a", root: project });
+  // The transcript path goes with the three hooks of watched agents when Cursor gives it non-empty (the main conversation's); null or empty is left out.
+  const transcript = join(root, "transcripts", "a.jsonl");
+  const withTranscript = (hook: string, extra: object = {}, value: unknown = transcript) => parseCursorHook({ hook_event_name: hook, conversation_id: "a", workspace_roots: [project], transcript_path: value, ...extra });
+  expect(withTranscript("afterFileEdit", { file_path: join(project, "src", "a.ts") })).toEqual({ hook: "afterFileEdit", conversation: "a", root: project, file: "src/a.ts", transcript });
+  expect(withTranscript("afterShellExecution", { command: "ls" })).toEqual({ hook: "afterShellExecution", conversation: "a", root: project, tramaWork: false, transcript });
+  expect(withTranscript("postToolUse")).toEqual({ hook: "postToolUse", conversation: "a", root: project, transcript });
+  expect(withTranscript("postToolUse", {}, null)).toEqual({ hook: "postToolUse", conversation: "a", root: project });
+  expect(withTranscript("postToolUse", {}, "")).toEqual({ hook: "postToolUse", conversation: "a", root: project });
+  expect(withTranscript("stop", { status: "completed" })).toEqual({ hook: "stop", conversation: "a", root: project, status: "completed" });
 });
 
 test("the hooks of watched agents become Events, and a stop is TURN_FINISHING only for a conversation with the chat Advisor", () => {
@@ -348,6 +357,8 @@ test("the hooks of watched agents become Events, and a stop is TURN_FINISHING on
   expect(at({ hook: "afterFileEdit", conversation: "m" })).toBeNull();
   expect(at({ hook: "afterShellExecution", conversation: "m", snapshot: [{ path: "a.ts", hash: "h" }, { path: "gone.ts" }] })).toEqual({ event: "FILES_CHANGED", conversation: "m", root: project, snapshot: [{ path: "a.ts", hash: "h" }, { path: "gone.ts" }] });
   expect(at({ hook: "postToolUse", conversation: "m" })?.event).toBe("TOOL_FINISHED");
+  expect(at({ hook: "afterFileEdit", conversation: "m", file: "a.ts", transcript: "/t/m.jsonl" })).toEqual({ event: "FILES_CHANGED", conversation: "m", root: project, files: ["a.ts"], transcript: "/t/m.jsonl" });
+  expect(at({ hook: "postToolUse", conversation: "m", transcript: "/t/m.jsonl" })).toEqual({ event: "TOOL_FINISHED", conversation: "m", root: project, transcript: "/t/m.jsonl" });
   expect(at({ hook: "subagentStart", conversation: "m", parent: "m", call: "c1" })).toBeNull();
   expect(at({ hook: "subagentStop", conversation: "m", status: "completed", call: "c1", child: "k", modifiedFiles: ["a.ts"] })).toEqual({ event: "SUBAGENT_STOPPED", conversation: "m", root: project, subagent: { call: "c1", child: "k", modifiedFiles: ["a.ts"] } });
   expect(at({ hook: "subagentStop", conversation: "m", status: "aborted" })?.event).toBe("SUBAGENT_INTERRUPTED");
@@ -427,6 +438,23 @@ test("the frequent hooks read the state file and contact a window only for an ag
     expect(await runCursorHook(hookJson("subagentStop", { status: "completed", subagent_id: "c9" }, "stranger"), { runtimeDir })).toBe("{}");
     expect(await runCursorHook(hookJson("stop", { status: "completed" }), { runtimeDir })).toBe(JSON.stringify({ followup_message: "review again" }));
     expect(received).toEqual(["afterFileEdit:main", "postToolUse:main", "subagentStart:main", "subagentStop:kid", "stop:main"]);
+  } finally {
+    await server.dispose();
+  }
+});
+
+test("a watched agent's file edit and tool result reach the window with the transcript path; an empty one is left out", async () => {
+  const received: CursorHook[] = [];
+  const server = await createQuestionServer({ project: projectAt(project), runtimeDir, windowId: "w1", handler: async () => ({ status: "unavailable" }) as never, onCursorHook: (h) => { received.push(h); } });
+  const transcript = join(root, "transcripts", "main.jsonl");
+  try {
+    server.setChatState(chatState({ agents: [{ agent: "main", text: true }] }));
+    await runCursorHook(hookJson("afterFileEdit", { file_path: join(project, "a.ts"), transcript_path: transcript }), { runtimeDir });
+    await runCursorHook(hookJson("postToolUse", { transcript_path: transcript }), { runtimeDir });
+    await runCursorHook(hookJson("postToolUse", { transcript_path: "" }), { runtimeDir });
+    expect(received.map((h) => [h.hook, h.transcript])).toEqual([["afterFileEdit", transcript], ["postToolUse", transcript], ["postToolUse", undefined]]);
+    // The state file never holds the path.
+    expect(JSON.stringify(readChatStates(questionProjectId(projectAt(project)), runtimeDir))).not.toContain("transcripts");
   } finally {
     await server.dispose();
   }

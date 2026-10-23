@@ -1,4 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChatState, CursorChatEvent, CursorHook } from "../src/core/cursor-chat";
@@ -33,6 +34,8 @@ afterEach(() => {
 /** A chat Run with the Advisor Scanner on, bound to the conversation `main`. */
 function run(): string {
   const root = join(tmpdir(), `trama-advisor-${crypto.randomUUID()}`);
+  // The folder exists before the job starts, so the registry's key for the project never changes while the test creates files in it.
+  mkdirSync(root, { recursive: true });
   roots.push(root);
   startJob("run", root, { chat: "cursor" }, chatJobSendStarted(root, "cursor"), "job1", undefined, true);
   bindChatJob(root, "main");
@@ -52,25 +55,42 @@ test("the registry publishes the chat state: the Run's conversation is watched, 
   expect(latest()).toEqual({ root, conversations: [], subagents: [], agents: [] });
 });
 
-test("a continuous review: asked with the next tool, one at a time, notes delivered with the next tool along with the changes meanwhile", async () => {
+test("a continuous review: asked with the next tool, one at a time, notes never added to a tool result and the changes meanwhile asked for as the next round", async () => {
   const root = run();
   await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "src/a.ts" }));
   const asked = (await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text;
-  expect(asked).toMatch(/^Trama's Advisor: start the trama-advisor sub-agent in the background for review \w{8} of these changes, and keep working without waiting for it: src\/a\.ts\.$/);
+  expect(asked).toMatch(/^Trama's Advisor: start the trama-advisor sub-agent with run_in_background for review \w{8} of these changes and keep working; do not wait for it or check on it, Cursor delivers its result to you\. Changed files: src\/a\.ts\.$/);
   expect(latest()?.agents).toEqual([{ agent: "main", text: false }]);
   // Nothing else is asked while the review goes on; the files wait for the next one.
   await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "src/b.ts" }));
   await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: ".trama/tasks/x.md" }));
   expect((await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text).toBeUndefined();
-  // Notes arrive: they wait in memory until the agent's next tool.
+  // Notes arrive: Cursor delivers them to the agent; Trama keeps them in memory and asks for the next round only.
   expect(receiveAdvisorReview({ review: reviewOf(asked), clean: false, notes: "The Task asks for X; the code does Y." })).toBe(true);
   expect(receiveAdvisorReview({ review: reviewOf(asked), clean: false, notes: "again" })).toBe(false);
   expect(latest()?.agents).toEqual([{ agent: "main", text: true }]);
   const delivered = (await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text ?? "";
-  expect(delivered).toContain("Trama's Advisor found that your Task's code drifts from the Model or the Requirements; fix it before you move the Task to Done: The Task asks for X; the code does Y.");
-  expect(delivered).toMatch(/review \w{8} of these changes, and keep working without waiting for it: src\/b\.ts\.$/);
+  expect(delivered).not.toContain("drifts from the Model");
+  expect(delivered).not.toContain("The Task asks for X");
+  expect(delivered).toMatch(/^Trama's Advisor: start the trama-advisor sub-agent with run_in_background for review \w{8} of these changes and keep working; do not wait for it or check on it, Cursor delivers its result to you\. Changed files: src\/b\.ts\.$/);
   expect(delivered).not.toContain(".trama/");
   expect(latest()?.agents).toEqual([{ agent: "main", text: false }]);
+});
+
+test("the notes of a continuous review without changes meanwhile are kept for the final review, and no tool result carries them", async () => {
+  const root = run();
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "a.ts" }));
+  const asked = (await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text;
+  expect(receiveAdvisorReview({ review: reviewOf(asked), clean: false, notes: "kept note" })).toBe(true);
+  expect(latest()?.agents).toEqual([{ agent: "main", text: false }]);
+  expect((await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text).toBeUndefined();
+  // A change after the round asks for a new round at once, from the listening state.
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "c.ts" }));
+  expect((await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text).toMatch(/c\.ts\.$/);
+  await receiveCursorHook(hook(root, { hook: "beforeSubmitPrompt", tramaPrompt: true }));
+  const final = (await receiveCursorHook(hook(root, { hook: "stop", status: "completed" }))).text ?? "";
+  expect(final).toContain("before you finish");
+  expect(final).toContain("kept note");
   expect(receiveAdvisorReview({ review: "unknown", clean: true })).toBe(false);
 });
 
@@ -81,7 +101,7 @@ test("a clean continuous review with changes meanwhile asks for another review a
   await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "b.ts" }));
   expect(receiveAdvisorReview({ review: reviewOf(first), clean: true })).toBe(true);
   const second = (await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text;
-  expect(second).toMatch(/for review \w{8} of these changes.*: b\.ts\.$/);
+  expect(second).toMatch(/for review \w{8} of these changes.*Changed files: b\.ts\.$/);
   expect(reviewOf(second)).not.toBe(reviewOf(first));
   expect(receiveAdvisorReview({ review: reviewOf(second), clean: true })).toBe(true);
   expect(latest()?.agents).toEqual([{ agent: "main", text: false }]);
@@ -115,7 +135,7 @@ test("a sub-agent is watched from the Task it takes, reviewed on its end at most
   receiveAdvisorReview({ review: reviewOf(continuous), clean: false, notes: "child notes" });
   const stop = (call: string) => receiveCursorHook(hook(root, { hook: "subagentStop", status: "completed", call, child: "child-1", modifiedFiles: [] }));
   const first = (await stop("call-1")).text ?? "";
-  expect(first).toMatch(/^Trama's Advisor: before you return, have the trama-advisor sub-agent do review \w{8} of your whole Task abc12345 and wait for its result; fix what it reports\./);
+  expect(first).toMatch(/^Trama's Advisor: before you return, have the trama-advisor sub-agent, in the foreground, do review \w{8} of your whole Task abc12345 and wait for its result; fix what it reports\. Ignore the result of any earlier background review\./);
   expect(first).toContain("child notes");
   // The sub-agent corrects and ends again: asked again, up to three times, then it returns.
   receiveAdvisorReview({ review: reviewOf(first), clean: false, notes: "fix it" });
@@ -153,7 +173,7 @@ test("the main agent's turn is continued with the final review, and a clean resu
   await receiveCursorHook(hook(root, { hook: "postToolUse" }));
   await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "b.ts" }));
   const reply = await receiveCursorHook(hook(root, { hook: "stop", status: "completed" }));
-  expect(reply.text).toMatch(/^Trama's Advisor: before you finish, have the trama-advisor sub-agent do review \w{8} of the whole run and wait for its result; fix what it reports\.\nFiles not yet reviewed: b\.ts\.$/);
+  expect(reply.text).toMatch(/^Trama's Advisor: before you finish, have the trama-advisor sub-agent, in the foreground, do review \w{8} of the whole run and wait for its result; fix what it reports\. Ignore the result of any earlier background review\.\nFiles not yet reviewed: b\.ts\.$/);
   expect(events.map((e) => e.event)).toContain("TURN_FINISHING");
   expect(events.map((e) => e.event)).not.toContain("AGENT_STOPPED");
   expect(receiveAdvisorReview({ review: reviewOf(reply.text), clean: true })).toBe(true);
@@ -215,6 +235,92 @@ test("a Run without the Advisor Scanner is never watched", async () => {
   expect(latest()).toEqual({ root, conversations: [{ conversation: "main", job: "plain", advisor: false }], subagents: [], agents: [] });
   await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "a.ts" }));
   expect((await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text).toBeUndefined();
+});
+
+test("a round names the agent's transcript and the byte position of its conversation since the last round, measured by size and never read", async () => {
+  const root = run();
+  const dir = join(root, "agent-transcripts", "main");
+  mkdirSync(dir, { recursive: true });
+  const transcript = join(dir, "main.jsonl");
+  writeFileSync(transcript, "x".repeat(100));
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "a.ts", transcript }));
+  const first = (await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text ?? "";
+  expect(first).toEndWith(`Changed files: a.ts. Your conversation since the last review: ${transcript} from byte 0.`);
+  // The position is the size when the previous round was asked for; the next hooks need no path again.
+  appendFileSync(transcript, "y".repeat(50));
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "b.ts" }));
+  expect(receiveAdvisorReview({ review: reviewOf(first), clean: true })).toBe(true);
+  const second = (await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text ?? "";
+  expect(second).toEndWith(`Changed files: b.ts. Your conversation since the last review: ${transcript} from byte 100.`);
+  appendFileSync(transcript, "z".repeat(25));
+  expect(receiveAdvisorReview({ review: reviewOf(second), clean: true })).toBe(true);
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "c.ts", transcript }));
+  expect((await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text).toEndWith(`from byte 150.`);
+  // The state file holds identities and flags only.
+  expect(JSON.stringify(latest())).not.toContain("agent-transcripts");
+});
+
+test("a round without a transcript, or with one that is missing, reviews the files only", async () => {
+  const root = run();
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "a.ts" }));
+  const none = (await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text ?? "";
+  expect(none).toEndWith("Changed files: a.ts.");
+  expect(receiveAdvisorReview({ review: reviewOf(none), clean: true })).toBe(true);
+  const missing = join(root, "nowhere", "main.jsonl");
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "b.ts", transcript: missing }));
+  const second = (await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text ?? "";
+  expect(second).toEndWith("Changed files: b.ts.");
+  expect(second).not.toContain("conversation");
+  expect(receiveAdvisorReview({ review: reviewOf(second), clean: true })).toBe(true);
+  // Once the file exists the first position is still 0: nothing was measured before.
+  mkdirSync(join(root, "nowhere"), { recursive: true });
+  writeFileSync(missing, "abc");
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "c.ts" }));
+  expect((await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text).toEndWith(`Your conversation since the last review: ${missing} from byte 0.`);
+});
+
+test("a sub-agent's transcript is derived from the folder of the main conversation's transcript", async () => {
+  const root = run();
+  const dir = join(root, "agent-transcripts", "main");
+  mkdirSync(join(dir, "subagents"), { recursive: true });
+  const transcript = join(dir, "main.jsonl");
+  const child = join(dir, "subagents", "child-1.jsonl");
+  writeFileSync(transcript, "main");
+  writeFileSync(child, "0123456789");
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "a.ts", transcript }));
+  await receiveCursorHook(hook(root, { hook: "subagentStart", parent: "main", call: "call-1", subagentType: "generalPurpose" }));
+  await receiveCursorHook(hook(root, { hook: "afterShellExecution", tramaWork: true, takenTask: "abc12345" }, "child-1"));
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "child.ts" }, "child-1"));
+  const asked = (await receiveCursorHook(hook(root, { hook: "postToolUse" }, "child-1"))).text ?? "";
+  expect(asked).toEndWith(`Changed files: child.ts. Your conversation since the last review: ${child} from byte 0.`);
+  // Its own position follows its own file, apart from the main agent's.
+  appendFileSync(child, "abcde");
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "child2.ts" }, "child-1"));
+  expect(receiveAdvisorReview({ review: reviewOf(asked), clean: true })).toBe(true);
+  expect((await receiveCursorHook(hook(root, { hook: "postToolUse" }, "child-1"))).text).toEndWith(`from byte 10.`);
+});
+
+test("a round still going when the Task review or the final review is asked no longer counts: its result is ignored and its notes are not kept", async () => {
+  const root = run();
+  await receiveCursorHook(hook(root, { hook: "subagentStart", parent: "main", call: "call-1", subagentType: "generalPurpose" }));
+  await receiveCursorHook(hook(root, { hook: "afterShellExecution", tramaWork: true, takenTask: "abc12345" }, "child-1"));
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "child.ts" }, "child-1"));
+  const childRound = (await receiveCursorHook(hook(root, { hook: "postToolUse" }, "child-1"))).text;
+  const taskReview = (await receiveCursorHook(hook(root, { hook: "subagentStop", status: "completed", call: "call-1", child: "child-1", modifiedFiles: [] }))).text ?? "";
+  expect(taskReview).toContain("in the foreground");
+  expect(taskReview).not.toContain("late child note");
+  expect(receiveAdvisorReview({ review: reviewOf(childRound), clean: false, notes: "late child note" })).toBe(false);
+  expect(receiveAdvisorReview({ review: reviewOf(taskReview), clean: true })).toBe(true);
+
+  await receiveCursorHook(hook(root, { hook: "beforeSubmitPrompt", tramaPrompt: true }));
+  await receiveCursorHook(hook(root, { hook: "afterFileEdit", file: "a.ts" }));
+  const round = (await receiveCursorHook(hook(root, { hook: "postToolUse" }))).text;
+  const final = (await receiveCursorHook(hook(root, { hook: "stop", status: "completed" }))).text ?? "";
+  expect(final).toContain("in the foreground");
+  expect(receiveAdvisorReview({ review: reviewOf(round), clean: false, notes: "late main note" })).toBe(false);
+  expect(receiveAdvisorReview({ review: reviewOf(final), clean: true })).toBe(true);
+  // Nothing of the ignored rounds comes back in a later request.
+  expect(final).not.toContain("late main note");
 });
 
 test("teardown", () => {

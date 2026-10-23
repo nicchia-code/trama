@@ -77,7 +77,7 @@ test("a Run all group cut by Proposal names its Proposals and the filter, and it
   expect(terminalName({ kind: "implement-all", group: { model: "  " } }, short)).toBe("All tasks");
 });
 test("the Drift blocker's sentence is added on the same line only when on, and only the instructions that may file Drifts take it", () => {
-  const sentence = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+  const sentence = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
   expect(mayFileDrifts({ kind: "scan" })).toBe(true);
   expect(mayFileDrifts({ kind: "scan", feature: "checkout" })).toBe(true);
   expect(mayFileDrifts({ kind: "implement", task: "abc" })).toBe(true);

@@ -26,7 +26,7 @@ export const STEP_KEYS: Readonly<Partial<Record<WizardStep, readonly string[]>>>
   Agent: [AGENT_KEY, "trama.ompPath", "trama.terminalLocation", IGNORE_INSTRUCTION_FILES_KEY],
   Models: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"],
   Project: ["trama.skillsDir"],
-  Advanced: ["trama.theme", "trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution", "trama.experimentalAsyncDriftResolver", "trama.experimentalContextSharing"],
+  Advanced: ["trama.theme", "trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing"],
 };
 
 export const STEP_SENTENCES: Readonly<Record<WizardStep, string>> = {
@@ -35,7 +35,7 @@ export const STEP_SENTENCES: Readonly<Record<WizardStep, string>> = {
   Models: "Choose the model for each kind of work. Analysis works best with your most capable model, Execution with a mid-range one, Scan with a fast, light one.",
   Project: "Choose where Trama installs the agent skills.",
   Folders: "Uncheck the folders the agent should not import.",
-  Advanced: "Theme and experimental features. You can skip this step.",
+  Advanced: "Theme and optional features. You can skip this step.",
   Summary: "Check your choices, then confirm.",
 };
 

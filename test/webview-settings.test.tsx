@@ -41,7 +41,7 @@ function setup(values: Record<string, SettingsValues> = {}, models: ModelSuggest
 
 test("the settings are in five groups, Appearance first, each with its title", () => {
   setup();
-  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Appearance", "Agent", "Models", "Project", "Experimental"]);
+  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Appearance", "Agent", "Models", "Project", "Features"]);
   expect(screen.getByRole("combobox", { name: "Theme" })).not.toBeNull();
   expect(screen.getByRole("checkbox", { name: "Auto Exit" })).not.toBeNull();
 });

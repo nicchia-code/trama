@@ -16,7 +16,7 @@ export const TIMING_JOBS_KEPT = 20;
 /** Jobs `trama timing list` shows when no `last` is given. */
 export const TIMINGS_DEFAULT_LAST = 5;
 
-/** A choice of the experimental parallel execution: Tasks started together, one waiting for the others, or a sub-agent stopped by a clash. */
+/** A choice of the parallel execution: Tasks started together, one waiting for the others, or a sub-agent stopped by a clash. */
 export const PARALLEL_CHOICE_KINDS = ["release", "order", "conflict"] as const;
 export type ParallelChoiceKind = (typeof PARALLEL_CHOICE_KINDS)[number];
 
@@ -150,7 +150,7 @@ export interface JobTiming {
   comparisons: ComparisonTiming[];
   tasks: TaskTiming[];
   queue: QueueTiming;
-  /** The choices of the experimental parallel execution recorded in the job, in time order. */
+  /** The choices of the parallel execution recorded in the job, in time order. */
   parallelChoices: ParallelChoice[];
 }
 

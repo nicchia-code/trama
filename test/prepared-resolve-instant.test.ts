@@ -17,7 +17,7 @@ mock.module("vscode", () => ({
   workspace: {
     workspaceFolders: [],
     getWorkspaceFolder: () => undefined,
-    getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback, inspect: (key: string) => (key === "experimentalAsyncDriftResolver" && asyncResolver ? { globalValue: true } : undefined), update: async () => undefined }),
+    getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback, inspect: (key: string) => (key === "asyncDriftResolver" && asyncResolver ? { globalValue: true } : undefined), update: async () => undefined }),
   },
   extensions: { getExtension: () => undefined },
   ConfigurationTarget: { Global: 1, Workspace: 2 },
@@ -201,7 +201,7 @@ test("while a prepared job is open, Run, Run all and Resolve on other Drifts are
   const preparedJob = startJob("prepared", dir, { held: true }) as string;
   const work = driftWork(dir);
   expect(work).toEqual({ resolving: true, running: false });
-  expect(runWindowBlocker(work, false)).toBe("Drifts are being resolved");
+  expect(runWindowBlocker(work)).toBe("Drifts are being resolved");
   expect(resolveDriftBlocker(p, work, false)).toBe("Drifts are being resolved");
   endHeldJob(dir, preparedJob);
   expect(driftWork(dir).resolving).toBe(false);

@@ -247,17 +247,14 @@ describe("resolveDriftBlocker", () => {
 });
 
 describe("runWindowBlocker", () => {
-  test("disables Runs while Drifts are being resolved, and during a run unless submitting while running is enabled", () => {
+  test("disables Runs while Drifts are being resolved, and always during a run", () => {
     const free = { resolving: false, running: false };
-    expect(runWindowBlocker(free, false)).toBeNull();
-    expect(runWindowBlocker({ resolving: false, running: true }, false)).toBe("A run is in progress");
-    expect(runWindowBlocker({ resolving: false, running: true }, true)).toBeNull();
-    expect(runWindowBlocker({ resolving: true, running: false }, false)).toBe("Drifts are being resolved");
-    expect(runWindowBlocker({ resolving: true, running: false }, true)).toBe("Drifts are being resolved");
+    expect(runWindowBlocker(free)).toBeNull();
+    expect(runWindowBlocker({ resolving: false, running: true })).toBe("A run is in progress");
+    expect(runWindowBlocker({ resolving: true, running: false })).toBe("Drifts are being resolved");
   });
   test("gives every reason that holds, the resolution first, when a resolution and a run are both going", () => {
-    expect(runWindowBlocker({ resolving: true, running: true }, false)).toBe("Drifts are being resolved. A run is in progress");
-    expect(runWindowBlocker({ resolving: true, running: true }, true)).toBe("Drifts are being resolved");
+    expect(runWindowBlocker({ resolving: true, running: true })).toBe("Drifts are being resolved. A run is in progress");
   });
 });
 

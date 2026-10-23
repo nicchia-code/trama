@@ -302,7 +302,7 @@ export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "erro
 export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires" | "kind" | "nonBlocking">, numbers: CardNumbers = noNumbers): Badge[] {
   const badges: Badge[] = [];
   if (p.kind === "import") badges.push({ label: "import", tone: "info", tooltip: "Describes existing code; approving it starts no Scan" });
-  if (p.nonBlocking) badges.push({ label: "blocks nothing", tone: "info", tooltip: "Filed by the experimental Drift blocker: these Drifts block no Task. Approve or reject it like any resolution." });
+  if (p.nonBlocking) badges.push({ label: "blocks nothing", tone: "info", tooltip: "Filed by the Drift Blocker: these Drifts block no Task. Approve or reject it like any resolution." });
   for (const r of p.requires)
     badges.push({ label: `requires ${namerOf(numbers)("proposal", r.id)}`, tone: appliesUnder(r.status) ? "info" : "error", tooltip: requiredReasons([r], (id) => namerOf(numbers)("proposal", id)).join(""), card: { kind: "proposal", id: r.id } });
   if (p.stale.length > 0) badges.push({ label: "stale", tone: "warning", tooltip: `The Model changed since the Proposal touched:\n${listed(p.stale)}` });

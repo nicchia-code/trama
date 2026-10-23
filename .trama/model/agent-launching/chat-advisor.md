@@ -4,9 +4,9 @@ L'Advisor Scanner nella chat di Cursor (vedi Agent launching). Cursor non ha un 
 
 Questa Machine descrive un agente guardato dall'advisor, dal suo inizio alla sua fine: l'agente principale di una conversazione a cui Trama ha mandato un Run con l'Advisor Scanner attivo, oppure un sotto-agente di quella conversazione che realizza un Task, che ha la sua revisione come con omp ogni sotto-agente ha il suo advisor. L'agente principale nasce in Al lavoro quando la conversazione del Run è legata al suo lavoro; un sotto-agente quando porta un Task in In progress. Non esiste in design, scan, import o Resolve Drifts, né con omp, dove lavora l'advisor di omp.
 
-Le revisioni sono di tre tipi. La revisione continua guarda le modifiche mentre l'agente lavora, senza fermarlo: `trama-advisor` lavora in background e le sue note arrivano all'agente con il risultato di un suo strumento successivo. Ce n'è al più una alla volta per agente, e la successiva copre tutte le modifiche arrivate nel frattempo. La revisione del Task, quando il sotto-agente di un Task ha finito, e la revisione finale, quando l'agente principale sta per concludere la corsa, rivedono invece tutto il lavoro e l'agente ne aspetta l'esito; ognuna si ripete finché è pulita, al più tre volte. Con una versione di Cursor che non consegna all'agente il testo aggiunto al risultato di uno strumento, la revisione continua non parla all'agente e nessuno lo avvisa: le note ancora in attesa e le modifiche non ancora riviste entrano nella revisione del Task o in quella finale.
+Le revisioni sono di tre tipi. La revisione continua guarda le modifiche mentre l'agente lavora, senza fermarlo, come l'advisor di omp: ogni round è un `trama-advisor` che l'agente avvia in background quando Trama glielo chiede, che legge i file cambiati e la parte della conversazione dell'agente scritta dall'ultimo round, e il cui esito, con le sue note, Cursor consegna da solo all'agente quando il round finisce. L'agente non aspetta mai un round e non ne controlla l'avanzamento. Ce n'è al più uno alla volta per agente, e il successivo copre tutte le modifiche arrivate nel frattempo, così una corsa non accumula sotto-agenti. La revisione del Task, quando il sotto-agente di un Task ha finito, e la revisione finale, quando l'agente principale sta per concludere la corsa, rivedono invece tutto il lavoro, controllano che le note dei round siano state corrette, e l'agente ne aspetta l'esito; ognuna si ripete finché è pulita, al più tre volte. Sono le sole attese, come con omp. Con una versione di Cursor che non consegna all'agente il testo aggiunto al risultato di uno strumento, i round non partono e nessuno lo avvisa: le modifiche non ancora riviste entrano nella revisione del Task o in quella finale.
 
-Quando `trama-advisor` trova che il codice scritto dal Task si allontana da ciò che chiedono il Task, il Modello o i Requisiti, lo dice all'agente con le note, e l'agente lo corregge prima di portare il Task in Done. Quando la differenza sta nel codice che c'era già, fuori dal lavoro del Task, la archivia lui come Drift, come l'advisor di omp (vedi il Drift). Le note aspettano soltanto nella memoria dell'editor: non sono informazione del progetto e si perdono se l'editor riparte.
+Quando `trama-advisor` trova che il codice scritto dal Task si allontana da ciò che chiedono il Task, il Modello o i Requisiti, lo dice all'agente con le note, e l'agente lo corregge prima di portare il Task in Done. Quando la differenza sta nel codice che c'era già, fuori dal lavoro del Task, la archivia lui come Drift, come l'advisor di omp (vedi il Drift). Trama conserva le note dei round soltanto nella memoria dell'editor, per riportarle nella revisione del Task o finale: non sono informazione del progetto e si perdono se l'editor riparte.
 
 Per ora l'avviso del Run finito senza la revisione finale non si mostra: Trama lo prepara come sempre, ma la Board non lo disegna (vedi il Panel).
 
@@ -14,8 +14,8 @@ Per ora l'avviso del Run finito senza la revisione finale non si mostra: Trama l
 
 ### Al lavoro (initial)
 L'agente realizza i Task; nessuna revisione che l'agente aspetta è in corso.
-- `editor-chat.TURN_FINISHING` → Revisione finale: solo per l'agente principale. Trama continua il turno chiedendo all'agente di far rivedere a `trama-advisor` la corsa intera e di aspettarne l'esito; la revisione copre anche le note in attesa e le modifiche non ancora riviste, e una revisione continua in corso non conta più. Il turno non finisce, quindi Task presi, annunci e lavoro restano.
-- `editor-chat.SUBAGENT_STOPPED` → Revisione del Task: solo per un sotto-agente che realizza un Task. Trama gli risponde chiedendogli di far rivedere il suo Task a `trama-advisor` e di aspettarne l'esito prima di restituire il risultato; la revisione copre anche le sue note in attesa e le modifiche non ancora riviste.
+- `editor-chat.TURN_FINISHING` → Revisione finale: solo per l'agente principale. Trama continua il turno chiedendo all'agente di far rivedere a `trama-advisor` la corsa intera e di aspettarne l'esito; la revisione copre anche le note dei round e le modifiche non ancora riviste, e un round in corso non conta più: se il suo esito arriva dopo, l'agente lo ignora e Trama ne dimentica le note. Il turno non finisce, quindi Task presi, annunci e lavoro restano.
+- `editor-chat.SUBAGENT_STOPPED` → Revisione del Task: solo per un sotto-agente che realizza un Task. Trama gli risponde chiedendogli di far rivedere il suo Task a `trama-advisor` e di aspettarne l'esito prima di restituire il risultato; la revisione copre anche le note dei suoi round e le modifiche non ancora riviste, e un suo round in corso non conta più: se il suo esito arriva dopo, il sotto-agente lo ignora e Trama ne dimentica le note.
 - `editor-chat.AGENT_STOPPED` → Finita senza revisione finale: solo per l'agente principale; il turno è finito senza che Trama potesse continuarlo, per esempio perché l'hook non ha raggiunto l'editor in tempo. Il Run finisce come ogni Run nella chat, e Trama prepara l'avviso che il Run è finito senza la revisione finale dell'Advisor, con il motivo.
 - `editor-chat.AGENT_STOPPED` → Finita: per un sotto-agente, la conversazione che lo ha lanciato ha concluso il turno.
 - `editor-chat.AGENT_INTERRUPTED` → Finita senza revisione finale: solo per l'agente principale; il Run è stato interrotto o è andato in errore prima della revisione finale. Trama prepara l'avviso come sopra.
@@ -24,21 +24,14 @@ L'agente realizza i Task; nessuna revisione che l'agente aspetta è in corso.
 - `editor-chat.CONVERSATION_CLOSED` → Finita: il developer ha chiuso la conversazione di sua scelta, quindi nessun avviso.
 
 #### In ascolto (initial)
-Nessuna revisione continua in corso e nessuna nota in attesa.
-- `editor-chat.FILES_CHANGED` → In revisione: Trama chiede all'agente, con il risultato dello strumento che ha cambiato i file, di avviare `trama-advisor` in background sui file cambiati dall'ultima revisione, e l'agente continua senza aspettarlo.
+Nessun round di revisione continua in corso.
+- `editor-chat.FILES_CHANGED` → In revisione: Trama chiede all'agente, con il risultato dello strumento che ha cambiato i file, di avviare `trama-advisor` in background sui file cambiati dall'ultimo round e sulla parte della sua conversazione scritta da allora; l'agente continua senza aspettarlo e senza controllarlo.
 
 #### In revisione
-Un `trama-advisor` in background rivede le modifiche, mentre l'agente continua a lavorare.
-- `editor-chat.FILES_CHANGED` → In revisione: non parte una seconda revisione; i file cambiati si aggiungono alla prossima.
-- `agent.ADVISOR_REVIEWED` → In ascolto: l'esito è pulito e nessun file è cambiato nel frattempo.
-- `agent.ADVISOR_REVIEWED` → In revisione: l'esito è pulito ma dei file sono cambiati nel frattempo; Trama chiede, con il risultato del prossimo strumento dell'agente, una nuova revisione in background che li copre.
-- `agent.ADVISOR_REVIEWED` → Note in attesa: l'esito ha delle note per l'agente.
-
-#### Note in attesa
-Le note dell'ultima revisione continua aspettano, nella memoria dell'editor, il prossimo strumento dell'agente.
-- `editor-chat.TOOL_FINISHED` → In ascolto: Trama aggiunge le note al risultato dello strumento; l'agente le legge e corregge il codice del Task senza fermarsi. Nessun file è cambiato dopo la revisione.
-- `editor-chat.TOOL_FINISHED` → In revisione: come sopra, e insieme alle note Trama chiede una nuova revisione in background dei file cambiati dopo la revisione.
-- `editor-chat.FILES_CHANGED` → Note in attesa: i file cambiati si aggiungono alla prossima revisione.
+Un round di `trama-advisor` in background rivede le modifiche, mentre l'agente continua a lavorare.
+- `editor-chat.FILES_CHANGED` → In revisione: non parte un secondo round; i file cambiati si aggiungono al prossimo.
+- `agent.ADVISOR_REVIEWED` → In ascolto: nessun file è cambiato nel frattempo. Se l'esito ha delle note, Cursor le consegna all'agente come risultato del round, e l'agente corregge il codice del Task senza fermarsi; Trama le conserva per la revisione del Task o finale.
+- `agent.ADVISOR_REVIEWED` → In revisione: dei file sono cambiati nel frattempo; le note, se ci sono, arrivano all'agente come sopra, e Trama chiede, con il risultato del prossimo strumento dell'agente, un nuovo round in background che copre quei file e la conversazione scritta dall'ultimo round.
 
 ### Revisione del Task
 Il sotto-agente aspetta l'esito di `trama-advisor` sul suo Task intero.
@@ -77,7 +70,7 @@ L'agente principale corregge secondo le note della revisione finale.
 - `editor-chat.CONVERSATION_CLOSED` → Finita: nessun avviso.
 
 ### Finita (final)
-L'advisor non guarda più questo agente. Le note ancora in attesa sono dimenticate.
+L'advisor non guarda più questo agente. Le note conservate dei suoi round sono dimenticate.
 
 ### Finita senza revisione finale (final)
 Il Run è finito senza un esito della revisione finale; Trama ne ha preparato l'avviso.

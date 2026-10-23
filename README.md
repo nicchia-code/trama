@@ -23,6 +23,7 @@ Your rules (tech stack, design, data, business rules) live next to the map as **
 - VS Code 1.95 or later, or Cursor.
 - Linux (x64), macOS (Apple silicon) or Windows (x64, preview).
 - An agent: Cursor's chat (in Cursor only), or omp installed and on your `PATH` (in any of the editors above).
+- With the Advisor Scanner on in Cursor's chat, Cursor 3.27.6 or later: its review rounds run in the background while the agent keeps working, and Cursor delivers each result and its notes to the agent. Trama reports the notes again in the review of the Task or the final review. Earlier versions are not recognised.
 
 The `trama` command line comes inside the extension: there's nothing else to install.
 

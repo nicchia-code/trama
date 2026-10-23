@@ -36,16 +36,16 @@ export const configuredSkillsDir = (): string => settings().get<string>("skillsD
 
 /** The language the agent writes in (`trama.language`), as typed; empty when none is chosen. Read at every launch. */
 export const configuredLanguage = (): string => settings().get<string>("language", "").trim();
-/** Whether `trama.experimentalDriftBlocker` is on, from user settings only: a workspace value does not turn it on. Read at every launch. */
-export const configuredDriftBlocker = (): boolean => settings().inspect<unknown>("experimentalDriftBlocker")?.globalValue === true;
-/** Whether the Advisor Scanner is on (`trama.experimentalAdvisorScanner`), from user settings only, with every agent (omp and Cursor's chat). Read at every launch. */
-export const configuredAdvisorScanner = (): boolean => settings().inspect<unknown>("experimentalAdvisorScanner")?.globalValue === true;
-/** Whether `trama.experimentalParallelExecution` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a run over several Tasks is about to start. */
-export const configuredParallelExecution = (): boolean => settings().inspect<unknown>("experimentalParallelExecution")?.globalValue === true;
-/** Whether `trama.experimentalAsyncDriftResolver` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a job is about to start. */
-export const configuredAsyncDriftResolver = (): boolean => settings().inspect<unknown>("experimentalAsyncDriftResolver")?.globalValue === true;
-/** Whether `trama.experimentalContextSharing` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
-export const configuredContextSharing = (): boolean => settings().inspect<unknown>("experimentalContextSharing")?.globalValue === true;
+/** Whether `trama.driftBlocker` is on, from user settings only: a workspace value does not turn it on. Read at every launch. */
+export const configuredDriftBlocker = (): boolean => settings().inspect<unknown>("driftBlocker")?.globalValue === true;
+/** Whether the Advisor Scanner is on (`trama.advisorScanner`), from user settings only, with every agent (omp and Cursor's chat). Read at every launch. */
+export const configuredAdvisorScanner = (): boolean => settings().inspect<unknown>("advisorScanner")?.globalValue === true;
+/** Whether `trama.parallelExecution` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a run over several Tasks is about to start. */
+export const configuredParallelExecution = (): boolean => settings().inspect<unknown>("parallelExecution")?.globalValue === true;
+/** Whether `trama.asyncDriftResolver` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a job is about to start. */
+export const configuredAsyncDriftResolver = (): boolean => settings().inspect<unknown>("asyncDriftResolver")?.globalValue === true;
+/** Whether `trama.subagentsContextSharing` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
+export const configuredSubagentsContextSharing = (): boolean => settings().inspect<unknown>("subagentsContextSharing")?.globalValue === true;
 /** Whether `trama.ignoreInstructionFiles` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
 export const configuredIgnoreInstructionFiles = (): boolean => settings().inspect<unknown>("ignoreInstructionFiles")?.globalValue === true;
 /** The configured concurrent sub-agent limit, from user settings only; invalid values use the default. */
@@ -412,7 +412,7 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
 /**
  * The instruction with its limit, sub-agent, parallel execution, advisor, Drift blocker, Async Drift Resolver, context sharing, ask and language sentences. The
  * parallel execution sentence goes right after the sub-agent sentence (or the limit one, when there is none), only to a
- * run over several Tasks and only when `trama.experimentalParallelExecution` is on, read now. The ask sentence stays on the
+ * run over several Tasks and only when `trama.parallelExecution` is on, read now. The ask sentence stays on the
  * instruction's line unless `askOwnLine` is set, which Cursor's chat needs: it gets the ask sentence on a line of its own,
  * after the PATH line.
  */
@@ -424,7 +424,7 @@ function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, seve
   const withAdvisor = advisor !== undefined ? `${withParallel} ${advisor}` : withParallel;
   const withBlocker = withDriftBlocker(withAdvisor, filesDrifts && configuredDriftBlocker());
   const withResolver = withAsyncDriftResolver(withBlocker, filesDrifts && configuredAsyncDriftResolver());
-  const withSharing = withContextSharing(withResolver, configuredContextSharing());
+  const withSharing = withContextSharing(withResolver, configuredSubagentsContextSharing());
   return withLanguage(askOwnLine ? withSharing : `${withSharing} ${ASK_DEVELOPER_SENTENCE}`, configuredLanguage());
 }
 
@@ -513,9 +513,9 @@ export function endHeldJob(root: string, id: string, abnormal?: string): void {
 
 export interface LaunchJobOptions {
   id?: string;
-  /** Whether the instruction lets the agent file Drifts: the experimental Drift blocker's sentence then goes to it. */
+  /** Whether the instruction lets the agent file Drifts: the Drift blocker's sentence then goes to it. */
   filesDrifts?: boolean;
-  /** Whether the instruction is for a run over several Tasks (Run all, a Run of its sequence by model): the experimental parallel execution's sentence then goes to it. */
+  /** Whether the instruction is for a run over several Tasks (Run all, a Run of its sequence by model): the parallel execution's sentence then goes to it. */
   severalTasks?: boolean;
   /** The model the instruction runs on when a Proposal's model applies (`proposalRunModel`); absent, the model of the role in Settings. */
   model?: RunModel;

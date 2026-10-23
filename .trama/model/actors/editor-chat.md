@@ -17,7 +17,7 @@ Un prompt è stato inviato a una conversazione di Trama nella chat: il primo, ch
 L'agente di una conversazione di Trama, o un suo sotto-agente, ha cambiato dei file del progetto: con una modifica diretta di un file, oppure con un comando di shell dopo il quale git mostra file cambiati che prima non lo erano (per esempio `git checkout`, `git apply` o `git stash`). Trama lo guarda solo nelle conversazioni di un Run con l'Advisor della chat.
 
 ### TOOL_FINISHED
-Uno strumento dell'agente di una conversazione di Trama, o di un suo sotto-agente, ha finito e quell'agente sta per leggerne il risultato: è il momento in cui Trama può aggiungere un testo per lui senza fermarlo. Trama lo usa solo nelle conversazioni di un Run con l'Advisor della chat; con una versione di Cursor che non consegna quel testo all'agente, il testo non arriva e Trama non lo sa.
+Uno strumento dell'agente di una conversazione di Trama, o di un suo sotto-agente, ha finito e quell'agente sta per leggerne il risultato: è il momento in cui Trama può aggiungere un testo per lui senza fermarlo. Trama lo usa solo nelle conversazioni di un Run con l'Advisor della chat, per chiedere all'agente un round di revisione continua; le note dei round non passano da qui, perché arrivano all'agente come esito del round. Con una versione di Cursor che non consegna quel testo all'agente, il testo non arriva e Trama non lo sa.
 
 ### SUBAGENT_STOPPED
 Un sotto-agente dell'agente di una conversazione di Trama ha concluso il suo lavoro normalmente, prima di restituire il risultato; la conversazione continua. Trama può rispondergli con un messaggio che lo fa continuare.

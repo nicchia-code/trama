@@ -121,15 +121,15 @@ export function withLanguage(prompt: string, language: string): string {
   return typed === "" ? prompt : `${prompt} Write everything you generate in ${typed}, except code, which always stays in English.`;
 }
 
-/** The sentence the experimental Drift blocker adds to an instruction whose agent may file Drifts (`trama.experimentalDriftBlocker`). */
-export const DRIFT_BLOCKER_SENTENCE = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+/** The sentence the Drift blocker adds to an instruction whose agent may file Drifts (`trama.driftBlocker`). */
+export const DRIFT_BLOCKER_SENTENCE = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
 
-/** The sentence the Async Drift Resolver adds to the instructions that may file Drifts (`trama.experimentalAsyncDriftResolver`). */
+/** The sentence the Async Drift Resolver adds to the instructions that may file Drifts (`trama.asyncDriftResolver`). */
 export const ASYNC_DRIFT_RESOLVER_SENTENCE = "The Async Drift Resolver is on: before finishing, prepare the resolution question of every Drift filed in this job, as your skill says.";
 
-/** The sentence Context Sharing adds to every instruction that carries the sub-agent limit (`trama.experimentalContextSharing`). */
+/** The sentence Context Sharing adds to every instruction that carries the sub-agent limit (`trama.subagentsContextSharing`). */
 export const CONTEXT_SHARING_SENTENCE =
-  'The experimental context sharing is on: pass each sub-agent what you have already read that concerns its part, as the "Experimental context sharing" section of your skill says.';
+  'The sub-agents context sharing is on: pass each sub-agent what you have already read that concerns its part, as the "Sub-agents context sharing" section of your skill says.';
 
 /** The sentence that follows the Resolve instruction when the developer gave feedback on how to resolve the Drift, followed by the feedback in quotes. */
 export const REWORK_FEEDBACK_SENTENCE = "The developer's feedback on how to resolve it:";
@@ -144,8 +144,8 @@ export function reworkPrompt(drift: string, feedback: string): string {
 /** The sentence that hands the resolution agent the developer's answer to a Drift's prepared question, followed by the answer as JSON and a full stop. */
 export const PREPARED_ANSWER_SENTENCE = "The developer already answered this Drift's prepared question; do not ask again. Answer:";
 
-/** The sentence the experimental parallel execution adds to the instruction of a run over several Tasks (`trama.experimentalParallelExecution`). */
-export const PARALLEL_EXECUTION_SENTENCE = 'The experimental parallel execution is on: follow the "Experimental parallel execution" section of the trama-implement skill.';
+/** The sentence the parallel execution adds to the instruction of a run over several Tasks (`trama.parallelExecution`). */
+export const PARALLEL_EXECUTION_SENTENCE = 'The parallel execution is on: follow the "Parallel execution" section of the trama-implement skill.';
 
 /** The sentence every instruction carries: the agent asks the developer only through `trama question new`, never with its own question tool. */
 export const ASK_DEVELOPER_SENTENCE = "Ask the developer only with `trama question new`, as the skill says, never with your own question tool; run it with no time limit and wait until it ends.";

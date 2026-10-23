@@ -54,7 +54,7 @@ Solo con Import from Code. L'albero delle cartelle della cartella scelta, con tu
 - `developer.PREVIOUS_SETUP_STEP` → Project
 
 #### Advanced
-Il tema del pannello e le impostazioni sperimentali. Il passo si può saltare.
+Il tema del pannello e le funzioni facoltative del gruppo Features. Il passo si può saltare.
 - `developer.NEXT_SETUP_STEP` → Summary
 - `developer.SKIP_SETUP_STEP` → Summary: i valori del passo tornano a quelli attuali, anche quelli già cambiati nel passo.
 - `developer.PREVIOUS_SETUP_STEP` → Folders: il percorso è Import from Code.
@@ -67,7 +67,7 @@ Tutte le scelte del wizard, passo per passo: il percorso e la cartella, ogni imp
 - `developer.OPEN_SETUP_STEP` → Models: il developer sceglie una riga dei modelli.
 - `developer.OPEN_SETUP_STEP` → Project: il developer sceglie la riga della cartella delle skill.
 - `developer.OPEN_SETUP_STEP` → Folders: il developer sceglie la riga delle cartelle escluse, solo con Import from Code.
-- `developer.OPEN_SETUP_STEP` → Advanced: il developer sceglie una riga del tema o delle sperimentali.
+- `developer.OPEN_SETUP_STEP` → Advanced: il developer sceglie una riga del tema o delle funzioni facoltative.
 - `developer.PREVIOUS_SETUP_STEP` → Advanced
 - `developer.INITIALIZE_PROJECT` → Closed: in modo primo setup il developer conferma e tutto riesce. Le impostazioni che cambiano sono salvate nelle impostazioni utente, come dalla scheda Settings; poi Trama inizializza la cartella scelta, con la cartella delle skill scelta (vedi il Project); poi prosegue con il percorso: con Import from Code chiede all'agente di descrivere il codice lasciando fuori le cartelle escluse, con Start from Scratch apre la richiesta di setup. Il pannello mostra il progetto.
 - `developer.INITIALIZE_PROJECT` → Summary: in modo primo setup, il salvataggio di un'impostazione fallisce, il developer rifiuta di sovrascrivere skill personalizzate, oppure l'inizializzazione fallisce. Le impostazioni già salvate restano salvate e nulla parte. Il riepilogo mostra il motivo, salvo per un rifiuto, e la conferma si può ripetere senza rifare i passi.

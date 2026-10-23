@@ -65,7 +65,7 @@ const DECISIONS: readonly DriftDecisionKind[] = ["proposal", "dismissed", "fix-c
 interface ProposalData {
   status: ProposalStatus;
   kind: ProposalKind;
-  /** A resolution born from the experimental Drift blocker: its Drifts block no Task. Only a marker for the Board and the command line; it changes nothing else. */
+  /** A resolution born from the Drift blocker: its Drifts block no Task. Only a marker for the Board and the command line; it changes nothing else. */
   nonBlocking: boolean;
   /** A resolution born from the answer to a Drift's prepared question: it does not stop Resolve while it awaits a decision. Only valid with `kind: resolution`. */
   prepared: boolean;

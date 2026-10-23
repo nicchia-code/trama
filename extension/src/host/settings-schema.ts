@@ -54,8 +54,13 @@ export const SETTING_GROUPS: readonly { title: string; keys: readonly string[] }
   { title: "Agent", keys: ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"] },
   { title: "Models", keys: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"] },
   { title: "Project", keys: ["trama.skillsDir"] },
-  { title: "Experimental", keys: ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution", "trama.experimentalAsyncDriftResolver", "trama.experimentalContextSharing"] },
+  { title: "Features", keys: ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing"] },
 ];
+
+/** Titles that the key does not give: the Settings tab and the wizard show the same one. */
+const EXPLICIT_TITLES: Readonly<Record<string, string>> = {
+  "trama.subagentsContextSharing": "Sub-agents Context Sharing",
+};
 
 /** The agent setting: the agents are Cursor's chat and omp. */
 export const AGENT_KEY = "trama.agent";
@@ -74,6 +79,8 @@ export const MODEL_ROLE_KEYS: readonly string[] = ["trama.analysis", "trama.scan
 
 /** `trama.maxParallelAgents` → `Max Parallel Agents`; `trama.autoExit` → `Auto Exit`. */
 export function settingTitle(key: string): string {
+  const explicit = EXPLICIT_TITLES[key];
+  if (explicit !== undefined) return explicit;
   return key
     .replace(/^trama\./, "")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")

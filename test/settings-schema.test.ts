@@ -15,11 +15,10 @@ const fixture: ManifestPackage = {
       properties: {
         "trama.autoExit": { type: "boolean", default: true, scope: "application", markdownDescription: "Close the terminal." },
         "trama.language": { type: "string", default: "", markdownDescription: "Language." },
-        "trama.experimentalDriftBlocker": { type: "boolean", default: false, scope: "application", markdownDescription: "Experimental." },
-        "trama.experimentalAdvisorScanner": { type: "boolean", default: false, scope: "application", markdownDescription: "Advisor." },
-        "trama.experimentalParallelExecution": { type: "boolean", default: false, scope: "application", markdownDescription: "Parallel." },
+        "trama.driftBlocker": { type: "boolean", default: false, scope: "application", markdownDescription: "Drift blocker." },
+        "trama.advisorScanner": { type: "boolean", default: false, scope: "application", markdownDescription: "Advisor." },
+        "trama.parallelExecution": { type: "boolean", default: false, scope: "application", markdownDescription: "Parallel." },
         "trama.maxParallelAgents": { type: "integer", default: 20, minimum: 1, scope: "application", markdownDescription: "Agents at once." },
-        "trama.submitWhileRunning": { type: "boolean", default: false, markdownDescription: "Runs overlap." },
         "trama.skillsDir": { type: "string", default: ".agents/skills", markdownDescription: "Skills folder." },
       },
     },
@@ -53,74 +52,79 @@ test("the groups and their keys keep the order of the Settings tab", () => {
     ["Agent", ["trama.agent", "trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"]],
     ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Experimental", ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution", "trama.experimentalAsyncDriftResolver", "trama.experimentalContextSharing"]],
+    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["Agent", ["trama.autoExit", "trama.language"]],
     ["Models", ["trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Experimental", ["trama.submitWhileRunning", "trama.experimentalDriftBlocker", "trama.experimentalAdvisorScanner", "trama.experimentalParallelExecution"]],
+    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution"]],
   ]);
 });
 
-test("the Experimental Drift Blocker is a checkbox of the last group, off by default and application-scoped", () => {
-  const blocker = properties["trama.experimentalDriftBlocker"];
+test("no group, title or description of the settings says Experimental", () => {
+  expect(SETTING_GROUPS.some((group) => /experimental/i.test(group.title))).toBe(false);
+  for (const entry of Object.values(properties)) expect(entry.markdownDescription ?? "").not.toMatch(/experimental/i);
+});
+
+test("the Drift Blocker is a checkbox of the last group, off by default and application-scoped", () => {
+  const blocker = properties["trama.driftBlocker"];
   expect(blocker?.type).toBe("boolean");
   expect(blocker?.default).toBe(false);
   expect(blocker?.scope).toBe("application");
-  expect(settingTitle("trama.experimentalDriftBlocker")).toBe("Experimental Drift Blocker");
+  expect(blocker?.markdownDescription).toBe("On: a new Drift blocks only the Tasks it really affects; one that blocks none arrives as a resolution Proposal.");
+  expect(settingTitle("trama.driftBlocker")).toBe("Drift Blocker");
   const last = SETTING_GROUPS[SETTING_GROUPS.length - 1];
-  expect(last?.title).toBe("Experimental");
-  expect(last?.keys).toContain("trama.experimentalDriftBlocker");
-  expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalDriftBlocker")?.control).toBe("boolean");
+  expect(last?.title).toBe("Features");
+  expect(last?.keys[0]).toBe("trama.driftBlocker");
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.driftBlocker")?.control).toBe("boolean");
 });
 
-test("the Experimental Advisor Scanner is a checkbox of the last group, off by default and application-scoped", () => {
-  const scanner = properties["trama.experimentalAdvisorScanner"];
+test("the Advisor Scanner is a checkbox of the last group, off by default and application-scoped", () => {
+  const scanner = properties["trama.advisorScanner"];
   expect(scanner?.type).toBe("boolean");
   expect(scanner?.default).toBe(false);
   expect(scanner?.scope).toBe("application");
-  expect(settingTitle("trama.experimentalAdvisorScanner")).toBe("Experimental Advisor Scanner");
-  expect(SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys).toContain("trama.experimentalAdvisorScanner");
-  expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalAdvisorScanner")?.control).toBe("boolean");
+  expect(settingTitle("trama.advisorScanner")).toBe("Advisor Scanner");
+  expect(SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys).toContain("trama.advisorScanner");
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.advisorScanner")?.control).toBe("boolean");
 });
 
-test("the Experimental Parallel Execution is a checkbox right after the Advisor Scanner, off by default and application-scoped", () => {
-  const parallel = properties["trama.experimentalParallelExecution"];
+test("the Parallel Execution is a checkbox right after the Advisor Scanner, off by default and application-scoped", () => {
+  const parallel = properties["trama.parallelExecution"];
   expect(parallel?.type).toBe("boolean");
   expect(parallel?.default).toBe(false);
   expect(parallel?.scope).toBe("application");
-  expect(settingTitle("trama.experimentalParallelExecution")).toBe("Experimental Parallel Execution");
+  expect(settingTitle("trama.parallelExecution")).toBe("Parallel Execution");
   const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
-  expect(keys.indexOf("trama.experimentalParallelExecution")).toBe(keys.indexOf("trama.experimentalAdvisorScanner") + 1);
-  expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalParallelExecution")?.control).toBe("boolean");
+  expect(keys.indexOf("trama.parallelExecution")).toBe(keys.indexOf("trama.advisorScanner") + 1);
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.parallelExecution")?.control).toBe("boolean");
 });
 
-test("the Experimental Async Drift Resolver is a checkbox right after the Parallel Execution, off by default and application-scoped", () => {
-  const resolver = properties["trama.experimentalAsyncDriftResolver"];
+test("the Async Drift Resolver is a checkbox right after the Parallel Execution, off by default and application-scoped", () => {
+  const resolver = properties["trama.asyncDriftResolver"];
   expect(resolver?.type).toBe("boolean");
   expect(resolver?.default).toBe(false);
   expect(resolver?.scope).toBe("application");
-  expect(settingTitle("trama.experimentalAsyncDriftResolver")).toBe("Experimental Async Drift Resolver");
+  expect(settingTitle("trama.asyncDriftResolver")).toBe("Async Drift Resolver");
   const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
-  expect(keys.indexOf("trama.experimentalAsyncDriftResolver")).toBe(keys.indexOf("trama.experimentalParallelExecution") + 1);
-  expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalAsyncDriftResolver")?.control).toBe("boolean");
+  expect(keys.indexOf("trama.asyncDriftResolver")).toBe(keys.indexOf("trama.parallelExecution") + 1);
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.asyncDriftResolver")?.control).toBe("boolean");
 });
 
-test("the Experimental Context Sharing is a checkbox right after the Async Drift Resolver, off by default and application-scoped", () => {
-  const sharing = properties["trama.experimentalContextSharing"];
+test("the Sub-agents Context Sharing is a checkbox right after the Async Drift Resolver, with its explicit title", () => {
+  const sharing = properties["trama.subagentsContextSharing"];
   expect(sharing?.type).toBe("boolean");
   expect(sharing?.default).toBe(false);
   expect(sharing?.scope).toBe("application");
-  expect(settingTitle("trama.experimentalContextSharing")).toBe("Experimental Context Sharing");
+  expect(settingTitle("trama.subagentsContextSharing")).toBe("Sub-agents Context Sharing");
   const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
-  expect(keys.indexOf("trama.experimentalContextSharing")).toBe(keys.indexOf("trama.experimentalAsyncDriftResolver") + 1);
-  expect(settingsSchema(manifest).find((s) => s.key === "trama.experimentalContextSharing")?.control).toBe("boolean");
+  expect(keys.indexOf("trama.subagentsContextSharing")).toBe(keys.indexOf("trama.asyncDriftResolver") + 1);
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.subagentsContextSharing")?.control).toBe("boolean");
 });
 
 test("controls follow the manifest type; maxParallelAgents is a whole number of at least 1", () => {
   expect(setting("trama.autoExit").control).toBe("boolean");
-  expect(setting("trama.submitWhileRunning").control).toBe("boolean");
   expect(setting("trama.language").control).toBe("text");
   expect(setting("trama.maxParallelAgents")).toMatchObject({ control: "integer", minimum: 1, default: 20 });
 });

@@ -136,9 +136,9 @@ This section applies when the instruction says to rework the rejected Proposal `
 - Data fields and formulas go in `data` and `rules`, attached to the Machine or State they concern, never in the Model.
 - A new Area is a new folder `requirements/<area>/` with a kebab-case name, an `area.md` and at least one fragment, for example to split `ui` into `ui-web` and `ui-mobile`.
 
-## Experimental context sharing
+## Sub-agents context sharing
 
-This section applies only when the instruction says "The experimental context sharing is on: …". Without that sentence, skip it and work as written above.
+This section applies only when the instruction says "The sub-agents context sharing is on: …". Without that sentence, skip it and work as written above.
 
 With it, when you hand a part of the work to a sub-agent, in whatever way your agent starts sub-agents, you pass it what you have already read that concerns its part, so it does not look for it again and does not read it again.
 

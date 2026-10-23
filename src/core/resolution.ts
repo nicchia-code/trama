@@ -106,8 +106,7 @@ export function unifiableDrifts(p: Project, finishing: readonly string[] = []): 
 
 /**
  * Why Unify Drifts cannot be launched now: every reason that holds, in order (Drifts are being resolved, a run in progress,
- * the resolution Proposal awaiting a decision, fewer than two Drifts to unify). Empty when it works. `work` is what holds in this window;
- * a run counts even with `trama.submitWhileRunning` on.
+ * the resolution Proposal awaiting a decision, fewer than two Drifts to unify). Empty when it works. `work` is what holds in this window.
  */
 export function unifyDriftsBlockers(p: Project, work: WindowWork, finishing: readonly string[] = []): string[] {
   const awaiting = awaitingResolution(p);
@@ -182,11 +181,11 @@ export function writePreparedResolution(p: Project, driftId: string, answer: Pre
 /** What holds in this window: Drift resolution and a run may both be going. */
 export interface WindowWork { resolving: boolean; running: boolean }
 
-/** Why every Run is disabled now: every reason that holds, in order (Drifts are being resolved, then a run in progress unless `trama.submitWhileRunning` is `enabled`), or null. */
-export function runWindowBlocker(work: WindowWork, submitWhileRunning: boolean): string | null {
+/** Why every Run is disabled now: every reason that holds, in order (Drifts are being resolved, then a run in progress), or null. */
+export function runWindowBlocker(work: WindowWork): string | null {
   return joinReasons([
     work.resolving ? "Drifts are being resolved" : null,
-    work.running && !submitWhileRunning ? "A run is in progress" : null,
+    work.running ? "A run is in progress" : null,
   ]);
 }
 

@@ -26,6 +26,10 @@ When the instruction asks you to write in a language, everything you generate fo
 - **A language changes nothing already written.** When you edit a file written in another language, keep its existing text and write only the new or rewritten text in the chosen language; never translate the whole file.
 - **No first person in Trama's texts.** In what you write for Trama (questions, contexts and options of rounds, titles and bodies of Proposals, Tasks and Drifts, History entries), Trama is always "Trama" and you are "the agent": no "I", "me", "my", "we", "our", and in Italian no "io", "noi" or first-person verbs. Your replies in the conversation are not Trama's texts and do not change. Text already written is not rewritten.
 
+## Notes on the ghost
+
+While your work waits on the Board it has a ghost, and you tell the developer what you are doing with notes: `trama announcement edit --input -` with `{"note":"<one line>"}`, passed as `trama announcement edit --input - <<'JSON'`, the object and `JSON`. Without an ID the note goes to every ghost still waiting of your terminal or conversation (never to a comparison). Declare a note at the start of each stage of your work: reading the request, each round of questions, writing the Proposal, handing over. Write 3 to 6 notes for the whole job, never one per command. A note is one sentence of at most 120 characters (a longer one is cut) saying what you do and why, for the developer: no first person, no Trama command names and no short numbers of cards, in the language of the instruction when it asks for one (for example «Writes the first Proposal for the shop from the answers»). A note changes nothing else about the ghost and is never needed to deliver a card.
+
 ## Step 1: read the request
 
 The instruction names a file `.trama/requests/<id>.md`. Read the **whole** file before anything else. If it does not exist, tell the developer that the request is gone and stop, without opening any Proposal.

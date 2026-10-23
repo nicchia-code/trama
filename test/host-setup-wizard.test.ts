@@ -192,8 +192,8 @@ test("the developer who declines to overwrite customised skills gets no message,
 });
 
 test("a confirmation of the mode Settings only saves the keys and answers with the result", async () => {
-  await send(confirm({ mode: "settings", choice: undefined, root: undefined, values: [{ key: "trama.experimentalDriftBlocker", value: true }] }));
-  expect(userSettings.get("experimentalDriftBlocker")).toBe(true);
+  await send(confirm({ mode: "settings", choice: undefined, root: undefined, values: [{ key: "trama.driftBlocker", value: true }] }));
+  expect(userSettings.get("driftBlocker")).toBe(true);
   expect(existsSync(join(root, ".trama"))).toBe(false);
   expect(launched).toEqual([]);
   expect(results()).toEqual([{ type: "guidedSetupResult", ok: true, error: null }]);

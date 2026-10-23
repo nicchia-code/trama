@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { bindConversation } from "../../../src/core/announcements";
 import { LEFT_OUT } from "../../../src/core/compared";
 import { type ChangedFile, type ChatState, type CursorChatEvent, workingTreeSnapshot } from "../../../src/core/cursor-chat";
@@ -357,7 +357,7 @@ const MAX_REVIEW_REQUESTS = 3;
 const NOT_CHANGES = [...LEFT_OUT, ".cursor/agents"];
 const countsAsChange = (path: string): boolean => !NOT_CHANGES.some((dir) => path === dir || path.startsWith(`${dir}/`));
 
-type AdvisorPhase = "listening" | "reviewing" | "notes" | "task-review" | "task-fix" | "final-review" | "final-fix" | "finished" | "finished-no-final";
+type AdvisorPhase = "listening" | "reviewing" | "task-review" | "task-fix" | "final-review" | "final-fix" | "finished" | "finished-no-final";
 type RequestKind = "continuous" | "task" | "final";
 
 interface WatchedAgent {
@@ -382,8 +382,12 @@ interface WatchedAgent {
   snapshot: Map<string, string | undefined>;
   /** How many Task or final reviews were asked for. */
   asked: number;
-  /** A text waiting for the agent's next tool (a request for a continuous review). */
+  /** A text waiting for the agent's next tool (a request for a round of continuous review). */
   text?: string;
+  /** The main agent's transcript path, as Cursor gave it (never read, only measured). */
+  transcript?: string;
+  /** The size in bytes of the transcript when the previous round was asked for: where the next round's conversation starts. */
+  position: number;
   /** The turn was continued with a final review and the agent has not sent its next prompt yet. */
   continued: boolean;
 }
@@ -451,7 +455,7 @@ export function chatStateOf(root: string): ChatState {
     root,
     conversations,
     subagents: (subagentCalls.get(key) ?? []).map((c) => ({ call: c.call, conversation: c.conversation })),
-    agents: live.map((a) => ({ agent: a.id, text: a.phase === "notes" || a.text !== undefined })),
+    agents: live.map((a) => ({ agent: a.id, text: a.text !== undefined })),
   };
 }
 
@@ -481,8 +485,40 @@ function request(agent: WatchedAgent, kind: RequestKind): string {
   return id;
 }
 
-const continuousText = (review: string, files: string[]): string =>
-  `Trama's Advisor: start the trama-advisor sub-agent in the background for review ${review} of these changes, and keep working without waiting for it: ${files.join(", ")}.`;
+/** The transcript Cursor gave for a main agent's conversation, kept for its rounds; a sub-agent's is derived from it (`transcriptOf`). */
+function noteTranscript(agent: WatchedAgent, e: CursorChatEvent): void {
+  if (agent.kind === "main" && e.transcript !== undefined) agent.transcript = e.transcript;
+}
+
+/** The path of an agent's transcript: Cursor's for the main agent; for a sub-agent, `subagents/<its conversation>.jsonl` in the folder of the main conversation's transcript. Undefined when the main one is not known. */
+function transcriptOf(agent: WatchedAgent): string | undefined {
+  if (agent.kind === "main") return agent.transcript;
+  const main = watchedAgent(agent.root, agent.conversation)?.transcript;
+  return main === undefined ? undefined : join(dirname(main), "subagents", `${agent.id}.jsonl`);
+}
+
+/**
+ * The request of a round of continuous review: the files changed since the last round and, when the transcript exists,
+ * where the agent's conversation since then starts. The size of the file (metadata only, never its content) is the
+ * position of the next round. The files not yet reviewed are covered, so they are cleared.
+ */
+function roundText(agent: WatchedAgent): string {
+  const files = [...agent.unreviewed].sort();
+  agent.unreviewed.clear();
+  const review = request(agent, "continuous");
+  let conversation = "";
+  const path = transcriptOf(agent);
+  if (path !== undefined) {
+    try {
+      const stat = statSync(path);
+      if (stat.isFile()) {
+        conversation = ` Your conversation since the last review: ${path} from byte ${agent.position}.`;
+        agent.position = stat.size;
+      }
+    } catch { /* A missing or unreadable transcript leaves the round to the files. */ }
+  }
+  return `Trama's Advisor: start the trama-advisor sub-agent with run_in_background for review ${review} of these changes and keep working; do not wait for it or check on it, Cursor delivers its result to you. Changed files: ${files.join(", ")}.${conversation}`;
+}
 const notesText = (note: string): string =>
   `Trama's Advisor found that your Task's code drifts from the Model or the Requirements; fix it before you move the Task to Done: ${note}`;
 
@@ -500,7 +536,7 @@ function taskReviewText(agent: WatchedAgent): string {
   agent.phase = "task-review";
   agent.asked++;
   const review = request(agent, "task");
-  return `Trama's Advisor: before you return, have the trama-advisor sub-agent do review ${review} of your whole Task ${agent.task ?? ""} and wait for its result; fix what it reports.${undelivered(agent)}`;
+  return `Trama's Advisor: before you return, have the trama-advisor sub-agent, in the foreground, do review ${review} of your whole Task ${agent.task ?? ""} and wait for its result; fix what it reports. Ignore the result of any earlier background review.${undelivered(agent)}`;
 }
 
 function finalReviewText(agent: WatchedAgent): string {
@@ -508,7 +544,7 @@ function finalReviewText(agent: WatchedAgent): string {
   agent.asked++;
   agent.continued = true;
   const review = request(agent, "final");
-  return `Trama's Advisor: before you finish, have the trama-advisor sub-agent do review ${review} of the whole run and wait for its result; fix what it reports.${undelivered(agent)}`;
+  return `Trama's Advisor: before you finish, have the trama-advisor sub-agent, in the foreground, do review ${review} of the whole run and wait for its result; fix what it reports. Ignore the result of any earlier background review.${undelivered(agent)}`;
 }
 
 /** The Advisor stops watching a sub-agent, or the main agent is done: no more requests; a Run's missing final review is recorded with its reason. */
@@ -539,7 +575,7 @@ function releaseCall(root: string, call: string | undefined): void {
 }
 
 function newAgent(root: string, job: string, id: string, kind: "main" | "sub", conversation: string): WatchedAgent {
-  const agent: WatchedAgent = { id, root, job, kind, conversation, phase: "listening", requests: new Map(), notes: [], unreviewed: new Set(), snapshot: new Map(), asked: 0, continued: false };
+  const agent: WatchedAgent = { id, root, job, kind, conversation, phase: "listening", requests: new Map(), notes: [], unreviewed: new Set(), snapshot: new Map(), asked: 0, position: 0, continued: false };
   for (const file of takeSnapshot(root) ?? []) agent.snapshot.set(file.path, file.hash);
   watched.set(agentKey(root, id), agent);
   return agent;
@@ -630,16 +666,14 @@ export function chatAdvisorEvent(e: CursorChatEvent): string | undefined {
     case "FILES_CHANGED": {
       const agent = watchedAgent(e.root, e.conversation);
       if (agent === undefined) return undefined;
+      noteTranscript(agent, e);
       const files = changedFiles(agent, e);
       if (files.length === 0) return undefined;
+      // A round is asked for only while none is going; the files that come meanwhile wait for the next one. A Task's or final review in progress already covers them.
+      if (agent.phase === "listening" || agent.phase === "reviewing" || agent.phase === "task-fix" || agent.phase === "final-fix") for (const f of files) agent.unreviewed.add(f);
       if (agent.phase === "listening") {
-        for (const f of files) agent.unreviewed.add(f);
-        const review = request(agent, "continuous");
-        agent.text = continuousText(review, [...agent.unreviewed].sort());
-        agent.unreviewed.clear();
+        agent.text = roundText(agent);
         agent.phase = "reviewing";
-      } else if (agent.phase === "reviewing" || agent.phase === "notes" || agent.phase === "task-fix" || agent.phase === "final-fix") {
-        for (const f of files) agent.unreviewed.add(f);
       }
       publishChatStateNow();
       return undefined;
@@ -647,17 +681,9 @@ export function chatAdvisorEvent(e: CursorChatEvent): string | undefined {
     case "TOOL_FINISHED": {
       const agent = watchedAgent(e.root, e.conversation);
       if (agent === undefined) return undefined;
+      noteTranscript(agent, e);
       let text: string | undefined;
-      if (agent.phase === "notes") {
-        text = agent.notes.map(notesText).join("\n");
-        agent.notes = [];
-        if (agent.unreviewed.size > 0) {
-          const review = request(agent, "continuous");
-          text += `\n${continuousText(review, [...agent.unreviewed].sort())}`;
-          agent.unreviewed.clear();
-          agent.phase = "reviewing";
-        } else agent.phase = "listening";
-      } else if (agent.text !== undefined) {
+      if (agent.text !== undefined) {
         text = agent.text;
         agent.text = undefined;
       }
@@ -674,7 +700,7 @@ export function chatAdvisorEvent(e: CursorChatEvent): string | undefined {
       }
       let text: string | undefined;
       if (e.event === "SUBAGENT_STOPPED") {
-        if (agent.phase === "listening" || agent.phase === "reviewing" || agent.phase === "notes") {
+        if (agent.phase === "listening" || agent.phase === "reviewing") {
           text = taskReviewText(agent);
         } else if ((agent.phase === "task-review" || agent.phase === "task-fix") && agent.asked < MAX_REVIEW_REQUESTS) {
           text = taskReviewText(agent);
@@ -688,7 +714,7 @@ export function chatAdvisorEvent(e: CursorChatEvent): string | undefined {
       const agent = watchedAgent(e.root, e.conversation);
       if (agent === undefined || agent.kind !== "main") return undefined;
       let text: string | undefined;
-      if (agent.phase === "listening" || agent.phase === "reviewing" || agent.phase === "notes") text = finalReviewText(agent);
+      if (agent.phase === "listening" || agent.phase === "reviewing") text = finalReviewText(agent);
       else if (agent.phase === "final-review" || agent.phase === "final-fix") {
         if (agent.asked < MAX_REVIEW_REQUESTS) text = finalReviewText(agent);
         else if (agent.phase === "final-review") finishAgent(agent, "the agent did not wait for the review");
@@ -706,7 +732,7 @@ export function chatAdvisorEvent(e: CursorChatEvent): string | undefined {
           finishAgent(agent);
           continue;
         }
-        const missed = agent.phase === "listening" || agent.phase === "reviewing" || agent.phase === "notes" || agent.phase === "final-review";
+        const missed = agent.phase === "listening" || agent.phase === "reviewing" || agent.phase === "final-review";
         if (e.event === "AGENT_STOPPED") finishAgent(agent, missed ? "the turn ended before Trama could ask for it" : undefined);
         else if (e.event === "AGENT_INTERRUPTED") finishAgent(agent, missed ? "the run was interrupted" : undefined);
         else finishAgent(agent);
@@ -751,13 +777,10 @@ export function receiveAdvisorReview(message: Record<string, unknown>): boolean 
   const notes = typeof message["notes"] === "string" ? message["notes"] : "";
   if (found.kind === "continuous") {
     if (agent.phase !== "reviewing") return false;
-    if (!clean) {
-      agent.notes.push(notes);
-      agent.phase = "notes";
-    } else if (agent.unreviewed.size > 0) {
-      const next = request(agent, "continuous");
-      agent.text = continuousText(next, [...agent.unreviewed].sort());
-      agent.unreviewed.clear();
+    // Cursor delivers the round's result, notes included, to the agent; Trama only keeps the notes for the Task or final review.
+    if (!clean) agent.notes.push(notes);
+    if (agent.unreviewed.size > 0) {
+      agent.text = roundText(agent);
     } else agent.phase = "listening";
   } else if (found.kind === "task" && agent.phase === "task-review") {
     if (clean) finishAgent(agent);

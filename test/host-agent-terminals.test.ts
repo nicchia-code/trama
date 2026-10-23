@@ -469,7 +469,7 @@ describe("Quick Task", () => {
     // Dynamic: the module must load after mock.module replaced "vscode".
     const { localProjectJobs } = await import("../extension/src/host/drift-resolution");
     const jobsBefore = localProjectJobs(dir).length;
-    Object.assign(settingValues, { advisor: true, language: "it", experimentalAdvisorScanner: true, ignoreInstructionFiles: true, scan: "slow-model", execution: "  fast  " });
+    Object.assign(settingValues, { advisor: true, language: "it", advisorScanner: true, ignoreInstructionFiles: true, scan: "slow-model", execution: "  fast  " });
     try {
       await openQuickTask(dir);
       const terminal = terminals.at(-1) as FakeTerminal;
@@ -789,12 +789,12 @@ describe("automatic terminal exit", () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
-    const sentence = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+    const sentence = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
     const scan = "Use the trama-scan skill on the whole System.";
     let query = "";
     settingValues.agent = "cursor";
     editor.appName = "Cursor";
-    inspected.experimentalDriftBlocker = { globalValue: true };
+    inspected.driftBlocker = { globalValue: true };
     commandHandler = (id, ...args) => {
       if (id === "composer.createNew") query = (args[0] as { partialState: { text: string } }).partialState.text;
     };
@@ -803,14 +803,14 @@ describe("automatic terminal exit", () => {
       expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence}\n${ASK_DEVELOPER_SENTENCE}`);
       expect(await launchAgent(dir, "Use the trama-design skill. Add refunds.", "Design", undefined, undefined, undefined, undefined, { filesDrifts: false })).toBe("sent");
       expect(query).not.toContain(sentence);
-      inspected.experimentalDriftBlocker = { workspaceValue: true };
+      inspected.driftBlocker = { workspaceValue: true };
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
       expect(query).toBe(`${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.\n${ASK_DEVELOPER_SENTENCE}`);
     } finally {
       commandHandler = previousHandler;
       editor.appName = previousApp;
       settingValues.agent = "omp";
-      delete inspected.experimentalDriftBlocker;
+      delete inspected.driftBlocker;
     }
   });
   test("a Run sent to Cursor's chat with the Advisor Scanner on carries the chat advisor sentence after the limit and no comparison sentence, also on the clipboard", async () => {
@@ -822,7 +822,7 @@ describe("automatic terminal exit", () => {
     let query = "";
     settingValues.agent = "cursor";
     editor.appName = "Cursor";
-    inspected.experimentalAdvisorScanner = { globalValue: true };
+    inspected.advisorScanner = { globalValue: true };
     commandHandler = (id, ...args) => {
       if (id === "composer.createNew") query = (args[0] as { partialState: { text: string } }).partialState.text;
     };
@@ -839,7 +839,7 @@ describe("automatic terminal exit", () => {
       commandHandler = previousHandler;
       editor.appName = previousApp;
       settingValues.agent = "omp";
-      delete inspected.experimentalAdvisorScanner;
+      delete inspected.advisorScanner;
     }
   });
   test("the Advisor Scanner is on only from the user value true, with every agent", async () => {
@@ -847,34 +847,34 @@ describe("automatic terminal exit", () => {
     const { configuredAdvisorScanner } = await import("../extension/src/host/agent");
     try {
       settingValues.agent = "omp";
-      inspected.experimentalAdvisorScanner = { globalValue: true };
+      inspected.advisorScanner = { globalValue: true };
       expect(configuredAdvisorScanner()).toBe(true);
-      inspected.experimentalAdvisorScanner = { globalValue: "true" };
+      inspected.advisorScanner = { globalValue: "true" };
       expect(configuredAdvisorScanner()).toBe(false);
-      inspected.experimentalAdvisorScanner = { workspaceValue: true };
+      inspected.advisorScanner = { workspaceValue: true };
       expect(configuredAdvisorScanner()).toBe(false);
-      inspected.experimentalAdvisorScanner = { globalValue: true };
+      inspected.advisorScanner = { globalValue: true };
       settingValues.agent = "cursor";
       expect(configuredAdvisorScanner()).toBe(true);
     } finally {
       settingValues.agent = "omp";
-      delete inspected.experimentalAdvisorScanner;
+      delete inspected.advisorScanner;
     }
   });
   test("the parallel execution is on only from the user value true", async () => {
     const { configuredParallelExecution } = await import("../extension/src/host/agent");
     try {
       expect(configuredParallelExecution()).toBe(false);
-      inspected.experimentalParallelExecution = { globalValue: true };
+      inspected.parallelExecution = { globalValue: true };
       expect(configuredParallelExecution()).toBe(true);
-      inspected.experimentalParallelExecution = { globalValue: "true" };
+      inspected.parallelExecution = { globalValue: "true" };
       expect(configuredParallelExecution()).toBe(false);
-      inspected.experimentalParallelExecution = { workspaceValue: true };
+      inspected.parallelExecution = { workspaceValue: true };
       expect(configuredParallelExecution()).toBe(false);
-      inspected.experimentalParallelExecution = { globalValue: false, workspaceValue: true };
+      inspected.parallelExecution = { globalValue: false, workspaceValue: true };
       expect(configuredParallelExecution()).toBe(false);
     } finally {
-      delete inspected.experimentalParallelExecution;
+      delete inspected.parallelExecution;
     }
   });
   test("Ignore Instruction Files is on only from the user value true", async () => {
@@ -893,24 +893,24 @@ describe("automatic terminal exit", () => {
   });
 
   test("Context Sharing is on only from the user value true", async () => {
-    const { configuredContextSharing } = await import("../extension/src/host/agent");
+    const { configuredSubagentsContextSharing } = await import("../extension/src/host/agent");
     try {
-      expect(configuredContextSharing()).toBe(false);
-      inspected.experimentalContextSharing = { globalValue: true };
-      expect(configuredContextSharing()).toBe(true);
-      inspected.experimentalContextSharing = { globalValue: "true" };
-      expect(configuredContextSharing()).toBe(false);
-      inspected.experimentalContextSharing = { workspaceValue: true };
-      expect(configuredContextSharing()).toBe(false);
+      expect(configuredSubagentsContextSharing()).toBe(false);
+      inspected.subagentsContextSharing = { globalValue: true };
+      expect(configuredSubagentsContextSharing()).toBe(true);
+      inspected.subagentsContextSharing = { globalValue: "true" };
+      expect(configuredSubagentsContextSharing()).toBe(false);
+      inspected.subagentsContextSharing = { workspaceValue: true };
+      expect(configuredSubagentsContextSharing()).toBe(false);
     } finally {
-      delete inspected.experimentalContextSharing;
+      delete inspected.subagentsContextSharing;
     }
   });
   test("the Async Drift Resolver is on only from the user value true, and its sentence follows the Drift blocker's", async () => {
     const { configuredAsyncDriftResolver, launchAgent } = await import("../extension/src/host/agent");
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
-    const blocker = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+    const blocker = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
     const resolver = "The Async Drift Resolver is on: before finishing, prepare the resolution question of every Drift filed in this job, as your skill says.";
     const scan = "Use the trama-scan skill on the whole System.";
     const base = `${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.`;
@@ -926,36 +926,36 @@ describe("automatic terminal exit", () => {
     };
     try {
       expect(configuredAsyncDriftResolver()).toBe(false);
-      inspected.experimentalAsyncDriftResolver = { globalValue: "true" };
+      inspected.asyncDriftResolver = { globalValue: "true" };
       expect(configuredAsyncDriftResolver()).toBe(false);
-      inspected.experimentalAsyncDriftResolver = { workspaceValue: true };
+      inspected.asyncDriftResolver = { workspaceValue: true };
       expect(configuredAsyncDriftResolver()).toBe(false);
-      inspected.experimentalAsyncDriftResolver = { globalValue: true };
+      inspected.asyncDriftResolver = { globalValue: true };
       expect(configuredAsyncDriftResolver()).toBe(true);
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
       expect(query).toBe(`${base} ${resolver}\n${ASK_DEVELOPER_SENTENCE}`);
-      inspected.experimentalDriftBlocker = { globalValue: true };
+      inspected.driftBlocker = { globalValue: true };
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
       expect(query).toBe(`${base} ${blocker} ${resolver}\n${ASK_DEVELOPER_SENTENCE}`);
       expect(await launchAgent(dir, "Use the trama-design skill. Add refunds.", "Design", undefined, undefined, undefined, undefined, { filesDrifts: false })).toBe("sent");
       expect(query).not.toContain(resolver);
-      delete inspected.experimentalAsyncDriftResolver;
+      delete inspected.asyncDriftResolver;
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
       expect(query).toBe(`${base} ${blocker}\n${ASK_DEVELOPER_SENTENCE}`);
     } finally {
       commandHandler = previousHandler;
       editor.appName = previousApp;
       settingValues.agent = "omp";
-      delete inspected.experimentalAsyncDriftResolver;
-      delete inspected.experimentalDriftBlocker;
+      delete inspected.asyncDriftResolver;
+      delete inspected.driftBlocker;
     }
   });
   test("the Context Sharing sentence follows the Async Drift Resolver's, or the limit and blocker sentences, on every instruction with the limit", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const previousHandler = commandHandler;
     const previousApp = editor.appName;
-    const sharing = 'The experimental context sharing is on: pass each sub-agent what you have already read that concerns its part, as the "Experimental context sharing" section of your skill says.';
-    const blocker = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+    const sharing = 'The sub-agents context sharing is on: pass each sub-agent what you have already read that concerns its part, as the "Sub-agents context sharing" section of your skill says.';
+    const blocker = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
     const resolver = "The Async Drift Resolver is on: before finishing, prepare the resolution question of every Drift filed in this job, as your skill says.";
     const scan = "Use the trama-scan skill on the whole System.";
     const design = "Use the trama-design skill. Add refunds.";
@@ -972,32 +972,32 @@ describe("automatic terminal exit", () => {
       }
     };
     try {
-      inspected.experimentalContextSharing = { globalValue: "true" };
+      inspected.subagentsContextSharing = { globalValue: "true" };
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
       expect(query).toBe(`${scanBase}\n${ASK_DEVELOPER_SENTENCE}`);
-      inspected.experimentalContextSharing = { workspaceValue: true };
+      inspected.subagentsContextSharing = { workspaceValue: true };
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
       expect(query).toBe(`${scanBase}\n${ASK_DEVELOPER_SENTENCE}`);
-      inspected.experimentalContextSharing = { globalValue: true };
+      inspected.subagentsContextSharing = { globalValue: true };
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
       expect(query).toBe(`${scanBase} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
       expect(await launchAgent(dir, design, "Design", undefined, undefined, undefined, undefined, { filesDrifts: false })).toBe("sent");
       expect(query).toBe(`${designBase} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
       expect(await launchAgent(dir, "Resolve the Drift.", "Resolve Drifts")).toBe("sent");
       expect(query).toBe(`Resolve the Drift. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
-      inspected.experimentalDriftBlocker = { globalValue: true };
+      inspected.driftBlocker = { globalValue: true };
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
       expect(query).toBe(`${scanBase} ${blocker} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
-      inspected.experimentalAsyncDriftResolver = { globalValue: true };
+      inspected.asyncDriftResolver = { globalValue: true };
       expect(await launchAgent(dir, scan, "Scan", undefined, undefined, undefined, undefined, { filesDrifts: true })).toBe("sent");
       expect(query).toBe(`${scanBase} ${blocker} ${resolver} ${sharing}\n${ASK_DEVELOPER_SENTENCE}`);
     } finally {
       commandHandler = previousHandler;
       editor.appName = previousApp;
       settingValues.agent = "omp";
-      delete inspected.experimentalContextSharing;
-      delete inspected.experimentalAsyncDriftResolver;
-      delete inspected.experimentalDriftBlocker;
+      delete inspected.subagentsContextSharing;
+      delete inspected.asyncDriftResolver;
+      delete inspected.driftBlocker;
     }
   });
   test("chat instructions are built when sent and not sent if delivery conditions change", async () => {
@@ -1164,13 +1164,13 @@ describe("agent instruction settings", () => {
   });
   test("the Drift blocker's sentence reaches only the instructions that may file Drifts, and only from the user setting", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
-    const sentence = "The experimental Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+    const sentence = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
     const scan = "Use the trama-scan skill on the whole System.";
     const send = async (instruction: string, name: string, filesDrifts: boolean) => {
       await launchAgent(dir, instruction, name, undefined, undefined, undefined, undefined, { filesDrifts });
       return typed.at(-1) ?? "";
     };
-    inspected["experimentalDriftBlocker"] = { globalValue: true };
+    inspected["driftBlocker"] = { globalValue: true };
     try {
       expect(await send(scan, "Scan", true)).toBe(`omp '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
       expect(await send("Use the trama-implement skill on Task abc.", "T3", true)).toBe(`omp 'Use the trama-implement skill on Task abc. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
@@ -1180,34 +1180,34 @@ describe("agent instruction settings", () => {
       expect(await send("Use the trama-resolve-drifts skill on the open Drifts ab12cd34.", "Drifts", false)).not.toContain(sentence);
       expect(await send(scan, "Scan", false)).not.toContain(sentence);
 
-      inspected["experimentalDriftBlocker"] = { globalValue: false };
+      inspected["driftBlocker"] = { globalValue: false };
       expect(await send(scan, "Scan", true)).not.toContain(sentence);
-      inspected["experimentalDriftBlocker"] = { globalValue: "true" };
+      inspected["driftBlocker"] = { globalValue: "true" };
       expect(await send(scan, "Scan", true)).not.toContain(sentence);
-      inspected["experimentalDriftBlocker"] = { workspaceValue: true };
+      inspected["driftBlocker"] = { workspaceValue: true };
       expect(await send(scan, "Scan", true)).not.toContain(sentence);
-      delete inspected["experimentalDriftBlocker"];
+      delete inspected["driftBlocker"];
       expect(await send(scan, "Scan", true)).not.toContain(sentence);
 
-      inspected["experimentalDriftBlocker"] = { globalValue: true };
+      inspected["driftBlocker"] = { globalValue: true };
       settingValues["language"] = "Italian";
       expect(await send(scan, "Scan", true)).toBe(`omp '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE} Write everything you generate in Italian, except code, which always stays in English.'`);
     } finally {
-      delete inspected["experimentalDriftBlocker"];
+      delete inspected["driftBlocker"];
       delete settingValues["language"];
     }
   });
   test("the parallel execution's sentence reaches only the runs over several Tasks, right after the sub-agent sentence, and only from the user setting", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const { PARALLEL_EXECUTION_SENTENCE } = await import("../extension/src/host/prompts");
-    const sentence = 'The experimental parallel execution is on: follow the "Experimental parallel execution" section of the trama-implement skill.';
+    const sentence = 'The parallel execution is on: follow the "Parallel execution" section of the trama-implement skill.';
     expect(PARALLEL_EXECUTION_SENTENCE).toBe(sentence);
     const all = "Use the trama-implement skill on every Task in the todo column.";
     const send = async (instruction: string, name: string, severalTasks: boolean) => {
       await launchAgent(dir, instruction, name, undefined, undefined, undefined, undefined, { filesDrifts: true, severalTasks });
       return typed.at(-1) ?? "";
     };
-    inspected["experimentalParallelExecution"] = { globalValue: true };
+    inspected["parallelExecution"] = { globalValue: true };
     try {
       expect(await send(all, "All tasks", true)).toBe(`omp '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`);
       expect((await send(buildPrompt({ kind: "implement-all" }), "All tasks", true)).includes(` Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE}'`)).toBe(true);
@@ -1215,16 +1215,16 @@ describe("agent instruction settings", () => {
       expect(await send("Use the trama-scan skill on the whole System.", "Scan", false)).not.toContain(sentence);
       expect(await send("Use the trama-design skill. Add refunds.", "Design", false)).not.toContain(sentence);
 
-      inspected["experimentalParallelExecution"] = { globalValue: false };
+      inspected["parallelExecution"] = { globalValue: false };
       expect(await send(all, "All tasks", true)).not.toContain(sentence);
-      inspected["experimentalParallelExecution"] = { globalValue: "true" };
+      inspected["parallelExecution"] = { globalValue: "true" };
       expect(await send(all, "All tasks", true)).not.toContain(sentence);
-      inspected["experimentalParallelExecution"] = { workspaceValue: true };
+      inspected["parallelExecution"] = { workspaceValue: true };
       expect(await send(all, "All tasks", true)).not.toContain(sentence);
-      delete inspected["experimentalParallelExecution"];
+      delete inspected["parallelExecution"];
       expect(await send(all, "All tasks", true)).toBe(`omp '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
     } finally {
-      delete inspected["experimentalParallelExecution"];
+      delete inspected["parallelExecution"];
     }
   });
   test("every instruction carries the ask sentence: on its line before the language in a terminal, on its own line in Cursor's chat and on the clipboard outside Cursor", async () => {

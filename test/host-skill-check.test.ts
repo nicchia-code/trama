@@ -98,6 +98,13 @@ test("both sub-agent definitions are written and rewritten only in Cursor", asyn
   expect(readFileSync(agent, "utf8")).toContain("name: trama-analysis");
   expect(readFileSync(advisor, "utf8")).toContain("name: trama-advisor");
   expect(readFileSync(advisor, "utf8")).toContain("trama advisor review");
+  // One definition for rounds and reviews, with neither `is_background` nor `readonly`; it reads the transcript from the position and ends with the result for the agent.
+  const definition = readFileSync(advisor, "utf8");
+  expect(definition).not.toContain("is_background");
+  expect(definition).not.toContain("readonly");
+  expect(definition).toContain("from that byte on");
+  expect(definition).toContain("Trama's Advisor found that your Task's code drifts from the Model or the Requirements; fix it before you move the Task to Done: <notes>");
+  expect(existsSync(join(home, ".cursor/agents/trama-advisor-background.md"))).toBe(false);
 
   for (const file of [agent, advisor]) {
     messages.length = 0;
