@@ -3056,7 +3056,7 @@ describe("Ask more", () => {
     mkdirSync(join(extensionPath, "media"), { recursive: true });
     mkdirSync(join(extensionPath, "bin"), { recursive: true });
     writeFileSync(join(extensionPath, "media", "ask-more.md"), instructions);
-    writeFileSync(join(extensionPath, "bin", "trama"), "");
+    writeFileSync(join(extensionPath, "bin", process.platform === "win32" ? "trama.exe" : "trama"), "");
     return root;
   };
   const tearDown = (root: string) => {
