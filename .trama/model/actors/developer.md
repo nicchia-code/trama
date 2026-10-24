@@ -67,9 +67,6 @@ Il developer sceglie Unify Drifts dal menu che si apre dalla freccetta di + Add 
 ### ASK_MORE
 Il developer preme Ask more per chiedere a un agente spiegazioni su una sola cosa, senza scriverne da sé il contesto: una Proposal, un Task o un Drift, dalla finestra dei loro dettagli sulla Board, oppure la domanda in vista di un round di domande aperto. Trama apre una chat nuova con omp, che riceve ciò che serve per leggere quella cosa e aspetta le domande del developer.
 
-### OPEN_QUICK_TASK
-Il developer sceglie Add Quick Task dal menu che si apre dalla freccetta di + Add Work Item, in fondo alla colonna Backlog, per affidare all'agente un lavoro rapido e di fiducia, per esempio «committa il codice», senza richiesta scritta, senza scan e senza schede. Non scrive nulla prima: scrive direttamente nella chat che Trama apre.
-
 ### CLOSE_REQUEST
 Il developer chiude la scheda di una richiesta di design scritta che non ha mai inviato, quando nessun'altra scheda mostra più quella richiesta. Chiudere la finestra dell'editor con la scheda aperta non è questo Event, né lo è chiudere la scheda di una richiesta già inviata.
 
@@ -120,7 +117,7 @@ Il developer passa alla vista History del pannello, dal menu laterale o con il c
 Il developer passa alla scheda Settings del pannello, dal menu laterale, con il comando Show Settings o con Open Settings nell'avviso che omp non è installato, che aprono il pannello se è chiuso, anche in una finestra senza cartelle.
 
 ### INSTALL_OMP
-Il developer preme Install omp: nel passo omp del wizard di setup, nel gruppo omp della scheda Settings o nell'avviso che omp non è installato, quando omp manca. Trama apre un terminale visibile con l'installer ufficiale di omp (vedi Agent launching).
+Il developer preme Install omp: nel passo omp del wizard di setup, nel gruppo omp della scheda Settings, nell'avviso che omp non è installato o dentro la conversazione General di omp Chat, quando omp manca. Trama apre un terminale visibile con l'installer ufficiale di omp (vedi Agent launching).
 
 ### CHANGE_SETTING
 Il developer cambia un'impostazione di Trama dalla scheda Settings: sceglie un valore in un menu, spunta o toglie una casella, oppure conferma un campo di testo o numerico.
@@ -174,7 +171,7 @@ Il developer preme View on diagram o View requirements sulla scheda di una Propo
 Il developer preme View on diagram o View requirements sulla scheda di un Task in Active, per vedere nel Diagramma o nei Requisiti ciò che il Task nomina.
 
 ### FOCUS_REF
-Il developer segue un chip di riferimento: sulla scheda di un Task in Active o in Done, sulla scheda di un Drift o fra i Task dei dettagli di una voce di History. Un chip di un elemento del Modello porta al Diagramma, uno di un Requisito ai Requisiti, uno delle Specs alle Specs.
+Il developer segue un chip di riferimento: sulla scheda di un Task in Active, nei dettagli di un Task, anche Done, sulla scheda di un Drift o fra i Task dei dettagli di una voce di History. La scheda di un Task in Done non ha chip dei riferimenti. Un chip di un elemento del Modello porta al Diagramma, uno di un Requisito ai Requisiti, uno delle Specs alle Specs.
 
 ### STEP_FOCUS
 Il developer passa al passo precedente o al successivo del focus della scheda, con le frecce della barra del focus.
@@ -219,4 +216,10 @@ Il developer riapre l'overlay delle domande in attesa dalla barra nel pannello g
 Il developer preme Stop nel campo del messaggio di una conversazione di omp Chat in cui l'agente lavora e lo conferma nel dialogo modale. Annullare il dialogo non produce nulla.
 
 ### CLOSE_CHAT_CONVERSATION
-Il developer chiude la scheda di una conversazione di omp Chat. Se l'agente della conversazione è in un turno, gli viene chiesto prima di confermare nello stesso dialogo modale di Stop; annullarlo non produce nulla.
+Il developer chiude la scheda di una conversazione di omp Chat, anche quella di General rimasta dopo che omp Chat è stata spenta (vedi omp Chat General). Se l'agente della conversazione è in un turno, gli viene chiesto prima di confermare nello stesso dialogo modale di Stop; annullarlo non produce nulla. Chiudere la scheda di General mentre omp Chat è in uso è invece CLEAR_GENERAL.
+
+### CLEAR_GENERAL
+Il developer pulisce la conversazione General di omp Chat: chiude la sua scheda con l'icona di pulizia, o con Delete sulla scheda, mentre omp Chat è in uso. Se l'agente di General è in un turno, gli viene chiesto prima di confermare in un dialogo modale; annullarlo non produce nulla.
+
+### SEND_CHAT_MESSAGE
+Il developer manda un messaggio nella conversazione General di omp Chat, scritto nel suo campo del messaggio. I messaggi delle altre conversazioni li descrive la conversazione stessa, senza questo Event.

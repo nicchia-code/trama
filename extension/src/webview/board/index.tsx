@@ -259,7 +259,6 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
               reason: unify.blockers.join(". "),
               onSelect: () => context.post({ type: "launch", action: { kind: "unify-drifts" } }),
             },
-            { label: "Add Quick Task", tooltip: "Ask an agent for a quick job, without scans or cards", onSelect: () => context.post({ type: "openQuickTask" }) },
           ]}
           onClick={() => context.post({ type: "writeDesignRequest" })}
         />

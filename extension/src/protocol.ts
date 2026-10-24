@@ -60,8 +60,6 @@ export type ToHost =
   | { type: "launch"; action: AgentAction }
   /** + Add Work Item: the host opens the Markdown document of a written design request. */
   | { type: "writeDesignRequest" }
-  /** Add Quick Task (the arrow of + Add Work Item): the host opens a new, empty chat with the agent. */
-  | { type: "openQuickTask" }
   /** Ask more on a card of the Board's details windows: the host reads the card from its files at the click and opens a new chat about it. Never refused for other work. */
   | { type: "askMore"; kind: "task" | "proposal" | "drift"; id: string }
   /** What the developer did on the overlay of question round `round`; the host answers with the new state. */

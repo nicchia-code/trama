@@ -49,11 +49,12 @@ Every setting is in the **Settings** tab of the panel, which saves to your user 
 
 ## Optional features
 
-The **Features** group of the Settings tab holds optional features, off by default except **omp Chat**:
+The **Features** group of the Settings tab holds optional features, off by default except **omp Chat** and its **omp Chat Intent Tracing**:
 
 - It is on by default and stays on until you turn it off in your user settings (`trama.ompChat` set to `false`); a value in the workspace settings does not count, so a cloned repository cannot change it.
 - With it on, the jobs Trama starts open as conversations in the **omp Chat** view, one conversation per job, instead of omp terminals. The view sits in its own container of the secondary sidebar of VS Code, on the right like the VS Code chat (VS Code 1.106 or later). Trama never opens, closes or moves a side bar by itself, except to show the view when a conversation opens.
 - **Approval**: the **omp Chat Approval** setting (`trama.ompChatApproval`, user settings only) is `ask` by default: omp asks permission as in the terminal, and each request shows in the conversation with a button per option. With `yolo`, **omp runs every command without asking**, even those it would ask you to approve in the terminal; choose it only if you accept that. The setting applies to omp Chat conversations only: the omp terminal and omp sessions you start by hand are not affected.
+- **Intent Tracing**: the **omp Chat Intent Tracing** setting (`trama.ompChatIntentTracing`, on by default, user settings only; a workspace value does not count) makes the agent write, at each tool call in omp Chat, the sentence that says why it makes it. Off saves tokens. It applies to conversations started afterwards.
 - The session receives only the MCP servers of omp's own files (`.omp/mcp.json` in the project and `~/.omp/agent/mcp.json`); the files of other tools are not read.
 - If omp cannot be reached (not found, exits at start, does not answer), the job starts in the omp terminal as it does with the feature off, and a notice says why.
 

@@ -1,5 +1,6 @@
-import type { ConversationItem, FormAnswerMessage, ModelChoice, ToChatWebview } from "../../omp-chat-protocol";
-import { addError, addForm, addPermission, addUserMessage, answerForm, answerPermission, applyUpdate, cancelPermission, emptyTranscript, settle, start, type Transcript } from "./transcript";
+import { GENERAL_ID } from "../../../../src/core/omp-chat-view";
+import type { ConversationItem, FormAnswerMessage, GeneralError, GeneralPhase, ModelChoice, ToChatWebview } from "../../omp-chat-protocol";
+import { addError, addForm, addPermission, addUserMessage, answerForm, answerPermission, applyUpdate, cancelPermission, emptyTranscript, returnMessage, settle, start, type Transcript } from "./transcript";
 
 /** What the view knows of one conversation. */
 export interface ConversationView {
@@ -8,6 +9,10 @@ export interface ConversationView {
   currentModel?: string;
   /** Grows each time the host asks for the focus in the message field. */
   focusToken: number;
+  /** General's process state, when this is General's tab (`generalStatus`). */
+  status?: { phase: GeneralPhase; error?: GeneralError; newSession?: boolean };
+  /** The text of a message that did not start, put back in the field; `token` tells one return from the next. */
+  returned?: { text: string; token: number };
 }
 
 export interface ChatState {
@@ -61,6 +66,16 @@ export function reduce(state: ChatState, message: ToChatWebview, now: number): C
       return change(state, message.id, (view) => ({ ...view, transcript: addPermission(view.transcript, { requestId: message.requestId, toolCall: message.toolCall, options: message.options }, now) }));
     case "permissionCancelled":
       return change(state, message.id, (view) => ({ ...view, transcript: cancelPermission(view.transcript, message.requestId) }));
+    case "generalStatus":
+      return change(state, GENERAL_ID, (view) => ({
+        ...view,
+        status: { phase: message.phase, ...(message.error === undefined ? {} : { error: message.error }), ...(message.newSession === undefined ? {} : { newSession: message.newSession }) },
+      }));
+    case "conversationCleared":
+      return change(state, message.id, (view) => ({ ...view, transcript: emptyTranscript() }));
+    case "returnToField":
+      if (message.text === "") return state;
+      return change(state, message.id, (view) => ({ ...view, transcript: returnMessage(view.transcript, message.text), returned: { text: message.text, token: (view.returned?.token ?? 0) + 1 } }));
     case "models":
       return change(state, message.id, (view) => ({ ...view, models: message.available, ...(message.current === undefined ? {} : { currentModel: message.current }) }));
     case "conversationError":

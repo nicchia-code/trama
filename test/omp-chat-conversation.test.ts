@@ -173,7 +173,7 @@ describe("saved conversations", () => {
   });
 
   test("only the variables of Trama are saved of the environment", () => {
-    expect(savedEnv({ TRAMA_AGENT: "1", TRAMA_TERMINAL: "abc123", QUESTION_ENDPOINT: "sock", PATH: "/bin", TRAMA_JOB: "j", TRAMA_ADVISOR_SCANNER: "1" })).toEqual({ TRAMA_AGENT: "1", TRAMA_TERMINAL: "abc123", TRAMA_JOB: "j", TRAMA_ADVISOR_SCANNER: "1" });
+    expect(savedEnv({ TRAMA_AGENT: "1", TRAMA_TERMINAL: "abc123", QUESTION_ENDPOINT: "sock", PATH: "/bin", TRAMA_JOB: "j", TRAMA_ADVISOR_SCANNER: "1", PI_INTENT_TRACING: "0" })).toEqual({ TRAMA_AGENT: "1", TRAMA_TERMINAL: "abc123", TRAMA_JOB: "j", TRAMA_ADVISOR_SCANNER: "1", PI_INTENT_TRACING: "0" });
   });
 
   test("the resume decision: a working conversation gets the notice and the fixed prompt, a resting one only its history", () => {

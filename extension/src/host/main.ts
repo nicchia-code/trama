@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { ActivitiesItem, SHOW_ACTIVITIES_COMMAND } from "./activities-item";
 import { watchAnnouncements } from "./announcements";
-import { watchAgentTerminal, configuredOmpPath, configuredSkillsDir, setBundledCliDir, setOmpChat, setOverlayStorage, settings, windowClosed } from "./agent";
+import { watchAgentTerminal, configuredOmpPath, configuredSkillsDir, ompChatGeneralSettingsChanged, setBundledCliDir, setOmpChat, setOverlayStorage, settings, windowClosed } from "./agent";
 import { Controller, describeError } from "./controller";
 import { startExecutionCheck } from "./execution-check";
 import { DesignRequests } from "./design-requests";
@@ -114,7 +114,10 @@ function startOmpChat(context: vscode.ExtensionContext): void {
     view,
     view.register(),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration("trama.ompChat")) view.model.refresh();
+      if (event.affectsConfiguration("trama.ompChat")) {
+        view.model.refresh();
+        ompChatGeneralSettingsChanged();
+      }
       if (event.affectsConfiguration("trama.theme")) view.model.themeChanged();
     }),
   );

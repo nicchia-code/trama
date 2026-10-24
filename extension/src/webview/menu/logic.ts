@@ -12,7 +12,7 @@ export const ENTRY_LABELS: Record<MenuViewName, string> = {
   getstarted: "Get Started",
 };
 
-/** The entries of a Trama project from the top, above Scan System; Settings stands alone at the bottom. */
+/** The entries of a Trama project, from the top; Scan System and Settings stand together at the foot, Settings last. */
 export const PROJECT_ENTRIES = ["board", "diagram", "requirements", "specs", "history"] as const satisfies readonly MenuViewName[];
 
 /** The tooltip of an entry. */

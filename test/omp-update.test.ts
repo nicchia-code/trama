@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkHolds, OMP_UPDATE_TTL_MS, ompSearchFolders, readUpdateCheck } from "../src/core/omp-update";
-import { ensureOmpUpdated, findOmp, forgetUpdateCheck, OMP_UPDATE_KEY, setUpdateStore } from "../extension/src/host/omp-update";
+import { ensureOmpUpdated, findConfiguredOmp, findOmp, forgetUpdateCheck, OMP_UPDATE_KEY, setUpdateStore } from "../extension/src/host/omp-update";
 
 const posix = process.platform !== "win32";
 let dir = "";
@@ -50,6 +50,17 @@ test("omp is found in the PATH, then in the bun and local folders of the home; a
   writeFileSync(join(home, ".bun", "bin", "omp"), "#!/bin/sh\n", { mode: 0o755 });
   expect(await findOmp("", { PATH: join(dir, "none") }, home, false)).toBe(join(home, ".bun", "bin", "omp"));
   expect(await findOmp("/x/omp", { PATH: "" }, home, false)).toBe("/x/omp");
+});
+
+test("General's set trama.ompPath resolves to the path as-is only when it runs: a file, or a bare name on the PATH; otherwise missing", async () => {
+  if (!posix) return;
+  const home = join(dir, "home");
+  expect(await findConfiguredOmp("", { PATH: join(dir, "none") }, home, false)).toBeUndefined();
+  writeFileSync(join(dir, "omp-bin"), "#!/bin/sh\n", { mode: 0o755 });
+  expect(await findConfiguredOmp(join(dir, "omp-bin"), { PATH: "" }, home, false)).toBe(join(dir, "omp-bin"));
+  expect(await findConfiguredOmp(join(dir, "omp-missing"), { PATH: "" }, home, false)).toBeUndefined();
+  expect(await findConfiguredOmp("omp-bin", { PATH: dir }, home, false)).toBe("omp-bin");
+  expect(await findConfiguredOmp("omp-missing", { PATH: dir }, home, false)).toBeUndefined();
 });
 
 test("a newer version is installed, announced first, and the outcome holds for an hour", async () => {

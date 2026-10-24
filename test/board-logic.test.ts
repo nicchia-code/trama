@@ -374,7 +374,6 @@ test("the explanation of a ghost depends on its kind and phase", () => {
   expect(explain({ kind: "check", phase: "history" })).toBe("The agent is writing the History entries of the finished Tasks.");
   expect(explain({ kind: "comparison", phase: null })).toBe("A comparison of one Machine with the code; its Tasks and Drifts arrive together.");
   expect(explain({ kind: "work", title: "Importing from code", phase: null })).toBe("The agent is describing the existing code as Proposals.");
-  expect(explain({ kind: "work", title: "Quick", phase: null })).toBe("A free chat with the agent: Trama does not follow what it does.");
 });
 
 test("the notice of a withdrawn Resolve Drifts ghost names a Proposal, and a withdrawn Scan says the check was stopped", () => {

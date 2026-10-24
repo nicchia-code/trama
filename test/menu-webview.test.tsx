@@ -42,13 +42,14 @@ test("in a folder that is no project: Get Started, and Settings at the bottom", 
   expect(posted).toEqual([{ type: "show", view: "getstarted" }]);
 });
 
-test("in a project the entries come in order, then the primary Scan System, then Settings apart", () => {
+test("in a project the entries come in order, then after a line Scan System and Settings at the foot", () => {
   setup(project());
   expect(names()).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", "Scan System", "Settings"]);
   const scan = screen.getByRole("button", { name: "Scan System" });
-  expect(scan.className).toContain("bg-primary");
-  expect(scan.parentElement?.className).toContain("pt-3");
-  expect(screen.getByRole("button", { name: "Settings" }).parentElement?.className).toContain("border-t");
+  expect(scan.className).toContain("justify-start");
+  expect(scan.className).not.toContain("bg-primary");
+  expect(scan.parentElement?.className).toContain("border-t");
+  expect(screen.getByRole("button", { name: "Settings" }).parentElement).toBe(scan.parentElement);
   for (const button of screen.getAllByRole("button")) {
     expect(button.className).toContain("w-full");
     expect(button.querySelector("svg")?.getAttribute("class")).toContain("size-4");
@@ -143,4 +144,41 @@ test("focusing an entry shows its tooltip", async () => {
     fireEvent.focus(history);
   });
   expect((await screen.findAllByText("Open History in the Trama panel")).length).toBeGreaterThan(0);
+});
+
+test("icon-only mode hides the text, the badge and the count under 200 px, centres the icon and keeps every tooltip", async () => {
+  setup({ ...project({ decisions: 2, tasksSinceScan: 4 }), situation: "project" });
+  const board = screen.getByRole("button", { name: "Board, 2 awaiting a decision" });
+  expect(board.className).toContain("@max-[200px]:justify-center");
+  expect(within(board).getByText("Board").className).toContain("@max-[200px]:hidden");
+  expect(within(board).getByText("2").className).toContain("@max-[200px]:hidden");
+  const scan = screen.getByRole("button", { name: /^Scan System · 4/ });
+  expect(scan.className).toContain("@max-[200px]:justify-center");
+  expect(scan.querySelector("span")?.className).toContain("@max-[200px]:hidden");
+  await act(async () => {
+    board.focus();
+    fireEvent.focus(board);
+  });
+  expect((await screen.findAllByText("Open Board in the Trama panel")).length).toBeGreaterThan(0);
+});
+
+test("the Scan System tooltip shows its count after ` · `", async () => {
+  setup(project({ tasksSinceScan: 4 }));
+  const scan = screen.getByRole("button", { name: /^Scan System · 4/ });
+  await act(async () => {
+    scan.focus();
+    fireEvent.focus(scan);
+  });
+  expect((await screen.findAllByText("Scan System · 4 Tasks finished since the last scan of the System")).length).toBeGreaterThan(0);
+});
+
+test("without a folder the sentence is hidden in icon-only mode, and Open Folder keeps its tooltip", async () => {
+  setup({ ...project(), situation: "noFolder" });
+  expect(screen.getByText("Open a folder to use Trama.").className).toContain("@max-[200px]:hidden");
+  const open = screen.getByRole("button", { name: "Open Folder" });
+  await act(async () => {
+    open.focus();
+    fireEvent.focus(open);
+  });
+  expect((await screen.findAllByText("Open a folder to use Trama.")).length).toBeGreaterThan(0);
 });

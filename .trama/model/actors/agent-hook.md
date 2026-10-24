@@ -2,7 +2,7 @@
 
 L'hook che l'agente del terminale carica per dire a Trama quando ha finito, invece di lasciarglielo indovinare dal suo comando. L'agente del terminale è omp: carica il modulo di Trama con `--hook` nel comando che Trama scrive nel terminale, e l'hook avvisa l'editor con `trama hook idle`. Riguarda solo i terminali che Trama ha avviato: un agente avviato a mano dal developer non ha l'hook di Trama.
 
-Con omp Chat il processo di omp di una conversazione carica lo stesso modulo, con la stessa identità che avrebbe il terminale di quel lavoro, e l'hook si comporta allo stesso modo: tutto ciò che questo Actor dice di un terminale di Trama vale per una conversazione di omp Chat (vedi omp Chat conversation). Come il terminale Quick e quello di Ask more, le conversazioni di Quick Task e di Ask more non hanno l'hook.
+Con omp Chat il processo di omp di una conversazione carica lo stesso modulo, con la stessa identità che avrebbe il terminale di quel lavoro, e l'hook si comporta allo stesso modo: tutto ciò che questo Actor dice di un terminale di Trama vale per una conversazione di omp Chat (vedi omp Chat conversation). Come il terminale di Ask more, la conversazione di Ask more non ha l'hook, e non lo ha nemmeno la conversazione General (vedi omp Chat General).
 
 L'agente carica l'hook anche in ogni suo sotto-agente, ma solo l'agente principale dice di essere partito e di aver finito: un sotto-agente che parte o finisce non dice nulla. L'hook non manda segnali di vita: dice una sola volta quale processo è l'agente, e il controllo di esecuzione verifica da sé che quel processo esista ancora (vedi l'Actor time).
 

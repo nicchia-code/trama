@@ -83,6 +83,24 @@ export function addUserMessage(t: Transcript, text: string, now: number): Transc
   return { ...next, echoes: [...next.echoes, text] };
 }
 
+/** A message the developer sent did not start: its block and its echo go, and the text is only in the field. */
+export function returnMessage(t: Transcript, text: string): Transcript {
+  let block = -1;
+  t.blocks.forEach((b, i) => {
+    if (b.kind === "user" && b.text === text && b.label === undefined) block = i;
+  });
+  let echo = -1;
+  t.echoes.forEach((e, i) => {
+    if (e === text) echo = i;
+  });
+  return {
+    ...t,
+    blocks: block === -1 ? t.blocks : t.blocks.filter((_, i) => i !== block),
+    echoes: echo === -1 ? t.echoes : t.echoes.filter((_, i) => i !== echo),
+    echoed: echo === 0 ? "" : t.echoed,
+  };
+}
+
 export function addError(t: Transcript, message: string, now: number): Transcript {
   return push(t, (id) => ({ kind: "error", id, message }), now);
 }

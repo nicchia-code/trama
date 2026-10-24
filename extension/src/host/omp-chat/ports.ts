@@ -1,4 +1,5 @@
 import type { ElicitationSchema, PermissionOption, SessionNotification, ToolCallUpdate } from "@agentclientprotocol/sdk";
+import type { GeneralError, GeneralPhase } from "../../omp-chat-protocol";
 
 // The two things the conversations of omp Chat stand on, as the host sees them. The ACP client (Task «Client ACP di omp») implements `OmpClientPort`
 // and the view in the secondary sidebar (Task «Vista omp Chat») implements `ChatViewPort`; the conversations (`conversations.ts`) are written against these
@@ -115,4 +116,22 @@ export interface ChatViewPort {
   onStopRequested(listener: (id: string) => void): Disposable;
   /** The developer closed the tab of `id` (before the confirmation). */
   onCloseRequested(listener: (id: string) => void): Disposable;
+  /** General comes to the view, as the first tab, without taking the view or the focus. */
+  showGeneral(): void;
+  /** General's session, or none while its process starts or after it stopped. Its history is replayed by a new listener, as for any session. */
+  setGeneralSession(session: OmpSessionPort | undefined): void;
+  /** General's process state, drawn in its tab (`generalStatus`). */
+  generalStatus(status: { phase: GeneralPhase; error?: GeneralError; newSession?: boolean }): void;
+  /** General's transcript was cleared: the tab is empty again. */
+  generalCleared(): void;
+  /** General leaves the view; the forms still waiting are refused. */
+  removeGeneral(): void;
+  /** The developer pressed the Clear button of General (or Delete on its tab) while it is not `kept`. */
+  onClearGeneralRequested(listener: () => void): Disposable;
+  /** The developer pressed Install omp in General. */
+  onInstallOmpRequested(listener: () => void): Disposable;
+  /** The developer sent a message from General's field: it is delivered by General's own process (`omp-chat-general`). */
+  onGeneralMessage(listener: (text: string) => void): Disposable;
+  /** A message the developer sent did not start: its text goes back into the field of the tab `id`, and the field keeps it. */
+  returnToField(id: string, text: string): void;
 }

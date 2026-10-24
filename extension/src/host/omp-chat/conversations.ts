@@ -78,9 +78,9 @@ export interface OpenConversation {
   root: string;
   name: string;
   launch: OmpLaunch;
-  /** The first message, when there is one (a Quick Task has none). */
+  /** The first message, when there is one (Ask more has one). */
   first?: OmpPrompt;
-  /** Quick Task and Ask more take the focus; jobs do not. */
+  /** Ask more takes the focus; jobs do not. */
   focus: boolean;
   job?: SavedJob;
 }
@@ -204,7 +204,7 @@ export class OmpConversations {
 
   /**
    * `editor.WINDOW_CLOSED`: the window closes or reloads. Every conversation stops its process and keeps its saved entry, its job and its announcements, to be
-   * resumed. A conversation with no hook (Quick Task, Ask more) saves whether its agent was in a turn as its state. Resolves when the processes are gone.
+   * resumed. A conversation with no hook (Ask more) saves whether its agent was in a turn as its state. Resolves when the processes are gone.
    */
   async windowClosed(): Promise<void> {
     const stopped: Promise<void>[] = [];

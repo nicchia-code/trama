@@ -3,27 +3,33 @@ import { chatViewState, ompChatVisible, tabAfterClose, tabKeyAction } from "../s
 
 describe("the state of the omp Chat view", () => {
   test("Hidden without omp Chat in use and without conversations", () => {
-    expect(chatViewState({ inUse: false, conversations: 0 })).toBe("hidden");
-    expect(ompChatVisible({ inUse: false, conversations: 0 })).toBe(false);
+    expect(chatViewState({ inUse: false, folder: true, general: false, conversations: 0 })).toBe("hidden");
+    expect(ompChatVisible({ inUse: false, folder: true, general: false, conversations: 0 })).toBe(false);
   });
 
-  test("Empty when omp Chat is in use and no conversation is open", () => {
-    expect(chatViewState({ inUse: true, conversations: 0 })).toBe("empty");
-    expect(ompChatVisible({ inUse: true, conversations: 0 })).toBe(true);
+  test("Empty when omp Chat is in use in a window without a folder and no conversation is open", () => {
+    expect(chatViewState({ inUse: true, folder: false, general: false, conversations: 0 })).toBe("empty");
+    expect(ompChatVisible({ inUse: true, folder: false, general: false, conversations: 0 })).toBe(true);
   });
 
-  test("With conversations whenever one is open or waiting to resume, in use or not", () => {
-    expect(chatViewState({ inUse: true, conversations: 2 })).toBe("with-conversations");
-    expect(chatViewState({ inUse: false, conversations: 1 })).toBe("with-conversations");
-    expect(ompChatVisible({ inUse: false, conversations: 1 })).toBe(true);
+  test("Hidden in use with a folder and no conversation: General is what the view shows, but it is not there yet", () => {
+    expect(chatViewState({ inUse: true, folder: true, general: false, conversations: 0 })).toBe("hidden");
+    expect(ompChatVisible({ inUse: true, folder: true, general: false, conversations: 0 })).toBe(true);
+  });
+
+  test("With conversations whenever General or a job conversation is open or waiting to resume, in use or not", () => {
+    expect(chatViewState({ inUse: true, folder: true, general: true, conversations: 0 })).toBe("with-conversations");
+    expect(chatViewState({ inUse: true, folder: true, general: false, conversations: 2 })).toBe("with-conversations");
+    expect(chatViewState({ inUse: false, folder: true, general: false, conversations: 1 })).toBe("with-conversations");
+    expect(ompChatVisible({ inUse: false, folder: true, general: false, conversations: 1 })).toBe(true);
   });
 });
 
 describe("the context key", () => {
   test("is a boolean: true while the view is there, false in Hidden", () => {
-    expect(ompChatVisible({ inUse: true, conversations: 0 })).toBe(true);
-    expect(ompChatVisible({ inUse: false, conversations: 2 })).toBe(true);
-    expect(ompChatVisible({ inUse: false, conversations: 0 })).toBe(false);
+    expect(ompChatVisible({ inUse: true, folder: true, general: false, conversations: 0 })).toBe(true);
+    expect(ompChatVisible({ inUse: false, folder: true, general: false, conversations: 2 })).toBe(true);
+    expect(ompChatVisible({ inUse: false, folder: true, general: false, conversations: 0 })).toBe(false);
   });
 });
 

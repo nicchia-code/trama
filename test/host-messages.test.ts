@@ -13,7 +13,7 @@ const ok = (message: unknown) => {
 test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "ready" })).toEqual({ type: "ready" });
   expect(ok({ type: "writeDesignRequest" })).toEqual({ type: "writeDesignRequest" });
-  expect(ok({ type: "openQuickTask" })).toEqual({ type: "openQuickTask" });
+  expect(parseToHost({ type: "openQuickTask" })).toEqual({ ok: false, reason: 'unknown message type "openQuickTask"' });
   expect(ok({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ type: "launch", action: { kind: "scan", feature: "checkout" } });
   expect(ok({ type: "launch", action: { kind: "scan" } })).toEqual({ type: "launch", action: { kind: "scan" } });
   expect(ok({ type: "launch", action: { kind: "implement", task: "0003" } })).toEqual({ type: "launch", action: { kind: "implement", task: "0003" } });

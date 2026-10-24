@@ -92,9 +92,9 @@ interface Fake {
   links: string[];
 }
 
-function setup(options: { inUse?: boolean; pending?: string[] } = {}) {
+function setup(options: { inUse?: boolean; pending?: string[]; folder?: boolean } = {}) {
   const fake: Fake = { posted: [], visible: [], reveals: [], opened: [], links: [] };
-  const state = { inUse: options.inUse ?? true, pending: options.pending ?? [] };
+  const state = { inUse: options.inUse ?? true, pending: options.pending ?? [], folder: options.folder ?? true };
   const surface: ChatSurface = {
     post: (message) => void fake.posted.push(message),
     setVisible: (visible) => void fake.visible.push(visible),
@@ -104,7 +104,7 @@ function setup(options: { inUse?: boolean; pending?: string[] } = {}) {
     openFile: (path) => void fake.opened.push(path),
     openLink: (url) => void fake.links.push(url),
   };
-  const model = new ChatViewModel(surface, () => state.inUse, () => state.pending);
+  const model = new ChatViewModel(surface, () => state.inUse, () => state.pending, () => state.folder);
   return { model, fake, state };
 }
 
@@ -154,17 +154,26 @@ describe("the context key", () => {
     expect(fake.visible).toEqual([true, false]);
   });
 
-  test("closing the last conversation with omp Chat in use goes back to Empty and keeps the view", () => {
-    const { model, fake } = setup();
+  test("closing the last conversation in a window without a folder, with omp Chat in use, goes back to Empty and keeps the view", () => {
+    const { model, fake } = setup({ folder: false });
     model.open({ id: "a", name: "T3" }, session, { focus: false });
     model.close("a");
     expect(model.state).toBe("empty");
     expect(fake.visible).toEqual([true]);
   });
+
+  test("in a window with a folder and omp Chat on, closing the last job conversation keeps the view on General", () => {
+    const { model, fake } = setup();
+    model.showGeneral();
+    model.open({ id: "a", name: "T3" }, session, { focus: false });
+    model.close("a");
+    expect(model.state).toBe("with-conversations");
+    expect(fake.visible).toEqual([true]);
+  });
 });
 
 describe("opening, selecting and closing", () => {
-  test("a new conversation adds its tab at the end and takes the view; jobs show the view without the focus, Quick Task with it", () => {
+  test("a new conversation adds its tab at the end and takes the view; jobs show the view without the focus, Ask more with it", () => {
     const { model, fake } = setup();
     model.webviewReady();
     model.open({ id: "a", name: "T3" }, session, { focus: false });
@@ -317,6 +326,16 @@ describe("messages from the webview", () => {
     model.receive({ type: "setModel", id: "a", model: "bad" });
     for (let turn = 0; turn < 5; turn++) await Promise.resolve();
     expect(fake.posted).toContainEqual({ type: "conversationError", id: "a", message: "unknown model" });
+  });
+
+  test("a message that did not start goes back to its tab's field, and an empty text sends nothing", () => {
+    const { model, fake } = setup();
+    model.webviewReady();
+    model.returnToField("a", "hello");
+    expect(fake.posted).toContainEqual({ type: "returnToField", id: "a", text: "hello" });
+    fake.posted.length = 0;
+    model.returnToField("a", "");
+    expect(fake.posted).toEqual([]);
   });
 
   test("an answer settles a form that waits, once", () => {

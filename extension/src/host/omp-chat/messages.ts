@@ -25,6 +25,8 @@ const messages = z.discriminatedUnion("type", [
     ]),
   }),
   z.strictObject({ type: z.literal("permissionAnswer"), id, requestId: z.string().min(1).max(200), optionId: z.string().min(1).max(500) }),
+  z.strictObject({ type: z.literal("clearGeneral") }),
+  z.strictObject({ type: z.literal("installOmp") }),
   z.strictObject({ type: z.literal("openFile"), path: z.string().min(1).max(MAX_PATH) }),
   z.strictObject({ type: z.literal("openLink"), url: z.string().min(1).max(MAX_URL) }),
 ]);

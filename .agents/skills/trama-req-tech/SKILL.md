@@ -60,12 +60,12 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia dei file di istruzioni** (`instruction-files.md`): Usa quando lavori al codice che esclude i file di istruzioni degli agenti nei lanci di omp: overlay di configurazione e ricerca dei file. Sections: `agent-terminal/Agent running`.
 - **Tecnologia del menu laterale** (`menu-laterale.md`): Usa per la tecnologia del menu laterale di Trama: vista webview, messaggi con l'host, badge e comandi delle viste. Sections: `menu-laterale`.
 - **Tecnologia di agenti e modelli** (`models.md`): Usa per agenti del terminale, ruoli dei modelli, limite dei sotto-agenti e advisor di omp. Sections: `agent-launching`.
+- **Tecnologia della conversazione General** (`omp-chat-general.md`): Usa per la tecnica della conversazione General di omp Chat: processo e sessione, avvio, pulizia, errori, salvataggio e messaggi fra host e webview. Sections: `omp-chat-general`.
 - **omp Chat** (`omp-chat.md`): Usa quando costruisci o cambi omp Chat: il client ACP verso omp, la vista della barra laterale secondaria e la sua impostazione. Sections: `omp-chat`, `omp-chat-conversation`.
 - **Tecnologia del pannello** (`panel.md`): Usa per la tecnologia del pannello e degli ingressi di Trama nell'editor: barra delle attività, barra di stato, icone. Sections: `panel`.
 - **Tecnologia del progetto** (`project.md`): Usa per setup del progetto, avvio dell'estensione e skill dei Requisiti. Sections: `project`.
 - **Tecnologia delle Proposal** (`proposal.md`): Usa quando lavori su Proposal, sui loro Task e sul loro scope o sulla consegna di una Proposal da una skill. Sections: `proposal`.
 - **Tecnologia dei round di domande** (`questions-notices.md`): Usa quando lavori sui round di domande. Sections: `question-round`.
-- **Quick Task technology** (`quick-task.md`): Usa quando costruisci il pulsante diviso della Board, il suo DropdownMenu e l'apertura della chat di un Quick Task con omp. Sections: `developer.OPEN_QUICK_TASK`.
 - **Tecnologia di design request** (`requests.md`): Usa quando lavori su richieste di design scritte. Sections: `design-request`.
 - **Rework with feedback** (`rework.md`): Usa quando costruisci Rework with feedback o il pulsante diviso condiviso (Reject, Dismiss Drift e + Add Work Item): i messaggi fra webview e host, la casella e la conferma, il campo `reworks` in `src/core` e le skill che rifanno. Sections: `developer.REWORK_PROPOSAL`, `developer.REWORK_DRIFT`.
 - **Tecnologia dei confronti** (`scans.md`): Usa per registro dei confronti e tempi delle fasi. Sections: `work`.

@@ -39,7 +39,7 @@ export class OmpChatView implements vscode.WebviewViewProvider, vscode.Disposabl
     private readonly root: () => string | undefined,
     pending: () => readonly string[],
   ) {
-    this.model = new ChatViewModel(this.surface(), ompChatOn, pending);
+    this.model = new ChatViewModel(this.surface(), ompChatOn, pending, () => this.root() !== undefined);
   }
 
   /** Registers the provider for the view. */

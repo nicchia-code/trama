@@ -21,11 +21,13 @@ import { agentCommandLine, isSupportedShell, programName, quote, type ShellFamil
 import { questionEndpoint } from "./questions";
 import { pruneAgentProcesses, releaseUnfollowedTasks } from "./task-release";
 import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
-import { agentTemplate, canScan, launchOverlay, type Models, ompArguments, ompOptions, quickCommandLine, quickOptions, type Role, roleOf, type RunModel, terminalEnv } from "./terminal-agent";
+import { agentTemplate, askMoreCommandLine, askMoreOptions, canScan, launchOverlay, type Models, ompArguments, ompOptions, type Role, roleOf, type RunModel, terminalEnv } from "./terminal-agent";
 import { ompPathVariable } from "./model-lists";
 import { ompBeforeLaunch } from "./omp-launch";
 import { type ConversationInfo, type ConversationStore, type OpenConversation, OmpConversations } from "./omp-chat/conversations";
 import type { ChatViewPort, OmpClientPort, OmpLaunch, OmpPrompt } from "./omp-chat/ports";
+import { GeneralConversation, type GeneralDeps } from "./omp-chat/general";
+import { findConfiguredOmp } from "./omp-update";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
 
@@ -82,6 +84,9 @@ const idleTerminals = new Map<vscode.Terminal, { id: string; jobId?: string; roo
 /** The conversations of omp Chat of this window; absent until the ACP client and the view are registered (`setOmpChat`), so nothing opens before they can. */
 let chatConversations: OmpConversations | undefined;
 
+/** The conversation General of omp Chat of this window, set with `chatConversations`. */
+let general: GeneralConversation | undefined;
+
 /** The folder of the `trama` program the extension ships, put first on the PATH of a conversation's process like on its terminals'. */
 let bundledCliDir: string | undefined;
 export function setBundledCliDir(dir: string | undefined): void {
@@ -103,7 +108,9 @@ const conversationPath = (): Record<string, string> => (bundledCliDir === undefi
  */
 function conversationLaunch(root: string, options: string[][], endpoint: string, terminalId: string, jobId?: string, advisor = false): OmpLaunch {
   const approval = settings().inspect<unknown>("ompChatApproval")?.globalValue === "yolo" ? "yolo" : "ask";
-  return { args: ompArguments(options, approval), env: { ...terminalEnv(endpoint, terminalId, jobId, advisor), ...conversationPath() }, cwd: root };
+  // Intent Tracing is off only when `trama.ompChatIntentTracing` is `false` in the user settings, read when the conversation opens.
+  const intentTracing = settings().inspect<unknown>("ompChatIntentTracing")?.globalValue === false ? "0" : "1";
+  return { args: ompArguments(options, approval), env: { ...terminalEnv(endpoint, terminalId, jobId, advisor), ...conversationPath(), PI_INTENT_TRACING: intentTracing }, cwd: root };
 }
 
 /** Opens the conversation; false, after the warning, when omp does not start: the caller's instruction then goes to a terminal. */
@@ -141,12 +148,46 @@ export function setOmpChat(ports: { client: OmpClientPort; view: ChatViewPort },
     },
     confirm: async (message, detail, button) => (await vscode.window.showWarningMessage(message, { modal: true, detail }, button)) === button,
   });
+  general = new GeneralConversation(generalDeps(ports, store));
+  general.start();
   return chatConversations.resume();
 }
 
 /** `editor.WINDOW_CLOSED`: the extension stops, and every conversation's process with it; their jobs and saved entries wait for the resume. Resolves when the processes are gone. */
 export async function windowClosed(): Promise<void> {
-  await chatConversations?.windowClosed();
+  await Promise.all([chatConversations?.windowClosed(), general?.windowClosed()]);
+}
+
+/** `trama.ompChat` changed in this window: General starts, or leaves as it is switched off. */
+export function ompChatGeneralSettingsChanged(): void {
+  general?.settingsChanged();
+}
+
+/** The deps of General: the folder the window has open, the settings read at each start, and the launches as the conversations make them. */
+function generalDeps(ports: { client: OmpClientPort; view: ChatViewPort }, store: ConversationStore): GeneralDeps {
+  return {
+    client: ports.client,
+    view: ports.view,
+    store,
+    folder: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    usable: configuredOmpChat,
+    ompPath: configuredOmpPath,
+    findOmp: findConfiguredOmp,
+    launch: async (root, terminalId) => {
+      const endpoint = await questionEndpoint(root);
+      if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
+      const analysis = configuredModels().analysis;
+      return conversationLaunch(root, analysis === "" ? [] : [["--model", analysis]], endpoint, terminalId);
+    },
+    resumeLaunch: async (root, args, env) => {
+      const endpoint = await questionEndpoint(root);
+      if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
+      return { args, env: { ...env, [QUESTION_ENDPOINT_ENV]: endpoint, ...conversationPath() }, cwd: root };
+    },
+    endWork: (terminalId, root) => endAgentWork({ id: terminalId, root, line: "", since: Date.now() }),
+    confirm: async (message, detail, button) => (await vscode.window.showWarningMessage(message, { modal: true, detail }, button)) === button,
+    install: () => void vscode.commands.executeCommand("trama.installOmp"),
+  };
 }
 
 function releaseTakenTasks(root: string, origin: AgentOrigin): void {
@@ -605,17 +646,6 @@ export async function launchAgent(
 }
 
 /**
- * Add Quick Task: a new, bare chat with omp on the model of the execution role, with no instruction, skill, sentence or job.
- * A terminal (or an omp Chat conversation) named `Quick` runs `omp [--model <m>]` and takes the focus.
- */
-export async function openQuickTask(root: string): Promise<void> {
-  const omp = await ompBeforeLaunch(configuredOmpPath());
-  if (omp === undefined) return;
-  const model = configuredModels().execution;
-  await openFocusedTerminal(root, "Quick", omp, (family) => quickCommandLine(omp, model, family), { options: quickOptions(model) });
-}
-
-/**
  * A new agent named `name` with no job, no hook and no instruction of its own: with omp Chat in use a conversation (`conversation` has its options and first message,
  * when it has one), which takes the focus in its message field; otherwise, or when omp does not start, a terminal, where `lineOf` builds the command for the
  * shell it runs in, written when the shell is ready. The terminal takes the focus. The card is announced as work either way.
@@ -668,7 +698,7 @@ export async function openAskMore(root: string, name: string, part: string): Pro
   const prompt = withLanguage(part, configuredLanguage());
   // The command is one line: the part's own line breaks become spaces.
   const oneLine = prompt.replace(/\s*\n\s*/g, " ");
-  await openFocusedTerminal(root, name, omp, (family) => `${quickCommandLine(omp, model, family)} ${quote(family, `@${file}`)} ${quote(family, oneLine)}`, { options: quickOptions(model), first: { text: prompt, attachment: file } });
+  await openFocusedTerminal(root, name, omp, (family) => `${askMoreCommandLine(omp, model, family)} ${quote(family, `@${file}`)} ${quote(family, oneLine)}`, { options: askMoreOptions(model), first: { text: prompt, attachment: file } });
 }
 
 /** The official installer of omp, by system: the script chooses bun or the binary. */

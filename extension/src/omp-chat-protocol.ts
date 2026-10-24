@@ -13,6 +13,17 @@ export interface ConversationItem {
   state: ConversationRunState;
   /** The model the conversation uses now, when omp says. */
   model?: string;
+  /** Whether this is General's tab: always the first one, with the Clear button instead of the close button. */
+  general?: true;
+}
+
+/** The phase of General's process as the view shows it (`omp-chat-general`): `kept` is the one after switch-off, where General's tab closes instead of clearing. */
+export type GeneralPhase = "starting" | "ready" | "stopped" | "resuming" | "waiting" | "kept";
+
+/** Why General's omp stopped or did not start, or is missing; `reason` is the text after the colon. */
+export interface GeneralError {
+  kind: "start" | "exited" | "missing";
+  reason?: string;
 }
 
 /** The first message of a job: Trama's instruction, with the file it carries, if any, as a name and its text. */
@@ -59,8 +70,14 @@ export type ToChatWebview =
   /** A waiting permission request was answered `cancelled` (Stop, or the process ended). */
   | { type: "permissionCancelled"; id: string; requestId: string }
   | { type: "models"; id: string; available: ModelChoice[]; current?: string }
+  /** General's transcript was cleared: the tab is empty again. */
+  | { type: "conversationCleared"; id: string }
+  /** General's process state, drawn under its messages; `newSession` says the agent does not remember what is above. */
+  | { type: "generalStatus"; phase: GeneralPhase; error?: GeneralError; newSession?: boolean }
   /** An error of omp (a message that was not sent, a model that was not changed) shown in the conversation. */
-  | { type: "conversationError"; id: string; message: string };
+  | { type: "conversationError"; id: string; message: string }
+  /** A message the developer sent did not start: its text goes back into the field of the tab `id` (General's too), not cleared. */
+  | { type: "returnToField"; id: string; text: string };
 
 /** Webview -> host. */
 export type ToChatHost =
@@ -72,6 +89,10 @@ export type ToChatHost =
   | { type: "setModel"; id: string; model: string }
   | { type: "formAnswer"; id: string; requestId: string; answer: FormAnswerMessage }
   | { type: "permissionAnswer"; id: string; requestId: string; optionId: string }
+  /** The Clear button of General (or its Delete key). */
+  | { type: "clearGeneral" }
+  /** The Install omp button of General. */
+  | { type: "installOmp" }
   /** A file an edit touched, to open in the editor. */
   | { type: "openFile"; path: string }
   | { type: "openLink"; url: string };

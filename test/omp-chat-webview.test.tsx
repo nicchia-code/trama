@@ -206,6 +206,21 @@ test("Enter sends, Shift+Enter does not, Send waits for text, and Stop shows onl
   expect(posted[1]).toEqual({ type: "stopAgent", id: "a" });
 });
 
+test("a message that did not start comes back into the field and leaves the transcript, and an empty return leaves the field as it is", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3")], selected: "a" });
+  const field = screen.getByPlaceholderText("Message omp…") as HTMLTextAreaElement;
+  fireEvent.change(field, { target: { value: "hello" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(screen.getByText("hello")).not.toBeNull();
+  host({ type: "returnToField", id: "a", text: "hello" });
+  expect(field.value).toBe("hello");
+  expect(screen.queryAllByText("hello").filter((element) => element.tagName !== "TEXTAREA")).toEqual([]);
+  fireEvent.change(field, { target: { value: "other" } });
+  host({ type: "returnToField", id: "a", text: "" });
+  expect(field.value).toBe("other");
+});
+
 test("a form of the agent shows its question, takes the answer and stays read-only", () => {
   const { host, posted } = setup();
   host({ type: "conversations", items: [item("a", "Quick", "waiting-form")], selected: "a" });

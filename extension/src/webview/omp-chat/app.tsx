@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { ToChatHost, ToChatWebview } from "../../omp-chat-protocol";
+import { GENERAL_ID } from "../../../../src/core/omp-chat-view";
 import { TooltipProvider } from "../ui/tooltip";
 import { Conversation, type ConversationActions } from "./conversation";
 import { answerFormIn, answerPermissionIn, type ChatStore, reduce, selectedOf, selectTab, sendMessage } from "./state";
@@ -20,7 +21,11 @@ export function createChatController(store: ChatStore, post: (message: ToChatHos
       store.set(selectTab(store.get(), id));
       post({ type: "selectConversation", id });
     },
-    close: (id) => post({ type: "closeConversation", id }),
+    close(id) {
+      // The Clear button of General (and Delete on its tab) clears it; once it is kept, its tab closes like the others.
+      if (id === GENERAL_ID && store.get().conversations[GENERAL_ID]?.status?.phase !== "kept") post({ type: "clearGeneral" });
+      else post({ type: "closeConversation", id });
+    },
     send(id, text) {
       store.set(sendMessage(store.get(), id, text, now()));
       post({ type: "sendMessage", id, text });
@@ -37,6 +42,7 @@ export function createChatController(store: ChatStore, post: (message: ToChatHos
     },
     openFile: (path) => post({ type: "openFile", path }),
     openLink: (url) => post({ type: "openLink", url }),
+    installOmp: () => post({ type: "installOmp" }),
   };
 }
 
@@ -57,7 +63,7 @@ export function ChatApp({ store, controller }: { store: ChatStore; controller: C
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col">
-        <ConversationTabs items={state.items} selected={selected} onSelect={controller.select} onClose={controller.close} />
+        <ConversationTabs items={state.items} selected={selected} generalKept={state.conversations[GENERAL_ID]?.status?.phase === "kept"} onSelect={controller.select} onClose={controller.close} />
         {state.items.map((item) => {
           const view = state.conversations[item.id];
           return view === undefined ? null : <Conversation key={item.id} item={item} view={view} selected={item.id === selected} actions={controller} />;

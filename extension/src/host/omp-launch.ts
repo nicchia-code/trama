@@ -34,7 +34,7 @@ function noticeMissing(): void {
 }
 
 /**
- * Before every launch of omp (a terminal, an omp Chat conversation, Quick Task, Ask more), before anything is created: finds the program for `ompPath`
+ * Before every launch of omp (a terminal, an omp Chat conversation, Ask more), before anything is created: finds the program for `ompPath`
  * (the user's `trama.ompPath`, trimmed), checks for a newer version and updates it. With no program the missing-omp notice shows and the result is undefined:
  * the launch does not start. A failed check or update does not stop it: the program of before is returned and the failure is told once per check.
  */

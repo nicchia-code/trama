@@ -19,7 +19,7 @@ import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, listDrift
 import type { AgentAction, NavigateOptions, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
 import type { MenuViewName } from "../menu-protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAdvisorScanner, configuredAsyncDriftResolver, configuredModels, configuredOmpPath, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, openAskMore, openQuickTask, settings, startHeldJob } from "./agent";
+import { configuredAdvisorScanner, configuredAsyncDriftResolver, configuredModels, configuredOmpPath, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, openAskMore, settings, startHeldJob } from "./agent";
 import { bundledUnifyInstructions } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing, unifyingDrifts } from "./drift-resolution";
@@ -35,6 +35,7 @@ import { planRuns, runSequence, type AppliedModel, type PlannedRun } from "./run
 import { ompModels, type ModelList } from "./model-lists";
 import { ensureOmpUpdated, findOmp, forgetUpdateCheck } from "./omp-update";
 import { ompStatus } from "./omp-status";
+import { confirmScanSystem } from "./scan-confirm";
 import { planSettingChange, settingsSchema, settingTitle, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
 import { resolveMarkdownFile } from "./paths";
 import { checkSkills, fileFolders, findProject, initializeProject, NO_PROJECT_WARNING, updateSkills } from "./project";
@@ -796,13 +797,6 @@ export class Controller implements vscode.Disposable {
       case "launch":
         await this.launchAction(project, message.action);
         return;
-      case "openQuickTask":
-        try {
-          await openQuickTask(project.root);
-        } catch (err) {
-          this.post({ type: "error", message: describeError(err) });
-        }
-        return;
       case "askMore":
         try {
           const subject = askMoreSubject(project, message.kind, message.id);
@@ -1181,6 +1175,7 @@ export class Controller implements vscode.Disposable {
       case "scan": {
         if (action.feature !== undefined && !loadModel(project).features.has(action.feature))
           throw new TramaError(`No Feature "${action.feature}" in the Model`);
+        if (action.feature === undefined && !(await confirmScanSystem())) return;
         await send(action, { kind: "check", title: action.feature === undefined ? "Scanning System" : `Scanning Feature ${action.feature}` });
         return;
       }

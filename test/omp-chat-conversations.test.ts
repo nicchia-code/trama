@@ -112,6 +112,21 @@ class FakeView implements ChatViewPort {
   pressClose(id: string): void {
     for (const listener of this.closeListeners) listener(id);
   }
+  returnToField(): void {}
+  showGeneral(): void {}
+  setGeneralSession(): void {}
+  generalStatus(): void {}
+  generalCleared(): void {}
+  removeGeneral(): void {}
+  onClearGeneralRequested(): Disposable {
+    return { dispose() {} };
+  }
+  onInstallOmpRequested(): Disposable {
+    return { dispose() {} };
+  }
+  onGeneralMessage(): Disposable {
+    return { dispose() {} };
+  }
 }
 
 class FakeStore implements ConversationStore {
@@ -199,9 +214,9 @@ describe("opening", () => {
     ]);
   });
 
-  test("Quick Task and Ask more focus the field and have no job in their entry", async () => {
+  test("Ask more focuses the field and has no job in its entry", async () => {
     const conversations = make();
-    await conversations.open({ id: "qqq111", root: "/p", name: "Quick", launch: { ...launch, args: ["acp", "--yolo"] }, focus: true });
+    await conversations.open({ id: "qqq111", root: "/p", name: "Ask", launch: { ...launch, args: ["acp", "--yolo"] }, focus: true });
     expect(client.started[0]?.first).toBeUndefined();
     expect(view.opened[0]?.focus).toBe(true);
     expect(store.saved[0]?.job).toBeUndefined();
@@ -443,7 +458,7 @@ describe("the window closing", () => {
 
   test("a conversation with no hook is saved as working only when its agent was in a turn", async () => {
     const conversations = make();
-    await conversations.open({ id: "qqq111", root: "/p", name: "Quick", launch: { ...launch, args: ["acp", "--yolo"] }, focus: true });
+    await conversations.open({ id: "qqq111", root: "/p", name: "Ask", launch: { ...launch, args: ["acp", "--yolo"] }, focus: true });
     await conversations.open({ id: "aaa222", root: "/p", name: "Ask P2", launch: { ...launch, args: ["acp", "--yolo"] }, focus: true });
     (client.sessions[1] as FakeSession).inTurn = false;
     await conversations.windowClosed();

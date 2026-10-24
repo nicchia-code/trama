@@ -671,7 +671,7 @@ export function ghostExplanation(a: AnnouncementView, asking: boolean): string {
         ? "The agent is comparing the code with the Model and the Requirements."
         : "The agent is running the final checks of the run: tests, lint and build.";
   if (a.kind === "comparison") return "A comparison of one Machine with the code; its Tasks and Drifts arrive together.";
-  if (a.kind === "work") return a.title === "Quick" ? "A free chat with the agent: Trama does not follow what it does." : "The agent is describing the existing code as Proposals.";
+  if (a.kind === "work") return "The agent is describing the existing code as Proposals.";
   if (asking) return WAITING_EXPLANATION;
   switch (a.kind) {
     case "proposal":

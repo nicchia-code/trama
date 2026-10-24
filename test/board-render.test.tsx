@@ -651,15 +651,16 @@ describe("The Board page", () => {
     expect(arrow.className).toContain("border-dashed");
   });
 
-  test("the arrow of Add Work Item opens a menu with Add Quick Task, which asks the host and closes the menu", async () => {
+  test("the arrow of Add Work Item opens a menu with only Unify Drifts, which asks the host and closes the menu", async () => {
     const { posted } = page(snapshot());
     const arrow = screen.getByRole("button", { name: "More ways to add work" }) as HTMLButtonElement;
     expect(arrow.disabled).toBe(false);
     arrow.focus();
     fireEvent.keyDown(arrow, { key: "Enter" });
-    const item = await screen.findByRole("menuitem", { name: "Add Quick Task" });
+    const item = await screen.findByRole("menuitem", { name: "Unify Drifts" });
+    expect(screen.getAllByRole("menuitem").map((entry) => entry.textContent)).toEqual(["Unify Drifts"]);
     fireEvent.click(item);
-    expect(posted).toEqual([{ type: "openQuickTask" }]);
+    expect(posted).toEqual([{ type: "launch", action: { kind: "unify-drifts" } }]);
     await waitFor(() => expect(screen.queryByRole("menuitem")).toBeNull());
   });
 
@@ -667,13 +668,14 @@ describe("The Board page", () => {
     const arrow = screen.getByRole("button", { name: "More ways to add work" });
     arrow.focus();
     fireEvent.keyDown(arrow, { key: "Enter" });
-    await screen.findByRole("menuitem", { name: "Add Quick Task" });
+    await screen.findByRole("menuitem", { name: "Unify Drifts" });
   };
 
-  test("the menu of Add Work Item has Unify Drifts and Add Quick Task, in this order", async () => {
+  test("the menu of Add Work Item has only Unify Drifts, and never Add Work Item or Add Quick Task", async () => {
     page(snapshot());
     await openMenu();
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Unify Drifts", "Add Quick Task"]);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Unify Drifts"]);
+    expect(screen.queryByRole("menuitem", { name: "Add Quick Task" })).toBeNull();
   });
 
   test("an enabled Unify Drifts closes the menu and asks the host to launch it", async () => {
@@ -684,7 +686,7 @@ describe("The Board page", () => {
     await waitFor(() => expect(screen.queryByRole("menuitem")).toBeNull());
   });
 
-  test("a disabled Unify Drifts shows every reason, stays in the menu and sends nothing; Add Quick Task still works", async () => {
+  test("a disabled Unify Drifts shows every reason, stays in the menu and sends nothing", async () => {
     const { posted } = page(snapshot(), { unify: { blockers: ["Drifts are being resolved", "Unify needs at least two open Drifts"], unifying: [] } });
     const arrow = screen.getByRole("button", { name: "More ways to add work" }) as HTMLButtonElement;
     expect(arrow.disabled).toBe(false);
@@ -692,10 +694,8 @@ describe("The Board page", () => {
     const item = screen.getByRole("menuitem", { name: "Unify Drifts" });
     expect([item.getAttribute("aria-disabled"), item.getAttribute("aria-description")]).toEqual(["true", "Drifts are being resolved. Unify needs at least two open Drifts"]);
     fireEvent.click(item);
-    expect(screen.getByRole("menuitem", { name: "Add Quick Task" })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Unify Drifts" })).not.toBeNull();
     expect(posted).toEqual([]);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Add Quick Task" }));
-    expect(posted).toEqual([{ type: "openQuickTask" }]);
   });
 
   test("the Unify Drifts ghost has the Unify type, its title and the accessible name of its phase", () => {
@@ -743,7 +743,7 @@ describe("The Board page", () => {
     expect(arrow.getAttribute("aria-expanded")).toBe("false");
     arrow.focus();
     fireEvent.keyDown(arrow, { key: "Enter" });
-    await screen.findByRole("menuitem", { name: "Add Quick Task" });
+    await screen.findByRole("menuitem", { name: "Unify Drifts" });
     expect(arrow.getAttribute("aria-expanded")).toBe("true");
   });
 
@@ -890,7 +890,7 @@ describe("The Done column", () => {
     expect(screen.getByRole("button", { name: "Collapse Done column" })).not.toBeNull();
   });
 
-  test("the card has the dot, the number, the Proposal tag with its tooltip, the end time and the references, and no button but its title and chips", () => {
+  test("the card has the dot, the number, the Proposal tag with its tooltip and the end time, and no button but its title: its references are not on the card", () => {
     const calls = page(snapshot({ tasks: [doneView({ proposal: "prop1", proposalTag: { text: "Refunds", proposal: "prop1", title: "Refunds Proposal" }, refs: ["order/Paid"], created: "2026-10-01T10:00:00.000Z" })] }));
     open();
     const card = within(column()).getByRole("article", { name: "Task T3: Finished one" });
@@ -900,7 +900,7 @@ describe("The Done column", () => {
     const time = card.querySelector("time") as HTMLElement;
     expect(time.textContent).toMatch(/^\d{2}:\d{2}/);
     expect(time.getAttribute("title")).toBe(new Date(finishedToday).toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" }));
-    expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(["Finished one", "order/Paid"]);
+    expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(["Finished one"]);
     expect(card.className).not.toContain("board-working");
     expect(within(card).queryByRole("button", { name: /Run|View|Open/ })).toBeNull();
     void calls;
@@ -922,7 +922,7 @@ describe("The Done column", () => {
     open();
     const card = within(column()).getByRole("article", { name: "Task T3: Finished one" });
     expect(card.className).toContain("cursor-pointer");
-    fireEvent.click(within(card).getByRole("button", { name: "order/Paid" }));
+    expect(within(card).queryByRole("button", { name: "order/Paid" })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(card);
     const dialog = screen.getByRole("dialog");

@@ -104,6 +104,8 @@ type FileUri = { scheme: string; fsPath: string };
 const requirementEvents = { create: [] as Listener<FileUri>[], change: [] as Listener<FileUri>[], delete: [] as Listener<FileUri>[] };
 const errorMessages: string[] = [];
 const warningMessages: string[] = [];
+/** The answer to the whole-System scan dialog; undefined is Cancel, Esc or a closed dialog. */
+let scanAnswer: string | undefined = "Scan";
 /** The answers to the offer to initialize a project, in the order the offers were shown. */
 const answerOffer: Array<(choice: string | undefined) => void> = [];
 let panelsCreated = 0;
@@ -153,7 +155,7 @@ mock.module("vscode", () => ({
     showErrorMessage: (message: string) => void errorMessages.push(message),
     showQuickPick: async (items: { label: string; description?: string }[], options: { title?: string }) => pick(items, options),
     showInputBox: async () => typeIn(),
-    showWarningMessage: (message: string) => void warningMessages.push(message),
+    showWarningMessage: (message: string) => (message === "Scan the whole System?" ? Promise.resolve(scanAnswer) : void warningMessages.push(message)),
     showInformationMessage: () => {
       const offer = Promise.withResolvers<string | undefined>();
       answerOffer.push(offer.resolve);
@@ -297,7 +299,7 @@ describe("taken Tasks and the agent terminals", () => {
     }
   });
 
-  test("a whole-System scan from the Scan command remembers its launch instant as the button does; a Feature scan does not", async () => {
+  test("a whole-System scan from the Scan command remembers its launch instant as the button does; Cancel at its dialog remembers nothing; a Feature scan does not", async () => {
     // Dynamic: Controller must load after mock.module replaced "vscode".
     const { Controller } = await import("../extension/src/host/controller");
     const { watchAgentTerminal } = await import("../extension/src/host/agent");
@@ -321,6 +323,11 @@ describe("taken Tasks and the agent terminals", () => {
       rmSync(join(root, ".trama/last-scan"), { recursive: true, force: true });
       await launch.launchAction(p, { kind: "scan", feature: "checkout" });
       expect(existsSync(remembered)).toBe(false);
+      rmSync(join(root, ".trama/last-scan"), { recursive: true, force: true });
+      scanAnswer = undefined;
+      await launch.launchAction(p, { kind: "scan" });
+      expect(existsSync(remembered)).toBe(false);
+      scanAnswer = "Scan";
     } finally {
       watching.dispose();
       controller.dispose();
@@ -429,45 +436,7 @@ describe("the identity of an agent terminal", () => {
   });
 });
 
-describe("Quick Task", () => {
-  test("with omp a bare Quick terminal takes the focus, has no hook or prompt, and its ghost ends with the command and with the terminal", async () => {
-    const { openQuickTask, watchAgentTerminal } = await import("../extension/src/host/agent");
-    watchAgentTerminal();
-    const p = projectAt(dir);
-    withdrawAll(p);
-    const saved = { ...settingValues };
-    // Dynamic: the module must load after mock.module replaced "vscode".
-    const { localProjectJobs } = await import("../extension/src/host/drift-resolution");
-    const jobsBefore = localProjectJobs(dir).length;
-    Object.assign(settingValues, { advisor: true, language: "it", advisorScanner: true, ignoreInstructionFiles: true, scan: "slow-model", execution: "  fast  " });
-    try {
-      await openQuickTask(dir);
-      const terminal = terminals.at(-1) as FakeTerminal;
-      const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
-      expect(created.at(-1)).toMatchObject({ name: "Quick", cwd: dir });
-      expect(environments.at(-1)).toMatchObject({ TRAMA_AGENT: "1", TRAMA_TERMINAL: id });
-      expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_ADVISOR_SCANNER");
-      expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_JOB");
-      expect(terminal.line).toBe("'omp' --model 'fast'");
-      expect(terminal.shown).toEqual([false]);
-      expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["work", "Quick", id]]);
-      listeners.end.forEach((fn) => fn(shell(terminal)));
-      expect(listAnnouncements(p)).toEqual([]);
-      expect(localProjectJobs(dir)).toHaveLength(jobsBefore);
-
-      settingValues.execution = "";
-      await openQuickTask(dir);
-      const second = terminals.at(-1) as FakeTerminal;
-      expect(second.line).toBe("'omp'");
-      expect(listAnnouncements(p)).toHaveLength(1);
-      listeners.close.forEach((fn) => fn(second));
-      expect(listAnnouncements(p)).toEqual([]);
-    } finally {
-      for (const key of Object.keys(settingValues)) delete settingValues[key];
-      Object.assign(settingValues, saved);
-    }
-  });
-
+describe("Install omp", () => {
   test("Install omp opens a bare terminal in the home folder with the official installer, and the end of the command or the terminal tells it finished", async () => {
     const { installOmp, INSTALL_OMP_COMMAND, watchAgentTerminal } = await import("../extension/src/host/agent");
     const watching = watchAgentTerminal();
@@ -528,59 +497,6 @@ describe("Quick Task", () => {
     } finally {
       setUpdateStore(undefined);
       watching.dispose();
-    }
-  });
-
-  test("in the editor tab the terminal opens with the focus", async () => {
-    const { openQuickTask, watchAgentTerminal } = await import("../extension/src/host/agent");
-    watchAgentTerminal();
-    inspected["terminalLocation"] = { globalValue: "editor" };
-    try {
-      await openQuickTask(dir);
-      expect(created.at(-1)?.location).toEqual({ viewColumn: 1, preserveFocus: false });
-      expect((terminals.at(-1) as FakeTerminal).shown).toEqual([false]);
-    } finally {
-      delete inspected["terminalLocation"];
-      withdrawAll(projectAt(dir));
-    }
-  });
-
-  test("a `cursor` value left in trama.agent still opens the Quick terminal: no composer command, no clipboard, no message", async () => {
-    const { openQuickTask } = await import("../extension/src/host/agent");
-    const savedAgent = settingValues["agent"];
-    const before = { calls: editorCalls.length, terminals: terminals.length, clipboard: clipboard.length, errors: errorMessages.length };
-    settingValues["agent"] = "cursor";
-    editor.appName = "Cursor";
-    try {
-      await openQuickTask(dir);
-      expect(terminals).toHaveLength(before.terminals + 1);
-      expect(created.at(-1)).toMatchObject({ name: "Quick", cwd: dir });
-      expect((terminals.at(-1) as FakeTerminal).line).toMatch(/^'?omp'?$/);
-      expect(editorCalls).toHaveLength(before.calls);
-      expect(clipboard).toHaveLength(before.clipboard);
-      expect(errorMessages).toHaveLength(before.errors);
-    } finally {
-      editor.appName = "Visual Studio Code";
-      settingValues["agent"] = savedAgent;
-      withdrawAll(projectAt(dir));
-    }
-  });
-  test("the Quick terminal runs the configured omp program, quoted, with the options it had", async () => {
-    const { openQuickTask } = await import("../extension/src/host/agent");
-    const saved = { ...settingValues };
-    settingValues["execution"] = "fast";
-    inspected["ompPath"] = { globalValue: "  /opt/my omp/omp  " };
-    try {
-      await openQuickTask(dir);
-      expect((terminals.at(-1) as FakeTerminal).line).toBe("'/opt/my omp/omp' --model 'fast'");
-      inspected["ompPath"] = { workspaceValue: "/tmp/evil/omp" };
-      await openQuickTask(dir);
-      expect((terminals.at(-1) as FakeTerminal).line).toBe("'omp' --model 'fast'");
-    } finally {
-      delete inspected["ompPath"];
-      for (const key of Object.keys(settingValues)) delete settingValues[key];
-      Object.assign(settingValues, saved);
-      withdrawAll(projectAt(dir));
     }
   });
 });
@@ -2329,6 +2245,24 @@ describe("Ask more", () => {
       tearDown(root);
     }
   });
+
+  test("in the editor tab the Ask terminal opens with the focus", async () => {
+    const { openAskMore, watchAgentTerminal } = await import("../extension/src/host/agent");
+    watchAgentTerminal();
+    inspected["terminalLocation"] = { globalValue: "editor" };
+    const root = setUp();
+    const p = projectAt(root);
+    withdrawAll(p);
+    try {
+      await openAskMore(root, "Ask T3", "Ask more about the Task.");
+      expect(created.at(-1)?.location).toEqual({ viewColumn: 1, preserveFocus: false });
+      expect((terminals.at(-1) as FakeTerminal).shown).toEqual([false]);
+    } finally {
+      delete inspected["terminalLocation"];
+      withdrawAll(p);
+      tearDown(root);
+    }
+  });
 });
 
 describe("omp Chat conversations in place of terminals", () => {
@@ -2389,6 +2323,15 @@ describe("omp Chat conversations in place of terminals", () => {
           close: (id) => void closedTabs.push(id),
           onStopRequested: () => ({ dispose() {} }),
           onCloseRequested: () => ({ dispose() {} }),
+          showGeneral() {},
+          setGeneralSession() {},
+          generalStatus() {},
+          generalCleared() {},
+          removeGeneral() {},
+          returnToField() {},
+          onClearGeneralRequested: () => ({ dispose() {} }),
+          onInstallOmpRequested: () => ({ dispose() {} }),
+          onGeneralMessage: () => ({ dispose() {} }),
         },
       },
       { get: (key) => saved.get(key), update: async (key, value) => void saved.set(key, value) },
@@ -2521,48 +2464,6 @@ describe("omp Chat conversations in place of terminals", () => {
     });
   });
 
-  test("Quick Task opens a bare conversation on the execution model with the focus, no hook and no first message, announced as work", async () => {
-    await withOmpChat(async () => {
-      const { openQuickTask, watchAgentTerminal } = await import("../extension/src/host/agent");
-      watchAgentTerminal();
-      const p = projectAt(dir);
-      withdrawAll(p);
-      const terminalCount = terminals.length;
-      settingValues["execution"] = " fast ";
-      try {
-        await openQuickTask(dir);
-        expect(terminals).toHaveLength(terminalCount);
-        const id = processes[0]?.launch.env["TRAMA_TERMINAL"] as string;
-        expect(processes[0]?.launch.args).toEqual(["--model", "fast", "acp"]);
-        expect(processes[0]?.first).toBeUndefined();
-        expect(Object.keys(processes[0]?.launch.env ?? {})).not.toContain("TRAMA_JOB");
-        expect(tabs).toEqual([{ id, name: "Quick", focus: true }]);
-        expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["work", "Quick", id]]);
-        // Close the tab's process: the work card ends with the conversation.
-      } finally {
-        delete settingValues["execution"];
-      }
-    });
-  });
-
-  test("a Quick Task whose omp does not start opens its terminal with the one card", async () => {
-    await withOmpChat(async () => {
-      const { openQuickTask, watchAgentTerminal } = await import("../extension/src/host/agent");
-      watchAgentTerminal();
-      const p = projectAt(dir);
-      withdrawAll(p);
-      failStart = "omp exited with code 1";
-      const terminalCount = terminals.length;
-      await openQuickTask(dir);
-      expect(warningMessages).toEqual(["Trama: omp Chat could not start omp (omp exited with code 1); the job runs in a terminal."]);
-      expect(terminals).toHaveLength(terminalCount + 1);
-      const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
-      expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["work", "Quick", id]]);
-      listeners.close.forEach((fn) => fn(terminals.at(-1) as FakeTerminal));
-      expect(listAnnouncements(p)).toEqual([]);
-    });
-  });
-
   test("Ask more opens a conversation with the fixed instructions as the attached file and the part as the first message", async () => {
     await withOmpChat(async () => {
       const { openAskMore, watchAgentTerminal } = await import("../extension/src/host/agent");
@@ -2588,11 +2489,19 @@ describe("omp Chat conversations in place of terminals", () => {
         inspected["ompChatApproval"] = { globalValue: "yolo" };
         await openAskMore(root, "Ask T6", "Ask more.");
         expect(processes[3]?.launch.args).toEqual(["--model", "opus", "acp", "--yolo"]);
+        // `trama.ompChatIntentTracing` is read the same way: PI_INTENT_TRACING=0 only for the user value false, 1 for anything else or none.
+        inspected["ompChatIntentTracing"] = { globalValue: false };
+        await openAskMore(root, "Ask T7", "Ask more.");
+        expect(processes[4]?.launch.env["PI_INTENT_TRACING"]).toBe("0");
+        inspected["ompChatIntentTracing"] = { workspaceValue: false };
+        await openAskMore(root, "Ask T8", "Ask more.");
+        expect(processes[5]?.launch.env["PI_INTENT_TRACING"]).toBe("1");
         expect(processes[0]?.launch.cwd).toBe(root);
         expect(processes[0]?.first).toEqual({ text: "Ask more about the Task.\nText:\nLaunch it.", attachment: join(extensionPath, "media", "ask-more.md") });
         expect(tabs[0]).toMatchObject({ name: "Ask T3", focus: true });
       } finally {
         delete inspected["ompChatApproval"];
+        delete inspected["ompChatIntentTracing"];
         extensionPath = "";
         delete settingValues["analysis"];
         withdrawAll(projectAt(root));
@@ -2603,8 +2512,8 @@ describe("omp Chat conversations in place of terminals", () => {
 });
 
 describe("omp before a launch", () => {
-  test("without omp no launch creates a terminal, a job or a ghost: the instruction, Quick Task and Ask more all stop", async () => {
-    const { launchAgent, openAskMore, openQuickTask } = await import("../extension/src/host/agent");
+  test("without omp no launch creates a terminal, a job or a ghost: the instruction and Ask more both stop", async () => {
+    const { launchAgent, openAskMore } = await import("../extension/src/host/agent");
     const { localProjectJobs } = await import("../extension/src/host/drift-resolution");
     const p = projectAt(dir);
     withdrawAll(p);
@@ -2618,7 +2527,6 @@ describe("omp before a launch", () => {
     writeFileSync(join(extensionPath, "media", "ask-more.md"), "Trama: Ask more\n");
     try {
       expect(await launchAgent(dir, "Use the trama-scan skill.", "Scan", { kind: "work", title: "Scan" }, () => true, "scan", () => void (sent = true))).toBeUndefined();
-      await openQuickTask(dir);
       await openAskMore(dir, "Ask T3", "Ask more about the Task.");
       expect(created.length).toBe(terminalsBefore);
       expect(localProjectJobs(dir)).toHaveLength(jobsBefore);

@@ -39,11 +39,11 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Note dei ghost** (`ghost-notes.md`): Usa quando implementi le note che l'agente dichiara sui ghost: a chi vanno, lunghezza, quante se ne tengono, quando le skill le scrivono. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
 - **Regole dei file di istruzioni** (`instruction-files.md`): Usa quando implementi l'esclusione dei file di istruzioni degli agenti nei lanci di omp. Sections: `agent-terminal/Agent running`.
 - **Regole di agenti e modelli** (`models.md`): Usa per scelta dell'agente, ruoli dei modelli e istruzioni all'agente. Sections: `agent-launching`.
+- **Regole della conversazione General** (`omp-chat-general.md`): Usa quando implementi le regole della conversazione General di omp Chat: quando c'è, avvio, pulizia, errori, ripresa e ciò che non blocca. Sections: `omp-chat-general`.
 - **omp Chat** (`omp-chat.md`): Usa quando implementi quando omp Chat si usa, come nascono, finiscono e riprendono le sue conversazioni e quali server MCP riceve omp. Sections: `omp-chat`, `omp-chat-conversation`.
 - **Installazione di omp** (`omp-install.md`): Usa quando implementi Install omp e il terminale che installa omp. Sections: `developer.INSTALL_OMP`.
 - **Regole del progetto** (`project.md`): Usa quando implementi init, aggiornamento delle skill e skill dei Requisiti. Sections: `project`.
 - **Regole dei round di domande** (`questions-notices.md`): Usa quando implementi i round di domande. Sections: `question-round`.
-- **Quick Task rules** (`quick-task.md`): Usa quando implementi cosa apre Add Quick Task, con quale modello, cosa segue Trama e cosa non blocca. Sections: `developer.OPEN_QUICK_TASK`.
 - **Regole delle richieste di design** (`requests.md`): Usa per invio, contenuto e consumo delle richieste di design scritte. Sections: `design-request`.
 - **Rework with feedback** (`rework.md`): Usa quando implementi Rework with feedback su una Proposal o su un Drift: condizioni, rifiuto con feedback, istruzioni all'agente, legame `reworks` e comportamento delle skill che rifanno. Sections: `developer.REWORK_PROPOSAL`, `developer.REWORK_DRIFT`.
 - **Regole di scan, confronti e Advisor Scanner** (`scans.md`): Usa per scan, confronto delle Machine e Advisor Scanner. Sections: `work`.

@@ -54,7 +54,7 @@ export const SETTING_GROUPS: readonly { title: string; keys: readonly string[] }
   { title: "omp", keys: ["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"] },
   { title: "Models", keys: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"] },
   { title: "Project", keys: ["trama.skillsDir"] },
-  { title: "Features", keys: ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat", "trama.ompChatApproval"] },
+  { title: "Features", keys: ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"] },
 ];
 
 /** Titles that the key does not give: the Settings tab and the wizard show the same one. */
@@ -62,6 +62,7 @@ const EXPLICIT_TITLES: Readonly<Record<string, string>> = {
   "trama.subagentsContextSharing": "Sub-agents Context Sharing",
   "trama.ompChat": "omp Chat",
   "trama.ompChatApproval": "omp Chat Approval",
+  "trama.ompChatIntentTracing": "omp Chat Intent Tracing",
 };
 
 /** The three model roles: the Settings tab suggests omp's model names for them. */

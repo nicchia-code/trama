@@ -23,7 +23,7 @@ export const STEP_KEYS: Readonly<Partial<Record<WizardStep, readonly string[]>>>
   omp: ["trama.ompPath", "trama.terminalLocation", IGNORE_INSTRUCTION_FILES_KEY],
   Models: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"],
   Project: ["trama.skillsDir"],
-  Advanced: ["trama.theme", "trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat", "trama.ompChatApproval"],
+  Advanced: ["trama.theme", "trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"],
 };
 
 export const STEP_SENTENCES: Readonly<Record<WizardStep, string>> = {

@@ -40,8 +40,8 @@ export function ompOptions(scanning: boolean, models: { model: string; scan: str
   return [...(ompHook === undefined ? [] : [["--hook", ompHook]]), ...(advisor ? [["--advisor"]] : []), ...(config === undefined ? [] : [["--config", config]]), ...option("--model", models.model), ...(scanning ? option("--slow", models.scan) : [])];
 }
 
-/** The options of a Quick Task or an Ask more: `--model <m>` only when the role has a model; no hook, overlay, `--slow` or `--advisor`. */
-export const quickOptions = (model: string): string[][] => (model === "" ? [] : [["--model", model]]);
+/** The options of an Ask more conversation or terminal: `--model <m>` only when the analysis role has a model; no hook, overlay, `--slow` or `--advisor`. */
+export const askMoreOptions = (model: string): string[][] => (model === "" ? [] : [["--model", model]]);
 
 /** The approval of an omp Chat conversation: `ask` (omp asks permission, the default) or `yolo`. */
 export type OmpApproval = "ask" | "yolo";
@@ -61,8 +61,8 @@ export function agentTemplate(omp: string, scanning: boolean, models: { model: s
   return [...words, ...(attachment === undefined ? [] : [quote(family, `@${attachment}`)]), "{prompt}"].join(" ");
 }
 
-/** The command line of a Quick Task's terminal: `omp` (the program Trama runs, quoted), with `--model <m>` only when the execution role has a model; no hook, overlay, `--slow`, `--advisor` or prompt. */
-export const quickCommandLine = (omp: string, model: string, family: ShellFamily): string => [quoteProgram(family, omp), ...quoted(family, quickOptions(model))].join(" ");
+/** The command line of an Ask more terminal: `omp` (the program Trama runs, quoted), with `--model <m>` only when the analysis role has a model; no hook, overlay, `--slow`, `--advisor` or prompt. */
+export const askMoreCommandLine = (omp: string, model: string, family: ShellFamily): string => [quoteProgram(family, omp), ...quoted(family, askMoreOptions(model))].join(" ");
 
 /** What an omp launch overlay holds: the advisor role and advisors of a Run with the Advisor Scanner on, and the instruction files omp must not read. */
 export interface LaunchOverlay {

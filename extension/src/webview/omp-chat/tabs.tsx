@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Eraser, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { tabKeyAction } from "../../../../src/core/omp-chat-view";
 import type { ConversationItem } from "../../omp-chat-protocol";
@@ -24,7 +24,7 @@ function Dot({ state }: { state: ConversationItem["state"] }) {
  * The row of tabs, one per conversation in order of opening. It is a `tablist`: left and right move between the tabs, `Delete` closes one like its `X`. With more
  * tabs than fit the row scrolls sideways without a visible bar, and the chosen tab stays in view.
  */
-export function ConversationTabs({ items, selected, onSelect, onClose }: { items: ConversationItem[]; selected: string | undefined; onSelect: (id: string) => void; onClose: (id: string) => void }) {
+export function ConversationTabs({ items, selected, generalKept, onSelect, onClose }: { items: ConversationItem[]; selected: string | undefined; generalKept: boolean; onSelect: (id: string) => void; onClose: (id: string) => void }) {
   const tabs = useRef(new Map<string, HTMLButtonElement>());
   const order = items.map((item) => item.id);
   useEffect(() => {
@@ -35,6 +35,8 @@ export function ConversationTabs({ items, selected, onSelect, onClose }: { items
     <div role="tablist" aria-label="Conversations" aria-orientation="horizontal" className="flex shrink-0 overflow-x-auto border-b [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {items.map((item) => {
         const isSelected = item.id === selected;
+        const clears = item.general === true && !generalKept;
+        const label = clears ? "Clear General" : `Close ${item.name}`;
         return (
           <div
             key={item.id}
@@ -42,6 +44,7 @@ export function ConversationTabs({ items, selected, onSelect, onClose }: { items
             className={cn(
               "flex shrink-0 items-center border-b-2 pr-0.5 pl-2.5 transition-colors duration-150 motion-reduce:transition-none",
               isSelected ? "border-ring bg-background text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+              item.general === true && "sticky left-0 z-10 bg-background",
             )}
           >
             <button
@@ -74,14 +77,14 @@ export function ConversationTabs({ items, selected, onSelect, onClose }: { items
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  aria-label={`Close ${item.name}`}
+                  aria-label={label}
                   onClick={() => onClose(item.id)}
                   className="ml-1 flex size-5 items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <X className="size-3.5" />
+                  {clears ? <Eraser className="size-3.5" /> : <X className="size-3.5" />}
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{`Close ${item.name}`}</TooltipContent>
+              <TooltipContent>{label}</TooltipContent>
             </Tooltip>
           </div>
         );

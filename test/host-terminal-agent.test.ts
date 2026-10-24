@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { agentCommandLine } from "../extension/src/host/quote";
-import { agentTemplate, launchOverlay, ompArguments, quickCommandLine, roleOf } from "../extension/src/host/terminal-agent";
+import { agentTemplate, askMoreCommandLine, launchOverlay, ompArguments, roleOf } from "../extension/src/host/terminal-agent";
 
 const none = { model: "", scan: "" };
 const all = { model: "opus", scan: "it's" };
@@ -22,9 +22,9 @@ test("the command starts with the omp program Trama runs, quoted for the shell l
   expect(agentTemplate("C:\\Program Files\\omp.exe", false, none, "powershell")).toBe("& 'C:\\Program Files\\omp.exe' {prompt}");
   expect(agentTemplate("C:\\Program Files\\omp.exe", false, none, "powershell5")).toBe("& 'C:\\Program Files\\omp.exe' {prompt}");
   expect(agentTemplate("it's", false, none, "powershell")).toBe("& 'it''s' {prompt}");
-  expect(quickCommandLine("/opt/my omp/omp", "", "posix")).toBe("'/opt/my omp/omp'");
-  expect(quickCommandLine("/opt/my omp/omp", "fast", "posix")).toBe("'/opt/my omp/omp' --model 'fast'");
-  expect(quickCommandLine("omp", "fast", "powershell5")).toBe(`& 'omp' --model '"fast"'`);
+  expect(askMoreCommandLine("/opt/my omp/omp", "", "posix")).toBe("'/opt/my omp/omp'");
+  expect(askMoreCommandLine("/opt/my omp/omp", "fast", "posix")).toBe("'/opt/my omp/omp' --model 'fast'");
+  expect(askMoreCommandLine("omp", "fast", "powershell5")).toBe(`& 'omp' --model '"fast"'`);
 });
 
 test("omp's idle hook is attached to its command", () => {

@@ -30,11 +30,10 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Get Started e wizard di setup** (`get-started.md`): Usa quando mostri Get Started, il wizard di setup, Guided setup, Start from Scratch, Import from Code o il Diagramma con il Modello vuoto. Sections: `panel/Get Started`, `panel/Diagram`, `project`, `setup-wizard`.
 - **Ghost e avvisi** (`ghosts.md`): Usa quando mostri i ghost degli annunci e i loro avvisi nella Board. Sections: `announcement`.
 - **Interfaccia di History e Done** (`history.md`): Usa quando mostri la vista History e le sue voci, la colonna Done della Board e il suo pulsante Clear. Sections: `voce-history`, `panel/History`, `task/Done`, `developer.CLEAR_DONE`.
-- **Interfaccia del menu laterale** (`menu-laterale.md`): Usa quando costruisci o cambi il menu laterale di Trama: icona nella barra delle attività, voci, Scan System e badge. Sections: `menu-laterale`.
-- **omp Chat** (`omp-chat.md`): Usa quando costruisci o cambi la vista omp Chat della barra laterale secondaria e le sue conversazioni. Sections: `omp-chat`, `omp-chat-conversation`.
+- **Interfaccia del menu laterale** (`menu-laterale.md`): Usa quando costruisci o cambi il menu laterale di Trama: icona nella barra delle attività, voci, Scan System, badge e modalità solo icone. Sections: `menu-laterale`.
+- **omp Chat** (`omp-chat.md`): Usa quando costruisci o cambi la vista omp Chat della barra laterale secondaria, la conversazione General e le conversazioni dei lavori. Sections: `omp-chat`, `omp-chat-general`, `omp-chat-conversation`.
 - **Interfaccia generale e pannello** (`panel.md`): Usa sempre quando lavori sull'interfaccia: regole generali, pannello, Board e Requisiti. Sections: `General`, `panel`, `panel/Requirements`.
 - **Interfaccia dei round di domande** (`questions-notices.md`): Usa quando mostri i round di domande. Sections: `question-round`.
-- **Quick Task interface** (`quick-task.md`): Usa quando costruisci o cambi il pulsante diviso + Add Work Item, il suo menu (Unify Drifts e Add Quick Task) e ciò che il Quick Task mostra. Sections: `developer.OPEN_QUICK_TASK`.
 - **Rework with feedback** (`rework.md`): Usa quando costruisci o cambi la freccetta di Reject e di Dismiss Drift, il suo menu Rework with feedback, la casella del feedback e la sua conferma. Sections: `developer.REWORK_PROPOSAL`, `developer.REWORK_DRIFT`.
 - **Schede Settings e Specs** (`settings-specs.md`): Usa quando costruisci o cambi le schede Settings e Specs del pannello. Sections: `panel/Settings`, `panel/Specs`.
 - **Task progress interface** (`task-progress.md`): Use when showing the percentage the agent declared on a Task, on the Board or in the command line. Sections: `task/Taken by the agent`.

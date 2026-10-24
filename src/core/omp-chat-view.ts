@@ -6,17 +6,31 @@
 /** The States of the `omp-chat` Machine. */
 export type ChatViewState = "hidden" | "empty" | "with-conversations";
 
+/** The id of General's tab: the window's one conversation that is not a job's. */
+export const GENERAL_ID = "general";
+
 /**
- * `omp-chat` State: `inUse` is omp Chat on (not turned off in the user settings, `rules#omp-chat`); `conversations` the window's conversations, open
- * or saved and waiting to be resumed. Open conversations keep the view after omp Chat is turned off, until the last one closes.
+ * `omp-chat` State: `inUse` is omp Chat on (not turned off in the user settings, `rules#omp-chat`); `folder` whether the window has a folder open; `general`
+ * whether General is in the view; `conversations` the job conversations, open or saved and waiting to be resumed. Empty exists only in a window without a folder,
+ * since there General is what the view shows.
  */
-export function chatViewState(facts: { inUse: boolean; conversations: number }): ChatViewState {
-  if (facts.conversations > 0) return "with-conversations";
-  return facts.inUse ? "empty" : "hidden";
+export interface ChatViewFacts {
+  inUse: boolean;
+  folder: boolean;
+  general: boolean;
+  conversations: number;
 }
 
-/** The value of the context key `trama.ompChatVisible`: the view is there in Empty and With conversations, not in Hidden. */
-export const ompChatVisible = (facts: { inUse: boolean; conversations: number }): boolean => chatViewState(facts) !== "hidden";
+export function chatViewState(facts: ChatViewFacts): ChatViewState {
+  if (facts.general || facts.conversations > 0) return "with-conversations";
+  return facts.inUse && !facts.folder ? "empty" : "hidden";
+}
+
+/**
+ * The value of the context key `trama.ompChatVisible`: true while omp Chat is in use, or while the window has General or a conversation open. Turning omp Chat
+ * off keeps the view while a conversation is open.
+ */
+export const ompChatVisible = (facts: ChatViewFacts): boolean => facts.inUse || facts.general || facts.conversations > 0;
 
 /**
  * The tab shown after `closed` leaves `order` (the ids in order of opening): `selected` when it is still there, otherwise the neighbour that now sits where the

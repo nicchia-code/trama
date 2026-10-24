@@ -1,0 +1,17 @@
+---
+technical: false
+refs:
+  - agent-launching
+---
+# Raffinamento nella skill design
+
+Con Auto-update Stale Proposals, `Approve` su una Proposal ordinaria obsoleta fa lanciare da Trama l'agente di design, con il ruolo di analisi (`trama.analysis`), perché la adatti al Modello e ai Requisiti di adesso senza rifare l'intervista; poi Trama la approva se non è bloccata. L'istruzione che l'host manda (Task "Coda dei raffinamenti") è: "Use the trama-design skill to refine the stale Proposal <id> on the current Model and Requirements, as the \"Refining a stale Proposal\" section says." Questo Task scrive in `skills/trama-design/SKILL.md` la sezione breve `## Refining a stale Proposal`, accanto a `## When a Proposal comes back` e `## Reworking a rejected Proposal`, in inglese come il resto della skill. Si appoggia a `trama proposal edit <id>` con `rebase: true` e al campo `refining`, che sono di un altro Task di questa Proposal.
+
+La sezione dice all'agente, con questa istruzione:
+- Lavora sulla stessa Proposal, che tiene identità, numero breve, posto in Backlog, etichetta, modello scelto, immagini dei Task e le Proposal che la richiedono. La legge con `trama proposal show <id>` (corpo con le decisioni, Task, file obsoleti e differenze rispetto ai file di adesso), poi legge soltanto il Modello e i Requisiti di adesso dei file obsoleti e i Drift aperti che nominano elementi o sezioni che la Proposal tocca. Non legge il codice, non fa lo scan leggero dopo la consegna (l'eccezione va detta anche dove gli `## Steps` lo chiedono), non archivia Task né Drift fuori dalla Proposal e non annuncia schede: l'annuncio lo fa Trama.
+- Le decisioni del corpo valgono come prese: il developer ha già risposto nel design. Fa al più un round di `trama question new`, solo quando il Modello di adesso contraddice una di quelle decisioni e l'agente non può scegliere da sé; il resto lo decide e lo scrive nel corpo come assunzione.
+- Quando il Modello di adesso contiene già tutta la modifica non riallinea nulla e fa un round di una sola domanda, che spiega quale Proposal approvata contiene già la modifica, con due opzioni: `Remove` («Reject this Proposal: the current Model already has its change.») e `Keep` («Leave it as it is, to refine; nothing changes.»), raccomandata `Keep`. Con `Remove` la rifiuta con `trama proposal move <id> rejected` e il feedback `Already in the current Model.`: è la decisione del developer, presa nel round, ed è l'unico caso in cui l'agente rifiuta una Proposal. Con `Keep`, o con il round saltato o perso, si ferma senza cambiare nulla.
+- Altrimenti riallinea con `trama proposal edit <id>` e `rebase: true` (che la riporta a Draft e scrive `refining: true`), poi riscrive per intero ogni file che tocca come il file di adesso più la modifica della Proposal, perché faccia la stessa modifica sul Modello di adesso, senza mai togliere ciò che altre Proposal approvate hanno cambiato; aggiorna i Task e `## Already present`, aggiunge al corpo una riga per ciò che il raffinamento ha cambiato, e la consegna con `trama proposal move <id> open`. Non la approva mai da sé: la approva Trama alla fine del lavoro.
+- Su una Draft rimasta a metà di un raffinamento (con `refining: true`) riprende da lei: rilegge i suoi file, riallinea di nuovo se nel frattempo è obsoleta e continua.
+
+Quando è fatto, la skill installata nei progetti (rigenerata dalle sorgenti in `skills/`) ha la sezione, e l'istruzione dell'host la trova con quel titolo esatto.

@@ -1,4 +1,4 @@
-import { chatViewState, tabAfterClose } from "../../../../src/core/omp-chat-view";
+import { chatViewState, GENERAL_ID, ompChatVisible, tabAfterClose } from "../../../../src/core/omp-chat-view";
 import type { ConversationItem, ConversationRunState, FirstMessage, ToChatWebview } from "../../omp-chat-protocol";
 import type { ThemeSetting } from "../../webview/theme";
 import { parseChatMessage } from "./messages";
@@ -23,7 +23,7 @@ export interface ChatSurface {
 interface Tab {
   id: string;
   name: string;
-  session: OmpSessionPort;
+  session: OmpSessionPort | undefined;
   /** The agent is in a turn. */
   inTurn: boolean;
   /** The conversation works for Trama (`setWorking`). */
@@ -36,6 +36,9 @@ interface Tab {
   subscriptions: Disposable[];
 }
 
+/** General's status as the webview draws it (`generalStatus`). */
+type GeneralStatus = Omit<Extract<ToChatWebview, { type: "generalStatus" }>, "type">;
+
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 const promptOf = (prompt: OmpPrompt, surface: ChatSurface): FirstMessage => {
@@ -45,8 +48,8 @@ const promptOf = (prompt: OmpPrompt, surface: ChatSurface): FirstMessage => {
 };
 
 /**
- * The omp Chat view of one window (`omp-chat` Machine): the tabs of its conversations, the one in view, the context key that shows or hides it and the
- * messages with the webview. It implements `ChatViewPort` for the conversations (`conversations.ts`).
+ * The omp Chat view of one window (`omp-chat` Machine): the tabs of its conversations, General's first when it is there, the one in view, the context key
+ * that shows or hides it and the messages with the webview. It implements `ChatViewPort` for the conversations (`conversations.ts`) and for General.
  */
 export class ChatViewModel implements ChatViewPort {
   private readonly tabs: Tab[] = [];
@@ -55,27 +58,32 @@ export class ChatViewModel implements ChatViewPort {
   private ready = false;
   private readonly stopListeners = new Set<(id: string) => void>();
   private readonly closeListeners = new Set<(id: string) => void>();
+  private lastGeneralStatus: GeneralStatus | undefined;
+  private readonly clearListeners = new Set<() => void>();
+  private readonly installListeners = new Set<() => void>();
+  private readonly generalListeners = new Set<(text: string) => void>();
 
   /**
    * `inUse`: omp Chat on, not turned off in the user settings (read now). `pending`: the conversations the window has saved and waits to resume, by
-   * id (read now), which keep the view like open ones.
+   * id (read now), which keep the view like open ones. `folder`: whether the window has a folder open (read now); General lives only in such a window.
    */
   constructor(
     private readonly surface: ChatSurface,
     private readonly inUse: () => boolean,
     private readonly pending: () => readonly string[] = () => [],
+    private readonly folder: () => boolean = () => true,
   ) {
     this.refresh();
   }
 
   /** The state of the view now. */
   get state() {
-    return chatViewState({ inUse: this.inUse(), conversations: this.count() });
+    return chatViewState(this.facts());
   }
 
   /** `editor.SETTINGS_CHANGED`, or the end of a resume: the context key follows the settings and the conversations. */
   refresh(): void {
-    const visible = this.state !== "hidden";
+    const visible = ompChatVisible(this.facts());
     if (visible === this.visible) return;
     this.visible = visible;
     this.surface.setVisible(visible);
@@ -92,6 +100,7 @@ export class ChatViewModel implements ChatViewPort {
     this.surface.post({ type: "reset" });
     this.surface.post({ type: "theme", setting: this.surface.theme() });
     this.postConversations();
+    if (this.lastGeneralStatus !== undefined) this.surface.post({ type: "generalStatus", ...this.lastGeneralStatus });
     for (const tab of this.tabs) {
       this.surface.post({ type: "conversationStart", id: tab.id, focus: false, ...tab.start });
       this.subscribe(tab);
@@ -120,6 +129,60 @@ export class ChatViewModel implements ChatViewPort {
     this.subscribe(created);
   }
 
+  /** General comes to the view as its first tab; it takes the view only when none is in view. */
+  showGeneral(): void {
+    if (this.find(GENERAL_ID) !== undefined) return;
+    const general: Tab = { id: GENERAL_ID, name: "General", session: undefined, inTurn: false, working: false, forms: new Set(), permissions: new Map(), start: {}, subscriptions: [] };
+    this.tabs.unshift(general);
+    if (this.selected === undefined) this.selected = GENERAL_ID;
+    this.refresh();
+    this.postConversations();
+    if (this.ready) this.surface.post({ type: "conversationStart", id: GENERAL_ID, focus: false });
+  }
+
+  /** General's session, or none while its process starts or after it stopped; a session's history is replayed to the tab, as for any conversation. */
+  setGeneralSession(session: OmpSessionPort | undefined): void {
+    const tab = this.find(GENERAL_ID);
+    if (tab === undefined) return;
+    this.unsubscribe(tab);
+    tab.session = session;
+    tab.inTurn = session?.inTurn ?? false;
+    tab.permissions.clear();
+    this.postConversations();
+    if (session !== undefined) this.subscribe(tab);
+  }
+
+  /** General's process state, drawn in its tab; it stays until General leaves the view. */
+  generalStatus(status: GeneralStatus): void {
+    this.lastGeneralStatus = status;
+    if (this.ready) this.surface.post({ type: "generalStatus", ...status });
+  }
+
+  /** General's transcript was cleared: the forms still waiting are refused, and the tab is empty again. */
+  generalCleared(): void {
+    const tab = this.find(GENERAL_ID);
+    if (tab === undefined) return;
+    for (const requestId of tab.forms) tab.session?.answerForm(requestId, { action: "decline" });
+    tab.forms.clear();
+    tab.permissions.clear();
+    this.postConversations();
+    if (this.ready) this.surface.post({ type: "conversationCleared", id: GENERAL_ID });
+  }
+
+  /** A message the developer sent did not start: its text goes back into the field of the tab (General's too). An empty text sends nothing. */
+  returnToField(id: string, text: string): void {
+    if (text === "") return;
+    this.surface.post({ type: "returnToField", id, text });
+  }
+
+  /** General leaves the view. */
+  removeGeneral(): void {
+    const tab = this.find(GENERAL_ID);
+    if (tab === undefined) return;
+    this.lastGeneralStatus = undefined;
+    this.remove(tab);
+  }
+
   setWorking(id: string, working: boolean): void {
     const tab = this.find(id);
     if (tab === undefined || tab.working === working) return;
@@ -130,17 +193,7 @@ export class ChatViewModel implements ChatViewPort {
   close(id: string): void {
     const tab = this.find(id);
     if (tab === undefined) return;
-    // The forms still waiting are refused, so the agent does not wait for a developer who closed the conversation.
-    for (const requestId of tab.forms) tab.session.answerForm(requestId, { action: "decline" });
-    this.unsubscribe(tab);
-    this.selected = tabAfterClose(
-      this.tabs.map((each) => each.id),
-      id,
-      this.selected,
-    );
-    this.tabs.splice(this.tabs.indexOf(tab), 1);
-    this.postConversations();
-    this.refresh();
+    this.remove(tab);
   }
 
   onStopRequested(listener: (id: string) => void): Disposable {
@@ -151,6 +204,21 @@ export class ChatViewModel implements ChatViewPort {
   onCloseRequested(listener: (id: string) => void): Disposable {
     this.closeListeners.add(listener);
     return { dispose: () => void this.closeListeners.delete(listener) };
+  }
+
+  onClearGeneralRequested(listener: () => void): Disposable {
+    this.clearListeners.add(listener);
+    return { dispose: () => void this.clearListeners.delete(listener) };
+  }
+
+  onInstallOmpRequested(listener: () => void): Disposable {
+    this.installListeners.add(listener);
+    return { dispose: () => void this.installListeners.delete(listener) };
+  }
+
+  onGeneralMessage(listener: (text: string) => void): Disposable {
+    this.generalListeners.add(listener);
+    return { dispose: () => void this.generalListeners.delete(listener) };
   }
 
   /** A message from the webview: validated, and ignored when it does not fit the protocol. */
@@ -169,7 +237,11 @@ export class ChatViewModel implements ChatViewPort {
       case "sendMessage": {
         const tab = this.find(message.id);
         if (tab === undefined) return;
-        tab.session.sendPrompt({ text: message.text }).catch((err: unknown) => this.error(tab, messageOf(err)));
+        if (tab.id === GENERAL_ID) {
+          for (const listener of [...this.generalListeners]) listener(message.text);
+          return;
+        }
+        tab.session?.sendPrompt({ text: message.text }).catch((err: unknown) => this.error(tab, messageOf(err)));
         return;
       }
       case "stopAgent":
@@ -178,9 +250,15 @@ export class ChatViewModel implements ChatViewPort {
       case "closeConversation":
         if (this.find(message.id) !== undefined) for (const listener of [...this.closeListeners]) listener(message.id);
         return;
+      case "clearGeneral":
+        if (this.find(GENERAL_ID) !== undefined) for (const listener of [...this.clearListeners]) listener();
+        return;
+      case "installOmp":
+        if (this.find(GENERAL_ID) !== undefined) for (const listener of [...this.installListeners]) listener();
+        return;
       case "setModel": {
         const tab = this.find(message.id);
-        if (tab === undefined) return;
+        if (tab?.session === undefined) return;
         tab.session.setModel(message.model).then(
           () => void this.postModels(tab),
           (err: unknown) => this.error(tab, messageOf(err)),
@@ -190,7 +268,7 @@ export class ChatViewModel implements ChatViewPort {
       case "formAnswer": {
         const tab = this.find(message.id);
         if (tab === undefined || !tab.forms.delete(message.requestId)) return;
-        tab.session.answerForm(message.requestId, message.answer);
+        tab.session?.answerForm(message.requestId, message.answer);
         this.postConversations();
         return;
       }
@@ -199,7 +277,7 @@ export class ChatViewModel implements ChatViewPort {
         // An answer that is not one of the offered options is ignored and the request keeps waiting.
         if (tab === undefined || tab.permissions.get(message.requestId)?.includes(message.optionId) !== true) return;
         tab.permissions.delete(message.requestId);
-        tab.session.answerPermission(message.requestId, message.optionId);
+        tab.session?.answerPermission(message.requestId, message.optionId);
         this.postConversations();
         return;
       }
@@ -212,12 +290,32 @@ export class ChatViewModel implements ChatViewPort {
     }
   }
 
-  private count(): number {
-    return new Set([...this.tabs.map((tab) => tab.id), ...this.pending()]).size;
+  private facts() {
+    return {
+      inUse: this.inUse(),
+      folder: this.folder(),
+      general: this.find(GENERAL_ID) !== undefined,
+      conversations: new Set([...this.tabs.filter((tab) => tab.id !== GENERAL_ID).map((tab) => tab.id), ...this.pending()]).size,
+    };
   }
 
   private find(id: string): Tab | undefined {
     return this.tabs.find((tab) => tab.id === id);
+  }
+
+  /** Removes a tab: the forms still waiting are refused, and the tab in view is picked again. */
+  private remove(tab: Tab): void {
+    // The forms still waiting are refused, so the agent does not wait for a developer who closed the conversation.
+    for (const requestId of tab.forms) tab.session?.answerForm(requestId, { action: "decline" });
+    this.unsubscribe(tab);
+    this.selected = tabAfterClose(
+      this.tabs.map((each) => each.id),
+      tab.id,
+      this.selected,
+    );
+    this.tabs.splice(this.tabs.indexOf(tab), 1);
+    this.postConversations();
+    this.refresh();
   }
 
   private runState(tab: Tab): ConversationRunState {
@@ -228,7 +326,13 @@ export class ChatViewModel implements ChatViewPort {
 
   private postConversations(): void {
     if (!this.ready) return;
-    const items: ConversationItem[] = this.tabs.map((tab) => ({ id: tab.id, name: tab.name, state: this.runState(tab), ...(tab.model === undefined ? {} : { model: tab.model }) }));
+    const items: ConversationItem[] = this.tabs.map((tab) => ({
+      id: tab.id,
+      name: tab.name,
+      state: this.runState(tab),
+      ...(tab.model === undefined ? {} : { model: tab.model }),
+      ...(tab.id === GENERAL_ID ? { general: true as const } : {}),
+    }));
     this.surface.post({ type: "conversations", items, ...(this.selected === undefined ? {} : { selected: this.selected }) });
   }
 
@@ -237,6 +341,7 @@ export class ChatViewModel implements ChatViewPort {
   }
 
   private async postModels(tab: Tab): Promise<void> {
+    if (tab.session === undefined) return;
     try {
       const { available, current } = await tab.session.models();
       if (this.find(tab.id) !== tab) return;
@@ -254,6 +359,7 @@ export class ChatViewModel implements ChatViewPort {
     // The session replays the requests still waiting; the ones cancelled while the webview was gone are not there.
     tab.permissions.clear();
     const { session } = tab;
+    if (session === undefined) return;
     tab.inTurn = session.inTurn;
     tab.subscriptions = [
       session.onUpdate((update) => this.surface.post({ type: "conversationUpdate", id: tab.id, update })),

@@ -287,6 +287,12 @@
           "default": "ask",
           "scope": "application",
           "markdownDescription": "How omp approves commands in omp Chat. With `yolo`, omp runs every command without asking, even those it would ask about in the terminal."
+        },
+        "trama.ompChatIntentTracing": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "markdownDescription": "On: in omp Chat the agent writes why it calls each tool. Off saves tokens. Applies to conversations started afterwards."
         }
       }
     }

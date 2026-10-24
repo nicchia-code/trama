@@ -112,7 +112,6 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
   switch (type) {
     case "ready":
     case "writeDesignRequest":
-    case "openQuickTask":
       return { ok: true, message: { type } };
     case "modelSuggestionsWanted": {
       if (raw["ompPath"] === undefined) return { ok: true, message: { type } };

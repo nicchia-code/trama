@@ -52,7 +52,7 @@ test("the groups and their keys keep the order of the Settings tab", () => {
     ["omp", ["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"]],
     ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat", "trama.ompChatApproval"]],
+    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["omp", ["trama.autoExit", "trama.language"]],
@@ -220,4 +220,16 @@ test("omp Chat Approval is a select right after omp Chat in Features: ask by def
   const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
   expect(keys.indexOf("trama.ompChatApproval")).toBe(keys.indexOf("trama.ompChat") + 1);
   expect(settingsSchema(manifest).find((s) => s.key === "trama.ompChatApproval")?.control).toBe("enum");
+});
+
+test("omp Chat Intent Tracing is a checkbox last in Features, on by default, user scope, with its explicit title and description", () => {
+  const tracing = properties["trama.ompChatIntentTracing"];
+  expect(tracing?.type).toBe("boolean");
+  expect(tracing?.default).toBe(true);
+  expect(tracing?.scope).toBe("application");
+  expect(tracing?.markdownDescription).toBe("On: in omp Chat the agent writes why it calls each tool. Off saves tokens. Applies to conversations started afterwards.");
+  expect(settingTitle("trama.ompChatIntentTracing")).toBe("omp Chat Intent Tracing");
+  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
+  expect(keys[keys.length - 1]).toBe("trama.ompChatIntentTracing");
+  expect(settingsSchema(manifest).find((s) => s.key === "trama.ompChatIntentTracing")?.control).toBe("boolean");
 });

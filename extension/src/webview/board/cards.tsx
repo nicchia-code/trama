@@ -431,9 +431,9 @@ function TaskCardView({ card }: { card: TaskCard }) {
 }
 
 /**
- * A Task in the Done column: its status dot, number or identity, Proposal tag and finish time on top, its title (the button that is reached by keyboard), the
- * `unchanged` and `kept` badges, and its reference chips. It has no buttons and no animated border; a click on the card outside its chips and badges opens the same
- * details as a Task in Active.
+ * A Task in the Done column: its status dot, number or identity, Proposal tag and finish time on top, then its title (the button that is reached by keyboard) and the
+ * `unchanged` and `kept` badges. It has no reference chips, no buttons and no animated border; a click on the card outside its tag and badges opens the same details
+ * as a Task in Active, whose window keeps the chips.
  */
 function DoneCardView({ card, now }: { card: TaskCard; now: Date }) {
   const env = useBoardEnv();
@@ -475,7 +475,6 @@ function DoneCardView({ card, now }: { card: TaskCard; now: Date }) {
           </TipBadge>
         )}
       </h3>
-      {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
     </Shell>
   );
 }

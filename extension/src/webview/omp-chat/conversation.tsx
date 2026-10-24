@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Circle, CircleCheck, Loader, Square } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Circle, CircleCheck, Loader, Square, TriangleAlert } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ConversationItem, FormAnswerMessage } from "../../omp-chat-protocol";
 import { Button } from "../ui/button";
@@ -21,6 +21,7 @@ export interface ConversationActions {
   choose(id: string, requestId: string, optionId: string): void;
   openFile(path: string): void;
   openLink(url: string): void;
+  installOmp(): void;
 }
 
 /** How far from the bottom the messages may be scrolled and still follow new text. */
@@ -57,6 +58,27 @@ function Plan({ plan }: { plan: NonNullable<Transcript["plan"]> }) {
   );
 }
 
+/** General's process state under its messages (`generalStatus`): what it is doing, what went wrong and whether the agent remembers the messages above. */
+function GeneralStatusRows({ status, onInstall }: { status: NonNullable<ConversationView["status"]>; onInstall: () => void }) {
+  const { error } = status;
+  const text = error === undefined ? "" : error.kind === "missing" ? "omp is not installed. Trama runs every agent with omp." : `omp ${error.kind === "start" ? "could not start" : "stopped"}: ${error.reason ?? "unknown reason"}.`;
+  return (
+    <>
+      {status.phase === "starting" ? <p className="text-xs text-muted-foreground">Starting omp…</p> : null}
+      {error === undefined ? null : (
+        <div role="alert" className="flex flex-col items-start gap-1.5 rounded-md border p-2 text-sm">
+          <p className="flex items-start gap-1.5 text-destructive">
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+            <span>{text}</span>
+          </p>
+          {error.kind === "missing" ? <Button type="button" size="sm" onClick={onInstall}>Install omp</Button> : <p className="text-xs text-muted-foreground">Your next message starts omp again.</p>}
+        </div>
+      )}
+      {status.newSession === true ? <p className="text-xs text-muted-foreground">New session: the agent does not remember the messages above.</p> : null}
+    </>
+  );
+}
+
 function Composer({ item, view, actions }: { item: ConversationItem; view: ConversationView; actions: ConversationActions }) {
   const [text, setText] = useState("");
   const field = useRef<HTMLTextAreaElement>(null);
@@ -70,6 +92,12 @@ function Composer({ item, view, actions }: { item: ConversationItem; view: Conve
   useEffect(() => {
     if (view.focusToken > 0) field.current?.focus();
   }, [view.focusToken]);
+  const restored = useRef(view.returned?.token ?? 0);
+  useEffect(() => {
+    if (view.returned === undefined || view.returned.token === restored.current) return;
+    restored.current = view.returned.token;
+    setText(view.returned.text);
+  }, [view.returned]);
   const send = () => {
     const message = text.trim();
     if (message === "") return;
@@ -183,6 +211,8 @@ export function Conversation({ item, view, selected, actions }: { item: Conversa
               return <Permission key={block.id} block={block} onChoose={(optionId) => actions.choose(item.id, block.requestId, optionId)} />;
           }
         })}
+        {item.general === true && transcript.blocks.length === 0 ? <p className="m-auto text-center text-muted-foreground">Chat with omp in this folder. Trama&apos;s jobs open in their own tabs.</p> : null}
+        {item.general === true && view.status !== undefined ? <GeneralStatusRows status={view.status} onInstall={actions.installOmp} /> : null}
         <div aria-live="polite" className="sr-only">
           {announcement(transcript, running)}
         </div>

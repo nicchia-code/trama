@@ -2,7 +2,7 @@ import { execFile, type ExecFileException } from "node:child_process";
 import { access, constants } from "node:fs/promises";
 import { homedir } from "node:os";
 import { checkHolds, ompFileName, ompSearchFolders, readUpdateCheck, type StoredCheck } from "../../../src/core/omp-update";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { ompPathVariable } from "./model-lists";
 
 /** Where the outcome of the last update check is kept for every window of the editor (`ExtensionContext.globalState`). */
@@ -54,6 +54,30 @@ export async function findOmp(ompPath: string, env: NodeJS.ProcessEnv = process.
     }
   }
   return undefined;
+}
+
+/**
+ * The omp General runs for a set `trama.ompPath`: the path as-is when it resolves (a path with a separator is that file; a bare name is
+ * found in the editor's PATH, `~/.bun/bin` or `~/.local/bin`), else undefined, so General reports omp as missing. The empty setting is
+ * found as `findOmp` finds it. The other callers keep `findOmp`.
+ */
+export async function findConfiguredOmp(ompPath: string, env: NodeJS.ProcessEnv = process.env, home = homedir(), windows = process.platform === "win32"): Promise<string | undefined> {
+  if (ompPath === "") return findOmp(ompPath, env, home, windows);
+  if (/[\\/]/.test(ompPath)) return (await runnable(ompPath, windows)) ? ompPath : undefined;
+  const names = windows && extname(ompPath) === "" ? [ompPath, `${ompPath}.exe`] : [ompPath];
+  const folders = ompSearchFolders(env["PATH"] ?? env["Path"], home, windows ? ";" : ":");
+  for (const folder of folders) for (const name of names) if (await runnable(join(folder, name), windows)) return ompPath;
+  return undefined;
+}
+
+/** Whether `file` exists and can run (on Windows only existence counts: the execute bit means nothing there). */
+async function runnable(file: string, windows: boolean): Promise<boolean> {
+  try {
+    await access(file, windows ? constants.F_OK : constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 type Run = { ok: true; stdout: string } | { ok: false; missing: boolean; reason: (what: string, limit: string) => string };

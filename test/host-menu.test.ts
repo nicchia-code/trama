@@ -18,6 +18,8 @@ let providers: Record<string, { resolveWebviewView(view: unknown): void }> = {};
 const configuration: Record<string, unknown> = {};
 const watcherListeners: (() => void)[] = [];
 const configListeners: ((event: { affectsConfiguration(section: string): boolean }) => void)[] = [];
+const modals: { message: string; options: unknown }[] = [];
+let modalAnswer: string | undefined;
 
 mock.module("vscode", () => ({
   window: {
@@ -56,7 +58,7 @@ mock.module("vscode", () => ({
       informationMessages.push(message);
       return undefined;
     },
-    showWarningMessage: () => undefined,
+    showWarningMessage: (message: string, options?: unknown) => (modals.push({ message, options }), modalAnswer),
     showErrorMessage: () => undefined,
   },
   workspace: {
@@ -111,6 +113,8 @@ beforeEach(() => {
   panels.length = 0;
   informationMessages.length = 0;
   executed.length = 0;
+  modals.length = 0;
+  modalAnswer = undefined;
   providers = {};
   watcherListeners.length = 0;
   configListeners.length = 0;
@@ -371,6 +375,37 @@ test("an entry of the menu does what the command does; Open Folder runs the edit
 
   view.receive?.({ type: "openFolder" });
   expect(executed).toEqual([["workbench.action.files.openFolder"]]);
+  menu.dispose();
+  controller.dispose();
+});
+
+// The modal answer is a mock value the controller awaits; no event marks when that await has finished, so one macrotask flush is the signal here.
+test("Scan System from the menu asks the modal question first: Cancel launches nothing and opens no panel", async () => {
+  const controller = new Controller(extensionUri);
+  const menu = new MenuView(extensionUri, controller, watcher());
+  menu.register();
+  const view = fakeView();
+  providers["trama.home"]?.resolveWebviewView(view);
+  modalAnswer = "Cancel";
+  view.receive?.({ type: "scan" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(modals).toEqual([{ message: "Scan the whole System?", options: { modal: true, detail: "The agent compares every Machine with the code: this can take a long time." } }]);
+  expect(panels).toHaveLength(0);
+  menu.dispose();
+  controller.dispose();
+});
+
+test("Scan System from the menu asks once; Scan launches the scan without opening the panel", async () => {
+  const controller = new Controller(extensionUri);
+  const menu = new MenuView(extensionUri, controller, watcher());
+  menu.register();
+  const view = fakeView();
+  providers["trama.home"]?.resolveWebviewView(view);
+  modalAnswer = "Scan";
+  view.receive?.({ type: "scan" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(modals).toHaveLength(1);
+  expect(panels).toHaveLength(0);
   menu.dispose();
   controller.dispose();
 });
