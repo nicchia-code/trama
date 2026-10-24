@@ -112,13 +112,16 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
   }
 }
 
+/** The sentence a chosen language (`trama.language`) adds: `language` is the setting's text, trimmed, as typed. */
+export const languageSentence = (language: string): string => `Write the texts for the developer in ${language}, as the Language section of your instructions says.`;
+
 /**
  * Ends an instruction with the request to write in `language` (`trama.language`), on the same line. Empty or blank text
  * asks nothing, so the instruction is exactly as built. The language is used trimmed, as typed.
  */
 export function withLanguage(prompt: string, language: string): string {
   const typed = language.trim();
-  return typed === "" ? prompt : `${prompt} Write everything you generate in ${typed}, except code, which always stays in English.`;
+  return typed === "" ? prompt : `${prompt} ${languageSentence(typed)}`;
 }
 
 /** The sentence the Drift blocker adds to an instruction whose agent may file Drifts (`trama.driftBlocker`). */

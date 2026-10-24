@@ -642,6 +642,20 @@ test("the omp step shows the state of the check in a bordered live region at the
   expect(within(region).getByRole("button", { name: "Install omp" })).not.toBeNull();
 });
 
+test("the omp step asks the language as an editable text field, with the explanation of the Settings tab, and never Auto Exit; the value is kept for the summary", () => {
+  const { controller } = setup({ mode: "settings", values: { "trama.language": { user: "Italian" } } });
+  expect(screen.queryByRole("checkbox", { name: "Auto Exit" })).toBeNull();
+  expect(Array.from(document.querySelectorAll("label[for^='st-']")).map((label) => label.textContent)).toEqual(["Omp Path", "Terminal Location", "Ignore Instruction Files", "Language"]);
+  const field = screen.getByRole("textbox", { name: "Language" }) as HTMLInputElement;
+  expect(field.disabled).toBe(false);
+  expect(field.value).toBe("Italian");
+  expect(screen.queryByText("Disabled for now: agents write in English.")).toBeNull();
+  expect(document.getElementById("st-trama-language-explain")?.textContent).toContain("The language the agent writes tasks, drifts, proposals, questions and replies in");
+  fireEvent.change(field, { target: { value: " Deutsch " } });
+  fireEvent.blur(field);
+  expect(controller.getSnapshot().state?.values["trama.language"]).toBe("Deutsch");
+});
+
 test("the folders step is a tree with a box, an icon and a name that is cut with an ellipsis and whole in its tooltip, and it scrolls inside the step", () => {
   const { controller } = setup({ mode: "empty-model", choice: "import" });
   advanceTo(controller, "Folders");

@@ -31,12 +31,15 @@ const setting = (key: string): SettingSchema => {
   return found;
 };
 
-test("every manifest description is at most two short sentences of about 160 characters", () => {
+test("every manifest description is at most two short sentences of about 160 characters; the language one is the text `ui#agents` fixes", () => {
   for (const [key, entry] of Object.entries(properties)) {
     const text = entry.markdownDescription ?? "";
     expect(text.length, key).toBeGreaterThan(0);
-    expect(text.length, key).toBeLessThanOrEqual(170);
+    if (key !== "trama.language") expect(text.length, key).toBeLessThanOrEqual(170);
   }
+  expect(properties["trama.language"]?.markdownDescription).toBe(
+    "The language the agent writes tasks, drifts, proposals, questions and replies in, for example `Italian`. The Model, Requirements, Specs and code stay in English. Empty (the default) keeps English.",
+  );
   expect(properties["trama.theme"]?.markdownDescription).toBe("Colours of the Trama panel. Auto (the default) follows the editor's theme; Light and Dark fix it.");
 });
 

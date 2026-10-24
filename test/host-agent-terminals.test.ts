@@ -18,7 +18,7 @@ import { dismissDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTa
 import { FIX_OPTIONS } from "./fix-options";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
 import type { AgentAction } from "../extension/src/protocol";
-import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, buildPrompt } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, buildPrompt, languageSentence } from "../extension/src/host/prompts";
 import { ompPathVariable } from "../extension/src/host/model-lists";
 import { type OmpLoginProvider, OMP_LOGIN_PROVIDERS, ompLoginProvider } from "../extension/src/omp-login";
 import type { Project } from "../src/core/store";
@@ -1094,7 +1094,7 @@ describe("the agent terminal as an editor tab", () => {
 });
 
 describe("agent instruction settings", () => {
-  test("the sub-agent limit is read at each launch, and the language setting asks for nothing while it is disabled", async () => {
+  test("the sub-agent limit is read at each launch, and the language sentence ends the line, trimmed and as typed, only while a language is set", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const instruction = "Use the trama-scan skill on the whole System.";
 
@@ -1115,12 +1115,12 @@ describe("agent instruction settings", () => {
     try {
       settingValues["maxParallelAgents"] = 4;
       await launchAgent(dir, instruction, "Scan");
-      expect(typed.at(-1)).toBe(`'omp' '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+      expect(typed.at(-1)).toBe(`'omp' '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE} ${languageSentence("Italian")}'`);
       expect(typed.at(-1)?.split("\\n")).toHaveLength(1);
 
       settingValues["language"] = "English";
       await launchAgent(dir, instruction, "Scan");
-      expect(typed.at(-1)).toBe(`'omp' '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+      expect(typed.at(-1)).toBe(`'omp' '${instruction} Run at most 4 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE} ${languageSentence("English")}'`);
 
       settingValues["language"] = "   ";
       await launchAgent(dir, instruction, "Scan");
@@ -1159,7 +1159,7 @@ describe("agent instruction settings", () => {
 
       inspected["driftBlocker"] = { globalValue: true };
       settingValues["language"] = "Italian";
-      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE} ${languageSentence("Italian")}'`);
     } finally {
       delete inspected["driftBlocker"];
       delete settingValues["language"];
@@ -1206,7 +1206,7 @@ describe("agent instruction settings", () => {
       delete inspected["parallelExecution"];
     }
   });
-  test("every instruction carries the ask sentence on its line, then the auto-exit one, and no language one while the setting is disabled", async () => {
+  test("every instruction carries the ask sentence on its line, then the auto-exit one, then the language one only while a language is set", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const jobs: [string, string][] = [
       [buildPrompt({ kind: "written-design", request: "r" }), "Design"],
@@ -1216,18 +1216,28 @@ describe("agent instruction settings", () => {
       [buildPrompt({ kind: "implement-all" }), "All tasks"],
       [buildPrompt({ kind: "import" }), "Import"],
       [buildPrompt({ kind: "resolve-drifts", drift: "ab12cd34" }), "Drifts"],
+      [buildPrompt({ kind: "unify-drifts", drifts: ["aaaa1111", "bbbb2222"] }), "Unify"],
+      [buildPrompt({ kind: "rework", proposal: "ab12cd34", skill: "design" }), "Design"],
+      [buildPrompt({ kind: "rework-resolution", proposal: "ab12cd34", drifts: ["aaaa1111"] }), "Drifts"],
+      [buildPrompt({ kind: "refine", proposal: "ab12cd34", seats: 1, job: "j" }), "Refine P1"],
     ];
     try {
       for (const [instruction, name] of jobs) {
         await launchAgent(dir, instruction, name);
         expect(typed.at(-1)).toEndWith(` ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+        expect(typed.at(-1)).not.toContain("Write the texts for the developer");
         expect(typed.at(-1)).not.toContain("\n");
       }
-      settingValues["language"] = "Italian";
+      settingValues["language"] = " Italian ";
+      for (const [instruction, name] of jobs) {
+        await launchAgent(dir, instruction, name);
+        expect(typed.at(-1)).toEndWith(` ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE} ${languageSentence("Italian")}'`);
+        expect(typed.at(-1)).not.toContain("\n");
+      }
+      settingValues["language"] = "   ";
       for (const [instruction, name] of jobs) {
         await launchAgent(dir, instruction, name);
         expect(typed.at(-1)).toEndWith(` ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
-        expect(typed.at(-1)).not.toContain("\n");
       }
     } finally {
       delete settingValues["language"];
@@ -2501,7 +2511,7 @@ describe("Ask more", () => {
       expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_JOB");
       expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_ADVISOR_SCANNER");
       expect(terminal.line).toBe(
-        `'omp' --model 'opus' '@${join(extensionPath, "media", "ask-more.md")}' 'Ask more about the Task j6tlxyad. Text: Launch it.'`,
+        `'omp' --model 'opus' '@${join(extensionPath, "media", "ask-more.md")}' 'Ask more about the Task j6tlxyad. Text: Launch it. ${languageSentence("Italian")}'`,
       );
       expect(terminal.line).not.toMatch(/--hook|--config|--slow|--advisor/);
       expect(terminal.shown).toEqual([false]);
@@ -2524,6 +2534,31 @@ describe("Ask more", () => {
     } finally {
       delete inspected["ompPath"];
       withdrawAll(projectAt(root));
+      tearDown(root);
+    }
+  });
+
+  test("General's instructions are the packaged file alone without a language, and a copy that ends with the language sentence, read at each start, with one", async () => {
+    const { generalInstructions } = await import("../extension/src/host/agent");
+    const root = setUp();
+    const general = "Trama: General\n\nThink with the developer.\n";
+    writeFileSync(join(extensionPath, "media", "general.md"), general);
+    const storage = { fsPath: join(root, "storage") } as Parameters<typeof generalInstructions>[0];
+    try {
+      expect(generalInstructions(storage)).toBe(join(extensionPath, "media", "general.md"));
+      settingValues["language"] = "   ";
+      expect(generalInstructions(storage)).toBe(join(extensionPath, "media", "general.md"));
+      settingValues["language"] = " Italian ";
+      const italian = generalInstructions(storage) as string;
+      expect(italian.startsWith(join(root, "storage"))).toBe(true);
+      expect(readFileSync(italian, "utf8")).toBe(`${general}\n${languageSentence("Italian")}\n`);
+      settingValues["language"] = "Deutsch";
+      const german = generalInstructions(storage) as string;
+      expect(german).not.toBe(italian);
+      expect(readFileSync(german, "utf8")).toBe(`${general}\n${languageSentence("Deutsch")}\n`);
+      expect(readFileSync(join(extensionPath, "media", "general.md"), "utf8")).toBe(general);
+      expect(() => generalInstructions(undefined)).toThrow();
+    } finally {
       tearDown(root);
     }
   });

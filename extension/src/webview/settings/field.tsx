@@ -11,9 +11,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { composeRoleValue, DEFAULT_LEVEL, effectiveValue, modelOptions, numberFromText, splitRoleValue, thinkingLevels, withModel, workspaceOverride } from "./logic";
 import { ThinkingLevelSelect } from "./thinking-level";
 
-/** The language setting: it keeps its value, but agents write in English for now, so the field is disabled. */
-const LANGUAGE_KEY = "trama.language";
-
 /**
  * Text that the developer is typing: `text` is what the field shows, a new `saved` value or a new message from the host
  * replaces it unless it is still unconfirmed, and `error` is the reason it cannot be saved.
@@ -76,10 +73,8 @@ export function SettingField({ setting, values, generation, models, listError, s
 
   const modelRole = setting.control === "text" && MODEL_ROLE_KEYS.includes(key);
   const chosen = setting.control === "enum" ? String(picked ?? saved) : undefined;
-  const language = key === LANGUAGE_KEY;
-  const override = language ? null : workspaceOverride(setting, values);
-  const listNote = modelRole ? listError : null;
-  const note = language ? "Disabled for now: agents write in English." : listNote;
+  const override = workspaceOverride(setting, values);
+  const note = modelRole ? listError : null;
   const role = modelRole ? splitRoleValue(savedText, models) : undefined;
   const levels = role === undefined ? [] : thinkingLevels(models, role.model);
   const levelChosen = typeof picked === "string" ? picked : (role?.level ?? DEFAULT_LEVEL);
@@ -213,7 +208,6 @@ export function SettingField({ setting, values, generation, models, listError, s
         aria-label={setting.title}
         aria-describedby={describedBy}
         placeholder={placeholder}
-        disabled={language}
         value={editable.text}
         onChange={(event) => editable.edit(event.target.value)}
         onKeyDown={(event) => {

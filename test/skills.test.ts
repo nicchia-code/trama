@@ -6,6 +6,7 @@ import { run } from "../src/cli/main";
 import { ADVISOR_INSTRUCTIONS, watchdogFile } from "../src/core/advisors";
 import { parse } from "yaml";
 import { ompAgentConflicts, SKILLS, skillConflicts } from "../src/cli/skills";
+import { SUB_AGENTS } from "../src/core/sub-agents";
 
 
 test("project new refuses to overwrite customised skill files and creates nothing", () => {
@@ -351,6 +352,36 @@ test("the skills give the writing rules: no first person in Trama's texts, and s
     expect(skill).toContain("Your replies in the conversation are not Trama's texts and do not change");
     if (name !== "trama-import" && name !== "trama-resolve-drifts") expect(skill).toContain(selfContained);
   }
+});
+
+test("every Language section carries the same list of what goes in the language and what stays English, with no transliteration of Model names", () => {
+  const root = join(import.meta.dir, "..");
+  const texts: Record<string, string> = {};
+  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-compare", "trama-implement", "trama-import", "trama-resolve-drifts"]) texts[name] = SKILLS[`${name}/SKILL.md`] as string;
+  for (const name of ["ask-more", "general", "unify-drifts"]) texts[name] = readFileSync(join(root, "extension", "media", `${name}.md`), "utf8");
+  const bullet = (text: string, start: string): string => {
+    const line = text.split("\n").find((l) => l.startsWith(start));
+    expect(line).toBeDefined();
+    return line as string;
+  };
+  const inLanguage = bullet(texts["trama-design"] as string, "- **In the language of the instruction:**");
+  const english = bullet(texts["trama-design"] as string, "- **Always in English**, whatever the language:");
+  expect(inLanguage).toContain("the titles and bodies of Tasks and the titles of groups of Tasks");
+  expect(inLanguage).toContain("the resolution question the Async Drift Resolver prepares");
+  expect(inLanguage).toContain("your replies during the work and your final report; the replies in General");
+  expect(english).toContain("the whole Model (the name of the System; the names of Features, Machines, Actors and States; IDs and Event names; the descriptions in Model files)");
+  expect(english).toContain("the Specs, also their `notes`");
+  for (const text of Object.values(texts)) {
+    expect(text).toContain("## Language");
+    expect(bullet(text, "- **In the language of the instruction:**")).toBe(inLanguage);
+    expect(bullet(text, "- **Always in English**, whatever the language:")).toBe(english);
+    expect(bullet(text, "- **A language changes nothing already written.**")).toContain("never translate the whole file");
+    expect(bullet(text, "- **No first person in Trama's texts.**")).toContain('Trama is always "Trama" and you are "the agent"');
+    expect(text).not.toContain("transliterated");
+    expect(text).not.toContain("PAGAMENTO_RIUSCITO");
+  }
+  expect(bullet(texts["ask-more"] as string, "- **In Ask more**")).toContain("in the language the developer writes in");
+  expect(SUB_AGENTS["trama-implementer"].prompt).toContain("write the Tasks, Drifts, questions, notes and your report in that language, and always write the Model, the Requirements, the Specs, code, comments and commit messages in English");
 });
 
 test("a CRLF checkout (core.autocrlf) of installed skills and omp definitions is not a conflict, and a project edit leaves it as it is", () => {

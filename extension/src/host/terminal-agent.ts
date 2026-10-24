@@ -32,7 +32,7 @@ export const canScan = (role: Role): boolean => role !== "analysis";
 
 /**
  * The options of an omp job in the order of the command line, each as its flag and, when it has one, its value, unquoted: `--hook <module>` (`ompHook` tells omp
- * when it is idle), `--advisor` (a Run with the Advisor Scanner on, launched without `--slow`), `--config <overlay>` (the overlay file, only when it has content),
+ * when it is idle), `--advisor` (a Run with the Advisor Scanner on, launched without `--slow`), `--config <overlay>` (the overlay file; missing only when it could not be written),
  * `--model <m>` (the run's model) and, for instructions that can scan, `--slow <scan model>`. The terminal quotes the values for its shell (`agentTemplate`);
  * a conversation of omp Chat passes them as array elements (`ompArguments`).
  */
@@ -65,7 +65,7 @@ export function agentTemplate(omp: string, scanning: boolean, models: { model: s
 /** The command line of an Ask more terminal: `omp` (the program Trama runs, quoted), with `--model <m>` only when the analysis role has a model; no hook, overlay, `--slow`, `--advisor` or prompt. */
 export const askMoreCommandLine = (omp: string, model: string, family: ShellFamily): string => [quoteProgram(family, omp), ...quoted(family, askMoreOptions(model))].join(" ");
 
-/** What an omp launch overlay holds: the advisor role and advisors of a Run with the Advisor Scanner on, and the instruction files omp must not read. */
+/** What an omp launch overlay holds besides `bash.autoBackground.enabled: false`: the advisor role and advisors of a Run with the Advisor Scanner on, and the instruction files omp must not read. */
 export interface LaunchOverlay {
   /** Set for a Run with the Advisor Scanner on: the advisor model role (`trama.scan`, may be empty) and the task advisors, on. */
   advisor?: { scan: string };
@@ -74,17 +74,18 @@ export interface LaunchOverlay {
 }
 
 /**
- * The text of the overlay an omp launch loads with `--config`, or `undefined` when it has nothing to say. It is YAML written with the
- * `yaml` library, every string double-quoted, so no value can change its structure.
+ * The text of the overlay an omp launch loads with `--config`. It always turns omp's `bash.autoBackground` off, so a long bash command stays in the foreground and
+ * a question round never closes midway; the advisor parts and `disabledExtensions` follow when present. It is YAML written with the `yaml` library, every string
+ * double-quoted, so no value can change its structure.
  */
-export function launchOverlay({ advisor, disabledExtensions }: LaunchOverlay): string | undefined {
-  const config: Record<string, unknown> = {};
+export function launchOverlay({ advisor, disabledExtensions }: LaunchOverlay): string {
+  const config: Record<string, unknown> = { bash: { autoBackground: { enabled: false } } };
   if (advisor !== undefined) {
     if (advisor.scan !== "") config.modelRoles = { advisor: advisor.scan };
     config.task = { agentAdvisor: { task: "on" } };
   }
   if (disabledExtensions.length > 0) config.disabledExtensions = [...disabledExtensions];
-  return Object.keys(config).length === 0 ? undefined : stringify(config, { defaultStringType: "QUOTE_DOUBLE", defaultKeyType: "PLAIN" });
+  return stringify(config, { defaultStringType: "QUOTE_DOUBLE", defaultKeyType: "PLAIN" });
 }
 
 /**

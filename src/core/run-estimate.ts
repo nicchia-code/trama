@@ -26,6 +26,8 @@ export const HISTORY_MIN_DURATIONS = 10;
 export const LOW_FACTOR = 0.7;
 /** The high limit of the range is the estimate times this. */
 export const HIGH_FACTOR = 1.5;
+/** A Run all never shows more progress than this before it ends; a Run all longer than expected shows exactly this. */
+export const MAX_PROGRESS = 0.95;
 
 /** A Task of the project as the estimate sees it. */
 export interface EstimateTask {
@@ -63,8 +65,9 @@ export interface RunEstimateInput {
   now: Date;
 }
 
-/** The estimate in minutes, before the range is rounded. */
+/** The estimate in minutes: `estimate` is the central one, before the range is rounded; `low` and `high` are its range. */
 export interface RunEstimate {
+  estimate: number;
   low: number;
   high: number;
 }
@@ -203,5 +206,17 @@ export function estimateRunAll(input: RunEstimateInput): RunEstimate | null {
     const shortest = started.length === 0 ? 0 : Math.min(...started);
     minutes = Math.max(0, ...pending.map((run) => (run.terminal === null ? shortest + ofRun(run) : ofRun(run))));
   }
-  return { low: minutes * LOW_FACTOR, high: minutes * HIGH_FACTOR };
+  return { estimate: minutes, low: minutes * LOW_FACTOR, high: minutes * HIGH_FACTOR };
+}
+
+/**
+ * The progress of a Run all, between 0 and `MAX_PROGRESS`: the time elapsed since the launch over the elapsed time plus the central
+ * estimate, never below `reached` (the highest progress already shown: it does not go back when the estimate grows) and never above
+ * `MAX_PROGRESS`; exactly `MAX_PROGRESS` when the Run all is `over` its first estimate. Pure: the host keeps `reached`, nothing is written.
+ */
+export function runAllProgress(input: { elapsedMinutes: number; estimate: number; reached: number; over: boolean }): number {
+  if (input.over) return MAX_PROGRESS;
+  const total = input.elapsedMinutes + input.estimate;
+  const done = total > 0 ? input.elapsedMinutes / total : 0;
+  return Math.min(MAX_PROGRESS, Math.max(input.reached, done));
 }

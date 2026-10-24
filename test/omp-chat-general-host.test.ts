@@ -174,6 +174,8 @@ interface Options {
   realFindOmp?: boolean;
   /** Whether the package has no General instructions file. */
   noInstructions?: boolean;
+  /** The reason the instructions file (with its language sentence) cannot be prepared: `instructions` throws it. */
+  instructionsError?: string;
   /** What `omp --version` says of the installed omp: undefined for a recent one, `unreadable` for an omp whose version cannot be read, else the version. */
   version?: string | "unreadable";
 }
@@ -204,7 +206,10 @@ function setup(options: Options = {}) {
       if (options.version === undefined) return {};
       return options.version === "unreadable" ? { tooOld: true } : { tooOld: true, version: options.version };
     },
-    instructions: () => (options.noInstructions ? undefined : "/ext/media/general.md"),
+    instructions: () => {
+      if (options.instructionsError !== undefined) throw new Error(options.instructionsError);
+      return options.noInstructions ? undefined : "/ext/media/general.md";
+    },
     launch: async (root, terminalId) => ({ args: ["acp"], env: { TRAMA_TERMINAL: terminalId, PI_INTENT_TRACING: "1" }, cwd: root }),
     resumeLaunch: async (root, args, env) => ({ args, env: { ...env, QUESTION_ENDPOINT: "http://endpoint" }, cwd: root }),
     endWork: (terminalId, root) => ends.push([terminalId, root]),
@@ -287,6 +292,15 @@ describe("General in the host", () => {
     expect(s.client.resumes).toHaveLength(0);
     expect(s.view.last?.phase).toBe("stopped");
     expect(s.view.last?.error?.kind).toBe("start");
+  });
+
+  test("instructions that cannot be prepared (the copy with the language sentence) stop General before any start, with the reason", async () => {
+    const s = setup({ instructionsError: "disk full" });
+    s.general.start();
+    await settle();
+    expect(s.client.starts).toHaveLength(0);
+    expect(s.view.last?.phase).toBe("stopped");
+    expect(s.view.last?.error).toMatchObject({ kind: "start", reason: "its instructions could not be prepared: disk full" });
   });
 
   test("a message after a failed start restarts General; if that fails too it comes back into the field, through the webview", async () => {

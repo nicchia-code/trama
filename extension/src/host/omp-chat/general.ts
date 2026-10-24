@@ -55,7 +55,7 @@ export interface GeneralDeps {
   launch(root: string, terminalId: string): Promise<OmpLaunch>;
   /** The launch of a saved session: the saved arguments and variables, with the endpoint and PATH of this window. */
   resumeLaunch(root: string, args: string[], env: Record<string, string>): Promise<OmpLaunch>;
-  /** The file of General's instructions (`media/general.md`) in this extension's package, undefined when the package has none: every start and resume passes it to omp. */
+  /** The file of General's instructions (`media/general.md` in this extension's package, followed by the language sentence when a language is chosen), read at every start and resume and passed to omp; undefined when the package has none; it throws when the file cannot be prepared. */
   instructions(): string | undefined;
   /** Ends General's work as a terminal's end does (the same `endAgentWork` the agent terminals use): releases what it took, withdraws its announcements, and forgets its process. It never disposes or idles a terminal. */
   endWork(terminalId: string, root: string): void;
@@ -295,7 +295,14 @@ export class GeneralConversation implements Disposable {
       this.dispatch({ type: "startFailed", missing: true });
       return;
     }
-    const instructions = this.deps.instructions();
+    let instructions: string | undefined;
+    try {
+      instructions = this.deps.instructions();
+    } catch (err) {
+      this.pendingFailure = { kind: "start", reason: `its instructions could not be prepared: ${err instanceof Error ? err.message : String(err)}` };
+      if (token === this.token) this.dispatch({ type: "startFailed", missing: false });
+      return;
+    }
     if (instructions === undefined) {
       this.pendingFailure = { kind: "start", reason: "its instructions are missing from the extension's package" };
       if (token === this.token) this.dispatch({ type: "startFailed", missing: false });

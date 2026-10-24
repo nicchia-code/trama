@@ -617,41 +617,73 @@ describe("The Board page", () => {
   describe("Run all with the time left", () => {
     const inRun = { blocker: null, runReason: "A run is in progress", drifts: {}, resolving: [] };
     const runAll = (name: RegExp | string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+    const bar = (run: HTMLElement) => run.querySelector<HTMLElement>("[aria-hidden='true'][data-bar]");
 
-    test("shows the range in minutes, with the Clock icon, disabled, with the reasons as description", () => {
-      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 14.6, high: 35.2, over: false } });
-      const run = runAll("Run all, about 15 to 35 minutes left");
-      expect(run.textContent).toBe("~15–35 min left");
+    test("says Running… with the Clock icon, no number, disabled, with the reasons as description and the accessible name with the percent", () => {
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 14.6, high: 35.2, over: false, done: 0.426 } });
+      const run = runAll("Run all, 43 percent done, about 15 to 35 minutes left");
+      expect(run.textContent).toBe("Running…");
       expect([run.disabled, run.getAttribute("aria-description"), run.hasAttribute("data-run-all")]).toEqual([true, "A run is in progress", true]);
       expect(run.querySelector("svg.lucide-clock")).not.toBeNull();
       expect(run.querySelector("svg.lucide-play")).toBeNull();
       expect(screen.queryByRole("button", { name: "Run all the Tasks in To do" })).toBeNull();
     });
 
-    test("shows hours from 60 minutes of the high limit, equal limits once, and says it is working it out", () => {
-      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 70, high: 150, over: false } });
-      expect(runAll("Run all, about 1 to 2.5 hours left").textContent).toBe("~1–2.5 h left");
+    test("draws the bar as a hidden element inside the button, with its width from the progress and a 2 s transition that reduced motion removes", () => {
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 14.6, high: 35.2, over: false, done: 0.426 } });
+      const filled = bar(runAll(/percent done/));
+      expect(filled).not.toBeNull();
+      expect(filled?.style.width).toBe("43%");
+      expect(filled?.getAttribute("data-bar")).toBe("");
+      expect(filled?.className).toContain("bg-primary/30");
+      expect(filled?.className).toContain("duration-2000");
+      expect(filled?.className).toContain("motion-reduce:transition-none");
+      expect(filled?.hasAttribute("aria-hidden")).toBe(true);
+    });
+
+    test("shows the range in hours and equal limits once in the name and the first line of the tooltip", async () => {
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 70, high: 150, over: false, done: 0.1 } });
+      expect(runAll("Run all, 10 percent done, about 1 to 2.5 hours left").textContent).toBe("Running…");
       cleanup();
-      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 20, high: 20.4, over: false } });
-      expect(runAll("Run all, about 20 minutes left").textContent).toBe("~20 min left");
-      cleanup();
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 20, high: 20.4, over: false, done: 0.5 } });
+      expect(runAll("Run all, 50 percent done, about 20 minutes left").textContent).toBe("Running…");
+    });
+
+    test("the first tooltip line is the range, with the reasons below", async () => {
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 14.6, high: 35.2, over: false, done: 0.2 } });
+      fireEvent.pointerMove(runAll(/percent done/).parentElement as HTMLElement);
+      const tip = await screen.findByRole("tooltip");
+      expect(tip.textContent).toBe("~15–35 min left\nA run is in progress");
+    });
+
+    test("while the time is worked out it says Running… with an indeterminate strip a third wide, still with reduced motion", () => {
       page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { estimating: true } });
       const run = runAll("Run all, estimating time left");
-      expect([run.textContent, run.disabled]).toEqual(["Estimating time left…", true]);
+      expect([run.textContent, run.disabled, run.querySelector("svg.lucide-clock") !== null]).toEqual(["Running…", true, true]);
+      const strip = bar(run);
+      expect(strip?.getAttribute("data-bar")).toBe("indeterminate");
+      expect(strip?.className).toContain("w-1/3");
+      expect(strip?.className).toContain("animate-run-slide");
+      expect(strip?.className).toContain("motion-reduce:animate-none");
+      expect(strip?.className).toContain("motion-reduce:translate-x-full");
+      expect(strip?.style.width).toBe("");
     });
 
-    test("says it takes longer than expected once the Run all is over its first estimate", () => {
-      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 5, high: 9, over: true } });
-      const run = runAll("Run all, taking longer than expected");
+    test("says it takes longer than expected once the Run all is over its first estimate, with the bar at 95%", () => {
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 5, high: 9, over: true, done: 0.95 } });
+      const run = runAll("Run all, 95 percent done, taking longer than expected");
       expect([run.textContent, run.disabled, run.querySelector("svg.lucide-clock") !== null]).toEqual(["Taking longer than expected", true, true]);
+      expect(bar(run)?.style.width).toBe("95%");
     });
 
-    test("without a Run all of this window the button is the usual one, a single Run included", () => {
+    test("without a Run all of this window the button is the usual one, with no bar, a single Run included", () => {
       page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: null });
       const run = runAll("Run all the Tasks in To do");
       expect([run.textContent, run.disabled, run.getAttribute("aria-description")]).toEqual(["Run all", true, "A run is in progress"]);
       expect(run.querySelector("svg.lucide-play")).not.toBeNull();
       expect(run.querySelector("svg.lucide-clock")).toBeNull();
+      expect(bar(run)).toBeNull();
+      expect(run.querySelector("[aria-hidden='true']:not(svg)")).toBeNull();
     });
   });
 

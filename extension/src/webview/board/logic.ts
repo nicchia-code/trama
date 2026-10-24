@@ -325,8 +325,11 @@ export const REFINEMENT_OFF: RefinementView = { enabled: false, running: [], que
 /** The wait after the click on Refine All before Cancel Refine All can be chosen. */
 export const CANCEL_REFINE_ALL_DELAY_MS = 2000;
 
-/** The text of the button while the Run all estimate is being worked out. */
+/** The text of the tooltip's first line while the Run all estimate is being worked out. */
 export const ESTIMATING_TEXT = "Estimating time left…";
+
+/** The text of the button during a Run all. */
+export const RUNNING_TEXT = "Running…";
 
 /** The text of the button when the Run all lasts longer than the high limit of its first estimate. */
 export const OVER_TEXT = "Taking longer than expected";
@@ -349,24 +352,27 @@ function estimateRange(low: number, high: number): { text: string; spoken: strin
 
 /** What the `Run all` button shows while a Run all launched from this window goes on. */
 export interface RunAllButtonText {
-  /** The visible text of the button. */
+  /** The visible text of the button: no number. */
   label: string;
   /** The first line of the tooltip: the estimate as it is now, even when the button says it takes longer than expected. */
   tooltipHead: string;
   /** The accessible name of the button. */
   aria: string;
+  /** The loading bar inside the button: `"indeterminate"` while the estimate is worked out, otherwise its width in whole percent. */
+  bar: "indeterminate" | number;
 }
 
 /**
- * The text, the first tooltip line and the accessible name of `Run all` for the estimate the host sends; null without a Run all
- * (the button is then the usual one). The texts are English and do not follow `trama.language`.
+ * The text, the first tooltip line, the accessible name and the bar of `Run all` for the estimate the host sends; null without a
+ * Run all (the button is then the usual one). The texts are English and do not follow `trama.language`.
  */
 export function runAllButtonText(estimate: RunEstimateView): RunAllButtonText | null {
   if (estimate === null) return null;
-  if ("estimating" in estimate) return { label: ESTIMATING_TEXT, tooltipHead: ESTIMATING_TEXT, aria: "Run all, estimating time left" };
+  if ("estimating" in estimate) return { label: RUNNING_TEXT, tooltipHead: ESTIMATING_TEXT, aria: "Run all, estimating time left", bar: "indeterminate" };
   const range = estimateRange(estimate.low, estimate.high);
-  if (estimate.over) return { label: OVER_TEXT, tooltipHead: range.text, aria: "Run all, taking longer than expected" };
-  return { label: range.text, tooltipHead: range.text, aria: `Run all, ${range.spoken}` };
+  const percent = Math.round(estimate.done * 100);
+  if (estimate.over) return { label: OVER_TEXT, tooltipHead: range.text, aria: `Run all, ${percent} percent done, taking longer than expected`, bar: percent };
+  return { label: RUNNING_TEXT, tooltipHead: range.text, aria: `Run all, ${percent} percent done, ${range.spoken}`, bar: percent };
 }
 
 /**

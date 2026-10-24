@@ -33,8 +33,8 @@ export interface RefinementView {
   waiting: string[];
 }
 
-/** The time left of a Run all launched from this window, as the host carries it with each picture: `null` without a Run all, `{ estimating: true }` while Trama works it out, otherwise the range in minutes (not rounded) and whether the Run all lasts longer than the high limit of its first estimate. */
-export type RunEstimateView = null | { estimating: true } | { low: number; high: number; over: boolean };
+/** The time left of a Run all launched from this window, as the host carries it with each picture: `null` without a Run all, `{ estimating: true }` while Trama works it out, otherwise the range in minutes (not rounded), whether the Run all lasts longer than the high limit of its first estimate, and `done`, its progress between 0 and 0.95 (the highest reached; 0.95 when `over`). */
+export type RunEstimateView = null | { estimating: true } | { low: number; high: number; over: boolean; done: number };
 
 /** One group of a Run all that a sequence cuts by model: the Tasks of the Proposals in `include`, or every Task but those of the Proposals in `exclude`. `model` is the group's model; absent for the Settings group. */
 export interface RunGroup {

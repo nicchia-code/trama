@@ -79,12 +79,15 @@
   --animate-fade-out: fade-out 150ms ease-in;
   --animate-pop-in: pop-in 150ms ease-out;
   --animate-pop-out: pop-out 150ms ease-in;
+  --animate-run-slide: run-slide 2s ease-in-out infinite alternate;
 }
 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
 @keyframes pop-out { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.96); } }
+/* The indeterminate bar of a button: a strip a third of the button wide, from one side to the other (200% of its own width). */
+@keyframes run-slide { from { transform: translateX(0); } to { transform: translateX(200%); } }
 
 @layer base {
   * { @apply border-border outline-ring/50; }

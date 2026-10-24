@@ -143,6 +143,18 @@ test("a whole number below the minimum shows its reason and is not saved; a vali
   expect(posted).toEqual([{ type: "setSetting", key: "trama.maxParallelAgents", value: 3 }]);
 });
 
+test("the language is a text field that can be edited, saved trimmed, with the workspace override under it", () => {
+  const { posted } = setup({ "trama.language": { user: "Italian", workspace: "German" } });
+  const field = screen.getByRole("textbox", { name: "Language" }) as HTMLInputElement;
+  expect(field.disabled).toBe(false);
+  expect(field.value).toBe("Italian");
+  expect(screen.getByText(/The workspace setting overrides this:/).textContent).toBe("The workspace setting overrides this: German.");
+  expect(screen.queryByText("Disabled for now: agents write in English.")).toBeNull();
+  fireEvent.change(field, { target: { value: "  French " } });
+  fireEvent.blur(field);
+  expect(posted).toEqual([{ type: "setSetting", key: "trama.language", value: "French" }]);
+});
+
 test("a workspace value shows under its control", () => {
   setup({ "trama.skillsDir": { user: "", workspace: "custom/skills" } });
   expect(screen.getByText(/The workspace setting overrides this:/).textContent).toBe("The workspace setting overrides this: custom/skills.");
@@ -281,12 +293,13 @@ test("the groups are the wizard's, each with its title and its sentence under it
   const advanced = sections[3] as HTMLElement;
   expect(Array.from(advanced.querySelectorAll("h3")).map((h) => h.textContent)).toEqual(["Appearance", "Drifts", "Agents", "omp Chat"]);
   expect(Array.from(advanced.querySelectorAll("section")).map((s) => s.querySelectorAll("label").length)).toEqual([1, 3, 3, 3]);
-  // Auto Exit and the language stay in omp, with the language disabled and its note; the group Features does not exist.
+  // Auto Exit and the language stay in omp, with the language enabled and no note; the group Features does not exist.
   const omp = sections[0] as HTMLElement;
   expect(within(omp).getByRole("checkbox", { name: "Auto Exit" })).not.toBeNull();
   const language = within(omp).getByRole("textbox", { name: "Language" });
-  expect(language.hasAttribute("disabled")).toBe(true);
-  expect(within(omp).getByText("Disabled for now: agents write in English.")).not.toBeNull();
+  expect(language.hasAttribute("disabled")).toBe(false);
+  expect(screen.queryByText("Disabled for now: agents write in English.")).toBeNull();
+  expect(language.getAttribute("aria-describedby")).toBe("st-trama-language-explain");
   expect(screen.queryByText("Features")).toBeNull();
 });
 

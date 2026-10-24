@@ -767,27 +767,27 @@ describe("the Run all button text while a Run all goes on", () => {
     expect(runAllButtonText(null)).toBeNull();
   });
 
-  test("says it is working the time out", () => {
-    expect(runAllButtonText({ estimating: true })).toEqual({ label: "Estimating time left…", tooltipHead: "Estimating time left…", aria: "Run all, estimating time left" });
+  test("says Running… with an indeterminate bar while the time is being worked out", () => {
+    expect(runAllButtonText({ estimating: true })).toEqual({ label: "Running…", tooltipHead: "Estimating time left…", aria: "Run all, estimating time left", bar: "indeterminate" });
   });
 
-  test("rounds a high limit under 60 minutes to the minute, at least 1", () => {
-    expect(runAllButtonText({ low: 14.6, high: 35.2, over: false })).toEqual({ label: "~15–35 min left", tooltipHead: "~15–35 min left", aria: "Run all, about 15 to 35 minutes left" });
-    expect(runAllButtonText({ low: 0.2, high: 0.4, over: false })?.label).toBe("~1 min left");
-    expect(runAllButtonText({ low: 3.4, high: 59.4, over: false })?.label).toBe("~3–59 min left");
+  test("rounds a high limit under 60 minutes to the minute, at least 1, and the percent to the integer", () => {
+    expect(runAllButtonText({ low: 14.6, high: 35.2, over: false, done: 0.426 })).toEqual({ label: "Running…", tooltipHead: "~15–35 min left", aria: "Run all, 43 percent done, about 15 to 35 minutes left", bar: 43 });
+    expect(runAllButtonText({ low: 0.2, high: 0.4, over: false, done: 0 })?.tooltipHead).toBe("~1 min left");
+    expect(runAllButtonText({ low: 3.4, high: 59.4, over: false, done: 0 })?.tooltipHead).toBe("~3–59 min left");
   });
 
   test("writes equal limits once", () => {
-    expect(runAllButtonText({ low: 20, high: 20.4, over: false })).toEqual({ label: "~20 min left", tooltipHead: "~20 min left", aria: "Run all, about 20 minutes left" });
-    expect(runAllButtonText({ low: 118, high: 121, over: false })).toEqual({ label: "~2 h left", tooltipHead: "~2 h left", aria: "Run all, about 2 hours left" });
+    expect(runAllButtonText({ low: 20, high: 20.4, over: false, done: 0.5 })).toEqual({ label: "Running…", tooltipHead: "~20 min left", aria: "Run all, 50 percent done, about 20 minutes left", bar: 50 });
+    expect(runAllButtonText({ low: 118, high: 121, over: false, done: 0.5 })).toEqual({ label: "Running…", tooltipHead: "~2 h left", aria: "Run all, 50 percent done, about 2 hours left", bar: 50 });
   });
 
   test("goes to hours rounded to the half hour with a dot from 60 minutes of the high limit, at least half an hour", () => {
-    expect(runAllButtonText({ low: 70, high: 150, over: false })).toEqual({ label: "~1–2.5 h left", tooltipHead: "~1–2.5 h left", aria: "Run all, about 1 to 2.5 hours left" });
-    expect(runAllButtonText({ low: 5, high: 60, over: false })?.label).toBe("~0.5–1 h left");
+    expect(runAllButtonText({ low: 70, high: 150, over: false, done: 0.1 })).toEqual({ label: "Running…", tooltipHead: "~1–2.5 h left", aria: "Run all, 10 percent done, about 1 to 2.5 hours left", bar: 10 });
+    expect(runAllButtonText({ low: 5, high: 60, over: false, done: 0.1 })?.tooltipHead).toBe("~0.5–1 h left");
   });
 
-  test("says it takes longer than expected, with the estimate as now in the first tooltip line", () => {
-    expect(runAllButtonText({ low: 15, high: 35, over: true })).toEqual({ label: "Taking longer than expected", tooltipHead: "~15–35 min left", aria: "Run all, taking longer than expected" });
+  test("says it takes longer than expected, with the range as now in the first tooltip line and the bar at 95%", () => {
+    expect(runAllButtonText({ low: 15, high: 35, over: true, done: 0.95 })).toEqual({ label: "Taking longer than expected", tooltipHead: "~15–35 min left", aria: "Run all, 95 percent done, taking longer than expected", bar: 95 });
   });
 });

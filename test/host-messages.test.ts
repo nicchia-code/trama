@@ -161,8 +161,9 @@ test("confirmSetup carries the mode, the path, the folder, only wizard keys that
   expect(parse({ mode: "first", choice: "import" }).ok).toBe(false);
   expect(parse({ mode: "empty-model" }).ok).toBe(false);
   expect(parse({ mode: "other", choice: "import" }).ok).toBe(false);
-  // A key outside the steps of the wizard (the language), an unknown key and a value that does not conform are refused.
-  expect(parse({ mode: "settings", values: [{ key: "trama.language", value: "Italian" }] }).ok).toBe(false);
+  // The language is a wizard key now (its step asks it), so it is accepted; autoExit stays out of the wizard, an unknown key and a value that does not conform are refused.
+  expect(parse({ mode: "settings", values: [{ key: "trama.language", value: "Italian" }] }).ok).toBe(true);
+  expect(parse({ mode: "settings", values: [{ key: "trama.autoExit", value: true }] }).ok).toBe(false);
   expect(parse({ mode: "settings", values: [{ key: "trama.nope", value: 1 }] }).ok).toBe(false);
   expect(parse({ mode: "settings", values: [{ key: "trama.maxParallelAgents", value: 0 }] }).ok).toBe(false);
   expect(parse({ mode: "settings", values: [{ key: "trama.terminalLocation", value: "nowhere" }] }).ok).toBe(false);

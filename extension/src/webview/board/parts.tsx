@@ -81,8 +81,18 @@ export function Tip({ text, children }: { text: string | null | undefined; child
 }
 
 /**
+ * The loading bar of a button, drawn under its text and icon and hidden from assistive technology: `"indeterminate"` is a strip of
+ * a third of the button sliding from side to side (still at the centre with reduced motion), a number is the width in percent, that
+ * changes with a transition of about 2 seconds (at once with reduced motion).
+ */
+function ButtonBar({ bar }: { bar: "indeterminate" | number }) {
+  if (bar === "indeterminate") return <span aria-hidden="true" data-bar="indeterminate" className="absolute inset-y-0 left-0 -z-10 w-1/3 animate-run-slide bg-primary/30 motion-reduce:translate-x-full motion-reduce:animate-none" />;
+  return <span aria-hidden="true" data-bar="" className="absolute inset-y-0 left-0 -z-10 bg-primary/30 transition-[width] duration-2000 ease-out motion-reduce:transition-none" style={{ width: `${bar}%` }} />;
+}
+
+/**
  * A `Button` with an icon to the left of its text. `tooltip` shows on hover and focus, disabled or not, and is also the
- * accessible description; `aria` is the accessible name when the visible text is not enough.
+ * accessible description; `aria` is the accessible name when the visible text is not enough. `bar` draws a loading bar inside it.
  */
 export function BoardButton({
   icon: Icon,
@@ -95,6 +105,7 @@ export function BoardButton({
   full = false,
   className,
   data,
+  bar,
   onClick,
 }: {
   icon?: LucideIcon;
@@ -108,10 +119,13 @@ export function BoardButton({
   className?: string;
   /** `data-` attributes of the button, for code that must find it (its accessible name may change). */
   data?: Record<`data-${string}`, string>;
+  /** A loading bar under the text: `"indeterminate"`, or its width in whole percent. */
+  bar?: "indeterminate" | number;
   onClick: () => void;
 }) {
   const button = (
-    <Button variant={variant} size="sm" disabled={disabled} aria-label={aria} aria-description={description || undefined} className={cn(full && "w-full", className)} onClick={onClick} {...data}>
+    <Button variant={variant} size="sm" disabled={disabled} aria-label={aria} aria-description={description || undefined} className={cn(full && "w-full", bar !== undefined && "relative isolate overflow-hidden", className)} onClick={onClick} {...data}>
+      {bar === undefined ? null : <ButtonBar bar={bar} />}
       {Icon ? <Icon aria-hidden="true" focusable="false" /> : null}
       {label}
     </Button>

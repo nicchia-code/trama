@@ -1587,7 +1587,7 @@ export class Controller implements vscode.Disposable {
         if (runs.length <= 1) {
           // The only Run's job is the Run all: it keeps what the time-left estimate needs, under the identity its job will have.
           const id = randomUUID();
-          const runAll: RunAll = { launchedAt, parallel, groups: [{ jobId: id, tasks: only?.tasks ?? [], seats: limit, terminal: null, ended: false }], high: null };
+          const runAll: RunAll = { launchedAt, parallel, groups: [{ jobId: id, tasks: only?.tasks ?? [], seats: limit, terminal: null, ended: false }], high: null, progress: 0 };
           await send({ kind: "implement-all", group: only?.group }, undefined, undefined, undefined, only?.run, { id, runAll });
           return;
         }
@@ -1595,7 +1595,7 @@ export class Controller implements vscode.Disposable {
         // The places each Run gets are decided at the launch, as the sequence decides them; the Runs are told apart by their Task lists.
         const seated = parallel ? (({ now, waiting }) => [...now, ...waiting])(startRuns(runs, limit)) : runs.map((run) => ({ ...run, seats: limit }));
         const jobIds = new Map<readonly string[], string>(runs.map((run) => [run.tasks, randomUUID()]));
-        const runAll: RunAll = { launchedAt, parallel, groups: seated.map((run) => ({ jobId: jobIds.get(run.tasks) as string, tasks: run.tasks, seats: run.seats, terminal: null, ended: false })), high: null };
+        const runAll: RunAll = { launchedAt, parallel, groups: seated.map((run) => ({ jobId: jobIds.get(run.tasks) as string, tasks: run.tasks, seats: run.seats, terminal: null, ended: false })), high: null, progress: 0 };
         startHeldJob(project.root, "run", held, runAll);
         const launch = (planned: PlannedRun & { seats?: number }, onEnd: (abnormal?: string) => void) => this.launchSequenceRun(project, planned, jobIds.get(planned.tasks), onEnd);
         const finish = (abnormal?: string) => endHeldJob(project.root, held, abnormal);

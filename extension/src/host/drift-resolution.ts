@@ -34,6 +34,8 @@ export interface RunAll {
   groups: RunAllGroup[];
   /** The high limit, in minutes, of the first estimate; null until the estimate first exists. */
   high: number | null;
+  /** The highest progress, between 0 and 0.95, already reached; it never goes back (`runAllProgress`). */
+  progress: number;
 }
 
 export interface Job {

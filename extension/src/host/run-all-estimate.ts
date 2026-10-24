@@ -1,4 +1,4 @@
-import { estimateRunAll } from "../../../src/core/run-estimate";
+import { estimateRunAll, runAllProgress } from "../../../src/core/run-estimate";
 import type { Project } from "../../../src/core/store";
 import { readTimingRecords } from "../../../src/core/timings";
 import { blockedTasks, listTasks } from "../../../src/core/work";
@@ -10,7 +10,8 @@ const MS_PER_MINUTE = 60_000;
 /**
  * The time left of the Run all this window launched in `project`, for the Board: `null` without one, `{ estimating: true }` while
  * Trama works it out. The first estimate's high limit is kept in the job and the Run all is `over` once the time since the launch
- * passes it, for good. Reads the timing records and the Tasks; writes nothing under `.trama/`.
+ * passes it, for good. The progress is made again with the estimate; the highest one reached is kept in the job. Reads the timing
+ * records and the Tasks; writes nothing under `.trama/`.
  */
 export function runAllEstimate(project: Project, now: Date = new Date()): RunEstimateView {
   const job = runAllJob(project.root);
@@ -33,5 +34,8 @@ export function runAllEstimate(project: Project, now: Date = new Date()): RunEst
   });
   if (estimate === null) return { estimating: true };
   runAll.high ??= estimate.high;
-  return { low: estimate.low, high: estimate.high, over: now.getTime() - runAll.launchedAt > runAll.high * MS_PER_MINUTE };
+  const elapsed = now.getTime() - runAll.launchedAt;
+  const over = elapsed > runAll.high * MS_PER_MINUTE;
+  runAll.progress = runAllProgress({ elapsedMinutes: elapsed / MS_PER_MINUTE, estimate: estimate.estimate, reached: runAll.progress, over });
+  return { low: estimate.low, high: estimate.high, over, done: runAll.progress };
 }

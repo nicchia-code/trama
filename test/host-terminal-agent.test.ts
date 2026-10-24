@@ -43,16 +43,25 @@ test("an overlay with only exclusions adds --config and never --advisor", () => 
   expect(agentTemplate("omp", true, all, "posix", "/ext/omp-hook.js", "/store/launch.yml")).toBe("'omp' --hook '/ext/omp-hook.js' --config '/store/launch.yml' --model 'opus' --slow 'it'\\''s' {prompt}");
 });
 
-test("the overlay has the advisor role only when trama.scan is set, the task advisors on, and the exclusions when there are some", () => {
-  expect(launchOverlay({ disabledExtensions: [] })).toBeUndefined();
-  expect(launchOverlay({ advisor: { scan: "" }, disabledExtensions: [] })).toBe('task:\n  agentAdvisor:\n    task: "on"\n');
-  expect(launchOverlay({ advisor: { scan: "it's \"x\"" }, disabledExtensions: [] })).toBe('modelRoles:\n  advisor: "it\'s \\"x\\""\ntask:\n  agentAdvisor:\n    task: "on"\n');
-  expect(launchOverlay({ disabledExtensions: ["rule:a", "context-file:project:AGENTS.md"] })).toBe('disabledExtensions:\n  - "rule:a"\n  - "context-file:project:AGENTS.md"\n');
-  expect(launchOverlay({ advisor: { scan: "" }, disabledExtensions: ["rule:a"] })).toBe('task:\n  agentAdvisor:\n    task: "on"\ndisabledExtensions:\n  - "rule:a"\n');
+const OFF = 'bash:\n  autoBackground:\n    enabled: false\n';
+
+test("the overlay always turns bash.autoBackground off, and adds the advisor parts and the exclusions when there are some", () => {
+  expect(launchOverlay({ disabledExtensions: [] })).toBe(OFF);
+  expect(launchOverlay({ advisor: { scan: "" }, disabledExtensions: [] })).toBe(`${OFF}task:\n  agentAdvisor:\n    task: "on"\n`);
+  expect(launchOverlay({ advisor: { scan: "it's \"x\"" }, disabledExtensions: [] })).toBe(`${OFF}modelRoles:\n  advisor: "it's \\"x\\""\ntask:\n  agentAdvisor:\n    task: "on"\n`);
+  expect(launchOverlay({ disabledExtensions: ["rule:a", "context-file:project:AGENTS.md"] })).toBe(`${OFF}disabledExtensions:\n  - "rule:a"\n  - "context-file:project:AGENTS.md"\n`);
+  expect(launchOverlay({ advisor: { scan: "" }, disabledExtensions: ["rule:a"] })).toBe(`${OFF}task:\n  agentAdvisor:\n    task: "on"\ndisabledExtensions:\n  - "rule:a"\n`);
+});
+
+test("the command line of a hook job always has --config, and Ask more's never has it", () => {
+  expect(agentTemplate("omp", false, none, "posix", "/ext/omp-hook.js", "/store/launch.yml")).toBe("'omp' --hook '/ext/omp-hook.js' --config '/store/launch.yml' {prompt}");
+  expect(agentTemplate("omp", false, all, "posix", "/ext/omp-hook.js", "/store/launch.yml", true)).toContain("--config '/store/launch.yml'");
+  expect(askMoreCommandLine("omp", "opus", "posix")).not.toContain("--config");
+  expect(askMoreCommandLine("omp", "", "posix")).toBe("'omp'");
 });
 
 test("an exclusion that looks like YAML structure stays one string", () => {
-  expect(launchOverlay({ disabledExtensions: ["a\nb: c", "- x"] })).toBe('disabledExtensions:\n  - "a\\nb: c"\n  - "- x"\n');
+  expect(launchOverlay({ disabledExtensions: ["a\nb: c", "- x"] })).toBe(`${OFF}disabledExtensions:\n  - "a\\nb: c"\n  - "- x"\n`);
 });
 
 test("the manifest has no agent choice: trama.agent is gone, and omp's program, terminal location and instruction files are user settings", async () => {

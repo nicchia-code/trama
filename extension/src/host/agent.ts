@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, win32 } from "node:path";
@@ -23,7 +23,7 @@ import { agentCommandLine, isSupportedShell, programName, quote, quoteProgram, t
 import type { OmpLoginProvider } from "../omp-login";
 import { interruptTerminalRounds, ownWindowId, questionEndpoint } from "./questions";
 import { pruneAgentProcesses, releaseUnfollowed } from "./task-release";
-import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, instructedMessage, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
+import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, instructedMessage, languageSentence, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
 import { agentTemplate, askMoreCommandLine, askMoreOptions, canScan, launchOverlay, type Models, ompArguments, ompOptions, type Role, roleOf, type RunModel, terminalEnv } from "./terminal-agent";
 import { ompPathVariable } from "./model-lists";
 import { checkedOmp, ompBeforeLaunch } from "./omp-launch";
@@ -37,10 +37,8 @@ export const settings = () => vscode.workspace.getConfiguration("trama");
 /** The folder the developer chose for Trama's skills (`trama.skillsDir`), relative to the project root unless absolute. */
 export const configuredSkillsDir = (): string => settings().get<string>("skillsDir", ".agents/skills").trim() || ".agents/skills";
 
-/** Whether the language setting is in use. Disabled for now: no instruction asks for a language and agents write in English, whatever `trama.language` holds. */
-const LANGUAGE_SETTING_ENABLED = false;
-/** The language the agent writes in (`trama.language`), as typed; empty when none is chosen or the setting is disabled. Read at every launch. */
-export const configuredLanguage = (): string => (LANGUAGE_SETTING_ENABLED ? settings().get<string>("language", "").trim() : "");
+/** The language the agent writes in (`trama.language`), trimmed, as typed; empty when none is chosen. Read at every launch. */
+export const configuredLanguage = (): string => settings().get<string>("language", "").trim();
 /** Whether `trama.driftBlocker` is on, from user settings only: a workspace value does not turn it on. Read at every launch. */
 export const configuredDriftBlocker = (): boolean => settings().inspect<unknown>("driftBlocker")?.globalValue === true;
 /** Whether the Advisor Scanner is on (`trama.advisorScanner`), from user settings only. Read at every launch of a Run: no other job uses it. */
@@ -172,6 +170,23 @@ export function ompChatGeneralSettingsChanged(): void {
   general?.settingsChanged();
 }
 
+/**
+ * The file of General's instructions for this start or resume: the extension's `media/general.md` as it is, or, when a language is chosen (`trama.language`,
+ * read now), a copy in the extension's storage that ends with the language sentence, since omp takes one `--append-system-prompt`. Undefined when the package has no
+ * instructions; it throws when the copy with the sentence cannot be written, so General never starts in a language other than the chosen one.
+ */
+export function generalInstructions(storage: vscode.Uri | undefined = overlayStorage): string | undefined {
+  const file = bundledGeneralInstructions();
+  const language = configuredLanguage();
+  if (file === undefined || language === "") return file;
+  if (storage === undefined) throw new Error("the extension's storage is not available to write the language sentence");
+  const text = `${readFileSync(file, "utf8").trimEnd()}\n\n${languageSentence(language)}\n`;
+  const copy = join(storage.fsPath, `general-${createHash("sha256").update(text).digest("hex").slice(0, 16)}.md`);
+  mkdirSync(storage.fsPath, { recursive: true });
+  writeFileAtomic(copy, text);
+  return copy;
+}
+
 /** The deps of General: the folder the window has open, the settings read at each start, and the launches as the conversations make them. */
 function generalDeps(ports: { client: OmpClientPort; view: ChatViewPort }, store: ConversationStore): GeneralDeps {
   return {
@@ -183,7 +198,7 @@ function generalDeps(ports: { client: OmpClientPort; view: ChatViewPort }, store
     ompPath: configuredOmpPath,
     findOmp: findConfiguredOmp,
     checkOmp: checkedOmp,
-    instructions: bundledGeneralInstructions,
+    instructions: generalInstructions,
     launch: async (root, terminalId) => {
       const endpoint = await questionEndpoint(root);
       if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
@@ -563,12 +578,12 @@ async function instructionExclusionsFor(root: string): Promise<string[]> {
 }
 
 /**
- * Writes the overlay of an omp launch into the extension's storage and returns its path, or `undefined` when it has nothing to say or cannot be written: the overlay
+ * Writes the overlay of an omp launch into the extension's storage and returns its path, or `undefined` when it cannot be written: the overlay
  * never goes into the repository and an error here never stops the launch (`quality#agent-terminal/Agent running`).
  */
 async function writeLaunchOverlay(root: string, advisor: boolean): Promise<string | undefined> {
   const text = launchOverlay({ ...(advisor ? { advisor: { scan: configuredModels().scan } } : {}), disabledExtensions: await instructionExclusionsFor(root) });
-  if (text === undefined || overlayStorage === undefined) return undefined;
+  if (overlayStorage === undefined) return undefined;
   try {
     mkdirSync(overlayStorage.fsPath, { recursive: true });
     const file = join(overlayStorage.fsPath, "launch.yml");

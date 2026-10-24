@@ -1,11 +1,12 @@
 ---
 created: 2026-10-24T16:44:14.288Z
-updated: 2026-10-24T16:44:14.288Z
-summary: While a Run all of the window works, the disabled Run all button shows how many minutes or hours are left, estimated by Trama alone; sub-agent merges are recorded as orders so the estimate sees them.
+updated: 2026-10-24T19:26:52.276Z
+summary: While a Run all of the window works, the Run all button shows the time left estimated by Trama alone, as a range in the tooltip and as a loading bar inside the button; sub-agent merges are recorded as orders so the estimate sees them.
 tasks:
   - nqwjne3p
   - jz9q6bjr
   - sz5n5wag
+  - 1q7djv44
 ---
 # Run all time estimate
 

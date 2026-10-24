@@ -19,8 +19,8 @@ export function stepsFor(mode: WizardMode, choice: WizardChoice | null): WizardS
   return steps;
 }
 
-/** The settings of the Settings tab that the wizard does not ask for: Auto Exit and the language stay in the group `omp` of the tab. */
-const NOT_IN_WIZARD: readonly string[] = ["trama.autoExit", "trama.language"];
+/** The settings of the Settings tab that the wizard does not ask for: Auto Exit stays in the group `omp` of the tab. */
+const NOT_IN_WIZARD: readonly string[] = ["trama.autoExit"];
 
 /** The keys of a group of the shared list `SETTING_GROUPS`, in order, without the ones the wizard leaves out. */
 const wizardKeysOf = (title: string): string[] => {

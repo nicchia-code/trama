@@ -60,7 +60,9 @@ test("the wizard opens on the first step of its mode, with the user values of th
   expect(state.values["trama.ompPath"]).toBe("/x/omp");
   expect(state.values["trama.scan"]).toBe("gpt-5");
   expect(state.values["trama.theme"]).toBeUndefined();
-  expect(Object.keys(state.values)).not.toContain("trama.language");
+  expect(Object.keys(state.values)).toContain("trama.language");
+  expect(state.values["trama.language"]).toBeUndefined();
+  expect(open("settings", { "trama.language": { user: "Italian" } }).values["trama.language"]).toBe("Italian");
 });
 
 test("Back and Next keep the choices; Back is missing on the first step of the mode", () => {
@@ -122,8 +124,8 @@ test("a new folder to initialize forgets the exclusions and the folders read", (
   expect(moved.tree).toEqual({});
 });
 
-test("the keys of each step are always shown, and the language is never in the wizard", () => {
-  expect(STEP_KEYS.omp).toEqual(["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles"]);
+test("the keys of each step are always shown: the omp step asks the language, never Auto Exit", () => {
+  expect(STEP_KEYS.omp).toEqual(["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.language"]);
   expect(STEP_KEYS.Models).toEqual(["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]);
   expect(STEP_KEYS.Project).toEqual(["trama.skillsDir"]);
   expect(STEP_KEYS.Advanced?.[0]).toBe("trama.theme");

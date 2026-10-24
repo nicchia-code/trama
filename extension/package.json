@@ -225,7 +225,7 @@
         "trama.language": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Disabled for now: agents write in English. Later: the language the agent writes in, for example `Italian`; code stays in English."
+          "markdownDescription": "The language the agent writes tasks, drifts, proposals, questions and replies in, for example `Italian`. The Model, Requirements, Specs and code stay in English. Empty (the default) keeps English."
         },
         "trama.driftBlocker": {
           "type": "boolean",

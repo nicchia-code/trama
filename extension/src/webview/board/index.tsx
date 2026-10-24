@@ -381,8 +381,10 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
           icon={estimate === null ? Play : Clock}
           label={estimate?.label ?? "Run all"}
           aria={estimate?.aria ?? "Run all the Tasks in To do"}
-          variant="default"
+          // During a Run all the bar (the panel's primary, with opacity) is drawn over a plain button, so it shows on the primary-coloured one too.
+          variant={estimate === null ? "default" : "outline"}
           full
+          bar={estimate?.bar}
           disabled={estimate !== null || runReason !== null}
           tooltip={estimate === null ? (runReason ?? "Run all the Tasks in To do") : runReason === null ? estimate.tooltipHead : `${estimate.tooltipHead}\n${runReason}`}
           description={runReason}

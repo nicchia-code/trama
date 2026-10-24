@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ASK_DEVELOPER_SENTENCE, askMorePart, AUTO_EXIT_SENTENCE, buildPrompt, DRIFT_BLOCKER_SENTENCE, importPrompt, instructedMessage, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, askMorePart, AUTO_EXIT_SENTENCE, buildPrompt, DRIFT_BLOCKER_SENTENCE, importPrompt, instructedMessage, languageSentence, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
@@ -44,14 +44,36 @@ test("the agent terminal is named after the work: the card's short number, or a 
   expect(terminalName({ kind: "import" }, short)).toBe("Import");
 });
 
-test("a chosen language ends the instruction on the same line, trimmed; blank asks nothing", () => {
-  const scan = buildPrompt({ kind: "scan" });
+test("a chosen language ends every job's instruction on the same line, trimmed and as typed; blank asks nothing", () => {
+  const sentence = (language: string) => `Write the texts for the developer in ${language}, as the Language section of your instructions says.`;
+  const jobs = [
+    buildPrompt({ kind: "written-design", request: "r" }),
+    buildPrompt({ kind: "setup-request", request: "r" }),
+    buildPrompt({ kind: "scan" }),
+    buildPrompt({ kind: "import" }),
+    buildPrompt({ kind: "implement", task: "abc" }),
+    buildPrompt({ kind: "implement-all" }),
+    buildPrompt({ kind: "resolve-drifts", drift: "ab12cd34" }),
+    buildPrompt({ kind: "unify-drifts", drifts: ["aaaa1111", "bbbb2222"] }),
+    buildPrompt({ kind: "rework", proposal: "ab12cd34", skill: "design" }),
+    buildPrompt({ kind: "rework-resolution", proposal: "ab12cd34", drifts: ["aaaa1111"] }),
+    buildPrompt({ kind: "refine", proposal: "ab12cd34", seats: 1, job: "j" }),
+  ];
+  for (const job of jobs) {
+    expect(withLanguage(job, "  Italian ")).toBe(`${job} ${sentence("Italian")}`);
+    expect(withLanguage(job, "Deutsch")).toBe(`${job} ${sentence("Deutsch")}`);
+    expect(withLanguage(job, "")).toBe(job);
+    expect(withLanguage(job, " \t ")).toBe(job);
+  }
   expect(withLanguage("Use the trama-scan skill on the whole System.", "  Italian ")).toBe(
-    "Use the trama-scan skill on the whole System. Write everything you generate in Italian, except code, which always stays in English.",
+    "Use the trama-scan skill on the whole System. Write the texts for the developer in Italian, as the Language section of your instructions says.",
   );
-  expect(withLanguage(scan, "Deutsch")).toBe(`${scan} Write everything you generate in Deutsch, except code, which always stays in English.`);
-  expect(withLanguage(scan, "")).toBe(scan);
-  expect(withLanguage(scan, " \t ")).toBe(scan);
+});
+test("Ask more carries only the language sentence after its part, when a language is chosen", () => {
+  const part = askMorePart({ kind: "task", id: "j6tlxyad", number: "T1", title: "Lancio", body: "Launch.", refs: [], images: [], proposal: null, drift: null });
+  expect(withLanguage(part, " Italian ")).toBe(`${part} ${languageSentence("Italian")}`);
+  expect(languageSentence("Italian")).toBe("Write the texts for the developer in Italian, as the Language section of your instructions says.");
+  expect(withLanguage(part, "  ")).toBe(part);
 });
 test("implementation batch commands receive the configured limit at send time", () => {
   const all = buildPrompt({ kind: "implement-all" }).replaceAll("{maxParallelAgents}", "7");

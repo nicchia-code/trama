@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_TASK_MINUTES,
   estimateRunAll,
+  MAX_PROGRESS,
+  runAllProgress,
   FIX_TASK_MINUTES,
   HIGH_FACTOR,
   LOW_FACTOR,
@@ -178,5 +180,43 @@ describe("while the estimate is being worked out", () => {
 
   test("without Parallel Execution it exists from the launch, even before any Run started", () => {
     expect(estimateRunAll({ records: [], tasks, runs: [run(["a"], { terminal: null })], parallel: false, launchedAt: at(0), now: at(0) })).not.toBeNull();
+  });
+});
+
+describe("the central estimate", () => {
+  test("is returned with the range, which is the estimate times the factors", () => {
+    const result = estimateRunAll({ records: [], tasks: [task("a")], runs: [run(["a"], { terminal: null })], parallel: false, launchedAt: at(0), now: at(0) });
+    if (result === null) throw new Error("expected an estimate");
+    expect(result.estimate).toBeCloseTo(START_MINUTES + DEFAULT_TASK_MINUTES + TAIL_MINUTES, 9);
+    expect(result.low).toBeCloseTo(result.estimate * LOW_FACTOR, 9);
+    expect(result.high).toBeCloseTo(result.estimate * HIGH_FACTOR, 9);
+  });
+});
+
+describe("progress of a Run all", () => {
+  test("is the elapsed time over the elapsed time plus the central estimate", () => {
+    expect(runAllProgress({ elapsedMinutes: 10, estimate: 30, reached: 0, over: false })).toBeCloseTo(0.25, 9);
+    expect(runAllProgress({ elapsedMinutes: 0, estimate: 30, reached: 0, over: false })).toBe(0);
+    expect(runAllProgress({ elapsedMinutes: 0, estimate: 0, reached: 0, over: false })).toBe(0);
+  });
+
+  test("does not go back when the estimate grows: the highest reached stays until the new calculation passes it", () => {
+    const first = runAllProgress({ elapsedMinutes: 20, estimate: 20, reached: 0, over: false });
+    expect(first).toBeCloseTo(0.5, 9);
+    // The estimate grows to 60 minutes: the calculation gives 0.25, the progress stays at 0.5.
+    expect(runAllProgress({ elapsedMinutes: 20, estimate: 60, reached: first, over: false })).toBe(first);
+    // Later the calculation passes it.
+    expect(runAllProgress({ elapsedMinutes: 60, estimate: 20, reached: first, over: false })).toBeCloseTo(0.75, 9);
+  });
+
+  test("never exceeds 0.95 before the Run all ends", () => {
+    expect(MAX_PROGRESS).toBe(0.95);
+    expect(runAllProgress({ elapsedMinutes: 1000, estimate: 0.5, reached: 0, over: false })).toBe(MAX_PROGRESS);
+    expect(runAllProgress({ elapsedMinutes: 1, estimate: 1, reached: 0.99, over: false })).toBe(MAX_PROGRESS);
+  });
+
+  test("is 0.95 beyond the estimate, whatever the recomputed estimate says", () => {
+    expect(runAllProgress({ elapsedMinutes: 5, estimate: 500, reached: 0.1, over: true })).toBe(MAX_PROGRESS);
+    expect(runAllProgress({ elapsedMinutes: 5, estimate: 0, reached: 0, over: true })).toBe(MAX_PROGRESS);
   });
 });
