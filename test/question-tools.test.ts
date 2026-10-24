@@ -49,7 +49,7 @@ test("an invalid later question prevents admission and identifies the offending 
   const invalid = { questions: [...round().questions, { ...round("later").questions[0], recommended: 9 }] };
   let admitted = false;
   server = await createQuestionServer({ project, runtimeDir: runtimeDir, handler: async () => { admitted = true; throw new Error("Invalid rounds must not be admitted"); } });
-  const cli = await ask(JSON.stringify(invalid), { [QUESTION_ENDPOINT_ENV]: server.endpoint });
+  const cli = await ask(JSON.stringify(invalid), { [QUESTION_ENDPOINT_ENV]: server.endpoint, TRAMA_TERMINAL: "abc123" });
   expect(admitted).toBe(false);
   expect(cli.exit).toBe(2);
   expect(JSON.parse(cli.out)).toMatchObject({ error: { code: "invalid-input", message: expect.stringContaining("questions[1].recommended") } });
@@ -62,7 +62,7 @@ test("context and details are optional, reach the editor, and must not be blank 
     received = request;
     return { status: "answered", answers: { direction: { status: "answered", selected: ["North"] } } };
   } });
-  const cli = await ask(JSON.stringify(rich), { [QUESTION_ENDPOINT_ENV]: server.endpoint });
+  const cli = await ask(JSON.stringify(rich), { [QUESTION_ENDPOINT_ENV]: server.endpoint, TRAMA_TERMINAL: "abc123" });
   expect(cli.exit).toBe(0);
   expect(JSON.parse(cli.out)).toEqual({ status: "answered", answers: { direction: { status: "answered", selected: ["North"] } } });
   expect(received).toEqual(rich);
@@ -75,7 +75,7 @@ test("context and details are optional, reach the editor, and must not be blank 
     let admitted = false;
     const watched = await createQuestionServer({ project, runtimeDir: runtimeDir, handler: async () => { admitted = true; throw new Error("Invalid rounds must not be admitted"); } });
     try {
-      const refused = await ask(JSON.stringify(bad), { [QUESTION_ENDPOINT_ENV]: watched.endpoint });
+      const refused = await ask(JSON.stringify(bad), { [QUESTION_ENDPOINT_ENV]: watched.endpoint, TRAMA_TERMINAL: "abc123" });
       expect(admitted).toBe(false);
       expect(refused.exit).toBe(2);
       expect(JSON.parse(refused.out)).toMatchObject({ error: { code: "invalid-input", message: expect.stringContaining(field) } });
@@ -89,7 +89,7 @@ test("`trama question new` prints the editor's answers as JSON", async () => {
   server = await createQuestionServer({ project, runtimeDir: runtimeDir, handler: async (_p, request) => (
     { status: "answered", answers: { [request.questions[0]!.id]: { status: "answered", selected: ["South"] } } }
   ) });
-  const cli = await ask(JSON.stringify(round()), { [QUESTION_ENDPOINT_ENV]: server.endpoint });
+  const cli = await ask(JSON.stringify(round()), { [QUESTION_ENDPOINT_ENV]: server.endpoint, TRAMA_TERMINAL: "abc123" });
   expect(cli.exit).toBe(0);
   expect(JSON.parse(cli.out)).toEqual({ status: "answered", answers: { direction: { status: "answered", selected: ["South"] } } });
 });
@@ -98,7 +98,7 @@ test("a UTF-8 byte order mark before the round on standard input is ignored", as
   server = await createQuestionServer({ project, runtimeDir: runtimeDir, handler: async (_p, request) => (
     { status: "answered", answers: { [request.questions[0]!.id]: { status: "answered", selected: ["North"] } } }
   ) });
-  const cli = await ask(`\uFEFF${JSON.stringify(round())}`, { [QUESTION_ENDPOINT_ENV]: server.endpoint });
+  const cli = await ask(`\uFEFF${JSON.stringify(round())}`, { [QUESTION_ENDPOINT_ENV]: server.endpoint, TRAMA_TERMINAL: "abc123" });
   expect(cli.exit).toBe(0);
   expect(JSON.parse(cli.out)).toEqual({ status: "answered", answers: { direction: { status: "answered", selected: ["North"] } } });
 });
@@ -115,7 +115,7 @@ test("CLI question new routes by selected root outside cwd and emits only the in
     entered.resolve();
     return await new Promise<QuestionResult>(() => {});
   } });
-  const proc = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/bin.ts"), "--root", dir, "question", "new", "--input", "-"], { cwd: tmpdir(), env: { ...process.env, [QUESTION_ENDPOINT_ENV]: server.endpoint }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/bin.ts"), "--root", dir, "question", "new", "--input", "-"], { cwd: tmpdir(), env: { ...process.env, [QUESTION_ENDPOINT_ENV]: server.endpoint, TRAMA_TERMINAL: "abc123" }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
   try {
     proc.stdin.write(JSON.stringify(round()));
     proc.stdin.end();
@@ -141,7 +141,7 @@ test("CLI question new routes by selected root outside cwd and emits only the in
       context.signal?.addEventListener("abort", () => { cancelled.resolve(); reject(questionAborted()); }, { once: true });
     });
   } });
-  const proc = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/bin.ts"), "question", "new", "--input", "-", "--root", dir], { cwd: tmpdir(), env: { ...process.env, [QUESTION_ENDPOINT_ENV]: server.endpoint }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/bin.ts"), "question", "new", "--input", "-", "--root", dir], { cwd: tmpdir(), env: { ...process.env, [QUESTION_ENDPOINT_ENV]: server.endpoint, TRAMA_TERMINAL: "abc123" }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
   try {
     proc.stdin.write(JSON.stringify(round()));
     proc.stdin.end();

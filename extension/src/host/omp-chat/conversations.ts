@@ -1,4 +1,3 @@
-import { terminalVerdict } from "../../../../src/core/terminal-check";
 import {
   CONVERSATIONS_KEY,
   closeNeedsConfirmation,
@@ -17,23 +16,24 @@ import {
   withoutSavedConversation,
   withSavedConversation,
 } from "../../../../src/core/omp-chat-conversation";
-import type { ChatViewPort, Disposable, OmpClientPort, OmpLaunch, OmpPrompt, OmpSessionPort, PendingInstruction } from "./ports";
+import { type ChatViewPort, type Disposable, type OmpClientPort, type OmpLaunch, type OmpPrompt, OmpStartFailure, type OmpSessionPort, type PendingInstruction } from "./ports";
 
 /** What the conversations need of the rest of the host (`agent.ts`): the end of a job's work, the registry of agent processes, the dialogs and the settings. */
 export interface ConversationHooks {
-  /** `trama.autoExit`, read when the agent's hook says idle. */
+  /** `trama.autoExit`, read when omp answers the prompt of the work. */
   autoExit(): boolean;
   /** Ends the work of the conversation as the end of a terminal's work does: releases what it took, withdraws its announcements, ends its job (with `abnormal` when the end is not normal) and forgets its registered process. */
   endWork(conversation: ConversationInfo, abnormal?: string): void;
-  /** The Board notice that Trama stopped following `name`, with its reason. */
-  reportStopped(name: string, reason: string): void;
-  /** Registers the process of the conversation's agent for the execution check. */
+  /** The Board notice that Trama stopped following `name`, with its reason and, when omp wrote any, the last lines of its error output. */
+  reportStopped(name: string, reason: string, details?: string): void;
+  /** The Board notice that the agent of `name` stopped abnormally: the model refused, a limit was reached or omp refused the prompt. */
+  reportAgentStopped(name: string, reason: string): void;
+  /** Registers the process of the conversation's agent in the registry of every window's execution check, as soon as it is started. */
   registerProcess(conversation: ConversationInfo, pid: number): void;
-  /** The process registered for the conversation, if any. */
-  registeredProcess(conversation: ConversationInfo): number | undefined;
-  processAlive(pid: number): boolean;
-  /** Whether the hook of the run follows the conversation (`rules#agent-terminal`): an unfollowed conversation is not asked about. */
-  follow(id: string, followed: boolean): void;
+  /** Forgets the registered process of a conversation that did not open: its process is stopped. */
+  unregisterProcess(conversation: ConversationInfo): void;
+  /** Interrupts the question round the conversation is waiting on, if any. */
+  interruptQuestions(conversation: ConversationInfo): void;
   /** Puts the saved job of a conversation to resume back in the registry of jobs, with its announcement. */
   restoreJob(conversation: ConversationInfo, job: SavedJob): void;
   /** The project a window's saved conversations belong to, or undefined when there is none. */
@@ -65,11 +65,12 @@ interface Conversation extends ConversationInfo {
   session?: OmpSessionPort;
   args: string[];
   env: Record<string, string>;
+  /** Whether it is a job conversation with Trama's hook: omp's forms are declined at once in it. Saved with the entry, never derived from the arguments. */
+  hook: boolean;
   job?: SavedJob;
   openedAt: string;
-  /** The hook said idle before the session was attached: applied as soon as it is. */
-  idleEarly?: boolean;
   exitListener?: Disposable;
+  turnListener?: Disposable;
 }
 
 /** Ask more's instruction, held for the first message of its conversation: the placeholder of the empty field, the prompt that message goes as (`compose`), and
@@ -90,14 +91,20 @@ export interface OpenConversation {
   first?: OmpPrompt;
   /** Ask more takes the focus; jobs do not. */
   focus: boolean;
+  /** Whether it is a job conversation with Trama's hook (a job whose package carries the hook module); Ask more and General are not. Omp's forms are declined at once in it, even when the hook did not load. */
+  hook: boolean;
   job?: SavedJob;
   /** Ask more's instruction, held for the developer's first message: the conversation opens with no message of its own. */
   instruction?: HeldInstruction;
 }
 
-export type OpenResult = { opened: true } | { opened: false; reason: string };
+/** A conversation that did not open: why, and the last lines omp wrote on its error output. */
+export type OpenResult = { opened: true } | { opened: false; reason: string; details?: string };
 
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/** The result of a start that failed: its reason and, when omp wrote some, the tail of its error output. */
+const notOpened = (err: unknown): OpenResult => ({ opened: false, reason: messageOf(err), ...(err instanceof OmpStartFailure && err.details !== undefined ? { details: err.details } : {}) });
 
 /** The conversations of omp Chat of one window (`omp-chat-conversation` Machine): each has its process, its state and its place in the registry of jobs. */
 export class OmpConversations {
@@ -117,14 +124,21 @@ export class OmpConversations {
     ];
   }
 
-  /** Whether this window has a conversation Trama follows or waits to resume: the execution check has it to look at. */
-  get following(): boolean {
-    return [...this.conversations.values()].some((conversation) => conversation.state === "running");
-  }
-
   /** The conversation `id`, if this window has it open. */
   has(id: string): boolean {
     return this.conversations.has(id);
+  }
+
+  /** Whether `id` is a conversation of a job that has not ended (working, or waiting to resume): it is followed by its turn end, whatever its hook. */
+  followsJob(id: string): boolean {
+    const conversation = this.conversations.get(id);
+    return conversation?.job !== undefined && (conversation.state === "running" || conversation.state === "waiting");
+  }
+
+  /** The name of the conversation `id` (the one on its tab) and its project, when this window has it open. */
+  named(id: string): { name: string; root: string } | undefined {
+    const conversation = this.conversations.get(id);
+    return conversation === undefined ? undefined : { name: conversation.name, root: conversation.root };
   }
 
   /** Opens a conversation. On a failed start nothing stays open or saved, and the reason is returned: the caller sends the same instruction to a terminal. */
@@ -139,21 +153,23 @@ export class OmpConversations {
       state: "running",
       args: spec.launch.args,
       env: savedEnv(spec.launch.env),
+      hook: spec.hook,
       openedAt: new Date().toISOString(),
     };
     this.conversations.set(spec.id, conversation);
     let session: OmpSessionPort;
     try {
-      session = await this.client.start(spec.launch, spec.first);
+      // The first message is the prompt of the job's work: the client marks it, and omp's answer to it ends the work.
+      session = await this.client.start({ ...spec.launch, hook: spec.hook }, spec.first, (pid) => this.hooks.registerProcess(conversation, pid));
     } catch (err) {
       this.conversations.delete(spec.id);
-      return { opened: false, reason: messageOf(err) };
+      this.hooks.unregisterProcess(conversation);
+      return notOpened(err);
     }
     this.attach(conversation, session);
     this.persist(conversation);
     this.view.open({ id: conversation.id, name: conversation.name }, session, { focus: spec.focus, ...(spec.first === undefined ? {} : { first: spec.first }) });
     this.view.setWorking(conversation.id, true);
-    if (conversation.idleEarly === true) this.step(conversation, { type: "agent-hook.IDLE" });
     return { opened: true };
   }
 
@@ -170,6 +186,7 @@ export class OmpConversations {
       state: "idle",
       args: spec.launch.args,
       env: savedEnv(spec.launch.env),
+      hook: spec.hook,
       openedAt: new Date().toISOString(),
     };
     this.conversations.set(spec.id, conversation);
@@ -181,15 +198,17 @@ export class OmpConversations {
     this.view.open({ id: spec.id, name: spec.name }, undefined, { focus: spec.focus, instruction });
     let session: OmpSessionPort;
     try {
-      session = await this.client.start(spec.launch);
+      session = await this.client.start({ ...spec.launch, hook: spec.hook }, undefined, (pid) => this.hooks.registerProcess(conversation, pid));
     } catch (err) {
       this.conversations.delete(spec.id);
+      this.hooks.unregisterProcess(conversation);
       this.view.close(spec.id);
-      return { opened: false, reason: messageOf(err) };
+      return notOpened(err);
     }
     // The developer may have closed the tab while omp started: nothing is open to take the process then, so it is stopped.
     if (this.conversations.get(spec.id) !== conversation) {
       await session.stop().catch(() => undefined);
+      this.hooks.unregisterProcess(conversation);
       return { opened: true };
     }
     this.attach(conversation, session);
@@ -206,24 +225,6 @@ export class OmpConversations {
     announce();
   }
 
-  /** `agent-hook.IDLE`: the agent of the conversation `id` says it is at rest. */
-  agentIdle(id: string): void {
-    const conversation = this.conversations.get(id);
-    if (conversation === undefined || conversation.state !== "running") return;
-    if (conversation.session === undefined) {
-      conversation.idleEarly = true;
-      return;
-    }
-    this.step(conversation, { type: "agent-hook.IDLE" });
-  }
-
-  /** `agent-hook.STARTED`: the hook named the process of the agent of `id`, which a followed conversation remembers. */
-  agentStarted(id: string, pid: number, root: string): void {
-    const conversation = this.conversations.get(id);
-    if (conversation === undefined || conversation.state !== "running" || conversation.root !== root) return;
-    this.step(conversation, { type: "agent-hook.STARTED" }, pid);
-  }
-
   /** `developer.STOP_CHAT_AGENT`: after the confirmation, the turn of the agent is cancelled. */
   async stopRequested(id: string): Promise<void> {
     const conversation = this.conversations.get(id);
@@ -231,7 +232,10 @@ export class OmpConversations {
     if (!(await this.hooks.confirm(`Stop the agent in ${conversation.name}?`, "The agent stops its current turn.", "Stop"))) return;
     if (conversation.state === "running") this.step(conversation, { type: "developer.STOP_CHAT_AGENT" });
     // At rest for Trama the agent may be in a turn for a message of the developer: Stop ends it all the same, and Trama follows nothing.
-    else if (conversation.state === "idle") conversation.session.cancel();
+    else if (conversation.state === "idle") {
+      conversation.session.cancel();
+      this.hooks.interruptQuestions(conversation);
+    }
   }
 
   /** `developer.CLOSE_CHAT_CONVERSATION`: confirmed first only when the agent is in a turn. */
@@ -244,22 +248,6 @@ export class OmpConversations {
     }
     if (this.conversations.get(id) !== conversation) return;
     this.step(conversation, { type: "developer.CLOSE_CHAT_CONVERSATION" });
-  }
-
-  /**
-   * `time.CHECK_DUE` for the conversations in Agent running: one whose agent process is gone, the one the hook reported or the one the client started, without
-   * Trama having seen its end, closes with the notice. Returns what it looked at, with the reason for the ones it closed.
-   */
-  check(only?: string): { id: string; name: string; reason?: string }[] {
-    const checked: { id: string; name: string; reason?: string }[] = [];
-    for (const conversation of [...this.conversations.values()]) {
-      if (conversation.state !== "running" || conversation.session === undefined || (only !== undefined && conversation.id !== only)) continue;
-      const pid = this.hooks.registeredProcess(conversation) ?? conversation.session.pid;
-      const reason = terminalVerdict({ terminalGone: false, ...(pid === undefined ? {} : { hookPid: pid }) }, this.hooks.processAlive);
-      checked.push({ id: conversation.id, name: conversation.name, ...(reason === undefined ? {} : { reason }) });
-      if (reason !== undefined) this.step(conversation, { type: "time.CHECK_DUE", processGone: true });
-    }
-    return checked;
   }
 
   /**
@@ -303,24 +291,28 @@ export class OmpConversations {
         state: "waiting",
         args: entry.args,
         env: entry.env,
+        hook: entry.hook,
         openedAt: entry.openedAt,
       };
       this.conversations.set(entry.id, conversation);
       return conversation;
     });
-    // The jobs stand again, and their conversations are followed, before the execution check can look at their Tasks.
-    for (const [index, conversation] of waiting.entries()) {
-      const entry = entries[index];
-      if (entry === undefined || root === undefined) continue;
-      this.hooks.follow(conversation.id, entry.state === "running" && entry.args.includes("--hook"));
-      if (conversation.job !== undefined) this.hooks.restoreJob(conversation, conversation.job);
+    // The jobs stand again before the execution check can look at their Tasks; a conversation is followed while it waits (`followsJob`).
+    for (const conversation of waiting) {
+      if (root !== undefined && conversation.job !== undefined) this.hooks.restoreJob(conversation, conversation.job);
     }
     await Promise.all(waiting.map((conversation, index) => this.resumeOne(conversation, entries[index] as SavedConversation, root)));
   }
 
   private async resumeOne(conversation: Conversation, entry: SavedConversation, root: string | undefined): Promise<void> {
     const wasRunning = resumeDecision(entry).wasRunning;
-    const lost = () => this.step(conversation, { type: "omp-acp.SESSION_NOT_RESUMED", wasRunning });
+    const lost = (cause?: unknown) =>
+      this.step(conversation, {
+        type: "omp-acp.SESSION_NOT_RESUMED",
+        wasRunning,
+        ...(cause === undefined ? {} : { cause: messageOf(cause) }),
+        ...(cause instanceof OmpStartFailure && cause.details !== undefined ? { details: cause.details } : {}),
+      });
     if (root === undefined) {
       lost();
       return;
@@ -329,12 +321,12 @@ export class OmpConversations {
     let session: OmpSessionPort;
     try {
       const launch = await this.hooks.resumeLaunch(root, entry.args, entry.env);
-      attempt = this.client.resume(launch, entry.sessionId);
+      attempt = this.client.resume({ ...launch, hook: entry.hook }, entry.sessionId, (pid) => this.hooks.registerProcess(conversation, pid));
       session = await within(attempt);
-    } catch {
+    } catch (err) {
       // A late answer of a resume that was given up is stopped: no process stays orphan.
       void attempt?.then((late) => late.stop(), () => undefined);
-      lost();
+      lost(err);
       return;
     }
     this.attach(conversation, session);
@@ -344,52 +336,71 @@ export class OmpConversations {
     this.view.setWorking(conversation.id, conversation.state === "running");
   }
 
-  /** Binds the session to the conversation: the process is registered for the execution check and its unasked end is `omp-acp.EXITED`. */
+  /**
+   * Binds the session to the conversation: the end of the process Trama did not ask for is `omp-acp.EXITED` and, for a job, omp's answer to the prompt of the work
+   * is `omp-acp.TURN_ENDED`. The session keeps an end that came before this, so no end is missed.
+   */
   private attach(conversation: Conversation, session: OmpSessionPort): void {
     conversation.session = session;
-    if (session.pid !== undefined) this.hooks.registerProcess(conversation, session.pid);
+    const current = (): boolean => this.conversations.get(conversation.id) === conversation;
     conversation.exitListener = session.onExit((exit) => {
-      if (this.conversations.get(conversation.id) !== conversation) return;
-      this.step(conversation, { type: "omp-acp.EXITED", code: exit.code, signal: exit.signal });
+      if (!current()) return;
+      this.step(conversation, { type: "omp-acp.EXITED", code: exit.code, signal: exit.signal, ...(exit.details === undefined ? {} : { details: exit.details }) });
     });
+    if (conversation.job !== undefined) {
+      conversation.turnListener = session.onTurnEnd((end) => {
+        if (current()) this.step(conversation, { type: "omp-acp.TURN_ENDED", end });
+      });
+    }
   }
 
   /** Applies an Event: moves the conversation and carries out the effects the Machine names. Returns the stops of processes it started. */
-  private step(conversation: Conversation, event: ConversationEvent, pid?: number): Promise<void>[] {
-    const next = conversationStep(conversation.state, event, this.hooks.autoExit());
+  private step(conversation: Conversation, event: ConversationEvent): Promise<void>[] {
+    const before = conversation.state;
+    const next = conversationStep(before, event, this.hooks.autoExit());
     conversation.state = next.state;
+    // The conversation closes or its process exits: the rounds its agent asked end with it, as they do when the developer stops its turn.
+    if ((before === "running" || before === "idle") && (event.type === "developer.CLOSE_CHAT_CONVERSATION" || event.type === "omp-acp.EXITED")) this.hooks.interruptQuestions(conversation);
     const stops: Promise<void>[] = [];
-    for (const effect of next.effects) this.apply(conversation, effect, stops, pid);
+    for (const effect of next.effects) this.apply(conversation, effect, stops);
     return stops;
   }
 
-  private apply(conversation: Conversation, effect: ConversationEffect, stops: Promise<void>[], pid: number | undefined): void {
+  private apply(conversation: Conversation, effect: ConversationEffect, stops: Promise<void>[]): void {
     switch (effect.effect) {
       case "end-work":
         this.hooks.endWork(conversation, effect.abnormal);
         return;
-      case "stop-process":
       case "stop-process-for-window":
-        if (conversation.session !== undefined) stops.push(conversation.session.stop().catch(() => undefined));
+        // The window is closing: there is little time, so `session/close` is skipped.
+        if (conversation.session !== undefined) stops.push(conversation.session.stop({ deactivating: true }).catch(() => undefined));
         return;
-      case "remember-process":
-        if (pid !== undefined) this.hooks.registerProcess(conversation, pid);
+      case "stop-process":
+        if (conversation.session !== undefined) stops.push(conversation.session.stop().catch(() => undefined));
         return;
       case "cancel-turn":
         conversation.session?.cancel();
         return;
+      case "interrupt-questions":
+        this.hooks.interruptQuestions(conversation);
+        return;
       case "report-stopped":
-        this.hooks.reportStopped(conversation.name, effect.reason);
+        this.hooks.reportStopped(conversation.name, effect.reason, effect.details);
+        return;
+      case "report-agent-stopped":
+        this.hooks.reportAgentStopped(conversation.name, effect.reason);
         return;
       case "save-state":
         this.persist(conversation, effect.state);
         this.view.setWorking(conversation.id, effect.state === "running");
         return;
       case "continue-work":
-        void conversation.session?.sendPrompt({ text: RESUME_PROMPT }).catch(() => undefined);
+        // The fixed message that continues the work of a job is its prompt of work: omp's answer to it, a refusal included, ends the work (`onTurnEnd`), so nothing is swallowed.
+        void conversation.session?.sendPrompt({ text: RESUME_PROMPT, work: true });
         return;
       case "close":
         conversation.exitListener?.dispose();
+        conversation.turnListener?.dispose();
         this.conversations.delete(conversation.id);
         this.saved = withoutSavedConversation(this.saved, conversation.id);
         void this.store.update(CONVERSATIONS_KEY, this.saved);
@@ -409,6 +420,7 @@ export class OmpConversations {
       state,
       args: conversation.args,
       env: conversation.env,
+      hook: conversation.hook,
       ...(conversation.job === undefined || state !== "running" ? {} : { job: conversation.job }),
       openedAt: conversation.openedAt,
     };

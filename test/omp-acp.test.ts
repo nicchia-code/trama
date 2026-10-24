@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { modelChoices, permissionOutcome, promptBlocks, reopenMethod, startFailureReason, steeringAnswer, steeringSupported } from "../src/core/omp-acp";
+import { missingDeclaration, modelChoices, permissionOutcome, promptBlocks, STDERR_MAX_BYTES, STDERR_MAX_LINES, StderrTail, startFailureReason, steeringAnswer } from "../src/core/omp-acp";
 
 describe("the answer to a permission request", () => {
   test("allow_always first, then allow_once, whatever the order", () => {
@@ -63,10 +63,15 @@ describe("a prompt's blocks", () => {
 });
 
 describe("what omp declares", () => {
-  test("steering", () => {
-    expect(steeringSupported({ _meta: { steering: { supported: true } } })).toBe(true);
-    expect(steeringSupported({ _meta: {} })).toBe(false);
-    expect(steeringSupported(undefined)).toBe(false);
+  test("what omp 18.12.6 declares is steering, session/close and, to reopen a session, loadSession; the first one missing is the reason", () => {
+    const declared = { _meta: { steering: { supported: true } }, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {}, close: {} } } };
+    expect(missingDeclaration(declared, false)).toBeUndefined();
+    expect(missingDeclaration(declared, true)).toBeUndefined();
+    expect(missingDeclaration({ ...declared, _meta: {} }, false)).toBe("omp does not declare steering (_session/steering)");
+    expect(missingDeclaration(undefined, false)).toBe("omp does not declare steering (_session/steering)");
+    expect(missingDeclaration({ ...declared, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } }, false)).toBe("omp does not declare session/close");
+    expect(missingDeclaration({ ...declared, agentCapabilities: { sessionCapabilities: { close: {} } } }, false)).toBeUndefined();
+    expect(missingDeclaration({ ...declared, agentCapabilities: { sessionCapabilities: { close: {} } } }, true)).toBe("omp does not declare session/load");
   });
   test("the answer to a steering message: injected or promptRequired, anything else is a failure", () => {
     expect(steeringAnswer({ outcome: "injected", queue: "steering" })).toBe("injected");
@@ -75,9 +80,37 @@ describe("what omp declares", () => {
     expect(steeringAnswer({ outcome: "rejected" })).toEqual({ failed: "omp did not take the message" });
     expect(steeringAnswer(undefined)).toEqual({ failed: "omp did not take the message" });
   });
-  test("reopening a session: load first, then resume", () => {
-    expect(reopenMethod({ agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } })).toBe("load");
-    expect(reopenMethod({ agentCapabilities: { sessionCapabilities: { resume: {} } } })).toBe("resume");
-    expect(reopenMethod({ agentCapabilities: {} })).toBeUndefined();
+});
+
+describe("the tail of omp's error output", () => {
+  test("it keeps the last lines and says nothing when omp wrote nothing", () => {
+    const tail = new StderrTail();
+    expect(tail.lines()).toBe("");
+    tail.push("one\ntwo\r\nthree\n\n");
+    expect(tail.lines()).toBe("one\ntwo\nthree");
+  });
+
+  test("at most 40 lines are kept, the oldest ones are cut first", () => {
+    const tail = new StderrTail();
+    for (let n = 1; n <= 100; n++) tail.push(`line ${n}\n`);
+    const kept = tail.lines().split("\n");
+    expect(kept).toHaveLength(STDERR_MAX_LINES);
+    expect(kept[0]).toBe("line 61");
+    expect(kept.at(-1)).toBe("line 100");
+  });
+
+  test("at most 4 KB are kept, and a multi-byte character cut between two chunks is not broken", () => {
+    const tail = new StderrTail();
+    for (let n = 0; n < 200; n++) tail.push(`${"x".repeat(99)}\n`);
+    expect(Buffer.byteLength(tail.lines())).toBeLessThanOrEqual(STDERR_MAX_BYTES);
+    const split = new StderrTail();
+    const bytes = Buffer.from("é\n");
+    split.push(bytes.subarray(0, 1));
+    split.push(bytes.subarray(1));
+    expect(split.lines()).toBe("é");
+    const long = new StderrTail();
+    long.push(`${"y".repeat(10_000)}END`);
+    expect(long.lines().endsWith("END")).toBe(true);
+    expect(Buffer.byteLength(long.lines())).toBeLessThanOrEqual(STDERR_MAX_BYTES);
   });
 });

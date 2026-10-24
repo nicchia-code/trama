@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { holdersToAsk, unfollowedTasks } from "../src/core/task-holders";
+import { holdersToAsk, unfollowedAnnouncements, unfollowedTasks } from "../src/core/task-holders";
 
 const facts = (over: Partial<Parameters<typeof unfollowedTasks>[0]> = {}) => ({
   tasks: [
@@ -25,7 +25,27 @@ describe("unfollowedTasks", () => {
     expect(unfollowedTasks(facts({ terminalProcessAlive: (t) => t === "term2" }))).toEqual(["a"]);
   });
   test("holdersToAsk lists the distinct known holders this window does not follow", () => {
-    const tasks = [...facts().tasks, { id: "e", holder: "term1" }];
-    expect(holdersToAsk(tasks, (h) => h === "term2")).toEqual(["term1"]);
+    const holders = [...facts().tasks.map((task) => task.holder), "term1", null];
+    expect(holdersToAsk(holders, (h) => h === "term2")).toEqual(["term1"]);
+  });
+});
+
+describe("unfollowedAnnouncements", () => {
+  const announcements = [
+    { id: "x", terminal: "term1" },
+    { id: "y", terminal: "term2" },
+    { id: "z", terminal: null },
+  ];
+  const withFacts = (over: Partial<Parameters<typeof unfollowedAnnouncements>[0]> = {}) => ({ ...facts(), announcements, ...over });
+
+  test("withdraws the ghosts of holders nobody follows and the ones of no terminal", () => {
+    expect(unfollowedAnnouncements(withFacts())).toEqual(["x", "y", "z"]);
+  });
+  test("a window following the terminal, here or elsewhere, keeps its ghost; one of no terminal has nobody to follow it", () => {
+    expect(unfollowedAnnouncements(withFacts({ followedHere: (h) => h === "term1" }))).toEqual(["y", "z"]);
+    expect(unfollowedAnnouncements(withFacts({ followedElsewhere: new Set(["term1", "term2"]), terminalProcessAlive: () => true }))).toEqual(["z"]);
+  });
+  test("a terminal whose agent process is alive keeps its ghost", () => {
+    expect(unfollowedAnnouncements(withFacts({ terminalProcessAlive: (t) => t === "term2" }))).toEqual(["x", "z"]);
   });
 });

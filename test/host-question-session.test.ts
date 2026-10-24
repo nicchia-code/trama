@@ -11,10 +11,13 @@ const request = (id = "q"): QuestionRequest => ({
   ],
 });
 
+/** The tabs of this window: the terminal `abc123` is named `Design`. */
+const tabName = (terminal: string) => terminal === "abc123" ? "Design" : undefined;
+
 function session() {
   let reveals = 0;
   const seen: (QuestionRoundView | null)[] = [];
-  const s = new QuestionSession(() => void reveals++);
+  const s = new QuestionSession(() => void reveals++, tabName);
   s.onChange((round) => seen.push(round));
   return { s, seen, reveals: () => reveals };
 }
@@ -24,7 +27,8 @@ test("a round entering Asking reveals the panel, and the developer's actions del
   const answered = s.present(request(), { signal: new AbortController().signal, prepared: true });
   expect(reveals()).toBe(1);
   const round = s.current();
-  expect(round?.agent).toBe("Prepared question");
+  expect(round?.name).toBeNull();
+  expect(round?.prepared).toBe(true);
   expect(round?.state.drafts[0]).toEqual({ selected: [0], text: "" });
   const id = round?.id as number;
 
@@ -39,19 +43,18 @@ test("a round entering Asking reveals the panel, and the developer's actions del
   expect(seen.at(-1)).toBeNull();
 });
 
-test("the round names the agent that asked it: Prepared question for a round Trama asks itself, omp for one from a terminal of Trama, none otherwise", () => {
-  const { s } = session();
+test("the round names the tab of the terminal or conversation that asked it: a prepared round and a terminal without a tab have no name", () => {
   const signal = new AbortController().signal;
-  void s.present(request(), { signal, fromTramaTerminal: true });
-  expect(s.current()?.agent).toBe("omp");
-  const named = (context: { prepared?: boolean; fromTramaTerminal?: boolean }) => {
+  const named = (context: { prepared?: boolean; terminal?: string }) => {
     const other = session().s;
-    void other.present(request(), { signal: new AbortController().signal, ...context });
-    return other.current()?.agent;
+    void other.present(request(), { signal, ...context });
+    const round = other.current();
+    return { name: round?.name, prepared: round?.prepared };
   };
-  expect(named({ prepared: true })).toBe("Prepared question");
-  expect(named({ fromTramaTerminal: false })).toBeNull();
-  expect(named({})).toBeNull();
+  expect(named({ terminal: "abc123" })).toEqual({ name: "Design", prepared: false });
+  expect(named({ terminal: "zzz999" })).toEqual({ name: null, prepared: false });
+  expect(named({})).toEqual({ name: null, prepared: false });
+  expect(named({ prepared: true, terminal: "abc123" })).toEqual({ name: null, prepared: true });
 });
 
 test("an incomplete send from the panel is refused and the round stays open", () => {

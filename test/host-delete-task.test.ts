@@ -187,7 +187,7 @@ test("the conditions are checked again at the instant of deleting: a Run that st
 
 test("a Task taken while the dialog was open is not deleted: the core refusal reaches the Board as a notice", async () => {
   const { project, task, name, controller, press, exists } = await setup("Taken during the dialog");
-  whileOpen = () => moveTask(project, task.id, "doing", "agent");
+  whileOpen = () => moveTask(project, task.id, "doing", "agent", { terminal: "aaa111" });
   await press();
   expect(notices()).toEqual([`Trama could not delete ${name}: Task ${name} is not in To do (it is doing): only a Task in To do is deleted, so nothing was deleted.`]);
   expect(snapshots()).toBeGreaterThan(0);

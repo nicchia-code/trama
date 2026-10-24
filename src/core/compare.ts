@@ -1,4 +1,4 @@
-import { deliverComparison, getAnnouncement } from "./announcements";
+import { deliverComparison, getAnnouncement, readUnownedComparison } from "./announcements";
 import { concernSameThing, extent } from "./blocking";
 import { recordComparison } from "./compared";
 import { TramaError } from "./errors";
@@ -146,7 +146,7 @@ export function parseComparisonFile(raw: string): ComparisonFile {
 
 const titleOf = (c: unknown, fallback: string) => (isObject(c) && typeof c["title"] === "string" ? c["title"] : fallback);
 
-/** Checks every card of a comparison file and writes them only when all pass; a comparison waiting for `comparisonId` is delivered. */
+/** Checks every card of a comparison file and writes them only when all pass; a comparison waiting for `comparisonId`, announced or briefed without a terminal, is delivered. */
 export function archiveComparison(p: Project, comparisonId: string, raw: string, job?: string): ArchiveResult {
   const file = parseComparisonFile(raw);
   const problems: string[] = [];
@@ -200,11 +200,12 @@ export function archiveComparison(p: Project, comparisonId: string, raw: string,
     }
   });
   if (problems.length > 0) throw new TramaError(`The comparison file has problems; nothing was written:\n${problems.map((m) => `- ${m}`).join("\n")}`);
-  const waiting = getAnnouncement(p, comparisonId);
+  const announced = getAnnouncement(p, comparisonId);
+  // The data of the briefing: those of its ghost, or of its file when it was briefed outside a Trama terminal.
+  const briefed = announced?.kind === "comparison" ? announced : readUnownedComparison(p, comparisonId);
   const written = { tasks: tasks.map((t) => writeTask(p, t)), drifts: drifts.map((d) => writeDrift(p, d)) };
   // A comparison briefed on a code fingerprint records what it compared now that its cards are written.
-  if (waiting?.kind === "comparison" && waiting.code !== null) recordComparison(p, waiting.code, waiting.texts);
-  const delivered = waiting?.kind === "comparison";
+  if (briefed !== null && briefed.code !== null) recordComparison(p, briefed.code, briefed.texts);
   deliverComparison(p, comparisonId);
-  return { ...written, delivered };
+  return { ...written, delivered: briefed !== null };
 }

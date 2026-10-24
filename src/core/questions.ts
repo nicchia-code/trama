@@ -10,8 +10,8 @@ export type QuestionAnswer = { status: "answered"; selected: string[]; text?: st
 export type QuestionResult = { status: "answered"; answers: Record<string, QuestionAnswer> } | { status: "unavailable"; reason: string };
 export interface QuestionContext {
   signal?: AbortSignal;
-  /** The round comes from an agent in a terminal Trama started: it reached the window by the address Trama put in that terminal, not by discovery. */
-  fromTramaTerminal?: boolean;
+  /** The terminal or omp Chat conversation Trama launched and in which the asking agent runs (its `TRAMA_TERMINAL`): the round belongs to it. Absent for a round Trama asks itself. */
+  terminal?: string;
   /** The round is asked by Trama itself, with no agent waiting: a Drift's prepared question opened by Resolve. */
   prepared?: boolean;
 }

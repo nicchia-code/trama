@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -37,10 +37,11 @@ test("a Task held by a terminal no window follows is released with the Board not
   expect(notices).toHaveLength(1);
 });
 
-test("a Task with no known holder or not held by the agent is unavailable and unchanged", async () => {
+test("a Task whose file says `agent: true` is held by nobody, so it is unavailable and unchanged", async () => {
   const p = projectAt(dir);
   const anonymous = newTask(p, { title: "Anon", refs: ["order"], technical: false }).id;
-  moveTask(p, anonymous, "doing", "agent");
+  moveTask(p, anonymous, "doing", "developer");
+  writeFileSync(getTask(p, anonymous).path, readFileSync(getTask(p, anonymous).path, "utf8").replace(/^agent: false$/m, "agent: true"));
   expect(await checkTaskHolder(dir, anonymous)).toEqual({ result: "unavailable" });
   expect(getTask(p, anonymous).data.column).toBe("doing");
 });

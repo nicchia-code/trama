@@ -1,8 +1,9 @@
 import { Bot, Check, ChevronDown, ChevronRight, Clock, FilePen, FileText, Loader, Paperclip, Search, SquareTerminal, Wrench, X } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { Fragment, type MouseEvent, type ReactNode, useEffect, useLayoutEffect, useState } from "react";
 import { Markdown } from "../markdown";
 import { Button } from "../ui/button";
 import type { Block } from "./transcript";
+import { cellHeader, isMultiline, type ToolDetail } from "./tool-detail";
 import { type ToolLogo, toolLabel } from "./tool-logo";
 
 /** Seconds since `since`, ticking while `active`. */
@@ -95,35 +96,103 @@ function ToolStatus({ status }: { status: Extract<Block, { kind: "tool" }>["stat
   return <Loader aria-label="Running" className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />;
 }
 
-/** A call to a tool: one compact read-only row. A failed call shows the first line of omp's error under it, and an edit the files it touched as plain text. */
-export function ToolCall({ block }: { block: Extract<Block, { kind: "tool" }> }) {
+/** The row of a call is clipped when its title does not fit its width (`scrollWidth > clientWidth` on the title), measured again when the view changes width and when the title changes. */
+function useClipped(title: string): { ref: (element: HTMLElement | null) => void; clipped: boolean } {
+  const [element, setElement] = useState<HTMLElement | null>(null);
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    if (element === null) return;
+    const measure = () => setClipped(element.scrollWidth > element.clientWidth);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    if (element.parentElement !== null) observer.observe(element.parentElement);
+    return () => observer.disconnect();
+  }, [element, title]);
+  return { ref: setElement, clipped };
+}
+
+/** Whether the developer has text selected inside `row`: the click that ends a selection must not open or close it. */
+function selectingIn(row: HTMLElement): boolean {
+  const selection = window.getSelection();
+  if (selection === null || selection.toString() === "") return false;
+  const { anchorNode, focusNode } = selection;
+  return (anchorNode === null && focusNode === null) || (anchorNode !== null && row.contains(anchorNode)) || (focusNode !== null && row.contains(focusNode));
+}
+
+/**
+ * The icon and the title of a call. When the title is clipped, or what the call shows opened has more than one line, or the call is open, it is a button with a
+ * chevron that opens and closes it; a title that fits whole is plain text, not a button.
+ */
+function CallTitle({ block, label, detail, open, onToggle }: { block: Pick<Extract<Block, { kind: "tool" }>, "name" | "toolKind">; label: { title: string; logo?: ToolLogo }; detail: ToolDetail; open: boolean; onToggle: () => void }) {
+  const { ref, clipped } = useClipped(label.title);
+  const openable = open || clipped || isMultiline(detail);
+  const content = (
+    <>
+      {openable ? open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" /> : null}
+      <ToolIcon block={block} logo={label.logo} />
+      <span ref={ref} className="truncate select-text">{label.title}</span>
+    </>
+  );
+  if (!openable) return <div className="flex min-w-0 flex-1 items-center gap-1.5">{content}</div>;
+  const toggle = (event: MouseEvent<HTMLButtonElement>) => {
+    if (!selectingIn(event.currentTarget)) onToggle();
+  };
+  return (
+    <button type="button" aria-expanded={open} aria-label={label.title} onClick={toggle} className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      {content}
+    </button>
+  );
+}
+
+/** What an open call shows under its row: the text whole in the style of an attachment, and for code cells a header line in secondary text over each one's code. Never the result of the call. */
+function CallDetail({ detail }: { detail: ToolDetail }) {
+  return (
+    <pre className="mt-1 max-h-60 overflow-auto rounded-md bg-background p-2 text-xs whitespace-pre-wrap select-text [overflow-wrap:anywhere]">
+      {detail.kind === "text"
+        ? detail.text
+        : detail.cells.map((cell, at) => (
+            <Fragment key={at}>
+              {at > 0 ? "\n\n" : null}
+              <span className="text-muted-foreground">{cellHeader(cell)}</span>
+              {"\n"}
+              {cell.code}
+            </Fragment>
+          ))}
+    </pre>
+  );
+}
+
+/** A call to a tool: one compact row, which opens to show the whole of what the agent does with the call when its title is clipped. A failed call shows the first line of omp's error under it, and an edit the files it touched as plain text. */
+export function ToolCall({ block, open, onToggle }: { block: Extract<Block, { kind: "tool" }>; open: boolean; onToggle: () => void }) {
   const edits = block.toolKind === "edit" || block.toolKind === "delete" || block.toolKind === "move";
   const label = toolLabel(block.title, block.places[0]?.path);
   return (
     <div className="text-sm" data-tool={block.toolCallId}>
       <div className="flex items-center gap-1.5">
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <ToolIcon block={block} logo={label.logo} />
-          <span className="truncate select-text">{label.title}</span>
-        </div>
+        <CallTitle block={block} label={label} detail={block.detail} open={open} onToggle={onToggle} />
         <ToolStatus status={block.status} />
       </div>
+      {open ? <CallDetail detail={block.detail} /> : null}
       {edits ? block.places.map((place) => <p key={place.path} className="pl-5 font-mono text-xs break-all text-muted-foreground select-text">{place.path}</p>) : null}
       {block.status === "failed" && block.error !== undefined ? <p className="truncate pl-5 text-xs text-destructive select-text">{block.error}</p> : null}
     </div>
   );
 }
 
-/** A permission request of omp: a box with the colour of warnings, the tool call as its compact row and a button per option, in omp's order. After the choice it stays, read-only. */
-export function Permission({ block, onChoose }: { block: Extract<Block, { kind: "permission" }>; onChoose: (optionId: string) => void }) {
+/** A permission request of omp: a box with the colour of warnings, the tool call as its row (which opens like the one in the flow, before and after the choice) and a button per option, in omp's order. After the choice it stays, read-only. */
+export function Permission({ block, open, onToggle, onChoose }: { block: Extract<Block, { kind: "permission" }>; open: boolean; onToggle: () => void; onChoose: (optionId: string) => void }) {
   const chosen = block.options.find((option) => option.optionId === block.answer);
   const label = toolLabel(block.title, block.places[0]?.path);
   return (
     <section aria-label="omp asks permission" data-permission={block.requestId} className="flex flex-col gap-2 rounded-lg border-2 border-amber-500 p-3">
       <p className="font-medium">omp asks permission</p>
-      <div className="flex items-center gap-1.5 text-sm">
-        <ToolIcon block={block} logo={label.logo} />
-        <span className="truncate">{label.title}</span>
+      <div className="text-sm">
+        <div className="flex items-center gap-1.5">
+          <CallTitle block={block} label={label} detail={block.detail} open={open} onToggle={onToggle} />
+        </div>
+        {open ? <CallDetail detail={block.detail} /> : null}
       </div>
       {block.cancelled ? (
         <p className="text-muted-foreground">Cancelled</p>

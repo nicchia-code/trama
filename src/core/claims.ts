@@ -164,6 +164,23 @@ function releaseWhere(root: string, matches: (claim: Claim) => boolean): void {
 /** Forgets every claim of `terminal`; a project without claims is not an error. */
 export const releaseTerminalClaims = (root: string, terminal: string): void => releaseWhere(root, (claim) => claim.terminal === terminal);
 
+/** The terminals and omp Chat conversations that hold a claim, each once; a claim that does not read names none, and a project without claims has none. */
+export function claimHolders(root: string): string[] {
+  const dir = join(root, TRAMA_DIR, "claims");
+  if (!existsSync(dir)) return [];
+  const holders = new Set<string>();
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      const claim = parseClaim(readFileSync(join(dir, name), "utf8"));
+      if (claim !== undefined) holders.add(claim.terminal);
+    } catch {
+      // A claim that cannot be read names nobody: it is left as it is.
+    }
+  }
+  return [...holders];
+}
+
 /** Forgets the claims `agent` holds in `terminal`; a project without claims is not an error. */
 export const releaseAgentClaims = (root: string, terminal: string, agent: string): void =>
   releaseWhere(root, (claim) => claim.terminal === terminal && claim.agent === agent);

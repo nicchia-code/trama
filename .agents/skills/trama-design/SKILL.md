@@ -18,7 +18,7 @@ When the developer asked for a design from Trama's terminal, Trama has already a
 ## Hard rules
 
 - NEVER edit `.trama/model/` or `.trama/requirements/` directly, nor the generated `trama-req-*` skills. Every change goes through a Proposal, created with `trama proposal new --input -`.
-- Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. After handing over a finished Proposal, stop and ask the developer to review it; an explicit design request does not by itself authorize approving, rejecting or discarding it.
+- Agents may approve or reject a Proposal, discard a Draft, resolve a Drift or delete a Task in To do (`trama task delete`) only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. After handing over a finished Proposal, stop and ask the developer to review it; an explicit design request does not by itself authorize approving, rejecting or discarding it, or deleting a Task.
 - The Model describes *what can happen*, never *how it is built*: no variables, field names, database columns, endpoints, classes or file paths. A State is a situation in domain words ("Awaiting payment"), not a combination of values. How it is built (layout, styling, libraries, limits, data fields, formulas) belongs in the Requirements.
 - Conditions and consequences of a Transition are plain prose after the colon.
 

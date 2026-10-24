@@ -6,6 +6,7 @@ import { ADVANCED_GROUP_SENTENCE, ignoresInstructionFiles, ROLE_ADVICE, STEP_SEN
 import {
   advancedSubgroups,
   agentCheckLine,
+  ompMissing,
   changedWrites,
   checkState,
   confirmLabel,
@@ -312,6 +313,18 @@ test("the omp step says what the check found", () => {
   // One full stop between the reason and the sentence, also when the reason ends with one.
   expect(agentCheckLine({ ompPath: "/x", state: "done", ok: false, missing: false, error: "omp did not answer in time." })).toEqual({ tone: "warning", text: "omp did not answer in time. Trama cannot work without omp." });
   expect(agentCheckLine({ ompPath: "/x", state: "done", ok: false, missing: false })).toEqual({ tone: "warning", text: "omp did not answer. Trama cannot work without omp." });
+});
+
+test("an omp older than the minimum shows the sentence in place of its version, and offers Install omp", () => {
+  const old = { ompPath: "", state: "done", ok: true, missing: false, version: "18.12.5", models: 12, tooOld: true } as const;
+  expect(agentCheckLine(old)).toEqual({ tone: "warning", text: "Trama needs omp 18.12.6 or later; the installed omp is 18.12.5." });
+  expect(ompMissing(old)).toBe(true);
+  // A version that cannot be read is told as unknown.
+  expect(agentCheckLine({ ompPath: "", state: "done", ok: true, missing: false, models: 1, tooOld: true })).toEqual({ tone: "warning", text: "Trama needs omp 18.12.6 or later; the installed omp is unknown." });
+  // A recent omp, or one still being checked, keeps its line and no Install omp.
+  expect(ompMissing({ ompPath: "", state: "done", ok: true, missing: false, version: "18.12.6", models: 12 })).toBe(false);
+  expect(ompMissing({ ompPath: "", state: "updating", version: "18.13.0" })).toBe(false);
+  expect(ompMissing(null)).toBe(false);
 });
 
 const MODES: { mode: "first" | "settings" | "empty-model"; choice: "import" | "scratch" | null }[] = [

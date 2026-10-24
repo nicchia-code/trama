@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ConversationItem, ToChatHost, ToChatWebview } from "../extension/src/omp-chat-protocol";
@@ -111,7 +111,7 @@ test("Trama's instruction is the first message, labelled Trama, with its attachm
   expect(screen.getByText("the attached text")).not.toBeNull();
 });
 
-test("the agent's streamed text builds one Markdown message, and a tool call is a read-only row that does not show its result", () => {
+test("the agent's streamed text builds one Markdown message, and a tool call whose title fits is a plain row that is not a button and does not show its result", () => {
   const { host } = setup();
   host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
   host({ type: "conversationUpdate", id: "a", update: chunk("Hello **wor") });
@@ -501,4 +501,204 @@ test("an Ask more conversation that is starting shows its placeholder and no Sen
   expect(screen.queryByText("Starting omp…")).toBeNull();
   expect(screen.getByPlaceholderText("Message omp…")).not.toBeNull();
   expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+// Opening a call: the widths of the rows are the ones of a layout that happy-dom does not have, so a title is clipped when it is in `clippedTitles`.
+const clippedTitles = new Set<string>();
+const resizeCallbacks: (() => void)[] = [];
+const originalObserver = (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+
+beforeEach(() => {
+  clippedTitles.clear();
+  resizeCallbacks.length = 0;
+  Object.defineProperty(HTMLElement.prototype, "scrollWidth", { configurable: true, get: function (this: HTMLElement) { return clippedTitles.has(this.textContent ?? "") ? 300 : 100; } });
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 100 });
+  (globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+    constructor(callback: () => void) {
+      resizeCallbacks.push(callback);
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+});
+
+afterEach(() => {
+  delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollWidth;
+  delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
+  (globalThis as unknown as Record<string, unknown>).ResizeObserver = originalObserver;
+});
+
+const SECRET_RESULT = "the result of the call";
+const callOf = (host: (message: ToChatWebview) => void, toolCallId: string, title: string, extra: Record<string, unknown> = {}, id = "a") =>
+  host({ type: "conversationUpdate", id, update: { sessionId: "s", update: { sessionUpdate: "tool_call", toolCallId, title, kind: "execute", status: "in_progress", ...extra } as SessionNotification["update"] } });
+const rowOf = (toolCallId: string) => document.querySelector(`[data-tool="${toolCallId}"]`) as HTMLElement;
+
+test("a call whose title is clipped is a button with the chevron, the title as its name and aria-expanded; one that fits is not", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
+  clippedTitles.add("A very long title");
+  callOf(host, "long", "A very long title");
+  callOf(host, "short", "Short");
+  const button = within(rowOf("long")).getByRole("button", { name: "A very long title" });
+  expect(button.tagName).toBe("BUTTON");
+  expect(button.getAttribute("aria-expanded")).toBe("false");
+  expect(button.className).toContain("focus-visible:ring-2");
+  expect(button.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+  expect(button.querySelector("span")?.className).toContain("select-text");
+  const short = rowOf("short");
+  expect(within(short).queryByRole("button")).toBeNull();
+  expect(short.querySelector("[aria-expanded], [tabindex], button")).toBeNull();
+  expect(short.querySelectorAll("svg")).toHaveLength(2);
+});
+
+test("clicking a clipped shell call opens a box with the whole command from its arguments, without the result, and clicking again closes it", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
+  const command = `echo ${"x".repeat(5000)}\nsecond line`;
+  clippedTitles.add("echo xxx");
+  callOf(host, "sh", "$ echo xxx", { name: "bash", rawInput: { command } });
+  host({ type: "conversationUpdate", id: "a", update: { sessionId: "s", update: { sessionUpdate: "tool_call_update", toolCallId: "sh", status: "completed", content: [{ type: "content", content: { type: "text", text: SECRET_RESULT } }], rawOutput: SECRET_RESULT } } });
+  const row = rowOf("sh");
+  expect(row.querySelector("pre")).toBeNull();
+  fireEvent.click(within(row).getByRole("button", { name: "echo xxx" }));
+  const box = row.querySelector("pre") as HTMLElement;
+  expect(box.textContent).toBe(command);
+  expect(box.className).toContain("max-h-60");
+  expect(box.className).toContain("overflow-auto");
+  expect(box.className).toContain("whitespace-pre-wrap");
+  expect(box.className).toContain("bg-background");
+  expect(row.textContent).not.toContain(SECRET_RESULT);
+  expect(within(row).getByRole("button", { name: "echo xxx" }).getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(within(row).getByRole("button", { name: "echo xxx" }));
+  expect(row.querySelector("pre")).toBeNull();
+});
+
+test("a call of another kind opens with its whole title, an edit keeps its paths and a failed call its error line under the box", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
+  const title = "Edit the configuration so that every setting is read once";
+  clippedTitles.add(title);
+  callOf(host, "e", title, { kind: "edit", status: "failed", content: [{ type: "diff", path: "src/a.ts", newText: "NEW TEXT" }] });
+  host({ type: "conversationUpdate", id: "a", update: { sessionId: "s", update: { sessionUpdate: "tool_call_update", toolCallId: "e", status: "failed", content: [{ type: "content", content: { type: "text", text: "boom" } }] } } });
+  const row = rowOf("e");
+  fireEvent.click(within(row).getByRole("button", { name: title }));
+  const box = row.querySelector("pre") as HTMLElement;
+  expect(box.textContent).toBe(title);
+  const order = [...row.children].map((child) => child.tagName.toLowerCase() + ":" + (child.textContent ?? ""));
+  expect(order).toEqual([`div:${title}`, `pre:${title}`, "p:src/a.ts", "p:boom"]);
+  expect(row.textContent).not.toContain("NEW TEXT");
+});
+
+test("a call of eval opens with the cells in order, each with a header in secondary text, and a call with no arguments opens with its title", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
+  callOf(host, "ev", "[py] Load settings\nimport json", {
+    name: "eval",
+    rawInput: { cells: [{ language: "py", title: "Load settings", code: "import json\nprint(1)" }, { language: "js", code: "console.log(2)" }] },
+  });
+  const row = rowOf("ev");
+  // The text to show opened has more than one line: the row opens without being clipped.
+  fireEvent.click(within(row).getByRole("button"));
+  const box = row.querySelector("pre") as HTMLElement;
+  expect(box.textContent).toBe("[py] Load settings\nimport json\nprint(1)\n\n[js]\nconsole.log(2)");
+  const headers = [...box.querySelectorAll("span")];
+  expect(headers.map((header) => header.textContent)).toEqual(["[py] Load settings", "[js]"]);
+  expect(headers[0]?.className).toContain("text-muted-foreground");
+  callOf(host, "ev2", "[py] print(1)", { name: "eval" });
+  expect(within(rowOf("ev2")).queryByRole("button")).toBeNull();
+});
+
+test("a call opened stays open when its title would fit after a widening, and a row that did not fit becomes a button when the view narrows", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
+  clippedTitles.add("Wide");
+  callOf(host, "w", "Wide");
+  callOf(host, "n", "Narrow");
+  fireEvent.click(within(rowOf("w")).getByRole("button", { name: "Wide" }));
+  clippedTitles.delete("Wide");
+  clippedTitles.add("Narrow");
+  act(() => resizeCallbacks.forEach((callback) => callback()));
+  expect(within(rowOf("w")).getByRole("button", { name: "Wide" }).getAttribute("aria-expanded")).toBe("true");
+  expect(rowOf("w").querySelector("pre")?.textContent).toBe("Wide");
+  expect(within(rowOf("n")).getByRole("button", { name: "Narrow" }).getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(within(rowOf("w")).getByRole("button", { name: "Wide" }));
+  expect(within(rowOf("w")).queryByRole("button")).toBeNull();
+});
+
+test("a click that ends a text selection inside the row neither opens nor closes it", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
+  clippedTitles.add("Select me please");
+  callOf(host, "s", "Select me please");
+  const row = rowOf("s");
+  const button = within(row).getByRole("button", { name: "Select me please" });
+  const selection = window.getSelection() as Selection;
+  selection.selectAllChildren(button.querySelector("span") as HTMLElement);
+  expect(selection.toString()).toBe("Select me please");
+  fireEvent.click(button);
+  expect(button.getAttribute("aria-expanded")).toBe("false");
+  selection.removeAllRanges();
+  fireEvent.click(button);
+  expect(button.getAttribute("aria-expanded")).toBe("true");
+});
+
+test("several calls are open together, each for itself, per conversation, and a tab switch keeps them", () => {
+  const { host, posted } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "running"), item("b", "T4", "running")], selected: "a" });
+  clippedTitles.add("First long");
+  clippedTitles.add("Second long");
+  callOf(host, "same", "First long");
+  callOf(host, "other", "Second long");
+  callOf(host, "same", "First long", {}, "b");
+  fireEvent.click(within(rowOf("same")).getByRole("button"));
+  fireEvent.click(within(rowOf("other")).getByRole("button"));
+  fireEvent.click(screen.getAllByRole("tab")[1] as HTMLElement);
+  fireEvent.click(screen.getAllByRole("tab")[0] as HTMLElement);
+  const panels = document.querySelectorAll('[role="tabpanel"]');
+  expect(panels[0]?.querySelectorAll("pre")).toHaveLength(2);
+  expect(panels[1]?.querySelectorAll("pre")).toHaveLength(0);
+  // Only the webview knows it: nothing goes to the host.
+  expect(posted.every((message) => message.type === "selectConversation")).toBe(true);
+});
+
+test("the call of a permission request opens above the buttons, before and after the choice, with the text of the call that omp attaches", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "waiting-permission")], selected: "a" });
+  clippedTitles.add("rm -rf build");
+  const command = "rm -rf build\nrm -rf dist";
+  host({ type: "permissionRequest", id: "a", requestId: "p1", toolCall: { toolCallId: "t", title: "$ rm -rf build", kind: "execute", name: "bash", rawInput: { command } }, options: permissionOptions });
+  const box = document.querySelector('[data-permission="p1"]') as HTMLElement;
+  fireEvent.click(within(box).getByRole("button", { name: "rm -rf build" }));
+  const pre = box.querySelector("pre") as HTMLElement;
+  expect(pre.textContent).toBe(command);
+  expect(pre.compareDocumentPosition(within(box).getByRole("button", { name: "Allow once" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+  expect(box.querySelector("pre")?.textContent).toBe(command);
+  fireEvent.click(within(box).getByRole("button", { name: "rm -rf build" }));
+  expect(box.querySelector("pre")).toBeNull();
+  fireEvent.click(within(box).getByRole("button", { name: "rm -rf build" }));
+  expect(box.querySelector("pre")?.textContent).toBe(command);
+});
+
+test("a permission row that fits is not a button", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "waiting-permission")], selected: "a" });
+  host({ type: "permissionRequest", id: "a", requestId: "p1", toolCall: { toolCallId: "t", title: "Run ls", kind: "execute" }, options: permissionOptions });
+  const box = document.querySelector('[data-permission="p1"]') as HTMLElement;
+  expect(within(box).getAllByRole("button").map((button) => button.textContent)).toEqual(["Allow once", "Allow always", "Reject"]);
+  expect(box.querySelector("[aria-expanded]")).toBeNull();
+});
+
+test("General says a missing omp, or one older than the minimum, in its error line, with Install omp, which asks the host to install it", () => {
+  const { host, posted } = setup();
+  host({ type: "conversations", items: [{ id: "general", name: "General", state: "idle", general: true }], selected: "general" });
+  host({ type: "generalStatus", phase: "stopped", error: { kind: "missing" } });
+  expect(within(screen.getByRole("alert")).getByText("omp is not installed. Trama runs every agent with omp.")).not.toBeNull();
+  host({ type: "generalStatus", phase: "stopped", error: { kind: "missing", reason: "Trama needs omp 18.12.6 or later; the installed omp is 18.12.5." } });
+  const alert = screen.getByRole("alert");
+  expect(within(alert).getByText("Trama needs omp 18.12.6 or later; the installed omp is 18.12.5.")).not.toBeNull();
+  expect(within(alert).queryByText(/is not installed/)).toBeNull();
+  fireEvent.click(within(alert).getByRole("button", { name: "Install omp" }));
+  expect(posted).toContainEqual({ type: "installOmp" });
 });

@@ -18,7 +18,7 @@ Trama has already announced the first resolution Proposal, so you do not announc
 ## Hard rules
 
 - NEVER edit `.trama/model/` or `.trama/requirements/` directly, nor the generated `trama-req-*` skills. Every change goes through a Proposal.
-- Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. A request to prepare a resolution does not by itself authorize resolving the Drift.
+- Agents may approve or reject a Proposal, discard a Draft, resolve a Drift or delete a Task in To do (`trama task delete`) only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. A request to prepare a resolution does not by itself authorize resolving the Drift or deleting a Task.
 - NEVER change the code of the project, and never create Tasks: approving the resolution creates the Task of each Drift to be fixed in the code.
 - Never apply a recommendation for a Drift the developer skipped, and never decide a Drift on your own.
 

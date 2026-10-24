@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ModelSuggestion } from "../extension/src/host/model-lists";
-import { composeRoleValue, splitRoleValue, thinkingLevels, withModel } from "../extension/src/webview/settings/logic";
+import { composeRoleValue, ompStatusLine, splitRoleValue, thinkingLevels, withModel } from "../extension/src/webview/settings/logic";
 
 const HAIKU = "anthropic/claude-haiku-4-5";
 const models: ModelSuggestion[] = [
@@ -34,4 +34,11 @@ test("withModel keeps the level only when the new model declares it, and never a
   expect(withModel(`${HAIKU}:xhigh`, "openai/gpt-5", models)).toBe("openai/gpt-5");
   expect(withModel(HAIKU, "openai/gpt-5", models)).toBe("openai/gpt-5");
   expect(withModel(`${HAIKU}:high`, "local/plain", models)).toBe("local/plain");
+});
+
+test("the omp row says what omp answered, or, when omp is older than the minimum, that Trama needs a later one, with Install omp", () => {
+  expect(ompStatusLine(null)).toEqual({ tone: "checking", text: "Checking omp…", missing: false });
+  expect(ompStatusLine({ state: "done", missing: false, version: "18.12.6", models: 3 })).toEqual({ tone: "ok", text: "omp 18.12.6 answered with 3 models.", missing: false });
+  expect(ompStatusLine({ state: "done", missing: false, version: "18.12.5", models: 3, tooOld: true })).toEqual({ tone: "warning", text: "Trama needs omp 18.12.6 or later; the installed omp is 18.12.5.", missing: true });
+  expect(ompStatusLine({ state: "done", missing: true, error: "omp not found at x" })).toEqual({ tone: "warning", text: "omp not found at x. Trama cannot work without omp.", missing: true });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  agentStoppedNotice,
   closeNeedsConfirmation,
   conversationStep,
   exitReason,
@@ -11,6 +12,7 @@ import {
   savedEnv,
   SESSION_NOT_RESUMED_REASON,
   startFailureNotice,
+  turnEndReason,
   useOmpChat,
   within,
   withoutSavedConversation,
@@ -28,39 +30,75 @@ describe("the choice between a terminal and a conversation", () => {
     expect(useOmpChat({ ompChat: true, available: false })).toBe(false);
   });
 
-  test("the failed start notice names the reason and the terminal", () => {
+  test("the failed start notice names the reason and the terminal, then the last lines of omp's error output", () => {
     expect(startFailureNotice("omp not found at /x/omp")).toBe("Trama: omp Chat could not start omp (omp not found at /x/omp); the job runs in a terminal.");
+    expect(startFailureNotice("omp exited with code 3", "boom")).toBe("Trama: omp Chat could not start omp (omp exited with code 3); the job runs in a terminal.\nboom");
   });
 });
 
 describe("Agent running", () => {
-  test("the hook at rest closes the conversation with autoExit on: work ends, then the process stops", () => {
-    const step = conversationStep("running", { type: "agent-hook.IDLE" }, true);
+  test("the end of the turn closes the conversation with autoExit on: work ends, then the process stops", () => {
+    const step = conversationStep("running", { type: "omp-acp.TURN_ENDED", end: { stopReason: "end_turn" } }, true);
     expect(step.state).toBe("closed");
-    expect(effects(step.effects)).toEqual(["end-work", "stop-process", "close"]);
-    expect(step.effects[0]).toEqual({ effect: "end-work" });
+    expect(step.effects).toEqual([{ effect: "end-work" }, { effect: "stop-process" }, { effect: "close" }]);
   });
 
-  test("the hook at rest leaves it in Agent idle with autoExit off, and saves it as idle", () => {
-    const step = conversationStep("running", { type: "agent-hook.IDLE" }, false);
+  test("the end of the turn leaves it in Agent idle with autoExit off, and saves it as idle", () => {
+    const step = conversationStep("running", { type: "omp-acp.TURN_ENDED", end: { stopReason: "end_turn" } }, false);
     expect(step.state).toBe("idle");
     expect(step.effects).toEqual([{ effect: "end-work" }, { effect: "save-state", state: "idle" }]);
   });
 
-  test("the hook's start only remembers the process", () => {
-    expect(conversationStep("running", { type: "agent-hook.STARTED" }, true)).toEqual({ state: "running", effects: [{ effect: "remember-process" }] });
+  test("Stop (cancelled) is a normal end of the turn, with no notice", () => {
+    expect(conversationStep("running", { type: "omp-acp.TURN_ENDED", end: { stopReason: "cancelled" } }, true).effects).toEqual([{ effect: "end-work" }, { effect: "stop-process" }, { effect: "close" }]);
   });
 
-  test("an unasked end of the process closes it with autoExit on or off, abnormal unless exit code 0", () => {
+  test("an abnormal end of the turn ends the work with the reason and reports it on the Board, with autoExit on or off", () => {
+    const refused = conversationStep("running", { type: "omp-acp.TURN_ENDED", end: { stopReason: "refusal" } }, true);
+    expect(refused.state).toBe("closed");
+    expect(refused.effects).toEqual([
+      { effect: "end-work", abnormal: "the model refused to continue" },
+      { effect: "report-agent-stopped", reason: "the model refused to continue" },
+      { effect: "stop-process" },
+      { effect: "close" },
+    ]);
+    const limit = conversationStep("running", { type: "omp-acp.TURN_ENDED", end: { stopReason: "max_tokens" } }, false);
+    expect(limit.state).toBe("idle");
+    expect(limit.effects).toEqual([
+      { effect: "end-work", abnormal: "the model reached its token limit" },
+      { effect: "report-agent-stopped", reason: "the model reached its token limit" },
+      { effect: "save-state", state: "idle" },
+    ]);
+  });
+
+  test("the reasons of an end of turn", () => {
+    expect(turnEndReason({ stopReason: "end_turn" })).toBeUndefined();
+    expect(turnEndReason({ stopReason: "cancelled" })).toBeUndefined();
+    expect(turnEndReason({ stopReason: "refusal" })).toBe("the model refused to continue");
+    expect(turnEndReason({ stopReason: "max_tokens" })).toBe("the model reached its token limit");
+    expect(turnEndReason({ stopReason: "max_turn_requests" })).toBe("the model reached its request limit");
+    expect(turnEndReason({ error: "no credentials" })).toBe("omp refused the prompt (no credentials)");
+    expect(agentStoppedNotice("T3", "the model reached its token limit")).toBe("The agent of T3 stopped: the model reached its token limit.");
+  });
+
+  test("an unasked end of the process closes it with autoExit on or off, and the notice gives the reason with the last lines of omp's error output", () => {
     for (const autoExit of [true, false]) {
-      expect(conversationStep("running", { type: "omp-acp.EXITED", code: 0, signal: null }, autoExit)).toEqual({ state: "closed", effects: [{ effect: "end-work" }, { effect: "close" }] });
-      expect(conversationStep("running", { type: "omp-acp.EXITED", code: 2, signal: null }, autoExit).effects[0]).toEqual({ effect: "end-work", abnormal: "its command exited with code 2" });
-      expect(conversationStep("running", { type: "omp-acp.EXITED", code: null, signal: "SIGKILL" }, autoExit).effects[0]).toEqual({ effect: "end-work", abnormal: "its process was ended by SIGKILL" });
+      expect(conversationStep("running", { type: "omp-acp.EXITED", code: 0, signal: null }, autoExit)).toEqual({
+        state: "closed",
+        effects: [{ effect: "end-work" }, { effect: "report-stopped", reason: "omp exited (code 0)" }, { effect: "stop-process" }, { effect: "close" }],
+      });
+      const failed = conversationStep("running", { type: "omp-acp.EXITED", code: 2, signal: null, details: "line 1\nline 2" }, autoExit);
+      expect(failed.effects[0]).toEqual({ effect: "end-work", abnormal: "its command exited with code 2" });
+      expect(failed.effects[1]).toEqual({ effect: "report-stopped", reason: "omp exited (code 2)", details: "line 1\nline 2" });
+      const killed = conversationStep("running", { type: "omp-acp.EXITED", code: null, signal: "SIGKILL" }, autoExit);
+      expect(killed.effects[0]).toEqual({ effect: "end-work", abnormal: "its process was ended by SIGKILL" });
+      expect(killed.effects[1]).toEqual({ effect: "report-stopped", reason: "omp exited (SIGKILL)" });
+      expect(conversationStep("running", { type: "omp-acp.EXITED", code: null, signal: null }, autoExit).effects[1]).toEqual({ effect: "report-stopped", reason: "omp exited" });
     }
   });
 
-  test("a confirmed Stop cancels the turn and stays in Agent running", () => {
-    expect(conversationStep("running", { type: "developer.STOP_CHAT_AGENT" }, true)).toEqual({ state: "running", effects: [{ effect: "cancel-turn" }] });
+  test("a confirmed Stop cancels the turn and interrupts the question round, and stays in Agent running", () => {
+    expect(conversationStep("running", { type: "developer.STOP_CHAT_AGENT" }, true)).toEqual({ state: "running", effects: [{ effect: "cancel-turn" }, { effect: "interrupt-questions" }] });
   });
 
   test("a confirmed close stops the process and ends the work as a closed terminal does", () => {
@@ -69,30 +107,19 @@ describe("Agent running", () => {
     expect(step.effects).toEqual([{ effect: "stop-process" }, { effect: "end-work", abnormal: "its conversation was closed" }, { effect: "close" }]);
   });
 
-  test("the execution check closes it, with the notice, only when the process is gone", () => {
-    expect(conversationStep("running", { type: "time.CHECK_DUE", processGone: false }, true)).toEqual({ state: "running", effects: [] });
-    const step = conversationStep("running", { type: "time.CHECK_DUE", processGone: true }, true);
-    expect(step.state).toBe("closed");
-    expect(step.effects[0]).toEqual({ effect: "report-stopped", reason: "the agent's process is gone" });
-    expect(step.effects).toContainEqual({ effect: "end-work", abnormal: "the agent's process is gone" });
-  });
-
   test("the window closing keeps the conversation and its work: nothing ends, nothing is deleted", () => {
-    const step = conversationStep("running", { type: "editor.WINDOW_CLOSED" }, true);
-    expect(step).toEqual({ state: "waiting", effects: [{ effect: "stop-process-for-window" }] });
+    expect(conversationStep("running", { type: "editor.WINDOW_CLOSED" }, true)).toEqual({ state: "waiting", effects: [{ effect: "stop-process-for-window" }] });
   });
 });
 
 describe("Agent idle", () => {
-  test("Trama no longer follows it: a later hook at rest or start changes nothing", () => {
-    expect(conversationStep("idle", { type: "agent-hook.IDLE" }, true)).toEqual({ state: "idle", effects: [] });
-    expect(conversationStep("idle", { type: "agent-hook.STARTED" }, true)).toEqual({ state: "idle", effects: [] });
-    expect(conversationStep("idle", { type: "time.CHECK_DUE", processGone: true }, true)).toEqual({ state: "idle", effects: [] });
+  test("Trama no longer follows it: a new end of turn changes nothing", () => {
+    expect(conversationStep("idle", { type: "omp-acp.TURN_ENDED", end: { stopReason: "refusal" } }, true)).toEqual({ state: "idle", effects: [] });
   });
 
-  test("closing, or the process ending, closes it; the window waiting keeps it", () => {
+  test("closing closes it; the process ending closes it with no notice; the window waiting keeps it", () => {
     expect(conversationStep("idle", { type: "developer.CLOSE_CHAT_CONVERSATION" }, false).state).toBe("closed");
-    expect(conversationStep("idle", { type: "omp-acp.EXITED", code: 1, signal: null }, false).state).toBe("closed");
+    expect(conversationStep("idle", { type: "omp-acp.EXITED", code: 1, signal: null }, false)).toEqual({ state: "closed", effects: [{ effect: "end-work" }, { effect: "stop-process" }, { effect: "close" }] });
     expect(conversationStep("idle", { type: "editor.WINDOW_CLOSED" }, false).state).toBe("waiting");
   });
 });
@@ -108,17 +135,19 @@ describe("Waiting for the window", () => {
     expect(conversationStep("waiting", { type: "omp-acp.SESSION_RESUMED", wasRunning: false }, true)).toEqual({ state: "idle", effects: [{ effect: "save-state", state: "idle" }] });
   });
 
-  test("a session that does not reopen closes it; a working one ends its work and reports it", () => {
+  test("a session that does not reopen closes it; a working one ends its work and reports it with the cause and the last lines of omp's error output", () => {
     const working = conversationStep("waiting", { type: "omp-acp.SESSION_NOT_RESUMED", wasRunning: true }, true);
     expect(working.state).toBe("closed");
     expect(working.effects).toEqual([{ effect: "report-stopped", reason: SESSION_NOT_RESUMED_REASON }, { effect: "end-work", abnormal: SESSION_NOT_RESUMED_REASON }, { effect: "close" }]);
     expect(SESSION_NOT_RESUMED_REASON).toBe("the agent's session could not be resumed");
+    const explained = conversationStep("waiting", { type: "omp-acp.SESSION_NOT_RESUMED", wasRunning: true, cause: "omp exited with code 3", details: "boom" }, true);
+    expect(explained.effects[0]).toEqual({ effect: "report-stopped", reason: `${SESSION_NOT_RESUMED_REASON} (omp exited with code 3)`, details: "boom" });
     const resting = conversationStep("waiting", { type: "omp-acp.SESSION_NOT_RESUMED", wasRunning: false }, true);
     expect(effects(resting.effects)).toEqual(["end-work", "close"]);
   });
 
   test("Closed receives nothing", () => {
-    expect(conversationStep("closed", { type: "agent-hook.IDLE" }, true)).toEqual({ state: "closed", effects: [] });
+    expect(conversationStep("closed", { type: "omp-acp.TURN_ENDED", end: { stopReason: "end_turn" } }, true)).toEqual({ state: "closed", effects: [] });
   });
 });
 
@@ -140,6 +169,7 @@ describe("saved conversations", () => {
     state: "running",
     args: ["--hook", "/x/hook.js", "acp", "--yolo"],
     env: { TRAMA_AGENT: "1", TRAMA_TERMINAL: "abc123" },
+    hook: true,
     job: { id: "job-1", kind: "run", name: "T3", announcement: "ann-1" },
     openedAt: "2026-10-23T10:00:00.000Z",
   };
@@ -172,8 +202,15 @@ describe("saved conversations", () => {
     expect(withoutSavedConversation(list, "abc123").map((e) => e.id)).toEqual(["def456"]);
   });
 
-  test("only the variables of Trama are saved of the environment", () => {
-    expect(savedEnv({ TRAMA_AGENT: "1", TRAMA_TERMINAL: "abc123", QUESTION_ENDPOINT: "sock", PATH: "/bin", TRAMA_JOB: "j", TRAMA_ADVISOR_SCANNER: "1", TRAMA_RUN: "1", PI_INTENT_TRACING: "0" })).toEqual({ TRAMA_AGENT: "1", TRAMA_TERMINAL: "abc123", TRAMA_JOB: "j", TRAMA_ADVISOR_SCANNER: "1", TRAMA_RUN: "1", PI_INTENT_TRACING: "0" });
+  test("only the variables of Trama are saved of the environment, TRAMA_ACP among them", () => {
+    expect(savedEnv({ TRAMA_AGENT: "1", TRAMA_ACP: "1", TRAMA_TERMINAL: "abc123", QUESTION_ENDPOINT: "sock", PATH: "/bin", TRAMA_JOB: "j", TRAMA_ADVISOR_SCANNER: "1", TRAMA_RUN: "1", PI_INTENT_TRACING: "0" })).toEqual({ TRAMA_AGENT: "1", TRAMA_ACP: "1", TRAMA_TERMINAL: "abc123", TRAMA_JOB: "j", TRAMA_ADVISOR_SCANNER: "1", TRAMA_RUN: "1", PI_INTENT_TRACING: "0" });
+  });
+
+  test("an entry saved before the explicit hook field reads as unreadable, so its job ends as a failed resume", () => {
+    const { hook: _omit, ...before } = entry;
+    const read = readSavedConversations([before]);
+    expect(read.entries).toEqual([]);
+    expect(read.unreadable).toEqual([{ id: "abc123", name: "T3", job: entry.job }]);
   });
 
   test("the resume decision: a working conversation gets the notice and the fixed prompt, a resting one only its history", () => {

@@ -34,6 +34,37 @@ const NO_UNIFY_STATE: UnifyState = { blockers: [], unifying: [] };
 export interface Notice {
   id: number;
   text: string;
+  /** The last lines of omp's error output, behind `Show details`. */
+  details?: string;
+}
+
+/** One notice of the top of the Board: its text, a `Show details` toggle when it has details, and Close. */
+function NoticeRow({ notice, close }: { notice: Notice; close: (id: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const detailsId = `notice-details-${notice.id}`;
+  return (
+    <div className="mt-1.5 flex flex-col gap-1 rounded-md border border-amber-600 bg-amber-600/10 px-2 py-1 dark:border-amber-400 dark:bg-amber-400/15">
+      <div className="flex items-center justify-between gap-2">
+        <span className="break-words">{notice.text}</span>
+        <div className="flex shrink-0 items-center gap-1">
+          {notice.details !== undefined && (
+            <Button variant="outline" size="sm" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(!open)}>
+              {open ? "Hide details" : "Show details"}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" aria-label={`Close the notice: ${notice.text}`} onClick={() => close(notice.id)}>
+            <X aria-hidden="true" focusable="false" />
+            Close
+          </Button>
+        </div>
+      </div>
+      {notice.details !== undefined && (
+        <pre id={detailsId} hidden={!open} className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs">
+          {notice.details}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 export interface BoardPageProps {
@@ -356,13 +387,7 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
           {notices.length > 0 && (
             <div role="status" className="flex flex-col gap-1 px-3">
               {notices.map((notice) => (
-                <div key={notice.id} className="mt-1.5 flex items-center justify-between gap-2 rounded-md border border-amber-600 bg-amber-600/10 px-2 py-1 dark:border-amber-400 dark:bg-amber-400/15">
-                  <span className="break-words">{notice.text}</span>
-                  <Button variant="outline" size="sm" aria-label={`Close the notice: ${notice.text}`} onClick={() => closeNotice(notice.id)}>
-                    <X aria-hidden="true" focusable="false" />
-                    Close
-                  </Button>
-                </div>
+                <NoticeRow key={notice.id} notice={notice} close={closeNotice} />
               ))}
             </div>
           )}
@@ -437,8 +462,8 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
       page = { ...page, notices: [...page.notices, ...gone.map((a) => ({ id: nextNotice++, text: withdrawnNotice(a) }))] };
       render();
     },
-    stoppedFollowing(subject: string, reason: string) {
-      page = { ...page, notices: [...page.notices, { id: nextNotice++, text: stoppedFollowingNotice(subject, reason) }] };
+    stoppedFollowing(subject: string, reason: string, details?: string) {
+      page = { ...page, notices: [...page.notices, { id: nextNotice++, text: stoppedFollowingNotice(subject, reason), ...(details === undefined ? {} : { details }) }] };
       render();
     },
     notice(text: string) {

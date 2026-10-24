@@ -102,7 +102,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   } else if (message.type === "withdrawn") {
     board.withdrawn?.(message.announcements);
   } else if (message.type === "stoppedFollowing") {
-    board.stoppedFollowing?.(message.subject, message.reason);
+    board.stoppedFollowing?.(message.subject, message.reason, message.details);
   } else if (message.type === "notice") {
     board.notice?.(message.text);
   } else if (message.type === "clearDoneEnded") {

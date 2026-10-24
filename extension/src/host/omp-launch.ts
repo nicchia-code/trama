@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { ompTooOldText } from "../../../src/core/omp-version";
 import { ensureOmpUpdated, findOmp, type OmpUpdateOutcome } from "./omp-update";
 
 export const OMP_MISSING_NOTICE = "Trama: omp is not installed. Trama runs every agent with omp.";
@@ -25,35 +26,47 @@ function showUpdating(version: string, until: Promise<unknown>): void {
   });
 }
 
-/** The missing-omp notice: not modal, with the installer's terminal and the Settings tab as buttons. The work does not restart by itself. */
-function noticeMissing(): void {
-  void Promise.resolve(vscode.window.showWarningMessage(OMP_MISSING_NOTICE, INSTALL_OMP_BUTTON, OPEN_SETTINGS_BUTTON)).then((choice) => {
+/** A notice that stops a launch: not modal, with the installer's terminal and the Settings tab as buttons. The work does not restart by itself. */
+function noticeStopped(message: string): void {
+  void Promise.resolve(vscode.window.showWarningMessage(message, INSTALL_OMP_BUTTON, OPEN_SETTINGS_BUTTON)).then((choice) => {
     if (choice === INSTALL_OMP_BUTTON) void vscode.commands.executeCommand("trama.installOmp");
     else if (choice === OPEN_SETTINGS_BUTTON) void vscode.commands.executeCommand("trama.openSettings");
   });
 }
 
 /**
+ * The check of the version and of updates, and the update of omp, for `program`, behind the progress notification of an update. Launches add their notices to it;
+ * General uses it as it is and shows no editor notice. The outcome says whether omp is missing, or older than the minimum (or of a version that cannot be read)
+ * after the update that could be done.
+ */
+export async function checkedOmp(program: string): Promise<OmpUpdateOutcome> {
+  const settled = Promise.withResolvers<void>();
+  try {
+    return await ensureOmpUpdated(program, (version) => showUpdating(version, settled.promise));
+  } finally {
+    settled.resolve();
+  }
+}
+
+/**
  * Before every launch of omp (a terminal, an omp Chat conversation, Ask more), before anything is created: finds the program for `ompPath`
- * (the user's `trama.ompPath`, trimmed), checks for a newer version and updates it. With no program the missing-omp notice shows and the result is undefined:
- * the launch does not start. A failed check or update does not stop it: the program of before is returned and the failure is told once per check.
+ * (the user's `trama.ompPath`, trimmed), checks its version and for a newer one, and updates it. With no program the missing-omp notice shows and the result is undefined:
+ * the launch does not start. An omp older than the minimum, or whose version cannot be read, that the update did not fix stops the launch the same way, with its own notice.
+ * A failed check or update does not stop a launch of an omp that is recent enough: the program of before is returned and the failure is told once per check.
  */
 const realLauncher: OmpLauncher = async (ompPath) => {
   const program = await findOmp(ompPath);
   if (program === undefined) {
-    noticeMissing();
+    noticeStopped(OMP_MISSING_NOTICE);
     return undefined;
   }
-  let outcome: OmpUpdateOutcome;
-  const settled = Promise.withResolvers<void>();
-  try {
-    const running = ensureOmpUpdated(program, (version) => showUpdating(version, settled.promise));
-    outcome = await running;
-  } finally {
-    settled.resolve();
-  }
+  const outcome = await checkedOmp(program);
   if (outcome.missing === true) {
-    noticeMissing();
+    noticeStopped(OMP_MISSING_NOTICE);
+    return undefined;
+  }
+  if (outcome.tooOld === true) {
+    noticeStopped(ompTooOldText(outcome.version));
     return undefined;
   }
   if (outcome.updateError !== undefined && !told.has(outcome)) {

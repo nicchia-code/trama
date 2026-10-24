@@ -1,4 +1,5 @@
 import type { SetupChoice, SetupMode, ToWebview } from "../../protocol";
+import { ompTooOldText } from "../../../../src/core/omp-version";
 import { groupKeys, MODEL_ROLE_KEYS, SETTING_GROUPS, type SettingSchema, type SettingsValues, type SettingValue, settingValueError, storedValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
 import { ompAnsweredText, ompFailureText, roleLabel } from "../settings/logic";
@@ -373,12 +374,14 @@ export type AgentCheckResult = AgentCheckMessage extends infer M ? (M extends un
 export function agentCheckLine(result: AgentCheckResult | null): { tone: "checking" | "ok" | "warning"; text: string } {
   if (result === null) return { tone: "checking", text: "Checking omp…" };
   if (result.state === "updating") return { tone: "checking", text: `Updating omp to ${result.version}…` };
+  // An omp older than the minimum says so in place of its version.
+  if (result.tooOld === true) return { tone: "warning", text: ompTooOldText(result.version) };
   if (!result.ok) return { tone: "warning", text: ompFailureText(result.error) };
   const answered = ompAnsweredText(result.version, result.models ?? 0);
   return result.updateError === undefined ? { tone: "ok", text: answered } : { tone: "warning", text: `Could not update omp (${result.updateError}). ${answered}` };
 }
 
-/** Whether the host found omp missing (the program was not found, not a timeout or a failure code): the only case where `Install omp` shows. */
+/** Whether `Install omp` shows: the host did not find the program (not a timeout or a failure code), or omp is older than the minimum and the current one is to be installed. */
 export function ompMissing(result: AgentCheckResult | null): boolean {
-  return result !== null && result.state === "done" && !result.ok && result.missing;
+  return result !== null && result.state === "done" && (result.tooOld === true || (!result.ok && result.missing));
 }

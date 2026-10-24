@@ -75,7 +75,7 @@ test("the bar has an entry for each window of the provider of the model: ring, s
   expect(screen.queryByRole("button", { name: "Usage" })).toBeNull();
 });
 
-test("the bar sits under the tabs and over the messages of General, and the conversations of jobs have none", () => {
+test("the bar sits in the row of the model selector of General, right of it and under the message field, with no border, and the conversations of jobs have none", () => {
   const { host } = setup();
   host({ type: "conversations", items: [general, { id: "job", name: "T3", state: "idle" }], selected: GENERAL_ID });
   host(models("anthropic/claude-opus-5-5"));
@@ -83,9 +83,16 @@ test("the bar sits under the tabs and over the messages of General, and the conv
   host({ type: "usage", fetching: false, report: report() });
   expect(document.querySelectorAll("[data-usage-bar]")).toHaveLength(1);
   const panel = document.getElementById("omp-chat-panel-general") ?? document.querySelector('[role="tabpanel"]');
-  expect(panel?.firstElementChild?.hasAttribute("data-usage-bar")).toBe(true);
   expect(panel?.contains(bar())).toBe(true);
-  expect(bar()?.className).toContain("border-b");
+  expect(panel?.firstElementChild?.hasAttribute("data-usage-bar")).toBe(false);
+  const selector = within(panel as HTMLElement).getByRole("combobox", { name: "Model" });
+  const field = within(panel as HTMLElement).getByRole("textbox", { name: "Message omp" });
+  const row = selector.parentElement;
+  expect(row?.contains(bar())).toBe(true);
+  expect(bar()?.previousElementSibling).toBe(selector);
+  expect(selector.className).toContain("shrink-0");
+  expect(field.compareDocumentPosition(selector) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(bar()?.className).not.toMatch(/\bborder|\bp[xy]?-\d/);
   host({ type: "conversations", items: [general, { id: "job", name: "T3", state: "idle" }], selected: "job" });
   expect(screen.getAllByRole("tabpanel", { hidden: true }).find((each) => !each.hidden)?.querySelector("[data-usage-bar]")).toBeNull();
 });
@@ -142,6 +149,7 @@ test("a model whose provider has no data leaves only a compact Usage button with
   host({ type: "usage", fetching: false, report: report() });
   const button = screen.getByRole("button", { name: "Usage" });
   expect(bar()?.contains(button)).toBe(true);
+  expect(bar()?.previousElementSibling).toBe(screen.getByRole("combobox", { name: "Model" }));
   expect(button.querySelector("svg")?.getAttribute("class")).toContain("lucide-gauge");
   expect(document.querySelectorAll("[data-usage-entry]")).toHaveLength(0);
   host(models("noprovider"));

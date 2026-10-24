@@ -1,12 +1,13 @@
 // The ACP client of omp Chat: it spawns `omp acp` (with `--yolo` only when `trama.ompChatApproval` is `yolo`) and talks to it over the process's stdio with `ClientSideConnection` of @agentclientprotocol/sdk.
 //
-// Verified with omp 18.12.6, which `omp acp` honours the options given before `acp`: `--hook` loads Trama's module (`trama hook start` is called with the
-// process's pid), `--config` applies the overlay, `--advisor` turns the advisors on, and `--model` and `--slow` choose the models. So the options of a
-// job are passed as they are in front of `acp` (`ompArguments` in `terminal-agent.ts`) and nothing has to be sent another way.
+// Verified with omp 18.12.6, which `omp acp` honours the options given before `acp`: `--hook` loads Trama's module, `--config` applies the overlay, `--advisor`
+// turns the advisors on, and `--model` and `--slow` choose the models. So the options of a job are passed as they are in front of `acp` (`ompArguments` in
+// `terminal-agent.ts`) and nothing has to be sent another way. `TRAMA_ACP=1` tells the hook it is in a conversation, so it never reports idle or start.
 //
-// What omp declares and this client uses: `_meta.steering.supported` in `initialize` (a message sent in the middle of a turn goes through the `_session/steering`
-// extension method; a second `session/prompt` would cancel the running turn), the select of category `model` in the session's configuration options
-// (`session/set_config_option`), and `loadSession` or `sessionCapabilities.resume` to reopen a saved session.
+// What omp 18.12.6 declares and this client relies on, with no fallback for an older omp (`missingDeclaration`): `_meta.steering.supported` in `initialize` (a
+// message sent in the middle of a turn goes through the `_session/steering` extension method; a second `session/prompt` would cancel the running turn),
+// `sessionCapabilities.close` (`session/close` when a process is stopped), `loadSession` (`session/load` reopens a saved session) and the select of category
+// `model` in the session's configuration options (`session/set_config_option`). The process leads its own group, so stopping it stops what it started.
 import { type ChildProcess, spawn } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import {
@@ -22,10 +23,11 @@ import {
   type RequestPermissionResponse,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
-import { modelChoices, type ModelChoices, permissionOutcome, promptBlocks, reopenMethod, type StartProblem, startFailureReason, steeringAnswer, steeringSupported } from "../../../../src/core/omp-acp";
+import { modelChoices, type ModelChoices, missingDeclaration, permissionOutcome, promptBlocks, type StartProblem, startFailureReason, StderrTail, steeringAnswer } from "../../../../src/core/omp-acp";
 import { type AcpMcpServer, readMcpServers } from "../../../../src/core/omp-mcp";
-import { RESUME_TIMEOUT_MS, ResumeTimeout, within } from "../../../../src/core/omp-chat-conversation";
-import { type ModelList, ompModels, ompPathVariable } from "../model-lists";
+import { RESUME_TIMEOUT_MS, ResumeTimeout, type TurnEnd, within } from "../../../../src/core/omp-chat-conversation";
+import { QUESTION_TOOL_REFUSAL } from "../../../../src/core/questions";
+import { ompPathVariable } from "../model-lists";
 import type { SendMode } from "../../omp-chat-protocol";
 import {
   type Disposable,
@@ -41,8 +43,11 @@ import {
   type SendStatus,
 } from "./ports";
 
-/** The grace a stopped process has before it is killed. */
+/** The grace a stopped process has before its group is killed. */
 export const STOP_GRACE_MS = 3000;
+
+/** How long `session/close` is waited for when a process is stopped. */
+const CLOSE_WAIT_MS = 2000;
 
 /** What the view learns of a message sent while the agent worked, and the reason a held message is not delivered when the conversation stops. */
 const DISCARDED = "the agent stopped before the message reached it";
@@ -50,12 +55,12 @@ const DISCARDED = "the agent stopped before the message reached it";
 export interface OmpClientDeps {
   /** The omp program, read at every start: the one found for `trama.ompPath`; empty means `omp` from the editor's PATH. */
   ompPath(): string | Promise<string>;
-  /** The models omp lists (`omp models --json`), for a session that declares none. */
-  models?(ompPath: string): Promise<ModelList>;
   /** The MCP servers of the project's native files. */
   mcpServers?(root: string): AcpMcpServer[];
-  /** How long `initialize` may stay unanswered; 30 s. */
-  initializeTimeoutMs?: number;
+  /** How long the whole opening may take, from the start of the process to the open session; 30 s. */
+  openTimeoutMs?: number;
+  /** How long `session/close` may take when a process is stopped; 2 s. */
+  closeTimeoutMs?: number;
   /** How long a stopped process may take before it is killed; 3 s. */
   stopGraceMs?: number;
 }
@@ -93,7 +98,6 @@ class OmpSession implements OmpSessionPort, Client {
   private connection!: ClientSideConnection;
   private initialized: unknown;
   private choices: ModelChoices | undefined;
-  private steering = false;
 
   private readonly updates: SessionNotification[] = [];
   private readonly updateListeners: Listeners<SessionNotification> = new Set();
@@ -121,15 +125,37 @@ class OmpSession implements OmpSessionPort, Client {
   private exit: OmpExit | undefined;
   private failure: ((problem: StartProblem) => void) | undefined;
 
+  /** The last lines omp wrote on its error output, and the moment it has no more to write. */
+  private readonly stderr = new StderrTail();
+  private readonly stderrDone: Promise<void>;
+  /** Whether the end of the process Trama had not asked for was taken up (it is reported once), and the report `onExit` replays to a listener that comes late. */
+  private reporting = false;
+  private reported: OmpExit | undefined;
+
+  /** Whether the prompt of the work is running or waiting: the answer of the turn that ends it, with no message of the developer waiting, is `onTurnEnd`. */
+  private working = false;
+  private readonly turnEndListeners: Listeners<TurnEnd> = new Set();
+  /** The end of the work that came before a listener of `onTurnEnd` did. */
+  private earlyEnd: TurnEnd | undefined;
+
   constructor(
     private readonly child: ChildProcess,
     private readonly deps: OmpClientDeps,
     private readonly cwd: string,
     /** `--yolo`: omp runs without asking, and a request that comes anyway is answered with an allow option. Otherwise every request waits for the developer. */
     private readonly yolo: boolean,
+    /** A job conversation with Trama's hook: omp's forms are declined at once (`createElicitation`). */
+    private readonly declineForms: boolean,
   ) {
     child.stdin?.on("error", () => {});
-    child.stderr?.resume();
+    child.stderr?.on("data", (chunk: Buffer) => this.stderr.push(chunk));
+    const { promise: stderrDone, resolve: stderrEnded } = Promise.withResolvers<void>();
+    this.stderrDone = stderrDone;
+    if (child.stderr === null) stderrEnded();
+    else {
+      child.stderr.once("close", () => stderrEnded());
+      child.stderr.once("end", () => stderrEnded());
+    }
     child.once("error", (error: NodeJS.ErrnoException) => this.ended({ kind: "spawn", ...(error.code === undefined ? {} : { code: error.code }), message: error.message }));
     child.once("exit", (code, signal) => {
       this.exit = { code, signal };
@@ -143,6 +169,15 @@ class OmpSession implements OmpSessionPort, Client {
     if (child.stdin === null || child.stdout === null) throw new OmpStartFailure("omp has no standard input or output");
     const stream = ndJsonStream(Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>, Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>);
     this.connection = new ClientSideConnection(() => this, stream);
+    // The connection closing with no exit of the process is the end of the process all the same: the exit has a moment to say it first.
+    void this.connection.closed.then(() => {
+      if (this.starting) return;
+      this.refuseForms();
+      this.cancelPermissions();
+      setTimeout(() => {
+        if (this.exit === undefined) this.report({ code: null, signal: null });
+      }, EVENT_GRACE_MS).unref();
+    });
   }
 
   /** Resolves with the problem that ends the start: a spawn error or an exit before the session is open. */
@@ -158,29 +193,59 @@ class OmpSession implements OmpSessionPort, Client {
     if (problem.kind !== "exit") return;
     this.refuseForms();
     this.cancelPermissions();
-    if (this.stopping === undefined && this.exit !== undefined) for (const listener of [...this.exitListeners]) listener(this.exit);
+    if (this.exit !== undefined) this.report(this.exit);
+  }
+
+  /** Resolves once omp's error output is complete, or after a moment when a command that omp started still holds the pipe. */
+  private async settled(): Promise<void> {
+    const timer = Promise.withResolvers<void>();
+    const handle = setTimeout(() => timer.resolve(), STDERR_GRACE_MS);
+    await Promise.race([this.stderrDone, timer.promise]);
+    clearTimeout(handle);
+  }
+
+  /** The last lines of omp's error output once they are complete, or undefined when omp wrote none. */
+  async errorOutput(): Promise<string | undefined> {
+    await this.settled();
+    const lines = this.stderr.lines();
+    return lines === "" ? undefined : lines;
+  }
+
+  /** `omp-acp.EXITED`, once, unless Trama is stopping the process; the last lines of omp's error output go with it. */
+  private report(exit: OmpExit): void {
+    if (this.reporting || this.stopping !== undefined) return;
+    this.reporting = true;
+    void this.errorOutput().then((details) => {
+      if (this.stopping !== undefined) return;
+      const reported = { ...exit, ...(details === undefined ? {} : { details }) };
+      this.reported = reported;
+      for (const listener of [...this.exitListeners]) listener(reported);
+    });
   }
 
   /** Runs the beginning of the session; `reopen` is the session to load or resume. */
-  async open(root: string, servers: AcpMcpServer[], timeoutMs: number, reopen?: string): Promise<void> {
-    this.initialized = await within(
-      this.connection.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: { elicitation: { form: {} } } }),
-      timeoutMs,
-    );
-    this.steering = steeringSupported(this.initialized);
+  async open(root: string, servers: AcpMcpServer[], reopen?: string): Promise<void> {
+    this.initialized = await this.connection.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: { elicitation: { form: {} } } });
+    // There is no fallback for an omp that declares less than 18.12.6 does: the start fails with what is missing.
+    const missing = missingDeclaration(this.initialized, reopen !== undefined);
+    if (missing !== undefined) throw new OmpStartFailure(missing);
     const mcpServers = servers as never;
     if (reopen === undefined) {
       const created = await this.connection.newSession({ cwd: root, mcpServers });
+      this.choices = this.modelOption(created.configOptions);
       this.sessionId = created.sessionId;
-      this.choices = modelChoices(created.configOptions);
       return;
     }
-    const method = reopenMethod(this.initialized);
-    if (method === undefined) throw new OmpStartFailure("omp cannot reopen a saved session");
+    const reopened = await this.connection.loadSession({ sessionId: reopen, cwd: root, mcpServers });
+    this.choices = this.modelOption(reopened.configOptions);
     this.sessionId = reopen;
-    const reopened =
-      method === "load" ? await this.connection.loadSession({ sessionId: reopen, cwd: root, mcpServers }) : await this.connection.resumeSession({ sessionId: reopen, cwd: root, mcpServers });
-    this.choices = modelChoices(reopened.configOptions);
+  }
+
+  /** The model option the session declares; a session without one is a failed start. */
+  private modelOption(configOptions: unknown): ModelChoices {
+    const choices = modelChoices(configOptions);
+    if (choices === undefined) throw new OmpStartFailure("omp declares no model option for the session");
+    return choices;
   }
 
   /** The session is open: from now on an exit is `onExit`, not a failed start. */
@@ -217,6 +282,8 @@ class OmpSession implements OmpSessionPort, Client {
   }
 
   createElicitation(params: CreateElicitationRequest): Promise<CreateElicitationResponse> {
+    // A job conversation never shows a form, even when the hook that refuses omp's question tool did not load: the form is declined with the tool's refusal, and the view hears nothing.
+    if (this.declineForms) return Promise.resolve({ action: "decline", _meta: { message: QUESTION_TOOL_REFUSAL } });
     const schema = params.mode === "form" ? (params as { requestedSchema?: ElicitationSchema }).requestedSchema : undefined;
     if (schema === undefined) return Promise.resolve({ action: "decline" });
     const requestId = `form-${++this.formCount}`;
@@ -252,10 +319,7 @@ class OmpSession implements OmpSessionPort, Client {
     if (this.turn === undefined) return this.begin(prompt);
     // A permission request waits: omp is sent nothing until the developer answers it (`answerPermission`).
     if (this.permissions.size > 0) return this.hold(prompt, report);
-    if (!this.steering) {
-      report({ status: "queued" });
-      return this.queue(prompt, report);
-    }
+    // omp declares steering (`start` refuses an omp that does not), so a message in the middle of a turn goes through `_session/steering`.
     return this.inject(prompt, mode, report);
   }
 
@@ -317,23 +381,43 @@ class OmpSession implements OmpSessionPort, Client {
   }
 
   private async run(prompt: OmpPrompt, report?: Report): Promise<void> {
+    if (prompt.work === true) this.working = true;
     this.setBusy(true);
     report?.({ status: "delivered" });
+    let answer: TurnEnd | undefined;
+    let failure: { error: unknown } | undefined;
     try {
-      await this.connection.prompt({ sessionId: this.sessionId, prompt: promptBlocks(prompt.text, prompt.attachment) });
-    } finally {
-      // The turn is over: omp has answered what it took into it.
-      for (const taken of this.takenQueued.splice(0)) taken.report({ status: "delivered" });
-      const next = this.waiting.shift();
-      if (next === undefined) {
-        this.turn = undefined;
-        this.setBusy(false);
-      } else {
-        const turn = this.run(next.prompt, next.report);
-        this.turn = turn;
-        turn.then(next.resolve, next.reject);
-      }
+      const response = await this.connection.prompt({ sessionId: this.sessionId, prompt: promptBlocks(prompt.text, prompt.attachment) });
+      answer = { stopReason: response.stopReason };
+    } catch (error) {
+      failure = { error };
+      // Only omp's own error answer is an answer; a connection that closes is the end of the process, which `onExit` reports.
+      if (error instanceof RequestError) answer = { error: error.message };
     }
+    // The turn is over: omp has answered what it took into it.
+    for (const taken of this.takenQueued.splice(0)) taken.report({ status: "delivered" });
+    const delivering = this.waiting.length > 0 || this.held.length > 0;
+    const next = this.waiting.shift();
+    if (next === undefined) {
+      this.turn = undefined;
+      this.setBusy(false);
+    } else {
+      const turn = this.run(next.prompt, next.report);
+      this.turn = turn;
+      turn.then(next.resolve, next.reject);
+    }
+    // The work ends with the answer of the turn, unless a message of the developer still waits to be delivered: the turn that delivers it ends it then.
+    if (this.working && !delivering && answer !== undefined) {
+      this.working = false;
+      this.turnEnded(answer);
+    }
+    // The prompt of the work reports through `onTurnEnd`; its promise never rejects.
+    if (failure !== undefined && prompt.work !== true) throw failure.error;
+  }
+
+  private turnEnded(end: TurnEnd): void {
+    if (this.turnEndListeners.size === 0) this.earlyEnd = end;
+    else for (const listener of [...this.turnEndListeners]) listener(end);
   }
 
   cancel(): void {
@@ -341,26 +425,93 @@ class OmpSession implements OmpSessionPort, Client {
     void this.connection.cancel({ sessionId: this.sessionId }).catch(() => {});
   }
 
-  stop(): Promise<void> {
+  /**
+   * Stops the process: `session/cancel` when a turn runs, then `session/close` (at most `closeTimeoutMs`, skipped on deactivation, where there is little time),
+   * then SIGTERM to omp's whole process group and, after the grace, SIGKILL to the group. Resolves when the process is gone; it never produces `onExit`.
+   */
+  stop(options: { deactivating?: boolean } = {}): Promise<void> {
     if (this.stopping !== undefined) return this.stopping;
     this.refuseForms();
     this.cancelPermissions();
     const done = Promise.withResolvers<void>();
     this.stopping = done.promise;
-    if (this.child.pid === undefined || this.exit !== undefined || this.child.exitCode !== null || this.child.signalCode !== null) {
+    const { child } = this;
+    if (child.pid === undefined || this.exit !== undefined || child.exitCode !== null || child.signalCode !== null) {
       done.resolve();
       return done.promise;
     }
-    this.child.once("exit", () => done.resolve());
-    this.child.kill("SIGTERM");
-    const timer = setTimeout(() => this.child.kill("SIGKILL"), this.deps.stopGraceMs ?? STOP_GRACE_MS);
-    void done.promise.then(() => clearTimeout(timer));
+    child.once("exit", () => done.resolve());
+    void this.terminate(options.deactivating === true).then(() => this.signalGroup());
     return done.promise;
+  }
+
+  /** SIGTERM to the group, unless its leader already left, and SIGKILL to the group at the end of the grace, unless nothing of the group is left by then. */
+  private signalGroup(): void {
+    const { child } = this;
+    if (child.exitCode === null && child.signalCode === null) this.killGroup("SIGTERM");
+    const kill = setTimeout(() => this.killGroup("SIGKILL"), this.deps.stopGraceMs ?? STOP_GRACE_MS);
+    kill.unref();
+    void this.stopping?.then(() => {
+      if (!this.groupAlive()) clearTimeout(kill);
+    });
+  }
+
+  /** What comes before the signals: the turn in progress is cancelled and the session is closed, waiting for omp's answer a moment. */
+  private async terminate(deactivating: boolean): Promise<void> {
+    if (this.busy) void this.connection.cancel({ sessionId: this.sessionId }).catch(() => {});
+    if (deactivating || this.sessionId === "") return;
+    const waited = Promise.withResolvers<void>();
+    const timer = setTimeout(() => waited.resolve(), this.deps.closeTimeoutMs ?? CLOSE_WAIT_MS);
+    void this.connection.closeSession({ sessionId: this.sessionId }).then(() => undefined, () => undefined).then(() => waited.resolve());
+    await waited.promise;
+    clearTimeout(timer);
+  }
+
+  /** Whether a process of the group omp led is still there (always false where the process does not lead a group). */
+  private groupAlive(): boolean {
+    const pid = this.child.pid;
+    if (pid === undefined || process.platform === "win32") return false;
+    try {
+      process.kill(-pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** `signal` to omp's whole process group; on Windows `taskkill /T` takes the process tree (`/F` for SIGKILL). */
+  private killGroup(signal: "SIGTERM" | "SIGKILL"): void {
+    const pid = this.child.pid;
+    if (pid === undefined) return;
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/T", ...(signal === "SIGKILL" ? ["/F"] : []), "/PID", String(pid)], { stdio: "ignore", windowsHide: true }).once("error", () => {});
+      return;
+    }
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      // The group is gone, or this system cannot signal it: the leader alone gets the signal.
+      try {
+        this.child.kill(signal);
+      } catch {
+        // Already gone.
+      }
+    }
   }
 
   onExit(listener: (exit: OmpExit) => void): Disposable {
     const subscription = disposer(this.exitListeners, listener);
-    if (this.exit !== undefined && this.stopping === undefined && !this.starting) queueMicrotask(() => this.exitListeners.has(listener) && listener(this.exit!));
+    if (this.reported !== undefined) queueMicrotask(() => this.exitListeners.has(listener) && this.stopping === undefined && listener(this.reported!));
+    return subscription;
+  }
+
+  onTurnEnd(listener: (end: TurnEnd) => void): Disposable {
+    const subscription = disposer(this.turnEndListeners, listener);
+    const early = this.earlyEnd;
+    if (early !== undefined) {
+      this.earlyEnd = undefined;
+      queueMicrotask(() => this.turnEndListeners.has(listener) && listener(early));
+    }
     return subscription;
   }
 
@@ -434,19 +585,17 @@ class OmpSession implements OmpSessionPort, Client {
   }
 
   async models(): Promise<{ available: { id: string; name: string }[]; current?: string }> {
-    if (this.choices !== undefined) return { available: this.choices.available, ...(this.choices.current === undefined ? {} : { current: this.choices.current }) };
-    const listed = await (this.deps.models ?? ompModels)(await this.deps.ompPath());
-    return { available: listed.models.map((model) => ({ id: model.value, name: model.label ?? model.value })) };
+    const choices = this.choices;
+    if (choices === undefined) return { available: [] };
+    return { available: choices.available, ...(choices.current === undefined ? {} : { current: choices.current }) };
   }
 
   async setModel(id: string): Promise<void> {
+    const choices = this.choices;
+    if (choices === undefined) throw new Error("the session is not open");
     try {
-      if (this.choices === undefined) {
-        await this.connection.request("session/set_model", { sessionId: this.sessionId, modelId: id });
-        return;
-      }
-      const answer = await this.connection.setSessionConfigOption({ sessionId: this.sessionId, configId: this.choices.configId, value: id });
-      this.choices = modelChoices(answer.configOptions) ?? { ...this.choices, current: id };
+      const answer = await this.connection.setSessionConfigOption({ sessionId: this.sessionId, configId: choices.configId, value: id });
+      this.choices = modelChoices(answer.configOptions) ?? { ...choices, current: id };
     } catch (error) {
       throw new Error(messageOf(error));
     }
@@ -457,38 +606,48 @@ class OmpSession implements OmpSessionPort, Client {
 export class OmpClient implements OmpClientPort {
   constructor(private readonly deps: OmpClientDeps) {}
 
-  start(launch: OmpLaunch, first?: OmpPrompt): Promise<OmpSessionPort> {
-    return this.open(launch, undefined, first);
+  start(launch: OmpLaunch, first?: OmpPrompt, spawned?: (pid: number) => void): Promise<OmpSessionPort> {
+    return this.open(launch, undefined, first, spawned);
   }
 
-  resume(launch: OmpLaunch, sessionId: string): Promise<OmpSessionPort> {
-    return this.open(launch, sessionId);
+  resume(launch: OmpLaunch, sessionId: string, spawned?: (pid: number) => void): Promise<OmpSessionPort> {
+    return this.open(launch, sessionId, undefined, spawned);
   }
 
-  private async open(launch: OmpLaunch, reopen: string | undefined, first?: OmpPrompt): Promise<OmpSessionPort> {
+  private async open(launch: OmpLaunch, reopen: string | undefined, first?: OmpPrompt, spawned?: (pid: number) => void): Promise<OmpSessionPort> {
     const ompPath = await this.deps.ompPath();
     const env = { ...process.env, ...launch.env };
     // The folder of the omp program and the folder of bun go in front of the launch's PATH, so a script of omp finds its runtime.
     env["PATH"] = ompPathVariable(ompPath, env);
-    const child = spawn(ompPath === "" ? "omp" : ompPath, launch.args, { cwd: launch.cwd, env, shell: false, stdio: "pipe" });
-    const session = new OmpSession(child, this.deps, launch.cwd, launch.args.includes("--yolo"));
+    // The process leads its own group on Linux and macOS, so that stopping it stops every command omp started (`OmpSession.stop`).
+    const child = spawn(ompPath === "" ? "omp" : ompPath, launch.args, { cwd: launch.cwd, env, shell: false, stdio: "pipe", detached: process.platform !== "win32" });
+    // The process stands: its pid is known the moment `spawn` succeeds, and a spawn that failed has none.
+    if (child.pid !== undefined) spawned?.(child.pid);
+    const session = new OmpSession(child, this.deps, launch.cwd, launch.args.includes("--yolo"), launch.hook === true);
     const failed = session.watchStart();
     try {
       session.connect();
       const servers = (this.deps.mcpServers ?? readMcpServers)(launch.cwd);
-      const opening = session.open(launch.cwd, servers, this.deps.initializeTimeoutMs ?? RESUME_TIMEOUT_MS, reopen);
+      const opening = session.open(launch.cwd, servers, reopen);
       opening.catch(() => {});
-      await Promise.race([opening, failed]);
+      // One limit covers the whole opening: `initialize` and `session/new` (or the loading of the session), counted from the start of the process.
+      await Promise.race([within(opening, this.deps.openTimeoutMs ?? RESUME_TIMEOUT_MS), failed]);
     } catch (error) {
       const problem = await explained(error, failed);
       await session.stop();
-      throw new OmpStartFailure(startFailureReason(problem, ompPath));
+      throw new OmpStartFailure(startFailureReason(problem, ompPath), await session.errorOutput());
     }
     session.opened();
-    if (first !== undefined) session.sendPrompt(first).catch(() => {});
+    if (first !== undefined) {
+      // The first message is the prompt of the job's work: omp's answer to it, even a refusal, is `onTurnEnd`, so its promise never rejects and nothing is swallowed.
+      void session.sendPrompt({ ...first, work: true });
+    }
     return session;
   }
 }
+
+/** How long the error output of a process that ended may take to be complete: a command omp started can hold its pipe open. */
+const STDERR_GRACE_MS = 300;
 
 /** How long the process's own event may take to follow the closing of its pipes. */
 const EVENT_GRACE_MS = 1000;

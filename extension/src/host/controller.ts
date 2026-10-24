@@ -23,7 +23,8 @@ import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./annou
 import { configuredAdvisorScanner, configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, openAskMore, settings, startHeldJob } from "./agent";
 import { bundledUnifyInstructions } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
-import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onProposalDelivered, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing, unifyingDrifts } from "./drift-resolution";
+import { driftWork, driftsFinishing, localProjectJobs, onAgentStopped, onDriftResolutionChange, onProposalDelivered, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing, unifyingDrifts } from "./drift-resolution";
+import { agentStoppedNotice } from "../../../src/core/omp-chat-conversation";
 import { askPreparedRound } from "./questions";
 import { askMorePlaceholder, askMoreSubject, askMoreTerminalName } from "./ask-more";
 import { webviewHtml } from "./html";
@@ -43,7 +44,7 @@ import { resolveMarkdownFile } from "./paths";
 import { checkSkills, fileFolders, findProject, initializeProject, NO_PROJECT_WARNING, updateSkills } from "./project";
 import { folderChildren, folderInside, gitIgnored, type RawEntry } from "./folder-tree";
 import { askMoreTarget } from "./question-state";
-import { PREPARED_QUESTION_AGENT, type QuestionSession } from "./question-session";
+import type { QuestionSession } from "./question-session";
 import type { DesignRequests } from "./design-requests";
 
 import { writeLastScan } from "../../../src/core/last-scan";
@@ -128,7 +129,6 @@ export class Controller implements vscode.Disposable {
     private readonly extensionUri: vscode.Uri,
     private readonly questions?: QuestionSession,
     private readonly tramaFiles?: vscode.FileSystemWatcher,
-    private readonly globalStorageUri?: vscode.Uri,
     private readonly designRequests?: DesignRequests,
     /** The workspace state, where the models chosen for Proposals are kept. */
     private readonly modelMemory?: ModelMemory,
@@ -268,7 +268,7 @@ export class Controller implements vscode.Disposable {
     if (!project || this.checkingSkills) return;
     this.checkingSkills = true;
     setTimeout(() => {
-      void checkSkills(project, this.globalStorageUri).finally(() => {
+      void checkSkills(project).finally(() => {
         this.checkingSkills = false;
       });
     }, 0);
@@ -371,6 +371,7 @@ export class Controller implements vscode.Disposable {
       ...(outcome.version === undefined ? {} : { version: outcome.version }),
       ...(list.error === undefined ? { models: list.models.length } : { error: list.error }),
       ...(outcome.updateError === undefined ? {} : { updateError: outcome.updateError }),
+      ...(outcome.tooOld === true ? { tooOld: true as const } : {}),
     });
   }
 
@@ -406,6 +407,7 @@ export class Controller implements vscode.Disposable {
         state: "done",
         missing: status.missing || list.missing === true,
         ...(status.version === undefined ? {} : { version: status.version }),
+        ...(status.tooOld === true ? { tooOld: true as const } : {}),
         ...(error === undefined ? { models: list.models.length } : { error }),
       });
     })().finally(() => {
@@ -500,7 +502,7 @@ export class Controller implements vscode.Disposable {
 
   async updateSkills(): Promise<void> {
     const project = this.requireProject();
-    if (project) await updateSkills(project, this.globalStorageUri);
+    if (project) await updateSkills(project);
   }
 
   private requireProject(): Project | undefined {
@@ -582,7 +584,8 @@ export class Controller implements vscode.Disposable {
     const subscriptions = [
       ...(this.tramaFiles ? this.watchChanges(this.tramaFiles) : []),
       onAnnouncementsWithdrawn((announcements) => this.post({ type: "withdrawn", announcements })),
-      onStoppedFollowing((subject, reason) => this.post({ type: "stoppedFollowing", subject, reason })),
+      onStoppedFollowing((subject, reason, details) => this.post({ type: "stoppedFollowing", subject, reason, ...(details === undefined ? {} : { details }) })),
+      onAgentStopped((job, reason) => this.post({ type: "notice", text: agentStoppedNotice(job, reason) })),
       onQuestionRoundChange(() => this.refresh()),
       onDriftResolutionChange(() => this.refresh()),
       onProposalDelivered((root, id) => this.noteDelivered(root, id)),
@@ -1101,9 +1104,9 @@ export class Controller implements vscode.Disposable {
     const id = picked.next;
     this.refinement = { ...this.refinement, running: id, delivered: false };
     this.launchAction(project, { kind: "refine", proposal: id }).catch((err: unknown) => {
-      this.refinement = { ...this.refinement, running: null, delivered: false };
+      // The instruction did not really start: the queue empties, the Proposals that waited go back to refinable, and the refinement is at rest.
+      this.refinement = { ...this.refinement, running: null, delivered: false, queued: [] };
       void vscode.window.showWarningMessage(`Trama: refining ${cardName(project, "proposal", id)} did not start: ${describeError(err)}.`);
-      this.pumpRefinement(project);
       this.refresh();
     });
   }
@@ -1197,7 +1200,7 @@ export class Controller implements vscode.Disposable {
     if (!asked) return;
     try {
       // A prepared question's ID is the identity of its Drift (Trama writes it so), and only a round Trama asks itself is one.
-      const drift = current.agent === PREPARED_QUESTION_AGENT ? { id: asked.id, title: getDrift(project, asked.id).title } : null;
+      const drift = current.prepared ? { id: asked.id, title: getDrift(project, asked.id).title } : null;
       const subject = { kind: "question" as const, question: asked, round: current.state.questions, drift };
       await openAskMore(project.root, "Ask question", askMorePart(subject), askMorePlaceholder(subject));
     } catch (err) {

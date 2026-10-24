@@ -39,8 +39,10 @@ class FakeSession implements OmpSessionPort {
   cancel(): void {
     this.cancels++;
   }
-  async stop(): Promise<void> {
+  stopOptions: ({ deactivating?: boolean } | undefined)[] = [];
+  async stop(options?: { deactivating?: boolean }): Promise<void> {
     this.stops++;
+    this.stopOptions.push(options);
   }
   exit(exit: OmpExit): void {
     for (const listener of [...this.exitListeners]) listener(exit);
@@ -48,6 +50,9 @@ class FakeSession implements OmpSessionPort {
   onExit(listener: (exit: OmpExit) => void): Disposable {
     this.exitListeners.push(listener);
     return { dispose: () => void (this.exitListeners = this.exitListeners.filter((l) => l !== listener)) };
+  }
+  onTurnEnd(): Disposable {
+    return { dispose: () => undefined };
   }
   onUpdate(): Disposable {
     return { dispose: () => undefined };
@@ -78,12 +83,14 @@ class FakeClient implements OmpClientPort {
   sessions: FakeSession[] = [];
   /** How many of the next starts fail (omp exits before the session opens). */
   startFailures = 0;
+  /** The last lines of omp's error output that the failed starts carry. */
+  startDetails: string | undefined;
   resumeFails = false;
   async start(launch: OmpLaunch): Promise<OmpSessionPort> {
     this.starts.push(launch);
     if (this.startFailures > 0) {
       this.startFailures--;
-      throw new OmpStartFailure("omp exited with code 1");
+      throw new OmpStartFailure("omp exited with code 1", this.startDetails);
     }
     const session = new FakeSession(`s${this.starts.length}`);
     this.sessions.push(session);
@@ -98,7 +105,7 @@ class FakeClient implements OmpClientPort {
   }
 }
 
-type Status = { phase: string; error?: { kind: string; reason?: string }; newSession?: boolean };
+type Status = { phase: string; error?: { kind: string; reason?: string; details?: string }; newSession?: boolean };
 
 /** The view's side of General: what it is told, and the listeners the view calls back. */
 class FakeView {
@@ -167,6 +174,8 @@ interface Options {
   realFindOmp?: boolean;
   /** Whether the package has no General instructions file. */
   noInstructions?: boolean;
+  /** What `omp --version` says of the installed omp: undefined for a recent one, `unreadable` for an omp whose version cannot be read, else the version. */
+  version?: string | "unreadable";
 }
 
 function setup(options: Options = {}) {
@@ -180,6 +189,8 @@ function setup(options: Options = {}) {
   const installed = options.installed ?? true;
   const ends: [string, string][] = [];
   const usability = { usable: true };
+  const interrupted: string[] = [];
+  const checked: string[] = [];
   const deps: GeneralDeps = {
     client,
     view: view as unknown as ChatViewPort,
@@ -188,6 +199,11 @@ function setup(options: Options = {}) {
     usable: () => usability.usable,
     ompPath: () => options.ompPath ?? "omp",
     findOmp: options.realFindOmp ? (ompPath) => findConfiguredOmp(ompPath, { PATH: "" }, "/nonexistent-home", false) : async () => (installed ? "/usr/local/bin/omp" : undefined),
+    checkOmp: async (program) => {
+      checked.push(program);
+      if (options.version === undefined) return {};
+      return options.version === "unreadable" ? { tooOld: true } : { tooOld: true, version: options.version };
+    },
     instructions: () => (options.noInstructions ? undefined : "/ext/media/general.md"),
     launch: async (root, terminalId) => ({ args: ["acp"], env: { TRAMA_TERMINAL: terminalId, PI_INTENT_TRACING: "1" }, cwd: root }),
     resumeLaunch: async (root, args, env) => ({ args, env: { ...env, QUESTION_ENDPOINT: "http://endpoint" }, cwd: root }),
@@ -196,10 +212,11 @@ function setup(options: Options = {}) {
       confirmations.asked++;
       return confirmations.answer;
     },
+    interruptRounds: (terminalId) => interrupted.push(terminalId),
     install: () => undefined,
   };
   const general = new GeneralConversation(deps);
-  return { general, client, view, store, confirmations, ends, usability };
+  return { general, client, view, store, confirmations, ends, usability, interrupted, checked };
 }
 
 describe("General in the host", () => {
@@ -215,6 +232,9 @@ describe("General in the host", () => {
     const record = s.store.get(GENERAL_KEY) as SavedGeneral;
     expect(record.sessionId).toBe("s1");
     expect(record.args).toEqual(["acp"]);
+    // The terminal ID has the form of every terminal's, so the command line recognises it; it is saved with the entry.
+    expect(record.id).toMatch(/^[a-z0-9]{6}$/);
+    expect(s.client.starts[0]!.env["TRAMA_TERMINAL"]).toBe(record.id);
   });
 
   test("a missing omp shows the missing state and starts nothing", async () => {
@@ -224,6 +244,39 @@ describe("General in the host", () => {
     expect(s.client.starts).toHaveLength(0);
     expect(s.view.last).toEqual({ phase: "stopped", error: { kind: "missing" } });
     expect(s.confirmations.asked).toBe(0);
+  });
+
+  test("an omp older than the minimum, or whose version cannot be read, starts nothing and says so as General's error line, with Install omp and no editor notice", async () => {
+    const old = setup({ version: "18.12.5" });
+    old.general.start();
+    await settle();
+    expect(old.checked).toEqual(["/usr/local/bin/omp"]);
+    expect(old.client.starts).toHaveLength(0);
+    expect(old.client.resumes).toHaveLength(0);
+    expect(old.view.last).toEqual({ phase: "stopped", error: { kind: "missing", reason: "Trama needs omp 18.12.6 or later; the installed omp is 18.12.5." } });
+    expect(old.confirmations.asked).toBe(0);
+
+    const unreadable = setup({ version: "unreadable" });
+    unreadable.general.start();
+    await settle();
+    expect(unreadable.view.last).toEqual({ phase: "stopped", error: { kind: "missing", reason: "Trama needs omp 18.12.6 or later; the installed omp is unknown." } });
+
+    // A missing omp is not looked at: the check comes after the program is found.
+    const missing = setup({ installed: false, version: "18.12.5" });
+    missing.general.start();
+    await settle();
+    expect(missing.checked).toEqual([]);
+    expect(missing.view.last).toEqual({ phase: "stopped", error: { kind: "missing" } });
+  });
+
+  test("a saved session is checked too before it resumes: with an omp that is too old it does not come back, and the start that follows says why", async () => {
+    const s = setup({ saved, version: "18.12.5" });
+    s.general.start();
+    await settle();
+    expect(s.client.resumes).toHaveLength(0);
+    expect(s.client.starts).toHaveLength(0);
+    expect(s.store.get(GENERAL_KEY)).toBeUndefined();
+    expect(s.view.last).toEqual({ phase: "stopped", error: { kind: "missing", reason: "Trama needs omp 18.12.6 or later; the installed omp is 18.12.5." } });
   });
 
   test("missing instructions in the package stop General before any start", async () => {
@@ -369,6 +422,37 @@ describe("General in the host", () => {
     expect(s.ends.every(([id, root]) => id !== "" && root === "/work/project")).toBe(true);
   });
 
+  test("the rounds its agent asked end with its Stop, its clear and the end of its process", async () => {
+    const s = setup();
+    s.general.start();
+    await settle();
+    const id = (s.store.get(GENERAL_KEY) as SavedGeneral).id;
+    s.view.emit("stop", GENERAL_ID);
+    await settle();
+    expect(s.client.sessions[0]!.cancels).toBe(1);
+    expect(s.interrupted).toEqual([id]);
+    s.view.emit("clear");
+    await settle();
+    expect(s.interrupted).toEqual([id, id]);
+    const second = (s.store.get(GENERAL_KEY) as SavedGeneral).id;
+    s.client.sessions.at(-1)!.exit({ code: 1, signal: null });
+    await settle();
+    expect(s.interrupted).toEqual([id, id, second]);
+  });
+
+  test("General owns the identity of its process only while the process runs", async () => {
+    const s = setup();
+    expect(s.general.owns("abc123")).toBe(false);
+    s.general.start();
+    await settle();
+    const id = (s.store.get(GENERAL_KEY) as SavedGeneral).id;
+    expect(s.general.owns(id)).toBe(true);
+    expect(s.general.owns("zzzzzz")).toBe(false);
+    s.client.sessions[0]!.exit({ code: 1, signal: null });
+    await settle();
+    expect(s.general.owns(id)).toBe(false);
+  });
+
   test("the window's close ends General's work too", async () => {
     const s = setup();
     s.general.start();
@@ -376,6 +460,65 @@ describe("General in the host", () => {
     const id = (s.store.values.get(GENERAL_KEY) as SavedGeneral).id;
     await s.general.windowClosed();
     expect(s.ends).toEqual([[id, "/work/project"]]);
+    // The window's close is a deactivation: the session is not closed first. A clear is not.
+    expect(s.client.sessions[0]!.stopOptions).toEqual([{ deactivating: true }]);
+  });
+
+  test("a clear stops the process without the deactivation option", async () => {
+    const s = setup();
+    s.general.start();
+    await settle();
+    s.view.emit("clear");
+    await settle();
+    expect(s.client.sessions[0]!.stopOptions).toEqual([undefined]);
+  });
+
+  test("a failed start and an exit show the last lines of omp's error output inside the conversation", async () => {
+    const s = setup({ startFailures: 1 });
+    s.client.startDetails = "error: no API key\nrun omp login";
+    s.general.start();
+    await settle();
+    expect(s.view.last).toEqual({ phase: "stopped", error: { kind: "start", reason: "omp exited with code 1", details: "error: no API key\nrun omp login" } });
+    s.view.emit("message", sent("again"));
+    await settle();
+    s.client.sessions.at(-1)!.exit({ code: 2, signal: null, details: "panic: out of memory" });
+    await settle();
+    expect(s.view.last?.error).toEqual({ kind: "exited", reason: "its command exited with code 2", details: "panic: out of memory" });
+    // Without output of error there is no `details`.
+    s.view.emit("message", sent("once more"));
+    await settle();
+    s.client.sessions.at(-1)!.exit({ code: 3, signal: null });
+    await settle();
+    expect(s.view.last?.error).toEqual({ kind: "exited", reason: "its command exited with code 3" });
+  });
+
+  test("General is followed under its identity while it has a process or a saved session, for the execution check of every window", async () => {
+    const s = setup();
+    expect(s.general.follows("t1")).toBe(false);
+    s.general.start();
+    await settle();
+    const id = (s.store.values.get(GENERAL_KEY) as SavedGeneral).id;
+    expect(s.general.follows(id)).toBe(true);
+    expect(s.general.follows("other1")).toBe(false);
+    // The process exited by itself: the saved session is still General's, resumed by the next message.
+    s.client.sessions[0]!.exit({ code: 1, signal: null });
+    await settle();
+    expect(s.general.follows(id)).toBe(true);
+    // Clearing drops the session: the identity it had is nobody's any more.
+    s.view.emit("clear");
+    await settle();
+    expect(s.general.follows(id)).toBe(false);
+    expect(s.general.follows((s.store.values.get(GENERAL_KEY) as SavedGeneral).id)).toBe(true);
+  });
+
+  test("a saved General keeps its identity when it resumes, and is followed as soon as the window opens", async () => {
+    const s = setup({ saved });
+    s.general.start();
+    expect(s.general.follows("t1")).toBe(true);
+    await settle();
+    expect(s.client.resumes).toHaveLength(1);
+    expect((s.store.values.get(GENERAL_KEY) as SavedGeneral).id).toBe("t1");
+    expect(s.general.follows("t1")).toBe(true);
   });
 
   test("a configured omp path that does not exist is missing, not a failed start", async () => {

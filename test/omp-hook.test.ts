@@ -62,6 +62,37 @@ test("session shutdown reports only an explicitly main agent", () => {
   fire("session_shutdown", "sub");
   expect(execs).toEqual([]);
 });
+test("in an omp Chat conversation (TRAMA_ACP) the hook says neither that the agent started nor that it is idle, in any session", () => {
+  const saved = process.env["TRAMA_ACP"];
+  process.env["TRAMA_ACP"] = "1";
+  try {
+    const { fire, execs } = setup();
+    fire("session_start");
+    fire("agent_start");
+    fire("session_stop");
+    fire("session_shutdown");
+    fire("session_shutdown", "sub");
+    expect(execs).toEqual([]);
+  } finally {
+    if (saved === undefined) delete process.env["TRAMA_ACP"];
+    else process.env["TRAMA_ACP"] = saved;
+  }
+});
+test("in a conversation the hook still refuses omp's question tool and claims the files of a Run", () => {
+  const saved = process.env["TRAMA_ACP"];
+  process.env["TRAMA_ACP"] = "1";
+  try {
+    const handlers = new Map<string, (event: unknown, ctx: { cwd: string; agent?: { kind: "main" | "sub" } }) => unknown>();
+    tramaHook({ on: (event: string, handler: (event: unknown, ctx: { cwd: string; agent?: { kind: "main" | "sub" } }) => unknown) => void handlers.set(event, handler), exec: async () => undefined });
+    expect(handlers.get("tool_call")?.({ toolName: "ask" }, { cwd: "/project", agent: { kind: "main" } })).toEqual({ block: true, reason: QUESTION_TOOL_REFUSAL });
+    expect(handlers.has("agent_end")).toBe(true);
+    expect(handlers.has("session_stop")).toBe(false);
+    expect(handlers.has("session_start")).toBe(false);
+  } finally {
+    if (saved === undefined) delete process.env["TRAMA_ACP"];
+    else process.env["TRAMA_ACP"] = saved;
+  }
+});
 
 test("the omp hook refuses the agent's own question tool with the shared refusal, and no other tool", () => {
   const handlers: Record<string, (event: unknown, ctx: { cwd: string; agent?: { kind: "main" | "sub" } }) => unknown> = {};

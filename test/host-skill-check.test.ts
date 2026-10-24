@@ -26,84 +26,74 @@ const { projectAt } = await import("../src/core/store");
 
 const UPDATED = "Trama: updated the agent skills to this version.";
 let root: string;
-let storage: string;
-const storageUri = () => ({ fsPath: storage }) as never;
 
 beforeEach(async () => {
   root = mkdtempSync(join(os.tmpdir(), "trama-check-"));
-  storage = mkdtempSync(join(os.tmpdir(), "trama-check-storage-"));
   editor.appName = "Visual Studio Code";
   run(["--root", root, "project", "new"], root);
   messages.length = 0;
-  await checkSkills(projectAt(root), storageUri());
+  await checkSkills(projectAt(root));
   messages.length = 0;
 });
 
 test("a project already in line with this version shows nothing", async () => {
-  await checkSkills(projectAt(root), storageUri());
+  await checkSkills(projectAt(root));
   expect(messages).toEqual([]);
 });
 
 test("an edited skill is replaced without asking and the short notice appears once", async () => {
   const file = join(root, ".agents/skills/trama-design/SKILL.md");
   writeFileSync(file, "edited by hand");
-  await checkSkills(projectAt(root), storageUri());
+  await checkSkills(projectAt(root));
   expect(messages).toEqual([{ kind: "info", text: UPDATED }]);
   expect(readFileSync(file, "utf8")).not.toBe("edited by hand");
-  await checkSkills(projectAt(root), storageUri());
+  await checkSkills(projectAt(root));
   expect(messages).toHaveLength(1);
 });
 
 test("an edited trama-implementer definition is rewritten without asking, and a project in line shows nothing", async () => {
   const file = join(root, ".omp/agents/trama-implementer.md");
   writeFileSync(file, "edited by hand");
-  await checkSkills(projectAt(root), storageUri());
+  await checkSkills(projectAt(root));
   expect(messages).toEqual([{ kind: "info", text: UPDATED }]);
   expect(readFileSync(file, "utf8")).toMatch(/^---\nname: trama-implementer\n/);
   expect(readFileSync(file, "utf8")).not.toMatch(/^model:/m);
   messages.length = 0;
-  await checkSkills(projectAt(root), storageUri());
+  await checkSkills(projectAt(root));
   expect(messages).toEqual([]);
 });
 
 test("a changed advisor file counts as an update, a deleted retired file too", async () => {
   writeFileSync(join(root, ".omp/WATCHDOG.yml"), "instructions: []\n");
-  await checkSkills(projectAt(root), storageUri());
+  await checkSkills(projectAt(root));
   expect(messages.map((m) => m.text)).toEqual([UPDATED]);
   expect(readFileSync(join(root, ".omp/WATCHDOG.yml"), "utf8")).toContain("Trama turn reviewer");
 
   messages.length = 0;
   writeFileSync(join(root, ".omp/agents/trama-triage.md"), "old");
-  await checkSkills(projectAt(root), storageUri());
+  await checkSkills(projectAt(root));
   expect(messages.map((m) => m.text)).toEqual([UPDATED]);
   expect(existsSync(join(root, ".omp/agents/trama-triage.md"))).toBe(false);
 });
 
-test("removing a Copilot piece counts as an update", async () => {
+test("what earlier versions wrote for Copilot is neither read nor removed", async () => {
   mkdirSync(join(home, ".copilot/agents"), { recursive: true });
   const agent = join(home, ".copilot/agents/trama-analysis.agent.md");
   writeFileSync(agent, "old");
-  await checkSkills(projectAt(root), storageUri());
-  expect(messages.map((m) => m.text)).toEqual([UPDATED]);
-  expect(existsSync(agent)).toBe(false);
-
-  messages.length = 0;
-  const hooks = join(storage, "copilot-hooks.json");
-  writeFileSync(hooks, "{}");
-  await checkSkills(projectAt(root), storageUri());
-  expect(messages.map((m) => m.text)).toEqual([UPDATED]);
-  expect(existsSync(hooks)).toBe(false);
+  await checkSkills(projectAt(root));
+  expect(messages).toEqual([]);
+  expect(readFileSync(agent, "utf8")).toBe("old");
 });
 
 test("it neither creates the starting Areas nor moves single-file Areas to Area folders", async () => {
   rmSync(join(root, ".trama/requirements"), { recursive: true });
   writeFileSync(join(root, ".agents/skills/trama-design/SKILL.md"), "old");
-  await checkSkills(projectAt(root), storageUri());
+  await checkSkills(projectAt(root));
   expect(existsSync(join(root, ".trama/requirements"))).toBe(false);
 
   mkdirSync(join(root, ".trama/requirements"));
   writeFileSync(join(root, ".trama/requirements/ui.md"), '---\ndescription: "Use when building screens."\n---\n# Interface\n\n## General\n\n- Something.\n');
-  await checkSkills(projectAt(root), storageUri());
+  await checkSkills(projectAt(root));
   expect(existsSync(join(root, ".trama/requirements/ui.md"))).toBe(true);
   expect(existsSync(join(root, ".trama/requirements/ui"))).toBe(false);
 });
@@ -111,8 +101,8 @@ test("it neither creates the starting Areas nor moves single-file Areas to Area 
 test("a failure shows the error, and the next opening shows it again while the problem stays", async () => {
   rmSync(join(root, ".omp"), { recursive: true });
   writeFileSync(join(root, ".omp"), "not a folder");
-  await checkSkills(projectAt(root), storageUri());
-  await checkSkills(projectAt(root), storageUri());
+  await checkSkills(projectAt(root));
+  await checkSkills(projectAt(root));
   expect(messages).toHaveLength(2);
   for (const m of messages) {
     expect(m.kind).toBe("error");

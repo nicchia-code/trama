@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AGENT_ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, CHECK_START_PHASES, type CheckPhase, changeCheckPhase, checkOutcome, declareNote, forgetCheck, getAnnouncement, NOTE_LENGTH } from "../../core/announcements";
+import { AGENT_ANNOUNCEMENT_KINDS, type AnnouncementKind, announce, CHECK_START_PHASES, type CheckPhase, changeCheckPhase, declareNote, deliverCheck, getAnnouncement, NOTE_LENGTH } from "../../core/announcements";
 import { TramaError, UsageError } from "../../core/errors";
 import { recordTiming } from "../../core/timings";
 import { defineCommand } from "../registry";
@@ -71,8 +71,7 @@ const move = defineCommand({
       return text(md, { id, outcome });
     }
     const failed = state === "failed";
-    const finished = checkOutcome(project, id as string, failed);
-    if (finished) forgetCheck(project, id as string);
+    const finished = deliverCheck(project, id as string);
     if (finished?.phase) recordTiming(project, ctx.origin, { event: "phase-end", check: id as string, phase: finished.phase, outcome: failed ? "failed" : "done" }, { job: ctx.job });
     const outcome = finished ? (failed ? "failed" : "done") : "missing";
     return text(finished ? `Check ${id} is ${outcome}` : `No check "${id}" was found (unknown, already finished or withdrawn, or not a check); nothing changed.`, { id, found: finished !== null, ...(finished ? { outcome } : {}) });

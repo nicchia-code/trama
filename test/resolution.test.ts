@@ -93,7 +93,7 @@ describe("resolution Proposals", () => {
 describe("approving a resolution", () => {
   test("resolves the listed open Drifts with their decisions, sets aside attached Proposals and skips Drifts resolved meanwhile", () => {
     const origin = newTask(p, { title: "Origin", refs: ["order"], technical: false });
-    moveTask(p, origin.id, "doing", "agent");
+    moveTask(p, origin.id, "doing", "agent", { terminal: "aaa111" });
     const a = newDrift(p, { where: "src/refund.ts", title: "A", refs: ["order"], happens: "x", should: "y", options: FIX_OPTIONS, origin: origin.id });
     const attached = newProposal(p, "Attached");
     const b = newDrift(p, { where: "src/refund.ts", title: "B", refs: ["order"], happens: "x", should: "y", options: FIX_OPTIONS, proposal: attached.id });

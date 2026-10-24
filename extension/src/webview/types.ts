@@ -23,8 +23,8 @@ export interface View {
   hide?(): void;
   /** Called when announced cards were withdrawn without being delivered, so the view tells the developer. */
   withdrawn?(announcements: AnnouncementView[]): void;
-  /** Called when the run control stopped following a job or a Task, so the view tells the developer what and why. */
-  stoppedFollowing?(subject: string, reason: string): void;
+  /** Called when the run control stopped following a job or a Task, so the view tells the developer what and why; `details` are the last lines of omp's error output, shown behind `Show details`. */
+  stoppedFollowing?(subject: string, reason: string, details?: string): void;
   /** Called with a notice for the top of the view (a refused or failed Clear), closable like the others. */
   notice?(text: string): void;
 }

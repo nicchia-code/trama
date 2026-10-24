@@ -28,6 +28,7 @@ Nessun Run, nessun agente di risoluzione o di unificazione e nessuna domanda pro
 ### Running tasks
 Almeno un Run è in corso. Resolve aspetta, anche su un Drift con una domanda pronta, e così Rework with feedback su un Drift o su una risoluzione e Unify Drifts; altri Run manuali seguono le regole esistenti. Una sequenza di Run per modello lanciata da Run all (vedi il Task) conta come un solo Run, anche quando i suoi Run lavorano insieme: la fine di un suo Run che lascia partire il successivo, o che lascia al lavoro gli altri, non è la fine dell'ultimo Run.
 - `agent-hook.IDLE` → Free: termina l'ultimo Run.
+- `omp-acp.TURN_ENDED` → Free: termina l'ultimo Run, in una conversazione di omp Chat, come con l'hook a riposo nel terminale. When the turn ended for an abnormal reason (refused, token limit, prompt refused by omp) it is an abnormal end: a sequence of Run all stops without launching other Runs, and the notice at the top of the Board says why.
 - `terminal.COMMAND_ENDED` → Free: termina l'ultimo Run; una fine anomala conserva i risultati.
 - `terminal.CLOSED` → Free: viene chiuso l'ultimo Run.
 - `time.CHECK_DUE` → Free: il controllo di esecuzione chiude l'ultimo Run: il suo agente di omp non c'è più (vedi l'Agent terminal). È una fine anomala: una sequenza di Run all si ferma senza lanciare altri Run. In cima alla Board l'avviso dice che Trama ha smesso di seguire quel Run e perché.
@@ -43,6 +44,7 @@ Il developer risponde alla domanda pronta del Drift scelto; nessun agente lavora
 ### Resolving
 Un solo agente prepara la risoluzione dei Drift raccolti: il Drift scelto con Resolve o con Rework with feedback, oppure i Drift della risoluzione rifatta. Nessun Run parte e Unify Drifts non parte prima che quell'agente abbia finito. Chiede le decisioni al developer e consegna la risoluzione al developer; una domanda saltata lascia il Drift fuori. Una raccolta vuota non crea una risoluzione. Quando parte dopo la risposta a una domanda pronta non chiede nulla: usa quella risposta, e la risoluzione che consegna è nata da una domanda pronta. Quando parte con il feedback di Rework with feedback chiede solo le decisioni che il feedback lascia aperte.
 - `agent-hook.IDLE` → Free: l'agente della risoluzione ha finito. Una Proposal consegnata ma non decisa continua a impedire un altro Resolve, se non è nata da una domanda pronta.
+- `omp-acp.TURN_ENDED` → Free: l'agente della risoluzione ha finito, in una conversazione di omp Chat, come con l'hook a riposo nel terminale.
 - `terminal.COMMAND_ENDED` → Free: è finito il comando della risoluzione.
 - `terminal.CLOSED` → Free: è stato chiuso il terminale della risoluzione; nessun Run parte da una chiusura.
 - `time.CHECK_DUE` → Free: il controllo di esecuzione chiude il lavoro della risoluzione, alle stesse condizioni dei Run; nessun Run parte da questa fine, e l'avviso compare come per un Run.
@@ -50,6 +52,7 @@ Un solo agente prepara la risoluzione dei Drift raccolti: il Drift scelto con Re
 ### Unifying
 Un solo agente unisce i Drift raccolti da Unify Drifts. Conta come una risoluzione in corso: nessun Run parte, nessun Resolve parte, nessun altro Unify Drifts parte e Dismiss Drift è indisponibile finché l'agente non ha finito. Chiede al developer soltanto i conflitti fra i Drift, poi registra il Drift unificato e chiude in un solo passo i Drift raccolti (vedi il Drift). Il Drift unificato non entra in nessuna risoluzione da solo, salvo con il Drift Blocker quando non blocca nessun Task (vedi il Drift): di regola il developer lo risolve con Resolve.
 - `agent-hook.IDLE` → Free: l'agente dell'unificazione ha finito. Se non ha registrato il Drift unificato, nessun Drift è cambiato.
+- `omp-acp.TURN_ENDED` → Free: l'agente dell'unificazione ha finito, in una conversazione di omp Chat, come con l'hook a riposo nel terminale.
 - `terminal.COMMAND_ENDED` → Free: è finito il comando dell'unificazione.
 - `terminal.CLOSED` → Free: è stato chiuso il terminale dell'unificazione; nessun Run parte da una chiusura.
 - `time.CHECK_DUE` → Free: il controllo di esecuzione chiude il lavoro dell'unificazione, alle stesse condizioni dei Run; nessun Run parte da questa fine, e l'avviso compare come per un Run.

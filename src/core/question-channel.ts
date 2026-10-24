@@ -5,7 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError, UsageError } from "./errors";
-import { type AgentOrigin } from "./announcements";
+import { terminalFromEnv, type AgentOrigin } from "./announcements";
 import { parseQuestionRequest, questionAborted, questionFailure, QuestionInterruptedError, unavailableQuestions, type QuestionContext, type QuestionHandler, type QuestionRequest, type QuestionResult } from "./questions";
 import { type Project } from "./store";
 
@@ -45,6 +45,8 @@ interface ServerOptions {
   handler: QuestionHandler;
   /** Whether this window still serves its project; a window that does not refuses before any round is submitted. */
   serves?: () => boolean;
+  /** Whether `terminal` is a terminal or omp Chat conversation this window opened and that still exists, working or idle, in the window's project `root`. A round for any other terminal is answered `unavailable` and never reaches the handler. Without it every terminal named is accepted. */
+  ownsTerminal?: (terminal: string, root: string) => boolean;
   runtimeDir?: string;
   focusedAt?: number;
   /** A command of the agent changed something: where it ran, as Trama reports it. */
@@ -250,6 +252,8 @@ function connectEditor(record: EditorRecord, signal: AbortSignal | undefined, so
 function resultValue(value: unknown, request: QuestionRequest): QuestionResult | null {
   if (!value || typeof value !== "object") return null;
   const result = value as Record<string, unknown>;
+  // The window refused the round at once: the terminal that asked it is not one it opened.
+  if (result.status === "unavailable" && typeof result.reason === "string") return unavailableQuestions();
   if (result.status !== "answered" || !result.answers || typeof result.answers !== "object" || Array.isArray(result.answers)) return null;
   const answers = result.answers as Record<string, unknown>;
   if (Object.keys(answers).length !== request.questions.length) return null;
@@ -315,11 +319,11 @@ function submit(editor: EditorConnection, projectId: string, request: QuestionRe
     socket.on("close", lost);
     // From this write onwards the validated round belongs to this editor: never reroute it.
     submitted = true;
-    socket.write(requestLine(editor.record, { type: "ask", projectId, request, fromTramaTerminal: context.fromTramaTerminal === true }));
+    socket.write(requestLine(editor.record, { type: "ask", projectId, request, terminal: context.terminal }));
   });
 }
 
-/** The live editor of the project that was focused last, found through the local discovery records; null without one. */
+/** The live editor of the project that was focused last, found through the local discovery records; null without one. Only the commands that tell the editor something use it: a round is never asked this way. */
 async function liveEditor(projectId: string, signal: AbortSignal | undefined, sockets: Set<Socket>, runtimeDir?: string): Promise<EditorConnection | null> {
   const directory = runtimeDirectory(runtimeDir);
   const privateDirectory = runtimeDirectoryReady(directory, false);
@@ -409,49 +413,67 @@ export async function settleCoordinatorMessages(): Promise<void> {
 }
 
 /**
- * Asks every other live window of the project (all but `ownWindow`) which of `holders` it follows, and returns the ones
- * some window follows. A window whose record does not connect follows nothing; a window that connects but does not
- * answer within `timeoutMs` counts as following every holder asked.
+ * Asks `record`'s window which of `holders` it follows. A window whose record does not connect follows nothing, and a
+ * window that connects but does not answer within `timeoutMs` follows nothing either.
+ */
+async function askWindow(record: EditorRecord, projectId: string, holders: string[], timeoutMs: number): Promise<string[]> {
+  const sockets = new Set<Socket>();
+  try {
+    const editor = await connectEditor(record, undefined, sockets);
+    if (!editor) return [];
+    const { promise, resolve: done } = Promise.withResolvers<string[]>();
+    const timer = setTimeout(() => finish([]), timeoutMs);
+    const finish = (value: string[]) => { clearTimeout(timer); stop(); editor.socket.destroy(); done(value); };
+    const stop = lines(editor.socket, (line) => {
+      try {
+        const reply: unknown = JSON.parse(line);
+        const list = reply !== null && typeof reply === "object" && "holders" in reply ? reply.holders : undefined;
+        finish(Array.isArray(list) ? list.filter((h): h is string => typeof h === "string" && holders.includes(h)) : []);
+      } catch { finish([]); }
+    });
+    editor.socket.once("close", () => finish([]));
+    editor.socket.write(requestLine(editor.record, { type: "followed-holders", projectId, holders }));
+    return await promise;
+  } catch { return []; }
+  finally { for (const socket of sockets) socket.destroy(); }
+}
+
+/**
+ * Asks the other live windows of the project (all but `ownWindow`) which of `holders` they follow, and returns the ones some
+ * window follows. `registered` names, for a holder, the window its registered process says follows it: that window is asked
+ * first, and only the holders it does not follow go on to every other live window. A window whose record does not connect,
+ * and one that connects but does not answer within `timeoutMs` (one second), follow nothing: for the holders nobody follows
+ * the registered process decides.
  */
 export async function askFollowedHolders(
   project: Project,
   holders: string[],
-  options: { ownWindow?: string; timeoutMs?: number; runtimeDir?: string } = {},
+  options: { ownWindow?: string; registered?: Readonly<Record<string, string | undefined>>; timeoutMs?: number; runtimeDir?: string } = {},
 ): Promise<Set<string>> {
   const followed = new Set<string>();
   if (holders.length === 0) return followed;
   const directory = runtimeDirectory(options.runtimeDir);
   if (!runtimeDirectoryReady(directory, false)) return followed;
   const projectId = questionProjectId(project);
+  const timeoutMs = options.timeoutMs ?? 1000;
   const others = records(directory, projectId).filter((record) => record.windowId !== options.ownWindow);
-  const answers = await Promise.all(others.map(async (record): Promise<string[]> => {
-    const sockets = new Set<Socket>();
-    try {
-      const editor = await connectEditor(record, undefined, sockets);
-      if (!editor) return [];
-      return await new Promise<string[]>((done) => {
-        const timer = setTimeout(() => finish(holders), options.timeoutMs ?? 1000);
-        const finish = (value: string[]) => { clearTimeout(timer); stop(); editor.socket.destroy(); done(value); };
-        const stop = lines(editor.socket, (line) => {
-          try {
-            const reply: unknown = JSON.parse(line);
-            const list = reply !== null && typeof reply === "object" && "holders" in reply ? reply.holders : undefined;
-            finish(Array.isArray(list) ? list.filter((h): h is string => typeof h === "string") : holders);
-          } catch { finish(holders); }
-        });
-        editor.socket.once("close", () => finish(holders));
-        editor.socket.write(requestLine(editor.record, { type: "followed-holders", projectId, holders }));
-      });
-    } catch { return []; }
-    finally { for (const socket of sockets) socket.destroy(); }
-  }));
-  for (const answer of answers) for (const holder of answer) followed.add(holder);
+  const first = others.filter((record) => holders.some((holder) => options.registered?.[holder] === record.windowId));
+  const answered = await Promise.all(first.map((record) => askWindow(record, projectId, holders.filter((holder) => options.registered?.[holder] === record.windowId), timeoutMs)));
+  for (const answer of answered) for (const holder of answer) followed.add(holder);
+  const rest = holders.filter((holder) => !followed.has(holder));
+  if (rest.length === 0) return followed;
+  const everyone = await Promise.all(others.map((record) => askWindow(record, projectId, rest, timeoutMs)));
+  for (const answer of everyone) for (const holder of answer) followed.add(holder);
   return followed;
 }
 
 
 
-/** Connect and identify editors before sending the validated round to exactly one window. */
+/**
+ * Connect to the window that launched the agent and send the validated round to it. The round needs both `TRAMA_QUESTION_ENDPOINT` and a recognised
+ * `TRAMA_TERMINAL` (Trama's own terminal or conversation, which owns the round): without either, as for an agent Trama did not launch, the answer is
+ * `unavailable` at once, with no search for a window.
+ */
 export async function askEditor(project: Project, request: QuestionRequest, context: QuestionContext, options: { env?: Record<string, string | undefined>; runtimeDir?: string } = {}): Promise<QuestionResult> {
   const validated = parseQuestionRequest(request);
   if (context.signal?.aborted) throw questionAborted();
@@ -462,12 +484,12 @@ export async function askEditor(project: Project, request: QuestionRequest, cont
   try {
     const env = options.env ?? process.env;
     const endpoint = env[QUESTION_ENDPOINT_ENV];
-    const editor = endpoint !== undefined
-      ? await connectEndpoint(runtimeDirectory(options.runtimeDir), projectId, endpoint, context.signal, sockets)
-      : await liveEditor(projectId, context.signal, sockets, options.runtimeDir);
+    const terminal = terminalFromEnv(env);
+    if (endpoint === undefined || terminal === undefined) return unavailableQuestions();
+    const editor = await connectEndpoint(runtimeDirectory(options.runtimeDir), projectId, endpoint, context.signal, sockets);
     if (context.signal?.aborted) throw questionAborted();
     if (!editor) return unavailableQuestions();
-    return await submit(editor, projectId, validated, { ...context, fromTramaTerminal: endpoint !== undefined });
+    return await submit(editor, projectId, validated, { ...context, terminal });
   } finally {
     context.signal?.removeEventListener("abort", abort);
     for (const socket of sockets) socket.destroy();
@@ -701,19 +723,16 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
           finish({ type: "followed", holders: options.onFollowedHolders?.(asked) ?? [] });
           return;
         }
-        // Hooks from older versions may still send this message; consume it without changing editor state.
-        if (phase === "ready" && message.type === "agent-alive") {
-          finish({ type: "taken" });
-          return;
-        }
         if (phase !== "ready" || message.type !== "ask") throw new UsageError("Identify the editor before submitting a question round");
         const request = parseQuestionRequest(message.request);
-        const fromTramaTerminal = message.fromTramaTerminal === true;
+        const terminal = typeof message.terminal === "string" && message.terminal !== "" ? message.terminal : undefined;
+        // The round belongs to a terminal or conversation this window opened: any other agent is told the editor is unavailable.
+        if (terminal === undefined || options.ownsTerminal?.(terminal, options.project.root) === false) { finish(unavailableQuestions()); return; }
         phase = "waiting";
         const { project } = from;
         void Promise.resolve().then(() => {
           if (controller.signal.aborted || closed) throw questionAborted();
-          return options.handler(project, request, { signal: controller.signal, fromTramaTerminal });
+          return options.handler(project, request, { signal: controller.signal, terminal });
         }).then((result) => finish(result.status === "unavailable" ? questionFailure(new QuestionInterruptedError()) : result), (error) => finish(questionFailure(error)));
       } catch (error) { finish(questionFailure(error)); }
     });

@@ -1,8 +1,38 @@
 // The pure decisions of the ACP client of omp Chat (`extension/src/host/omp-chat/client.ts`): what answers a permission request, why a start failed, which
 // models a session offers and how an attachment goes into a prompt.
 import { basename } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { pathToFileURL } from "node:url";
 import { exitReason, RESUME_TIMEOUT_MS } from "./omp-chat-conversation";
+
+/** How much of omp's error output the host keeps: the last lines, and at most this many bytes of them. */
+export const STDERR_MAX_LINES = 40;
+export const STDERR_MAX_BYTES = 4096;
+
+/** The last lines omp wrote on its error output: at most 40 lines and 4 KB, kept in memory, so the reason of an end or a failed start can show them. */
+export class StderrTail {
+  private readonly decoder = new StringDecoder("utf8");
+  private text = "";
+
+  /** Adds what omp just wrote. */
+  push(chunk: Uint8Array | string): void {
+    this.text += typeof chunk === "string" ? chunk : this.decoder.write(Buffer.from(chunk));
+    // Much more than the tail can ever need is never kept: a process that writes without end does not grow the memory.
+    if (this.text.length > STDERR_MAX_BYTES * 4) this.text = this.text.slice(-STDERR_MAX_BYTES * 4);
+  }
+
+  /** The kept lines, joined by newlines, the oldest ones cut first; empty when omp wrote nothing. */
+  lines(): string {
+    let lines = this.text.replace(/\r\n?/g, "\n").split("\n");
+    while (lines.length > 0 && (lines.at(-1) ?? "").trim() === "") lines.pop();
+    lines = lines.slice(-STDERR_MAX_LINES);
+    while (lines.length > 1 && Buffer.byteLength(lines.join("\n")) > STDERR_MAX_BYTES) lines.shift();
+    let kept = lines.join("\n");
+    // A single line longer than the limit keeps its end.
+    while (Buffer.byteLength(kept) > STDERR_MAX_BYTES) kept = kept.slice(Math.max(1, Math.floor(kept.length / 8)));
+    return kept;
+  }
+}
 
 /** An option of `session/request_permission`. */
 export interface PermissionOption {
@@ -72,9 +102,6 @@ export function promptBlocks(text: string, attachment?: string): ({ type: "text"
   return [...(attachment === undefined ? [] : [{ type: "resource_link" as const, name: basename(attachment), uri: pathToFileURL(attachment).href }]), { type: "text", text }];
 }
 
-/** Whether `initialize`'s answer declares steering (`_meta.steering.supported`). */
-export const steeringSupported = (initialized: unknown): boolean => record(record(record(initialized)?.["_meta"])?.["steering"])?.["supported"] === true;
-
 /** What omp answers to `_session/steering`: `injected` (the message is in the running turn), `promptRequired` (no turn takes it: it goes as a prompt), or why it failed. */
 export type SteeringAnswer = "injected" | "promptRequired" | { failed: string };
 
@@ -85,9 +112,15 @@ export function steeringAnswer(answer: unknown): SteeringAnswer {
   return { failed: "omp did not take the message" };
 }
 
-/** How omp reopens a saved session: `session/load` when it declares `loadSession`, else `session/resume` when it declares it; undefined when it declares neither. */
-export function reopenMethod(initialized: unknown): "load" | "resume" | undefined {
+/**
+ * What omp 18.12.6 declares and the client relies on, with no fallback for an older omp: steering (`_meta.steering.supported`), `session/close`
+ * (`agentCapabilities.sessionCapabilities.close`) and, to reopen a saved session, `session/load` (`agentCapabilities.loadSession`). The reason of the first one
+ * `initialize` does not declare, or undefined when it declares everything: the start fails with it.
+ */
+export function missingDeclaration(initialized: unknown, reopening: boolean): string | undefined {
   const capabilities = record(record(initialized)?.["agentCapabilities"]);
-  if (capabilities?.["loadSession"] === true) return "load";
-  return record(capabilities?.["sessionCapabilities"])?.["resume"] !== undefined ? "resume" : undefined;
+  if (record(record(record(initialized)?.["_meta"])?.["steering"])?.["supported"] !== true) return "omp does not declare steering (_session/steering)";
+  if (record(capabilities?.["sessionCapabilities"])?.["close"] === undefined) return "omp does not declare session/close";
+  if (reopening && capabilities?.["loadSession"] !== true) return "omp does not declare session/load";
+  return undefined;
 }

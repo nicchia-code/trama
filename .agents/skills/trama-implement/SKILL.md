@@ -26,7 +26,7 @@ With the Advisor Scanner on, step 7 never runs: announce no Scanning phase, and 
 ## Hard rules
 
 - NEVER edit `.trama/model/`, `.trama/requirements/` or the generated `trama-req-*` skills.
-- Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. A request to design, implement Tasks or prepare a Drift resolution does not by itself authorize deciding it.
+- Agents may approve or reject a Proposal, discard a Draft, resolve a Drift or delete a Task in To do (`trama task delete`) only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. A request to design, implement Tasks or prepare a Drift resolution does not by itself authorize deciding it or deleting a Task.
 - Every question to the developer goes through `trama question new`, as the "Asking" section of `trama-design` says, waiting rules included (`timeout: 0`, no timers or polling): never with your own question tool, and never as a round written in the conversation.
 - NEVER implement behaviour that contradicts the Model, or code that contradicts a Requirement, to get something working.
 - Do not touch code unrelated to the Task.

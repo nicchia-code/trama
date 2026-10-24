@@ -15,6 +15,10 @@ import { coverWithTask } from "./cover";
 /** The fields of a Drift filed from the command line, as its input takes them. */
 const NEW_DRIFT = { title: "Cli", where: "src/refund.ts", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: FIX_OPTIONS };
 
+/** The agent's origin and environment: the terminal Trama started for it (`TRAMA_TERMINAL`). Only an agent in a terminal takes a Task. */
+const AGENT = { terminal: "aaa111" };
+const AGENT_ENV = { TRAMA_AGENT: "1", TRAMA_TERMINAL: "aaa111" };
+
 let dir: string;
 let p: Project;
 
@@ -178,16 +182,16 @@ describe("Tasks and Drifts", () => {
     expect(moveTask(p, id, "doing", "developer").data.agent).toBe(false);
     moveTask(p, id, "todo", "developer");
 
-    expect(moveTask(p, id, "doing", "agent").data).toMatchObject({ column: "doing", agent: true });
+    expect(moveTask(p, id, "doing", "agent", AGENT).data).toMatchObject({ column: "doing", agent: true, holder: "aaa111" });
     expect(getTask(p, id).data.agent).toBe(true);
     for (const column of ["todo", "done"]) {
       expect(() => moveTask(p, id, column, "developer")).toThrow(new RegExp(`^(?!.*(button|card|Board)).*agent is working on Task ${named("task", id)}.*"trama task move ${named("task", id)} doing"`, "i"));
     }
     expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: true });
 
-    expect(moveTask(p, id, "doing", "agent").data.agent).toBe(true);
+    expect(moveTask(p, id, "doing", "agent", AGENT).data.agent).toBe(true);
     expect(moveTask(p, id, "done", "agent").data).toMatchObject({ column: "done", agent: false });
-    expect(moveTask(p, id, "doing", "agent").data.agent).toBe(true);
+    expect(moveTask(p, id, "doing", "agent", AGENT).data.agent).toBe(true);
     expect(moveTask(p, id, "todo", "agent").data).toMatchObject({ column: "todo", agent: false });
     expect(moveTask(p, id, "done", "developer").data.column).toBe("done");
   });
@@ -201,7 +205,7 @@ describe("Tasks and Drifts", () => {
     expect(getTask(p, id).data.finished).toBe(first);
     expect(moveTask(p, id, "done", "agent").data.finished).toBe(first);
 
-    moveTask(p, id, "doing", "agent");
+    moveTask(p, id, "doing", "agent", AGENT);
     expect(getTask(p, id).data.finished).toBeNull();
     expect(readFileSync(getTask(p, id).path, "utf8")).not.toContain("finished");
     expect(moveTask(p, id, "done", "agent").data.finished).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -215,29 +219,29 @@ describe("Tasks and Drifts", () => {
   test("the agent cannot start a blocked Task, from any column; the developer and the agent's other moves are free", async () => {
     const id = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
     const drift = newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Refunds differ", refs: ["order"], origin: id, happens: "The code does it one way.", should: "The Model says another." });
-    const agent = (column: string) => run(["--root", dir, "task", "move", id, column], process.cwd(), { TRAMA_AGENT: "1" });
+    const agent = (column: string) => run(["--root", dir, "task", "move", id, column], process.cwd(), AGENT_ENV);
 
-    expect(() => moveTask(p, id, "doing", "agent")).toThrow(new RegExp(`Drift ${named("drift", drift.id)} "Refunds differ".*developer must decide`));
+    expect(() => moveTask(p, id, "doing", "agent", AGENT)).toThrow(new RegExp(`Drift ${named("drift", drift.id)} "Refunds differ".*developer must decide`));
     expect(() => agent("doing")).toThrow(/Drift .* "Refunds differ"/);
     expect(getTask(p, id).data).toMatchObject({ column: "todo", agent: false });
 
     expect(moveTask(p, id, "doing", "developer").data).toMatchObject({ column: "doing", agent: false });
-    expect(() => moveTask(p, id, "doing", "agent")).toThrow(/blocked/);
+    expect(() => moveTask(p, id, "doing", "agent", AGENT)).toThrow(/blocked/);
     expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: false });
     expect(moveTask(p, id, "done", "agent").data.column).toBe("done");
-    expect(() => moveTask(p, id, "doing", "agent")).toThrow(new RegExp(`Drift ${named("drift", drift.id)} "Refunds differ"`));
+    expect(() => moveTask(p, id, "doing", "agent", AGENT)).toThrow(new RegExp(`Drift ${named("drift", drift.id)} "Refunds differ"`));
     expect(getTask(p, id).data).toMatchObject({ column: "done", agent: false });
     expect(moveTask(p, id, "todo", "agent").data.column).toBe("todo");
 
     resolveDrift(p, drift.id, "fix-code", [], { option: 1 });
     const fix = getDrift(p, drift.id).data.task as string;
-    expect(() => moveTask(p, id, "doing", "agent")).toThrow(new RegExp(`Task ${named("task", fix)} .*fixes the code for Drift ${named("drift", drift.id)}`));
+    expect(() => moveTask(p, id, "doing", "agent", AGENT)).toThrow(new RegExp(`Task ${named("task", fix)} .*fixes the code for Drift ${named("drift", drift.id)}`));
   });
 
   test("fixing the code of a Drift sends its origin Task back to To do, waiting for the fix; other resolutions leave it", () => {
     const origin = (column: "doing" | "done") => {
       const id = newTask(p, { title: "Return flow", refs: ["order"], technical: false }).id;
-      moveTask(p, id, column, "agent");
+      moveTask(p, id, column, "agent", AGENT);
       return id;
     };
     const drift = (id: string | undefined) => newDrift(p, { where: "src/refund.ts", options: FIX_OPTIONS, title: "Refunds differ", refs: ["order"], origin: id, happens: "The code does it one way.", should: "The Model says another." }).id;
@@ -245,14 +249,14 @@ describe("Tasks and Drifts", () => {
     const working = origin("doing");
     const fixed = resolveDrift(p, drift(working), "fix-code", [], { option: 1 });
     expect(getTask(p, working).data).toMatchObject({ column: "todo", agent: false });
-    expect(() => moveTask(p, working, "doing", "agent")).toThrow(new RegExp(`Task ${named("task", fixed.data.task as string)} `));
+    expect(() => moveTask(p, working, "doing", "agent", AGENT)).toThrow(new RegExp(`Task ${named("task", fixed.data.task as string)} `));
     moveTask(p, fixed.data.task as string, "done", "developer");
-    expect(moveTask(p, working, "doing", "agent").data.agent).toBe(true);
+    expect(moveTask(p, working, "doing", "agent", AGENT).data.agent).toBe(true);
 
     const finished = origin("done");
     resolveDrift(p, drift(finished), "fix-code", [], { option: 1 });
     expect(getTask(p, finished).data.column).toBe("done");
-    expect(() => moveTask(p, finished, "doing", "agent")).toThrow(/fixes the code for Drift/);
+    expect(() => moveTask(p, finished, "doing", "agent", AGENT)).toThrow(/fixes the code for Drift/);
     expect(getTask(p, finished).data.column).toBe("done");
 
     const dismissedOrigin = origin("doing");
@@ -272,7 +276,7 @@ describe("Tasks and Drifts", () => {
     const cli = (env: Record<string, string>) => run(["--root", dir, "task", "move", id, "doing"], process.cwd(), env);
 
     // The agent's own move is the agent's: it keeps the Task.
-    cli({ TRAMA_AGENT: "1" });
+    cli({ TRAMA_AGENT: "1", TRAMA_TERMINAL: "abc123" });
     expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: true });
     // Without `TRAMA_AGENT` the command is the developer's: the developer takes the Task back.
     const developer = cli({});
@@ -288,38 +292,44 @@ describe("Tasks and Drifts", () => {
 
     // A move that is not to In progress is still refused, and `unchanged` does not turn a retake into something else.
     const again = newTask(p, { title: "Again", refs: ["order"], technical: false }).id;
-    moveTask(p, again, "doing", "agent");
+    moveTask(p, again, "doing", "agent", AGENT);
     expect(() => run(["--root", dir, "task", "move", again, "todo"], process.cwd(), {})).toThrow(/agent is working on Task .*"trama task move .* doing"/);
     expect(() => run(["--root", dir, "task", "move", again, "doing", "--input", '{"unchanged":"checked"}'], process.cwd(), {})).toThrow(/Only a move to done/);
     expect(getTask(p, again).data).toMatchObject({ column: "doing", agent: true });
   });
 
-  test("unrecognized task origins are ownerless and legacy editor holders are released by any end", () => {
-    const cliTake = (id: string) => run(["--root", dir, "task", "move", id, "doing"], process.cwd(), { TRAMA_AGENT: "1" });
-    const first = newTask(p, { title: "First ownerless", refs: ["order"], technical: false }).id;
-    const second = newTask(p, { title: "Second ownerless", refs: ["order"], technical: false }).id;
-    cliTake(first);
-    cliTake(second);
-    expect([first, second].map((id) => getTask(p, id).data)).toMatchObject([{ agent: true, holder: null }, { agent: true, holder: null }]);
-    expect(releaseTasks(p, {}).map((task) => task.id)).toEqual([first, second]);
-
-    const legacy = newTask(p, { title: "Legacy editor holder", refs: ["order"], technical: false }).id;
-    cliTake(legacy);
-    const task = getTask(p, legacy);
-    const content = readFileSync(task.path, "utf8");
-    const legacyContent = content.replace(/^agent: true$/m, "agent: editor");
-    expect(legacyContent).not.toBe(content);
-    writeFileSync(task.path, legacyContent);
-    expect(getTask(p, legacy).data).toMatchObject({ agent: true, holder: null });
-    expect(releaseTasks(p, { terminal: "abc123" }).map((task) => task.id)).toEqual([legacy]);
+  test("an agent without a recognised terminal cannot take a Task: the move is refused, nothing changes, and a developer's move is free", () => {
+    const id = newTask(p, { title: "No terminal", refs: ["order"], technical: false }).id;
+    const cli = (env: Record<string, string>) => run(["--root", dir, "task", "move", id, "doing"], process.cwd(), env);
+    const envs: Record<string, string>[] = [{ TRAMA_AGENT: "1" }, { TRAMA_AGENT: "1", TRAMA_TERMINAL: "not a terminal id" }];
+    for (const env of envs) {
+      expect(() => cli(env)).toThrow(/only an agent launched by Trama can take a Task/);
+      expect(getTask(p, id).data).toMatchObject({ column: "todo", agent: false, holder: null });
+    }
+    expect(() => moveTask(p, id, "doing", "agent")).toThrow(/only an agent launched by Trama can take a Task/);
+    expect(() => moveTask(p, id, "doing", "agent", {})).toThrow(/only an agent launched by Trama can take a Task/);
+    expect(getTask(p, id).data).toMatchObject({ column: "todo", agent: false });
+    // Also from In progress (kept) and from Done.
+    moveTask(p, id, "doing", "developer");
+    expect(() => cli({ TRAMA_AGENT: "1" })).toThrow(/only an agent launched by Trama can take a Task/);
+    moveTask(p, id, "done", "developer");
+    expect(() => cli({ TRAMA_AGENT: "1" })).toThrow(/only an agent launched by Trama can take a Task/);
+    expect(getTask(p, id).data).toMatchObject({ column: "done", agent: false });
+    // The developer's move is free; the agent in a terminal takes the Task.
+    expect(cli({}).exit).toBe(0);
+    expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: false, holder: null });
+    expect(cli(AGENT_ENV).exit).toBe(0);
+    expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: true, holder: "aaa111" });
   });
 
-  test("releasing sends back to To do the Tasks taken by the origin that ended, and those taken with no holder kept", () => {
+  test("releasing sends back to To do only the Tasks carrying the mark of the origin that ended: never another holder's, never a Task without a holder", () => {
     const [a, b, c, d] = [1, 2, 3, 4].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string, string];
-    moveTask(p, a, "doing", "agent");
+    moveTask(p, a, "doing", "agent", { terminal: "bbb222" });
     moveTask(p, b, "doing", "developer");
     moveTask(p, d, "doing", "agent", { terminal: "aaa111" });
     moveTask(p, d, "doing", "agent", { terminal: "bbb222" }); // taken again: the holder stays
+    expect(releaseTasks(p, {})).toEqual([]);
+    expect(releaseTasks(p, { terminal: "ccc333" })).toEqual([]);
     expect(releaseTasks(p, { terminal: "bbb222" }).map((t) => t.id)).toEqual([a]);
     expect([a, b, c, d].map((id) => getTask(p, id).data)).toMatchObject([
       { column: "todo", agent: false },
@@ -333,34 +343,35 @@ describe("Tasks and Drifts", () => {
     expect(releaseTasks(p, {})).toEqual([]);
   });
 
-  test("a Task taken by a terminal is held, declared on and released by that terminal only; a Task taken without a terminal answers to any", () => {
-    const [x, y, z] = [1, 2, 3].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string, string];
+  test("a Task taken by a terminal is held, declared on and released by that terminal only", () => {
+    const [x, y] = [1, 2].map(() => newTask(p, { title: "T", refs: ["order"], technical: false }).id) as [string, string];
     moveTask(p, x, "doing", "agent", { terminal: "aaa111" });
     moveTask(p, y, "doing", "agent", { terminal: "bbb222" });
-    moveTask(p, z, "doing", "agent", {});
-    expect([x, y, z].map((id) => getTask(p, id).data.holder)).toEqual(["aaa111", "bbb222", null]);
-    // Progress: only the same terminal, or any agent for a Task taken without a terminal.
+    expect([x, y].map((id) => getTask(p, id).data.holder)).toEqual(["aaa111", "bbb222"]);
+    // Progress: only the same terminal.
     expect(declareProgress(p, x, 30, "agent", { terminal: "bbb222" })).toMatchObject({ declared: false });
     expect(declareProgress(p, x, 30, "agent", {})).toMatchObject({ declared: false });
     expect(declareProgress(p, x, 30, "agent", { terminal: "aaa111" })).toMatchObject({ declared: true });
-    expect(declareProgress(p, z, 30, "agent", { terminal: "bbb222" })).toMatchObject({ declared: true });
-    expect(declareProgress(p, z, 40, "agent", {})).toMatchObject({ declared: true });
-    // The end of aaa111 releases its Task and the one taken without a terminal, not bbb222's.
-    expect(releaseTasks(p, { terminal: "aaa111" }).map((t) => t.id)).toEqual([x, z]);
+    expect(declareProgress(p, y, 30, "agent", { terminal: "aaa111" })).toMatchObject({ declared: false });
+    // The end of aaa111 releases its Task, not bbb222's.
+    expect(releaseTasks(p, { terminal: "aaa111" }).map((t) => t.id)).toEqual([x]);
     expect(getTask(p, y).data).toMatchObject({ agent: true, holder: "bbb222" });
     expect(releaseTasks(p, { terminal: "bbb222" }).map((t) => t.id)).toEqual([y]);
   });
 
-  test("an agent field of `cursor` or `cursor:<conversation>` is a reading error until the developer corrects the file", () => {
-    const id = newTask(p, { title: "Cursor holder", refs: ["order"], technical: false }).id;
+  test("an agent field that is not a terminal ID (`true`, `editor`, `cursor`, `cursor:<conversation>`) is no error: nobody holds the Task, and the file is not rewritten", () => {
+    const id = newTask(p, { title: "Legacy holder", refs: ["order"], technical: false }).id;
     moveTask(p, id, "doing", "agent", { terminal: "abc123" });
     const path = getTask(p, id).path;
     const taken = readFileSync(path, "utf8");
     expect(taken).toMatch(/^agent: abc123$/m);
-    for (const value of ["cursor", "cursor:abc"]) {
-      writeFileSync(path, taken.replace(/^agent: abc123$/m, `agent: ${value}`));
-      expect(() => getTask(p, id)).toThrow(/"agent" cannot be .*cursor/);
-      expect(() => listTasks(p)).toThrow(/"agent" cannot be .*cursor/);
+    for (const value of ["true", "editor", "cursor", "cursor:abc"]) {
+      const legacy = taken.replace(/^agent: abc123$/m, `agent: ${value}`);
+      writeFileSync(path, legacy);
+      expect(getTask(p, id).data).toMatchObject({ column: "doing", agent: false, holder: null });
+      expect(listTasks(p).find((t) => t.id === id)?.data).toMatchObject({ agent: false, holder: null });
+      expect(releaseTasks(p, { terminal: "abc123" })).toEqual([]);
+      expect(readFileSync(path, "utf8")).toBe(legacy);
     }
     writeFileSync(path, taken);
     expect(getTask(p, id).data).toMatchObject({ agent: true, holder: "abc123" });
@@ -370,7 +381,7 @@ describe("Tasks and Drifts", () => {
     const prop = newProposal(p, "Returns");
     const mk = (title: string, proposal?: string) => newTask(p, { title, refs: ["order"], technical: false, proposal }).id;
     const [taken, free, a, b] = [mk("Taken"), mk("Free"), mk("In design", prop.id), mk("Other in design", prop.id)] as [string, string, string, string];
-    for (const id of [taken, a]) moveTask(p, id, "doing", "agent");
+    for (const id of [taken, a]) moveTask(p, id, "doing", "agent", AGENT);
     moveTask(p, free, "doing", "developer");
     moveTask(p, b, "doing", "developer");
     const cli = (...args: string[]) => run(["--root", dir, ...args], process.cwd(), {}).out;
@@ -412,15 +423,17 @@ describe("Tasks and Drifts", () => {
     expect(existsSync(file(id))).toBe(false);
   });
 
-  test("a Task taken without a known terminal accepts a declaration from any agent", () => {
+  test("a declaration without a recognised terminal changes nothing, even on a Task taken by a terminal", () => {
     const id = newTask(p, { title: "T", refs: ["order"], technical: false }).id;
-    moveTask(p, id, "doing", "agent");
-    expect(declareProgress(p, id, 100, "agent", { terminal: "zzz999" })).toMatchObject({ declared: true, progress: 100 });
+    moveTask(p, id, "doing", "agent", AGENT);
+    expect(declareProgress(p, id, 100, "agent", {})).toMatchObject({ declared: false });
+    expect(declareProgress(p, id, 100, "agent", { terminal: "zzz999" })).toMatchObject({ declared: false });
+    expect(declareProgress(p, id, 100, "agent", AGENT)).toMatchObject({ declared: true, progress: 100 });
   });
 
   test("task move doing with progress only declares, shows in the views and JSON, and is a usage error with another column or unchanged", () => {
     const id = newTask(p, { title: "Progressing", refs: ["order"], technical: false }).id;
-    const agent = { TRAMA_AGENT: "1" };
+    const agent = AGENT_ENV;
     const cli = (env: Record<string, string>, ...args: string[]) => run(["--root", dir, ...args], process.cwd(), env).out;
     cli(agent, "task", "move", id, "doing");
     expect(cli(agent, "task", "move", id, "doing", "--input", '{"progress":40}')).toContain("40%");
@@ -617,20 +630,24 @@ describe("Tasks and Drifts", () => {
     run2({}, a, "doing");
     expect(getTask(p, a).data.agent).toBe(false);
 
-    run2({ TRAMA_AGENT: "1" }, b, "doing");
-    expect(getTask(p, b).data.agent).toBe(true);
+    // The agent outside a Trama terminal cannot take a Task: refused, nothing changes.
+    expect(() => run2({ TRAMA_AGENT: "1" }, c, "doing")).toThrow(/only an agent launched by Trama can take a Task/);
+    expect(getTask(p, c).data).toMatchObject({ column: "todo", agent: false });
+
+    run2(AGENT_ENV, b, "doing");
+    expect(getTask(p, b).data).toMatchObject({ agent: true, holder: "aaa111" });
     expect(() => run2({}, b, "done")).toThrow(/agent is working on Task/);
     run2({ TRAMA_AGENT: "1" }, b, "done");
     expect(getTask(p, b).data).toMatchObject({ column: "done", agent: false });
 
-    run2({ TRAMA_AGENT: "1" }, c, "doing");
+    run2(AGENT_ENV, c, "doing");
     expect(getTask(p, c).data.agent).toBe(true);
 
     run2({ TRAMA_AGENT: "1" }, a, "todo");
     // Without `TRAMA_AGENT` the command is the developer's: it takes nothing.
     run2({}, a, "doing");
     expect(getTask(p, a).data.agent).toBe(false);
-    run2({ TRAMA_AGENT: "1" }, a, "doing");
+    run2(AGENT_ENV, a, "doing");
     expect(getTask(p, a).data.agent).toBe(true);
     expect(() => run2({}, a, "done")).toThrow(/agent is working on Task/);
   });

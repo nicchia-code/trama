@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Circle, CircleCheck, Loader, Square, TriangleAlert } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ConversationItem, FormAnswerMessage, SendMode } from "../../omp-chat-protocol";
 import { Button } from "../ui/button";
 import { Combobox } from "../ui/combobox";
@@ -68,7 +68,7 @@ function Plan({ plan }: { plan: NonNullable<Transcript["plan"]> }) {
 /** General's process state under its messages (`generalStatus`): what it is doing, what went wrong and whether the agent remembers the messages above. */
 function GeneralStatusRows({ status, onInstall }: { status: NonNullable<ConversationView["status"]>; onInstall: () => void }) {
   const { error } = status;
-  const text = error === undefined ? "" : error.kind === "missing" ? "omp is not installed. Trama runs every agent with omp." : `omp ${error.kind === "start" ? "could not start" : "stopped"}: ${error.reason ?? "unknown reason"}.`;
+  const text = error === undefined ? "" : error.kind === "missing" ? (error.reason ?? "omp is not installed. Trama runs every agent with omp.") : `omp ${error.kind === "start" ? "could not start" : "stopped"}: ${error.reason ?? "unknown reason"}.`;
   return (
     <>
       {status.phase === "starting" ? <p className="text-xs text-muted-foreground">Starting omp…</p> : null}
@@ -78,6 +78,12 @@ function GeneralStatusRows({ status, onInstall }: { status: NonNullable<Conversa
             <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
             <span>{text}</span>
           </p>
+          {error.details === undefined ? null : (
+            <details className="w-full text-xs">
+              <summary className="cursor-pointer text-muted-foreground">Show details</summary>
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words select-text">{error.details}</pre>
+            </details>
+          )}
           {error.kind === "missing" ? <Button type="button" size="sm" onClick={onInstall}>Install omp</Button> : <p className="text-xs text-muted-foreground">Your next message starts omp again.</p>}
         </div>
       )}
@@ -86,7 +92,7 @@ function GeneralStatusRows({ status, onInstall }: { status: NonNullable<Conversa
   );
 }
 
-function Composer({ item, view, actions, sendMode }: { item: ConversationItem; view: ConversationView; actions: ConversationActions; sendMode: SendMode }) {
+function Composer({ item, view, actions, sendMode, usage }: { item: ConversationItem; view: ConversationView; actions: ConversationActions; sendMode: SendMode; usage: ReactNode }) {
   const [text, setText] = useState("");
   const field = useRef<HTMLTextAreaElement>(null);
   const running = item.state === "running";
@@ -164,19 +170,22 @@ function Composer({ item, view, actions, sendMode }: { item: ConversationItem; v
         </div>
       </div>
       {item.starting === true ? <p className="text-xs text-muted-foreground">Starting omp…</p> : null}
-      <Combobox
-        aria-label="Model"
-        className="h-7 w-48 text-xs"
-        options={view.models.map((model) => ({ value: model.id, label: model.name }))}
-        value={view.currentModel ?? item.model ?? ""}
-        placeholder="Model"
-        searchPlaceholder="Search models…"
-        emptyText="No model."
-        disabled={view.models.length === 0}
-        onValueChange={(model) => {
-          if (model !== "" && model !== (view.currentModel ?? item.model)) actions.setModel(item.id, model);
-        }}
-      />
+      <div className="flex items-center gap-2">
+        <Combobox
+          aria-label="Model"
+          className="h-7 w-48 shrink-0 text-xs"
+          options={view.models.map((model) => ({ value: model.id, label: model.name }))}
+          value={view.currentModel ?? item.model ?? ""}
+          placeholder="Model"
+          searchPlaceholder="Search models…"
+          emptyText="No model."
+          disabled={view.models.length === 0}
+          onValueChange={(model) => {
+            if (model !== "" && model !== (view.currentModel ?? item.model)) actions.setModel(item.id, model);
+          }}
+        />
+        {usage}
+      </div>
     </div>
   );
 }
@@ -190,6 +199,14 @@ export function Conversation({ item, view, selected, actions, sendMode, usage }:
   const [stuck, setStuck] = useState(true);
   const stuckRef = useRef(true);
   const running = item.state === "running";
+  // Which calls are open: only here, per conversation, and gone with the window. A tool call is `tool:<toolCallId>` and a permission request `permission:<requestId>`.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleOpen = (key: string) =>
+    setOpened((before) => {
+      const next = new Set(before);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
   const { transcript } = view;
   useLayoutEffect(() => {
     const element = list.current;
@@ -204,7 +221,6 @@ export function Conversation({ item, view, selected, actions, sendMode, usage }:
   };
   return (
     <div role="tabpanel" id={panelId(item.id)} aria-labelledby={tabId(item.id)} hidden={!selected} className={cn("min-h-0 flex-1 flex-col", selected && "flex")}>
-      {item.general === true ? <UsageBar usage={usage} model={view.currentModel} active={selected} onRefresh={actions.refreshUsage} /> : null}
       <div className="relative min-h-0 flex-1">
       <div
         ref={list}
@@ -225,7 +241,7 @@ export function Conversation({ item, view, selected, actions, sendMode, usage }:
             case "thought":
               return <Thought key={block.id} block={block} running={running} />;
             case "tool":
-              return <ToolCall key={block.id} block={block} />;
+              return <ToolCall key={block.id} block={block} open={opened.has(`tool:${block.toolCallId}`)} onToggle={() => toggleOpen(`tool:${block.toolCallId}`)} />;
             case "error":
               return <ErrorMessage key={block.id} message={block.message} />;
             case "notice":
@@ -233,7 +249,7 @@ export function Conversation({ item, view, selected, actions, sendMode, usage }:
             case "form":
               return <Form key={block.id} form={block.form} answer={block.answer} onAnswer={(answer) => actions.answer(item.id, block.form.requestId, answer)} />;
             case "permission":
-              return <Permission key={block.id} block={block} onChoose={(optionId) => actions.choose(item.id, block.requestId, optionId)} />;
+              return <Permission key={block.id} block={block} open={opened.has(`permission:${block.requestId}`)} onToggle={() => toggleOpen(`permission:${block.requestId}`)} onChoose={(optionId) => actions.choose(item.id, block.requestId, optionId)} />;
           }
         })}
         {item.general === true && transcript.blocks.length === 0 ? <p className="m-auto text-center text-muted-foreground">Chat with omp in this folder. Trama&apos;s jobs open in their own tabs.</p> : null}
@@ -250,7 +266,13 @@ export function Conversation({ item, view, selected, actions, sendMode, usage }:
       )}
       </div>
       {transcript.plan === undefined ? null : <Plan plan={transcript.plan} />}
-      <Composer item={item} view={view} actions={actions} sendMode={sendMode} />
+      <Composer
+        item={item}
+        view={view}
+        actions={actions}
+        sendMode={sendMode}
+        usage={item.general === true ? <UsageBar usage={usage} model={view.currentModel} active={selected} onRefresh={actions.refreshUsage} /> : null}
+      />
     </div>
   );
 }

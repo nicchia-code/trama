@@ -40,12 +40,11 @@ interface TaskData {
   drift: string | null;
   /** The Proposal (the design) the Task comes from; absent in Tasks written before the link existed. */
   proposal: string | null;
-  /** True while the agent has taken the Task (it is working on it); absent in Tasks written before the mark existed, which are free. */
+  /** True while the agent has taken the Task (it is working on it). Always true together with a `holder`; never true without one. */
   agent: boolean;
   /**
-   * Who took it, kept in the `agent` field instead of `true`: the ID of the agent terminal that took it (an omp Chat conversation has the ID of the terminal it replaces).
-   * Null when free, taken before the holder was recorded, taken from an unknown origin, or read from legacy `editor`;
-   * any end releases it.
+   * Who took it, kept in the `agent` field: the ID of the agent terminal that took it (an omp Chat conversation has the ID of the terminal it replaces).
+   * Null when nobody holds the Task: free, or the `agent` field of the file holds anything but a terminal ID.
    */
   holder: string | null;
   /** When the Task was created, UTC ISO 8601. Absent on numbered Tasks written before the field existed. */
@@ -107,7 +106,7 @@ function parseTask(raw: Raw, where: string): TaskData {
     refs: stringList(raw, "refs", where),
     drift: idField(raw, "drift", where),
     proposal: idField(raw, "proposal", where),
-    ...agentField(raw, where),
+    ...agentField(raw),
     created: createdField(raw, where),
     finished: instantField(raw, "finished", where),
     unchanged: textOrNull(raw, "unchanged", where),
@@ -117,17 +116,15 @@ function parseTask(raw: Raw, where: string): TaskData {
 }
 
 /**
- * The `agent` field: false, true, or the holder that took the Task (an agent terminal's ID). The values `cursor` and
- * `cursor:<conversation>` are no longer valid: reading a Task that has one is an error until the developer fixes the file.
+ * The `agent` field: the ID of the terminal or conversation that took the Task, or `false`. Any other value (`true`,
+ * `editor`, `cursor`, `cursor:<conversation>`, anything that is not a terminal ID) is no error and is not read
+ * specially: nobody holds the Task.
  */
-function agentField(raw: Raw, where: string): { agent: boolean; holder: string | null } {
+function agentField(raw: Raw): { agent: boolean; holder: string | null } {
   const v = raw["agent"];
-  if (typeof v === "string" && v.trim() !== "") {
-    const holder = v.trim();
-    if (holder === "cursor" || holder.startsWith("cursor:")) throw new TramaError(`${where}: "agent" cannot be ${JSON.stringify(holder)}: Cursor is no longer supported, so correct the file (false, true or a terminal ID)`);
-    return { agent: true, holder: holder === "editor" ? null : holder };
-  }
-  return { agent: boolField(raw, "agent", false, where), holder: null };
+  const holder = typeof v === "string" ? v.trim() : "";
+  if (holder === "" || holder === "true" || holder === "editor" || holder === "cursor" || holder.startsWith("cursor:")) return { agent: false, holder: null };
+  return { agent: true, holder };
 }
 
 /** Task ownership belongs to agent terminals only: a command with no recognized terminal takes the Task with no holder. */
@@ -387,6 +384,8 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
   if (!COLUMNS.includes(column as Column))
     throw new TramaError(`Unknown column "${column}" (expected ${COLUMNS.join(", ")})`);
   const task = getTask(p, id);
+  if (by === "agent" && column === "doing" && holderOf(origin) === null)
+    throw new TramaError(`Refused: only an agent launched by Trama can take a Task, and this command does not run in a Trama terminal or omp Chat conversation (TRAMA_TERMINAL is not set); Task ${cardName(p, "task", task.id)} was not taken or moved.`);
   const taken = by === "developer" && task.data.agent;
   if (taken && column !== "doing") {
     const name = cardName(p, "task", task.id);
@@ -411,9 +410,9 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
   else if (unchanged !== undefined) task.data.unchanged = unchanged.trim();
   task.data.column = column as Column;
   if (by === "agent") {
-    // Moving a taken Task to In progress again keeps the mark and who holds it.
-    task.data.holder = column !== "doing" ? null : task.data.agent ? task.data.holder : holderOf(origin);
-    task.data.agent = column === "doing";
+    // Moving a taken Task to In progress again keeps the mark and who holds it; a move to To do or Done clears it.
+    task.data.holder = column !== "doing" ? null : task.data.holder ?? holderOf(origin);
+    task.data.agent = task.data.holder !== null;
   }
   saveItem(task.path, task.data, task.body);
   if (!task.data.agent) clearProgress(p, task.id);
@@ -431,7 +430,7 @@ export type ProgressDeclaration = { declared: true; task: Task; progress: number
 
 /**
  * The agent declares how far along a Task it has taken is. Accepted only for a Task In progress and taken by the agent,
- * from the agent that holds it (any agent when it was taken without a known terminal or chat); every other declaration
+ * from the agent that holds it (the same terminal or omp Chat conversation, `TRAMA_TERMINAL`); every other declaration
  * changes nothing and says why. It never moves or takes the Task and does not touch its file.
  */
 export function declareProgress(p: Project, id: string, value: number, by: Mover, origin: AgentOrigin = {}): ProgressDeclaration {
@@ -439,8 +438,9 @@ export function declareProgress(p: Project, id: string, value: number, by: Mover
   const name = cardName(p, "task", task.id);
   const ignored = (why: string): ProgressDeclaration => ({ declared: false, task, note: `Progress ignored: Task ${name} ${why}` });
   if (by !== "agent") return ignored("is not declared by the agent: only the agent that took a Task declares its progress");
-  if (task.data.column !== "doing" || !task.data.agent) return ignored("is not taken by the agent");
-  if (task.data.holder !== null && task.data.holder !== holderOf(origin)) return ignored("is taken by another agent");
+  if (task.data.column !== "doing" || task.data.holder === null) return ignored("is not taken by the agent");
+  if (holderOf(origin) === null) return ignored("is not declared from a Trama terminal or omp Chat conversation: only the agent that holds a Task declares its progress");
+  if (task.data.holder !== holderOf(origin)) return ignored("is taken by another agent");
   writeProgress(p, task.id, value);
   return { declared: true, task, progress: value };
 }
@@ -562,12 +562,12 @@ export function scopedTodo(p: Project, filter: ProposalFilter, taskIds?: string[
 
 /**
  * The agent's command ended in `origin` (an agent terminal, or an omp Chat conversation as the terminal it replaces), so
- * that agent is no longer working: the Tasks it took are released and go back to To do. Tasks taken without a recorded
- * holder count as any origin's.
+ * that agent is no longer working: the Tasks carrying its mark are released and go back to To do. Never another holder's
+ * Task and never a Task with no holder; an origin with no terminal releases nothing.
  */
 export function releaseTasks(p: Project, origin: AgentOrigin): Task[] {
   const holder = holderOf(origin);
-  return releaseTaken(p, (task) => task.data.holder === null || task.data.holder === holder);
+  return releaseTaken(p, (task) => holder !== null && task.data.holder === holder);
 }
 
 /**

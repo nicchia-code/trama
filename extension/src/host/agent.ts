@@ -17,14 +17,15 @@ import { terminalVerdict } from "../../../src/core/terminal-check";
 import { startFailureNotice, type SavedJob, useOmpChat } from "../../../src/core/omp-chat-conversation";
 import { bundledAskMoreInstructions, bundledGeneralInstructions, bundledOmpHook } from "./bundled";
 import { withdrawWaiting } from "./announcements";
-import { endHeldJob as endHeldJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, onAgentStarted, releaseFiledWork, reportStoppedFollowing, setHooked, startJob } from "./drift-resolution";
+import { addJobFollower, endHeldJob as endHeldJobs, endTerminalJobs, hasJobs, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, onAgentStarted, releaseFiledWork, reportAgentStopped, reportStoppedFollowing, setHooked, startJob } from "./drift-resolution";
+import { addHolderFollower } from "./followed-holders";
 import { agentCommandLine, isSupportedShell, programName, quote, type ShellFamily, shellFamily } from "./quote";
-import { questionEndpoint } from "./questions";
-import { pruneAgentProcesses, releaseUnfollowedTasks } from "./task-release";
+import { interruptTerminalRounds, ownWindowId, questionEndpoint } from "./questions";
+import { pruneAgentProcesses, releaseUnfollowed } from "./task-release";
 import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, instructedMessage, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
 import { agentTemplate, askMoreCommandLine, askMoreOptions, canScan, launchOverlay, type Models, ompArguments, ompOptions, type Role, roleOf, type RunModel, terminalEnv } from "./terminal-agent";
 import { ompPathVariable } from "./model-lists";
-import { ompBeforeLaunch } from "./omp-launch";
+import { checkedOmp, ompBeforeLaunch } from "./omp-launch";
 import { type ConversationInfo, type ConversationStore, type OpenConversation, OmpConversations } from "./omp-chat/conversations";
 import type { ChatViewPort, OmpClientPort, OmpLaunch } from "./omp-chat/ports";
 import { GeneralConversation, type GeneralDeps } from "./omp-chat/general";
@@ -115,14 +116,14 @@ function conversationLaunch(root: string, options: string[][], endpoint: string,
   const approval = settings().inspect<unknown>("ompChatApproval")?.globalValue === "yolo" ? "yolo" : "ask";
   // Intent Tracing is off only when `trama.ompChatIntentTracing` is `false` in the user settings, read when the conversation opens.
   const intentTracing = settings().inspect<unknown>("ompChatIntentTracing")?.globalValue === false ? "0" : "1";
-  return { args: ompArguments(options, approval), env: { ...terminalEnv(endpoint, terminalId, jobId, advisor, run, task, parallel), ...conversationPath(), PI_INTENT_TRACING: intentTracing }, cwd: root };
+  return { args: ompArguments(options, approval), env: { ...terminalEnv(endpoint, terminalId, jobId, advisor, run, task, parallel), ...conversationPath(), TRAMA_ACP: "1", PI_INTENT_TRACING: intentTracing }, cwd: root };
 }
 
 /** Opens the conversation; false, after the warning, when omp does not start: the caller's instruction then goes to a terminal. */
 async function openConversation(spec: OpenConversation): Promise<boolean> {
   const opened = await chatConversations?.open(spec);
   if (opened?.opened === true) return true;
-  void vscode.window.showWarningMessage(startFailureNotice(opened === undefined ? "omp Chat is not available" : opened.reason));
+  void vscode.window.showWarningMessage(startFailureNotice(opened === undefined ? "omp Chat is not available" : opened.reason, opened === undefined || opened.opened ? undefined : opened.details));
   return false;
 }
 
@@ -137,10 +138,10 @@ export function setOmpChat(ports: { client: OmpClientPort; view: ChatViewPort },
     autoExit: () => settings().get<boolean>("autoExit", true),
     endWork: (conversation, abnormal) => endAgentWork(endInfo(conversation), abnormal),
     reportStopped: reportStoppedFollowing,
-    registerProcess: (conversation, pid) => writeAgentProcess(questionProjectId(projectAt(conversation.root)), conversation.id, pid),
-    registeredProcess: (conversation) => readAgentProcess(questionProjectId(projectAt(conversation.root)), conversation.id)?.pid,
-    processAlive,
-    follow: setHooked,
+    reportAgentStopped,
+    registerProcess: (conversation, pid) => void writeAgentProcess(questionProjectId(projectAt(conversation.root)), conversation.id, pid, ownWindowId(conversation.root)),
+    unregisterProcess: (conversation) => removeAgentProcess(questionProjectId(projectAt(conversation.root)), conversation.id),
+    interruptQuestions: (conversation) => interruptTerminalRounds(conversation.id),
     restoreJob: (conversation, job) => {
       launchedRoots.add(conversation.root);
       startJob(job.kind, conversation.root, { terminal: conversation.id }, job.id, job.drifts ?? []);
@@ -178,6 +179,7 @@ function generalDeps(ports: { client: OmpClientPort; view: ChatViewPort }, store
     usable: configuredOmpChat,
     ompPath: configuredOmpPath,
     findOmp: findConfiguredOmp,
+    checkOmp: checkedOmp,
     instructions: bundledGeneralInstructions,
     launch: async (root, terminalId) => {
       const endpoint = await questionEndpoint(root);
@@ -191,6 +193,7 @@ function generalDeps(ports: { client: OmpClientPort; view: ChatViewPort }, store
       return { args, env: { ...env, [QUESTION_ENDPOINT_ENV]: endpoint, ...conversationPath() }, cwd: root };
     },
     endWork: (terminalId, root) => endAgentWork({ id: terminalId, root, line: "", since: Date.now() }),
+    interruptRounds: interruptTerminalRounds,
     confirm: async (message, detail, button) => (await vscode.window.showWarningMessage(message, { modal: true, detail }, button)) === button,
     install: () => void vscode.commands.executeCommand("trama.installOmp"),
   };
@@ -229,6 +232,8 @@ export function watchAgentTerminal(): vscode.Disposable {
     vscode.window.onDidEndTerminalShellExecution((e) => {
       const info = agentTerminals.get(e.terminal);
       if (info === undefined || !isTypedCommand(e.terminal, e.execution.commandLine.value)) return;
+      // The command of the agent ended: the rounds it asked end with it, whichever way the terminal goes on.
+      interruptTerminalRounds(info.id);
       finishAgentTerminal(e.terminal, info, abnormalCommandEnd(e.exitCode));
     }),
     onAgentIdle((terminal) => {
@@ -237,23 +242,23 @@ export function watchAgentTerminal(): vscode.Disposable {
         finishAgentTerminal(tracked, info);
         break;
       }
-      chatConversations?.agentIdle(terminal);
     }),
     onAgentStarted((terminal, pid, root) => {
       // Only a terminal followed in Agent running registers its agent's process; nothing else changes.
       for (const info of agentTerminals.values()) {
-        if (info.id === terminal && info.root === root) writeAgentProcess(questionProjectId(projectAt(root)), terminal, pid);
+        if (info.id === terminal && info.root === root) void writeAgentProcess(questionProjectId(projectAt(root)), terminal, pid, ownWindowId(root));
       }
-      chatConversations?.agentStarted(terminal, pid, root);
     }),
     vscode.window.onDidCloseTerminal((terminal) => {
       const info = agentTerminals.get(terminal);
       if (info !== undefined) {
+        interruptTerminalRounds(info.id);
         endAgentWork(info, "its terminal was closed");
         unfollowTerminal(terminal);
       }
       const idle = idleTerminals.get(terminal);
       if (idle !== undefined) {
+        interruptTerminalRounds(idle.id);
         endAgentWork(idle, "its terminal was closed");
         idleTerminals.delete(terminal);
       }
@@ -293,7 +298,7 @@ function finishAgentTerminal(terminal: vscode.Terminal, info: { id: string; jobI
   }
 }
 
-/** The shell process of each followed terminal, read once and kept with it (`time.CHECK_DUE`, when the hook named no process). */
+/** The shell process of each followed terminal, read once and kept with it, when the hook named no process. */
 const shellPids = new WeakMap<vscode.Terminal, number | undefined>();
 
 /**
@@ -302,6 +307,7 @@ const shellPids = new WeakMap<vscode.Terminal, number | undefined>();
  * gone (the one the hook reported or, without it, the terminal's shell) ends as an abnormal end of its command. Both
  * release the Tasks, withdraw the announcements and report `Trama stopped following <name>: <reason>.` once; with
  * `trama.autoExit` on an agent that is gone has its terminal disposed. A live process, however still, changes nothing.
+ * The conversations of omp Chat are not looked at here: their end comes from their process and their connection.
  */
 export async function checkAgentTerminals(only?: string): Promise<{ id: string; name: string; reason?: string }[]> {
   const listed = new Set(vscode.window.terminals);
@@ -318,6 +324,8 @@ export async function checkAgentTerminals(only?: string): Promise<{ id: string; 
     if (verdict === undefined) { checked.push({ id: info.id, name: terminal.name }); continue; }
     reportStoppedFollowing(terminal.name, verdict);
     checked.push({ id: info.id, name: terminal.name, reason: verdict });
+    // The execution check stops following it: the rounds it asked end.
+    interruptTerminalRounds(info.id);
     if (verdict === "the terminal is gone") {
       unfollowTerminal(terminal);
       endAgentWork(info, "its terminal was closed");
@@ -325,15 +333,46 @@ export async function checkAgentTerminals(only?: string): Promise<{ id: string; 
       finishAgentTerminal(terminal, info, "the agent's process is gone");
     }
   }
-  checked.push(...(chatConversations?.check(only) ?? []));
   return checked;
 }
 
 /** The projects this window launched work in, whose agent registry the check prunes. */
 const launchedRoots = new Set<string>();
 
-/** Whether this window follows an agent terminal, whether or not a job is registered for it: the check has it to look at. */
-export const hasFollowedTerminals = (): boolean => agentTerminals.size > 0 || chatConversations?.following === true;
+/**
+ * Whether this window has work in a terminal: a terminal it follows in Agent running, or a job in its registry that is not
+ * an omp Chat conversation's. The conversations neither arm the execution check nor are looked at by it: their end comes
+ * from the exit of their process or the closing of their connection.
+ */
+export const hasTerminalWork = (): boolean => agentTerminals.size > 0 || hasJobs((job) => "held" in job.place || chatConversations?.has(job.place.terminal) !== true);
+
+// The holders this window follows, as it answers `followed-holders` and as its own check leaves alone: its terminals in Agent running, its omp Chat conversations (also those it is about to resume) and its General.
+addHolderFollower((holder) => [...agentTerminals.values()].some((info) => info.id === holder) || chatConversations?.has(holder) === true || general?.follows(holder) === true);
+// The job conversations of this window hold what their agent files until its turn ends, with no hook.
+addJobFollower((holder) => chatConversations?.followsJob(holder) === true);
+
+/**
+ * Whether `terminal` is a terminal or an omp Chat conversation of this window, working or idle, or its General, in the project `root`: the only agents whose question
+ * rounds the window accepts. An agent started by hand, or in a terminal this window does not have (any more), is none of them.
+ */
+export function ownsAgentTerminal(terminal: string, root: string): boolean {
+  for (const info of [...agentTerminals.values(), ...idleTerminals.values()]) {
+    if (info.id === terminal) return info.root === root;
+  }
+  const conversation = chatConversations?.named(terminal);
+  if (conversation !== undefined) return conversation.root === root;
+  return general?.owns(terminal) === true && vscode.workspace.workspaceFolders?.[0]?.uri.fsPath === root;
+}
+
+/** The name on the tab of the terminal or conversation `terminal` (`Design`, a Task's tab name, `General`), or undefined when this window has none by that identity. */
+export function agentTabName(terminal: string): string | undefined {
+  for (const [tab, info] of [...agentTerminals, ...idleTerminals]) {
+    if (info.id === terminal) return tab.name;
+  }
+  const conversation = chatConversations?.named(terminal);
+  if (conversation !== undefined) return conversation.name;
+  return general?.owns(terminal) === true ? "General" : undefined;
+}
 
 /** This window stops following `terminal`. */
 function unfollowTerminal(terminal: vscode.Terminal): void {
@@ -341,16 +380,16 @@ function unfollowTerminal(terminal: vscode.Terminal): void {
 }
 
 /**
- * One execution check (`time.CHECK_DUE`): agent terminals and omp Chat conversations, then, for the project open in the window and
- * every project this window launched work in, the Tasks no window follows and the agent registry. The scheduler
- * (`execution-check.ts`) decides when it runs.
+ * One execution check (`time.CHECK_DUE`): the agent terminals of this window, then, for the project open in the window and
+ * every project this window launched work in, the Tasks and announcements no window follows and the agent registry. The
+ * scheduler (`execution-check.ts`) decides when it runs.
  */
 export async function runExecutionCheck(openRoot?: string): Promise<void> {
   await checkAgentTerminals();
   const roots = new Set(launchedRoots);
   if (openRoot !== undefined) roots.add(openRoot);
   for (const root of roots) {
-    await releaseUnfollowedTasks(root);
+    await releaseUnfollowed(root);
     await pruneAgentProcesses(root);
   }
 }
@@ -619,7 +658,7 @@ export async function launchAgent(
     if (ompChatInUse()) {
       const prompt = run.prompt();
       launchedRoots.add(root);
-      setHooked(terminalId, run.hooked);
+      // A conversation is not hooked: its job ends at omp's answer to the prompt of its work (`omp-acp.TURN_ENDED`).
       const cardId = announceProposal === undefined ? undefined : announceLaunch(root, announceProposal, { terminal: terminalId });
       onSent?.(Date.now());
       let savedJob: SavedJob | undefined;
@@ -629,7 +668,7 @@ export async function launchAgent(
         if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
         savedJob = { id: jobId, kind: job, name, ...(cardId === undefined ? {} : { announcement: cardId }), ...(drifts.length === 0 ? {} : { drifts: [...drifts] }) };
       }
-      const opened = await openConversation({ id: terminalId, root, name, launch: conversationLaunch(root, run.options, endpoint, terminalId, jobId, advisor, isRun, runTask, parallel), first: { text: prompt, ...(jobOptions.attachment === undefined ? {} : { attachment: jobOptions.attachment.file }) }, focus: false, ...(savedJob === undefined ? {} : { job: savedJob }) });
+      const opened = await openConversation({ id: terminalId, root, name, launch: conversationLaunch(root, run.options, endpoint, terminalId, jobId, advisor, isRun, runTask, parallel), first: { text: prompt, ...(jobOptions.attachment === undefined ? {} : { attachment: jobOptions.attachment.file }) }, focus: false, hook: run.hooked, ...(savedJob === undefined ? {} : { job: savedJob }) });
       if (opened) return "conversation";
       writtenFor = "conversation";
     }
@@ -687,6 +726,7 @@ async function openFocusedTerminal(root: string, name: string, omp: string, line
       name,
       launch: conversationLaunch(root, conversation.options, endpoint, terminalId),
       focus: true,
+      hook: false,
       instruction: {
         placeholder,
         compose: (message) => ({ text: instructedMessage(part, message), attachment }),

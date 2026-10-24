@@ -1,4 +1,5 @@
 import type { ElicitationSchema, PermissionOption, SessionNotification, ToolCallUpdate } from "@agentclientprotocol/sdk";
+import type { TurnEnd } from "../../../../src/core/omp-chat-conversation";
 import type { GeneralError, GeneralPhase, SendMode } from "../../omp-chat-protocol";
 
 // The two things the conversations of omp Chat stand on, as the host sees them. The ACP client (Task «Client ACP di omp») implements `OmpClientPort`
@@ -17,12 +18,18 @@ export interface OmpLaunch {
   env: Record<string, string>;
   /** The project's root. */
   cwd: string;
+  /** A job conversation with Trama's hook (`OpenConversation.hook`): the forms omp asks to show are declined at once with the question tool's refusal, and the view receives none. */
+  hook?: boolean;
 }
 
-/** A prompt: the text and, when the instruction carries a file of its own, the file the client sends as a `resource_link`. */
+/**
+ * A prompt: the text and, when the instruction carries a file of its own, the file the client sends as a `resource_link`. `work` marks the prompt of a job
+ * conversation's work (the instruction, or the fixed message that continues it after a resume): omp's answer to it is the end of the agent's work, `onTurnEnd`.
+ */
 export interface OmpPrompt {
   text: string;
   attachment?: string;
+  work?: boolean;
 }
 
 /** What became of a message sent while the agent worked: queued until omp takes it, delivered once it did, or failed with the reason. */
@@ -35,13 +42,21 @@ export interface OutgoingMessage {
   report: (status: SendStatus) => void;
 }
 
-/** A start or a resume that failed; `message` is the reason (`omp not found at <path>`, `omp exited with code <N>`, `omp did not answer within 30 s` or omp's own message). */
-export class OmpStartFailure extends Error {}
+/** A start or a resume that failed; `message` is the reason (`omp not found at <path>`, `omp exited with code <N>`, `omp did not answer within 30 s` or omp's own message) and `details` the last lines omp wrote on its error output. */
+export class OmpStartFailure extends Error {
+  constructor(
+    message: string,
+    readonly details?: string,
+  ) {
+    super(message);
+  }
+}
 
-/** How a process of omp ended without Trama stopping it. */
+/** How a process of omp ended without Trama stopping it. `details` are the last lines it wrote on its error output. */
 export interface OmpExit {
   code: number | null;
   signal: string | null;
+  details?: string;
 }
 
 /** One process of omp with its ACP session. */
@@ -60,10 +75,18 @@ export interface OmpSessionPort {
   send(prompt: OmpPrompt, mode: SendMode, report: (status: SendStatus) => void): Promise<void>;
   /** `session/cancel`. */
   cancel(): void;
-  /** Stops the process: SIGTERM and, after 3 seconds, SIGKILL. It never produces `onExit`. Resolves when the process is gone. */
-  stop(): Promise<void>;
-  /** The process ended and Trama had not asked it to (`omp-acp.EXITED`). */
+  /**
+   * Stops the process: `session/cancel` when a turn runs, then `session/close` (at most 2 s; skipped with `deactivating`, where there is little time), then SIGTERM to omp's
+   * whole process group (`taskkill /T` on Windows) and, after 3 seconds, SIGKILL to the group. It never produces `onExit`. Resolves when the process is gone.
+   */
+  stop(options?: { deactivating?: boolean }): Promise<void>;
+  /** The process ended and Trama had not asked it to, or its connection closed with no exit (`omp-acp.EXITED`); once. */
   onExit(listener: (exit: OmpExit) => void): Disposable;
+  /**
+   * omp answered the prompt of the work (`work`) and no message of the developer waits to be delivered: the end of the agent's work (`omp-acp.TURN_ENDED`), once per work.
+   * A turn that a message of the developer queued behind the work is the one that counts. An end that comes before a listener is the one it receives first.
+   */
+  onTurnEnd(listener: (end: TurnEnd) => void): Disposable;
   /** The `session/update` notifications as they arrive. Everything received since the session was created or loaded (the history a load replays included) is replayed to a new listener first. */
   onUpdate(listener: (notification: SessionNotification) => void): Disposable;
   /** The agent starts or ends a turn, for a prompt of the view or of anyone else. */
@@ -78,7 +101,7 @@ export interface OmpSessionPort {
   answerPermission(requestId: string, optionId: string): void;
   /** A waiting permission request was answered `cancelled` (Stop, closing, the process ended). */
   onPermissionCancelled(listener: (requestId: string) => void): Disposable;
-  /** The models the session can use and the one it uses now, from omp's session options or, without them, from the models omp lists. */
+  /** The models the session can use and the one it uses now, from the model option omp declares for the session. */
   models(): Promise<{ available: { id: string; name: string }[]; current?: string }>;
   /** Changes the session's model from the next turn; rejects with omp's message when it refuses. */
   setModel(id: string): Promise<void>;
@@ -102,12 +125,13 @@ export interface PermissionRequest {
 
 export interface OmpClientPort {
   /**
-   * Spawns omp, opens the session and, when `first` is given, delivers it as the first message without waiting for its turn to end. Rejects with
-   * `OmpStartFailure` when the process does not start or the session does not open before the delivery.
+   * Spawns omp, opens the session and, when `first` is given, delivers it as the first message without waiting for its turn to end: it is the prompt of the job's work
+   * (`work` is set by the client), and omp's answer to it, a refusal included, is `onTurnEnd`. Rejects with `OmpStartFailure` when the process does not start,
+   * when it does not declare what omp 18.12.6 does, or when the session does not open within 30 s of the start of the process. `spawned` hears the process's pid as soon as `spawn` succeeds.
    */
-  start(launch: OmpLaunch, first?: OmpPrompt): Promise<OmpSessionPort>;
-  /** Spawns omp with the same launch and reopens the saved session. Rejects with `OmpStartFailure` when it does not. */
-  resume(launch: OmpLaunch, sessionId: string): Promise<OmpSessionPort>;
+  start(launch: OmpLaunch, first?: OmpPrompt, spawned?: (pid: number) => void): Promise<OmpSessionPort>;
+  /** Spawns omp with the same launch and reopens the saved session. Rejects with `OmpStartFailure` when it does not. `spawned` as in `start`. */
+  resume(launch: OmpLaunch, sessionId: string, spawned?: (pid: number) => void): Promise<OmpSessionPort>;
 }
 
 /** The tab of a conversation in the view. */

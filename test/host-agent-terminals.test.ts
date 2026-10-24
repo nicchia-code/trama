@@ -12,6 +12,7 @@ import { newProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { announcedGhosts } from "../extension/src/webview/board/logic";
 import { projectAt } from "../src/core/store";
+import type { TurnEnd } from "../src/core/omp-chat-conversation";
 import { dismissDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask } from "../src/core/work";
 import { FIX_OPTIONS } from "./fix-options";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
@@ -216,7 +217,9 @@ mock.module("vscode", () => ({
   ConfigurationTarget: { Global: 1 },
   extensions: { getExtension: () => extensionPath === "" ? undefined : { extensionPath } },
 }));
-mock.module("../extension/src/host/questions", () => ({ questionEndpoint: () => questionEndpoint(), questionWindowId: async () => "window-id", ownWindowId: () => undefined, EditorQuestions: class {}, askPreparedRound: async () => undefined }));
+/** The terminals whose question rounds the host interrupted, in order. */
+const interruptedRounds: string[] = [];
+mock.module("../extension/src/host/questions", () => ({ questionEndpoint: () => questionEndpoint(), questionWindowId: async () => "window-id", ownWindowId: () => undefined, interruptTerminalRounds: (terminal: string) => void interruptedRounds.push(terminal), EditorQuestions: class {}, askPreparedRound: async () => undefined }));
 
 let dir: string;
 /** The omp the launches find: what `trama.ompPath` says, else `omp`; the check before a launch is tested in omp-launch.test.ts. */
@@ -229,7 +232,7 @@ beforeAll(async () => {
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("taken Tasks and the agent terminals", () => {
-  test("a command ending in one terminal sends back to To do only the Tasks that terminal took, and those taken before the holder was kept", async () => {
+  test("a command ending in one terminal sends back to To do only the Tasks that terminal took, never another holder's nor a Task nobody holds", async () => {
     // Dynamic: the module must load after mock.module replaced "vscode".
     const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
     const p = projectAt(dir);
@@ -245,17 +248,19 @@ describe("taken Tasks and the agent terminals", () => {
     expect(second).not.toBe(first);
     listeners.start.forEach((fn) => fn(shell(second)));
 
-    const take = (title: string, terminal?: string) => moveTask(p, newTask(p, { title, refs: ["order/Paid"], technical: false }).id, "doing", "agent", terminal ? { terminal } : {}).id;
+    const take = (title: string, terminal: string) => moveTask(p, newTask(p, { title, refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal }).id;
     const a = take("A", firstId);
     const b = take("B", secondId);
-    const old = take("Old"); // taken with no holder recorded, as before the mark kept one
+    const old = moveTask(p, newTask(p, { title: "Old", refs: ["order/Paid"], technical: false }).id, "doing", "developer").id;
+    writeFileSync(getTask(p, old).path, readFileSync(getTask(p, old).path, "utf8").replace(/^agent: false$/m, "agent: true")); // a mark with no holder, as an earlier version wrote it
     expect(readFileSync(getTask(p, a).path, "utf8")).toContain(`agent: ${firstId}`);
     const state = (id: string) => [getTask(p, id).data.column, getTask(p, id).data.agent];
 
     listeners.end.forEach((fn) => fn(shell(first)));
-    expect([a, b, old].map(state)).toEqual([["todo", false], ["doing", true], ["todo", false]]);
+    expect([a, b, old].map(state)).toEqual([["todo", false], ["doing", true], ["doing", false]]);
     listeners.end.forEach((fn) => fn(shell(second)));
     expect(state(b)).toEqual(["todo", false]);
+    expect(state(old)).toEqual(["doing", false]);
   });
 
   test("a pending Run rechecks taken Tasks in its scope before delivery", async () => {
@@ -1171,6 +1176,67 @@ describe("announcing every launch as its instruction starts", () => {
   });
 });
 
+describe("the question rounds of an agent terminal", () => {
+  test("the end of its command, the closing of its terminal and the execution check interrupt the rounds of that terminal only", async () => {
+    const { launchAgent, watchAgentTerminal, checkAgentTerminals } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    try {
+      interruptedRounds.length = 0;
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan");
+      const ended = terminals.at(-1) as FakeTerminal;
+      const endedId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      await launchAgent(dir, "Use the trama-scan skill on Task abcd1234.", "T3", undefined, () => true, "run");
+      const closed = terminals.at(-1) as FakeTerminal;
+      const closedId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      expect(closedId).not.toBe(endedId);
+
+      // A command Trama did not type ends nothing.
+      listeners.end.forEach((fn) => fn(shell({ ...ended })));
+      expect(interruptedRounds).toEqual([]);
+
+      listeners.end.forEach((fn) => fn(shell(ended)));
+      expect(interruptedRounds).toEqual([endedId]);
+      listeners.close.forEach((fn) => fn(closed));
+      expect(interruptedRounds).toEqual([endedId, closedId]);
+      listeners.close.forEach((fn) => fn(ended));
+
+      // A terminal the editor no longer lists is ended by the check, which interrupts its rounds once.
+      await launchAgent(dir, "Use the trama-scan skill on Task abcd1234.", "T4", undefined, () => true, "run");
+      const gone = terminals.at(-1) as FakeTerminal;
+      const goneId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      interruptedRounds.length = 0;
+      unlisted.add(gone);
+      await checkAgentTerminals();
+      expect(interruptedRounds).toEqual([goneId]);
+      await checkAgentTerminals();
+      expect(interruptedRounds).toEqual([goneId]);
+    } finally {
+      unlisted.clear();
+      watching.dispose();
+    }
+  });
+
+  test("a terminal of this window is owned, and has its tab's name, while it exists; an unknown terminal or another project's is neither", async () => {
+    const { launchAgent, watchAgentTerminal, ownsAgentTerminal, agentTabName } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    try {
+      await launchAgent(dir, "Use the trama-design skill. Cancel orders", "Design", "Cancel orders");
+      const terminal = terminals.at(-1) as FakeTerminal;
+      const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      expect(ownsAgentTerminal(id, dir)).toBe(true);
+      expect(agentTabName(id)).toBe(terminal.name);
+      expect(ownsAgentTerminal(id, join(dir, "elsewhere"))).toBe(false);
+      expect(ownsAgentTerminal("zzzzzz", dir)).toBe(false);
+      expect(agentTabName("zzzzzz")).toBeUndefined();
+      listeners.close.forEach((fn) => fn(terminal));
+      expect(ownsAgentTerminal(id, dir)).toBe(false);
+      expect(agentTabName(id)).toBeUndefined();
+    } finally {
+      watching.dispose();
+    }
+  });
+});
+
 describe("withdrawing the ghosts", () => {
   test("the end of the command Trama typed withdraws that terminal's announcements and tells the panel; closing the terminal does the same", async () => {
     // Dynamic, as above: the modules must load after mock.module replaced "vscode".
@@ -1244,14 +1310,15 @@ describe("withdrawing the ghosts", () => {
       const second = terminals.at(-1) as FakeTerminal;
       const secondId = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
       const firstTask = moveTask(p, newTask(p, { title: "Unhooked", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: firstId }).id;
-      const originlessTask = moveTask(p, newTask(p, { title: "Originless", refs: ["order/Paid"], technical: false }).id, "doing", "agent").id;
+      const originlessTask = moveTask(p, newTask(p, { title: "Originless", refs: ["order/Paid"], technical: false }).id, "doing", "developer").id;
+      writeFileSync(getTask(p, originlessTask).path, readFileSync(getTask(p, originlessTask).path, "utf8").replace(/^agent: false$/m, "agent: true"));
       const secondTask = moveTask(p, newTask(p, { title: "Other terminal", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: secondId }).id;
 
       listeners.close.forEach((listener) => listener(first));
 
       expect([firstTask, originlessTask, secondTask].map((id) => [getTask(p, id).data.column, getTask(p, id).data.agent])).toEqual([
         ["todo", false],
-        ["todo", false],
+        ["doing", false],
         ["doing", true],
       ]);
       listeners.close.forEach((listener) => listener(first));
@@ -1424,18 +1491,21 @@ describe("starting the editor with Tasks an agent had taken", () => {
     cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
     try {
       const p = projectAt(root);
-      const take = (origin: { terminal?: string }) => moveTask(p, newTask(p, { title: "Taken", refs: ["order/Paid"], technical: false }).id, "doing", "agent", origin).id;
-      const byTerminal = take({ terminal: "aaa111" });
-      const byEditor = take({});
+      const take = (terminal: string) => moveTask(p, newTask(p, { title: "Taken", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal }).id;
+      const byTerminal = take("aaa111");
+      const byEditor = moveTask(p, newTask(p, { title: "Legacy", refs: ["order/Paid"], technical: false }).id, "doing", "developer").id;
+      writeFileSync(getTask(p, byEditor).path, readFileSync(getTask(p, byEditor).path, "utf8").replace(/^agent: false$/m, "agent: true"));
       const byDeveloper = moveTask(p, newTask(p, { title: "Developer", refs: ["order/Paid"], technical: false }).id, "doing", "developer").id;
       announce(p, { kind: "task", title: "Left on disk", terminal: "aaa111" });
 
       const watching = watchAnnouncements(() => root);
       try {
+        // The orphans are withdrawn once the conversations are read: nobody follows terminal aaa111.
+        await watching.done;
         expect(listAnnouncements(p)).toEqual([]);
         expect([byTerminal, byEditor, byDeveloper].map((id) => [getTask(p, id).data.column, getTask(p, id).data.agent !== false])).toEqual([
           ["doing", true],
-          ["doing", true],
+          ["doing", false],
           ["doing", false],
         ]);
       } finally {
@@ -1832,6 +1902,17 @@ describe("the agent command waits for the shell", () => {
   });
 });
 
+/** The registry entry of `id`, waited for: the registration reads the start of the process first, which may take a program on macOS and Windows. */
+const registered = async (p: Project, id: string) => {
+  const { readAgentProcess } = await import("../src/core/agent-processes");
+  const { questionProjectId } = await import("../src/core/question-channel");
+  for (let attempt = 0; attempt < 150; attempt++) {
+    const entry = readAgentProcess(questionProjectId(p), id);
+    if (entry !== undefined) return entry;
+    await new Promise((done) => setTimeout(done, 20));
+  }
+  return undefined;
+};
 describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
   const dead = () => 2_000_000_000;
   /** Launches a Run in omp, registers `pid` as its agent through the hook, and takes a Task for it. */
@@ -1857,7 +1938,7 @@ describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
     const watching = watchAgentTerminal();
     try {
       const { terminal, id, task, p } = await start(dead());
-      expect(readAgentProcess(questionProjectId(p), id)?.pid).toBe(dead());
+      expect((await registered(p, id))?.pid).toBe(dead());
       expect(driftWork().running).toBe(true);
       await checkAgentTerminals();
       expect(notices).toEqual(["T3: the agent's process is gone"]);
@@ -1880,7 +1961,9 @@ describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
     const { driftWork } = await import("../extension/src/host/drift-resolution");
     const watching = watchAgentTerminal();
     try {
-      const { terminal, task, p } = await start(process.pid);
+      const { terminal, id, task, p } = await start(process.pid);
+      // The registration carries the start of the process, as the system tells it, so the process can be recognised later.
+      expect((await registered(p, id))?.processStart).toBeDefined();
       await checkAgentTerminals();
       await checkAgentTerminals();
       expect(driftWork().running).toBe(true);
@@ -1939,6 +2022,7 @@ describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
     const subscription = onAnnouncementsWithdrawn((views) => told.push(views.map((v) => `${v.kind}:${v.title}`)));
     try {
       const { terminal, id, p } = await start(dead());
+      await registered(p, id);
       withdrawAll(p);
       announce(p, { kind: "drift", title: "Ghost", terminal: id });
       announce(p, { kind: "check", title: "Final check", phase: "verifying", terminal: id });
@@ -1988,6 +2072,10 @@ describe("the minute timer of the execution check", () => {
     try {
       await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
       receiveAgentStarted(environments.at(-1)?.["TRAMA_TERMINAL"] as string, 2_000_000_000, dir);
+      // The hook's registration reads the start of the process first and finishes on its own time, which fake timers cannot wait for: the entry is written here, awaited.
+      const { writeAgentProcess } = await import("../src/core/agent-processes");
+      const { questionProjectId } = await import("../src/core/question-channel");
+      await writeAgentProcess(questionProjectId(projectAt(dir)), environments.at(-1)?.["TRAMA_TERMINAL"] as string, 2_000_000_000);
       expect(driftWork().running).toBe(true);
       vi.advanceTimersByTime(59_000);
       await flush();
@@ -2034,6 +2122,37 @@ describe("the minute timer of the execution check", () => {
     }
   });
 
+  test("an announcement of no terminal arms the check, which withdraws it; one of a terminal this window follows does not", async () => {
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    for (const earlier of terminals) listeners.close.forEach((listener) => listener(earlier));
+    const p = projectAt(dir);
+    for (const left of listTasks(p)) if (left.data.agent) moveTask(p, left.id, "todo", "agent");
+    withdrawAll(p);
+    const { addHolderFollower } = await import("../extension/src/host/followed-holders");
+    const following = addHolderFollower((holder) => holder === "mine01");
+    vi.useFakeTimers();
+    const { scheduler, files } = await startScheduler();
+    try {
+      announce(p, { kind: "task", title: "Mine", terminal: "mine01" });
+      files.fire(join(dir, ".trama", "announcements", "mine.json"));
+      expect(vi.getTimerCount()).toBe(0);
+      announce(p, { kind: "task", title: "Nobody's" });
+      files.fire(join(dir, ".trama", "announcements", "nobody.json"));
+      expect(vi.getTimerCount()).toBe(1);
+      vi.advanceTimersByTime(61_000);
+      await flush();
+      expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Mine"]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      scheduler.dispose();
+      vi.useRealTimers();
+      following.dispose();
+      withdrawAll(p);
+      watching.dispose();
+    }
+  });
+
   test("disposing the scheduler cancels its timer: a vanished agent is no longer looked for", async () => {
     const { watchAgentTerminal, launchAgent } = await import("../extension/src/host/agent");
     const { driftWork, receiveAgentStarted } = await import("../extension/src/host/drift-resolution");
@@ -2044,6 +2163,10 @@ describe("the minute timer of the execution check", () => {
     try {
       await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
       receiveAgentStarted(environments.at(-1)?.["TRAMA_TERMINAL"] as string, 2_000_000_000, dir);
+      // The hook's registration reads the start of the process first and finishes on its own time, which fake timers cannot wait for: the entry is written here, awaited.
+      const { writeAgentProcess } = await import("../src/core/agent-processes");
+      const { questionProjectId } = await import("../src/core/question-channel");
+      await writeAgentProcess(questionProjectId(projectAt(dir)), environments.at(-1)?.["TRAMA_TERMINAL"] as string, 2_000_000_000);
       scheduler.dispose();
       vi.advanceTimersByTime(120_000);
       await flush();
@@ -2280,9 +2403,13 @@ describe("Ask more", () => {
 describe("omp Chat conversations in place of terminals", () => {
   /** One process of omp that the fake client started. */
   interface FakeProcess {
-    launch: { args: string[]; env: Record<string, string>; cwd: string };
+    launch: { args: string[]; env: Record<string, string>; cwd: string; hook?: boolean };
     first?: { text: string; attachment?: string };
     stops: number;
+    /** The pid the client told `spawned`. */
+    spawned?: number;
+    /** omp answers the prompt of the work: what the conversation's turn-end listener hears. */
+    endTurn: (end: TurnEnd) => void;
   }
   let processes: FakeProcess[];
   let failStart: string | undefined;
@@ -2307,6 +2434,10 @@ describe("omp Chat conversations in place of terminals", () => {
       cancel() {},
       stop: async () => void process.stops++,
       onExit: none,
+      onTurnEnd: (listener: (end: TurnEnd) => void) => {
+        process.endTurn = listener;
+        return { dispose() {} };
+      },
       onUpdate: none,
       onTurn: none,
       onFormRequest: none,
@@ -2320,10 +2451,12 @@ describe("omp Chat conversations in place of terminals", () => {
     await setOmpChat(
       {
         client: {
-          start: async (launch, first) => {
+          start: async (launch, first, spawned) => {
             if (failStart !== undefined) throw new Error(failStart);
-            const process: FakeProcess = { launch, ...(first === undefined ? {} : { first }), stops: 0 };
+            const process: FakeProcess = { launch, ...(first === undefined ? {} : { first }), stops: 0, endTurn: () => undefined };
             processes.push(process);
+            spawned?.(5000 + processes.length - 1);
+            process.spawned = 5000 + processes.length - 1;
             return session(process);
           },
           resume: async () => {
@@ -2390,7 +2523,7 @@ describe("omp Chat conversations in place of terminals", () => {
         // Role scan: no --model of the execution role, the scan model for --slow, in the terminal's order.
         expect(started?.launch.args).toContain("--slow");
         expect(started?.launch.args[started.launch.args.indexOf("--slow") + 1]).toBe("slow-model");
-        expect(started?.launch.env).toMatchObject({ TRAMA_AGENT: "1", TRAMA_TERMINAL: id, TRAMA_QUESTION_ENDPOINT: "endpoint" });
+        expect(started?.launch.env).toMatchObject({ TRAMA_AGENT: "1", TRAMA_ACP: "1", TRAMA_TERMINAL: id, TRAMA_QUESTION_ENDPOINT: "endpoint" });
         expect(Object.keys(started?.launch.env ?? {})).toContain("TRAMA_JOB");
         expect(started?.first?.text).toContain("Scan it.");
         expect(started?.first?.text).toContain("Compare each Machine with the trama-analysis sub-agent.");
@@ -2398,7 +2531,7 @@ describe("omp Chat conversations in place of terminals", () => {
         // Registered as the terminal would be: its job and its card, under the same identity.
         expect(localProjectJobs(dir).map((job) => ("terminal" in job.place ? job.place.terminal : undefined))).toContain(id);
         expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["check", "Scan", id]]);
-        expect(saved.get("trama.ompChat.conversations")).toEqual([expect.objectContaining({ id, name: "Scan", sessionId: "s1", state: "running", job: expect.objectContaining({ kind: "scan", name: "Scan" }) })]);
+        expect(saved.get("trama.ompChat.conversations")).toEqual([expect.objectContaining({ id, name: "Scan", sessionId: "s1", state: "running", hook: expect.any(Boolean), job: expect.objectContaining({ kind: "scan", name: "Scan" }) })]);
       } finally {
         for (const key of Object.keys(settingValues)) delete settingValues[key];
         Object.assign(settingValues, saveSettings);
@@ -2406,7 +2539,7 @@ describe("omp Chat conversations in place of terminals", () => {
     });
   });
 
-  test("the hook at rest ends the conversation's job and card like a terminal's, and with autoExit off it stays", async () => {
+  test("omp's answer to the prompt ends the conversation's job and card like a terminal's, with no hook signal, and with autoExit off it stays", async () => {
     await withOmpChat(async () => {
       const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
       const { localProjectJobs, receiveAgentIdle } = await import("../extension/src/host/drift-resolution");
@@ -2417,23 +2550,77 @@ describe("omp Chat conversations in place of terminals", () => {
       await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan");
       const id = processes[0]?.launch.env["TRAMA_TERMINAL"] as string;
       expect(localProjectJobs(dir)).toHaveLength(jobsBefore + 1);
+      // The hook's idle and start signals no longer mean anything to a conversation: neither ends its work nor registers another process for it.
+      const { readAgentProcess } = await import("../src/core/agent-processes");
+      const { questionProjectId } = await import("../src/core/question-channel");
+      const { receiveAgentStarted } = await import("../extension/src/host/drift-resolution");
       receiveAgentIdle(id, dir);
+      receiveAgentStarted(id, 2_000_000_000, dir);
+      // Real wait, on purpose: a registration, if the start signal wrongly made one, reads the start of the process with a child process, which no fake clock or microtask flush can wait for.
+      await new Promise((done) => setTimeout(done, 50));
+      expect(readAgentProcess(questionProjectId(p), id)?.pid).not.toBe(2_000_000_000);
+      expect(localProjectJobs(dir)).toHaveLength(jobsBefore + 1);
+      expect(processes[0]?.stops).toBe(0);
+      processes[0]?.endTurn({ stopReason: "end_turn" });
       expect(localProjectJobs(dir)).toHaveLength(jobsBefore);
       expect(listAnnouncements(p)).toEqual([]);
       expect(processes[0]?.stops).toBe(1);
       expect(closedTabs).toEqual([id]);
+      expect(warningMessages).toEqual([]);
 
       settingValues["autoExit"] = false;
       try {
         await launchAgent(dir, "Scan again.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan");
-        const second = processes[1]?.launch.env["TRAMA_TERMINAL"] as string;
-        receiveAgentIdle(second, dir);
+        processes[1]?.endTurn({ stopReason: "end_turn" });
         expect(localProjectJobs(dir)).toHaveLength(jobsBefore);
         expect(processes[1]?.stops).toBe(0);
         expect(closedTabs).toEqual([id]);
       } finally {
         delete settingValues["autoExit"];
       }
+    });
+  });
+
+  test("an abnormal end of the turn ends the job and card and the Board says why; the process spawned is in the registry from the start", async () => {
+    await withOmpChat(async () => {
+      const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+      const { localProjectJobs, onAgentStopped } = await import("../extension/src/host/drift-resolution");
+      watchAgentTerminal();
+      const p = projectAt(dir);
+      withdrawAll(p);
+      const jobsBefore = localProjectJobs(dir).length;
+      const stopped: [string, string][] = [];
+      const subscription = onAgentStopped((job, reason) => stopped.push([job, reason]));
+      try {
+        await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan");
+        const id = processes[0]?.launch.env["TRAMA_TERMINAL"] as string;
+        expect(processes[0]?.spawned).toBe(5000);
+        processes[0]?.endTurn({ stopReason: "refusal" });
+        expect(stopped).toEqual([["Scan", "the model refused to continue"]]);
+        expect(localProjectJobs(dir)).toHaveLength(jobsBefore);
+        expect(listAnnouncements(p)).toEqual([]);
+        expect(closedTabs).toEqual([id]);
+      } finally {
+        subscription.dispose();
+      }
+    });
+  });
+
+  test("a conversation's job is in the registry but is not terminal work: the execution check neither looks at it nor is armed by it", async () => {
+    await withOmpChat(async () => {
+      const { hasTerminalWork, launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+      const { hasJobs } = await import("../extension/src/host/drift-resolution");
+      watchAgentTerminal();
+      withdrawAll(projectAt(dir));
+      await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan");
+      const id = processes[0]?.launch.env["TRAMA_TERMINAL"] as string;
+      const ofConversation = (job: { place: object }) => "terminal" in job.place && job.place.terminal === id;
+      expect(hasJobs(ofConversation)).toBe(true);
+      expect(hasJobs(() => false)).toBe(false);
+      // A conversation's job alone does not count as terminal work: what is left is a followed terminal or another job.
+      expect(hasJobs((job) => !ofConversation(job))).toBe(hasTerminalWork());
+      processes[0]?.endTurn({ stopReason: "end_turn" });
+      expect(hasJobs(ofConversation)).toBe(false);
     });
   });
 
@@ -2512,6 +2699,8 @@ describe("omp Chat conversations in place of terminals", () => {
         expect(processes[5]?.launch.env["PI_INTENT_TRACING"]).toBe("1");
         expect(processes[0]?.launch.cwd).toBe(root);
         expect(processes[0]?.first).toBeUndefined(); // Ask more sends nothing until the developer writes; the instruction is composed with that first message
+        expect(processes[0]?.launch.hook).toBe(false); // Ask more is not a job conversation: its forms go to the view
+        expect(processes[0]?.launch.env["TRAMA_ACP"]).toBe("1");
         expect(tabs[0]).toMatchObject({ name: "Ask T3", focus: true });
       } finally {
         delete inspected["ompChatApproval"];

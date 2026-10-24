@@ -29,6 +29,8 @@ export type GeneralPhase = "starting" | "ready" | "stopped" | "resuming" | "wait
 export interface GeneralError {
   kind: "start" | "exited" | "missing";
   reason?: string;
+  /** The last lines omp wrote on its error output, shown behind `Show details`. */
+  details?: string;
 }
 
 /** The first message of a job: Trama's instruction, with the file it carries, if any, as a name and its text. */

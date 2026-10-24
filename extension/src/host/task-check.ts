@@ -3,7 +3,7 @@ import { projectAt } from "../../../src/core/store";
 import { isKnownHolder } from "../../../src/core/task-holders";
 import { getTask } from "../../../src/core/work";
 import { checkAgentTerminals } from "./agent";
-import { releaseUnfollowedTasks } from "./task-release";
+import { releaseUnfollowed } from "./task-release";
 
 /**
  * `agent.CHECK_TASK`: this window runs at once, for the Task `taskId` only, the execution check of `rules#time`. A Task held
@@ -23,7 +23,7 @@ export async function checkTaskHolder(root: string, taskId: string): Promise<Tas
   if (terminal?.reason !== undefined) return { result: "released", reason: terminal.reason };
   const after = held();
   if (after === undefined) return { result: "released", reason: "its agent is gone" };
-  if ((await releaseUnfollowedTasks(root, taskId)).includes(taskId)) return { result: "released", reason: "no window follows its agent" };
+  if ((await releaseUnfollowed(root, taskId)).tasks.includes(taskId)) return { result: "released", reason: "no window follows its agent" };
   const still = held();
   return still === undefined ? { result: "released", reason: "its agent is gone" } : { result: "alive", holder: still.holder };
 }

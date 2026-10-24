@@ -108,7 +108,7 @@ beforeEach(() => {
   failOn = undefined;
   setups = 0;
   receive = undefined;
-  controller = new Controller({ fsPath: root } as never, undefined, undefined, undefined, { writeSetup: async () => void setups++ } as never);
+  controller = new Controller({ fsPath: root } as never, undefined, undefined, { writeSetup: async () => void setups++ } as never);
 });
 
 afterEach(() => {
@@ -237,7 +237,7 @@ test("the omp status says checking, then that omp is not found at the path set; 
 function fakeOmp(): { program: string; calls: () => number } {
   const program = join(root, "omp");
   const counter = join(root, "models-calls");
-  writeFileSync(program, `#!/bin/sh\ncase "$1" in\n  models) echo x >> '${counter}'; echo '{"models":[{"selector":"a/b"},{"selector":"c/d"}]}' ;;\n  *) echo 'omp/14.2.1' ;;\nesac\n`, { mode: 0o755 });
+  writeFileSync(program, `#!/bin/sh\ncase "$1" in\n  models) echo x >> '${counter}'; echo '{"models":[{"selector":"a/b"},{"selector":"c/d"}]}' ;;\n  *) echo 'omp/18.12.6' ;;\nesac\n`, { mode: 0o755 });
   return { program, calls: () => (existsSync(counter) ? readFileSync(counter, "utf8").split("\n").filter((l) => l !== "").length : 0) };
 }
 
@@ -250,9 +250,37 @@ test("a change of the omp path sends the status again; the status of omp that an
   await controller.refreshOmp();
   expect(messages.filter((m) => m["type"] === "ompStatus")).toEqual([
     { type: "ompStatus", state: "checking" },
-    { type: "ompStatus", state: "done", missing: false, version: "14.2.1", models: 2 },
+    { type: "ompStatus", state: "done", missing: false, version: "18.12.6", models: 2 },
   ]);
   expect(messages.filter((m) => m["type"] === "modelSuggestions")).toEqual([{ type: "modelSuggestions", models: [{ value: "a/b" }, { value: "c/d" }] }]);
+});
+
+/** An omp of version `version` that is up to date and lists one model. */
+function fakeOmpOfVersion(version: string): string {
+  const program = join(root, "omp");
+  writeFileSync(program, `#!/bin/sh\ncase "$1" in\n  models) echo '{"models":[{"selector":"a/b"}]}' ;;\n  update) echo 'Current version: ${version}'; echo 'Already up to date' ;;\n  *) echo 'omp/${version}' ;;\nesac\n`, { mode: 0o755 });
+  return program;
+}
+
+test("an omp older than the minimum is flagged tooOld in the Settings status and in the wizard's check, with its version, and a recent one is not", async () => {
+  const { forgetUpdateCheck } = await import("../extension/src/host/omp-update");
+  forgetUpdateCheck();
+  const program = fakeOmpOfVersion("18.12.5");
+  userSettings.set("ompPath", program);
+  await send({ type: "ompStatusWanted" });
+  await controller.refreshOmp();
+  expect(messages.filter((m) => m["type"] === "ompStatus").at(-1)).toEqual({ type: "ompStatus", state: "done", missing: false, version: "18.12.5", tooOld: true, models: 1 });
+  await send({ type: "agentCheckWanted", ompPath: program });
+  expect(messages.filter((m) => m["type"] === "agentCheck").at(-1)).toEqual({ type: "agentCheck", ompPath: program, state: "done", ok: true, missing: false, version: "18.12.5", models: 1, tooOld: true });
+
+  forgetUpdateCheck();
+  fakeOmpOfVersion("18.12.6");
+  messages.length = 0;
+  await send({ type: "ompStatusWanted" });
+  await controller.refreshOmp(true);
+  expect(messages.filter((m) => m["type"] === "ompStatus").at(-1)).toEqual({ type: "ompStatus", state: "done", missing: false, version: "18.12.6", models: 1 });
+  await send({ type: "agentCheckWanted", ompPath: program });
+  expect(messages.filter((m) => m["type"] === "agentCheck").at(-1)).toEqual({ type: "agentCheck", ompPath: program, state: "done", ok: true, missing: false, version: "18.12.6", models: 1 });
 });
 
 test("the Settings tab asking for the model names and for the status together runs `omp models` once", async () => {
@@ -270,11 +298,11 @@ test("the Settings tab asking for the model names and for the status together ru
 
 test("omp that answers its version but gives no list says why, with no number of models", async () => {
   const program = join(root, "omp");
-  writeFileSync(program, "#!/bin/sh\ncase \"$1\" in\n  models) echo 'not json' ;;\n  *) echo 'omp/14.2.1' ;;\nesac\n", { mode: 0o755 });
+  writeFileSync(program, "#!/bin/sh\ncase \"$1\" in\n  models) echo 'not json' ;;\n  *) echo 'omp/18.12.6' ;;\nesac\n", { mode: 0o755 });
   userSettings.set("ompPath", program);
   await send({ type: "ompStatusWanted" });
   await controller.refreshOmp();
-  expect(messages.filter((m) => m["type"] === "ompStatus").at(-1)).toEqual({ type: "ompStatus", state: "done", missing: false, version: "14.2.1", error: "omp models did not return a valid list" });
+  expect(messages.filter((m) => m["type"] === "ompStatus").at(-1)).toEqual({ type: "ompStatus", state: "done", missing: false, version: "18.12.6", error: "omp models did not return a valid list" });
 });
 
 test("a folder outside the workspace is refused, and the workspace folders are sent without a project", async () => {

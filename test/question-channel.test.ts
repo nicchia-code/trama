@@ -65,8 +65,11 @@ async function server(handler: QuestionHandler, options: {
   return created;
 }
 
-function ask(request: QuestionRequest, endpoint?: string, signal?: AbortSignal) {
-  return askEditor(projectAt(projectRoot), request, { signal }, { runtimeDir, env: endpoint === undefined ? {} : { [QUESTION_ENDPOINT_ENV]: endpoint } });
+/** The terminal the agent of these tests runs in (`TRAMA_TERMINAL`). */
+const TERMINAL = "abc123";
+
+function ask(request: QuestionRequest, endpoint?: string, signal?: AbortSignal, terminal: string | null = TERMINAL) {
+  return askEditor(projectAt(projectRoot), request, { signal }, { runtimeDir, env: { ...(endpoint === undefined ? {} : { [QUESTION_ENDPOINT_ENV]: endpoint }), ...(terminal === null ? {} : { TRAMA_TERMINAL: terminal }) } });
 }
 
 function outcome<T>(promise: Promise<T>): Promise<T | Error> {
@@ -164,38 +167,36 @@ test("a worktree of the window's repository is another project, even on a trama 
   expect(presentations).toBe(0);
 });
 
-test("discovery selects focus recency among live same-project windows, never sends rounds to probes", async () => {
-  const presented: string[] = [];
-  const earlier = await server(async () => { presented.push("earlier"); return answer("choice", "earlier window"); }, { focusedAt: 10 });
-  await server(async () => { presented.push("later"); return answer("choice", "later window"); }, { focusedAt: 20 });
-  const stale = process.platform === "win32" ? "\\\\.\\pipe\\trama-question-00000000-0000-0000-0000-000000000000" : join(runtimeDir, "stale.sock");
-  writeFileSync(join(runtimeDir, "stale.json"), JSON.stringify({ projectId: questionProjectId(projectAt(projectRoot)), windowId: "stale", endpoint: stale, focusedAt: 999 }), { mode: 0o600 });
-  const otherRoot = join(root, "other");
-  mkdirSync(otherRoot);
-  const wrong = await server(async () => { presented.push("wrong project"); return answer("choice"); }, { projectRoot: otherRoot, focusedAt: 9999 });
-  // Even a misleading record cannot route a request before the live project's identity is checked.
-  writeFileSync(join(runtimeDir, "mismatch.json"), JSON.stringify({ projectId: questionProjectId(projectAt(projectRoot)), windowId: "mismatch", endpoint: wrong.endpoint, focusedAt: 99999 }), { mode: 0o600 });
-  expect(await ask(round())).toEqual(answer("choice", "later window"));
-  await earlier.focus(30);
-  expect(await ask(round())).toEqual(answer("choice", "earlier window"));
-  expect(presented).toEqual(["later", "earlier"]);
+test("a round needs both the endpoint and a recognised terminal: otherwise it is unavailable at once, whatever windows are live", async () => {
+  let presentations = 0;
+  const editor = await server(async () => { presentations++; return answer("choice"); });
+  expect(await ask(round())).toEqual(unavailableQuestions());
+  expect(await ask(round(), editor.endpoint, undefined, null)).toEqual(unavailableQuestions());
+  expect(await ask(round(), editor.endpoint, undefined, "not a terminal")).toEqual(unavailableQuestions());
+  expect(presentations).toBe(0);
 });
 
-test("the window learns whether a round comes from a Trama terminal by how it was addressed, never from discovery", async () => {
-  const origins: Array<boolean | undefined> = [];
-  const editor = await server(async (_project, _request, context) => { origins.push(context.fromTramaTerminal); return answer("choice"); });
-  await ask(round(), editor.endpoint);
-  await ask(round());
-  expect(origins).toEqual([true, false]);
+test("the window receives the terminal of the agent that asked, and a terminal it does not own gets unavailable without presentation", async () => {
+  const terminals: Array<string | undefined> = [];
+  const editor = await createQuestionServer({
+    project: projectAt(projectRoot),
+    runtimeDir,
+    handler: async (_project, _request, context) => { terminals.push(context.terminal); return answer("choice"); },
+    ownsTerminal: (terminal, owned) => terminal === TERMINAL && owned.length > 0,
+  });
+  servers.push(editor);
+  expect(await ask(round(), editor.endpoint)).toEqual(answer("choice"));
+  expect(await ask(round(), editor.endpoint, undefined, "zzz999")).toEqual(unavailableQuestions());
+  expect(terminals).toEqual([TERMINAL]);
 });
 
 test("explicit project routing works from an unrelated caller working directory", async () => {
-  await server(async () => answer("choice", "explicit project"));
+  const editor = await server(async () => answer("choice", "explicit project"));
   const elsewhere = join(root, "elsewhere");
   mkdirSync(elsewhere);
   const script = `import { askEditor } from ${JSON.stringify(join(import.meta.dir, "../src/core/question-channel.ts"))};
 import { projectAt } from ${JSON.stringify(join(import.meta.dir, "../src/core/store.ts"))};
-console.log(JSON.stringify(await askEditor(projectAt(${JSON.stringify(projectRoot)}), ${JSON.stringify(round())}, {}, {env:{},runtimeDir:${JSON.stringify(runtimeDir)}})));`;
+console.log(JSON.stringify(await askEditor(projectAt(${JSON.stringify(projectRoot)}), ${JSON.stringify(round())}, {}, {env:{TRAMA_QUESTION_ENDPOINT:${JSON.stringify(editor.endpoint)},TRAMA_TERMINAL:"abc123"},runtimeDir:${JSON.stringify(runtimeDir)}})));`;
   const child = spawn(process.execPath, ["-e", script], { cwd: elsewhere, stdio: ["pipe", "pipe", "pipe"] });
   children.push(child);
   let stdout = "";
@@ -248,7 +249,7 @@ test("a presenter lost after wire submission cannot turn the round into initial 
 });
 
 // Skipped on Windows: the peer here is a Unix socket file; Windows reaches the editor through a named pipe instead.
-(process.platform === "win32" ? test.skip : test)("an unavailable reply after admission cannot authorize fallback", async () => {
+(process.platform === "win32" ? test.skip : test)("a window that refuses the round answers unavailable, while a presenter lost after admission interrupts it and authorizes no fallback", async () => {
   const endpoint = join(root, "late-unavailable.sock");
   // The fake presenter is reached as a discovery record names it, and that record supplies the secret.
   mkdirSync(runtimeDir, { recursive: true });
@@ -257,11 +258,13 @@ test("a presenter lost after wire submission cannot turn the round into initial 
     const input = createInterface({ input: socket });
     socket.once("close", () => input.close());
     input.on("line", (line) => {
-      const message = JSON.parse(line) as { type: string };
+      const message = JSON.parse(line) as { type: string; terminal?: string };
       if (message.type === "hello") {
         socket.write(`${JSON.stringify({ type: "ready", projectId: questionProjectId(projectAt(projectRoot)), windowId: "lost-presenter", endpoint, focusedAt: 1 })}\n`);
       } else {
-        socket.end(`${JSON.stringify({ status: "unavailable", reason: "Presenter lost after admission" })}\n`);
+        // A terminal the window does not own is refused at once; any other round is lost with its presenter.
+        if (message.terminal === "refuse") socket.end(`${JSON.stringify({ status: "unavailable", reason: "Not a terminal of this window" })}\n`);
+        else socket.end();
       }
     });
   });
@@ -275,6 +278,7 @@ test("a presenter lost after wire submission cannot turn the round into initial 
     expect(result).toBeInstanceOf(QuestionInterruptedError);
     expect((result as QuestionInterruptedError).code).toBe("editor-interrupted");
     expect(result).not.toHaveProperty("answers");
+    expect(await ask(round(), endpoint, undefined, "refuse")).toEqual(unavailableQuestions());
   } finally {
     await new Promise<void>((resolve) => peer.close(() => resolve()));
   }
@@ -317,16 +321,15 @@ test("every request must carry the window secret, which the editor never sends b
   const ready = await firstReply(editor.endpoint, `${JSON.stringify({ ...hello, secret })}\n`);
   expect(ready).not.toContain(secret);
   expect(JSON.parse(ready)).toMatchObject({ type: "ready", projectId: hello.projectId });
-  expect(await ask(round())).toEqual(answer("choice"));
+  expect(await ask(round(), editor.endpoint)).toEqual(answer("choice"));
 });
 
-test("a discovery record without its secret does not reach the editor, by endpoint or by discovery", async () => {
+test("a discovery record without its secret does not reach the editor, by its endpoint", async () => {
   const editor = await server(async () => answer("choice"));
   const [name] = readdirSync(runtimeDir).filter((file) => file.endsWith(".json"));
   const recordPath = join(runtimeDir, name!);
   const record: Record<string, unknown> = JSON.parse(readFileSync(recordPath, "utf8"));
   writeFileSync(recordPath, JSON.stringify({ ...record, secret: undefined }), { mode: 0o600 });
-  expect(await ask(round())).toMatchObject({ status: "unavailable" });
   expect(await ask(round(), editor.endpoint)).toMatchObject({ status: "unavailable" });
   rmSync(recordPath);
   expect(await ask(round(), editor.endpoint)).toMatchObject({ status: "unavailable" });
@@ -459,7 +462,7 @@ test("the server rejects an invalid wire round before presenting even its valid 
   socket.destroy();
   output.close();
 });
-test("legacy agent-alive messages are consumed without invoking activity or idle callbacks", async () => {
+test("an agent-alive message of an older hook is refused like any unknown message, without invoking activity or idle callbacks", async () => {
   let activity = 0;
   let idle = 0;
   const editor = await createQuestionServer({
@@ -473,15 +476,15 @@ test("legacy agent-alive messages are consumed without invoking activity or idle
   const secret = windowSecret();
   const socket = createConnection({ path: editor.endpoint });
   const output = createInterface({ input: socket });
-  const handled = deferred<void>();
+  const refused = deferred<unknown>();
   output.on("line", (line) => {
     const message = JSON.parse(line);
     if (message.type === "ready") socket.write(`${JSON.stringify({ type: "agent-alive", terminal: "legacy", projectId: questionProjectId(projectAt(projectRoot)), secret })}\n`);
-    else if (message.type === "taken") handled.resolve();
+    else refused.resolve(message);
   });
   await once(socket, "connect");
   socket.write(`${JSON.stringify({ type: "hello", projectId: questionProjectId(projectAt(projectRoot)), secret })}\n`);
-  await handled.promise;
+  expect(await refused.promise).toMatchObject({ error: { code: "invalid-input" } });
   expect(activity).toBe(0);
   expect(idle).toBe(0);
   socket.destroy();
@@ -526,11 +529,13 @@ test("runtime files contain routing identities only, never pending questions or 
 // Skipped on Windows: POSIX mode bits on the runtime folder do not restrict access there.
 (process.platform === "win32" ? test.skip : test)("insecure Unix discovery storage cannot submit questions", async () => {
   let presented = 0;
-  await server(async () => { presented++; return answer("choice"); });
-  chmodSync(runtimeDir, 0o755);
-  expect(await ask(round())).toMatchObject({ status: "unavailable" });
+  const editor = await server(async () => { presented++; return answer("choice"); });
+  const [record] = readdirSync(runtimeDir).filter((file) => file.endsWith(".json"));
+  chmodSync(join(runtimeDir, record!), 0o644);
+  expect(await ask(round(), editor.endpoint)).toMatchObject({ status: "unavailable" });
   expect(presented).toBe(0);
-  chmodSync(runtimeDir, 0o700);
+  chmodSync(join(runtimeDir, record!), 0o600);
+  expect(await ask(round(), editor.endpoint)).toEqual(answer("choice"));
 });
 
 (process.platform === "win32" ? test.skip : test)("the record folder is always named after the process UID, whatever CURSOR_ORIG_UID says, and an unreachable editor has one reason", async () => {
@@ -545,9 +550,10 @@ test("runtime files contain routing identities only, never pending questions or 
     servers.push(created);
     expect(existsSync(join(xdg, `trama-q-${process.getuid!()}`))).toBe(true);
     expect(existsSync(join(xdg, "trama-q-4242"))).toBe(false);
-    expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toMatchObject({ status: "answered" });
+    const env = { [QUESTION_ENDPOINT_ENV]: created.endpoint, TRAMA_TERMINAL: TERMINAL };
+    expect(await askEditor(projectAt(projectRoot), round(), {}, { env })).toMatchObject({ status: "answered" });
     await created.dispose();
-    expect(await askEditor(projectAt(projectRoot), round(), {}, { env: {} })).toEqual(unavailableQuestions());
+    expect(await askEditor(projectAt(projectRoot), round(), {}, { env })).toEqual(unavailableQuestions());
     expect(unavailableQuestions()).toEqual({ status: "unavailable", reason: "Editor not available for this project. Do not ask in any other way: stop, tell the developer to open the project in the editor with Trama, and run the same trama question new again when they say to continue." });
   } finally {
     if (saved.xdg === undefined) delete process.env.XDG_RUNTIME_DIR; else process.env.XDG_RUNTIME_DIR = saved.xdg;

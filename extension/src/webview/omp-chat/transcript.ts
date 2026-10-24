@@ -1,5 +1,6 @@
 import type { PlanEntry, SessionNotification, ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
 import type { FirstMessage, FormAnswerMessage, FormView, PermissionView } from "../../omp-chat-protocol";
+import { inputDetail, isTitleDetail, titleDetail, type ToolDetail } from "./tool-detail";
 
 // What the conversation shows, built from the notifications of ACP as they arrive (`ui#omp-chat-conversation`). Everything here is pure: the components draw
 // the blocks, and the tests feed notifications to `applyUpdate`.
@@ -14,13 +15,13 @@ export type Block =
   /** `done` once something else followed it or the turn ended: only then is it announced. */
   | { kind: "agent"; id: number; messageId?: string; text: string; done: boolean }
   | { kind: "thought"; id: number; text: string; startedAt: number; endedAt?: number }
-  /** `error` is the first line of what omp reported while the call was not done; the conversation shows it only for a failed call, and keeps nothing of a call that succeeded. */
-  | { kind: "tool"; id: number; toolCallId: string; title: string; name?: string; toolKind: ToolKind; status: "pending" | "in_progress" | "completed" | "failed"; error?: string; places: FilePlace[] }
+  /** `error` is the first line of what omp reported while the call was not done; the conversation shows it only for a failed call, and keeps nothing of a call that succeeded. `detail` is what the row shows opened: the command or the cells from the call's arguments, otherwise its whole title; never its result. */
+  | { kind: "tool"; id: number; toolCallId: string; title: string; detail: ToolDetail; name?: string; toolKind: ToolKind; status: "pending" | "in_progress" | "completed" | "failed"; error?: string; places: FilePlace[] }
   | { kind: "error"; id: number; message: string }
   | { kind: "notice"; id: number; text: string }
   | { kind: "form"; id: number; form: FormView; answer?: FormAnswerMessage }
-  /** A permission request: the tool call as a compact row and omp's options in omp's order; `answer` is the chosen option id, `cancelled` after Stop or closing. */
-  | { kind: "permission"; id: number; requestId: string; title: string; toolKind: ToolKind; name?: string; places: FilePlace[]; options: PermissionView["options"]; answer?: string; cancelled?: boolean };
+  /** A permission request: the tool call as a compact row and omp's options in omp's order; `answer` is the chosen option id, `cancelled` after Stop or closing. `detail` is what its row shows opened, as for a tool call. */
+  | { kind: "permission"; id: number; requestId: string; title: string; detail: ToolDetail; toolKind: ToolKind; name?: string; places: FilePlace[]; options: PermissionView["options"]; answer?: string; cancelled?: boolean };
 
 export interface Transcript {
   blocks: Block[];
@@ -139,8 +140,16 @@ export function addPermission(t: Transcript, request: PermissionView, now: numbe
   const known = t.blocks.find((block): block is Extract<Block, { kind: "tool" }> => block.kind === "tool" && block.toolCallId === request.toolCall.toolCallId);
   const title = request.toolCall.title ?? known?.title ?? "Tool call";
   const toolKind: ToolKind = request.toolCall.kind ?? known?.toolKind ?? "other";
+  const name = typeof request.toolCall.name === "string" && request.toolCall.name !== "" ? request.toolCall.name : known?.name;
   const places = placesOf(request.toolCall.locations, request.toolCall.content);
-  return push(t, (id) => ({ kind: "permission", id, requestId: request.requestId, title, toolKind, ...(known?.name === undefined ? {} : { name: known.name }), places: places.length > 0 ? places : (known?.places ?? []), options: request.options }), now);
+  // The arguments the request carries, else what the call already in the conversation shows opened when that is more than its title.
+  const detail =
+    request.toolCall.rawInput !== undefined
+      ? (inputDetail(name, toolKind, request.toolCall.rawInput) ?? titleDetail(title))
+      : known !== undefined && !isTitleDetail(known.detail, known.title)
+        ? known.detail
+        : titleDetail(title);
+  return push(t, (id) => ({ kind: "permission", id, requestId: request.requestId, title, detail, toolKind, ...(name === undefined ? {} : { name }), places: places.length > 0 ? places : (known?.places ?? []), options: request.options }), now);
 }
 
 /** The developer chose an option: the request stays, read-only, with it. */
@@ -229,16 +238,19 @@ export function applyUpdate(t: Transcript, notification: SessionNotification, no
       const block = (id: number): Block => {
         const status = isStatus(update.status) ? update.status : "pending";
         const error = errorOf(status, outputOf(update.content, update.rawOutput));
+        const name = typeof update.name === "string" && update.name !== "" ? update.name : undefined;
+        const toolKind = update.kind ?? "other";
         return {
           kind: "tool",
           id,
           toolCallId: update.toolCallId,
           title: update.title,
-          toolKind: update.kind ?? "other",
+          detail: inputDetail(name, toolKind, update.rawInput) ?? titleDetail(update.title),
+          toolKind,
           status,
           places: placesOf(update.locations, update.content),
           ...(error === undefined ? {} : { error }),
-          ...(typeof update.name === "string" && update.name !== "" ? { name: update.name } : {}),
+          ...(name === undefined ? {} : { name }),
         };
       };
       if (known === -1) return push(t, block, now);
@@ -249,18 +261,22 @@ export function applyUpdate(t: Transcript, notification: SessionNotification, no
       if (known === -1) {
         const status = isStatus(update.status) ? update.status : "in_progress";
         const error = errorOf(status, outputOf(update.content, update.rawOutput));
+        const title = update.title ?? "Tool call";
+        const name = typeof update.name === "string" && update.name !== "" ? update.name : undefined;
+        const toolKind = update.kind ?? "other";
         return push(
           t,
           (id) => ({
             kind: "tool",
             id,
             toolCallId: update.toolCallId,
-            title: update.title ?? "Tool call",
-            toolKind: update.kind ?? "other",
+            title,
+            detail: inputDetail(name, toolKind, update.rawInput) ?? titleDetail(title),
+            toolKind,
             status,
             places: placesOf(update.locations, update.content),
             ...(error === undefined ? {} : { error }),
-            ...(typeof update.name === "string" && update.name !== "" ? { name: update.name } : {}),
+            ...(name === undefined ? {} : { name }),
           }),
           now,
         );
@@ -273,13 +289,19 @@ export function applyUpdate(t: Transcript, notification: SessionNotification, no
           const status = isStatus(update.status) ? update.status : block.status;
           const error = errorOf(status, outputOf(update.content, update.rawOutput), before);
           const places = placesOf(update.locations, update.content);
+          const title = typeof update.title === "string" ? update.title : block.title;
+          const name = typeof update.name === "string" && update.name !== "" ? update.name : block.name;
+          const toolKind = update.kind === undefined || update.kind === null ? block.toolKind : update.kind;
+          // The arguments, when the update carries them, say what the row shows opened; a detail that was only the title follows the title.
+          const detail = update.rawInput !== undefined ? (inputDetail(name, toolKind, update.rawInput) ?? titleDetail(title)) : isTitleDetail(block.detail, block.title) ? titleDetail(title) : block.detail;
           return {
             ...rest,
-            ...(typeof update.title === "string" ? { title: update.title } : {}),
-            ...(update.kind === undefined || update.kind === null ? {} : { toolKind: update.kind }),
+            title,
+            detail,
+            toolKind,
             status,
             ...(error === undefined ? {} : { error }),
-            ...(typeof update.name === "string" && update.name !== "" ? { name: update.name } : {}),
+            ...(name === undefined ? {} : { name }),
             places: places.length > 0 ? places : block.places,
           };
         }),

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execute } from "../src/cli/main";
@@ -52,13 +52,14 @@ test("a Task the agent has not taken is answered without contacting the editor",
   expect(asked).toEqual([]);
 });
 
-test("a Task taken with no known holder says so and changes nothing", async () => {
+test("a Task whose file says `agent: true` is held by nobody: not taken by the agent, and nothing changes", async () => {
   const asked: string[] = [];
   await window((id) => { asked.push(id); return { result: "alive", holder: "x" }; });
   const anonymous = task();
-  moveTask(p, anonymous, "doing", "agent");
+  moveTask(p, anonymous, "doing", "developer");
+  writeFileSync(getTask(p, anonymous).path, readFileSync(getTask(p, anonymous).path, "utf8").replace(/^agent: false$/m, "agent: true"));
   const before = readFileSync(getTask(p, anonymous).path, "utf8");
-  expect(await check(anonymous, true)).toEqual({ out: { task: anonymous, result: "unknown-holder" }, exit: 0 });
+  expect(await check(anonymous, true)).toEqual({ out: { task: anonymous, result: "not-taken" }, exit: 0 });
   expect(readFileSync(getTask(p, anonymous).path, "utf8")).toEqual(before);
   expect(asked).toEqual([]);
 });

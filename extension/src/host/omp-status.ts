@@ -1,21 +1,14 @@
 import { execFile, type ExecFileException } from "node:child_process";
+import { ompMeetsMinimum, parseOmpVersion } from "../../../src/core/omp-version";
 import { ompPathVariable } from "./model-lists";
 import { findOmp } from "./omp-update";
 
-/** What the Settings tab shows of omp: the version that answers, or why nothing does. `missing` is true only when the program was not found. */
+/** What the Settings tab shows of omp: the version that answers, or why nothing does. `missing` is true only when the program was not found; `tooOld` when the version is older than the minimum. */
 export interface OmpStatus {
   missing: boolean;
   version?: string;
   error?: string;
-}
-
-const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
-
-/** The version in the output of `omp --version`: the first version number of the first non-empty line, or that line. Undefined for no output. */
-export function parseOmpVersion(output: string): string | undefined {
-  const line = output.replace(ANSI, "").split(/\r?\n/).map((l) => l.trim()).find((l) => l !== "");
-  if (line === undefined) return undefined;
-  return /\d+\.\d+\.\d+[^\s/,)]*/.exec(line)?.[0] ?? line;
+  tooOld?: true;
 }
 
 /** The reason `omp --version` failed, in English, as the Settings tab and the model fields give it. */
@@ -38,7 +31,7 @@ export async function ompStatus(ompPath: string, timeoutMs = 15_000, env: NodeJS
   execFile(program, ["--version"], { timeout: timeoutMs, maxBuffer: 1024 * 1024, env: { ...env, PATH: ompPathVariable(program, env) } }, (error, stdout) => {
     if (error !== null) return resolve({ missing: error.code === "ENOENT", error: ompVersionError(error, where, timeoutMs) });
     const version = parseOmpVersion(stdout);
-    resolve(version === undefined ? { missing: false, error: ompVersionError(null, where, timeoutMs) } : { missing: false, version });
+    resolve(version === undefined ? { missing: false, error: ompVersionError(null, where, timeoutMs) } : { missing: false, version, ...(ompMeetsMinimum(version) ? {} : { tooOld: true as const }) });
   });
   return promise;
 }

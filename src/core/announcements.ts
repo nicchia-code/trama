@@ -1,10 +1,12 @@
 import { randomInt } from "node:crypto";
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomic } from "./atomic-write";
 import { TramaError, UsageError } from "./errors";
+import { withFileLock } from "./file-lock";
 import { enumField, idField, type Raw } from "./schema";
 import { cardName } from "./short-numbers";
-import { type Project, readDocument, writeDocument, writeFileEnsuringDir } from "./store";
+import { documentText, type Project, readDocument, writeFileEnsuringDir } from "./store";
 
 /**
  * An announcement is a card the agent is about to create, kept in a temporary file so the Board can show a ghost of
@@ -106,17 +108,16 @@ export function originFromEnv(env: Record<string, string | undefined>): AgentOri
   return terminal ? { terminal } : {};
 }
 
+/** A six-character ID no announcement file and no unowned comparison file has. */
 function newId(dir: string): string {
   for (;;) {
     let id = "";
     for (let i = 0; i < 6; i++) id += ID_CHARS[randomInt(ID_CHARS.length)];
-    if (!existsSync(join(dir, `${id}.md`))) return id;
+    if (!existsSync(join(dir, `${id}.md`)) && !existsSync(join(dir, `${id}.json`))) return id;
   }
 }
 
 function parse(raw: Raw, body: string, id: string, where: string): Announcement {
-  // Written when Cursor's chat could announce: an announcement belongs to a terminal only, so Trama neither reads, converts nor deletes such a file.
-  for (const legacy of ["chat", "conversation"]) if (raw[legacy] !== undefined) throw new TramaError(`${where}: "${legacy}" is no longer supported, since an announcement belongs to an agent terminal only; correct or delete the file`);
   const stamp = (key: string): string => {
     const v = raw[key];
     if (typeof v === "string" && !Number.isNaN(Date.parse(v))) return v;
@@ -202,6 +203,36 @@ function machineField(raw: Raw, where: string): string | null {
   throw new TramaError(`${where}: "machine" must be a machine name or none`);
 }
 
+const ANNOUNCEMENTS_LOCK = "announcements";
+const ID_PATTERN = /^[a-z0-9]{6}$/;
+const fileOf = (p: Project, id: string) => join(announcementsDir(p), `${id}.md`);
+
+/**
+ * Runs `fn` holding the `announcements` lock, so the read-modify-writes of announcements, across processes, run one
+ * after the other. Inside it, read the announcement again: only a read made under the lock is current.
+ */
+export function withAnnouncementsLock<T>(p: Project, fn: () => T): T {
+  return withFileLock(announcementsDir(p), ANNOUNCEMENTS_LOCK, fn);
+}
+
+/** As `withAnnouncementsLock`, but without an announcements folder there is nothing to change: `none` is returned and the lock does not create the folder. */
+function lockedIfAny<T>(p: Project, none: T, fn: () => T): T {
+  return existsSync(announcementsDir(p)) ? withAnnouncementsLock(p, fn) : none;
+}
+
+/** The announcement `id` as it is on disk now, or null when its file no longer exists (or cannot be read). */
+function readOne(p: Project, id: string): Announcement | null {
+  if (!ID_PATTERN.test(id)) return null;
+  const file = fileOf(p, id);
+  try {
+    const doc = readDocument(file);
+    return parse(doc.data, doc.body, id, file);
+  } catch {
+    return null;
+  }
+}
+
+/** Writes the announcement through a temporary file renamed over its file. Callers that change an existing announcement hold the lock and have read it under it. */
 function write(p: Project, a: Announcement) {
   const dir = announcementsDir(p);
   // The folder ignores itself and everything in it, so announcements are never versioned.
@@ -209,11 +240,11 @@ function write(p: Project, a: Announcement) {
   if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
   const { id, title, phase, drifts, machine, refs, code, texts, proposals, notes, ...data } = a;
   // `phase`, `drifts`, `machine`, `refs`, `code`, `texts`, `proposals` and `notes` are written only when set, so the other announcements look as before.
-  writeDocument(join(dir, `${id}.md`), { ...data, ...(phase ? { phase } : {}), ...(drifts.length > 0 ? { drifts } : {}), ...(machine ? { machine } : {}), ...(refs.length > 0 ? { refs } : {}), ...(code ? { code } : {}), ...(Object.keys(texts).length > 0 ? { texts } : {}), ...(proposals.length > 0 ? { proposals } : {}), ...(notes.length > 0 ? { notes } : {}) }, `# ${title}\n`);
+  writeFileAtomic(fileOf(p, id), documentText({ ...data, ...(phase ? { phase } : {}), ...(drifts.length > 0 ? { drifts } : {}), ...(machine ? { machine } : {}), ...(refs.length > 0 ? { refs } : {}), ...(code ? { code } : {}), ...(Object.keys(texts).length > 0 ? { texts } : {}), ...(proposals.length > 0 ? { proposals } : {}), ...(notes.length > 0 ? { notes } : {}) }, `# ${title}\n`));
 }
 
 function remove(p: Project, id: string) {
-  rmSync(join(announcementsDir(p), `${id}.md`), { force: true });
+  rmSync(fileOf(p, id), { force: true });
 }
 
 /**
@@ -261,36 +292,75 @@ export function announce(
   if ((input.kind === "comparison") !== (input.machine !== undefined)) throw new TramaError(input.kind === "comparison" ? "A comparison needs a machine" : "Only a comparison has a machine");
   if (input.kind !== "comparison" && (input.refs !== undefined || input.code !== undefined || input.texts !== undefined)) throw new TramaError("Only a comparison has references and a code fingerprint");
   // A scan the agent announces is the check of a scan Trama announced at launch, if one still waits in the same terminal: it takes that one over. So is a Drift of Unify Drifts, announced by Trama at launch, and it keeps its title.
-  if (((input.kind === "check" && input.phase === "scanning") || input.kind === "drift") && input.source === undefined && input.terminal !== undefined) {
-    // The oldest one of the same terminal wins.
-    const waiting = listAnnouncements(p).find((a) => a.kind === input.kind && a.source === "request" && a.terminal === input.terminal);
-    if (waiting) {
-      const taken: Announcement = { ...waiting, ...(input.kind === "check" ? { phase: "scanning" as const } : {}), touched: now.toISOString() };
-      write(p, taken);
-      return taken;
+  // Under the lock the oldest waiting one is read again, so two agents of a terminal never take the same file at once and a ghost withdrawn meanwhile is not brought back.
+  return withAnnouncementsLock(p, () => {
+    if (((input.kind === "check" && input.phase === "scanning") || input.kind === "drift") && input.source === undefined && input.terminal !== undefined) {
+      // The oldest one of the same terminal wins.
+      const waiting = listAnnouncements(p).find((a) => a.kind === input.kind && a.source === "request" && a.terminal === input.terminal);
+      if (waiting) {
+        const taken: Announcement = { ...waiting, ...(input.kind === "check" ? { phase: "scanning" as const } : {}), touched: now.toISOString() };
+        write(p, taken);
+        return taken;
+      }
     }
+    const stamp = now.toISOString();
+    const announcement: Announcement = {
+      id: newId(announcementsDir(p)),
+      kind: input.kind,
+      source: input.source ?? "agent",
+      proposal: input.proposal ?? null,
+      announced: nextAnnouncedStamp(p),
+      touched: stamp,
+      terminal: input.terminal ?? null,
+      phase: input.phase ?? null,
+      drifts: input.drifts ?? [],
+      machine: input.machine ?? null,
+      refs: input.refs ?? [],
+      code: input.code ?? null,
+      texts: input.texts ?? {},
+      proposals: [],
+      notes: [],
+      title,
+    };
+    write(p, announcement);
+    return announcement;
+  });
+}
+
+/** What a comparison briefed outside a Trama terminal keeps: the code fingerprint and the texts it compared, for the registry. */
+export interface UnownedComparison {
+  code: string | null;
+  texts: Record<string, string>;
+}
+
+const unownedFile = (p: Project, id: string) => join(announcementsDir(p), `${id}.json`);
+
+/**
+ * A comparison briefed without a terminal has no announcement, so no ghost that a terminal's end or an orphan withdrawal
+ * could take: its data go to `<id>.json` beside the announcements, which neither the Snapshot nor a withdrawal reads.
+ * Returns the ID the briefing prints; `deliverComparison` deletes the file.
+ */
+export function keepUnownedComparison(p: Project, data: UnownedComparison): string {
+  return withAnnouncementsLock(p, () => {
+    const id = newId(announcementsDir(p));
+    writeFileAtomic(unownedFile(p, id), `${JSON.stringify(data, null, 2)}\n`);
+    return id;
+  });
+}
+
+/** The data kept by `keepUnownedComparison` for `id`, or null when there are none (or they cannot be read). */
+export function readUnownedComparison(p: Project, id: string): UnownedComparison | null {
+  if (!ID_PATTERN.test(id)) return null;
+  try {
+    const raw: unknown = JSON.parse(readFileSync(unownedFile(p, id), "utf8"));
+    if (typeof raw !== "object" || raw === null) return null;
+    const { code, texts } = raw as { code?: unknown; texts?: unknown };
+    if (code !== null && typeof code !== "string") return null;
+    if (typeof texts !== "object" || texts === null || Array.isArray(texts) || !Object.values(texts).every((t) => typeof t === "string")) return null;
+    return { code: code as string | null, texts: texts as Record<string, string> };
+  } catch {
+    return null;
   }
-  const stamp = now.toISOString();
-  const announcement: Announcement = {
-    id: newId(announcementsDir(p)),
-    kind: input.kind,
-    source: input.source ?? "agent",
-    proposal: input.proposal ?? null,
-    announced: nextAnnouncedStamp(p),
-    touched: stamp,
-    terminal: input.terminal ?? null,
-    phase: input.phase ?? null,
-    drifts: input.drifts ?? [],
-    machine: input.machine ?? null,
-    refs: input.refs ?? [],
-    code: input.code ?? null,
-    texts: input.texts ?? {},
-    proposals: [],
-    notes: [],
-    title,
-  };
-  write(p, announcement);
-  return announcement;
 }
 
 /** The title of a Resolve Drifts ghost: «Resolving Drift <short number>» for the one Drift it names. Undefined when it names none. */
@@ -321,27 +391,32 @@ export function announcementNote(p: Project, id: string | undefined, kind: Annou
 export function bindDraft(p: Project, proposal: { id: string; title: string }, announcementId?: string, origin: AgentOrigin = {}, now = new Date()): Announcement | null {
   const terminal = origin.terminal;
   if (terminal === undefined) return null;
-  const all = listAnnouncements(p);
-  const target = announcementId !== undefined
-    ? all.find((a) => a.id === announcementId && (a.kind === "proposal" || a.kind === "drift") && a.proposal === null && a.terminal === terminal)
-    : all.find((a) => a.kind === "proposal" && a.source === "request" && a.proposal === null && a.terminal === terminal);
-  if (announcementId !== undefined) {
-    const comparison = all.find((a) => a.id === announcementId && a.kind === "comparison" && a.terminal === terminal);
-    if (comparison) {
-      // A comparison keeps its title and its ghost: the Draft only joins its list.
-      const joined = { ...comparison, proposals: [...comparison.proposals, proposal.id], touched: now.toISOString() };
-      write(p, joined);
-      return joined;
+  // An announcement named by ID needs the folder to exist; without a name a new ghost creates it.
+  if (announcementId !== undefined && !existsSync(announcementsDir(p))) return null;
+  // Everything is read under the lock, so a ghost delivered or withdrawn meanwhile is not bound and not brought back.
+  return withAnnouncementsLock(p, () => {
+    const all = listAnnouncements(p);
+    const target = announcementId !== undefined
+      ? all.find((a) => a.id === announcementId && (a.kind === "proposal" || a.kind === "drift") && a.proposal === null && a.terminal === terminal)
+      : all.find((a) => a.kind === "proposal" && a.source === "request" && a.proposal === null && a.terminal === terminal);
+    if (announcementId !== undefined) {
+      const comparison = all.find((a) => a.id === announcementId && a.kind === "comparison" && a.terminal === terminal);
+      if (comparison) {
+        // A comparison keeps its title and its ghost: the Draft only joins its list.
+        const joined = { ...comparison, proposals: [...comparison.proposals, proposal.id], touched: now.toISOString() };
+        write(p, joined);
+        return joined;
+      }
     }
-  }
-  if (target) {
-    // A Drift and a Resolve Drifts announcement keep their own title; a Proposal's ghost takes the Draft's title.
-    const bound = { ...target, title: target.kind === "drift" || target.drifts.length > 0 ? target.title : proposal.title, proposal: proposal.id, touched: now.toISOString() };
-    write(p, bound);
-    return bound;
-  }
-  if (announcementId !== undefined) return null;
-  return announce(p, { kind: "proposal", title: proposal.title, proposal: proposal.id, ...origin }, now);
+    if (target) {
+      // A Drift and a Resolve Drifts announcement keep their own title; a Proposal's ghost takes the Draft's title.
+      const bound = { ...target, title: target.kind === "drift" || target.drifts.length > 0 ? target.title : proposal.title, proposal: proposal.id, touched: now.toISOString() };
+      write(p, bound);
+      return bound;
+    }
+    if (announcementId !== undefined) return null;
+    return announce(p, { kind: "proposal", title: proposal.title, proposal: proposal.id, ...origin }, now);
+  });
 }
 
 /**
@@ -350,48 +425,53 @@ export function bindDraft(p: Project, proposal: { id: string; title: string }, a
  * the Drift delivers it.
  */
 export function removeBoundTo(p: Project, proposalId: string, handedOver = false) {
-  for (const a of listAnnouncements(p)) {
-    if (a.kind === "comparison") {
-      // A comparison keeps its ghost; only the Draft leaves its list.
-      if (a.proposals.includes(proposalId)) write(p, { ...a, proposals: a.proposals.filter((id) => id !== proposalId) });
-    } else if (a.proposal === proposalId && !(handedOver && a.kind === "drift")) remove(p, a.id);
-  }
+  lockedIfAny(p, undefined, () => {
+    for (const a of listAnnouncements(p)) {
+      if (a.kind === "comparison") {
+        // A comparison keeps its ghost; only the Draft leaves its list.
+        if (a.proposals.includes(proposalId)) write(p, { ...a, proposals: a.proposals.filter((id) => id !== proposalId) });
+      } else if (a.proposal === proposalId && !(handedOver && a.kind === "drift")) remove(p, a.id);
+    }
+  });
 }
 
 /**
  * A Task or a Drift was filed, and its matching announcement, if any, is delivered. Any other ID is ignored.
  */
 export function deliverCard(p: Project, id: string | undefined, kind: "task" | "drift") {
-  const a = id ? getAnnouncement(p, id) : null;
-  if (a?.kind === kind) remove(p, a.id);
+  if (id === undefined) return;
+  lockedIfAny(p, undefined, () => {
+    if (readOne(p, id)?.kind === kind) remove(p, id);
+  });
 }
 
-/** A comparison is delivered by its `comparison move`: its ghost goes, and no notice is given. Any other ID is ignored. */
+/** A comparison is delivered by its `comparison move`: its ghost goes, or the file of one briefed without a terminal, and no notice is given. Any other ID is ignored. */
 export function deliverComparison(p: Project, id: string): void {
-  const a = getAnnouncement(p, id);
-  if (a?.kind === "comparison") remove(p, a.id);
+  lockedIfAny(p, undefined, () => {
+    if (readOne(p, id)?.kind === "comparison") remove(p, id);
+    if (ID_PATTERN.test(id)) rmSync(unownedFile(p, id), { force: true });
+  });
 }
-
-const findCheck = (p: Project, id: string) => {
-  const a = getAnnouncement(p, id);
-  return a?.kind === "check" ? a : null;
-};
 
 /** The order a check's phases can only move in. */
 const PHASE_RANK: Record<CheckPhase, number> = { verifying: 0, scanning: 1, history: 2 };
 
+type PhaseChange = "changed" | "unchanged" | "refused" | "missing";
+
 /**
  * The agent moves a check forward: Verifying → Scanning, Verifying or Scanning → History. Returns `changed`, `unchanged`
  * when it is already in `phase`, `refused` for a backward move (nothing changes), or `missing` when `id` is no check that
- * still exists: never an error, so the agent goes on.
+ * still exists (also when it was delivered or withdrawn while this waited for the lock): never an error, so the agent goes on.
  */
-export function changeCheckPhase(p: Project, id: string, phase: CheckPhase, now = new Date()): "changed" | "unchanged" | "refused" | "missing" {
-  const check = findCheck(p, id);
-  if (!check) return "missing";
-  if (check.phase === phase) return "unchanged";
-  if (check.phase !== null && PHASE_RANK[check.phase] > PHASE_RANK[phase]) return "refused";
-  write(p, { ...check, phase, touched: now.toISOString() });
-  return "changed";
+export function changeCheckPhase(p: Project, id: string, phase: CheckPhase, now = new Date()): PhaseChange {
+  return lockedIfAny<PhaseChange>(p, "missing", () => {
+    const check = readOne(p, id);
+    if (check?.kind !== "check") return "missing";
+    if (check.phase === phase) return "unchanged";
+    if (check.phase !== null && PHASE_RANK[check.phase] > PHASE_RANK[phase]) return "refused";
+    write(p, { ...check, phase, touched: now.toISOString() });
+    return "changed";
+  });
 }
 
 /** Whether an announcement belongs to the agent terminal an agent runs in. These are the rules by which a terminal's end withdraws its announcements. */
@@ -410,8 +490,9 @@ export interface DeclaredNote {
  * announcement still waiting that belongs to the agent's terminal, a comparison excepted. The note is
  * one line (line breaks become spaces, the ends are trimmed) of at most `NOTE_LENGTH` characters; each announcement keeps
  * at most `MAX_NOTES`, and a note equal to the last one only renews its instant. Nothing else of the announcement changes,
- * `touched` included. An empty note is a usage error and an unknown `id` an error; no announcement to go to is not one,
- * and writes nothing.
+ * `touched` included. An empty note is a usage error and an `id` that no longer exists (unknown, delivered or withdrawn,
+ * also while this waited for the lock) an error; no announcement to go to is not one, and writes nothing. The
+ * announcements are read and written under the lock, so no note is lost to another change and a ghost that went stays gone.
  */
 export function declareNote(p: Project, input: { id?: string; text: string } & AgentOrigin, now = new Date()): DeclaredNote {
   let text = input.text.replace(/\s*[\r\n\u2028\u2029]+\s*/g, " ").trim();
@@ -419,60 +500,67 @@ export function declareNote(p: Project, input: { id?: string; text: string } & A
   const chars = [...text];
   const truncated = chars.length > NOTE_LENGTH;
   if (truncated) text = `${chars.slice(0, NOTE_LENGTH - 1).join("")}…`;
-  const all = listAnnouncements(p);
-  let targets: Announcement[];
-  if (input.id !== undefined) {
-    const named = all.find((a) => a.id === input.id);
-    if (!named) throw new TramaError(`No announcement "${input.id}" is waiting (unknown, delivered or withdrawn); the note was not saved.`);
-    targets = [named];
-  } else {
-    // Without a terminal there is no announcement to go to.
-    targets = input.terminal === undefined ? [] : all.filter((a) => a.kind !== "comparison" && ownedBy(a, input));
+  const missing = (id: string) => new TramaError(`Announcement "${id}" no longer exists (unknown, delivered or withdrawn); the note was not saved.`);
+  if (!existsSync(announcementsDir(p))) {
+    if (input.id !== undefined) throw missing(input.id);
+    return { announcements: [], truncated };
   }
-  const at = now.toISOString();
-  const announcements: Announcement[] = [];
-  for (const a of targets) {
-    // A ghost delivered or withdrawn since it was read stays gone: `write` would bring it back.
-    if (!existsSync(join(announcementsDir(p), `${a.id}.md`))) continue;
-    const last = a.notes[a.notes.length - 1];
-    const notes = last?.text === text ? [...a.notes.slice(0, -1), { at, text }] : [...a.notes, { at, text }].slice(-MAX_NOTES);
-    const noted = { ...a, notes };
-    write(p, noted);
-    announcements.push(noted);
-  }
-  return { announcements, truncated };
-}
-
-/** A check the agent finished, as the editor is told it over the local channel. */
-export interface FinishedCheck {
-  id: string;
-  title: string;
-  phase: CheckPhase | null;
-  terminal: string | null;
-  touched: string;
-  failed: boolean;
+  return withAnnouncementsLock(p, () => {
+    let targets: Announcement[];
+    if (input.id !== undefined) {
+      const named = readOne(p, input.id);
+      if (!named) throw missing(input.id);
+      targets = [named];
+    } else {
+      // Without a terminal there is no announcement to go to.
+      targets = input.terminal === undefined ? [] : listAnnouncements(p).filter((a) => a.kind !== "comparison" && ownedBy(a, input));
+    }
+    const at = now.toISOString();
+    const announcements: Announcement[] = [];
+    for (const a of targets) {
+      const last = a.notes[a.notes.length - 1];
+      const notes = last?.text === text ? [...a.notes.slice(0, -1), { at, text }] : [...a.notes, { at, text }].slice(-MAX_NOTES);
+      const noted = { ...a, notes };
+      write(p, noted);
+      announcements.push(noted);
+    }
+    return { announcements, truncated };
+  });
 }
 
 /**
- * The outcome of a check the agent finished, for the editor over the local channel. Reading it changes nothing: the
- * caller forgets the ghost with `forgetCheck` only after it has tried the channel, so the editor hears of it first.
+ * A check the agent finished is delivered, whether it succeeded or failed (the phase timings tell the two apart): its
+ * ghost goes. Returns the check as it was, or null when `id` is no check that still exists.
  */
-export function checkOutcome(p: Project, id: string, failed = false): FinishedCheck | null {
-  const check = findCheck(p, id);
-  if (!check) return null;
-  return { id: check.id, title: check.title, phase: check.phase, terminal: check.terminal, touched: check.touched, failed };
+export function deliverCheck(p: Project, id: string): Announcement | null {
+  return lockedIfAny<Announcement | null>(p, null, () => {
+    const check = readOne(p, id);
+    if (check?.kind !== "check") return null;
+    remove(p, id);
+    return check;
+  });
 }
 
-/** The ghost of a finished check goes, whether or not the editor heard of its outcome. */
-export function forgetCheck(p: Project, id: string): void {
-  remove(p, id);
+/**
+ * Gives the announcement bound to Draft `proposalId` the title `title`, when it is still a Proposal's ghost named by its
+ * Draft (not one of Resolve Drifts, not a Drift's, not a comparison's) and its title differs. Read and written under the
+ * lock, and only while its file exists: a ghost delivered or withdrawn is never brought back. Everything else of the
+ * announcement, identity and `touched` included, stays. Returns whether a title was written.
+ */
+export function retitleBoundAnnouncement(p: Project, id: string, proposalId: string, title: string): boolean {
+  return lockedIfAny(p, false, () => {
+    const current = readOne(p, id);
+    if (!current || current.kind !== "proposal" || current.proposal !== proposalId || current.drifts.length > 0 || current.title === title) return false;
+    write(p, { ...current, title });
+    return true;
+  });
 }
-
-
 
 /** Withdraws every announcement still waiting, or only `ids`; returns what was withdrawn so the developer can be told. */
 export function withdrawAll(p: Project, ids?: readonly string[]): Announcement[] {
-  const gone = listAnnouncements(p).filter((a) => !ids || ids.includes(a.id));
-  for (const a of gone) remove(p, a.id);
-  return gone;
+  return lockedIfAny<Announcement[]>(p, [], () => {
+    const gone = listAnnouncements(p).filter((a) => !ids || ids.includes(a.id));
+    for (const a of gone) remove(p, a.id);
+    return gone;
+  });
 }

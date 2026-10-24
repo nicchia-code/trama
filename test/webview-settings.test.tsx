@@ -237,6 +237,14 @@ test("omp that is missing adds Install omp inside the box, which sends installOm
   expect(posted).toEqual([{ type: "installOmp" }]);
 });
 
+test("omp older than the minimum shows the sentence in place of its version, with Install omp inside the box", () => {
+  const { region, posted } = ompRow({ state: "done", missing: false, version: "18.12.5", models: 3, tooOld: true });
+  expect(region.textContent).toContain("Trama needs omp 18.12.6 or later; the installed omp is 18.12.5.");
+  expect(region.textContent).not.toContain("answered with");
+  fireEvent.click(within(region).getByRole("button", { name: /Install omp/ }));
+  expect(posted).toEqual([{ type: "installOmp" }]);
+});
+
 test("the mounted tab takes the host's ompStatus, and asks again when it becomes visible", () => {
   const posted: ToHost[] = [];
   const page = render(<></>);

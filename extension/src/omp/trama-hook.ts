@@ -25,26 +25,31 @@ export default function tramaHook(pi: Pi): void {
   const terminal = process.env["TRAMA_TERMINAL"];
   if (!terminal) return;
 
+  // In an omp Chat conversation (`TRAMA_ACP`) Trama started the process and knows the end of the work from omp's answer to the prompt: the hook says neither.
+  const acp = process.env["TRAMA_ACP"] !== undefined && process.env["TRAMA_ACP"] !== "";
+
   const sendAgentEvent = async (cwd: string) => {
     await pi.exec("trama", ["hook", "idle"], { cwd, timeout: 3000 }).catch(() => undefined);
   };
 
-  // `agent-hook.STARTED`: said once, by the main session only, at its first `session_start` or, if omp gives none before the turn, its first `agent_start`.
-  let started = false;
-  const sendStarted = (ctx: Ctx) => {
-    if (started || ctx.agent?.kind !== "main") return;
-    started = true;
-    void pi.exec("trama", ["hook", "start", String(process.pid)], { cwd: ctx.cwd, timeout: 3000 }).catch(() => undefined);
-  };
-  pi.on("session_start", (_event, ctx) => sendStarted(ctx));
-  pi.on("agent_start", (_event, ctx) => sendStarted(ctx));
+  if (!acp) {
+    // `agent-hook.STARTED`: said once, by the main session only, at its first `session_start` or, if omp gives none before the turn, its first `agent_start`.
+    let started = false;
+    const sendStarted = (ctx: Ctx) => {
+      if (started || ctx.agent?.kind !== "main") return;
+      started = true;
+      void pi.exec("trama", ["hook", "start", String(process.pid)], { cwd: ctx.cwd, timeout: 3000 }).catch(() => undefined);
+    };
+    pi.on("session_start", (_event, ctx) => sendStarted(ctx));
+    pi.on("agent_start", (_event, ctx) => sendStarted(ctx));
 
-  pi.on("session_stop", (_event, ctx) => {
-    if (ctx.agent?.kind !== "sub") void sendAgentEvent(ctx.cwd);
-  });
-  pi.on("session_shutdown", (_event, ctx) => {
-    if (ctx.agent?.kind === "main") void sendAgentEvent(ctx.cwd);
-  });
+    pi.on("session_stop", (_event, ctx) => {
+      if (ctx.agent?.kind !== "sub") void sendAgentEvent(ctx.cwd);
+    });
+    pi.on("session_shutdown", (_event, ctx) => {
+      if (ctx.agent?.kind === "main") void sendAgentEvent(ctx.cwd);
+    });
+  }
 
   // The parent of each agent, as the events show it: the ancestors of a writer are read from here.
   const parents = new Map<string, string>();

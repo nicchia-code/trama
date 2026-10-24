@@ -2,6 +2,7 @@ import { execFile, type ExecFileException } from "node:child_process";
 import { access, constants } from "node:fs/promises";
 import { homedir } from "node:os";
 import { checkHolds, ompFileName, ompSearchFolders, readUpdateCheck, type StoredCheck } from "../../../src/core/omp-update";
+import { ompMeetsMinimum, parseOmpVersion } from "../../../src/core/omp-version";
 import { extname, join } from "node:path";
 import { ompPathVariable } from "./model-lists";
 
@@ -13,6 +14,7 @@ export interface UpdateStore {
 
 export const OMP_UPDATE_KEY = "trama.ompUpdateCheck";
 const CHECK_TIMEOUT_MS = 30_000;
+const VERSION_TIMEOUT_MS = 15_000;
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 
 let store: UpdateStore | undefined;
@@ -100,25 +102,31 @@ function run(program: string, args: string[], timeoutMs: number, env: NodeJS.Pro
 export interface OmpUpdateOutcome {
   /** The program was not found. */
   missing?: true;
-  /** The version that answers, when it is known. */
+  /** The version that answers (`omp --version`, or the version omp was updated to), when it is known. */
   version?: string;
   /** Why the check or the update failed; omp stayed as it was. */
   updateError?: string;
   /** The version omp was updated to. */
   updated?: string;
+  /** omp is older than the minimum, or its version cannot be read, after the check and the update that could be done. */
+  tooOld?: true;
 }
 
 const inFlight = new Map<string, { promise: Promise<OmpUpdateOutcome>; listeners: Set<(version: string) => void>; updating?: string }>();
 
+/** `outcome` with `tooOld` when its version is below the minimum or unknown. */
+const judged = (outcome: OmpUpdateOutcome): OmpUpdateOutcome => (ompMeetsMinimum(outcome.version) ? outcome : { ...outcome, tooOld: true });
+
 /**
- * The check of updates and, with a newer version, the update of omp, before a launch or the wizard's check. An outcome younger than an hour
- * for the same program holds and nothing runs; a check or update already running is joined, not repeated. `onUpdating` hears the new version
- * when the update starts.
+ * The check of updates and, with a newer version, the update of omp, before a launch or the wizard's check; `omp --version` is read with the check.
+ * An outcome younger than an hour for the same program holds and nothing runs; a check or update already running is joined, not repeated.
+ * `onUpdating` hears the new version when the update starts. An omp older than the minimum, or whose version cannot be read, that the update does
+ * not bring to the minimum comes back with `tooOld`.
  */
 export function ensureOmpUpdated(program: string, onUpdating?: (version: string) => void, env: NodeJS.ProcessEnv = process.env, now: () => number = Date.now): Promise<OmpUpdateOutcome> {
   const last = stored();
   if (last !== undefined && checkHolds(last, program, now())) {
-    return Promise.resolve(last?.version === undefined ? {} : { version: last.version });
+    return Promise.resolve(judged(last.version === undefined ? {} : { version: last.version }));
   }
   const running = inFlight.get(program);
   if (running !== undefined) {
@@ -131,30 +139,32 @@ export function ensureOmpUpdated(program: string, onUpdating?: (version: string)
   const entry: { promise: Promise<OmpUpdateOutcome>; listeners: Set<(version: string) => void>; updating?: string } = { promise: Promise.resolve({}), listeners: new Set(onUpdating === undefined ? [] : [onUpdating]) };
   entry.promise = (async (): Promise<OmpUpdateOutcome> => {
     const record = (version: string | undefined): void => save({ checkedAt: new Date(now()).toISOString(), omp: program, ...(version === undefined ? {} : { version }) });
-    const checked = await run(program, ["update", "--check"], CHECK_TIMEOUT_MS, env);
+    const [checked, asked] = await Promise.all([run(program, ["update", "--check"], CHECK_TIMEOUT_MS, env), run(program, ["--version"], VERSION_TIMEOUT_MS, env)]);
+    if ((!checked.ok && checked.missing) || (!asked.ok && asked.missing)) return { missing: true };
+    const installed = asked.ok ? parseOmpVersion(asked.stdout) : undefined;
+    const known = installed === undefined ? {} : { version: installed };
     if (!checked.ok) {
-      if (checked.missing) return { missing: true };
-      record(undefined);
-      return { updateError: checked.reason("omp update --check did not answer", "within 30 s") };
+      record(installed);
+      return judged({ updateError: checked.reason("omp update --check did not answer", "within 30 s"), ...known });
     }
     const reading = readUpdateCheck(checked.stdout);
     if (reading.kind === "unexpected") {
-      record(undefined);
-      return { updateError: "omp update --check gave an unexpected answer" };
+      record(installed);
+      return judged({ updateError: "omp update --check gave an unexpected answer", ...known });
     }
     if (reading.kind === "latest") {
-      record(reading.version);
-      return reading.version === undefined ? {} : { version: reading.version };
+      record(installed);
+      return judged(known);
     }
     entry.updating = reading.version;
     for (const listener of entry.listeners) listener(reading.version);
     const updated = await run(program, ["update"], UPDATE_TIMEOUT_MS, env);
     if (!updated.ok) {
-      record(reading.current);
-      return { updateError: updated.reason("omp update did not finish", "within 5 minutes"), ...(reading.current === undefined ? {} : { version: reading.current }) };
+      record(installed);
+      return judged({ updateError: updated.reason("omp update did not finish", "within 5 minutes"), ...known });
     }
     record(reading.version);
-    return { version: reading.version, updated: reading.version };
+    return judged({ version: reading.version, updated: reading.version });
   })().finally(() => inFlight.delete(program));
   inFlight.set(program, entry);
   return entry.promise;

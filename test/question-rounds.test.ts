@@ -17,6 +17,32 @@ function controlledWindow() {
 }
 
 describe("window question rounds", () => {
+  test("interrupting a terminal's rounds ends its presented and queued rounds only, and the oldest round left opens", async () => {
+    const { queue, sessions } = controlledWindow();
+    const outcome = (promise: Promise<unknown>) => promise.catch((error: unknown) => error);
+    const a = outcome(queue.ask(round("A"), { terminal: "aaa111" }));
+    const b = outcome(queue.ask(round("B"), { terminal: "bbb222" }));
+    const c = outcome(queue.ask(round("C"), { terminal: "aaa111" }));
+    const d = outcome(queue.ask(round("D"), { terminal: "bbb222" }));
+    expect(sessions.map((session) => session.id)).toEqual(["A"]);
+    queue.interrupt((context) => context.terminal === "aaa111");
+    expect(await a).toBeInstanceOf(QuestionInterruptedError);
+    expect(await c).toBeInstanceOf(QuestionInterruptedError);
+    expect(sessions[0]!.signal.aborted).toBe(true);
+    expect(sessions[0]!.signal.reason).toBeInstanceOf(QuestionInterruptedError);
+    // The other terminal's rounds stay: the oldest of them is presented now, and the interrupted queued round never was.
+    expect(sessions.map((session) => session.id)).toEqual(["A", "B"]);
+    expect(sessions[1]!.signal.aborted).toBe(false);
+    sessions[1]!.complete(answer);
+    expect(await b).toEqual(answer);
+    expect(sessions.map((session) => session.id)).toEqual(["A", "B", "D"]);
+    sessions[2]!.complete(answer);
+    expect(await d).toEqual(answer);
+    // Nothing matches: nothing changes.
+    queue.interrupt(() => true);
+    expect(queue.busy).toBe(false);
+  });
+
   test("busy and onIdle track the admitted round until its answer is delivered", async () => {
     let idle = 0;
     const sessions: { complete: (result: CompletedQuestionRound) => void }[] = [];

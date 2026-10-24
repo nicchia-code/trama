@@ -111,9 +111,14 @@ export function readDocument(path: string): Document {
   return { data: asObject(data, path), body: m[2] as string };
 }
 
-export function writeDocument(path: string, data: object, body: string) {
+/** The text of a Markdown document: YAML front matter of `data`, then `body`. */
+export function documentText(data: object, body: string): string {
   const yaml = stringify(data, { lineWidth: 0 }).trimEnd();
-  writeFileEnsuringDir(path, `---\n${yaml}\n---\n${body.replace(/^\n+/, "")}`);
+  return `---\n${yaml}\n---\n${body.replace(/^\n+/, "")}`;
+}
+
+export function writeDocument(path: string, data: object, body: string) {
+  writeFileEnsuringDir(path, documentText(data, body));
 }
 
 export function slugify(title: string): string {

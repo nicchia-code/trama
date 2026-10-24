@@ -104,9 +104,17 @@ export function releaseFiledWork(root: string, holder: string): void {
   if (released) changed();
 }
 
-/** Whether a filing message's holder is an agent this window follows: a Trama terminal (or omp Chat conversation) it started with hooks. Only such a window holds the Drift, Proposal or Task. */
+const jobFollowers = new Set<(holder: string) => boolean>();
+
+/** Adds what follows the job conversations of omp Chat of this window: they are followed by their own turn end, not by the hook. Returns what removes it. */
+export function addJobFollower(follower: (holder: string) => boolean): { dispose(): void } {
+  jobFollowers.add(follower);
+  return { dispose: () => void jobFollowers.delete(follower) };
+}
+
+/** Whether a filing message's holder is an agent this window follows for a job: a Trama terminal with its hook, or an omp Chat conversation of a job that has not ended. Only such a window holds the Drift, Proposal or Task. */
 export function followsAgent(_root: string, holder: string): boolean {
-  return isHooked(holder);
+  return isHooked(holder) || [...jobFollowers].some((follows) => follows(holder));
 }
 
 /** Applies a notice that a command or another editor window of the project sent: an agent filed a Drift or Task or delivered a Proposal, or its turn ended. */
@@ -132,7 +140,7 @@ export function onProposalDelivered(listener: (root: string, proposal: string) =
   return { dispose: () => void deliveryListeners.delete(listener) };
 }
 
-/** Hooked terminal jobs end only when the hook reports idle or the terminal closes. */
+/** Hooked terminal jobs end only when the hook reports idle or the terminal closes. A conversation is never hooked: its job ends at its turn end. */
 const hooked = new Set<string>();
 
 /** Records whether the run just started in `terminal` is followed by its agent's hook; a reused terminal's old answer no longer holds. */
@@ -209,17 +217,29 @@ export const endHeldJob = (root: string, id: string, abnormal?: string): Job[] =
 export const endUnsentJob = (root: string, id: string): Job[] =>
   endWhere((j) => j.id === id && j.root === root);
 
-/** Whether this window has any job in its registry: the execution check has something to look at. */
-export const hasJobs = (): boolean => jobs.size > 0;
+/** Whether this window has a job in its registry, optionally one that `matches`: the execution check has something to look at. */
+export const hasJobs = (matches: (job: Job) => boolean = () => true): boolean => [...jobs].some(matches);
 
-const followingListeners = new Set<(subject: string, reason: string) => void>();
+const followingListeners = new Set<(subject: string, reason: string, details?: string) => void>();
 
-/** The Board hears when the run control stops following a job (its terminal name or the one a chat job would have) or releases a Task (`T3 Title`), with the reason (`ui#agents`). Only the window that made the check reports it. */
-export function onStoppedFollowing(listener: (subject: string, reason: string) => void): { dispose(): void } {
+/** The Board hears when the run control stops following a job (its terminal name or the one a chat job would have) or releases a Task (`T3 Title`), with the reason (`ui#agents`) and, for a conversation whose omp ended, the last lines of omp's error output. Only the window that made the check reports it. */
+export function onStoppedFollowing(listener: (subject: string, reason: string, details?: string) => void): { dispose(): void } {
   followingListeners.add(listener);
   return { dispose: () => void followingListeners.delete(listener) };
 }
 
-export function reportStoppedFollowing(subject: string, reason: string): void {
-  for (const listener of [...followingListeners]) listener(subject, reason);
+export function reportStoppedFollowing(subject: string, reason: string, details?: string): void {
+  for (const listener of [...followingListeners]) listener(subject, reason, details);
+}
+
+const agentStoppedListeners = new Set<(job: string, reason: string) => void>();
+
+/** The Board hears when the agent of a conversation's job stopped abnormally: the model refused, a limit was reached or omp refused the prompt. */
+export function onAgentStopped(listener: (job: string, reason: string) => void): { dispose(): void } {
+  agentStoppedListeners.add(listener);
+  return { dispose: () => void agentStoppedListeners.delete(listener) };
+}
+
+export function reportAgentStopped(job: string, reason: string): void {
+  for (const listener of [...agentStoppedListeners]) listener(job, reason);
 }

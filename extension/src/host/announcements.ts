@@ -1,7 +1,5 @@
 import * as vscode from "vscode";
-import { closeSync, ftruncateSync, openSync, readFileSync, writeSync } from "node:fs";
-import { join } from "node:path";
-import { announcementsDir, listAnnouncements, withdrawAll } from "../../../src/core/announcements";
+import { listAnnouncements, retitleBoundAnnouncement, withdrawAll } from "../../../src/core/announcements";
 import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { getProposal, listProposals } from "../../../src/core/proposals";
@@ -9,6 +7,8 @@ import { announcementView } from "../../../src/core/snapshot";
 import type { AnnouncementView } from "../../../src/core/snapshot";
 import { projectAt } from "../../../src/core/store";
 import type { Project } from "../../../src/core/store";
+import { unfollowedAnnouncements } from "../../../src/core/task-holders";
+import { followFacts } from "./follow-facts";
 
 type Listener = (withdrawn: AnnouncementView[]) => void;
 const listeners = new Set<Listener>();
@@ -51,10 +51,14 @@ export function withdrawWaiting(root: string, which?: (a: Announcement) => boole
   });
 }
 
+/**
+ * Gives the ghost of a Draft the Draft's current title. The title is written by the core under the announcements lock,
+ * through a temporary file renamed over the announcement, and only while the file still exists: a ghost delivered or
+ * withdrawn is never brought back, and nothing is written when the title already matches.
+ */
 export function synchronizeAnnouncementTitles(p: Project): void {
-  const waiting = listAnnouncements(p);
-  for (const a of waiting) {
-    // A Resolve Drifts announcement keeps its title: it is named by its Drifts, not by a Draft.
+  for (const a of listAnnouncements(p)) {
+    // A Resolve Drifts announcement keeps its title: it is named by its Drifts, not by a Draft. A Drift's ghost keeps the Drift's title.
     if (a.kind !== "proposal" || a.proposal === null || a.drifts.length > 0) continue;
     let title: string;
     try {
@@ -66,40 +70,49 @@ export function synchronizeAnnouncementTitles(p: Project): void {
       continue;
     }
     if (title === a.title) continue;
-    let fd: number;
     try {
-      // Opening an existing file cannot recreate a delivered or withdrawn announcement.
-      fd = openSync(join(announcementsDir(p), `${a.id}.md`), "r+");
+      retitleBoundAnnouncement(p, a.id, a.proposal, title);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
       throw new TramaError(`Could not synchronize announcement ${a.id}: ${(err as Error).message}`);
-    }
-    try {
-      const text = readFileSync(fd, "utf8");
-      const updated = text.replace(/^#\s+(.+)$/m, () => `# ${title}`);
-      if (text === updated) continue;
-      const bytes = Buffer.from(updated);
-      let offset = 0;
-      while (offset < bytes.length) offset += writeSync(fd, bytes, offset, bytes.length - offset, offset);
-      ftruncateSync(fd, bytes.length);
-    } finally {
-      closeSync(fd);
     }
   }
 }
 
 /**
- * Starting up, announcements left on disk in the open folder belong to an agent run that can no longer be told: they
- * are withdrawn with no notice. The Tasks an agent had taken stay taken until that agent ends or the developer takes
- * them back. Draft title synchronization runs from the panel's existing snapshot refresh path.
+ * The announcements left on disk that are orphans (`rules#announcement`): those of no terminal, and those of a terminal or
+ * omp Chat conversation that no window follows (this one, with the conversations it will resume and its General, or another
+ * open window of the project) and whose recorded process is gone, recognised by pid and start time. They are withdrawn with
+ * the notice of an announcement not delivered, none for a work. What a live agent keeps alive stays, with its ghost: a
+ * second window on the project never withdraws what the first follows. An unreadable registry withdraws nothing of a holder.
  */
-export function watchAnnouncements(root: () => string | undefined): vscode.Disposable {
-  const startup = root();
-  if (startup !== undefined) {
-    guarded(() => {
-      const p = projectAt(startup);
-      withdrawAll(p);
-    });
+export async function withdrawOrphans(root: string): Promise<void> {
+  let gone: Set<string>;
+  try {
+    const owned = listAnnouncements(projectAt(root)).map((a) => ({ id: a.id, terminal: a.terminal }));
+    if (owned.length === 0) return;
+    const facts = await followFacts(root, owned.map((a) => a.terminal));
+    gone = new Set(unfollowedAnnouncements({ announcements: owned, ...facts }));
+  } catch (err) {
+    if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: announcements could not be checked: ${err.message}`);
+    else throw err;
+    return;
   }
-  return vscode.Disposable.from();
+  if (gone.size > 0) withdrawWaiting(root, (announcement) => gone.has(announcement.id));
+}
+
+/**
+ * Opening or reloading the window withdraws only the orphan announcements (`withdrawOrphans`). It runs once the caller says
+ * the window has read the conversations it will resume and its General (`conversationsRead`, which the window's own
+ * `followsHolder` then counts); without it at once. The Tasks an agent had taken stay taken until that agent ends, or the
+ * developer takes them back. Draft title synchronization runs from the panel's existing snapshot refresh path.
+ * `done` settles when the withdrawal has finished, so the first execution check can follow it.
+ */
+export function watchAnnouncements(root: () => string | undefined, conversationsRead: Promise<void> = Promise.resolve()): vscode.Disposable & { done: Promise<void> } {
+  const startup = root();
+  let disposed = false;
+  const done =
+    startup === undefined
+      ? Promise.resolve()
+      : conversationsRead.then(() => (disposed ? undefined : withdrawOrphans(startup))).catch(() => undefined);
+  return { dispose: () => void (disposed = true), done };
 }

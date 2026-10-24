@@ -8,6 +8,7 @@ import { trackRound } from "./question-activity";
 import type { QuestionSession } from "./question-session";
 import { checkTaskHolder } from "./task-check";
 import { followsAgent, receiveNotice, receiveAgentIdle, receiveAgentStarted } from "./drift-resolution";
+import { followsHolder } from "./followed-holders";
 import { noteCommandSeen } from "./terminal-activity";
 interface WindowRoundService {
   identity: string;
@@ -52,6 +53,11 @@ export async function askPreparedRound(root: string, request: QuestionRequest, s
   return windowQuestions?.askHostRound(root, request, signal);
 }
 
+/** Interrupts every round of the terminal or conversation `terminal`, presented or queued, with the shared interruption error: its answers are discarded. */
+export function interruptTerminalRounds(terminal: string): void {
+  windowQuestions?.interruptTerminal(terminal);
+}
+
 /** The window-owned queue serves every local `trama question new` connection. */
 export class EditorQuestions implements vscode.Disposable {
   private service: WindowRoundService | undefined;
@@ -62,7 +68,8 @@ export class EditorQuestions implements vscode.Disposable {
   private closed = false;
   private readonly subscriptions: vscode.Disposable[];
 
-  constructor(private readonly project: () => Project | undefined, private readonly session: QuestionSession) {
+  /** `ownsTerminal` says whether a terminal or omp Chat conversation of this window, working or idle, has the identity a round names: any other asker is told the editor is unavailable. */
+  constructor(private readonly project: () => Project | undefined, private readonly session: QuestionSession, private readonly ownsTerminal: (terminal: string, root: string) => boolean) {
     windowQuestions = this;
     this.queue = new QuestionRoundQueue(session.present);
     // Directory deletion/rename does not emit separate events for its children.
@@ -102,6 +109,11 @@ export class EditorQuestions implements vscode.Disposable {
     return this.queue.ask(request, { signal, prepared: true }, trackRound(this.session.presentFor(service.identity)));
   }
 
+  /** The rounds of `terminal` are interrupted; the rounds of other agents stay as they are. */
+  interruptTerminal(terminal: string): void {
+    this.queue.interrupt((context) => context.terminal === terminal);
+  }
+
   dispose(): void {
     if (this.closed) return;
     this.closed = true;
@@ -133,6 +145,8 @@ export class EditorQuestions implements vscode.Disposable {
         project,
         windowId,
         focusedAt: vscode.window.state.focused ? Date.now() : 0,
+        // A round for a terminal or conversation this window does not have is answered unavailable before it reaches the queue.
+        ownsTerminal: (terminal, root) => this.ownsTerminal(terminal, root),
         // A window whose project is gone refuses new connections, so the round is answered unavailable before submission.
         serves: () => !this.closed && !service.detached && this.service === service,
         // The channel admits only this project. The round joins the window's queue, behind any round still in progress.
@@ -152,7 +166,7 @@ export class EditorQuestions implements vscode.Disposable {
         onAgentIdle: receiveAgentIdle,
         onAgentStarted: receiveAgentStarted,
         // The terminals in Agent running and the omp Chat conversations with a job this window follows, of those asked.
-        onFollowedHolders: (holders) => holders.filter((holder) => followsAgent(project.root, holder)),
+        onFollowedHolders: (holders) => holders.filter((holder) => followsHolder(holder)),
         onCheckTask: (task) => checkTaskHolder(project.root, task),
         onCoordinatorMessage: (message) => {
           const rooted: CoordinatorMessage = { ...message, root: project.root };

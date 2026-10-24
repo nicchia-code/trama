@@ -4,12 +4,12 @@ import * as vscode from "vscode";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { ActivitiesItem, SHOW_ACTIVITIES_COMMAND } from "./activities-item";
 import { watchAnnouncements } from "./announcements";
-import { watchAgentTerminal, configuredOmpPath, configuredSkillsDir, ompChatGeneralSettingsChanged, setBundledCliDir, setOmpChat, setOverlayStorage, settings, windowClosed } from "./agent";
+import { agentTabName, watchAgentTerminal, configuredOmpPath, configuredSkillsDir, ompChatGeneralSettingsChanged, ownsAgentTerminal, setBundledCliDir, setOmpChat, setOverlayStorage, settings, windowClosed } from "./agent";
 import { Controller, describeError } from "./controller";
 import { startExecutionCheck } from "./execution-check";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./bundled";
-import { findProject, removeCopilotPieces } from "./project";
+import { findProject } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
 import { CONVERSATIONS_KEY, readSavedConversations } from "../../../src/core/omp-chat-conversation";
@@ -36,14 +36,14 @@ function guarded<A extends unknown[]>(action: (...args: A) => Promise<void>): (.
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const session = new QuestionSession(() => trama.revealForQuestions());
-  const questions = new EditorQuestions(() => findProject(), session);
+  const session = new QuestionSession(() => trama.revealForQuestions(), agentTabName);
+  const questions = new EditorQuestions(() => findProject(), session, ownsAgentTerminal);
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
   setOverlayStorage(context.globalStorageUri);
   setUpdateStore(context.globalState);
   const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
   const requests = new DesignRequests(context.workspaceState, tramaFiles, undefined, undefined, () => trama.launch({ kind: "implement-all" }));
-  const trama = new Controller(context.extensionUri, session, tramaFiles, context.globalStorageUri, requests, context.workspaceState);
+  const trama = new Controller(context.extensionUri, session, tramaFiles, requests, context.workspaceState);
   controller = trama;
   // The item of the ghosts with no Board column lives with the extension, so it shows with the panel closed too.
   const activities = new ActivitiesItem(() => findProject()?.root, tramaFiles, (announcement) => trama.openGhostDetails(announcement));
@@ -64,10 +64,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("trama.import", guarded(() => trama.importFromCode())),
     vscode.commands.registerCommand("trama.updateSkills", guarded(async () => trama.updateSkills())),
     watchAgentTerminal(),
-    watchAnnouncements(() => findProject()?.root),
     activities,
     vscode.commands.registerCommand(SHOW_ACTIVITIES_COMMAND, () => activities.show()),
-    startExecutionCheck(() => findProject()?.root, tramaFiles),
     questions,
     requests,
     watchRequirements(),
@@ -79,16 +77,18 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
   exposeBundledCli(context);
-  startOmpChat(context);
-  // Earlier versions installed Copilot's hooks: an error in removing them shows nothing.
-  void removeCopilotPieces(context.globalStorageUri).catch(() => undefined);
+  // The window follows its conversations and General from here on: only now can the announcements of agents nobody follows be told from those it resumes.
+  const orphans = watchAnnouncements(() => findProject()?.root, startOmpChat(context));
+  // The first execution check follows the withdrawal of the orphan ghosts.
+  context.subscriptions.push(orphans, startExecutionCheck(() => findProject()?.root, tramaFiles, orphans.done));
 }
 
 /**
  * omp Chat: the view of the conversations and the ACP client they stand on. The conversations the window saved before resume once both exist, and the context key
- * that shows the view follows the settings (`trama.ompChat`) and the conversations from the start.
+ * that shows the view follows the settings (`trama.ompChat`) and the conversations from the start. The returned promise settles when the window has read the
+ * conversations it will resume and its General (they are registered as followed before the sessions reopen), not when the sessions are back.
  */
-function startOmpChat(context: vscode.ExtensionContext): void {
+function startOmpChat(context: vscode.ExtensionContext): Promise<void> {
   const savedIds = () => readSavedConversations(context.workspaceState.get(CONVERSATIONS_KEY)).entries.map((entry) => entry.id);
   // The usage of the subscription: `omp usage --json` in General's folder, with the program General runs as (`tech#omp-chat-general`).
   const usage = new OmpUsage(ompUsageRunner({ ompPath: configuredOmpPath, findOmp: findConfiguredOmp, folder: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath }));
@@ -112,7 +112,10 @@ function startOmpChat(context: vscode.ExtensionContext): void {
       if (event.affectsConfiguration("trama.theme")) view.model.themeChanged();
     }),
   );
-  void guarded(() => setOmpChat({ client, view: view.model }, context.workspaceState, () => findProject()?.root))().finally(() => view.model.refresh());
+  // `setOmpChat` registers the saved conversations and reads General before its first wait: from here the window follows them, whatever the sessions do.
+  const resumed = guarded(() => setOmpChat({ client, view: view.model }, context.workspaceState, () => findProject()?.root))();
+  void resumed.finally(() => view.model.refresh());
+  return Promise.resolve();
 }
 
 /**
@@ -147,7 +150,7 @@ export function watchRequirements(): vscode.Disposable {
 }
 
 /**
- * Agents run `trama` in the editor's terminals (the agent terminals Trama opens, Copilot's terminal tool). When the
+ * Agents run `trama` in the editor's terminals (the agent terminals Trama opens). When the
  * package ships a binary for this platform, its folder is put first on those terminals' PATH.
  */
 function exposeBundledCli(context: vscode.ExtensionContext): void {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { announce } from "../../core/announcements";
+import { announce, keepUnownedComparison } from "../../core/announcements";
 import { archiveComparison, briefing } from "../../core/compare";
 import { codeFingerprint } from "../../core/compared";
 import { filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
@@ -15,7 +15,7 @@ const create = defineCommand({
   mode: "immediate",
   summary: "Announce a comparison of a Machine and print its briefing.",
   description:
-    "Announces the comparison and prints its ID first, then the references to compare (`refs` limits them to those of the Machine; without it, the whole Machine), their States, Events and Transitions, the Requirements that apply, the analysis, the open Tasks and Drifts on the same thing, and the resolved or dismissed Drifts on the same references. `candidates: true` adds the Tasks a Drift on each reference would block. Keep the ID: `comparison move` takes it.",
+    "Announces the comparison and prints its ID first, then the references to compare (`refs` limits them to those of the Machine; without it, the whole Machine), their States, Events and Transitions, the Requirements that apply, the analysis, the open Tasks and Drifts on the same thing, and the resolved or dismissed Drifts on the same references. `candidates: true` adds the Tasks a Drift on each reference would block. Keep the ID: `comparison move` takes it. Without `TRAMA_TERMINAL` the briefing is the same but no announcement, and so no ghost, is made: the comparison data stay in a file of their own that `comparison move <id> delivered` deletes.",
   positionals: [{ name: "machine", description: "The Machine to compare." }],
   input: z.strictObject({
     refs: z.array(z.string().min(1)).optional().describe("Only these references, which must be of the Machine."),
@@ -38,9 +38,14 @@ const create = defineCommand({
     const project = ctx.project();
     const b = briefing(project, machine as string, input.refs ?? [], input.candidates === true);
     const code = codeFingerprint(project.root);
-    const announcement = announce(project, { kind: "comparison", title: `Comparing ${b.machine.name}`, machine: b.machine.id, refs: b.scope, code, texts: code === null ? {} : briefedTexts(b), ...ctx.origin });
-    recordTiming(project, ctx.origin, { event: "compare-start", comparison: announcement.id, machine: b.machine.name, refs: b.scope.length }, { job: ctx.job });
-    return briefingView(project, b, announcement.id);
+    const texts = code === null ? {} : briefedTexts(b);
+    // Without a terminal no ghost is made: a ghost with no terminal would be withdrawn as an orphan, and nothing could say whose it is.
+    const comparison =
+      ctx.origin.terminal === undefined
+        ? keepUnownedComparison(project, { code, texts })
+        : announce(project, { kind: "comparison", title: `Comparing ${b.machine.name}`, machine: b.machine.id, refs: b.scope, code, texts, ...ctx.origin }).id;
+    recordTiming(project, ctx.origin, { event: "compare-start", comparison, machine: b.machine.name, refs: b.scope.length }, { job: ctx.job });
+    return briefingView(project, b, comparison);
   },
 });
 

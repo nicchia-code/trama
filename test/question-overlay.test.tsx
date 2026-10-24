@@ -26,7 +26,7 @@ function setup(questions: Question[]) {
   const delivered: unknown[] = [];
   const actions: string[] = [];
   const messages: ToHost[] = [];
-  const view = (): QuestionRoundView => ({ id: 1, agent: "omp", state });
+  const view = (): QuestionRoundView => ({ id: 1, name: "Design", prepared: false, state });
   const ui = render(<QuestionOverlay round={view()} openLink={() => {}} post={onPost} />);
   function onPost(message: ToHost) {
     messages.push(message);
@@ -47,12 +47,19 @@ function setup(questions: Question[]) {
 const click = (name: string | RegExp) => act(() => void fireEvent.click(screen.getByRole("button", { name })));
 const askMoreButton = () => screen.queryByRole("button", { name: "Ask more about this question" });
 
-test("the dialog has its title, the agent and the position, and the focus is on the text of the question", () => {
+test("the dialog has its title, the name of the asking terminal and the position, and the focus is on the text of the question", () => {
   setup([q("one"), q("two")]);
   expect(screen.getByRole("dialog", { name: "Questions from the agent" })).not.toBeNull();
-  expect(screen.getByText("omp")).not.toBeNull();
+  expect(screen.getByText("Design")).not.toBeNull();
   expect(screen.getByText("Question 1 of 2")).not.toBeNull();
   expect(document.activeElement).toBe(screen.getByRole("heading", { name: "one?" }));
+});
+
+test("a round with no asking terminal shows no name", () => {
+  const ui = render(<QuestionOverlay round={{ id: 1, name: null, prepared: true, state: startRound([q("one")]) }} openLink={() => {}} post={() => {}} />);
+  expect(screen.getByRole("dialog", { name: "Questions from the agent" })).not.toBeNull();
+  expect(screen.queryByText("Design")).toBeNull();
+  ui.unmount();
 });
 
 test("each new question takes the focus, and Esc does nothing", () => {

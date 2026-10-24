@@ -64,6 +64,23 @@ export class QuestionRoundQueue {
     }
   }
 
+  /**
+   * Interrupts every round, presented or queued, whose context `matches`, with the shared interruption error: its answers are discarded. Rounds that do not
+   * match stay as they are; a queued round that matches is just removed, and the round being presented is touched only when it matches itself. When the
+   * presented round is interrupted the oldest round still queued opens (`question-round.ROUND_CLOSED`).
+   */
+  interrupt(matches: (context: QuestionContext) => boolean): void {
+    if (this.closed) return;
+    const hit = [...(this.active ? [this.active] : []), ...this.pending].filter((round) => matches(round.context));
+    // The queued rounds that match leave first, so the next round to open is never one of them.
+    this.pending = this.pending.filter((round) => !hit.includes(round));
+    for (const round of hit) {
+      const error = new QuestionInterruptedError();
+      round.controller.abort(error);
+      this.finish(round, undefined, error);
+    }
+  }
+
   private next(): void {
     if (this.closed || this.active) return;
     const round = this.pending.shift();

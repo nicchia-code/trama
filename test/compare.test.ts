@@ -54,11 +54,19 @@ describe("trama comparison new", () => {
     expect(briefing(p, "order", ["order/Paid"], false).candidates).toBeNull();
   });
 
-  test("the command announces the comparison and prints its announcement first", () => {
-    const out = run(["--root", dir, "comparison", "new", "order"], dir, {}).out;
+  test("the command announces the comparison of a terminal and prints its announcement first", () => {
+    const out = run(["--root", dir, "comparison", "new", "order"], dir, { TRAMA_TERMINAL: "ab12cd" }).out;
     const [ghost] = listAnnouncements(p);
     expect(ghost?.kind).toBe("comparison");
+    expect(ghost?.terminal).toBe("ab12cd");
     expect(out.startsWith(ghost?.id ?? "")).toBe(true);
+    expect(out).toContain("Machine `order`");
+  });
+
+  test("without a terminal the command gives the briefing and its ID, and makes no announcement", () => {
+    const out = run(["--root", dir, "comparison", "new", "order"], dir, {}).out;
+    expect(listAnnouncements(p)).toEqual([]);
+    expect(out).toMatch(/^[a-z0-9]{6}/);
     expect(out).toContain("Machine `order`");
   });
 

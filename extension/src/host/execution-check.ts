@@ -1,8 +1,10 @@
 import * as vscode from "vscode";
+import { listAnnouncements } from "../../../src/core/announcements";
 import { projectAt } from "../../../src/core/store";
 import { listTasks } from "../../../src/core/work";
-import { hasFollowedTerminals, runExecutionCheck } from "./agent";
-import { hasJobs, onDriftResolutionChange } from "./drift-resolution";
+import { hasTerminalWork, runExecutionCheck } from "./agent";
+import { onDriftResolutionChange } from "./drift-resolution";
+import { followsHolder } from "./followed-holders";
 
 /** The delay between two execution checks (`time.CHECK_DUE`); not a setting. */
 export const CHECK_INTERVAL_MS = 60_000;
@@ -17,21 +19,33 @@ function hasTakenTask(root: string): boolean {
   }
 }
 
+/** Whether the project at `root` has an announcement owned by no terminal or conversation of this window: one of no terminal at all, or of one this window does not follow. */
+function hasForeignAnnouncement(root: string): boolean {
+  try {
+    return listAnnouncements(projectAt(root)).some((announcement) => announcement.terminal === null || !followsHolder(announcement.terminal));
+  } catch {
+    // Unreadable announcements say nothing: no work is assumed.
+    return false;
+  }
+}
+
 /**
- * The window's scheduler of `time.CHECK_DUE`, the only one: a check runs once when the project opens (after the withdrawal
- * of the announcements left on disk, which the caller has done) and then every minute, but only while this window has a job
- * in its registry or the open project has a Task taken by the agent; at rest nothing is armed. One `setTimeout`, re-armed
+ * The window's scheduler of `time.CHECK_DUE`, the only one: a check runs once when the project opens (after `after`, the withdrawal
+ * of the orphan announcements left on disk, when the caller has one) and then every minute, but only while this window has a job
+ * running in a terminal, the open project has a Task taken by the agent, or it has an announcement no terminal or conversation of this window owns. The omp Chat
+ * conversations of the window neither arm the timer nor are checked: their end is certain. At rest nothing is armed. One `setTimeout`, re-armed
  * after each finished check, so two checks never overlap; it does not keep the host process alive and is cancelled on dispose.
- * Armed again at the first registered job (the job registry tells) and at the first Task taken (the `.trama/tasks` watcher tells).
+ * Armed again at the first job in a terminal (the job registry tells), at the first Task taken and at the first announcement of another's (the `.trama/tasks` and
+ * `.trama/announcements` watcher tells).
  */
-export function startExecutionCheck(root: () => string | undefined, files: vscode.FileSystemWatcher): vscode.Disposable {
+export function startExecutionCheck(root: () => string | undefined, files: vscode.FileSystemWatcher, after?: Promise<unknown>): vscode.Disposable {
   let timer: NodeJS.Timeout | undefined;
   let running = false;
   let disposed = false;
 
   const pending = (): boolean => {
     const open = root();
-    return hasJobs() || hasFollowedTerminals() || (open !== undefined && hasTakenTask(open));
+    return hasTerminalWork() || (open !== undefined && (hasTakenTask(open) || hasForeignAnnouncement(open)));
   };
 
   const check = async (): Promise<void> => {
@@ -61,12 +75,12 @@ export function startExecutionCheck(root: () => string | undefined, files: vscod
     timer.unref?.();
   };
 
-  const onTaskFile = (uri: vscode.Uri): void => {
-    if (/[\\/]\.trama[\\/]tasks[\\/]/.test(uri.fsPath)) arm();
+  const onWorkFile = (uri: vscode.Uri): void => {
+    if (/[\\/]\.trama[\\/](tasks|announcements)[\\/]/.test(uri.fsPath)) arm();
   };
 
-  const subscriptions = [onDriftResolutionChange(arm), files.onDidCreate(onTaskFile), files.onDidChange(onTaskFile)];
-  void check().finally(arm);
+  const subscriptions = [onDriftResolutionChange(arm), files.onDidCreate(onWorkFile), files.onDidChange(onWorkFile)];
+  void (after === undefined ? check() : after.then(check, check)).finally(arm);
 
   return {
     dispose: () => {

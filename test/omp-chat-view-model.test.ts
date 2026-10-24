@@ -34,6 +34,9 @@ class FakeSession implements OmpSessionPort {
   onExit(_listener: (exit: OmpExit) => void): Disposable {
     return { dispose() {} };
   }
+  onTurnEnd(): Disposable {
+    return { dispose() {} };
+  }
   onUpdate(listener: (n: SessionNotification) => void): Disposable {
     this.updateListeners.push(listener);
     for (const past of this.history) listener(past);

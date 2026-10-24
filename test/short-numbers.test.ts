@@ -386,6 +386,6 @@ describe("as the command line shows cards", () => {
     expect(shown).toContain("(blocked by Drift D1)");
     expect(shown).toContain("Blocked by Drift D1: Found");
     expect(shown).not.toContain(open.id);
-    expect(() => run(["--root", dir, "task", "move", "T1", "doing"], dir, { TRAMA_AGENT: "1" })).toThrow(/Task T1 is blocked.*Drift D1 "Found"/);
+    expect(() => run(["--root", dir, "task", "move", "T1", "doing"], dir, { TRAMA_AGENT: "1", TRAMA_TERMINAL: "aaa111" })).toThrow(/Task T1 is blocked.*Drift D1 "Found"/);
   });
 });

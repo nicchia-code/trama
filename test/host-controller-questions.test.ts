@@ -92,7 +92,7 @@ test("a question round opens the panel even when the workspace has no Trama proj
   // A workspace folder without `.trama/`: there is no project to show.
   workspaceFolders = [{ uri: { fsPath: dir, scheme: "file" } }];
   let controller: InstanceType<typeof Controller> | undefined;
-  const session = new QuestionSession(() => controller?.revealForQuestions());
+  const session = new QuestionSession(() => controller?.revealForQuestions(), () => undefined);
   controller = new Controller({ fsPath: dir } as never, session);
 
   const asking = new AbortController();
@@ -116,7 +116,7 @@ test("reopening the panel with an open round shows the round without offering to
   panels.length = 0;
   workspaceFolders = [{ uri: { fsPath: dir, scheme: "file" } }];
   let controller: InstanceType<typeof Controller> | undefined;
-  const session = new QuestionSession(() => controller?.revealForQuestions());
+  const session = new QuestionSession(() => controller?.revealForQuestions(), () => undefined);
   controller = new Controller({ fsPath: dir } as never, session);
 
   const asking = new AbortController();

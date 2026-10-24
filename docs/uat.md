@@ -14,7 +14,7 @@ A real VS Code (code-oss, same extension build, fish shell) was driven through t
 | Navigation from the board to the Diagram | E4 | DOM `.click()` on chips and links |
 | Live updates and error banners | F1 to F7, F9, F10 | Files written from outside; DOM read. **F8 was not run** |
 | Developer decisions | G1 to G10 | Buttons activated with DOM `.click()`; input boxes typed with real key events; results read from the files on disk |
-| Agent launches | H1 to H19 | Buttons with DOM `.click()`; prompts read back from the log file |
+| Agent launches | H1 to H16, H20 to H23a | Buttons with DOM `.click()`; prompts read back from the log file |
 | Empty project | J1 to J10 | Notification and modal buttons with DOM `.click()` |
 | Keyboard focus rings | K4 | Real Tab key events, computed outline read |
 | Canvas interactions | B2.1, B2.3, B3.2, B5, B6.2, B6.3, B10.1 to B10.3, B10.5, B10.6, B11.1, D1, D2 | Real mouse and key events sent to the webview at node positions read from the Cytoscape instance |
@@ -582,13 +582,12 @@ Each launch starts a new agent terminal named after its work (cwd = the demo fol
 | H15 | Palette: type `Trama`, look at the list | No **Quick Design Request…** and no **Add Work Item…** command: design requests start only from the Board's **+ Add Work Item** button (and, with an empty Model, the Diagram's **Import from Code** and **Start from Scratch**) | ☐ |
 | H15a | Board: click the arrow beside **+ Add Work Item** | The menu has only **Unify Drifts**; no **Add Quick Task** item is shown | ☐ |
 | H16 | After H1 to H15, open the terminal dropdown | Every launch has its own terminal, even when an earlier command with the same name has ended. Terminals are named for their work: `Scan`, `Design`, a Task's short number or `All tasks`; no terminal is reused | ☐ |
-| H18 | Add the legacy settings `"trama.agentLauncher": "terminal"`, `"trama.terminalAgent": "codex"` and `"trama.agentCommand": "fake {prompt}"` to user settings; click **Scan System** | The scan goes to omp; legacy values are ignored and remain unchanged | ☐ |
-| H19 | Remove the legacy values | Future launches use omp without prompting | ☐ |
 | H20 | Set `"trama.ompPath": "/tmp/fake/omp"` (a script that writes its arguments to a file) in user settings; click **Scan System** | The terminal command starts with `'/tmp/fake/omp' --hook '<extension>/…/omp-hook.js'` and ends with the instruction; with `trama.ompPath` empty or only spaces it starts with the quoted path of the first `omp` found in the PATH, `~/.bun/bin` or `~/.local/bin` | ☐ |
 | H20a | With no `omp` in the PATH, `~/.bun/bin` or `~/.local/bin` and `trama.ompPath` empty, click **Scan System**, and **Ask more** on a card | Nothing starts: no terminal, no conversation, no ghost, no job. Each time a warning (not modal) `Trama: omp is not installed. Trama runs every agent with omp.` with the buttons `Install omp` (opens the terminal `Install omp`) and `Open Settings` (opens the panel on the Settings tab, also when it was closed). The work does not restart by itself | ☐ |
 | H20b | With a fake `omp` whose `update --check` prints `Current version: 1.0.0` and `New version available: 1.1.0`, set as `trama.ompPath`, click **Scan System** | A notification without cancel `Updating omp to 1.1.0…` stays while `omp update` runs and the terminal opens after it; a second launch within the hour runs neither command | ☐ |
 | H20c | With a fake `omp` whose `update --check` exits with code 4 (or prints nothing known), click **Scan System** twice | The launch goes on with that omp, and a single information message `Trama: could not update omp (omp update --check exited with code 4). The agent runs with omp the installed version.` shows; changing `trama.ompPath` and launching again checks again | ☐ |
 | H20d | Cut the network (or make `omp update --check` hang) and click **Scan System** | After 30 s the launch goes on with the omp of before and the message says `omp update --check did not answer within 30 s` | ☐ |
+| H20e | With a fake `omp` whose `--version` prints `18.12.5` (and whose `update --check` says it is up to date), set as `trama.ompPath`, click **Scan System** and **Ask more** on a card; then look at the `omp` step of the wizard, the omp row of the Settings tab and General | Nothing starts and the warning says `Trama needs omp 18.12.6 or later; the installed omp is 18.12.5.` with `Install omp` and `Open Settings`; the wizard step and the Settings row show the same sentence in place of the version, with `Install omp`; General shows it as its error line, with `Install omp` and no warning in the editor | ☐ |
 | H21 | Set `"trama.language": " Italian "` in user settings; click **Scan System** | The instruction includes `Write everything you generate in Italian, except code, which always stays in English.`; the setting applies to scans, Runs, written design and imports | ☐ |
 | H22 | Change `trama.language` to `"   "`; click **Scan System** | The instruction has no language sentence | ☐ |
 | H23 | Restore S2 and remove `trama.language` | The setup is restored | ☐ |
@@ -878,7 +877,6 @@ Drifts are never resolved on their own: there is no delegation, no automatic app
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| Y1 | Start a Run, then look at Run all and a Task's Run button while the Run is in progress; with `"trama.submitWhileRunning": true` left in the user settings, look again | Run all and the Run button of a Task are disabled while the Run is in progress, with `A run is in progress`, and a launch is refused with `A run cannot start: A run is in progress.`, with or without the leftover value; the value is ignored and not rewritten. Scan System and Resolve Drifts stay available | ☐ |
 | Y2 | With several open Drifts, press **Resolve** on the card of one of them | Only that Drift is gathered: the agent asks the decisions and hands over a resolution to review; nothing is approved or run until you decide, and the Tasks that come out of it start by hand | ☐ |
 
 ---

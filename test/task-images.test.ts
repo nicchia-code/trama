@@ -132,7 +132,7 @@ describe("deleting the images of Tasks that no longer keep them", () => {
     mkdirSync(join(dir, ".trama/tasks"), { recursive: true });
     writeFileSync(join(dir, ".trama/tasks", `${id}-t.md`), "---\ncolumn: todo\ntechnical: true\nrefs: []\ndrift: null\nproposal: null\nagent: false\ncreated: 2026-01-01T00:00:00.000Z\n---\n# T\n");
     changeTaskImagesDirect(id);
-    moveTask(p, id, "doing", "agent");
+    moveTask(p, id, "doing", "agent", { terminal: "aaa111" });
     expect(existsSync(taskImagesDir(p, id))).toBe(true);
     moveTask(p, id, "done", "agent");
     expect(existsSync(taskImagesDir(p, id))).toBe(false);

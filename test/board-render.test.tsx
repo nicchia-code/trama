@@ -916,6 +916,39 @@ describe("The Board page", () => {
     view.unmount();
   });
 
+  test("a notice with the last lines of omp's error output keeps them behind Show details, and a notice without them has no such button", () => {
+    let slotted: ReactNode = null;
+    const board = mountBoard((node) => { slotted = node; }, { post: () => {}, navigate: () => {}, openLink: () => {} });
+    board.update(snapshot());
+    board.stoppedFollowing?.("T3", "omp exited (code 2)", "fatal: out of memory\nrun omp login");
+    board.stoppedFollowing?.("T4", "the agent's process is gone");
+    const view = render(<TooltipProvider>{slotted}</TooltipProvider>);
+    const toggles = screen.getAllByRole("button", { name: /details$/ });
+    expect(toggles).toHaveLength(1);
+    const details = document.getElementById(toggles[0]!.getAttribute("aria-controls") ?? "") as HTMLElement;
+    expect(details.hidden).toBe(true);
+    expect(details.textContent).toBe("fatal: out of memory\nrun omp login");
+    fireEvent.click(toggles[0]!);
+    expect(details.hidden).toBe(false);
+    expect(screen.getByRole("button", { name: "Hide details" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Hide details" }));
+    expect(details.hidden).toBe(true);
+    expect(screen.getByText("Trama stopped following T3: omp exited (code 2).")).not.toBeNull();
+    view.unmount();
+  });
+
+  test("the notice of an agent that stopped abnormally is text with Close, and no details", () => {
+    let slotted: ReactNode = null;
+    const board = mountBoard((node) => { slotted = node; }, { post: () => {}, navigate: () => {}, openLink: () => {} });
+    board.update(snapshot());
+    board.notice?.("The agent of T3 stopped: the model reached its token limit.");
+    const view = render(<TooltipProvider>{slotted}</TooltipProvider>);
+    expect(screen.getByText("The agent of T3 stopped: the model reached its token limit.")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Close the notice: The agent of T3 stopped: the model reached its token limit." }).textContent).toContain("Close");
+    expect(screen.queryByRole("button", { name: /details$/ })).toBeNull();
+    view.unmount();
+  });
+
 });
 
 describe("The Done column", () => {

@@ -49,7 +49,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 
 - **Tecnologia dell'hook dell'agente del terminale** (`agent-hooks.md`): Usa quando lavori sull'hook di omp, su `trama hook start` e su `trama hook idle`. Sections: `agent-hook`.
 - **Tecnologia di avvio dell'agente** (`agent-terminal.md`): Usa quando lavori sul terminale dell'agente. Sections: `agent-terminal`.
-- **Tecnologia degli annunci** (`announcements.md`): Usa per annunci, ghost della Board e attesa di fine turno. Sections: `announcement`, `panel/Board`.
+- **Tecnologia degli annunci** (`announcements.md`): Usa per annunci e ghost della Board e della barra di stato. Sections: `announcement`.
 - **Tecnica di Ask more** (`ask-more.md`): Usa quando costruisci Ask more nel webview o nell'host: modali dei dettagli, messaggi, prompt e lancio della chat. Sections: `developer.ASK_MORE`.
 - **Tecnologia della chiusura di una corsa** (`chiusura.md`): Usa quando lavori sulla verifica finale di una corsa di `trama-implement` e sulla preparazione delle voci di History durante la verifica. Sections: `announcement/Verifying`.
 - **Tecnica della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts dall'estensione, costruisci l'Async Drift Resolver o togli codice della vecchia delega dei Drift. Sections: `drift-resolution`.
@@ -62,8 +62,10 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia dei file di istruzioni** (`instruction-files.md`): Usa quando lavori al codice che esclude i file di istruzioni degli agenti nei lanci di omp: overlay di configurazione e ricerca dei file. Sections: `agent-terminal/Agent running`.
 - **Tecnologia del menu laterale** (`menu-laterale.md`): Usa per la tecnologia del menu laterale di Trama: vista webview, messaggi con l'host, badge e comandi delle viste. Sections: `menu-laterale`.
 - **Tecnologia di agenti e modelli** (`models.md`): Usa per agenti del terminale, ruoli dei modelli, limite dei sotto-agenti e advisor di omp. Sections: `agent-launching`.
+- **Connessione ACP con omp** (`omp-acp.md`): Usa quando lavori sulla connessione ACP con omp: versione minima, apertura, fine del turno, output di errore e arresto del processo. Sections: `omp-acp`.
 - **Conversazioni di omp Chat: tecnica** (`omp-chat-conversation.md`): Usa quando costruisci o cambi il client ACP di una conversazione di omp Chat: processo, sessione, steering, ripresa. Sections: `omp-chat-conversation`.
 - **Tecnologia della conversazione General** (`omp-chat-general.md`): Usa per la tecnica della conversazione General di omp Chat: processo e sessione, avvio, pulizia, errori, salvataggio e messaggi fra host e webview. Sections: `omp-chat-general`.
+- **Conversazioni di omp Chat: ripresa** (`omp-chat-resume.md`): Usa quando costruisci o cambi il salvataggio e la ripresa delle conversazioni di omp Chat dopo una ricarica o una riapertura della finestra. Sections: `omp-chat-conversation/Waiting for the window`.
 - **omp Chat** (`omp-chat.md`): Usa quando costruisci o cambi omp Chat: la sua impostazione, la vista della barra laterale secondaria, i messaggi fra vista e host e i loghi delle chiamate. Sections: `omp-chat`.
 - **Tecnologia del pannello** (`panel.md`): Usa per la tecnologia del pannello e degli ingressi di Trama nell'editor: barra delle attività, icone, renderer Markdown. Sections: `panel`.
 - **Tecnologia delle prenotazioni dei file** (`prenotazioni.md`): Usa quando lavori sulle prenotazioni dei file nell'hook di omp, nella cartella `.trama/claims/` e nella loro pulizia. Sections: `prenotazione-file`.
@@ -78,5 +80,6 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia del wizard di setup** (`setup-wizard.md`): Usa quando lavori al codice del wizard di setup: modulo del webview, messaggi con l'host, albero delle cartelle, conferma e skill di import. Sections: `setup-wizard`.
 - **Tecnologia del sotto-agente che realizza i Task** (`sotto-agenti.md`): Usa quando lavori sul sotto-agente di omp `trama-implementer`, sulla sua definizione e sul suo prompt. Sections: `agent`.
 - **Task progress technology** (`task-progress.md`): Use when working on how the agent declares the percentage of a Task and how it is read. Sections: `task/Taken by the agent`.
+- **Attesa di fine turno** (`turn-wait.md`): Usa per l'attesa di fine turno delle schede appena consegnate sulla Board. Sections: `panel/Board`.
 - **Unify Drifts technology** (`unify-drifts.md`): Usa quando lavori al codice di Unify Drifts: voce disabilitabile del pulsante diviso, messaggio e lancio dall'host, file di istruzioni inline, lavoro di unificazione e `trama drift new` con `unifies`. Sections: `developer.UNIFY_DRIFTS`, `agent.UNIFY_DRIFTS`.
 - **Tecnologia dei Task** (`work.md`): Usa quando lavori sui Task. Sections: `task`.

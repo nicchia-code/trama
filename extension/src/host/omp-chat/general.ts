@@ -1,9 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { newTerminalId } from "../../../../src/core/announcements";
+import { ompTooOldText } from "../../../../src/core/omp-version";
 import { GENERAL_ID } from "../../../../src/core/omp-chat-view";
 import { drawnPhase, GENERAL_INITIAL, type GeneralEffect, type GeneralEvent, type GeneralMachine, GeneralQueue, generalStep, returnedText } from "../../../../src/core/omp-chat-general";
 import { exitReason, savedEnv } from "../../../../src/core/omp-chat-conversation";
 import type { GeneralError } from "../../omp-chat-protocol";
-import type { ChatViewPort, Disposable, OmpClientPort, OmpExit, OmpLaunch, OmpSessionPort, OutgoingMessage } from "./ports";
+import { type ChatViewPort, type Disposable, type OmpClientPort, type OmpExit, type OmpLaunch, type OmpSessionPort, OmpStartFailure, type OutgoingMessage } from "./ports";
 import type { ConversationStore } from "./conversations";
 
 /** The saved entry of General (`trama.ompChat.general` in `workspaceState`): enough to resume its session in a new process. */
@@ -48,6 +49,8 @@ export interface GeneralDeps {
   ompPath(): string;
   /** The program omp runs as, undefined when omp is not installed. */
   findOmp(ompPath: string): Promise<string | undefined>;
+  /** The check of omp's version and of updates, and the update that may follow, for `program` (`checkedOmp`): omp missing, or older than the minimum, stops General's start with its error line. */
+  checkOmp(program: string): Promise<{ missing?: true; tooOld?: true; version?: string }>;
   /** The launch of a new session: `omp [--model m] acp [--yolo]` with Trama's environment for `terminalId`. */
   launch(root: string, terminalId: string): Promise<OmpLaunch>;
   /** The launch of a saved session: the saved arguments and variables, with the endpoint and PATH of this window. */
@@ -56,6 +59,8 @@ export interface GeneralDeps {
   instructions(): string | undefined;
   /** Ends General's work as a terminal's end does (the same `endAgentWork` the agent terminals use): releases what it took, withdraws its announcements, and forgets its process. It never disposes or idles a terminal. */
   endWork(terminalId: string, root: string): void;
+  /** Interrupts every question round of General's agent, presented or queued, with the shared interruption error: its stop, its clear and its end do. */
+  interruptRounds(terminalId: string): void;
   /** The confirmation of a clear or a close while the agent is in a turn. */
   confirm(message: string, detail: string, button: string): Promise<boolean>;
   /** Runs Install omp, as Settings does. */
@@ -87,6 +92,8 @@ export class GeneralConversation implements Disposable {
   /** Bumped when a start, a resume or the process of General is dropped: an open that finishes late is stopped. */
   private token = 0;
   private stopping: Promise<void> = Promise.resolve();
+  /** Set while `editor.WINDOW_CLOSED` is dispatched: the stop it causes skips `session/close`, as there is little time left. */
+  private deactivating = false;
 
   constructor(private readonly deps: GeneralDeps) {
     const { view } = deps;
@@ -113,8 +120,26 @@ export class GeneralConversation implements Disposable {
 
   /** `editor.WINDOW_CLOSED`: the process of General stops; its session stays saved for the next window. Resolves when the process is gone. */
   async windowClosed(): Promise<void> {
-    this.dispatch({ type: "windowClosed" });
+    this.deactivating = true;
+    try {
+      this.dispatch({ type: "windowClosed" });
+    } finally {
+      this.deactivating = false;
+    }
     await this.stopping;
+  }
+
+  /**
+   * Whether General is the holder `id` for the execution check of other windows (`followed-holders`): its process runs, or it has a saved session this window
+   * resumes, and `id` is the identity of that process or of the saved entry.
+   */
+  follows(id: string): boolean {
+    return (this.session !== undefined || this.record !== undefined) && (this.terminalId === id || this.record?.id === id);
+  }
+
+  /** Whether `id` is the identity of General's process while it runs: a round asked by its agent is accepted. */
+  owns(id: string): boolean {
+    return this.session !== undefined && this.terminalId === id;
   }
 
   dispose(): void {
@@ -190,6 +215,7 @@ export class GeneralConversation implements Disposable {
       case "withdraw":
         {
           const root = this.deps.folder();
+          if (this.terminalId !== undefined) this.deps.interruptRounds(this.terminalId);
           if (this.terminalId !== undefined && root !== undefined) this.deps.endWork(this.terminalId, root);
         }
         return;
@@ -203,6 +229,7 @@ export class GeneralConversation implements Disposable {
         return;
       case "cancel":
         this.session?.cancel();
+        if (this.terminalId !== undefined) this.deps.interruptRounds(this.terminalId);
         return;
       case "failed": {
         this.failure = this.pendingFailure;
@@ -250,9 +277,22 @@ export class GeneralConversation implements Disposable {
     if (folder === undefined) return;
     this.pendingFailure = undefined;
     const ompPath = this.deps.ompPath();
-    if ((await this.deps.findOmp(ompPath)) === undefined) {
-      this.pendingFailure = { kind: "missing" };
-      if (token === this.token) this.dispatch({ type: "startFailed", missing: true });
+    const program = await this.deps.findOmp(ompPath);
+    const checked = program === undefined ? undefined : await this.deps.checkOmp(program);
+    // An omp older than the minimum is told as General's error line, with Install omp, and no editor notice.
+    const unusable: GeneralError | undefined = program === undefined || checked?.missing === true ? { kind: "missing" }
+      : checked?.tooOld === true ? { kind: "missing", reason: ompTooOldText(checked.version) }
+      : undefined;
+    if (unusable !== undefined) {
+      if (token !== this.token) return;
+      if (mode === "resume") {
+        // A saved session needs an omp to reopen it: without one it does not come back, and the new start says why.
+        this.discardRecord();
+        this.dispatch({ type: "sessionNotResumed" });
+        return;
+      }
+      this.pendingFailure = unusable;
+      this.dispatch({ type: "startFailed", missing: true });
       return;
     }
     const instructions = this.deps.instructions();
@@ -262,7 +302,7 @@ export class GeneralConversation implements Disposable {
       return;
     }
     const saved = mode === "resume" ? this.record : undefined;
-    const terminalId = saved?.id ?? randomUUID();
+    const terminalId = saved?.id ?? newTerminalId();
     let opened: { session: OmpSessionPort; launch: OmpLaunch } | undefined;
     try {
       const launch = saved === undefined ? await this.deps.launch(folder, terminalId) : await this.deps.resumeLaunch(folder, saved.args, saved.env);
@@ -278,7 +318,7 @@ export class GeneralConversation implements Disposable {
         this.dispatch({ type: "sessionNotResumed" });
         return;
       }
-      this.pendingFailure = { kind: "start", reason };
+      this.pendingFailure = { kind: "start", reason, ...(err instanceof OmpStartFailure && err.details !== undefined ? { details: err.details } : {}) };
       this.dispatch({ type: "startFailed", missing: false });
       return;
     }
@@ -314,7 +354,7 @@ export class GeneralConversation implements Disposable {
     this.exitListener = undefined;
     this.session = undefined;
     this.deps.view.setGeneralSession(undefined);
-    this.pendingFailure = { kind: "exited", reason: exitReason(exit.code, exit.signal) ?? "omp exited" };
+    this.pendingFailure = { kind: "exited", reason: exitReason(exit.code, exit.signal) ?? "omp exited", ...(exit.details === undefined ? {} : { details: exit.details }) };
     this.dispatch({ type: "exited" });
   }
 
@@ -328,7 +368,7 @@ export class GeneralConversation implements Disposable {
     this.deps.view.setGeneralSession(undefined);
     if (session === undefined) return;
     session.cancel();
-    this.stopping = session.stop().catch(() => undefined);
+    this.stopping = session.stop(this.deactivating ? { deactivating: true } : undefined).catch(() => undefined);
   }
 
   private discardRecord(): void {

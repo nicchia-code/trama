@@ -93,7 +93,7 @@ describe("code fingerprint", () => {
 describe("trama comparison new", () => {
   test("in git the announcement records the code fingerprint, the refs and each reference's text", () => {
     gitRepo();
-    run(["--root", dir, "comparison", "new", "order"], dir, {});
+    run(["--root", dir, "comparison", "new", "order"], dir, { TRAMA_TERMINAL: "abc123" });
     const [ghost] = listAnnouncements(p);
     expect(ghost?.code).toMatch(/^[0-9a-f]{64}$/);
     expect(ghost?.refs).toContain("order/Paid");
@@ -101,7 +101,7 @@ describe("trama comparison new", () => {
   }, GIT_TEST_MS);
 
   test("outside git the announcement records no code fingerprint", () => {
-    run(["--root", dir, "comparison", "new", "order"], dir, {});
+    run(["--root", dir, "comparison", "new", "order"], dir, { TRAMA_TERMINAL: "abc123" });
     const [ghost] = listAnnouncements(p);
     expect(ghost?.code).toBeNull();
     expect(ghost?.texts).toEqual({});
@@ -111,7 +111,7 @@ describe("trama comparison new", () => {
 describe("trama comparison move and the registry", () => {
   test("a successful comparison file records every reference it covered under the code fingerprint", () => {
     gitRepo();
-    run(["--root", dir, "comparison", "new", "order"], dir, {});
+    run(["--root", dir, "comparison", "new", "order"], dir, { TRAMA_TERMINAL: "abc123" });
     const [ghost] = listAnnouncements(p);
     archiveComparison(p, ghost?.id ?? "", validComparison);
     const recorded = comparedRefs(p, ghost?.code ?? "");
@@ -147,7 +147,7 @@ describe("trama comparison move and the registry", () => {
 describe("trama task list with runnable and scope", () => {
   test("lists the references already compared, and leaves them out of the references to check", () => {
     gitRepo();
-    run(["--root", dir, "comparison", "new", "order"], dir, {});
+    run(["--root", dir, "comparison", "new", "order"], dir, { TRAMA_TERMINAL: "abc123" });
     const [ghost] = listAnnouncements(p);
     archiveComparison(p, ghost?.id ?? "", validComparison);
     newTask(p, { title: "Refund paid orders", refs: ["order/Paid"], technical: false });

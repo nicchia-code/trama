@@ -3,6 +3,7 @@ import type { ComboboxOption } from "../ui/combobox";
 import type { ThemeSetting } from "../theme";
 import type { SettingSchema, SettingsValues } from "../../host/settings-schema";
 import type { ToWebview } from "../../protocol";
+import { ompTooOldText } from "../../../../src/core/omp-version";
 
 export interface SettingsGroup {
   title: string;
@@ -106,6 +107,8 @@ export const ompAnsweredText = (version: string | undefined, models: number): st
 /** The status box of the omp group: being checked, what omp answered (the version and the number of models), or the reason it does not (and `missing` for `Install omp`). */
 export function ompStatusLine(status: OmpStatus | null): { tone: "checking" | "ok" | "warning"; text: string; missing: boolean } {
   if (status === null || status.state === "checking") return { tone: "checking", text: "Checking omp…", missing: false };
+  // An omp older than the minimum says so in place of its version, and offers Install omp, which brings the current one.
+  if (status.tooOld === true) return { tone: "warning", text: ompTooOldText(status.version), missing: true };
   if (status.error !== undefined || status.version === undefined) return { tone: "warning", text: ompFailureText(status.error), missing: status.missing === true };
   return { tone: "ok", text: ompAnsweredText(status.version, status.models ?? 0), missing: false };
 }

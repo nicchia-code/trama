@@ -152,8 +152,8 @@ export type ToWebview =
   | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; scans: { advisorScanner: boolean }; refinement?: RefinementView }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
-  /** The run control stopped following a job or released a Task: the Board shows `Trama stopped following <subject>: <reason>.` (`ui#agents`). */
-  | { type: "stoppedFollowing"; subject: string; reason: string }
+  /** The run control stopped following a job or released a Task: the Board shows `Trama stopped following <subject>: <reason>.` (`ui#agents`). `details` are the last lines of omp's error output, shown behind `Show details`. */
+  | { type: "stoppedFollowing"; subject: string; reason: string; details?: string }
   /** A notice at the top of the Board, closable like the others: a Clear that was refused or failed says why. */
   | { type: "notice"; text: string }
   /** The host is done with the last `clearDone`, sent after the fresh picture whether Clear succeeded, was refused (`cleared` empty) or failed: `cleared` are the identities really deleted. The Board then stops hiding the cards it hid at the click. */
@@ -170,11 +170,11 @@ export type ToWebview =
   | { type: "workspaceFolders"; folders: WorkspaceFolderView[] }
   /** How the confirmation of the wizard of the modes Settings and Empty Model ended: closed on `ok`, otherwise left on the summary with `error`. */
   | { type: "guidedSetupResult"; ok: boolean; error: string | null }
-  /** The check of omp for the wizard: omp is being updated to `version`, or it is done (omp answered with `models` models and `version`, or `error` says why not; `updateError` is why a check or update failed). */
+  /** The check of omp for the wizard: omp is being updated to `version`, or it is done (omp answered with `models` models and `version`, or `error` says why not; `updateError` is why a check or update failed; `tooOld` says omp is older than the minimum or its version cannot be read). */
   | { type: "agentCheck"; ompPath: string; state: "updating"; version: string }
-  | { type: "agentCheck"; ompPath: string; state: "done"; ok: boolean; missing: boolean; version?: string; models?: number; error?: string; updateError?: string }
-  /** The state of omp for the Settings tab: being checked, or done with the `version` that answers and the number of `models` omp lists, or `error` saying why not (`missing` when the program was not found). */
-  | { type: "ompStatus"; state: "checking" | "done"; missing?: boolean; version?: string; models?: number; error?: string }
+  | { type: "agentCheck"; ompPath: string; state: "done"; ok: boolean; missing: boolean; version?: string; models?: number; error?: string; updateError?: string; tooOld?: true }
+  /** The state of omp for the Settings tab: being checked, or done with the `version` that answers and the number of `models` omp lists, or `error` saying why not (`missing` when the program was not found); `tooOld` says the version is older than the minimum. */
+  | { type: "ompStatus"; state: "checking" | "done"; missing?: boolean; version?: string; models?: number; error?: string; tooOld?: true }
   /** The agent instruction files found for `root`, with `path` absolute and `label` as it is shown. No content is sent. */
   | { type: "instructionFiles"; root: string; files: InstructionFileView[] }
   /** The entries of one folder of the wizard's tree, without the ones named with a dot or ignored by git. */

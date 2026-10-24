@@ -20,22 +20,26 @@ export const CONVERSATIONS_KEY = "trama.ompChat.conversations";
 /** Whether an instruction opens a conversation: omp Chat is on (not turned off in the user settings) and can start. Read at every instruction. */
 export const useOmpChat = (facts: { ompChat: boolean; available: boolean }): boolean => facts.ompChat && facts.available;
 
-/** The warning shown when omp does not start and the instruction goes to a terminal. */
-export const startFailureNotice = (reason: string): string => `Trama: omp Chat could not start omp (${reason}); the job runs in a terminal.`;
+/** The warning shown when omp does not start and the instruction goes to a terminal: the reason, then the last lines omp wrote on its error output, when it wrote any. */
+export const startFailureNotice = (reason: string, details?: string): string =>
+  `Trama: omp Chat could not start omp (${reason}); the job runs in a terminal.${details === undefined || details === "" ? "" : `\n${details}`}`;
 
 export type ConversationState = "running" | "idle" | "waiting" | "closed";
 
+/** How the answer of omp to the prompt of the work ended: its `stopReason`, or the error omp answered the prompt with (it refused it). */
+export type TurnEnd = { stopReason: string } | { error: string };
+
 export type ConversationEvent =
-  | { type: "agent-hook.IDLE" }
-  | { type: "agent-hook.STARTED" }
-  | { type: "omp-acp.EXITED"; code: number | null; signal: string | null }
+  /** omp answered the prompt of the job's work (`omp-acp.TURN_ENDED`), with no developer message waiting to be delivered. */
+  | { type: "omp-acp.TURN_ENDED"; end: TurnEnd }
+  /** The process ended without Trama asking, or the connection closed without an `exit`; `details` are the last lines of omp's error output. */
+  | { type: "omp-acp.EXITED"; code: number | null; signal: string | null; details?: string }
   | { type: "developer.STOP_CHAT_AGENT" }
   | { type: "developer.CLOSE_CHAT_CONVERSATION" }
-  /** The execution check found the process gone (`processGone`) or alive. */
-  | { type: "time.CHECK_DUE"; processGone: boolean }
   | { type: "editor.WINDOW_CLOSED" }
   | { type: "omp-acp.SESSION_RESUMED"; wasRunning: boolean }
-  | { type: "omp-acp.SESSION_NOT_RESUMED"; wasRunning: boolean };
+  /** `cause` is why the session did not reopen (the start failure's reason) and `details` the last lines of omp's error output. */
+  | { type: "omp-acp.SESSION_NOT_RESUMED"; wasRunning: boolean; cause?: string; details?: string };
 
 /** What the host does as a consequence of an Event, in the order listed. */
 export type ConversationEffect =
@@ -45,12 +49,14 @@ export type ConversationEffect =
   | { effect: "stop-process" }
   /** Stop the process because the window closes; the work and the saved entry stay. */
   | { effect: "stop-process-for-window" }
-  /** Remember the process the hook named. */
-  | { effect: "remember-process" }
   /** `session/cancel`. */
   | { effect: "cancel-turn" }
-  /** The Board notice that Trama stopped following the conversation. */
-  | { effect: "report-stopped"; reason: string }
+  /** Interrupt the question round the conversation was waiting on, if any. */
+  | { effect: "interrupt-questions" }
+  /** The Board notice that Trama stopped following the conversation, with the last lines of omp's error output when there are any. */
+  | { effect: "report-stopped"; reason: string; details?: string }
+  /** The Board notice that the agent of the conversation stopped abnormally (the model refused, a limit was reached or omp refused the prompt). */
+  | { effect: "report-agent-stopped"; reason: string }
   /** The conversation goes from the view and its saved entry is deleted. */
   | { effect: "close" }
   /** The saved entry changes to this state. */
@@ -71,35 +77,71 @@ export function exitReason(code: number | null, signal: string | null): string |
   return "its command ended without an exit status";
 }
 
-const stay = (state: ConversationState): ConversationStep => ({ state, effects: [] });
+/** What the Board notice says about a process that ended without Trama asking, or whose connection closed with no exit: `omp exited (code 1)`, `omp exited (SIGKILL)`, `omp exited`. */
+export function exitedNotice(code: number | null, signal: string | null): string {
+  if (code !== null) return `omp exited (code ${code})`;
+  return signal !== null ? `omp exited (${signal})` : "omp exited";
+}
+
+/** The Board notice for a job whose agent stopped abnormally (`turnEndReason`): `The agent of T3 stopped: the model reached its token limit.` */
+export const agentStoppedNotice = (job: string, reason: string): string => `The agent of ${job} stopped: ${reason}.`;
 
 /**
- * The transition of a conversation in `state` on `event`; `autoExit` is `trama.autoExit`, read when the hook says idle. An Event the
- * state does not receive changes nothing: Agent idle no longer follows what happens, and Closed receives nothing.
+ * Why the end of a turn is not a normal end, or undefined for `end_turn` and `cancelled` (the agent ended it, or the developer stopped it with Stop). The model
+ * refusing, a token or request limit and an error answer (omp refused the prompt, for example for authentication or for the model) are abnormal.
+ */
+export function turnEndReason(end: TurnEnd): string | undefined {
+  if ("error" in end) return `omp refused the prompt (${end.error})`;
+  switch (end.stopReason) {
+    case "end_turn":
+    case "cancelled":
+      return undefined;
+    case "refusal":
+      return "the model refused to continue";
+    case "max_tokens":
+      return "the model reached its token limit";
+    case "max_turn_requests":
+      return "the model reached its request limit";
+    default:
+      return `omp ended the turn with ${end.stopReason}`;
+  }
+}
+
+const stay = (state: ConversationState): ConversationStep => ({ state, effects: [] });
+
+const closed = (what: string): ConversationStep => ({ state: "closed", effects: [{ effect: "stop-process" }, { effect: "end-work", abnormal: what }, { effect: "close" }] });
+
+/**
+ * The transition of a conversation in `state` on `event`; `autoExit` is `trama.autoExit`, read when omp answers the prompt of the work. An Event the
+ * state does not receive changes nothing: Agent idle no longer follows what happens (a new end of turn changes nothing), and Closed receives nothing.
  */
 export function conversationStep(state: ConversationState, event: ConversationEvent, autoExit: boolean): ConversationStep {
   switch (state) {
     case "running":
       switch (event.type) {
-        case "agent-hook.IDLE":
+        case "omp-acp.TURN_ENDED": {
+          const abnormal = turnEndReason(event.end);
+          const work: ConversationEffect[] = [{ effect: "end-work", ...(abnormal === undefined ? {} : { abnormal }) }, ...(abnormal === undefined ? [] : [{ effect: "report-agent-stopped", reason: abnormal } as const])];
           return autoExit
-            ? { state: "closed", effects: [{ effect: "end-work" }, { effect: "stop-process" }, { effect: "close" }] }
-            : { state: "idle", effects: [{ effect: "end-work" }, { effect: "save-state", state: "idle" }] };
-        case "agent-hook.STARTED":
-          return { state, effects: [{ effect: "remember-process" }] };
+            ? { state: "closed", effects: [...work, { effect: "stop-process" }, { effect: "close" }] }
+            : { state: "idle", effects: [...work, { effect: "save-state", state: "idle" }] };
+        }
         case "omp-acp.EXITED": {
           const abnormal = exitReason(event.code, event.signal);
-          return { state: "closed", effects: [{ effect: "end-work", ...(abnormal === undefined ? {} : { abnormal }) }, { effect: "close" }] };
+          return {
+            state: "closed",
+            effects: [
+              { effect: "end-work", ...(abnormal === undefined ? {} : { abnormal }) },
+              { effect: "report-stopped", reason: exitedNotice(event.code, event.signal), ...(event.details === undefined ? {} : { details: event.details }) },
+              { effect: "stop-process" },
+              { effect: "close" },
+            ],
+          };
         }
         case "developer.STOP_CHAT_AGENT":
-          return { state, effects: [{ effect: "cancel-turn" }] };
+          return { state, effects: [{ effect: "cancel-turn" }, { effect: "interrupt-questions" }] };
         case "developer.CLOSE_CHAT_CONVERSATION":
-          return { state: "closed", effects: [{ effect: "stop-process" }, { effect: "end-work", abnormal: "its conversation was closed" }, { effect: "close" }] };
-        case "time.CHECK_DUE": {
-          if (!event.processGone) return stay(state);
-          const reason = "the agent's process is gone";
-          return { state: "closed", effects: [{ effect: "report-stopped", reason }, { effect: "stop-process" }, { effect: "end-work", abnormal: reason }, { effect: "close" }] };
-        }
+          return closed("its conversation was closed");
         case "editor.WINDOW_CLOSED":
           return { state: "waiting", effects: [{ effect: "stop-process-for-window" }] };
         default:
@@ -108,9 +150,9 @@ export function conversationStep(state: ConversationState, event: ConversationEv
     case "idle":
       switch (event.type) {
         case "developer.CLOSE_CHAT_CONVERSATION":
-          return { state: "closed", effects: [{ effect: "stop-process" }, { effect: "end-work", abnormal: "its conversation was closed" }, { effect: "close" }] };
+          return closed("its conversation was closed");
         case "omp-acp.EXITED":
-          return { state: "closed", effects: [{ effect: "end-work" }, { effect: "close" }] };
+          return { state: "closed", effects: [{ effect: "end-work" }, { effect: "stop-process" }, { effect: "close" }] };
         case "editor.WINDOW_CLOSED":
           return { state: "waiting", effects: [{ effect: "stop-process-for-window" }] };
         default:
@@ -126,7 +168,9 @@ export function conversationStep(state: ConversationState, event: ConversationEv
           return {
             state: "closed",
             effects: [
-              ...(event.wasRunning ? [{ effect: "report-stopped", reason: SESSION_NOT_RESUMED_REASON } as const] : []),
+              ...(event.wasRunning
+                ? [{ effect: "report-stopped", reason: event.cause === undefined ? SESSION_NOT_RESUMED_REASON : `${SESSION_NOT_RESUMED_REASON} (${event.cause})`, ...(event.details === undefined ? {} : { details: event.details }) } as const]
+                : []),
               { effect: "end-work", abnormal: SESSION_NOT_RESUMED_REASON },
               { effect: "close" },
             ],
@@ -143,7 +187,7 @@ export function conversationStep(state: ConversationState, event: ConversationEv
 export const closeNeedsConfirmation = (inTurn: boolean): boolean => inTurn;
 
 /** The Trama variables a saved conversation keeps of its environment; the question endpoint and the PATH are made again at the resume. */
-export const SAVED_ENV_KEYS = ["TRAMA_AGENT", "TRAMA_TERMINAL", "TRAMA_JOB", "TRAMA_ADVISOR_SCANNER", "TRAMA_RUN", "TRAMA_TASK", "TRAMA_PARALLEL", "PI_INTENT_TRACING"] as const;
+export const SAVED_ENV_KEYS = ["TRAMA_AGENT", "TRAMA_TERMINAL", "TRAMA_ACP", "TRAMA_JOB", "TRAMA_ADVISOR_SCANNER", "TRAMA_RUN", "TRAMA_TASK", "TRAMA_PARALLEL", "PI_INTENT_TRACING"] as const;
 
 /** Only the Trama variables of `env`, the ones a saved entry keeps. */
 export function savedEnv(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
@@ -174,6 +218,8 @@ const EntrySchema = z.object({
   state: z.enum(["running", "idle"]),
   args: z.array(z.string()),
   env: z.record(z.string(), z.string()),
+  /** Whether the conversation runs with Trama's hook, so it is a job whose work ends on omp's answer to the prompt and whose forms are declined (not derived from the arguments). */
+  hook: z.boolean(),
   job: JobSchema.optional(),
   openedAt: z.string().refine((value) => !Number.isNaN(Date.parse(value))),
 });

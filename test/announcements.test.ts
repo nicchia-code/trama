@@ -17,8 +17,7 @@ import {
   newTerminalId,
   terminalFromEnv,
   originFromEnv,
-  checkOutcome,
-  forgetCheck,
+  deliverCheck,
   withdrawAll,
   removeBoundTo,
 } from "../src/core/announcements";
@@ -419,12 +418,15 @@ describe("a check", () => {
     expect(() => announcementNew({ kind: "check", title: "Late check", phase: "history" })).toThrow(/phase: Invalid option/);
     withdrawAll(p);
   });
-  test("a finished check hands its outcome to the caller, and forgetting it leaves nothing to finish", () => {
+  test("a finished check is delivered with its file gone, and delivering it again finds nothing", () => {
     const id = announcementNew({ kind: "check", title: "Final check after completed Task", phase: "verifying" }, { TRAMA_TERMINAL: "ab12cd" }).out;
     const touched = getAnnouncement(p, id)!.touched;
-    expect(checkOutcome(p, id, true)).toEqual({ id, title: "Final check after completed Task", phase: "verifying", terminal: "ab12cd", touched, failed: true });
-    forgetCheck(p, id);
-    expect(checkOutcome(p, id)).toBeNull();
+    expect(deliverCheck(p, id)).toMatchObject({ id, title: "Final check after completed Task", phase: "verifying", terminal: "ab12cd", touched });
+    expect(existsSync(join(announcementsDir(p), `${id}.md`))).toBe(false);
+    expect(deliverCheck(p, id)).toBeNull();
+    const task = announce(p, { kind: "task", title: "Not a check" });
+    expect(deliverCheck(p, task.id)).toBeNull();
+    expect(getAnnouncement(p, task.id)).not.toBeNull();
   });
   test("an announcement takes no job: the input is refused, nothing is written and a leftover job line is ignored", () => {
     expect(() => announcementNew({ kind: "check", title: "Final check after all Tasks", phase: "verifying", job: "run-7" })).toThrow(/job/);
@@ -529,23 +531,23 @@ describe("an announcement belongs to a terminal only", () => {
     expect(Object.keys(getAnnouncement(p, id) as object)).not.toContain("conversation");
   });
 
-  test("a file that still has `chat` or `conversation` is a reading error: it is skipped, and Trama neither converts nor deletes it", () => {
-    const good = announce(p, { kind: "task", title: "Good", terminal: "ab12cd" });
-    const front = "kind: task\nsource: agent\nproposal: null\ntouched: 2026-01-01T10:00:00.000Z\nterminal: null";
+  test("a file that still has `chat` or `conversation` is read without them, and the next write of it drops them", () => {
+    const front = "kind: task\nsource: agent\nproposal: null\ntouched: 2026-01-01T10:00:00.000Z\nterminal: ab12cd";
     const legacy: [string, string][] = [
-      ["chat001", `---\n${front}\nchat: editor\n---\n# Chat\n`],
-      ["chat002", `---\n${front}\nchat: cursor\n---\n# Cursor chat\n`],
+      ["chat01", `---\n${front}\nchat: editor\n---\n# Chat\n`],
+      ["chat02", `---\n${front}\nchat: cursor\n---\n# Cursor chat\n`],
       ["conv01", `---\n${front}\nconversation: abc\n---\n# Conversation\n`],
     ];
+    mkdirSync(announcementsDir(p), { recursive: true });
     for (const [name, text] of legacy) writeFileSync(join(announcementsDir(p), `${name}.md`), text);
-    expect(listAnnouncements(p).map((a) => a.id)).toEqual([good.id]);
-    for (const [name] of legacy) expect(getAnnouncement(p, name)).toBeNull();
-    expect(buildSnapshot(p).announcements.map((a) => a.id)).toEqual([good.id]);
-    withdrawAll(p);
-    for (const [name, text] of legacy) expect(readFileSync(join(announcementsDir(p), `${name}.md`), "utf8")).toBe(text);
-    // The same file without the field is a valid announcement.
-    writeFileSync(join(announcementsDir(p), "ok0001.md"), `---\n${front}\n---\n# Old\n`);
-    expect(getAnnouncement(p, "ok0001")).toMatchObject({ title: "Old", terminal: null });
+    for (const [name] of legacy) {
+      const a = getAnnouncement(p, name);
+      expect(a).toMatchObject({ kind: "task", terminal: "ab12cd" });
+      expect(Object.keys(a as object)).not.toContain("chat");
+      expect(Object.keys(a as object)).not.toContain("conversation");
+    }
+    declareNote(p, { id: "chat01", text: "Reads" }, t(1));
+    expect(readFileSync(join(announcementsDir(p), "chat01.md"), "utf8")).not.toMatch(/chat:|conversation:/);
   });
 });
 

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { ompVersionError, parseOmpVersion } from "../extension/src/host/omp-status";
+import { ompVersionError } from "../extension/src/host/omp-status";
+import { parseOmpVersion } from "../src/core/omp-version";
 
 test("the version is read from the first line of omp --version", () => {
   expect(parseOmpVersion("14.2.1\n")).toBe("14.2.1");

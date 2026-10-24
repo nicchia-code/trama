@@ -2,18 +2,17 @@ import type { CompletedQuestionRound, PresentationContext, QuestionPresenter } f
 import { questionAborted, type QuestionRequest } from "../../../src/core/questions";
 import { applyQuestionAction, type QuestionAction, type QuestionRoundState, startRound } from "./question-state";
 
-/** The agent name of a round Trama asks itself (a prepared Drift question): its one question's ID is the identity of that Drift. */
-export const PREPARED_QUESTION_AGENT = "Prepared question";
-
-/** The agent that asked a round, when it can be told: `Prepared question` for a round Trama asks itself, `omp` for one started in a terminal of Trama. */
-const roundAgent = (context: PresentationContext): string | null => (context.prepared === true ? PREPARED_QUESTION_AGENT : context.fromTramaTerminal === true ? "omp" : null);
+/** The name on the tab of the terminal or omp Chat conversation `terminal`, undefined when this window has none by that identity. */
+export type TabNameOf = (terminal: string) => string | undefined;
 
 /** The round being answered, as the panel draws it. */
 export interface QuestionRoundView {
   /** Changes with every round, so an action meant for a round that has closed is ignored. */
   id: number;
-  /** The agent that asked, when known. */
-  agent: string | null;
+  /** The name of the terminal or conversation that asked, the same as its tab; null for a round Trama asks itself (a prepared Drift question) and when the asker has no tab. */
+  name: string | null;
+  /** A round Trama asks itself: its one question's ID is the identity of that Drift. */
+  prepared: boolean;
   state: QuestionRoundState;
 }
 
@@ -37,8 +36,8 @@ export class QuestionSession {
   /** The identity of the window's project. A round admitted for another project stays out of sight until the window is back on it. */
   private project: string | undefined;
 
-  /** `reveal` opens the panel in front, on the Diagram, or brings it to the front keeping its tab (the round entered Asking). */
-  constructor(private readonly reveal: () => void | Promise<void>) {}
+  /** `reveal` opens the panel in front, on the Diagram, or brings it to the front keeping its tab (the round entered Asking). `tabName` names the terminal or conversation a round came from. */
+  constructor(private readonly reveal: () => void | Promise<void>, private readonly tabName: TabNameOf) {}
 
   /** A round that belongs to no project: shown while the window has none. */
   readonly present: QuestionPresenter = (request, context) => this.admit(request, context, undefined);
@@ -54,7 +53,9 @@ export class QuestionSession {
       reject(context.signal.reason ?? questionAborted());
       return promise;
     }
-    const round: ActiveRound = { id: this.nextId++, agent: roundAgent(context), state: startRound(request.questions), context, resolve, owner };
+    const prepared = context.prepared === true;
+    const name = prepared || context.terminal === undefined ? null : (this.tabName(context.terminal) ?? null);
+    const round: ActiveRound = { id: this.nextId++, name, prepared, state: startRound(request.questions), context, resolve, owner };
     const close = () => {
       if (this.active !== round) return;
       // The agent stopped waiting or the editor was lost: nothing is delivered and the overlay or the bar closes.
@@ -87,7 +88,7 @@ export class QuestionSession {
 
   current(): QuestionRoundView | null {
     const round = this.shownRound();
-    return round ? { id: round.id, agent: round.agent, state: round.state } : null;
+    return round ? { id: round.id, name: round.name, prepared: round.prepared, state: round.state } : null;
   }
 
   /** The window's project changed: a round of that project comes back into sight, a round of another goes out of sight, and no answer is lost. */
