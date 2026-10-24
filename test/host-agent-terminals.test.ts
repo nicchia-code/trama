@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, mock, spyOn, test, vi } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, spyOn, test, vi } from "bun:test";
 import { basename, delimiter, join, relative, isAbsolute, sep } from "node:path";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
@@ -169,6 +169,7 @@ mock.module("vscode", () => ({
       panelsCreated++;
       return {
         reveal: () => void reveals++,
+        dispose: () => {},
         onDidDispose: () => ({ dispose() {} }),
         webview: { html: "", cspSource: "", asWebviewUri: (uri: unknown) => uri, onDidReceiveMessage: () => ({ dispose() {} }), postMessage: async () => true },
       };
@@ -194,7 +195,7 @@ mock.module("vscode", () => ({
       ? { onDidCreate: subscribe(requirementEvents.create), onDidChange: subscribe(requirementEvents.change), onDidDelete: subscribe(requirementEvents.delete), dispose() { for (const list of Object.values(requirementEvents)) list.length = 0; } }
       : { onDidCreate() {}, onDidChange() {}, onDidDelete() {}, dispose() {} },
   },
-  Uri: { joinPath: (base: unknown, ...parts: string[]) => ({ base, parts, toString: () => parts.join("/") }), parse: (value: string) => ({ toString: () => value }) },
+  Uri: { file: (fsPath: string) => ({ scheme: "file", fsPath, toString: () => fsPath }), joinPath: (base: unknown, ...parts: string[]) => ({ base, parts, toString: () => parts.join("/") }), parse: (value: string) => ({ toString: () => value }) },
   RelativePattern: class {},
   // Bun re-mocks "vscode" in place, keeping only these keys, for every later test file that mocks it too.
   TabInputText: class {},
@@ -1016,6 +1017,17 @@ describe("agent instruction settings", () => {
       expect(await send(all, "All tasks", true)).not.toContain(sentence);
       delete inspected["parallelExecution"];
       expect(await send(all, "All tasks", true)).toBe(`'omp' '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE}'`);
+    } finally {
+      delete inspected["parallelExecution"];
+    }
+  });
+  test("a Run that starts with its share of the places says so in its instruction, and its trama task list carries that max", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const all = "Use the trama-implement skill on every Task in the \"todo\" column.";
+    inspected["parallelExecution"] = { globalValue: true };
+    try {
+      await launchAgent(dir, all, "All tasks", undefined, undefined, undefined, undefined, { filesDrifts: true, severalTasks: true, limit: 3 });
+      expect(typed.at(-1)).toContain("Run at most 3 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.");
     } finally {
       delete inspected["parallelExecution"];
     }
@@ -2553,6 +2565,235 @@ describe("omp before a launch", () => {
       delete inspected["ompChat"];
       ompFound = async (ompPath) => (ompPath === "" ? "omp" : ompPath);
       withdrawAll(projectAt(dir));
+    }
+  });
+});
+
+// Dynamic imports: the Controller must load after mock.module replaced "vscode", as in the tests above.
+describe("Approve waits for a Run in progress", () => {
+  // Waiting Proposals only exist with the setting on: turning it off empties the waiting list when the setting changes.
+  beforeEach(() => void (settingValues["autoUpdateStaleProposals"] = true));
+  afterEach(() => void delete settingValues["autoUpdateStaleProposals"]);
+  test("a refined Proposal waits while a Run of this window runs, and is approved when the Run ends", async () => {
+    const { Controller } = await import("../extension/src/host/controller");
+    const { endHeldJob, startJob } = await import("../extension/src/host/drift-resolution");
+    const { editInProposal, getProposal, newProposal } = await import("../src/core/proposals");
+    const { handOver } = await import("./handover");
+    const { coverWithTask } = await import("./cover");
+    const root = mkdtempSync(join(tmpdir(), "trama-wait-run-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    const p = projectAt(root);
+    const previousRoot = workspaceRoot;
+    workspaceRoot = root;
+    const controller = new Controller({ scheme: "file" } as never);
+    await controller.open();
+    const host = controller as unknown as {
+      refinement: { running: string | null; delivered: boolean; waiting: string[] };
+      endRefinement(project: Project, id: string): void;
+      refuseWhileRunning(project: Project): boolean;
+    };
+    try {
+      const prop = newProposal(p, "Change");
+      const file = editInProposal(p, prop.id, "checkout/order.md");
+      writeFileSync(file, readFileSync(file, "utf8").replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
+      coverWithTask(p, prop.id, "checkout", "user");
+      handOver(p, prop.id);
+      startJob("run", root, { held: true }, "wait-run");
+      expect(host.refuseWhileRunning(p)).toBe(true);
+      host.refinement = { ...host.refinement, running: prop.id, delivered: true };
+      host.endRefinement(p, prop.id);
+      expect(host.refinement.waiting).toEqual([prop.id]);
+      expect(getProposal(p, prop.id).data.status).toBe("open");
+      endHeldJob(root, "wait-run");
+      expect(host.refinement.waiting).toEqual([]);
+      expect(getProposal(p, prop.id).data.status).toBe("approved");
+    } finally {
+      controller.dispose();
+      workspaceRoot = previousRoot;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("with no Run in progress a refined Proposal is approved at once, and the guard lets Approve through", async () => {
+    const { Controller } = await import("../extension/src/host/controller");
+    const { editInProposal, getProposal, newProposal } = await import("../src/core/proposals");
+    const { handOver } = await import("./handover");
+    const { coverWithTask } = await import("./cover");
+    const root = mkdtempSync(join(tmpdir(), "trama-no-run-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    const p = projectAt(root);
+    const previousRoot = workspaceRoot;
+    workspaceRoot = root;
+    const controller = new Controller({ scheme: "file" } as never);
+    await controller.open();
+    const host = controller as unknown as {
+      refinement: { running: string | null; delivered: boolean; waiting: string[] };
+      endRefinement(project: Project, id: string): void;
+      refuseWhileRunning(project: Project): boolean;
+    };
+    try {
+      const prop = newProposal(p, "Change");
+      const file = editInProposal(p, prop.id, "checkout/order.md");
+      writeFileSync(file, readFileSync(file, "utf8").replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
+      coverWithTask(p, prop.id, "checkout", "user");
+      handOver(p, prop.id);
+      expect(host.refuseWhileRunning(p)).toBe(false);
+      host.refinement = { ...host.refinement, running: prop.id, delivered: true };
+      host.endRefinement(p, prop.id);
+      expect(host.refinement.waiting).toEqual([]);
+      expect(getProposal(p, prop.id).data.status).toBe("approved");
+    } finally {
+      controller.dispose();
+      workspaceRoot = previousRoot;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a refined Proposal that is stale again when the Run ends rejoins the queue and is refined again", async () => {
+    const { Controller } = await import("../extension/src/host/controller");
+    const { endHeldJob, startJob } = await import("../extension/src/host/drift-resolution");
+    const { editInProposal, getProposal, newProposal } = await import("../src/core/proposals");
+    const { handOver } = await import("./handover");
+    const { coverWithTask } = await import("./cover");
+    const root = mkdtempSync(join(tmpdir(), "trama-requeue-run-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    const p = projectAt(root);
+    const previousRoot = workspaceRoot;
+    workspaceRoot = root;
+    const controller = new Controller({ scheme: "file" } as never);
+    await controller.open();
+    const launched: string[] = [];
+    const host = controller as unknown as {
+      refinement: { running: string | null; delivered: boolean; waiting: string[]; queued: string[] };
+      endRefinement(project: Project, id: string): void;
+      launchAction(project: Project, action: { kind: string; proposal?: string }): Promise<void>;
+    };
+    // The refinement agent is not launched: the launch is recorded, and the queue is what decides it.
+    host.launchAction = async (_project, action) => {
+      launched.push(action.proposal ?? "");
+      return new Promise(() => {});
+    };
+    try {
+      const prop = newProposal(p, "Change");
+      const file = editInProposal(p, prop.id, "checkout/order.md");
+      writeFileSync(file, readFileSync(file, "utf8").replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
+      coverWithTask(p, prop.id, "checkout", "user");
+      handOver(p, prop.id);
+      startJob("run", root, { held: true }, "requeue-run");
+      host.refinement = { ...host.refinement, running: prop.id, delivered: true };
+      host.endRefinement(p, prop.id);
+      expect(host.refinement.waiting).toEqual([prop.id]);
+      // The Model changes under the Proposal while the Run runs: when the Run ends the Proposal is stale again.
+      const model = join(root, ".trama", "model", "checkout", "order.md");
+      writeFileSync(model, `${readFileSync(model, "utf8")}\nUna riga in più.\n`);
+      endHeldJob(root, "requeue-run");
+      expect(host.refinement.waiting).toEqual([]);
+      expect(launched).toEqual([prop.id]);
+      expect(getProposal(p, prop.id).data.status).toBe("open");
+    } finally {
+      controller.dispose();
+      workspaceRoot = previousRoot;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("turning the setting off empties the queue and the waiting list, and the waiting Proposal is not approved when the Run ends", async () => {
+    const { Controller } = await import("../extension/src/host/controller");
+    const { endHeldJob, startJob } = await import("../extension/src/host/drift-resolution");
+    const { editInProposal, getProposal, newProposal } = await import("../src/core/proposals");
+    const { handOver } = await import("./handover");
+    const { coverWithTask } = await import("./cover");
+    const root = mkdtempSync(join(tmpdir(), "trama-off-run-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    const p = projectAt(root);
+    const previousRoot = workspaceRoot;
+    workspaceRoot = root;
+    settingValues["autoUpdateStaleProposals"] = true;
+    const controller = new Controller({ scheme: "file" } as never);
+    await controller.open();
+    const launched: string[] = [];
+    const host = controller as unknown as {
+      refinement: { running: string | null; delivered: boolean; waiting: string[]; queued: string[] };
+      endRefinement(project: Project, id: string): void;
+      settingsChanged(ompPathChanged?: boolean): void;
+      launchAction(project: Project, action: { kind: string; proposal?: string }): Promise<void>;
+    };
+    host.launchAction = async (_project, action) => {
+      launched.push(action.proposal ?? "");
+      return new Promise(() => {});
+    };
+    try {
+      const prop = newProposal(p, "Change");
+      const file = editInProposal(p, prop.id, "checkout/order.md");
+      writeFileSync(file, readFileSync(file, "utf8").replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
+      coverWithTask(p, prop.id, "checkout", "user");
+      handOver(p, prop.id);
+      startJob("run", root, { held: true }, "off-run");
+      host.refinement = { ...host.refinement, running: prop.id, delivered: true };
+      host.endRefinement(p, prop.id);
+      expect(host.refinement.waiting).toEqual([prop.id]);
+      host.refinement = { ...host.refinement, queued: ["zzzzzzzz"] };
+      settingValues["autoUpdateStaleProposals"] = false;
+      host.settingsChanged();
+      expect(host.refinement.queued).toEqual([]);
+      expect(host.refinement.waiting).toEqual([]);
+      endHeldJob(root, "off-run");
+      expect(getProposal(p, prop.id).data.status).toBe("open");
+      expect(launched).toEqual([]);
+    } finally {
+      controller.dispose();
+      delete settingValues["autoUpdateStaleProposals"];
+      workspaceRoot = previousRoot;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("an approveProposal message during a Run is refused without queueing or launching, and accepted once the Run ends", async () => {
+    const { Controller } = await import("../extension/src/host/controller");
+    const { endHeldJob, startJob } = await import("../extension/src/host/drift-resolution");
+    const { editInProposal, getProposal, newProposal } = await import("../src/core/proposals");
+    const { handOver } = await import("./handover");
+    const { coverWithTask } = await import("./cover");
+    const root = mkdtempSync(join(tmpdir(), "trama-approve-msg-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    const p = projectAt(root);
+    const previousRoot = workspaceRoot;
+    workspaceRoot = root;
+    const controller = new Controller({ scheme: "file" } as never);
+    await controller.open();
+    const launched: string[] = [];
+    const host = controller as unknown as {
+      refinement: { running: string | null; delivered: boolean; waiting: string[]; queued: string[] };
+      handle(raw: unknown): Promise<void>;
+      launchAction(project: Project, action: { kind: string; proposal?: string }): Promise<void>;
+    };
+    host.launchAction = async (_project, action) => {
+      launched.push(action.proposal ?? "");
+      return new Promise(() => {});
+    };
+    try {
+      const prop = newProposal(p, "Change");
+      const file = editInProposal(p, prop.id, "checkout/order.md");
+      writeFileSync(file, readFileSync(file, "utf8").replace("### Cancelled (final)", "### Cancelled (final)\n\n### Lost (final)"));
+      coverWithTask(p, prop.id, "checkout", "user");
+      handOver(p, prop.id);
+      // The Model changes under the Proposal: it is stale, so Approve would refine it.
+      const model = join(root, ".trama", "model", "checkout", "order.md");
+      writeFileSync(model, `${readFileSync(model, "utf8")}\nUna riga in più.\n`);
+      startJob("run", root, { held: true }, "approve-msg-run");
+      await host.handle({ type: "approveProposal", id: prop.id });
+      expect(getProposal(p, prop.id).data.status).toBe("open");
+      expect(host.refinement.queued).toEqual([]);
+      expect(host.refinement.waiting).toEqual([]);
+      expect(launched).toEqual([]);
+      endHeldJob(root, "approve-msg-run");
+      await host.handle({ type: "approveProposal", id: prop.id });
+      expect(host.refinement.queued.concat(host.refinement.waiting)).toEqual([]);
+      expect(launched).toEqual([prop.id]);
+    } finally {
+      controller.dispose();
+      workspaceRoot = previousRoot;
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

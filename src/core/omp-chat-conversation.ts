@@ -143,7 +143,7 @@ export function conversationStep(state: ConversationState, event: ConversationEv
 export const closeNeedsConfirmation = (inTurn: boolean): boolean => inTurn;
 
 /** The Trama variables a saved conversation keeps of its environment; the question endpoint and the PATH are made again at the resume. */
-export const SAVED_ENV_KEYS = ["TRAMA_AGENT", "TRAMA_TERMINAL", "TRAMA_JOB", "TRAMA_ADVISOR_SCANNER", "PI_INTENT_TRACING"] as const;
+export const SAVED_ENV_KEYS = ["TRAMA_AGENT", "TRAMA_TERMINAL", "TRAMA_JOB", "TRAMA_ADVISOR_SCANNER", "TRAMA_RUN", "TRAMA_TASK", "TRAMA_PARALLEL", "PI_INTENT_TRACING"] as const;
 
 /** Only the Trama variables of `env`, the ones a saved entry keeps. */
 export function savedEnv(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
@@ -157,7 +157,7 @@ export function savedEnv(env: Readonly<Record<string, string | undefined>>): Rec
 
 const JobSchema = z.object({
   id: z.string().min(1),
-  kind: z.enum(["run", "resolve", "scan", "prepared", "unify"]),
+  kind: z.enum(["run", "resolve", "scan", "prepared", "unify", "refine"]),
   name: z.string(),
   announcement: z.string().optional(),
   advisor: z.boolean().optional(),

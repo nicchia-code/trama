@@ -11,6 +11,7 @@ import {
   editInProposal,
   getProposal,
   createProposal,
+  rebaseInProposal,
   rejectProposal,
   save,
   setProposalLabel,
@@ -161,10 +162,11 @@ const edit = defineCommand({
   mode: "immediate",
   summary: "Open a Proposal for writing: label, files and decisions on Drifts.",
   description:
-    "Every use sends an open Proposal back to Draft and says so; hand it over again with `proposal move <id> open`. Without input it only returns an open Proposal to Draft, touching no file. `label` writes or changes the short label. `edit` makes each path (a Model file, `specs.yaml`, a Requirement fragment such as `requirements/<area>/<fragment>.md`, or a Task as `tasks/<slug>.md`) editable inside the Proposal and prints the path to write for each; a new Task takes a new identity, and a Task is rewritten by the full name printed. `delete` marks each path for deletion. `drifts` records or replaces the decisions of a resolution on open Drifts, and `removeDrifts` takes Drifts out of its list. `images` ties images to the Tasks of the Proposal, a list of `{ task, path }` (`path` is a local `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg` file, absolute or relative to the project root), and `removeImages` takes them away, a list of `{ task, name }`. " + IMAGES_RULES,
+    "Every use sends an open Proposal back to Draft and says so; hand it over again with `proposal move <id> open`. Without input it only returns an open Proposal to Draft, touching no file. `rebase` records again the starting version of each file the Proposal holds, so a stale Proposal is no longer stale, and marks the Draft refining until it is handed over again; only an ordinary change Proposal not attached to a Drift can be rebased. `label` writes or changes the short label. `edit` makes each path (a Model file, `specs.yaml`, a Requirement fragment such as `requirements/<area>/<fragment>.md`, or a Task as `tasks/<slug>.md`) editable inside the Proposal and prints the path to write for each; a new Task takes a new identity, and a Task is rewritten by the full name printed. `delete` marks each path for deletion. `drifts` records or replaces the decisions of a resolution on open Drifts, and `removeDrifts` takes Drifts out of its list. `images` ties images to the Tasks of the Proposal, a list of `{ task, path }` (`path` is a local `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg` file, absolute or relative to the project root), and `removeImages` takes them away, a list of `{ task, name }`. " + IMAGES_RULES,
   positionals: [{ name: "id", description: "The Proposal: its ID, a unique prefix or its short number." }],
   input: z.strictObject({
     label: z.string().optional().describe("The short label: 1 to 30 characters, one line."),
+    rebase: z.boolean().optional().describe("Record again the starting version of each file the Proposal holds, so it is no longer stale; marks it refining until handed over again. Only an ordinary change Proposal not attached to a Drift."),
     edit: stringList.optional().describe("Paths to make editable inside the Proposal."),
     delete: stringList.optional().describe("Paths to mark for deletion."),
     drifts: z.array(driftDecision).optional().describe("The decisions to record on Drifts. Only in a resolution."),
@@ -186,6 +188,7 @@ const edit = defineCommand({
       (proposalId) => {
         const returnedToDraft = getProposal(project, proposalId).data.status === "open";
         const paths: { path: string; edit: string }[] = [];
+        if (input.rebase === true) rebaseInProposal(project, proposalId);
         if (input.label !== undefined) setProposalLabel(project, proposalId, input.label);
         for (const path of input.edit ?? []) paths.push({ path, edit: editInProposal(project, proposalId, path) });
         for (const path of input.delete ?? []) deleteInProposal(project, proposalId, path);
@@ -204,6 +207,7 @@ const edit = defineCommand({
     const proposal = getProposal(project, proposalId);
     const n = numbersOf(ctx);
     const lines = [...paths.map((p) => p.edit), ...(input.label === undefined ? [] : [`Label of Proposal ${n.name("proposal", proposalId)} is "${proposal.data.label}".`]), ...(input.delete ?? []).map((p) => `Marked ${p} for deletion.`), ...(input.drifts ?? []).map((d) => `Recorded Drift ${n.name("drift", getDrift(project, d.drift, true).id)} as ${d.decision}.`), ...(input.removeDrifts ?? []).map((d) => `Removed Drift ${d} from the list.`), ...copies.map((c) => `Image copied to ${c}`), ...(input.removeImages ?? []).map((r) => `Removed image ${r.name} from Task ${r.task}.`)];
+    if (input.rebase === true) lines.unshift(`Rebased Proposal ${n.name("proposal", proposalId)} on the current Model; it is refining until handed over.`);
     if (lines.length === 0) lines.push(`Proposal ${n.name("proposal", proposalId)} is a Draft.`);
     return text(`${lines.join("\n")}${returnedToDraft ? `\n${RETURNED}` : ""}`, { id: proposalId, number: n.label("proposal", proposalId), status: proposal.data.status, returnedToDraft, label: proposal.data.label, paths, drifts: proposal.data.drifts, images: copies });
   },

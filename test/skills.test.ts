@@ -38,6 +38,37 @@ test("project new and project edit install the analysis sub-agent on its role, n
   }
 });
 
+test("project new and project edit install the implementer sub-agent without a model, so it runs on the main model", () => {
+  const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
+  try {
+    run(["--root", root, "project", "new"], root);
+    const implementer = join(root, ".omp/agents/trama-implementer.md");
+    const text = readFileSync(implementer, "utf8");
+    expect(text).toMatch(/^---\nname: trama-implementer\ndescription: "Implements one Trama Task and reports how it ended\."\n---\n\n/);
+    expect(text).not.toMatch(/^model:/m);
+    expect(text).toContain("trama task move <id> doing");
+    expect(Buffer.byteLength(text)).toBeLessThan(6 * 1024);
+    rmSync(join(root, ".omp"), { recursive: true });
+    run(["--root", root, "project", "edit"], root);
+    expect(readFileSync(implementer, "utf8")).toBe(text);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("project new refuses a customised implementer definition and creates nothing", () => {
+  const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
+  try {
+    const implementer = join(root, ".omp/agents/trama-implementer.md");
+    mkdirSync(join(implementer, ".."), { recursive: true });
+    writeFileSync(implementer, "custom implementer\n");
+    expect(() => run(["--root", root, "project", "new"], root)).toThrow(/trama-implementer\.md/);
+    expect(existsSync(join(root, ".trama"))).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("project new ignores retired omp triage files but still refuses customised analysis definitions", () => {
   const root = mkdtempSync(join(tmpdir(), "trama-skills-"));
   try {
@@ -205,6 +236,27 @@ test("trama-implement writes History after the check and before the report, and 
   expect(skill).toContain("step 9 of the steps above");
 });
 
+test("trama-implement runs the independent checks in parallel and waits for all of them before judging the check", () => {
+  const skill = SKILLS["trama-implement/SKILL.md"] as string;
+  const step6 = skill.slice(skill.indexOf("6. **Check the run.**"), skill.indexOf("7. **Scan the completed Tasks' scope.**"));
+  expect(step6).toContain("as parallel processes");
+  expect(step6).toContain("wait until every one has finished before judging the check");
+  expect(step6).toContain("when both write the same files; when in doubt, run them one after the other");
+  expect(step6).toContain("together, the checks that failed and those that depend on them");
+});
+
+test("trama-implement starts a History sub-agent after the check is announced, and writes the History itself when it gives no entries", () => {
+  const skill = SKILLS["trama-implement/SKILL.md"] as string;
+  const announcing = skill.slice(skill.indexOf("## Announcing the check"), skill.indexOf("## Hard rules"));
+  expect(announcing).toContain("start one sub-agent right after announcing the check, before step 6");
+  expect(announcing).toContain("`trama task show <id> --json`");
+  expect(announcing).toContain("It runs no writing command, announces nothing and touches no code.");
+  expect(announcing).toContain("if it did not come back or gave no valid entries, the agent writes them itself");
+  const step8 = skill.slice(skill.indexOf("8. **Write History.**"), skill.indexOf("9. **Report.**"));
+  expect(step8).toContain("If the sub-agent of the check came back with entries");
+  expect(step8).toContain("Otherwise read the entries with `trama history list --json`");
+});
+
 test("trama-implement skips the pre-flight and the targeted scan when the Advisor Scanner is on, and keeps them otherwise", () => {
   const skill = SKILLS["trama-implement/SKILL.md"] as string;
   expect(skill).toContain("## Advisor Scanner");
@@ -217,22 +269,6 @@ test("trama-implement skips the pre-flight and the targeted scan when the Adviso
   expect(skill).toContain("Correct that code before moving the Task to Done; do not file a Drift for it.");
   expect(skill).not.toContain("Cursor");
   expect(skill).not.toContain("trama-advisor");
-});
-
-test("trama-implement has the Parallel execution section: plan from the text, limits, records, revision, conflicts and report", () => {
-  const skill = SKILLS["trama-implement/SKILL.md"] as string;
-  expect(skill).toContain("## Parallel execution");
-  expect(skill).toContain("This section applies only when the instruction says \"The parallel execution is on: follow the \\\"Parallel execution\\\" section of the trama-implement skill.\"");
-  expect(skill).toContain("`runnable: true`, `max: <N>`, `heldBack: true` and the filters of the Run");
-  expect(skill).toContain("Do not open the code to decide.");
-  expect(skill).toContain("Never start a blocked Task");
-  expect(skill).toContain("Never keep more than N sub-agents working");
-  expect(skill).toContain("Never start a Task before the Tasks its order makes it wait for are Done.");
-  expect(skill).toContain("`trama timing new --input -`");
-  expect(skill).toContain("when a Task finishes (Done, closed without changes or stopped by a Drift), when a new runnable Task is born");
-  expect(skill).toContain("it does not undo its changes, leaves its Task In progress and comes back with what it did and the Task it clashes with");
-  expect(skill).toContain("runs only its own tests");
-  expect(skill).toContain("section \"Parallel choices\"");
 });
 
 test("the skills that start sub-agents or are started by one have the Sub-agents context sharing section, valid only with the sentence, with no change to the rest", () => {
@@ -255,7 +291,9 @@ test("the skills that start sub-agents or are started by one have the Sub-agents
   expect(SKILLS["trama-design/SKILL.md"]).toContain("receives the decisions of the interview, the new text of the Model and of the Requirements for its references");
   expect(SKILLS["trama-design/SKILL.md"]).toContain("Light code scan (step 7).");
   expect(SKILLS["trama-scan/SKILL.md"]).toContain("Lists of cards and the General Requirements stay out");
-  expect(SKILLS["trama-implement/SKILL.md"]).toContain("skips `trama task show` only if it received that text");
+  expect(SKILLS["trama-implement/SKILL.md"]).toContain("A `trama-implementer` sub-agent loads no skill, and it skips `trama task show` only when it received that text.");
+  expect(SKILLS["trama-implement/SKILL.md"]).toContain("If the definition is not installed, the project predates it: start your own sub-agents with the instructions below instead");
+  expect(SKILLS["trama-implement/SKILL.md"]).toContain("`.omp/agents/trama-implementer.md`");
   expect(SKILLS["trama-implement/SKILL.md"]).toContain("The pre-flight and the end-of-Run scan.");
   const compare = SKILLS["trama-compare/SKILL.md"] as string;
   expect(compare).toContain("## Sub-agents context sharing");
@@ -321,7 +359,9 @@ test("a CRLF checkout (core.autocrlf) of installed skills and omp definitions is
     run(["--root", root, "project", "new"], root);
     const skill = join(root, ".agents/skills/trama-scan/SKILL.md");
     const analysis = join(root, ".omp/agents/trama-analysis.md");
-    for (const path of [skill, analysis]) writeFileSync(path, readFileSync(path, "utf8").replace(/\n/g, "\r\n"));
+    const implementer = join(root, ".omp/agents/trama-implementer.md");
+    for (const path of [skill, analysis, implementer]) writeFileSync(path, readFileSync(path, "utf8").replace(/\n/g, "\r\n"));
+    expect(readFileSync(implementer, "utf8")).toContain("\r\n");
     const crlf = readFileSync(skill, "utf8");
     expect(crlf).toContain("\r\n");
     expect(skillConflicts(join(root, ".agents/skills"))).toEqual([]);
@@ -329,6 +369,7 @@ test("a CRLF checkout (core.autocrlf) of installed skills and omp definitions is
     expect(run(["--root", root, "project", "edit"], root).out).toContain("already up to date");
     expect(readFileSync(skill, "utf8")).toBe(crlf);
     expect(readFileSync(analysis, "utf8")).toContain("\r\n");
+    expect(readFileSync(implementer, "utf8")).toContain("\r\n");
 
     writeFileSync(skill, "custom scan skill\r\n");
     expect(skillConflicts(join(root, ".agents/skills"))).toEqual([skill]);

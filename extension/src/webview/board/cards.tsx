@@ -48,7 +48,7 @@ const Actions = ({ children }: { children: ReactNode }) => <div className="mt-0.
 /** The generic badge of a card: a tooltip, and for "requires <Proposal>" the Proposal's number or identity. */
 function CardBadge({ badge }: { badge: BadgeData }) {
   const { numbers } = useBoardEnv();
-  if (badge.card === undefined) return <TipBadge tone={badge.tone} tooltip={badge.tooltip}>{badge.label}</TipBadge>;
+  if (badge.card === undefined) return <TipBadge tone={badge.tone} tooltip={badge.tooltip} label={badge.accessibleName}>{badge.label}</TipBadge>;
   const name = cardNameOf(numbers, badge.card.kind, badge.card.id);
   const distinction = `${name.isNumber ? ID_NAMES.number : ID_NAMES.identity} ${name.text}`;
   return (
@@ -255,7 +255,7 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
       card={card}
       kind={card.resolution ? "resolution" : "proposal"}
       label={`${card.heading}: ${card.title}`}
-      className={cn("cursor-pointer", card.resolution ? "border-l-amber-500 dark:border-l-amber-400" : "border-l-blue-600 dark:border-l-blue-400")}
+      className={cn("cursor-pointer", card.refine === "running" ? "border-l-border board-working" : card.resolution ? "border-l-amber-500 dark:border-l-amber-400" : "border-l-blue-600 dark:border-l-blue-400")}
       // A click on the card, outside its buttons, badges and links, opens its body too.
       onClick={(event) => {
         if (leavesCardAlone(event)) return;
@@ -274,6 +274,12 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
           {card.title}
         </button>
       </h3>
+      {card.refinePhase === null ? null : <p className="text-xs text-muted-foreground italic">{card.refinePhase}</p>}
+      {card.refineNote === null ? null : (
+        <Tip text={card.refineNote}>
+          <p className="truncate text-xs text-muted-foreground">{card.refineNote}</p>
+        </Tip>
+      )}
       {card.creates !== null ? (
         <Tip text={card.creates}>
           <p aria-label={card.creates} className="text-muted-foreground">
@@ -296,7 +302,10 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
       <Actions>
         {card.views.diagram ? <ViewButton kind="diagram" focus={{ kind: "proposal", id: card.id }} verb="changes" name={card.name.text} /> : null}
         {card.views.requirements ? <ViewButton kind="requirements" focus={{ kind: "proposal", id: card.id }} verb="changes" name={card.name.text} /> : null}
-        <BoardButton icon={Check} label="Approve" aria={`Approve ${card.heading}`} variant="default" disabled={card.blocker !== null} tooltip={card.blocker} onClick={() => env.context.post({ type: "approveProposal", id: card.id })} />
+        <BoardButton icon={Check} label="Approve" aria={`Approve ${card.heading}`} variant="default" disabled={card.blocker !== null} tooltip={card.blocker ?? card.approveHint} onClick={() => env.context.post({ type: "approveProposal", id: card.id })} />
+        {card.refine === "queued" ? (
+          <BoardButton icon={X} label="Cancel" aria={`Take ${card.name.text} out of the refining queue`} tooltip={`Take ${card.name.text} out of the refining queue`} onClick={() => env.cancelRefinement(card.id, card.key)} />
+        ) : null}
         <SplitButton
           icon={X}
           label="Reject"

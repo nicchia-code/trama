@@ -7,6 +7,16 @@ import type { SettingSchema, SettingsValues, SettingValue } from "./host/setting
 
 export type Column = "todo" | "doing" | "done";
 
+/** The Proposal refinement, as the host carries it with each picture. `enabled`: the setting `trama.autoUpdateStaleProposals` is on. `running`: the Proposal the agent refines now, or null. `queued`: the Proposals waiting for it, in order. `note`: the latest note of that agent, or null. `runInProgress`: a Run launched from this window is in progress, so Approve is disabled. `waiting`: the Proposals the refinement delivered and that are approved only when that Run ends. */
+export interface RefinementView {
+  enabled: boolean;
+  running: string | null;
+  queued: string[];
+  note: string | null;
+  runInProgress: boolean;
+  waiting: string[];
+}
+
 /** One group of a Run all that a sequence cuts by model: the Tasks of the Proposals in `include`, or every Task but those of the Proposals in `exclude`. `model` is the group's model; absent for the Settings group. */
 export interface RunGroup {
   include?: string[];
@@ -71,6 +81,7 @@ export type ToHost =
   /** Open an existing Task or Drift by its permanent identity. */
   | { type: "openCard"; kind: "task" | "drift"; id: string }
   | { type: "approveProposal"; id: string }
+  | { type: "cancelRefinement"; proposal: string }
   | { type: "rejectProposal"; id: string }
   /** «Rework with feedback…» of Reject's arrow: the host asks the developer what to change, rejects the Proposal and has the agent redo it. */
   | { type: "reworkProposal"; proposal: string }
@@ -135,8 +146,8 @@ export interface NavigateOptions {
 
 /** Host -> webview. */
 export type ToWebview =
-  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `unify.blockers` are all the reasons Unify Drifts is unavailable, in order (empty when it works), and `unify.unifying` the open Drifts the running Unify Drifts agent works on. `models` carries the models chosen for the Proposals that carry Tasks. `scans.advisorScanner`: the Advisor Scanner is on, so the Scan buttons are disabled. */
-  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; scans: { advisorScanner: boolean } }
+  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `unify.blockers` are all the reasons Unify Drifts is unavailable, in order (empty when it works), and `unify.unifying` the open Drifts the running Unify Drifts agent works on. `models` carries the models chosen for the Proposals that carry Tasks. `scans.advisorScanner`: the Advisor Scanner is on, so the Scan buttons are disabled. `refinement` is the state of the Proposal refinement (absent: off); see `RefinementView`. */
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; scans: { advisorScanner: boolean }; refinement?: RefinementView }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** The run control stopped following a job or released a Task: the Board shows `Trama stopped following <subject>: <reason>.` (`ui#agents`). */

@@ -1,5 +1,5 @@
 ---
-status: open
+status: approved
 base:
   agent-launching/raffinamento.md: new
   model-changes/proposal.md: 33998829510aa695e7a8f99462d68c354560a7c2b45369db92ebb80507987b29

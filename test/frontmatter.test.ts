@@ -101,7 +101,7 @@ describe("malformed Proposal files", () => {
 
   test("missing optional fields fall back to an open Proposal that touches nothing", () => {
     proposal("status: open");
-    expect(getProposal(p, "1").data).toEqual({ status: "open", kind: "change", nonBlocking: false, prepared: false, drifts: [], requires: [], base: {}, delete: [], request: null, created: null, scanScope: null, label: null, reworks: null, reworkRequested: false });
+    expect(getProposal(p, "1").data).toEqual({ status: "open", kind: "change", nonBlocking: false, prepared: false, drifts: [], requires: [], base: {}, delete: [], request: null, created: null, scanScope: null, label: null, reworks: null, reworkRequested: false, refining: false });
   });
 
   test("an old automatic field is read without error and ignored", () => {

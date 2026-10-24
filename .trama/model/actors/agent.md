@@ -60,6 +60,9 @@ The agent asks the developer a round of related questions and waits for the answ
 ### TOOL_DOMANDE_CHIAMATO
 L'agente prova a fare una domanda al developer con il proprio strumento di domande invece che con un round di Trama. In una conversazione o in un terminale di Trama l'hook di Trama lo rifiuta prima che la domanda compaia; altrove lo strumento funziona e Trama non lo vede.
 
+### SCRITTURA_FILE_CHIESTA
+L'agente, nella sessione principale o in un sotto-agente, sta per scrivere un file con uno dei suoi strumenti di scrittura. In un terminale o in una conversazione di Trama l'hook di Trama lo vede prima che il file cambi e, durante un Run, lo confronta con le prenotazioni (vedi la Prenotazione di un file); altrove Trama non lo vede. Una scrittura fatta con un comando della shell non produce questo Event.
+
 ### STOP_WAITING
 The agent's wait for a question round ends without an answer because the caller stops waiting: the agent is stopped, its terminal closes, its question call is cancelled, or the caller disconnects. L'agente non mette nessun limite di tempo alla sua attesa, quindi l'attesa non scade mai da sola. Loss of the editor while the caller is still waiting is reported by `editor.DISCONNECTED` instead.
 

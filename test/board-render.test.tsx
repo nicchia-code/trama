@@ -59,6 +59,7 @@ function env(over: Partial<BoardEnv> = {}): { env: BoardEnv; calls: Calls } {
       openProposal: (id) => calls.opened.push(id),
       openTaskImage: (id, name) => calls.images.push(`${id}/${name}`),
       openGhost: (key) => calls.ghosts.push(key),
+      cancelRefinement: () => {},
       ...over,
     },
   };
@@ -80,7 +81,7 @@ const proposal: ProposalCard = {
   badges: [{ label: "requires old", tooltip: "Requires Proposal old", tone: "info", card: { kind: "proposal", id: "old" } }],
   resolution: false, changes: { files: [], more: 0 }, blocker: "Resolve the requirement first", views: { diagram: true, requirements: false }, resolves: [],
   creates: null, rejectBlocker: null, reworkBlocker: null, choosable: false, model: null,
-  body: "",
+  body: "", approveHint: null, refine: null, refinePhase: null, refineNote: null,
 };
 const task: TaskCard = {
   kind: "task", key: "task:liveTask", id: "liveTask", name: { text: "T3", isNumber: true }, title: "A task", technical: false,
@@ -183,6 +184,20 @@ describe("Board card rendering", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resolve Drift D1" }));
     fireEvent.click(screen.getByRole("button", { name: "Dismiss Drift" }));
     expect(calls.posted).toEqual([{ type: "launch", action: { kind: "resolve-drifts", drift: "d" } }, { type: "dismissDrift", id: "d" }]);
+  });
+
+  test("a queued Proposal can be taken out of the refining queue; a running one shows its phase and note", async () => {
+    const cancelled: unknown[][] = [];
+    draw(<CardView card={{ ...proposal, refine: "queued", blocker: "Already queued for refining", refinePhase: null, refineNote: null, badges: [{ label: "queued", tone: "info", tooltip: "Waiting for P1 to be refined first" }] }} />, { cancelRefinement: (...args) => cancelled.push(args) });
+    expect(screen.getByRole("button", { name: "Approve Proposal P2" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Take P2 out of the refining queue" }));
+    expect(cancelled).toEqual([["live", "proposal:live"]]);
+    cleanup();
+    draw(<CardView card={{ ...proposal, refine: "running", blocker: "The agent is refining this Proposal", rejectBlocker: "The agent is refining this Proposal", refinePhase: "Refining", refineNote: "Reading the order" }} />);
+    expect(screen.getByText("Refining")).toBeTruthy();
+    expect(screen.getByText("Reading the order")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Take P2 out of the refining queue" })).toBeNull();
+    cleanup();
   });
 
   test("the arrow of Reject and of Dismiss Drift opens a menu with Rework with feedback and asks the host", async () => {
@@ -505,7 +520,7 @@ describe("History entry details", () => {
 });
 
 const proposalView = (over: Partial<ProposalView> = {}): ProposalView => ({
-  id: "live", created: "2026-10-01T10:00:00.000Z", title: "A proposal", body: "Testo **lungo** della Proposal.", kind: "change", nonBlocking: false, prepared: false, resolves: [], requires: [], base: null, stale: [], unbased: [], errors: [], unfixable: [], creates: 1,
+  id: "live", created: "2026-10-01T10:00:00.000Z", title: "A proposal", body: "Testo **lungo** della Proposal.", kind: "change", nonBlocking: false, prepared: false, refining: false, resolves: [], requires: [], base: null, stale: [], unbased: [], errors: [], unfixable: [], creates: 1,
   tasks: [{ id: "t1", title: "Do it", refs: [], technical: true, body: "", images: [] }], removals: [], changes: [], machines: [], actors: [], areas: [], specs: EMPTY_SPECS, specsChange: { entries: [], notesBefore: null }, scope: [], ...over,
 });
 const taskView = (over: Partial<TaskView> = {}): TaskView => ({ id: "liveTask", created: "2026-10-01T10:00:00.000Z", title: "A task", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], file: "tasks/liveTask.md", images: [], ...over });

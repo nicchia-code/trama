@@ -541,7 +541,7 @@ export function runnableTasks(p: Project, filter: ProposalFilter = {}, taskIds?:
 }
 
 /** The To do Tasks of a scope with the blocking of every Task. Every Proposal and identity must exist. */
-function scopedTodo(p: Project, filter: ProposalFilter, taskIds?: string[]) {
+export function scopedTodo(p: Project, filter: ProposalFilter, taskIds?: string[]) {
   if ((filter.include?.length ?? 0) > 0 && (filter.exclude?.length ?? 0) > 0) throw new TramaError("--proposal and --not-proposal cannot be used together");
   const include = filter.include?.length ? new Set(filter.include.map((id) => getProposal(p, id).id)) : null;
   const exclude = filter.exclude?.length ? new Set(filter.exclude.map((id) => getProposal(p, id).id)) : null;

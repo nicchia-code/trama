@@ -160,6 +160,10 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
     case "approveProposal":
     case "rejectProposal":
       return id === undefined ? bad(`${type} needs a valid Proposal ID`) : { ok: true, message: { type, id } };
+    case "cancelRefinement": {
+      const proposal = typeof raw["proposal"] === "string" && ID.test(raw["proposal"]) ? raw["proposal"] : undefined;
+      return proposal === undefined ? bad("cancelRefinement needs a valid Proposal ID") : { ok: true, message: { type, proposal } };
+    }
     case "reworkProposal": {
       const proposal = typeof raw["proposal"] === "string" && ID.test(raw["proposal"]) ? raw["proposal"] : undefined;
       return proposal === undefined ? bad("reworkProposal needs a valid Proposal ID") : { ok: true, message: { type, proposal } };

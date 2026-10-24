@@ -46,7 +46,7 @@ Solo per un controllo: l'agente sta ancora lavorando dopo che i Task della sua c
 - `agent.FINISH_CHECK` → Delivered: l'agente dice che il controllo è finito; il ghost sparisce senza avvisi. Le schede che il controllo ha archiviato sono già arrivate da sole.
 
 ##### Verifying (initial)
-L'agente esegue la verifica finale della corsa: test, lint e build.
+L'agente esegue la verifica finale della corsa: test, lint e build, insieme quando non dipendono l'uno dall'altro. Intanto un suo sotto-agente può preparare il testo delle voci di History, che l'agente registrerà nella fase della History.
 - `agent.CHANGE_CHECK_PHASE` → Scanning: la verifica è passata e le condizioni della scansione mirata di fine corsa sono vere, quindi l'agente comincia a confrontare ciò che i Task della corsa hanno toccato.
 - `agent.CHANGE_CHECK_PHASE` → Aggiornamento della History: solo per il controllo finale di una corsa che ha realizzato almeno un Task, quando la scansione mirata non parte (anche perché la verifica è fallita); l'agente comincia a scrivere o aggiornare le voci di History.
 - `agent.DECLARE_ANNOUNCEMENT_NOTE` → Verifying: la nota si aggiunge al controllo.

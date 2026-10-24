@@ -36,6 +36,8 @@ export interface BoardEnv extends ViewEnv {
   openTaskImage(task: string, name: string): void;
   /** Opens the read-only details of the ghost with this key (`AnnouncedCard.key`). */
   openGhost(key: string): void;
+  /** Takes a queued Proposal out of the refining queue; `key` is its card, which gets the focus back on its Approve. */
+  cancelRefinement(proposal: string, key: string): void;
 }
 
 export const BoardEnvContext = createContext<BoardEnv | null>(null);
@@ -110,6 +112,7 @@ const TONE = {
   info: "border-blue-600 bg-blue-600/10 dark:border-blue-400 dark:bg-blue-400/15",
   warning: "border-amber-600 bg-amber-600/10 dark:border-amber-400 dark:bg-amber-400/15",
   error: "border-red-600 bg-red-600/10 dark:border-red-400 dark:bg-red-400/15",
+  primary: "border-primary bg-primary/10 text-primary dark:bg-primary/15",
 } as const;
 
 export type Tone = keyof typeof TONE;

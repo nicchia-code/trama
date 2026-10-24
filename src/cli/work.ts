@@ -14,11 +14,12 @@ import { type PreparedDecision, preparedFlag, type PreparedStatus, preparedStatu
 import type { Result } from "./result";
 import type { AgentOrigin } from "../core/announcements";
 import { recordTiming } from "../core/timings";
+import { parallelGroups } from "../core/groups";
 
 /** One-line summary of a Proposal for lists and the board. `number` is its short number (`P3`) while it is live, otherwise null. */
 export function proposalSummary(p: Project, proposal: Proposal, numbers: ShortNumbers) {
   const h = proposal.data.status === "draft" || proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
-  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, nonBlocking: proposal.data.nonBlocking, prepared: proposal.data.prepared, stale: h.stale.length > 0, requires: h.requires.map((r) => r.id), attachedTo: attachedDrift(p, proposal.id)?.id ?? null, resolves: proposal.data.kind === "resolution" ? proposal.data.drifts.length : null };
+  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, nonBlocking: proposal.data.nonBlocking, prepared: proposal.data.prepared, stale: h.stale.length > 0, refining: proposal.data.refining, requires: h.requires.map((r) => r.id), attachedTo: attachedDrift(p, proposal.id)?.id ?? null, resolves: proposal.data.kind === "resolution" ? proposal.data.drifts.length : null };
 }
 
 const resolvesMark = (i: { resolves: number | null; nonBlocking: boolean }) => (i.resolves === null ? "" : ` (resolves ${i.resolves} Drift${i.resolves === 1 ? "" : "s"})${i.nonBlocking ? " (blocks nothing)" : ""}`);
@@ -31,7 +32,7 @@ export function proposalListView(p: Project, all: boolean): Result {
   const flags = (i: (typeof items)[number]) =>
     [i.status, i.kind === "change" ? "" : i.kind, i.stale ? "stale" : "", i.requires.length > 0 ? `requires ${i.requires.map((r) => numbers.name("proposal", r)).join(", ")}` : ""].filter(Boolean).join(", ");
   const md = bullets(
-    items.map((i) => `- ${numbers.name("proposal", i.id)} [${flags(i)}] ${i.title}${i.status === "draft" ? " (draft)" : ""}${resolvesMark(i)}${i.attachedTo ? ` (attached to ${numbers.name("drift", i.attachedTo)})` : ""}`),
+    items.map((i) => `- ${numbers.name("proposal", i.id)} [${flags(i)}] ${i.title}${i.status === "draft" ? " (draft)" : ""}${i.refining ? " (refining)" : ""}${resolvesMark(i)}${i.attachedTo ? ` (attached to ${numbers.name("drift", i.attachedTo)})` : ""}`),
     "_No Proposals._",
   );
   return { md: `# Proposals\n\n${md}`, json: { proposals: items } };
@@ -71,6 +72,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
     `Status: **${proposal.data.status}**${h.stale.length > 0 ? " (stale)" : ""}${proposal.data.kind === "change" ? "" : ` · ${proposal.data.kind}`}`,
     attached ? `Attached to Drift ${numbers.name("drift", attached.id)} ${attached.title}. It brings no Tasks and is decided on the Drift.` : "",
     proposal.data.status === "draft" ? "Still being written; submit when finished. The developer cannot approve or reject it yet." : "",
+    proposal.data.refining ? "Refining: rebased, not handed over yet" : "",
     proposal.data.requires.length > 0 ? `Requires: ${proposal.data.requires.map((r) => numbers.name("proposal", r)).join(", ")}. Changes and validation below are on top of them.` : "",
     h.requires.length > 0 ? `\nCannot be approved yet:\n${requiredReasons(h.requires, (id) => numbers.name("proposal", id)).map((r) => `- ${r}`).join("\n")}` : "",
     h.stale.length > 0 ? `\nStale: the Model changed since the Proposal touched ${h.stale.join(", ")}. It cannot be approved; write a new Proposal.` : "",
@@ -105,6 +107,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
       kind: proposal.data.kind,
       nonBlocking: proposal.data.nonBlocking,
       prepared: proposal.data.prepared,
+      refining: proposal.data.refining,
       drifts: proposal.data.drifts,
       tasks: proposal.tasks.map((t) => ({ id: t.id, title: t.title, technical: t.technical, refs: t.refs, images: readTaskImages(p, t.id).map((i) => i.name) })),
       ...(proposal.data.kind === "resolution" ? { resolvesDrifts: resolvedDrifts } : {}),
@@ -226,16 +229,46 @@ export function taskNextView(p: Project, filter: ProposalFilter = {}, batch = fa
   const scope = proposalScope(p, numbers, filter);
   const waitingJson = waiting.map((w) => taskSummary(p, w.task, blocked, numbers));
   const brief = (t: Task) => ({ id: t.id, number: numbers.label("task", t.id), title: t.title });
-  const held = {
-    md: withHeldBack
-      ? `\n\n## Held back\n\n${queue.heldBack.length === 0 ? "_None._" : queue.heldBack.map((h) => `- ${numbers.name("task", h.task.id)} ${h.task.title} (overlaps ${h.overlaps.map((o) => numbers.name("task", o.id)).join(", ")})`).join("\n")}`
-      : "",
-    json: withHeldBack ? { heldBack: queue.heldBack.map((h) => ({ ...brief(h.task), overlaps: h.overlaps.map((o) => ({ id: o.id, number: numbers.label("task", o.id) })) })) } : {},
-  };
+  const heldOut = heldBackOutput(numbers, queue.heldBack);
+  const held = withHeldBack ? { md: `\n\n${heldOut.md}`, json: heldOut.json } : { md: "", json: {} };
   if (next && batch) return { md: queue.batch.map((t) => `${numbers.name("task", t.id)} ${t.title}`).join("\n") + held.md, json: { batch: queue.batch.map(brief), waiting: waitingJson, ...held.json } };
   if (next) return { md: `Next Task${scope}: ${numbers.name("task", next.id)} ${next.title}${held.md}`, json: { next: brief(next), waiting: waitingJson, ...held.json } };
   const md = [`No Task is runnable${scope}.`, ...(waiting.length > 0 ? ["", "Still in To do:", ...waiting.map((w) => taskLine(p, w.task, blocked, numbers))] : [])].join("\n");
   return { md: md + held.md, json: { next: null, waiting: waitingJson, ...held.json } };
+}
+
+/** The `## Held back` section of a run's answer, in markdown and in JSON: each runnable Task kept out and the Tasks it overlaps. */
+function heldBackOutput(numbers: ShortNumbers, held: { task: Task; overlaps: Task[] }[]): { md: string; json: { heldBack: { id: string; number: string | null; title: string; overlaps: { id: string; number: string | null }[] }[] } } {
+  const lines = held.map((h) => `- ${numbers.name("task", h.task.id)} ${h.task.title} (overlaps ${h.overlaps.map((o) => numbers.name("task", o.id)).join(", ")})`);
+  return {
+    md: `## Held back\n\n${lines.length === 0 ? "_None._" : lines.join("\n")}`,
+    json: { heldBack: held.map((h) => ({ id: h.task.id, number: numbers.label("task", h.task.id), title: h.task.title, overlaps: h.overlaps.map((o) => ({ id: o.id, number: numbers.label("task", o.id) })) })) },
+  };
+}
+
+/**
+ * The runnable Tasks of a parallel run in groups: each `## Group <n>` lists its Tasks and what ties them, then the runnable
+ * Tasks held back for a Task the agent has taken. With `max`, up to that many groups. Moves nothing.
+ */
+export function taskGroupsView(p: Project, filter: ProposalFilter = {}, max?: number, taskIds?: string[], timing?: { origin: AgentOrigin; job?: string }): Result {
+  const queue = parallelGroups(p, filter, max, taskIds);
+  const given = queue.groups.reduce((n, g) => n + g.tasks.length, 0);
+  if (timing && max !== undefined) recordTiming(p, timing.origin, { event: "queue", requested: max, given, remaining: queue.remaining }, { job: timing.job });
+  const numbers = syncShortNumbers(p);
+  const scope = proposalScope(p, numbers, filter);
+  const code = (refs: string[]) => refs.map((r) => `\`${r}\``).join(", ");
+  const groups = queue.groups.map((g, i) => {
+    const tasks = g.tasks.map((t) => `- ${numbers.name("task", t.id)} ${t.title}`);
+    const shared = [...(g.refs.length > 0 ? [`refs ${code(g.refs)}`] : []), ...(g.files.length > 0 ? [`files ${code(g.files)}`] : [])];
+    return `## Group ${i + 1}\n\n${tasks.join("\n")}\n\nShared: ${shared.join("; ") || "none"}`;
+  });
+  const held = heldBackOutput(numbers, queue.heldBack);
+  const md = groups.length === 0 && queue.heldBack.length === 0 ? `No Task is runnable${scope}.` : [...groups, ...(queue.heldBack.length > 0 ? [held.md] : [])].join("\n\n");
+  const json = {
+    groups: queue.groups.map((g) => ({ tasks: g.tasks.map((t) => ({ id: t.id, number: numbers.label("task", t.id), title: t.title })), refs: g.refs, files: g.files })),
+    ...held.json,
+  };
+  return { md, json };
 }
 
 /**
@@ -429,7 +462,7 @@ export function boardView(p: Project): Result {
     ...(drafts.length === 0 ? [] : ["## In writing", bullets(drafts.map((i) => `- Proposal ${i.number ?? i.id} (draft): ${i.title}${resolvesMark(i)}`)), ""]),
     "## To decide",
     bullets([
-      ...proposals.map((i) => `- Proposal ${i.number ?? i.id}${i.stale ? " (stale)" : ""}: ${i.title}${resolvesMark(i)}${nestedDrifts(i.id)}`),
+      ...proposals.map((i) => `- Proposal ${i.number ?? i.id}${i.stale ? " (stale)" : ""}${i.refining ? " (refining)" : ""}: ${i.title}${resolvesMark(i)}${nestedDrifts(i.id)}`),
       ...drifts.map((d) => {
         const nested = attachedLine(d.proposal, "  ");
         return `- Drift ${d.number ?? d.id}: ${d.title}${d.previous.length === 0 ? "" : " (recurring)"}${d.unifies.length === 0 ? "" : ` (unifies ${d.unifies.length})`}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;

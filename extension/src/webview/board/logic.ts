@@ -4,10 +4,10 @@ import { ghostColumn } from "../../../../src/core/ghost-column";
 import { formatDiagnostic } from "../../../../src/core/model";
 import { compareByCreation } from "../../../../src/core/schema";
 import { driftsWithCard } from "../../../../src/core/board-decisions";
-import { joinReasons } from "../../../../src/core/design";
+import { joinReasons, RUN_IN_PROGRESS } from "../../../../src/core/design";
 import type { Blocker } from "../../../../src/core/blocking";
 import type { AnnouncementView, DriftView, HistoryView, ProposalTag, ProposalView, Snapshot, TaskImageView, TaskView } from "../../../../src/core/snapshot";
-import type { Column, FocusRequest } from "../../protocol";
+import type { Column, FocusRequest, RefinementView } from "../../protocol";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import { focusStepCount } from "../focus/steps";
 import { dismissBlocker } from "../dismiss";
@@ -79,7 +79,9 @@ export function blockedReason(blockedByDrifts: readonly DriftBlocker[], waitingF
 export interface Badge {
   label: string;
   tooltip: string;
-  tone: "info" | "warning" | "error";
+  /** The name read by assistive technology when it is not the visible label; the tooltip otherwise. */
+  accessibleName?: string;
+  tone: "primary" | "info" | "warning" | "error";
   card?: { kind: "proposal"; id: string };
 }
 
@@ -164,6 +166,14 @@ export interface ProposalCard {
   changes: ChangeSummary;
   /** Why Approve is disabled; null when the Proposal can be approved. */
   blocker: string | null;
+  /** What Approve does on a Proposal the refinement touches, as its tooltip when it works; null otherwise. */
+  approveHint: string | null;
+  /** Where the Proposal stands in the refinement; null when the refinement does not touch it. */
+  refine: RefineStatus | null;
+  /** The phase line of a Proposal the agent refines now; null otherwise. */
+  refinePhase: string | null;
+  /** The latest note of the agent refining this Proposal; null when it has none or it does not refine it. */
+  refineNote: string | null;
   /** Why Reject is disabled; null when the Proposal can be rejected. */
   rejectBlocker: string | null;
   /** Why the arrow of Reject (Rework with feedback) is disabled: Reject's reasons, and for a resolution also Resolve's; null when it works. */
@@ -292,14 +302,58 @@ export function finishingBlocker(id: string, finishing: readonly string[]): stri
   return finishing.includes(id) ? "The agent is still finishing" : null;
 }
 
-/** The reason a Proposal cannot be approved, or null. Mirrors what the host refuses. */
-export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires">, numbers: CardNumbers = noNumbers): string | null {
+/** The reason a Proposal cannot be approved, or null. Mirrors what the host refuses: while a Run of this window is in progress, Approve waits for it. */
+export function approveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires">, numbers: CardNumbers = noNumbers, runInProgress = false): string | null {
+  return joinReasons([runInProgress ? RUN_IN_PROGRESS : null, ownApproveBlocker(p, numbers)]);
+}
+
+/** The reasons of the Proposal itself that block its approval, without the Run. */
+function ownApproveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires">, numbers: CardNumbers): string | null {
   if (p.requires.length > 0) return `Approve the required Proposals first:\n${listed(requiredReasons(p.requires, (id) => namerOf(numbers)("proposal", id)))}`;
   if (p.stale.length > 0) return "Stale: the Model changed since this Proposal touched it. Ask the agent for a new Proposal.";
   if (p.unbased.length > 0) return "Some files were never registered with the Proposal.";
   if (p.errors.length > 0) return "Applying this Proposal would leave the Model or its Requirements invalid.";
   if (p.unfixable.length > 0) return `Cannot be approved, nothing changed:\n${listed(p.unfixable)}\nHave Resolve Drifts rewrite the resolution.`;
   return null;
+}
+
+/** The refinement of the Proposals is off: the Board and the diagram draw them as before. */
+export const REFINEMENT_OFF: RefinementView = { enabled: false, running: null, queued: [], note: null, runInProgress: false, waiting: [] };
+
+/** Why Approve and Reject wait while the agent refines this Proposal. */
+export const REFINING_REASON = "The agent is refining this Proposal";
+/** Why Approve waits on a Proposal already in the refining queue. */
+export const QUEUED_REASON = "Already queued for refining";
+/** The tooltip of the `waiting for the run` badge: a refined Proposal that Trama approves once the Run in progress ends. */
+export const WAITING_RUN_TIP = "Refined; Trama approves it when the run in progress ends";
+/** Why Reject waits on a Proposal whose refining stopped before its hand-over: Approve resumes it. */
+export const RESUME_REASON = "Approve to resume refining first";
+/** The tooltip of the `to refine` badge, and of Approve when it refines the Proposal first. */
+export const TO_REFINE_TIP = "The Model changed under this Proposal. Approve refines it on the current Model, then approves it.";
+
+/**
+ * Where a Proposal stands in the refinement, or null when the refinement does not touch it (off, or a Proposal the Model
+ * did not change): `running` the one the agent refines now, `queued` one waiting for it, `stopped` a Draft whose refining
+ * stopped before its hand-over, `to-refine` a stale open Proposal that Approve refines first.
+ */
+export function refineStatus(p: Pick<ProposalView, "id" | "stale" | "refining">, refinement: RefinementView): RefineStatus | null {
+  if (!refinement.enabled) return null;
+  if (refinement.running === p.id) return "running";
+  if (refinement.queued.includes(p.id)) return "queued";
+  if (p.refining) return "stopped";
+  return p.stale.length > 0 ? "to-refine" : null;
+}
+
+export type RefineStatus = "running" | "queued" | "stopped" | "to-refine";
+
+/**
+ * Why Approve is disabled on a Proposal the refinement touches. Stale, unbased, invalid and unfixable do not block there:
+ * the refinement settles them. Only the required Proposals and the finishing of the agent that filed it do.
+ */
+export function refineApproveBlocker(status: RefineStatus, p: Pick<ProposalView, "requires">, numbers: CardNumbers, refinement: RefinementView): string | null {
+  if (status === "running") return joinReasons([refinement.runInProgress ? RUN_IN_PROGRESS : null, REFINING_REASON]);
+  if (status === "queued") return joinReasons([refinement.runInProgress ? RUN_IN_PROGRESS : null, QUEUED_REASON]);
+  return approveBlocker({ requires: p.requires, stale: [], unbased: [], errors: [], unfixable: [] }, numbers, refinement.runInProgress);
 }
 
 export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires" | "kind" | "nonBlocking">, numbers: CardNumbers = noNumbers): Badge[] {
@@ -324,10 +378,26 @@ export function createsText(n: number): string | null {
   return n === 0 ? null : `Creates ${n} ${n === 1 ? "Task" : "Tasks"}`;
 }
 
-export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, blocked: Map<string, TaskCard[]> = new Map(), finishing: readonly string[] = [], models: BoardModels = NO_MODELS, views: FocusViews = NO_VIEWS, resolveReason: string | null = null): ProposalCard {
+export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, blocked: Map<string, TaskCard[]> = new Map(), finishing: readonly string[] = [], models: BoardModels = NO_MODELS, views: FocusViews = NO_VIEWS, resolveReason: string | null = null, refinement: RefinementView = REFINEMENT_OFF, asking = false): ProposalCard {
   const wait = finishingBlocker(p.id, finishing);
   const name = cardNameOf(numbers, "proposal", p.id);
   const choosable = Object.hasOwn(models.proposals, p.id);
+  const refine = refineStatus(p, refinement);
+  const runningName = refinement.running === null ? null : namerOf(numbers)("proposal", refinement.running);
+  const approve = refine === null ? approveBlocker(p, numbers, refinement.runInProgress) : refineApproveBlocker(refine, p, numbers, refinement);
+  const rejectBlocker = joinReasons([wait, refine === "running" ? REFINING_REASON : refine === "stopped" ? RESUME_REASON : null]);
+  const refineBadge: Badge | null =
+    refine === null
+      ? null
+      : refine === "running"
+        ? { label: "refining", tone: "info", tooltip: "The agent is refining this Proposal on the current Model" }
+        : refine === "queued"
+          ? { label: "queued", tone: "info", tooltip: runningName === null ? "Waiting to be refined first" : `Waiting for ${runningName} to be refined first` }
+          : refine === "stopped"
+            ? { label: "to refine", tone: "primary", tooltip: "Refining stopped before the hand-over. Approve resumes it." }
+            : { label: "to refine", tone: "primary", tooltip: TO_REFINE_TIP };
+  // Refined while a Run of this window was in progress: Trama approves it when that Run ends.
+  const waitingRun: Badge | null = refinement.waiting.includes(p.id) ? { label: "waiting for the run", tone: "info", tooltip: WAITING_RUN_TIP, accessibleName: WAITING_RUN_TIP } : null;
   return {
     kind: "proposal",
     key: `proposal:${p.id}`,
@@ -337,11 +407,15 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, 
     title: p.title,
     body: p.body,
     resolution: p.kind === "resolution",
-    badges: proposalBadges(p, numbers),
+    badges: [...(refineBadge === null ? [] : [refineBadge]), ...(waitingRun === null ? [] : [waitingRun]), ...proposalBadges(refine === null ? p : { ...p, stale: [] }, numbers)],
     changes: summarizeChanges(p.changes),
-    blocker: joinReasons([wait, approveBlocker(p, numbers)]),
-    rejectBlocker: wait,
-    reworkBlocker: joinReasons([wait, p.kind === "resolution" ? resolveReason : null]),
+    blocker: joinReasons([wait, approve]),
+    approveHint: refine === "to-refine" ? "Refine it on the current Model, then approve it" : null,
+    refine,
+    refinePhase: refine === "running" ? (asking ? "Waiting for your answers" : "Refining") : null,
+    refineNote: refine === "running" ? refinement.note : null,
+    rejectBlocker,
+    reworkBlocker: joinReasons([rejectBlocker, p.kind === "resolution" ? resolveReason : null]),
     views,
     resolves: resolvedRows(p, numbers, blocked),
     creates: createsText(p.creates),
@@ -448,6 +522,10 @@ export interface BoardResolve {
   resolving: readonly string[];
   /** The open Drifts the Unify Drifts agent gathered and works on: their cards wear an Unifying badge. */
   unifying?: readonly string[];
+  /** The Proposal refinement, as the host carries it; absent: off. */
+  refinement?: RefinementView;
+  /** Whether a question round is open: the refining Proposal's phase says so. */
+  asking?: boolean;
 }
 
 export const NO_RESOLVE: BoardResolve = { blocker: null, drifts: {}, resolving: [], unifying: [] };
@@ -507,7 +585,7 @@ export function buildBoard(snapshot: Snapshot, resolve: BoardResolve = NO_RESOLV
     }
   }
   const backlog = byCreation<{ id: string; created: string | null; card: Card }>([
-    ...snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, underDrift, snapshot.finishingProposals, models, focusViews(snapshot, { kind: "proposal", id: p.id }), resolve.blocker) as Card })),
+    ...snapshot.proposals.map((p) => ({ id: p.id, created: p.created, card: proposalCard(p, numbers, underDrift, snapshot.finishingProposals, models, focusViews(snapshot, { kind: "proposal", id: p.id }), resolve.blocker, resolve.refinement, resolve.asking) as Card })),
     ...driftsWithCard(snapshot)
       .map((d) => ({ id: d.id, created: d.created, card: driftCard(d, numbers, dismissBlocker(d.id, snapshot.resolutionDrifts, resolve.blocker, snapshot.finishingDrifts), { blocker: resolveBlocker(d.id, snapshot.finishingDrifts, resolve), hostReason: resolve.drifts[d.id] ?? null, resolving: resolve.resolving.includes(d.id), unifying: resolve.unifying?.includes(d.id) === true }, underDrift.get(d.id) ?? []) as Card })),
   ]);

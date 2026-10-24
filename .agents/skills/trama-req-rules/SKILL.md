@@ -42,10 +42,13 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole della conversazione General** (`omp-chat-general.md`): Usa quando implementi le regole della conversazione General di omp Chat: quando c'è, avvio, pulizia, errori, ripresa e ciò che non blocca. Sections: `omp-chat-general`.
 - **omp Chat** (`omp-chat.md`): Usa quando implementi quando omp Chat si usa, come nascono, finiscono e riprendono le sue conversazioni e quali server MCP riceve omp. Sections: `omp-chat`, `omp-chat-conversation`.
 - **Installazione di omp** (`omp-install.md`): Usa quando implementi Install omp e il terminale che installa omp. Sections: `developer.INSTALL_OMP`.
+- **Regole delle prenotazioni dei file** (`prenotazioni.md`): Usa quando lavori sulle prenotazioni dei file dei sotto-agenti durante un Run: chi prenota, chi è fermato, quando una prenotazione finisce. Sections: `prenotazione-file`.
 - **Regole del progetto** (`project.md`): Usa quando implementi init, aggiornamento delle skill e skill dei Requisiti. Sections: `project`.
 - **Regole dei round di domande** (`questions-notices.md`): Usa quando implementi i round di domande. Sections: `question-round`.
+- **Raffinamento delle Proposal obsolete** (`raffinamento.md`): Usa quando implementi Auto-update Stale Proposals: quando una Proposal è da raffinare, coda, istruzione, fine del raffinamento e approvazione. Sections: `raffinamento`, `developer.ANNULLA_RAFFINAMENTO`.
 - **Regole delle richieste di design** (`requests.md`): Usa per invio, contenuto e consumo delle richieste di design scritte. Sections: `design-request`.
 - **Rework with feedback** (`rework.md`): Usa quando implementi Rework with feedback su una Proposal o su un Drift: condizioni, rifiuto con feedback, istruzioni all'agente, legame `reworks` e comportamento delle skill che rifanno. Sections: `developer.REWORK_PROPOSAL`, `developer.REWORK_DRIFT`.
+- **Regole dei Run per modello in parallelo** (`run-paralleli.md`): Usa quando lavori sulla sequenza per modello di Run all lanciata in parallelo e sulla divisione del limite dei sotto-agenti fra i suoi Run. Sections: `drift-resolution/Running tasks`.
 - **Regole di scan, confronti e Advisor Scanner** (`scans.md`): Usa per scan, confronto delle Machine e Advisor Scanner. Sections: `work`.
 - **Regole del wizard di setup** (`setup-wizard.md`): Usa quando implementi i passi, i salvataggi, le cartelle escluse e la conferma del wizard di setup. Sections: `setup-wizard`.
 - **Task progress rules** (`task-progress.md`): Use when implementing the percentage the agent declares on a Task it has taken. Sections: `task/Taken by the agent`.

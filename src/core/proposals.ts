@@ -88,6 +88,8 @@ interface ProposalData {
   reworks: string | null;
   /** Set when the Proposal was rejected with Rework with feedback; absent elsewhere. */
   reworkRequested: boolean;
+  /** Set by a rebase (`proposal edit` with `rebase`) and cleared by a successful hand-over: the Draft is being refined over the current Model. */
+  refining: boolean;
 }
 
 /** Longest label a Proposal can carry, in characters. */
@@ -155,6 +157,7 @@ function parseData(raw: Raw, where: string): ProposalData {
     label: textOrNull(raw, "label", where),
     reworks: idField(raw, "reworks", where),
     reworkRequested: boolField(raw, "reworkRequested", false, where),
+    refining: boolField(raw, "refining", false, where),
   };
   if (data.reworks !== null && data.request !== null) throw new TramaError(`${where}: a Proposal with "reworks" has no "request"`);
   data.drifts = driftsField(raw, data.kind, where);
@@ -245,7 +248,7 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
 
 /** Writes `proposal.md` from the Proposal's data, leaving defaults out of the file. */
 export function save(proposal: Proposal) {
-  const { kind, nonBlocking, prepared, drifts, requires, request, created, scanScope, label, reworks, reworkRequested, ...rest } = proposal.data;
+  const { kind, nonBlocking, prepared, drifts, requires, request, created, scanScope, label, reworks, reworkRequested, refining, ...rest } = proposal.data;
   // Defaults stay out of the file, so Proposals without dependencies look as they always did.
   // Numbered Proposals have no `created`; writing it would pretend they remember an instant they do not.
   const data = {
@@ -263,6 +266,7 @@ export function save(proposal: Proposal) {
     ...(label === null ? {} : { label }),
     ...(reworks === null ? {} : { reworks }),
     ...(reworkRequested ? { reworkRequested: true } : {}),
+    ...(refining ? { refining: true } : {}),
   };
   writeDocument(join(proposal.dir, "proposal.md"), data, proposal.body);
 }
@@ -357,6 +361,7 @@ export function createProposal(
         label,
         reworks: rework === null ? null : rework.id,
         reworkRequested: false,
+        refining: false,
       },
       body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
       tasks: [],
@@ -556,6 +561,31 @@ export function editInProposal(p: Project, id: string, modelPath: string): strin
     }
     save(proposal);
     return target;
+  });
+}
+
+/**
+ * Records again the starting version of every file the Proposal holds, computed on top of the Proposals it requires, so it is
+ * no longer stale; this is the one exception to what `editInProposal` keeps. Marks it `refining`, and an open Proposal returns
+ * to Draft. Refused, changing nothing, unless it is an ordinary change Proposal not attached to a Drift, and a Draft or open.
+ */
+export function rebaseInProposal(p: Project, id: string): Proposal {
+  return withProposalLock(p, id, () => {
+    const proposal = getProposal(p, id);
+    const name = cardName(p, "proposal", proposal.id);
+    if (proposal.data.kind !== "change") throw new TramaError(`Proposal ${name} is of kind ${proposal.data.kind}; only a change Proposal can be rebased`);
+    const attached = attachedDrift(p, proposal.id);
+    if (attached !== null) throw new TramaError(`Proposal ${name} is attached to Drift ${cardName(p, "drift", attached.id)}: decide it on the Drift`);
+    if (proposal.data.status !== "draft" && proposal.data.status !== "open") throw new TramaError(`Proposal ${name} is ${proposal.data.status}; only a Draft or an open Proposal can be rebased`);
+    const files = baseFiles(p, proposal);
+    for (const path of [...newFiles(proposal).keys(), ...proposal.data.delete]) {
+      const content = files.get(path);
+      proposal.data.base[path] = content !== undefined ? sha256(content) : "new";
+    }
+    touch(proposal);
+    proposal.data.refining = true;
+    save(proposal);
+    return proposal;
   });
 }
 
@@ -997,6 +1027,7 @@ export function rejectProposal(p: Project, id: string, feedback = "", options: {
  * with it applied would have errors or when a file it holds was never registered. Being stale or requiring
  * Proposals that are not approved yet does not refuse it: writing cannot fix those; nor do the warnings, which are returned.
  * A successful hand-over consumes the design request the Proposal is bound to: `requestConsumed` is true when its file was deleted.
+ * A successful hand-over clears `refining`, so the Draft reads as written again.
  * A setup Proposal handed over to an empty Model is approved at once, as the developer's approval would; when that refuses it,
  * it stays Open and `openReason` says why.
  */
@@ -1013,6 +1044,7 @@ export function submitProposal(p: Project, id: string, skillsDirs: string[] = []
   if (problems.length > 0)
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} cannot be handed over yet:\n${problems.map((x) => `- ${x}`).join("\n")}${warningsText(warnings)}`);
   proposal.data.status = "open";
+  proposal.data.refining = false;
   save(proposal);
   pruneImages(p);
   removeBoundTo(p, proposal.id, true);

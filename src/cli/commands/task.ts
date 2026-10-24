@@ -11,7 +11,7 @@ import { preflightCompared } from "../compare";
 import type { Context } from "../context";
 import { defineCommand } from "../registry";
 import { text, type Result } from "../result";
-import { taskListView, taskNextView, taskShowView } from "../work";
+import { taskGroupsView, taskListView, taskNextView, taskShowView } from "../work";
 
 const stringList = z.array(z.string().min(1));
 const card = z.looseObject({ id: z.string(), number: z.string().nullable(), title: z.string() });
@@ -97,17 +97,18 @@ const list = defineCommand({
   mode: "immediate",
   summary: "The Tasks by column, the runnable ones, or the scope of a scan.",
   description:
-    "Without `runnable`, every Task by column, filtered by `column` and `tasks`. With `runnable: true`, the next runnable Task (in To do, not blocked), or with `max` the Tasks for the free places of a parallel run: up to `max` of them, none concerning the same thing as another or as a Task In progress the agent has taken. `tasks` keeps only the named Tasks, `proposals` only those of the named Proposals and `notProposals` all but those (the Tasks with no Proposal included); the two never go together. When none is runnable it says so and lists the Tasks in To do with what blocks them. With `heldBack: true` it adds `## Held back`: the runnable Tasks the free-places rule left out because they concern the same thing as a chosen Task or a Task the agent has taken, each with the Tasks it overlaps; blocked Tasks and Tasks left out only for lack of places are not there. With `scope: true` it adds the scope of a scan: with `runnable`, the exact references of the runnable Tasks (the pre-flight), the ones already compared on this code apart; without it, the scope of the Tasks named in `tasks`, which is then required. Moves nothing.",
+    "Without `runnable`, every Task by column, filtered by `column` and `tasks`. With `runnable: true`, the next runnable Task (in To do, not blocked), or with `max` the Tasks for the free places of a parallel run: up to `max` of them, none concerning the same thing as another or as a Task In progress the agent has taken. `tasks` keeps only the named Tasks, `proposals` only those of the named Proposals and `notProposals` all but those (the Tasks with no Proposal included); the two never go together. When none is runnable it says so and lists the Tasks in To do with what blocks them. With `heldBack: true` it adds `## Held back`: the runnable Tasks the free-places rule left out because they concern the same thing as a chosen Task or a Task the agent has taken, each with the Tasks it overlaps; blocked Tasks and Tasks left out only for lack of places are not there. With `groups: true` it prints the runnable Tasks in groups instead: each `## Group <n>` holds Tasks that concern the same thing, directly or through other Tasks of the group, or name the same project file, with what they share; the largest group comes first, and `max` counts groups. Runnable Tasks that concern a Task the agent has taken are held back as above, and blocked Tasks take no part. With `scope: true` it adds the scope of a scan: with `runnable`, the exact references of the runnable Tasks (the pre-flight), the ones already compared on this code apart; without it, the scope of the Tasks named in `tasks`, which is then required. Moves nothing.",
   input: z
     .strictObject({
       column: z.enum(COLUMNS).optional().describe("Only the Tasks of this column. Not with `runnable`."),
       runnable: z.boolean().optional().describe("The runnable Tasks instead of every Task."),
-      max: z.number().int().min(1).optional().describe("With `runnable`: up to this many Tasks, for a parallel run."),
+      max: z.number().int().min(1).optional().describe("With `runnable`: up to this many Tasks, for a parallel run; with `groups`, up to this many groups."),
       tasks: stringList.optional().describe("Only these Tasks: IDs or short numbers; each must exist."),
       proposals: stringList.optional().describe("With `runnable`: only the Tasks of these Proposals."),
       notProposals: stringList.optional().describe("With `runnable`: every Task but those of these Proposals."),
       scope: z.boolean().optional().describe("Add the scope of the scan."),
       heldBack: z.boolean().optional().describe("With `runnable`, without `scope`: add the runnable Tasks kept out because they concern the same thing as a chosen or taken Task."),
+      groups: z.boolean().optional().describe("With `runnable`: the runnable Tasks in groups for a parallel run: Tasks that concern the same thing, directly or through others, or name a common project file. `max` then counts groups. Not with `scope` or `heldBack`."),
     })
     .superRefine((input, ctx) => {
       const fail = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });
@@ -116,16 +117,20 @@ const list = defineCommand({
         if (input.heldBack !== undefined) fail("heldBack", "applies only with runnable");
         if (input.proposals !== undefined) fail("proposals", "applies only with runnable");
         if (input.notProposals !== undefined) fail("notProposals", "applies only with runnable");
+        if (input.groups !== undefined) fail("groups", "applies only with runnable");
         if (input.scope === true && input.tasks === undefined) fail("tasks", "is required with scope unless runnable is true");
       } else if (input.column !== undefined) fail("column", "does not apply with runnable");
       if (input.proposals !== undefined && input.notProposals !== undefined) fail("notProposals", "cannot go together with proposals");
       if (input.scope === true && input.runnable === true && input.max !== undefined) fail("max", "does not apply with scope");
       if (input.scope === true && input.runnable === true && input.heldBack === true) fail("heldBack", "does not apply with scope");
+      if (input.groups === true && input.scope === true) fail("scope", "does not apply with groups");
+      if (input.groups === true && input.heldBack === true) fail("heldBack", "does not apply with groups");
     }),
   output: z.union([
     z.object({ tasks: z.array(summary) }).describe("Without `runnable`"),
     z.object({ next: card.nullable(), waiting: z.array(summary), heldBack: z.array(held).optional() }).describe("`runnable`; `heldBack` with `heldBack: true`"),
     z.object({ batch: z.array(card), waiting: z.array(summary), heldBack: z.array(held).optional() }).describe("`runnable` with `max`; `heldBack` with `heldBack: true`"),
+    z.object({ groups: z.array(z.object({ tasks: z.array(card), refs: z.array(z.string()), files: z.array(z.string()) })), heldBack: z.array(held) }).describe("`runnable` with `groups`"),
     z.array(z.object({ ref: z.string(), reason: z.enum(["changed", "leads into a change"]) })).describe("`scope` with `tasks`"),
     z.object({ refs: z.array(z.object({ ref: z.string() })), alreadyCompared: z.array(z.object({ ref: z.string() })), tasks: z.array(card) }).describe("`scope` with `runnable`"),
   ]),
@@ -140,6 +145,7 @@ const list = defineCommand({
       return text(scope.length ? `## Scan scope\n\n${scope.map(({ ref, reason }) => `- \`${ref}\` (${reason})`).join("\n")}` : "## Scan scope\n\n_Nothing to scan._", scope);
     }
     const filter = { include: (input.proposals ?? []).map((id) => getProposal(project, id, true).id), exclude: (input.notProposals ?? []).map((id) => getProposal(project, id, true).id) };
+    if (input.groups === true) return taskGroupsView(project, filter, input.max, ids, { origin: ctx.origin, job: ctx.job });
     if (input.scope !== true) return taskNextView(project, filter, input.max !== undefined, input.max, ids, { origin: ctx.origin, job: ctx.job }, input.heldBack === true);
     const { refs, tasks } = preflightScope(project, filter, ids);
     const n = syncShortNumbers(project);

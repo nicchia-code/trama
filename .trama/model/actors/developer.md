@@ -7,13 +7,16 @@ Può anche registrare direttamente un Drift dalla riga di comando, per annotare 
 ## Events
 
 ### APPROVE_PROPOSAL
-The developer approves an open Proposal, from the Board or from the Diagram's detail panel. Una Proposal allegata a un Drift aperto non si approva così: si decide con il Drift, dalla riga di comando o con una risoluzione.
+The developer approves an open Proposal, from the Board or from the Diagram's detail panel. Una Proposal allegata a un Drift aperto non si approva così: si decide con il Drift, dalla riga di comando o con una risoluzione. Con Auto-update Stale Proposals, Approve su una Proposal da raffinare, o su una Draft rimasta a metà di un raffinamento, chiede invece a Trama di raffinarla e poi di approvarla (vedi il Raffinamento).
 
 ### REJECT_PROPOSAL
 The developer rejects an open Proposal, from the Board or from the Diagram's detail panel. Reject non chiede più nessun feedback: chi vuole dire all'agente che cosa cambiare usa Rework with feedback (REWORK_PROPOSAL). Dalla riga di comando il rifiuto accetta ancora un feedback facoltativo; confermato vuoto, non ne aggiunge nessuno. Una Proposal allegata a un Drift aperto non si rifiuta così: si decide con il Drift, dalla riga di comando o con una risoluzione.
 
 ### REWORK_PROPOSAL
 Il developer sceglie Rework with feedback… dal menu della freccetta di Reject di una Proposal aperta, sulla Board o nei dettagli del Diagramma, e scrive nella casella di input dell'editor che cosa l'agente deve cambiare. Annullare la casella non fa nulla. Confermarla vuota chiede prima una conferma, contro i clic sbagliati: confermata, la Proposal è rifatta senza feedback sul Modello di adesso; annullata, non succede nulla. Con un testo parte subito.
+
+### ANNULLA_RAFFINAMENTO
+Il developer preme Cancel sulla scheda di una Proposal che aspetta in coda il suo raffinamento (vedi il Raffinamento), per toglierla dalla coda senza rifiutarla.
 
 ### SCEGLI_MODELLO_PROPOSAL
 Il developer sceglie, dall'ingranaggio della scheda di una Proposal in Backlog, il modello con cui lavorano gli agenti dei lavori di quella Proposal, oppure lo toglie e torna al default dei Settings. Sceglie un modello suggerito o ne scrive il nome, come nella scheda Settings.

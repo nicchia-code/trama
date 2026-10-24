@@ -1,5 +1,6 @@
 import type { Snapshot } from "../../../../src/core/snapshot";
-import type { FocusRequest, NavigateOptions } from "../../protocol";
+import { REFINEMENT_OFF } from "../board/logic";
+import type { FocusRequest, NavigateOptions, RefinementView } from "../../protocol";
 import { type Detail, containersOf, detailOfSelection, requirementItems } from "./details";
 import { type Element, alwaysOpens, homeLevel, resolveElement, selectionFor, showsElement } from "./elements";
 import { type GraphSpec, type Level, sameLevel } from "./graph";
@@ -33,12 +34,14 @@ export interface DiagramState {
   resolveBlocker: string | null;
   /** Whether the Advisor Scanner is on: the Scan button is then disabled. */
   advisorScanner: boolean;
+  /** The Proposal refinement, as the host carries it; off when absent. */
+  refinement: RefinementView;
 }
 
 export interface DiagramStore {
   get(): DiagramState;
   subscribe(listener: () => void): () => void;
-  update(snapshot: Snapshot, resolveBlocker: string | null, advisorScanner: boolean): void;
+  update(snapshot: Snapshot, resolveBlocker: string | null, advisorScanner: boolean, refinement?: RefinementView): void;
   /** Called when the tab is shown or navigated to. */
   show(options: NavigateOptions): void;
   setLevel(target: Level): void;
@@ -77,6 +80,7 @@ export function createDiagramStore(): DiagramStore {
     fitTo: null,
     resolveBlocker: null,
     advisorScanner: false,
+    refinement: REFINEMENT_OFF,
   };
   let pending: NavigateOptions | null = null;
   const expanded = new Map<string, Set<string>>();
@@ -185,10 +189,10 @@ export function createDiagramStore(): DiagramStore {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    update(snapshot, resolveBlocker, advisorScanner) {
+    update(snapshot, resolveBlocker, advisorScanner, refinement = REFINEMENT_OFF) {
       const at = state.focus?.index ?? -1;
       const stepBefore = at >= 0 ? (state.focus?.steps[at]?.key ?? null) : null;
-      state = { ...state, snapshot, resolveBlocker, advisorScanner };
+      state = { ...state, snapshot, resolveBlocker, advisorScanner, refinement };
       if (pending) {
         const options = pending;
         pending = null;

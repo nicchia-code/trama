@@ -79,15 +79,16 @@ export function installSkills(dir: string): string[] {
   return Object.entries(SKILLS).map(([rel, content]) => writeIfChanged(join(dir, rel), content));
 }
 
-/** omp's default role for the Machine-comparison sub-agent; Trama passes `--slow` with the scan model when set. */
-const OMP_ROLES = [["trama-analysis", "@slow"]] as const;
+/** omp's role for each sub-agent, as `[name, model]`. `trama-analysis` takes omp's `@slow` role, which Trama passes `--slow` with the scan model when set. `trama-implementer` names no model, so it uses the model of the main process (`--model`). */
+const OMP_ROLES = [["trama-analysis", "@slow"], ["trama-implementer", undefined]] as const;
 
 /** omp's definitions of the scan's sub-agents and the Advisor Scanner's advisors (`.omp/WATCHDOG.yml`), as they are installed in the project's `.omp/`: path -> content. */
 export function ompAgentFiles(root: string): Record<string, string> {
   const agents = Object.fromEntries(
     OMP_ROLES.map(([name, model]) => {
       const { description, prompt } = SUB_AGENTS[name];
-      return [join(root, ".omp", "agents", `${name}.md`), `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\nmodel: "${model}"\n---\n\n${prompt}\n`];
+      const modelLine = model === undefined ? "" : `model: "${model}"\n`;
+      return [join(root, ".omp", "agents", `${name}.md`), `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n${modelLine}---\n\n${prompt}\n`];
     }),
   );
   return { ...agents, [join(root, ".omp", "WATCHDOG.yml")]: watchdogFile() };

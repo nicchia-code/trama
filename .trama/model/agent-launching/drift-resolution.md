@@ -26,7 +26,7 @@ Nessun Run, nessun agente di risoluzione o di unificazione e nessuna domanda pro
 - `developer.UNIFY_DRIFTS` → Unifying: Unify Drifts parte davvero quando almeno due Drift aperti stanno fuori da ogni risoluzione in scrittura o aperta e nessuna risoluzione aspetta una decisione, se non quelle nate da una domanda pronta. Trama lancia l'agente di unificazione su tutti quei Drift, raccolti quando l'istruzione parte; le loro schede restano in Backlog segnate come in unificazione. Se l'istruzione non parte davvero non succede nulla e i Drift restano come sono.
 
 ### Running tasks
-Almeno un Run è in corso. Resolve aspetta, anche su un Drift con una domanda pronta, e così Rework with feedback su un Drift o su una risoluzione e Unify Drifts; altri Run manuali seguono le regole esistenti. Una sequenza di Run per modello lanciata da Run all (vedi il Task) conta come un solo Run: la fine di un suo Run che lascia partire il successivo non è la fine dell'ultimo Run.
+Almeno un Run è in corso. Resolve aspetta, anche su un Drift con una domanda pronta, e così Rework with feedback su un Drift o su una risoluzione e Unify Drifts; altri Run manuali seguono le regole esistenti. Una sequenza di Run per modello lanciata da Run all (vedi il Task) conta come un solo Run, anche quando i suoi Run lavorano insieme: la fine di un suo Run che lascia partire il successivo, o che lascia al lavoro gli altri, non è la fine dell'ultimo Run.
 - `agent-hook.IDLE` → Free: termina l'ultimo Run.
 - `terminal.COMMAND_ENDED` → Free: termina l'ultimo Run; una fine anomala conserva i risultati.
 - `terminal.CLOSED` → Free: viene chiuso l'ultimo Run.

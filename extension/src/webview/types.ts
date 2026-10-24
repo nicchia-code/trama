@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { AnnouncementView, Snapshot } from "../../../src/core/snapshot";
-import type { NavigateOptions, ToHost, ViewName } from "../protocol";
+import type { NavigateOptions, RefinementView, ToHost, ViewName } from "../protocol";
 
 /** What the shell gives each view. */
 export interface ViewContext {
@@ -16,7 +16,7 @@ export interface View {
    * Called with every new snapshot, also while the view is hidden. Must keep the user's zoom, selection and breadcrumb
    * when it can. `asking`: a question round is open.
    */
-  update(snapshot: Snapshot, asking?: boolean, resolve?: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }, scans?: { advisorScanner: boolean }): void;
+  update(snapshot: Snapshot, asking?: boolean, resolve?: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }, scans?: { advisorScanner: boolean }, refinement?: RefinementView): void;
   /** Called when the view becomes visible or is navigated to. */
   show(options: NavigateOptions): void;
   /** Called when the panel moves to another view: a window of this view that is still open closes. */

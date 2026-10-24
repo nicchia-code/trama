@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 /** Trama-launched jobs, retained only in memory for their live editor windows. */
-export type JobKind = "run" | "resolve" | "scan" | "prepared" | "unify";
+export type JobKind = "run" | "resolve" | "scan" | "prepared" | "unify" | "refine";
 
 /**
  * Where a job runs: a terminal (an omp Chat conversation counts as the terminal it replaces). A held job has none: it keeps the project in its state between the Runs of a
@@ -118,9 +118,18 @@ export function receiveNotice(message: Record<string, unknown>): void {
     const kind = message["type"] === "drift-filed" ? "drift" : message["type"] === "task-filed" ? "task" : "proposal";
     const id = message[kind];
     if (typeof id === "string") holdFiledWork(root, kind, id, holder);
+    if (kind === "proposal" && typeof id === "string") for (const listener of deliveryListeners) listener(root, id);
     return;
   }
   if (message["type"] === "turn-ended") releaseFiledWork(root, holder);
+}
+
+/** Listeners of a Proposal delivered to a project: the Proposal refinement hears of it. */
+const deliveryListeners = new Set<(root: string, proposal: string) => void>();
+/** Calls `listener` each time a Proposal of the project at `root` is delivered; disposing it stops that. */
+export function onProposalDelivered(listener: (root: string, proposal: string) => void): { dispose(): void } {
+  deliveryListeners.add(listener);
+  return { dispose: () => void deliveryListeners.delete(listener) };
 }
 
 /** Hooked terminal jobs end only when the hook reports idle or the terminal closes. */

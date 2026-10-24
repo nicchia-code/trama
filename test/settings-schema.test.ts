@@ -52,7 +52,7 @@ test("the groups and their keys keep the order of the Settings tab", () => {
     ["omp", ["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"]],
     ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
     ["Project", ["trama.skillsDir"]],
-    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"]],
+    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals", "trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"]],
   ]);
   expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["omp", ["trama.autoExit", "trama.language"]],
@@ -200,7 +200,8 @@ test("omp Chat is a checkbox in Features after Sub-agents Context Sharing, on by
   expect(chat?.markdownDescription).toBe("Trama's jobs open a conversation in the omp Chat view instead of a terminal.");
   expect(settingTitle("trama.ompChat")).toBe("omp Chat");
   const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
-  expect(keys.indexOf("trama.ompChat")).toBe(keys.indexOf("trama.subagentsContextSharing") + 1);
+  expect(keys.indexOf("trama.autoUpdateStaleProposals")).toBe(keys.indexOf("trama.subagentsContextSharing") + 1);
+  expect(keys.indexOf("trama.ompChat")).toBe(keys.indexOf("trama.autoUpdateStaleProposals") + 1);
   expect(settingsSchema(manifest).find((s) => s.key === "trama.ompChat")?.control).toBe("boolean");
 });
 

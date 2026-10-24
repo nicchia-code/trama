@@ -61,6 +61,7 @@ When the instruction asks you to write in a language, everything you generate fo
    - Do not show the Proposal before handing it over: the hand-over's output prints its Tasks and scope, and step 6 reads them.
 6. **Hand over.** Run `trama proposal move <id> open` without `trama proposal show` before it. Its checks report every uncovered scope entry and every Task that names a missing element; fix the Tasks or the `## Already present` lines. A Requirement section titled with a State you removed or renamed is an error: update or remove that section in the same Proposal. Its warnings do not block, but act on them: a fragment over 12 KB that the Proposal writes into is split in the same Proposal (see "Good Requirement habits"); a switch of the Requirement skills between fragment and index mode goes into your hand-over summary. If the hand-over is refused, or its output does not match what was agreed, reopen the Proposal with `trama proposal edit <id>`, fix the files, and hand over again.
 7. **Light code scan after submission.** Take the scope of the Proposal from the hand-over's output and read in the code only the entries that exploration did not already read; do not reread the rest, nor the `## Already present` lines. With sub-agents, split those entries among them, at most N at once, as in step 1; they come back with a short account and write nothing. A contradiction between the code and the Model or the Requirements is never a Drift: ask the developer a new round of questions about it (see "The interview"), reopen the Proposal with `trama proposal edit <id>`, keep it a Draft, update the Proposal and its Tasks with the answers, hand over again with `trama proposal move <id> open`, and light-scan only the new entries. The scan never files a Drift and is not announced as a check. After the hand-over succeeds, summarise the Proposal in a few lines, tell the developer to review it on the board or with `trama proposal show <id>`, and stop.
+   Not after a refinement: the instruction to refine a stale Proposal (see "Refining a stale Proposal") skips this scan.
 
 ## The interview
 
@@ -115,6 +116,24 @@ This section applies when the instruction says to rework the rejected Proposal `
 4. **Bind it with `reworks`.** Pass `"reworks":"<id>"` (the identity of the rejected Proposal) only in the first `trama proposal new` of the rework; the Proposals that follow it with `requires` get none. `reworks` is refused together with `request`. Trama binds the new Proposal only when the rejected one exists, is rejected and no other Proposal already reworks it; otherwise it creates the Proposal without the link and the result says why, so read the result. The new Proposal takes the place of the rejected one in the creation order and in the `requires` of the Proposals that waited for it.
    When the rejected Proposal's Tasks had images, bind them to the new Tasks that need them, copying each from the old Task (the path `trama task show` prints for it) with `images` in `trama proposal edit`, and without asking the developer again.
 5. **Hand over and stop.** Hand over as the Steps say. Never approve, reject or discard a Proposal yourself: after the hand-over, tell the developer to review the new one.
+
+## Refining a stale Proposal
+
+This section applies when the instruction says to refine the stale Proposal `<id>` on the current Model and Requirements, as this section says. Without that sentence, skip it.
+
+Refining reworks the same Proposal. It keeps its identity, short number, place on the Board, label, chosen model, the images of its Tasks and the Proposals that require it. Trama approves it at the end of the work if it is not blocked; you never approve it.
+
+1. **Read what the Proposal changes.** Run `trama proposal show <id>`: it gives the body with the decisions, the Tasks, the stale files and their differences from the files as they are now. Then read only the current Model and Requirements of those stale files, and the open Drifts that name elements or sections the Proposal touches. Do not read the code, do not run the light scan after the hand-over, do not archive Tasks or Drifts outside the Proposal, and do not announce cards: Trama announces them.
+2. **The decisions in the body count as taken.** The developer answered them in the design. Ask at most one round of `trama question new`, and only when the current Model contradicts one of those decisions and you cannot choose yourself. Decide everything else, and write each such decision in the body as an assumption.
+3. **When the current Model already has the whole change,** reconcile nothing. Ask one round with one question that explains which approved Proposal already contains the change, with two options: `Remove` (description: "Reject this Proposal: the current Model already has its change.") and `Keep` (description: "Leave it as it is, to refine; nothing changes."), recommended `Keep`. Name that Proposal to the developer by its short number and title.
+   With `Remove`, reject it: `trama proposal move <id> rejected --input -` with `{"feedback":"Already in the current Model."}`, in a heredoc. That is the developer's decision, taken in the round, and the only case in which you reject a Proposal.
+   With `Keep`, or when the round is skipped or lost, stop and change nothing.
+4. **Otherwise, reconcile the Proposal with the current Model.**
+   Run `trama proposal edit <id> --input -` with `{"rebase":true}`: the Proposal goes back to Draft and is marked `refining` until you hand it over again.
+   Rewrite in full each file the Proposal touches, as the current file plus the Proposal's change, so that the same change is made on the Model as it is now. Never remove what other approved Proposals changed. Requirements are rewritten the same way, through `{"edit":[...]}` as in step 4 of the Steps.
+   Update the Tasks and `## Already present` as the Steps say, and add to the body one line for each thing the refinement changed.
+   Hand over with `trama proposal move <id> open`, as the Steps say, and fix what its checks report. Do not approve it: Trama does, at the end of the work.
+5. **A Draft left half-way through a refinement** (still marked `refining`) resumes from there: reread its files, reconcile again as in step 4 if it is stale again, and go on.
 
 ## Good Model habits
 

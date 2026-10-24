@@ -4,6 +4,7 @@ import { namerOf, noNumbers } from "../../../../src/core/card-names";
 import { joinReasons, RUN_IN_PROGRESS, runBlocker } from "../../../../src/core/design";
 import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
 import type { ModelSuggestion } from "../../host/model-lists";
+import type { RefinementView } from "../../protocol";
 import type { BoardModels } from "../../host/proposal-models";
 import { cn } from "../lib/utils";
 import type { Slot, View, ViewContext } from "../types";
@@ -13,7 +14,7 @@ import { SplitButton } from "../split-button";
 import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
 import { DriftDetailsDialog, type ModelList, GhostDetailsDialog, ModelDialog, ProposalBodyDialog, TaskDetailsDialog } from "./dialogs";
-import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, doneGroups, EMPTY_HINTS, interleave, NO_MODELS, type ProposalCard, stoppedFollowingNotice, type TaskCard, withdrawnNotice } from "./logic";
+import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, doneGroups, EMPTY_HINTS, interleave, NO_MODELS, type ProposalCard, REFINEMENT_OFF, stoppedFollowingNotice, type TaskCard, withdrawnNotice } from "./logic";
 import { BoardButton, BoardEnvContext, type BoardEnv, Tip } from "./parts";
 
 /** The state of Resolve Drifts and of the Runs the host gives with each picture. */
@@ -44,6 +45,8 @@ export interface BoardPageProps {
   unify?: UnifyState;
   /** The models chosen for the Proposals that carry Tasks. */
   models: BoardModels;
+  /** The Proposal refinement: which Proposal the agent refines, and which wait for it. Absent: off. */
+  refinement?: RefinementView;
   /** The model names the agent offers to the model window. */
   modelList: ModelList;
   notices: Notice[];
@@ -139,8 +142,10 @@ function DoneColumn({ cards, open, toggle, chevron, clear, now }: { cards: Card[
 }
 
 /** The Board: three columns of cards (Backlog, Active, Done), and the notices at its top. */
-export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, models, modelList, notices, closeNotice, context, ghostRequest }: BoardPageProps) {
+export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, models, refinement = REFINEMENT_OFF, modelList, notices, closeNotice, context, ghostRequest }: BoardPageProps) {
   const root = useRef<HTMLDivElement>(null);
+  /** The card whose queued refining was cancelled: its Approve gets the focus once the picture no longer queues it. */
+  const refocus = useRef<string | null>(null);
   /** Whether the Done column is open. It starts collapsed; kept while the panel lives, so a refresh or a change of view does not reopen it. */
   const [doneOpen, setDoneOpen] = useState(false);
   const doneChevron = useRef<HTMLButtonElement>(null);
@@ -156,9 +161,17 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
   const runReason = snapshot === null ? null : joinReasons([resolve.runReason, runBlocker(snapshot.tasks, namerOf(numbers))]);
   const columns = useMemo(() => {
     if (snapshot === null) return [];
-    const boardResolve: BoardResolve = { blocker: resolve.blocker, drifts: resolve.drifts, resolving: resolve.resolving, unifying: unify.unifying };
+    const boardResolve: BoardResolve = { blocker: resolve.blocker, drifts: resolve.drifts, resolving: resolve.resolving, unifying: unify.unifying, refinement, asking };
     return buildBoard(snapshot, boardResolve, models);
-  }, [snapshot, resolve, unify, models]);
+  }, [snapshot, resolve, unify, models, refinement, asking]);
+  useEffect(() => {
+    if (refocus.current === null) return;
+    const card = root.current?.querySelector<HTMLElement>(`[data-key="${refocus.current}"]`);
+    const approve = [...(card?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((b) => b.getAttribute("aria-label")?.startsWith("Approve "));
+    if (approve === undefined || approve.disabled) return;
+    approve.focus();
+    refocus.current = null;
+  }, [columns]);
 
   const backlogCard = (proposal: string | null): ProposalCard | undefined =>
     proposal === null ? undefined : columns.find((column) => column.id === "backlog")?.cards.find((card): card is ProposalCard => card.kind === "proposal" && card.id === proposal);
@@ -229,6 +242,10 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
       setGhostOf(key);
     },
     openTaskImage: (task, name) => context.post({ type: "openTaskImage", task, name }),
+    cancelRefinement(proposal, key) {
+      refocus.current = key;
+      context.post({ type: "cancelRefinement", proposal });
+    },
   };
 
   if (snapshot === null) return <div ref={root} />;
@@ -337,7 +354,7 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
 
 /** The Board: its view, and the model names the Board's model window offers. */
 export interface BoardView extends Omit<View, "update"> {
-  update(next: Snapshot, isAsking?: boolean, resolveState?: ResolveState, models?: BoardModels, unify?: UnifyState): void;
+  update(next: Snapshot, isAsking?: boolean, resolveState?: ResolveState, models?: BoardModels, unify?: UnifyState, refinement?: RefinementView): void;
   receiveModels(message: { models: ModelSuggestion[]; error?: string }): void;
 }
 
@@ -368,8 +385,8 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
   render();
 
   return {
-    update(next, isAsking = false, resolveState = NO_RESOLVE_STATE, models = NO_MODELS, unify = NO_UNIFY_STATE) {
-      page = { ...page, snapshot: next, asking: isAsking, resolve: resolveState, unify, models };
+    update(next, isAsking = false, resolveState = NO_RESOLVE_STATE, models = NO_MODELS, unify = NO_UNIFY_STATE, refinement = REFINEMENT_OFF) {
+      page = { ...page, snapshot: next, asking: isAsking, resolve: resolveState, unify, models, refinement };
       render();
     },
     receiveModels(message) {

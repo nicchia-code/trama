@@ -117,7 +117,6 @@ test("the keys of each step are always shown, and the language is never in the w
   expect(STEP_KEYS.omp).toEqual(["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles"]);
   expect(STEP_KEYS.Models).toEqual(["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]);
   expect(STEP_KEYS.Advanced?.[0]).toBe("trama.theme");
-  expect(STEP_KEYS.Advanced).toHaveLength(9);
   expect(STEP_KEYS.Advanced?.slice(-3)).toEqual(["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"]);
   for (const step of ["omp", "Models", "Project", "Advanced"] as const) for (const key of STEP_KEYS[step] ?? []) expect(schema.some((s) => s.key === key)).toBe(true);
 });

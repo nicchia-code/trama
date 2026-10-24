@@ -1,6 +1,7 @@
 import { stringify } from "yaml";
 import { ADVISOR_SCANNER_ENV, ADVISOR_SCANNER_ON } from "../../../src/core/advisors";
 import { TERMINAL_ENV } from "../../../src/core/announcements";
+import { PARALLEL_ENV, PARALLEL_ON, RUN_ENV, RUN_ON, TASK_ENV } from "../../../src/core/claims";
 import { QUESTION_ENDPOINT_ENV } from "../../../src/core/question-channel";
 import { quote, quoteProgram, type ShellFamily } from "./quote";
 
@@ -89,14 +90,19 @@ export function launchOverlay({ advisor, disabledExtensions }: LaunchOverlay): s
 /**
  * The environment of an agent's terminal: the marks of an agent Trama started, the editor's question endpoint and the
  * terminal's ID, the job ID (`TRAMA_JOB`, which only times the phases of its work) and, only for a Run launched with the Advisor Scanner on (`advisor`),
- * `TRAMA_ADVISOR_SCANNER=1`, which Trama's advisors read through `trama advisor show`.
+ * `TRAMA_ADVISOR_SCANNER=1`, which Trama's advisors read through `trama advisor show`. A Run (`run`) also carries `TRAMA_RUN=1`, which makes the
+ * write tools of its agents claim the files they write; with `task`, the Task it implements (`TRAMA_TASK`), and with `parallel`, the parallel
+ * execution is on (`TRAMA_PARALLEL=1`): a sub-agent stopped by a claim then records the clash.
  */
-export function terminalEnv(endpoint: string, terminalId: string, jobId?: string, advisor = false): Record<string, string> {
+export function terminalEnv(endpoint: string, terminalId: string, jobId?: string, advisor = false, run = false, task?: string, parallel = false): Record<string, string> {
   return {
     TRAMA_AGENT: "1",
     [QUESTION_ENDPOINT_ENV]: endpoint,
     [TERMINAL_ENV]: terminalId,
     ...(jobId === undefined ? {} : { TRAMA_JOB: jobId }),
     ...(advisor ? { [ADVISOR_SCANNER_ENV]: ADVISOR_SCANNER_ON } : {}),
+    ...(run ? { [RUN_ENV]: RUN_ON } : {}),
+    ...(run && task !== undefined ? { [TASK_ENV]: task } : {}),
+    ...(run && parallel ? { [PARALLEL_ENV]: PARALLEL_ON } : {}),
   };
 }

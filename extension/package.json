@@ -271,6 +271,12 @@
           "scope": "application",
           "markdownDescription": "On: the agent passes its sub-agents what it has already read about their work, so they do not read it again."
         },
+        "trama.autoUpdateStaleProposals": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "On: a stale design Proposal shows `to refine`; Approve adapts it to the current Model and then approves it."
+        },
         "trama.ompChat": {
           "type": "boolean",
           "default": true,

@@ -86,7 +86,7 @@ export interface ProposalTaskView {
   images: TaskImageView[];
 }
 
-/** An open Proposal with everything the Diagram needs to draw it as a ghost over the current Model. */
+/** A Proposal with everything the Diagram needs to draw it as a ghost over the current Model: an open one, or a Draft being refined. */
 export interface ProposalView {
   id: string;
   /** When the Proposal was created, UTC ISO 8601; null for a numbered Proposal written before the field existed. */
@@ -98,6 +98,8 @@ export interface ProposalView {
   nonBlocking: boolean;
   /** A resolution born from the answer to a Drift's prepared question: it does not stop Resolve while it awaits a decision. */
   prepared: boolean;
+  /** Set while a Draft is being refined by a rebase: it is drawn as a ghost until handed over again. */
+  refining: boolean;
   /** The Drifts a resolution resolves, in creation order, each with what approving does to it; empty for any other Proposal. */
   resolves: ResolvedDrift[];
   /** Required Proposals not approved yet; Approve stays disabled while any is listed. */
@@ -382,6 +384,7 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     kind: proposal.data.kind,
     nonBlocking: proposal.data.nonBlocking,
     prepared: proposal.data.prepared,
+    refining: proposal.data.refining,
     tasks: coverage === null ? [] : proposal.tasks.map((t) => ({ id: t.id, title: t.title, body: stripTitle(t.body), technical: t.technical, refs: t.refs, images: readTaskImages(p, t.id) })),
     removals: coverage?.removals ?? [],
     creates: coverage === null ? 0 : proposal.tasks.length + coverage.removals.length,
@@ -426,7 +429,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
   const blocked = computeBlocked(project, tasks, drifts);
 
   const allProposals = listProposals(p);
-  const openProposals = allProposals.filter((x) => x.data.status === "open").map((proposal) => proposalView(p, project, proposal));
+  const shownProposals = allProposals.filter((x) => x.data.status === "open" || (x.data.status === "draft" && x.data.refining)).map((proposal) => proposalView(p, project, proposal));
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
   // The developer does not see attached Proposals, so the ghost of a Proposal whose Draft is attached to an open Drift is drawn nowhere.
   const announcements = listAnnouncements(p).filter((a) => !(a.kind === "proposal" && a.proposal !== null && attachedDrift(p, a.proposal)));
@@ -453,7 +456,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
     proposal: d.data.proposal,
     proposalBlock: d.data.proposal === null ? null : approvalBlock(p, d.data.proposal),
     proposalTitle: (d.data.proposal !== null && proposalById.get(d.data.proposal)?.title) || null,
-    proposalChanges: openProposals.find((x) => x.id === d.data.proposal)?.changes ?? null,
+    proposalChanges: shownProposals.find((x) => x.id === d.data.proposal)?.changes ?? null,
   });
   return {
     ...modelView(project),
@@ -461,7 +464,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
     specsPresent: project.specsPresent,
     // A History file that does not read is an error of the Snapshot, shown with the Model's errors; it is not a Model error, so approval does not see it.
     diagnostics: [...project.diagnostics, ...history.faults.map((fault) => ({ file: fault.file, line: 0, message: fault.message }))],
-    proposals: openProposals.filter((v) => !attachedDrift(p, v.id)),
+    proposals: shownProposals.filter((v) => !attachedDrift(p, v.id)),
     resolutionDrifts: allProposals.filter((x) => x.data.kind === "resolution" && (x.data.status === "draft" || x.data.status === "open")).flatMap((x) => x.data.drifts.map((d) => d.drift)),
     finishingDrifts: [...finishingDrifts],
     finishingProposals: [...finishingProposals],

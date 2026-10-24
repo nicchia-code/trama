@@ -54,6 +54,18 @@ test("an edited skill is replaced without asking and the short notice appears on
   expect(messages).toHaveLength(1);
 });
 
+test("an edited trama-implementer definition is rewritten without asking, and a project in line shows nothing", async () => {
+  const file = join(root, ".omp/agents/trama-implementer.md");
+  writeFileSync(file, "edited by hand");
+  await checkSkills(projectAt(root), storageUri());
+  expect(messages).toEqual([{ kind: "info", text: UPDATED }]);
+  expect(readFileSync(file, "utf8")).toMatch(/^---\nname: trama-implementer\n/);
+  expect(readFileSync(file, "utf8")).not.toMatch(/^model:/m);
+  messages.length = 0;
+  await checkSkills(projectAt(root), storageUri());
+  expect(messages).toEqual([]);
+});
+
 test("a changed advisor file counts as an update, a deleted retired file too", async () => {
   writeFileSync(join(root, ".omp/WATCHDOG.yml"), "instructions: []\n");
   await checkSkills(projectAt(root), storageUri());

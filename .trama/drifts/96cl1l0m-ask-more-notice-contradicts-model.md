@@ -1,13 +1,14 @@
 ---
-status: open
-resolution: null
+status: resolved
+resolution: dismissed
 refs:
   - announcement
 proposal: null
-task: null
+task: nifnmoha
 origin: p3zcrvmt
-option: null
+option: 1
 note: null
+resolvedBy: yt73yzk4
 created: 2026-10-24T06:13:56.919Z
 job: d2ab117d-f663-4230-b750-6dbc790a74f5
 ---

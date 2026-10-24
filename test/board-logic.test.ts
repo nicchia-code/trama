@@ -1,18 +1,20 @@
 import { EMPTY_SPECS } from "../src/core/specs";
 import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
-import type { DriftCard, TaskCard } from "../extension/src/webview/board/logic";
+import { REFINEMENT_OFF, REFINING_REASON, RESUME_REASON, QUEUED_REASON, TO_REFINE_TIP, WAITING_RUN_TIP, type DriftCard, type TaskCard } from "../extension/src/webview/board/logic";
+import type { RefinementView } from "../extension/src/protocol";
 import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
 import { boardDecisionCount } from "../src/core/board-decisions";
 import { announcedCard, announcedGhosts, approveBlocker, blockedReason, buildBoard, createsText, doneGroups, driftReworkBlocker, ghostExplanation, NO_MODELS, finishingBlocker, noteTime, runningFor, stoppedFollowingNotice, formatCounts, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
-import { runBlocker } from "../src/core/design";
+import { RUN_IN_PROGRESS, runBlocker } from "../src/core/design";
 import { dismissBlocker } from "../extension/src/webview/dismiss";
 import { namerOf } from "../src/core/card-names";
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "0007",
   created: null,
+  refining: false,
   title: "Returns",
   body: "",
   kind: "change",
@@ -191,6 +193,68 @@ test("every written tooltip and disabling reason of a Proposal stays within abou
   }
   const waiting = proposalCard(proposal({ id: "iwham416", stale: ["a.md"] }), NUMBERS, new Map(), ["iwham416"]);
   expect((waiting.blocker as string).length).toBeLessThanOrEqual(LIMIT);
+});
+
+test("the refinement: off keeps the stale Proposal as it was; on, it refines before Approve", () => {
+  const stale = proposal({ id: "0007", stale: ["a.md"] });
+  const off = proposalCard(stale, NUMBERS);
+  expect(off.blocker).toContain("Stale");
+  expect(off.refine).toBeNull();
+  expect(off.badges.map((b) => b.label)).toEqual(["stale"]);
+  const on: RefinementView = { enabled: true, running: null, queued: [], note: null, runInProgress: false, waiting: [] };
+  const toRefine = proposalCard(stale, NUMBERS, new Map(), [], NO_MODELS, undefined, null, on);
+  expect(toRefine.refine).toBe("to-refine");
+  expect(toRefine.blocker).toBeNull();
+  expect(toRefine.approveHint).toBe("Refine it on the current Model, then approve it");
+  expect(toRefine.badges.map((b) => [b.label, b.tone, b.tooltip])).toEqual([["to refine", "primary", TO_REFINE_TIP]]);
+  expect(toRefine.rejectBlocker).toBeNull();
+  const requiring = proposalCard(proposal({ id: "0007", stale: ["a.md"], requires: [{ id: "0001", title: "Old", status: "open" }] } as Partial<ProposalView>), NUMBERS, new Map(), [], NO_MODELS, undefined, null, on);
+  expect(requiring.blocker).not.toBeNull();
+});
+
+test("the refinement: running and queued Proposals wait, a stopped one resumes on Approve", () => {
+  const stale = proposal({ id: "0007", stale: ["a.md"] });
+  const running = proposalCard(stale, NUMBERS, new Map(), [], NO_MODELS, undefined, null, { enabled: true, running: "0007", queued: [], note: "Reading the order", runInProgress: false, waiting: [] }, true);
+  expect(running.refine).toBe("running");
+  expect(running.blocker).toBe(REFINING_REASON);
+  expect(running.rejectBlocker).toBe(REFINING_REASON);
+  expect(running.refinePhase).toBe("Waiting for your answers");
+  expect(running.refineNote).toBe("Reading the order");
+  expect(running.badges[0]).toMatchObject({ label: "refining", tone: "info", tooltip: "The agent is refining this Proposal on the current Model" });
+  const queued = proposalCard(proposal({ id: "0008", stale: ["a.md"] }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, { enabled: true, running: "0007", queued: ["0008"], note: null, runInProgress: false, waiting: [] });
+  expect(queued.refine).toBe("queued");
+  expect(queued.blocker).toBe(QUEUED_REASON);
+  expect(queued.badges[0]).toMatchObject({ label: "queued", tone: "info", tooltip: "Waiting for P1 to be refined first" });
+  expect(queued.refinePhase).toBeNull();
+  expect(queued.refineNote).toBeNull();
+  const stopped = proposalCard(proposal({ id: "0009", refining: true, stale: ["a.md"] }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, { enabled: true, running: null, queued: [], note: null, runInProgress: false, waiting: [] });
+  expect(stopped.refine).toBe("stopped");
+  expect(stopped.blocker).toBeNull();
+  expect(stopped.rejectBlocker).toBe(RESUME_REASON);
+  expect(stopped.badges[0]).toMatchObject({ label: "to refine", tone: "primary", tooltip: "Refining stopped before the hand-over. Approve resumes it." });
+  expect(RESUME_REASON).toBe("Approve to resume refining first");
+  expect(proposalCard(proposal({ refining: true }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, REFINEMENT_OFF).refine).toBeNull();
+});
+
+test("a Run of this window in progress blocks Approve with its reason, after the finishing reason", () => {
+  const run = { runInProgress: true, waiting: [] };
+  expect(approveBlocker(proposal(), NUMBERS, true)).toBe(RUN_IN_PROGRESS);
+  expect(approveBlocker(proposal({ stale: ["a.md"] }), NUMBERS, true)).toBe(`${RUN_IN_PROGRESS}. ${approveBlocker(proposal({ stale: ["a.md"] }))}`);
+  const card = proposalCard(proposal({ id: "0007" }), NUMBERS, new Map(), ["0007"], NO_MODELS, undefined, null, { enabled: true, running: null, queued: [], note: null, ...run });
+  expect(card.blocker).toBe(`The agent is still finishing. ${RUN_IN_PROGRESS}`);
+  const refining = proposalCard(proposal({ id: "0007", stale: ["a.md"] }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, { enabled: true, running: "0007", queued: [], note: null, runInProgress: true, waiting: [] }, true);
+  expect(refining.blocker).toBe(`${RUN_IN_PROGRESS}. ${REFINING_REASON}`);
+  expect(refining.rejectBlocker).toBe(REFINING_REASON);
+});
+
+test("a refined Proposal waiting for the Run carries a badge; Approve waits with the Run reason and Reject stays enabled", () => {
+  const waiting = proposalCard(proposal({ id: "0007" }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, { enabled: true, running: null, queued: [], note: null, runInProgress: true, waiting: ["0007"] });
+  expect(waiting.badges[0]).toMatchObject({ label: "waiting for the run", tone: "info", tooltip: WAITING_RUN_TIP, accessibleName: "Refined; Trama approves it when the run in progress ends" });
+  expect(waiting.blocker).toBe(RUN_IN_PROGRESS);
+  expect(waiting.rejectBlocker).toBeNull();
+  const after = proposalCard(proposal({ id: "0007" }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, { enabled: true, running: null, queued: [], note: null, runInProgress: false, waiting: [] });
+  expect(after.badges.map((b) => b.label)).not.toContain("waiting for the run");
+  expect(after.blocker).toBeNull();
 });
 
 const design = (id: string, column: TaskView["column"], proposal: string | null = "0007") => task({ id, column, proposal, proposalTag: proposal === null ? null : { text: "Returns", proposal, title: "Returns" } });

@@ -4,7 +4,8 @@ import { type CardName, type CardNumbers, ID_NAMES, cardNameOf } from "../../../
 import { joinReasons } from "../../../../src/core/design";
 import { REQUIRED_STATUS, appliesUnder } from "../../../../src/core/required";
 import type { DriftView, ProposalView } from "../../../../src/core/snapshot";
-import { approveBlocker, driftReworkBlocker, finishingBlocker, decisionLabel, recurringLabel, resolvedRows, unifiedLabel } from "../board/logic";
+import type { RefinementView } from "../../protocol";
+import { approveBlocker, decisionLabel, QUEUED_REASON, type RefineStatus, driftReworkBlocker, finishingBlocker, recurringLabel, REFINEMENT_OFF, REFINING_REASON, refineApproveBlocker, refineStatus, RESUME_REASON, resolvedRows, TO_REFINE_TIP, unifiedLabel } from "../board/logic";
 import { driftComparison } from "../drift-compare";
 import { dismissBlocker } from "../dismiss";
 import { InlineMarkdown, Markdown } from "../markdown";
@@ -310,23 +311,36 @@ function ResolvesBlock({ proposal, numbers, showDrift }: { proposal: ProposalVie
   );
 }
 
+/** Heading of the changed-files block: the Stale wording when refining is off, else what the refining status means. */
+function refineHeading(refine: RefineStatus | null): string {
+  if (refine === null) return "Stale: the Model changed since the Proposal was written";
+  if (refine === "running") return REFINING_REASON;
+  if (refine === "queued") return QUEUED_REASON;
+  if (refine === "stopped") return "Refining stopped before the hand-over. Approve resumes it.";
+  return "To refine: the Model changed since the Proposal was written. Approve refines it first.";
+}
+
 function ProposalBlock({
   proposal: p,
   numbers,
   finishing,
-  reworkReason,
+  resolveReason,
+  refinement,
   actions,
 }: {
   proposal: ProposalView;
   numbers: CardNumbers;
   finishing: string | null;
-  /** Why the arrow of Reject is disabled, or null. */
-  reworkReason: string | null;
+  /** Why Resolve is disabled, for a resolution Proposal (its Reject arrow then waits on it), or null. */
+  resolveReason: string | null;
+  refinement: RefinementView;
   actions: { jump(ref: string): void; showDrift(drift: string): void; approve(id: string): void; reject(id: string): void; rework(id: string): void; openLink(url: string): void; openTaskImage(task: string, name: string): void };
 }) {
   const open = p.requires.filter((r) => appliesUnder(r.status));
   const unusable = p.requires.filter((r) => !appliesUnder(r.status));
-  const blocker = joinReasons([finishing, approveBlocker(p, numbers)]);
+  const refine = refineStatus(p, refinement);
+  const blocker = joinReasons([finishing, refine === null ? approveBlocker(p, numbers, refinement.runInProgress) : refineApproveBlocker(refine, p, numbers, refinement)]);
+  const rejectReason = joinReasons([finishing, refine === "running" ? REFINING_REASON : refine === "stopped" ? RESUME_REASON : null]);
   return (
     <section className="mt-4.5 rounded-md border border-dashed border-blue-600 p-3 dark:border-blue-400">
       <div className="text-[11px] tracking-wide text-muted-foreground uppercase">
@@ -361,7 +375,7 @@ function ProposalBlock({
       ) : null}
       {p.stale.length > 0 ? (
         <>
-          <div className={PROBLEM}>Stale: the Model changed since the Proposal was written</div>
+          <div className={PROBLEM}>{refineHeading(refine)}</div>
           <Lines lines={p.stale} className={PROBLEMS} />
         </>
       ) : null}
@@ -399,15 +413,15 @@ function ProposalBlock({
       {p.resolves.length > 0 ? <ResolvesBlock proposal={p} numbers={numbers} showDrift={actions.showDrift} /> : null}
       {p.tasks.length + p.removals.length > 0 ? <ProposalTasks proposal={p} jump={actions.jump} openLink={actions.openLink} openImage={actions.openTaskImage} /> : null}
       <div className="my-2.5 flex flex-wrap gap-1.5">
-        <ActionButton icon={Check} variant="default" label="Approve" disabled={blocker !== null} tooltip={blocker ?? "Apply this Proposal to the Model"} onClick={() => actions.approve(p.id)} />
+        <ActionButton icon={Check} variant="default" label="Approve" disabled={blocker !== null} tooltip={blocker ?? (refine === "to-refine" ? TO_REFINE_TIP : "Apply this Proposal to the Model")} onClick={() => actions.approve(p.id)} />
         <SplitButton
           icon={X}
           label="Reject"
           tooltip="Reject this Proposal"
-          disabled={finishing !== null}
-          reason={finishing}
-          arrowDisabled={reworkReason !== null}
-          arrowReason={reworkReason}
+          disabled={rejectReason !== null}
+          reason={rejectReason}
+          arrowDisabled={joinReasons([rejectReason, resolveReason]) !== null}
+          arrowReason={joinReasons([rejectReason, resolveReason])}
           arrowName={`More ways to reject ${cardNameOf(numbers, "proposal", p.id).text}`}
           items={[{ label: "Rework with feedback…", tooltip: "Reject it and have the agent redo it with your feedback", onSelect: () => actions.rework(p.id) }]}
           onClick={() => actions.reject(p.id)}
@@ -422,8 +436,9 @@ export function DetailsPanel({
   detail,
   dismissReason,
   proposalWait,
-  proposalReworkReason,
+  proposalResolveReason,
   driftReworkReason,
+  refinement = REFINEMENT_OFF,
   actions,
 }: {
   detail: Detail;
@@ -431,8 +446,10 @@ export function DetailsPanel({
   dismissReason: string | null;
   /** Why Approve and Reject are disabled for the Proposal in the detail, or null. */
   proposalWait: string | null;
-  /** Why the arrow of Reject is disabled for the Proposal in the detail (a resolution adds Resolve's reasons), or null. */
-  proposalReworkReason: string | null;
+  /** Why Resolve is disabled, for the resolution Proposal in the detail (its Reject arrow waits on it), or null. */
+  proposalResolveReason: string | null;
+  /** The Proposal refinement; off by default. */
+  refinement?: RefinementView;
   /** Why the arrow of «Dismiss Drift» is disabled for the Drift in the detail, or null. */
   driftReworkReason: string | null;
   actions: {
@@ -538,7 +555,7 @@ export function DetailsPanel({
           </Fragment>
         ),
       )}
-      {detail.proposal ? <ProposalBlock proposal={detail.proposal} numbers={detail.numbers} finishing={proposalWait} reworkReason={proposalReworkReason} actions={actions} /> : null}
+      {detail.proposal ? <ProposalBlock proposal={detail.proposal} numbers={detail.numbers} finishing={proposalWait} resolveReason={proposalResolveReason} refinement={refinement} actions={actions} /> : null}
     </>
   );
 }
@@ -554,9 +571,8 @@ export function DiagramDetails({ store, context }: { store: DiagramStore; contex
       detail={detail}
       dismissReason={detail.drift && snapshot ? dismissBlocker(detail.drift.id, snapshot.resolutionDrifts, state.resolveBlocker, snapshot.finishingDrifts) : null}
       proposalWait={detail.proposal && snapshot ? finishingBlocker(detail.proposal.id, snapshot.finishingProposals) : null}
-      proposalReworkReason={
-        detail.proposal && snapshot ? joinReasons([finishingBlocker(detail.proposal.id, snapshot.finishingProposals), detail.proposal.kind === "resolution" ? state.resolveBlocker : null]) : null
-      }
+      proposalResolveReason={detail.proposal?.kind === "resolution" ? state.resolveBlocker : null}
+      refinement={state.refinement}
       driftReworkReason={
         detail.drift && snapshot
           ? driftReworkBlocker(dismissBlocker(detail.drift.id, snapshot.resolutionDrifts, state.resolveBlocker, snapshot.finishingDrifts), state.resolveBlocker)

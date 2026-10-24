@@ -6,6 +6,7 @@ import { delimiter, join, win32 } from "node:path";
 import { announce, newTerminalId, type AgentOrigin } from "../../../src/core/announcements";
 import { ADVISOR_SENTENCE } from "../../../src/core/advisors";
 import { writeFileAtomic } from "../../../src/core/atomic-write";
+import { releaseTerminalClaims } from "../../../src/core/claims";
 import { developerExclusions, findInstructionFiles, instructionExclusions, mergeExclusions } from "../../../src/core/instruction-files";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
@@ -46,6 +47,8 @@ export const configuredParallelExecution = (): boolean => settings().inspect<unk
 export const configuredAsyncDriftResolver = (): boolean => settings().inspect<unknown>("asyncDriftResolver")?.globalValue === true;
 /** Whether `trama.subagentsContextSharing` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
 export const configuredSubagentsContextSharing = (): boolean => settings().inspect<unknown>("subagentsContextSharing")?.globalValue === true;
+/** Whether `trama.autoUpdateStaleProposals` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read at each refresh and each approval. */
+export const configuredAutoUpdateStaleProposals = (): boolean => settings().inspect<unknown>("autoUpdateStaleProposals")?.globalValue === true;
 /** Whether `trama.ignoreInstructionFiles` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
 export const configuredIgnoreInstructionFiles = (): boolean => settings().inspect<unknown>("ignoreInstructionFiles")?.globalValue === true;
 /** The configured concurrent sub-agent limit, from user settings only; invalid values use the default. */
@@ -106,11 +109,11 @@ const conversationPath = (): Record<string, string> => (bundledCliDir === undefi
  * The process of a conversation: the terminal's environment with the PATH `trama` is found on, and the arguments of its options and its approval. The approval is
  * `trama.ompChatApproval` from the user settings only, read when the conversation opens: `yolo` is yolo, any other value or none is `ask`.
  */
-function conversationLaunch(root: string, options: string[][], endpoint: string, terminalId: string, jobId?: string, advisor = false): OmpLaunch {
+function conversationLaunch(root: string, options: string[][], endpoint: string, terminalId: string, jobId?: string, advisor = false, run = false, task?: string, parallel = false): OmpLaunch {
   const approval = settings().inspect<unknown>("ompChatApproval")?.globalValue === "yolo" ? "yolo" : "ask";
   // Intent Tracing is off only when `trama.ompChatIntentTracing` is `false` in the user settings, read when the conversation opens.
   const intentTracing = settings().inspect<unknown>("ompChatIntentTracing")?.globalValue === false ? "0" : "1";
-  return { args: ompArguments(options, approval), env: { ...terminalEnv(endpoint, terminalId, jobId, advisor), ...conversationPath(), PI_INTENT_TRACING: intentTracing }, cwd: root };
+  return { args: ompArguments(options, approval), env: { ...terminalEnv(endpoint, terminalId, jobId, advisor, run, task, parallel), ...conversationPath(), PI_INTENT_TRACING: intentTracing }, cwd: root };
 }
 
 /** Opens the conversation; false, after the warning, when omp does not start: the caller's instruction then goes to a terminal. */
@@ -199,6 +202,15 @@ function releaseTakenTasks(root: string, origin: AgentOrigin): void {
   }
 }
 
+function releaseClaims(root: string, terminal: string): void {
+  try {
+    releaseTerminalClaims(root, terminal);
+  } catch (err) {
+    if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: could not release the claims of the files the agent wrote: ${err.message}`);
+    else throw err;
+  }
+}
+
 /** The turn of `holder` ended: the Drifts it filed and the Proposals it delivered are released here and in every other window that hears of it. */
 function endFiledWork(root: string, holder: string): void {
   releaseFiledWork(root, holder);
@@ -252,6 +264,7 @@ export function watchAgentTerminal(): vscode.Disposable {
 function endAgentWork(info: { id: string; jobId?: string; root: string; line: string; since: number }, abnormal?: string): void {
   setHooked(info.id, false);
   releaseTakenTasks(info.root, { terminal: info.id });
+  releaseClaims(info.root, info.id);
   // No Task holds this terminal any more and this window stops following it: its registered process is forgotten.
   removeAgentProcess(questionProjectId(projectAt(info.root)), info.id);
   endFiledWork(info.root, info.id);
@@ -452,8 +465,7 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
  * run over several Tasks and only when `trama.parallelExecution` is on, read now. The ask sentence always stays on the instruction's line, after the Drift
  * blocker's sentence and before the language one.
  */
-function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, severalTasks: boolean, advisor?: string): string {
-  const limit = configuredMaxParallelAgents();
+function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, severalTasks: boolean, advisor?: string, limit?: number): string {
   const withLimit = withAgentLimit(instruction, limit);
   const withSubAgent = canScan(role) && advisor === undefined ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
   const withParallel = severalTasks && configuredParallelExecution() ? `${withSubAgent} ${PARALLEL_EXECUTION_SENTENCE}` : withSubAgent;
@@ -471,13 +483,13 @@ export const configuredModels = (): Models => ({
   execution: settings().get<string>("execution", "").trim(),
 });
 
-function terminalRun(omp: string, instruction: Instruction, role: Role, filesDrifts: boolean, severalTasks: boolean, model: string, overlay: string | undefined, advisor: boolean, attachment: string | undefined): TerminalRun {
+function terminalRun(omp: string, instruction: Instruction, role: Role, filesDrifts: boolean, severalTasks: boolean, model: string, overlay: string | undefined, advisor: boolean, attachment: string | undefined, limit: number | undefined): TerminalRun {
   const hook = bundledOmpHook();
   const models = { model, scan: configuredModels().scan };
   return {
     options: ompOptions(canScan(role) && !advisor, models, hook, overlay, advisor),
     template: (family) => agentTemplate(omp, canScan(role) && !advisor, models, family, hook, overlay, advisor, attachment),
-    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, advisor ? ADVISOR_SENTENCE : undefined),
+    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, advisor ? ADVISOR_SENTENCE : undefined, limit),
     hooked: hook !== undefined,
   };
 }
@@ -551,6 +563,10 @@ export interface LaunchJobOptions {
   severalTasks?: boolean;
   /** The model the instruction runs on when a Proposal's model applies (`proposalRunModel`); absent, the model of the role in Settings. */
   model?: RunModel;
+  /** The Task a single-Task Run implements: its terminal carries it, so a sub-agent stopped by a claim names it in the timings. */
+  task?: string;
+  /** The sub-agent places the instruction gives, for a Run that starts with its share of `trama.maxParallelAgents`; absent, the whole limit. */
+  limit?: number;
   /** Called once the Run's job ends: with why it ended abnormally, or with nothing for a normal end. A Run that did not start ends with a reason too. */
   onEnd?: (abnormal?: string) => void;
   /** Overrides the role the terminal's name gives (Unify Drifts is always analysis, whatever its terminal is called). */
@@ -584,8 +600,11 @@ export async function launchAgent(
     if (omp === undefined) return undefined;
     if (!canSend()) return undefined;
     const advisor = job === "run" && configuredAdvisorScanner();
+    const isRun = job === "run";
+    const runTask = isRun ? jobOptions.task : undefined;
+    const parallel = isRun && configuredParallelExecution();
     const overlay = await writeLaunchOverlay(root, advisor);
-    const run = terminalRun(omp, instruction, role, filesDrifts, severalTasks, runModel, overlay, advisor, jobOptions.attachment?.file);
+    const run = terminalRun(omp, instruction, role, filesDrifts, severalTasks, runModel, overlay, advisor, jobOptions.attachment?.file, jobOptions.limit);
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
@@ -605,7 +624,7 @@ export async function launchAgent(
         if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
         savedJob = { id: jobId, kind: job, name, ...(cardId === undefined ? {} : { announcement: cardId }), ...(drifts.length === 0 ? {} : { drifts: [...drifts] }) };
       }
-      const opened = await openConversation({ id: terminalId, root, name, launch: conversationLaunch(root, run.options, endpoint, terminalId, jobId, advisor), first: { text: prompt, ...(jobOptions.attachment === undefined ? {} : { attachment: jobOptions.attachment.file }) }, focus: false, ...(savedJob === undefined ? {} : { job: savedJob }) });
+      const opened = await openConversation({ id: terminalId, root, name, launch: conversationLaunch(root, run.options, endpoint, terminalId, jobId, advisor, isRun, runTask, parallel), first: { text: prompt, ...(jobOptions.attachment === undefined ? {} : { attachment: jobOptions.attachment.file }) }, focus: false, ...(savedJob === undefined ? {} : { job: savedJob }) });
       if (opened) return "conversation";
       writtenFor = "conversation";
     }
@@ -618,7 +637,7 @@ export async function launchAgent(
       name,
       cwd: root,
       shellPath,
-      env: { ...terminalEnv(endpoint, terminalId, jobId, advisor), ...ompPathEnv(omp) },
+      env: { ...terminalEnv(endpoint, terminalId, jobId, advisor, isRun, runTask, parallel), ...ompPathEnv(omp) },
       ...(asTab ? { location: { viewColumn: vscode.ViewColumn.Active, preserveFocus: true } } : {}),
     });
     if (replaced) warnShellReplaced(defaultShell);

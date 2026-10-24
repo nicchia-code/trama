@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { cardLabel, noNumbers } from "../../../../src/core/card-names";
+import { REFINEMENT_OFF, refineStatus } from "../board/logic";
 import { FocusBar } from "../focus/bar";
 import type { MountView, ViewContext } from "../types";
 import { scanButtonLabel } from "../scan-label";
@@ -199,7 +200,7 @@ export function DiagramView({ store, context }: { store: DiagramStore; context: 
               <SelectContent>
                 <SelectItem value={NO_PROPOSAL}>None</SelectItem>
                 {(snapshot?.proposals ?? []).map((p) => {
-                  const marks = [p.stale.length > 0 ? "stale" : "", p.unbased.length > 0 ? "unbased" : "", p.errors.length > 0 ? "invalid" : "", p.unfixable.length > 0 ? "unfixable" : ""].filter(Boolean);
+                  const marks = [refineStatus(p, state.refinement) === "to-refine" ? "to refine" : p.stale.length > 0 ? "stale" : "", p.unbased.length > 0 ? "unbased" : "", p.errors.length > 0 ? "invalid" : "", p.unfixable.length > 0 ? "unfixable" : ""].filter(Boolean);
                   return (
                     <SelectItem key={p.id} value={p.id}>
                       {`${cardLabel(snapshot?.numbers ?? noNumbers, "proposal", p.id)} · ${p.title}${marks.length > 0 ? ` ⚠ ${marks.join(", ")}` : ""}`}
@@ -315,8 +316,8 @@ export const mountDiagram: MountView = (slot, context: ViewContext) => {
   const store = createDiagramStore();
   slot(<DiagramView store={store} context={context} />);
   return {
-    update(next, _asking, resolve, scans) {
-      store.update(next, resolve?.blocker ?? null, scans?.advisorScanner ?? false);
+    update(next, _asking, resolve, scans, refinement) {
+      store.update(next, resolve?.blocker ?? null, scans?.advisorScanner ?? false, refinement ?? REFINEMENT_OFF);
     },
     show(options) {
       store.show(options);

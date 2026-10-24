@@ -15,7 +15,9 @@ export type ResolvedAction =
   /** Rework with feedback on a rejected Proposal, redone with the `skill` that wrote it: `design` (change, or setup on a Model that has a Feature or an Actor), `setup` (setup on an empty Model) or `import`. */
   | { kind: "rework"; proposal: string; skill: "design" | "setup" | "import" }
   /** Rework with feedback on a rejected resolution: one agent resolves its `drifts`, the ones still open and in no other resolution. */
-  | { kind: "rework-resolution"; proposal: string; drifts: string[] };
+  | { kind: "rework-resolution"; proposal: string; drifts: string[] }
+  /** Refine a stale Proposal on the current Model and Requirements, one at a time (`trama.autoUpdateStaleProposals`). */
+  | { kind: "refine"; proposal: string };
 
 /** The one-line instruction that makes the external agent use the right Trama skill. */
 export function buildPrompt(action: ResolvedAction): string {
@@ -32,6 +34,8 @@ export function buildPrompt(action: ResolvedAction): string {
       return action.skill === "setup"
         ? `Use the trama-setup skill to rework the rejected setup Proposal ${action.proposal} with the developer's feedback. Bind the setup Proposal you open to it with the \`reworks\` field.`
         : `Use the trama-${action.skill} skill to rework the rejected Proposal ${action.proposal} with the developer's feedback. Bind the first Proposal you open to it with the \`reworks\` field.`;
+    case "refine":
+      return `Use the trama-design skill to refine the stale Proposal ${action.proposal} on the current Model and Requirements, as the "Refining a stale Proposal" section says.`;
     case "rework-resolution":
       return `Use the trama-resolve-drifts skill to rework the rejected resolution ${action.proposal} with the developer's feedback, on the Drifts ${action.drifts.map((d) => `\`${d}\``).join(", ")}. Bind the resolution you open to it with the \`reworks\` field.`;
     case "scan":
@@ -110,6 +114,8 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
       return "Unify";
     case "rework":
       return action.skill === "design" ? "Design" : action.skill === "setup" ? "Setup" : "Import";
+    case "refine":
+      return `Refine ${short("proposal", action.proposal)}`;
   }
 }
 
@@ -163,6 +169,7 @@ export function mayFileDrifts(action: ResolvedAction): boolean {
     case "written-design":
     case "setup-request":
     case "resolve-drifts":
+    case "refine":
     case "rework-resolution":
       return false;
     case "rework":

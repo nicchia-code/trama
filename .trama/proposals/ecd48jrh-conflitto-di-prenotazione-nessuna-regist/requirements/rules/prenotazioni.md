@@ -1,0 +1,17 @@
+---
+description: "Usa quando lavori sulle prenotazioni dei file dei sotto-agenti durante un Run: chi prenota, chi è fermato, quando una prenotazione finisce."
+---
+# Regole delle prenotazioni dei file
+
+## prenotazione-file
+- Le prenotazioni valgono solo nei Run lanciati da Trama: implement di un Task, implement all e ogni Run di una sequenza per modello, nel terminale o in omp Chat. Valgono con `trama.parallelExecution` acceso o spento. Design, scan, import, Resolve Drifts, Unify Drifts, raffinamento e Ask more non prenotano e non sono mai fermati.
+- Una scrittura è ogni chiamata a uno strumento di omp che scrive un file: `write`, `edit`, `apply_patch` e `ast_edit`. Una chiamata che scrive più file conta come una scrittura per ogni file. I comandi della shell (`bash`) e gli altri strumenti non sono guardati.
+- Si prenotano solo i file dentro la cartella del progetto. Un percorso fuori dal progetto non si prenota e non ferma nessuno.
+- Chi prenota: ogni sotto-agente del Run (sessione di omp con `kind` uguale a `"sub"`), alla sua prima scrittura di un file libero. Chi non prenota: l'agente principale del Run e gli advisor di omp. L'agente principale è fermato come un sotto-agente su un file prenotato da un altro; un advisor non è mai fermato.
+- Chi tiene un file è un sotto-agente di un terminale. Può scrivere il file lui e ogni sotto-agente avviato da lui, a qualunque profondità. Ogni altro agente, dello stesso terminale o di un altro, è fermato.
+- Una scrittura di chi tiene il file, o di un suo discendente, rinnova la prenotazione. Una prenotazione non rinnovata da 2 ore è scaduta: alla scrittura successiva di un altro agente si cancella, e il file va al nuovo sotto-agente se è uno che prenota.
+- Messaggio di blocco, in inglese come gli altri messaggi all'agente: "Trama: <percorso> is claimed by sub-agent <agente> of this run until it finishes. Stop now: do not undo your changes, leave your Task In progress and report to the main agent which file and which sub-agent stopped you." Per un file tenuto dal sotto-agente di un altro terminale il messaggio dice "of another run" al posto di "of this run".
+- Se la prenotazione non si può leggere o scrivere, la scrittura è fermata con il messaggio "Trama could not check the claim of <percorso>: <motivo>. Stop now and report it to the main agent.", per ogni sessione che prenoterebbe o controllerebbe.
+- Fine di una prenotazione: quando il sotto-agente che la tiene finisce la sua corsa (`agent-hook.SOTTO_AGENTE_FINITO`); quando finisce il lavoro del suo terminale o della sua conversazione di omp Chat, per le stesse fini che rilasciano i Task presi (hook a riposo, fine del comando, chiusura del terminale, fine o chiusura della conversazione, controllo di esecuzione): allora si cancellano tutte le prenotazioni di quel terminale.
+- Il sotto-agente fermato da una prenotazione si ferma subito: non annulla le sue modifiche, lascia il Task In progress e torna all'agente principale con ciò che ha fatto, il file e il sotto-agente che lo tiene. L'agente principale non gli affida altro e affida quel Task a un nuovo sotto-agente quando il Task di chi tiene il file è Done, con quel resoconto.
+- L'agente principale fermato da una prenotazione non scrive quel file finché il sotto-agente che lo tiene non ha finito.

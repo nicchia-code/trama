@@ -51,11 +51,13 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia di avvio dell'agente** (`agent-terminal.md`): Usa quando lavori sul terminale dell'agente. Sections: `agent-terminal`.
 - **Tecnologia degli annunci** (`announcements.md`): Usa per annunci, ghost della Board e attesa di fine turno. Sections: `announcement`, `panel/Board`.
 - **Tecnica di Ask more** (`ask-more.md`): Usa quando costruisci Ask more nel webview o nell'host: modali dei dettagli, messaggi, prompt e lancio della chat. Sections: `developer.ASK_MORE`.
+- **Tecnologia della chiusura di una corsa** (`chiusura.md`): Usa quando lavori sulla verifica finale di una corsa di `trama-implement` e sulla preparazione delle voci di History durante la verifica. Sections: `announcement/Verifying`.
 - **Tecnica della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts dall'estensione, costruisci l'Async Drift Resolver o togli codice della vecchia delega dei Drift. Sections: `drift-resolution`.
 - **Tecnologia dei Drift** (`drifts.md`): Usa quando lavori sui Drift. Sections: `drift`.
 - **Tecnica del controllo di esecuzione** (`execution-check.md`): Usa quando costruisci nell'estensione il controllo di esecuzione, la registrazione del processo di omp, la domanda fra finestre su chi segue un Task o `trama task check`. Sections: `time`, `agent.CHECK_TASK`.
 - **Tecnologia generale** (`general.md`): Usa sempre quando lavori sulla tecnologia: vincoli generali e piattaforme. Sections: `General`.
 - **Tecnologia delle note dei ghost** (`ghost-notes.md`): Usa quando lavori al codice delle note dei ghost: scrittura nel nucleo, quadro della Board, modale dei dettagli e skill. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
+- **Tecnologia dei gruppi di Task** (`gruppi.md`): Usa quando lavori sui gruppi di Task di `trama task list` con `groups` e sui sotto-agenti che realizzano un gruppo. Sections: `task/To do`.
 - **Tecnologia della History** (`history.md`): Usa quando costruisci le voci di History (comandi, quadro, modale, skill che le scrivono) o Clear della colonna Done. Sections: `voce-history`, `developer.CLEAR_DONE`.
 - **Tecnologia dei file di istruzioni** (`instruction-files.md`): Usa quando lavori al codice che esclude i file di istruzioni degli agenti nei lanci di omp: overlay di configurazione e ricerca dei file. Sections: `agent-terminal/Agent running`.
 - **Tecnologia del menu laterale** (`menu-laterale.md`): Usa per la tecnologia del menu laterale di Trama: vista webview, messaggi con l'host, badge e comandi delle viste. Sections: `menu-laterale`.
@@ -63,14 +65,17 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia della conversazione General** (`omp-chat-general.md`): Usa per la tecnica della conversazione General di omp Chat: processo e sessione, avvio, pulizia, errori, salvataggio e messaggi fra host e webview. Sections: `omp-chat-general`.
 - **omp Chat** (`omp-chat.md`): Usa quando costruisci o cambi omp Chat: il client ACP verso omp, la vista della barra laterale secondaria e la sua impostazione. Sections: `omp-chat`, `omp-chat-conversation`.
 - **Tecnologia del pannello** (`panel.md`): Usa per la tecnologia del pannello e degli ingressi di Trama nell'editor: barra delle attività, barra di stato, icone. Sections: `panel`.
+- **Tecnologia delle prenotazioni dei file** (`prenotazioni.md`): Usa quando lavori sulle prenotazioni dei file nell'hook di omp, nella cartella `.trama/claims/` e nella loro pulizia. Sections: `prenotazione-file`.
 - **Tecnologia del progetto** (`project.md`): Usa per setup del progetto, avvio dell'estensione e skill dei Requisiti. Sections: `project`.
 - **Tecnologia delle Proposal** (`proposal.md`): Usa quando lavori su Proposal, sui loro Task e sul loro scope o sulla consegna di una Proposal da una skill. Sections: `proposal`.
 - **Tecnologia dei round di domande** (`questions-notices.md`): Usa quando lavori sui round di domande. Sections: `question-round`.
+- **Raffinamento delle Proposal obsolete** (`raffinamento.md`): Usa quando implementi Auto-update Stale Proposals: impostazione, riallineamento della Proposal nella CLI, coda dell'host, Board e skill di design. Sections: `raffinamento`.
 - **Tecnologia di design request** (`requests.md`): Usa quando lavori su richieste di design scritte. Sections: `design-request`.
 - **Rework with feedback** (`rework.md`): Usa quando costruisci Rework with feedback o il pulsante diviso condiviso (Reject, Dismiss Drift e + Add Work Item): i messaggi fra webview e host, la casella e la conferma, il campo `reworks` in `src/core` e le skill che rifanno. Sections: `developer.REWORK_PROPOSAL`, `developer.REWORK_DRIFT`.
 - **Tecnologia dei confronti** (`scans.md`): Usa per registro dei confronti e tempi delle fasi. Sections: `work`.
 - **Tecnologia della scheda Settings** (`settings.md`): Usa per la tecnologia della scheda Settings e i suggerimenti dei modelli. Sections: `panel/Settings`.
 - **Tecnologia del wizard di setup** (`setup-wizard.md`): Usa quando lavori al codice del wizard di setup: modulo del webview, messaggi con l'host, albero delle cartelle, conferma e skill di import. Sections: `setup-wizard`.
+- **Tecnologia del sotto-agente che realizza i Task** (`sotto-agenti.md`): Usa quando lavori sul sotto-agente di omp `trama-implementer`, sulla sua definizione e sul suo prompt. Sections: `agent`.
 - **Task progress technology** (`task-progress.md`): Use when working on how the agent declares the percentage of a Task and how it is read. Sections: `task/Taken by the agent`.
 - **Unify Drifts technology** (`unify-drifts.md`): Usa quando lavori al codice di Unify Drifts: voce disabilitabile del pulsante diviso, messaggio e lancio dall'host, file di istruzioni inline, lavoro di unificazione e `trama drift new` con `unifies`. Sections: `developer.UNIFY_DRIFTS`, `agent.UNIFY_DRIFTS`.
 - **Tecnologia dei Task** (`work.md`): Usa quando lavori sui Task. Sections: `task`.
