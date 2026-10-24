@@ -190,6 +190,15 @@ test("askMore needs a Task, Proposal or Drift identity, and a question action ne
   expect(parseToHost({ type: "questionAction", round: 3, action: { type: "askMore", id: "" } }).ok).toBe(false);
 });
 
+test("refineAll and cancelRefineAll carry no field, and cancelRefinement needs a Proposal identity", () => {
+  expect(ok({ type: "refineAll" })).toEqual({ type: "refineAll" });
+  expect(ok({ type: "refineAll", force: true })).toEqual({ type: "refineAll" });
+  expect(ok({ type: "cancelRefineAll" })).toEqual({ type: "cancelRefineAll" });
+  expect(ok({ type: "cancelRefineAll", proposal: "0001" })).toEqual({ type: "cancelRefineAll" });
+  expect(ok({ type: "cancelRefinement", proposal: "0001" })).toEqual({ type: "cancelRefinement", proposal: "0001" });
+  expect(parseToHost({ type: "cancelRefinement" }).ok).toBe(false);
+});
+
 test("viewChanged needs the name of a view of the panel", () => {
   expect(ok({ type: "viewChanged", view: "specs" })).toEqual({ type: "viewChanged", view: "specs" });
   expect(ok({ type: "viewChanged", view: "getstarted" })).toEqual({ type: "viewChanged", view: "getstarted" });

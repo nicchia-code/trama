@@ -16,8 +16,8 @@ export type ResolvedAction =
   | { kind: "rework"; proposal: string; skill: "design" | "setup" | "import" }
   /** Rework with feedback on a rejected resolution: one agent resolves its `drifts`, the ones still open and in no other resolution. */
   | { kind: "rework-resolution"; proposal: string; drifts: string[] }
-  /** Refine a stale Proposal on the current Model and Requirements, one at a time (`trama.autoUpdateStaleProposals`). */
-  | { kind: "refine"; proposal: string };
+  /** Refine a stale Proposal on the current Model and Requirements (`trama.autoUpdateStaleProposals`). `seats`: the sub-agent places this refinement holds, the limit its instruction gives. `job`: the identity of its job, kept in memory to tell its end from another's. */
+  | { kind: "refine"; proposal: string; seats: number; job: string };
 
 /** The one-line instruction that makes the external agent use the right Trama skill. */
 export function buildPrompt(action: ResolvedAction): string {

@@ -24,7 +24,7 @@ describe("scan button labels", () => {
   });
 
   test("with the Advisor Scanner on, the button is disabled, keeps its label without the count, and says why", () => {
-    expect(SCANS_OFF_TOOLTIP).toBe("Scans are off: the Advisor Scanner checks the code during Runs.");
+    expect(SCANS_OFF_TOOLTIP).toBe("Scan is off during Runs.");
     expect(scanButtonLabel("Scan System", 3, true)).toEqual({
       text: "Scan System",
       tooltip: SCANS_OFF_TOOLTIP,

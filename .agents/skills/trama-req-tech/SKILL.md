@@ -72,7 +72,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia del progetto** (`project.md`): Usa per setup del progetto, avvio dell'estensione e skill dei Requisiti. Sections: `project`.
 - **Tecnologia delle Proposal** (`proposal.md`): Usa quando lavori su Proposal, sui loro Task e sul loro scope o sulla consegna di una Proposal da una skill. Sections: `proposal`.
 - **Tecnologia dei round di domande** (`questions-notices.md`): Usa quando lavori sui round di domande. Sections: `question-round`.
-- **Raffinamento delle Proposal obsolete** (`raffinamento.md`): Usa quando implementi Auto-update Stale Proposals: impostazione, riallineamento della Proposal nella CLI, coda dell'host, Board e skill di design. Sections: `raffinamento`.
+- **Raffinamento delle Proposal obsolete** (`raffinamento.md`): Usa quando implementi Auto-update Stale Proposals: impostazione, riallineamento della Proposal nella CLI, coda e catene dell'host, Refine All, Board e skill di design. Sections: `raffinamento`, `developer.RAFFINA_TUTTE`.
 - **Tecnologia di design request** (`requests.md`): Usa quando lavori su richieste di design scritte. Sections: `design-request`.
 - **Rework with feedback** (`rework.md`): Usa quando costruisci Rework with feedback o il pulsante diviso condiviso (Reject, Dismiss Drift e + Add Work Item): i messaggi fra webview e host, la casella e la conferma, il campo `reworks` in `src/core` e le skill che rifanno. Sections: `developer.REWORK_PROPOSAL`, `developer.REWORK_DRIFT`.
 - **Tecnologia dei confronti** (`scans.md`): Usa per registro dei confronti e tempi delle fasi. Sections: `work`.

@@ -721,14 +721,17 @@ describe("The Board page", () => {
     expect(arrow.className).toContain("border-dashed");
   });
 
-  test("the arrow of Add Work Item opens a menu with only Unify Drifts, which asks the host and closes the menu", async () => {
+  /** The names of the entries of the open menu: an item disabled has its label as its accessible name. */
+  const menuNames = () => screen.getAllByRole("menuitem").map((entry) => entry.getAttribute("aria-label") ?? entry.textContent);
+
+  test("the arrow of Add Work Item opens a menu with Unify Drifts and then Refine All, and Unify Drifts asks the host and closes the menu", async () => {
     const { posted } = page(snapshot());
     const arrow = screen.getByRole("button", { name: "More ways to add work" }) as HTMLButtonElement;
     expect(arrow.disabled).toBe(false);
     arrow.focus();
     fireEvent.keyDown(arrow, { key: "Enter" });
     const item = await screen.findByRole("menuitem", { name: "Unify Drifts" });
-    expect(screen.getAllByRole("menuitem").map((entry) => entry.textContent)).toEqual(["Unify Drifts"]);
+    expect(menuNames()).toEqual(["Unify Drifts", "Refine All"]);
     fireEvent.click(item);
     expect(posted).toEqual([{ type: "launch", action: { kind: "unify-drifts" } }]);
     await waitFor(() => expect(screen.queryByRole("menuitem")).toBeNull());
@@ -741,11 +744,95 @@ describe("The Board page", () => {
     await screen.findByRole("menuitem", { name: "Unify Drifts" });
   };
 
-  test("the menu of Add Work Item has only Unify Drifts, and never Add Work Item or Add Quick Task", async () => {
+  test("the menu of Add Work Item has only Unify Drifts and Refine All, and never Add Work Item or Add Quick Task", async () => {
     page(snapshot());
     await openMenu();
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Unify Drifts"]);
+    expect(menuNames()).toEqual(["Unify Drifts", "Refine All"]);
     expect(screen.queryByRole("menuitem", { name: "Add Quick Task" })).toBeNull();
+  });
+
+  const refinementWith = (over: Partial<NonNullable<BoardPageProps["refinement"]>>): NonNullable<BoardPageProps["refinement"]> => ({
+    enabled: true, running: [], queued: [], note: null, runInProgress: false, waiting: [], refineAll: { mode: "refine", count: 0, blockers: [] }, ...over,
+  });
+
+  test("Refine All is disabled with the setting off and with nothing to refine, and shows every reason under its label as its accessible description", async () => {
+    page(snapshot(), { refinement: refinementWith({ enabled: false, refineAll: { mode: "refine", count: 0, blockers: ["Turn on Auto-update Stale Proposals in Settings", "No Proposal to refine"] } }) });
+    await openMenu();
+    const item = screen.getByRole("menuitem", { name: "Refine All" });
+    expect([item.getAttribute("aria-disabled"), item.hasAttribute("title"), item.getAttribute("aria-description")]).toEqual(["true", false, "Turn on Auto-update Stale Proposals in Settings. No Proposal to refine"]);
+    expect(Array.from(item.querySelectorAll("span")).slice(1).map((line) => line.textContent)).toEqual(["Turn on Auto-update Stale Proposals in Settings", "No Proposal to refine"]);
+  });
+
+  test("with nothing to refine the label has no number, and the one reason is shown", async () => {
+    const { posted } = page(snapshot(), { refinement: refinementWith({ refineAll: { mode: "refine", count: 0, blockers: ["No Proposal to refine"] } }) });
+    await openMenu();
+    const item = screen.getByRole("menuitem", { name: "Refine All" });
+    expect(Array.from(item.querySelectorAll("span")).map((line) => line.textContent)).toEqual(["Refine All", "No Proposal to refine"]);
+    fireEvent.click(item);
+    expect(posted).toEqual([]);
+    expect(screen.getByRole("menuitem", { name: "Refine All" })).not.toBeNull();
+  });
+
+  test("an enabled Refine All says how many Proposals it takes, closes the menu and sends refineAll with no field", async () => {
+    const { posted } = page(snapshot(), { refinement: refinementWith({ refineAll: { mode: "refine", count: 3, blockers: [] } }) });
+    await openMenu();
+    const item = screen.getByRole("menuitem", { name: "Refine All (3)" });
+    expect([item.getAttribute("aria-description"), item.hasAttribute("title"), item.getAttribute("aria-disabled")]).toEqual(["Refine every stale design Proposal on the current Model, then approve it", false, null]);
+    fireEvent.click(item);
+    expect(posted).toEqual([{ type: "refineAll" }]);
+    await waitFor(() => expect(screen.queryByRole("menuitem")).toBeNull());
+  });
+
+  test("a Run in progress, other refinements or a resolution do not disable Refine All: only the reasons of the host do", async () => {
+    page(snapshot(), {
+      resolve: { blocker: "Drifts are being resolved", runReason: "A run is in progress", running: true, drifts: {}, resolving: [] },
+      refinement: refinementWith({ runInProgress: true, running: ["live"], refineAll: { mode: "refine", count: 2, blockers: [] } }),
+    });
+    await openMenu();
+    expect(screen.getByRole("menuitem", { name: "Refine All (2)" }).getAttribute("aria-disabled")).toBeNull();
+  });
+
+  test("with Refine All in progress the entry is Cancel Refine All: disabled with no written reason for two seconds after the click, then enabled on its own, even with the menu open", async () => {
+    const { posted } = page(snapshot(), { refinement: refinementWith({ refineAll: { mode: "cancel", count: 4, blockers: [], since: Date.now() - 1700 } }) });
+    await openMenu();
+    expect(menuNames()).toEqual(["Unify Drifts", "Cancel Refine All"]);
+    const waiting = screen.getByRole("menuitem", { name: "Cancel Refine All" });
+    expect([waiting.getAttribute("aria-disabled"), waiting.getAttribute("aria-description"), waiting.hasAttribute("title")]).toEqual(["true", "Take every waiting Proposal out of the refining queue", false]);
+    expect(Array.from(waiting.querySelectorAll("span")).map((line) => line.textContent)).toEqual(["Cancel Refine All"]);
+    fireEvent.click(waiting);
+    expect(posted).toEqual([]);
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Cancel Refine All" }).getAttribute("aria-disabled")).toBeNull(), { timeout: 1500 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cancel Refine All" }));
+    expect(posted).toEqual([{ type: "cancelRefineAll" }]);
+    await waitFor(() => expect(screen.queryByRole("menuitem")).toBeNull());
+  });
+
+  test("Cancel Refine All is enabled at once when the two seconds have passed, and a new click restarts the wait", async () => {
+    const { rerender, props } = page(snapshot(), { refinement: refinementWith({ refineAll: { mode: "cancel", count: 1, blockers: [], since: Date.now() - 5000 } }) });
+    await openMenu();
+    expect(screen.getByRole("menuitem", { name: "Cancel Refine All" }).getAttribute("aria-disabled")).toBeNull();
+    rerender(<BoardPage {...props} refinement={refinementWith({ refineAll: { mode: "cancel", count: 1, blockers: [], since: Date.now() } })} />);
+    expect(screen.getByRole("menuitem", { name: "Cancel Refine All" }).getAttribute("aria-disabled")).toBe("true");
+    // The picture goes back to refine: the entry is Refine All again.
+    rerender(<BoardPage {...props} refinement={refinementWith({ refineAll: { mode: "refine", count: 2, blockers: [] } })} />);
+    expect(screen.getByRole("menuitem", { name: "Refine All (2)" })).not.toBeNull();
+  });
+
+  test("several Proposals can be refining together, each with its badge and its disabled buttons, and a queued one says why it waits", () => {
+    const stale = (id: string, created: string) => proposalView({ id, created, title: `Proposal ${id}`, stale: ["a.md"] });
+    page(snapshot({ proposals: [stale("pa", "2026-10-01T10:00:00.000Z"), stale("pb", "2026-10-02T10:00:00.000Z"), stale("pc", "2026-10-03T10:00:00.000Z")] }), {
+      refinement: refinementWith({ running: ["pa", "pb"], queued: [{ proposal: "pc", waiting: "chain", on: "pa" }] }),
+    });
+    const refining = screen.getAllByLabelText("The agent is refining this Proposal on the current Model");
+    expect(refining.map((badge) => badge.textContent)).toEqual(["refining", "refining"]);
+    const approves = screen.getAllByRole("button", { name: /^Approve Proposal/ }) as HTMLButtonElement[];
+    expect(approves.map((button) => [button.disabled, button.getAttribute("aria-description")])).toEqual([
+      [true, "The agent is refining this Proposal"],
+      [true, "The agent is refining this Proposal"],
+      [true, "Already queued for refining"],
+    ]);
+    expect(screen.getByLabelText("Waiting for pa to be refined first").textContent).toBe("queued");
+    expect(screen.getAllByText("Refining")).toHaveLength(2);
   });
 
   test("an enabled Unify Drifts closes the menu and asks the host to launch it", async () => {

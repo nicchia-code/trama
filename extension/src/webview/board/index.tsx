@@ -14,7 +14,7 @@ import { SplitButton } from "../split-button";
 import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
 import { DriftDetailsDialog, type ModelList, GhostDetailsDialog, ModelDialog, ProposalBodyDialog, TaskDetailsDialog } from "./dialogs";
-import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, clearableTasks, COLUMN_TITLES, type ColumnId, doneGroups, EMPTY_HINTS, hideCleared, interleave, NO_MODELS, type ProposalCard, REFINEMENT_OFF, stoppedFollowingNotice, type TaskCard, withdrawnNotice } from "./logic";
+import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, CANCEL_REFINE_ALL_DELAY_MS, type Card, clearableTasks, COLUMN_TITLES, type ColumnId, doneGroups, EMPTY_HINTS, hideCleared, interleave, NO_MODELS, type ProposalCard, REFINEMENT_OFF, refineAllEntry, stoppedFollowingNotice, type TaskCard, withdrawnNotice } from "./logic";
 import { BoardButton, BoardEnvContext, type BoardEnv, Tip } from "./parts";
 
 /** The state of Resolve Drifts and of the Runs the host gives with each picture. */
@@ -195,6 +195,20 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
   const deleting = useRef<string | null>(null);
   const latest = useRef(snapshot);
   latest.current = snapshot;
+  // Cancel Refine All works two seconds after the click on Refine All: the timer starts from the picture, runs on its own, and is cleared when the picture changes `since` or the page goes.
+  const since = refinement.refineAll.mode === "cancel" ? refinement.refineAll.since : undefined;
+  const [cancelReadyFor, setCancelReadyFor] = useState<number | null>(null);
+  useEffect(() => {
+    if (since === undefined) return;
+    const wait = since + CANCEL_REFINE_ALL_DELAY_MS - Date.now();
+    if (wait <= 0) {
+      setCancelReadyFor(since);
+      return;
+    }
+    const timer = setTimeout(() => setCancelReadyFor(since), wait);
+    return () => clearTimeout(timer);
+  }, [since]);
+  const cancelReady = since !== undefined && (cancelReadyFor === since || Date.now() - since >= CANCEL_REFINE_ALL_DELAY_MS);
 
   const numbers = snapshot?.numbers ?? noNumbers;
   const runReason = snapshot === null ? null : joinReasons([resolve.runReason, runBlocker(snapshot.tasks, namerOf(numbers))]);
@@ -321,6 +335,7 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
   const doneCards = columns.find((column) => column.id === "done")?.cards ?? [];
   const clearable = doneCards.filter((card) => card.kind === "task" && card.keptBy.length === 0);
   const clearReason = joinReasons([resolve.running === true ? RUN_IN_PROGRESS : null, clearable.length === 0 ? "Nothing to clear" : null]);
+  const refineAll = refineAllEntry(refinement.refineAll, cancelReady);
   const foot = (id: ColumnId): ReactNode => {
     if (id === "backlog")
       return (
@@ -341,6 +356,13 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
               disabled: unify.blockers.length > 0,
               reason: unify.blockers.join("\n"),
               onSelect: () => context.post({ type: "launch", action: { kind: "unify-drifts" } }),
+            },
+            {
+              label: refineAll.label,
+              description: refineAll.description,
+              disabled: refineAll.disabled,
+              reason: refineAll.reason,
+              onSelect: () => context.post({ type: refineAll.message }),
             },
           ]}
           onClick={() => context.post({ type: "writeDesignRequest" })}

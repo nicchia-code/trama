@@ -4,7 +4,7 @@ Usa quando costruisci o cambi la voce Unify Drifts del menu di + Add Work Item, 
 
 ## developer.UNIFY_DRIFTS
 
-- `Unify Drifts` è la sola voce del menu della freccetta di `+ Add Work Item` (`ui#panel/Board`), senza icona e senza tooltip, con nome accessibile `Unify Drifts` e descrizione accessibile `Merge every open Drift into one Drift to resolve`.
+- `Unify Drifts` è la prima voce del menu della freccetta di `+ Add Work Item` (`ui#panel/Board`), sopra `Refine All` (`ui#developer.RAFFINA_TUTTE`), senza icona e senza tooltip, con nome accessibile `Unify Drifts` e descrizione accessibile `Merge every open Drift into one Drift to resolve`.
 - Quando non si può usare resta nel menu, appare disabilitata ed è segnata come disabilitata per le tecnologie assistive; i motivi stanno sotto l'etichetta della voce, in testo secondario e piccolo, uno per riga, e sono anche la descrizione accessibile, in quest'ordine quando ne valgono più d'uno: `Drifts are being resolved` (un agente di risoluzione o di unificazione lavora, o il developer risponde a una domanda pronta), `A run is in progress` (un Run lanciato da Trama non è finito), `Proposal <id> resolving Drifts awaits a decision` (con lo stesso testo e la stessa regola di `Resolve`, `ui#drift`), `Unify needs at least two open Drifts` (meno di due Drift aperti fuori da ogni risoluzione in scrittura o aperta). Nessuna voce di un menu dei pulsanti divisi ha un tooltip. Una voce disabilitata non chiude il menu e non fa nulla.
 - Scegliere la voce abilitata non mostra campi, caselle né conferme: chiude il menu e lancia subito l'agente. Il terminale `Unify`, con omp, non prende il focus, come ogni terminale dell'agente salvo quello di Ask more.
 - Tutti questi testi sono in inglese e non seguono `trama.language`.

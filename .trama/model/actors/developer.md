@@ -18,6 +18,12 @@ Il developer sceglie Rework with feedback… dal menu della freccetta di Reject 
 ### ANNULLA_RAFFINAMENTO
 Il developer preme Cancel sulla scheda di una Proposal che aspetta in coda il suo raffinamento (vedi il Raffinamento), per toglierla dalla coda senza rifiutarla.
 
+### RAFFINA_TUTTE
+Il developer sceglie Refine All dal menu della freccetta di + Add Work Item, quando è disponibile, per far raffinare e poi approvare in un clic tutte le Proposal da raffinare (vedi il Raffinamento).
+
+### ANNULLA_RAFFINA_TUTTE
+Il developer sceglie Cancel Refine All dal menu della freccetta di + Add Work Item, che prende il posto di Refine All dopo il suo lancio, per svuotare la coda dei raffinamenti senza rifiutare nessuna Proposal (vedi il Raffinamento).
+
 ### SCEGLI_MODELLO_PROPOSAL
 Il developer sceglie, dall'ingranaggio della scheda di una Proposal in Backlog, il modello con cui lavorano gli agenti dei lavori di quella Proposal, oppure lo toglie e torna al default dei Settings. Sceglie un modello suggerito o ne scrive il nome, come nella scheda Settings.
 

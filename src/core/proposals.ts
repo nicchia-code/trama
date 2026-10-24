@@ -743,9 +743,14 @@ export interface ProposalHealth {
 
 const newFiles = (proposal: Proposal): FileMap => readTracked(proposal.dir);
 
+/** The tracked files the Proposal touches: those it holds in its folder and those it deletes. `health` checks each against its recorded base. */
+export function touchedFiles(proposal: Proposal): Set<string> {
+  return new Set([...newFiles(proposal).keys(), ...proposal.data.delete]);
+}
+
 export function health(p: Project, proposal: Proposal): ProposalHealth {
   const base = baseFiles(p, proposal);
-  const touched = new Set([...newFiles(proposal).keys(), ...proposal.data.delete]);
+  const touched = touchedFiles(proposal);
   const stale: string[] = [];
   const unbased: string[] = [];
   for (const path of touched) {

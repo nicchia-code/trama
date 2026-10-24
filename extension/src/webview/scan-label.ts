@@ -1,5 +1,5 @@
 /** The tooltip of every Scan button while the Advisor Scanner is on: the code is checked during Runs, so no scan starts. */
-export const SCANS_OFF_TOOLTIP = "Scans are off: the Advisor Scanner checks the code during Runs.";
+export const SCANS_OFF_TOOLTIP = "Scan is off during Runs.";
 
 /**
  * The label, tooltip and accessible name of a Scan button. With the Advisor Scanner on the button is disabled, keeps its

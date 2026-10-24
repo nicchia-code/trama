@@ -96,11 +96,11 @@ test("with the Advisor Scanner on Scan System stays in its place, disabled, with
   expect(scan.disabled).toBe(true);
   expect(scan.textContent).toBe("Scan System");
   const row = document.getElementById(scan.getAttribute("aria-describedby") ?? "");
-  expect(row?.textContent).toBe("Scans are off: the Advisor Scanner checks the code during Runs.");
+  expect(row?.textContent).toBe("Scan is off during Runs.");
   expect(row?.className).toContain("@max-[56px]:hidden");
   fireEvent.click(scan);
   expect(posted).toEqual([]);
-  expect(names()).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", "Scan System. Scans are off: the Advisor Scanner checks the code during Runs.", "Settings"]);
+  expect(names()).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", "Scan System. Scan is off during Runs.", "Settings"]);
 });
 
 test("the entry of the view the panel shows is highlighted with aria-current, and none is with the panel closed", () => {
@@ -172,7 +172,7 @@ test("Scan System shows no tooltip when focused, and no line about the Advisor S
     fireEvent.focus(scan);
   });
   expect(screen.queryByRole("tooltip")).toBeNull();
-  expect(screen.queryByText("Scans are off: the Advisor Scanner checks the code during Runs.")).toBeNull();
+  expect(screen.queryByText("Scan is off during Runs.")).toBeNull();
   expect(scan.hasAttribute("aria-describedby")).toBe(false);
 });
 

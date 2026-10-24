@@ -320,7 +320,25 @@ function ownApproveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors" 
 }
 
 /** The refinement of the Proposals is off: the Board and the diagram draw them as before. */
-export const REFINEMENT_OFF: RefinementView = { enabled: false, running: null, queued: [], note: null, runInProgress: false, waiting: [] };
+export const REFINEMENT_OFF: RefinementView = { enabled: false, running: [], queued: [], note: null, runInProgress: false, waiting: [], refineAll: { mode: "refine", count: 0, blockers: ["Turn on Auto-update Stale Proposals in Settings", "No Proposal to refine"] } };
+
+/** The wait after the click on Refine All before Cancel Refine All can be chosen. */
+export const CANCEL_REFINE_ALL_DELAY_MS = 2000;
+
+/**
+ * The second entry of the menu of `+ Add Work Item`, as the host's `refineAll` says: `Refine All (<count>)` (`Refine All` with none), disabled with the host's reasons;
+ * with Refine All in progress `Cancel Refine All`, disabled with no written reason until `cancelReady`. `message` is what choosing it sends.
+ */
+export function refineAllEntry(refineAll: RefinementView["refineAll"], cancelReady: boolean): { label: string; description: string; disabled: boolean; reason: string; message: "refineAll" | "cancelRefineAll" } {
+  if (refineAll.mode === "cancel") return { label: "Cancel Refine All", description: "Take every waiting Proposal out of the refining queue", disabled: !cancelReady, reason: "", message: "cancelRefineAll" };
+  return {
+    label: refineAll.count === 0 ? "Refine All" : `Refine All (${refineAll.count})`,
+    description: "Refine every stale design Proposal on the current Model, then approve it",
+    disabled: refineAll.blockers.length > 0,
+    reason: refineAll.blockers.join("\n"),
+    message: "refineAll",
+  };
+}
 
 /** Why Approve and Reject wait while the agent refines this Proposal. */
 export const REFINING_REASON = "The agent is refining this Proposal";
@@ -340,8 +358,8 @@ export const TO_REFINE_TIP = "The Model changed under this Proposal. Approve ref
  */
 export function refineStatus(p: Pick<ProposalView, "id" | "stale" | "refining">, refinement: RefinementView): RefineStatus | null {
   if (!refinement.enabled) return null;
-  if (refinement.running === p.id) return "running";
-  if (refinement.queued.includes(p.id)) return "queued";
+  if (refinement.running.includes(p.id)) return "running";
+  if (refinement.queued.some((entry) => entry.proposal === p.id)) return "queued";
   if (p.refining) return "stopped";
   return p.stale.length > 0 ? "to-refine" : null;
 }
@@ -385,16 +403,20 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, 
   const name = cardNameOf(numbers, "proposal", p.id);
   const choosable = Object.hasOwn(models.proposals, p.id);
   const refine = refineStatus(p, refinement);
-  const runningName = refinement.running === null ? null : namerOf(numbers)("proposal", refinement.running);
+  const queuedEntry = refinement.queued.find((entry) => entry.proposal === p.id);
+  const queuedTip =
+    queuedEntry === undefined || queuedEntry.waiting === "slot"
+      ? "Waiting for a free refining slot"
+      : `Waiting for ${queuedEntry.on === undefined ? "another Proposal" : namerOf(numbers)("proposal", queuedEntry.on)} to be ${queuedEntry.waiting === "approval" ? "approved" : "refined"} first`;
   const approve = refine === null ? approveBlocker(p, numbers, refinement.runInProgress) : refineApproveBlocker(refine, p, numbers, refinement);
   const rejectBlocker = joinReasons([wait, refine === "running" ? REFINING_REASON : refine === "stopped" ? RESUME_REASON : null]);
   const refineBadge: Badge | null =
     refine === null
       ? null
       : refine === "running"
-        ? { label: "refining", tone: "info", tooltip: "The agent is refining this Proposal on the current Model" }
+        ? { label: "refining", tone: "info", tooltip: "The agent is refining this Proposal on the current Model", accessibleName: "The agent is refining this Proposal on the current Model" }
         : refine === "queued"
-          ? { label: "queued", tone: "info", tooltip: runningName === null ? "Waiting to be refined first" : `Waiting for ${runningName} to be refined first` }
+          ? { label: "queued", tone: "info", tooltip: queuedTip, accessibleName: queuedTip }
           : refine === "stopped"
             ? { label: "to refine", tone: "primary", tooltip: "Refining stopped before the hand-over. Approve resumes it." }
             : { label: "to refine", tone: "primary", tooltip: TO_REFINE_TIP };

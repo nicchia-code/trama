@@ -101,7 +101,7 @@ export function SplitButton({
                 );
               const reasons = (item.reason ?? "").split("\n").filter((line) => line !== "");
               return (
-                <DropdownMenuItem key={item.label} disabled aria-label={item.label} aria-disabled="true" aria-description={reasons.join(". ") || undefined} className="flex-col items-start gap-0.5" onSelect={(event) => event.preventDefault()}>
+                <DropdownMenuItem key={item.label} disabled aria-label={item.label} aria-disabled="true" aria-description={reasons.join(". ") || item.description} className="flex-col items-start gap-0.5" onSelect={(event) => event.preventDefault()}>
                   <span>{item.label}</span>
                   {reasons.map((reason) => (
                     <span key={reason} className="text-xs font-normal text-muted-foreground">

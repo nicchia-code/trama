@@ -7,11 +7,27 @@ import type { SettingSchema, SettingsValues, SettingValue } from "./host/setting
 
 export type Column = "todo" | "doing" | "done";
 
-/** The Proposal refinement, as the host carries it with each picture. `enabled`: the setting `trama.autoUpdateStaleProposals` is on. `running`: the Proposal the agent refines now, or null. `queued`: the Proposals waiting for it, in order. `note`: the latest note of that agent, or null. `runInProgress`: a Run launched from this window is in progress, so Approve is disabled. `waiting`: the Proposals the refinement delivered and that are approved only when that Run ends. */
+/** A Proposal waiting in the refining queue and why: `approval` it waits for the Proposal `on` it requires to be approved, `chain` for `on`, in its chain, to be refined, `slot` for a free sub-agent place. */
+export interface QueuedRefinement {
+  proposal: string;
+  waiting: "approval" | "chain" | "slot";
+  on?: string;
+}
+
+/** The state of Refine All. `mode` is `cancel` while it is in progress, with `since` the instant of its click (ms since the epoch). `count` is how many Proposals a click takes now; `blockers` are all the reasons it is unavailable, in order (empty when it works). */
+export interface RefineAllView {
+  mode: "refine" | "cancel";
+  count: number;
+  blockers: string[];
+  since?: number;
+}
+
+/** The Proposal refinement, as the host carries it with each picture. `enabled`: the setting `trama.autoUpdateStaleProposals` is on. `running`: the Proposals the agents refine now, in the order they started. `queued`: the Proposals waiting, in order, each with why. `refineAll`: the Refine All menu entry. `note`: the latest note of an agent, or null. `runInProgress`: a Run launched from this window is in progress, so Approve is disabled. `waiting`: the Proposals the refinement delivered and that are approved only when that Run ends. */
 export interface RefinementView {
   enabled: boolean;
-  running: string | null;
-  queued: string[];
+  running: string[];
+  queued: QueuedRefinement[];
+  refineAll: RefineAllView;
   note: string | null;
   runInProgress: boolean;
   waiting: string[];
@@ -82,6 +98,10 @@ export type ToHost =
   | { type: "openCard"; kind: "task" | "drift"; id: string }
   | { type: "approveProposal"; id: string }
   | { type: "cancelRefinement"; proposal: string }
+  /** «Refine All» of the menu of `+ Add Work Item`: the host rechecks and queues every Proposal a click takes. No other field. */
+  | { type: "refineAll" }
+  /** «Cancel Refine All»: the host empties the whole queue when Refine All is in progress and 2 seconds have passed. No other field. */
+  | { type: "cancelRefineAll" }
   | { type: "rejectProposal"; id: string }
   /** «Rework with feedback…» of Reject's arrow: the host asks the developer what to change, rejects the Proposal and has the agent redo it. */
   | { type: "reworkProposal"; proposal: string }

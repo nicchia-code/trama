@@ -2765,6 +2765,8 @@ describe("Approve waits for a Run in progress", () => {
   // Waiting Proposals only exist with the setting on: turning it off empties the waiting list when the setting changes.
   beforeEach(() => void (settingValues["autoUpdateStaleProposals"] = true));
   afterEach(() => void delete settingValues["autoUpdateStaleProposals"]);
+  /** The refinement at work of Proposal `id`, delivered, as the controller keeps it. */
+  const delivered = (id: string) => new Map([[id, { proposal: id, seats: 1, job: "job", delivered: true }]]);
   test("a refined Proposal waits while a Run of this window runs, and is approved when the Run ends", async () => {
     const { Controller } = await import("../extension/src/host/controller");
     const { endHeldJob, startJob } = await import("../extension/src/host/drift-resolution");
@@ -2779,8 +2781,8 @@ describe("Approve waits for a Run in progress", () => {
     const controller = new Controller({ scheme: "file" } as never);
     await controller.open();
     const host = controller as unknown as {
-      refinement: { running: string | null; delivered: boolean; waiting: string[] };
-      endRefinement(project: Project, id: string): void;
+      refinement: { running: ReadonlyMap<string, unknown>; waiting: string[] };
+      endRefinement(project: Project, id: string, job: string): void;
       refuseWhileRunning(project: Project): boolean;
     };
     try {
@@ -2791,8 +2793,8 @@ describe("Approve waits for a Run in progress", () => {
       handOver(p, prop.id);
       startJob("run", root, { held: true }, "wait-run");
       expect(host.refuseWhileRunning(p)).toBe(true);
-      host.refinement = { ...host.refinement, running: prop.id, delivered: true };
-      host.endRefinement(p, prop.id);
+      host.refinement = { ...host.refinement, running: delivered(prop.id) };
+      host.endRefinement(p, prop.id, "job");
       expect(host.refinement.waiting).toEqual([prop.id]);
       expect(getProposal(p, prop.id).data.status).toBe("open");
       endHeldJob(root, "wait-run");
@@ -2818,8 +2820,8 @@ describe("Approve waits for a Run in progress", () => {
     const controller = new Controller({ scheme: "file" } as never);
     await controller.open();
     const host = controller as unknown as {
-      refinement: { running: string | null; delivered: boolean; waiting: string[] };
-      endRefinement(project: Project, id: string): void;
+      refinement: { running: ReadonlyMap<string, unknown>; waiting: string[] };
+      endRefinement(project: Project, id: string, job: string): void;
       refuseWhileRunning(project: Project): boolean;
     };
     try {
@@ -2829,8 +2831,8 @@ describe("Approve waits for a Run in progress", () => {
       coverWithTask(p, prop.id, "checkout", "user");
       handOver(p, prop.id);
       expect(host.refuseWhileRunning(p)).toBe(false);
-      host.refinement = { ...host.refinement, running: prop.id, delivered: true };
-      host.endRefinement(p, prop.id);
+      host.refinement = { ...host.refinement, running: delivered(prop.id) };
+      host.endRefinement(p, prop.id, "job");
       expect(host.refinement.waiting).toEqual([]);
       expect(getProposal(p, prop.id).data.status).toBe("approved");
     } finally {
@@ -2855,8 +2857,8 @@ describe("Approve waits for a Run in progress", () => {
     await controller.open();
     const launched: string[] = [];
     const host = controller as unknown as {
-      refinement: { running: string | null; delivered: boolean; waiting: string[]; queued: string[] };
-      endRefinement(project: Project, id: string): void;
+      refinement: { running: ReadonlyMap<string, unknown>; waiting: string[]; queued: string[] };
+      endRefinement(project: Project, id: string, job: string): void;
       launchAction(project: Project, action: { kind: string; proposal?: string }): Promise<void>;
     };
     // The refinement agent is not launched: the launch is recorded, and the queue is what decides it.
@@ -2871,8 +2873,8 @@ describe("Approve waits for a Run in progress", () => {
       coverWithTask(p, prop.id, "checkout", "user");
       handOver(p, prop.id);
       startJob("run", root, { held: true }, "requeue-run");
-      host.refinement = { ...host.refinement, running: prop.id, delivered: true };
-      host.endRefinement(p, prop.id);
+      host.refinement = { ...host.refinement, running: delivered(prop.id) };
+      host.endRefinement(p, prop.id, "job");
       expect(host.refinement.waiting).toEqual([prop.id]);
       // The Model changes under the Proposal while the Run runs: when the Run ends the Proposal is stale again.
       const model = join(root, ".trama", "model", "checkout", "order.md");
@@ -2904,8 +2906,8 @@ describe("Approve waits for a Run in progress", () => {
     await controller.open();
     const launched: string[] = [];
     const host = controller as unknown as {
-      refinement: { running: string | null; delivered: boolean; waiting: string[]; queued: string[] };
-      endRefinement(project: Project, id: string): void;
+      refinement: { running: ReadonlyMap<string, unknown>; waiting: string[]; queued: string[] };
+      endRefinement(project: Project, id: string, job: string): void;
       settingsChanged(ompPathChanged?: boolean): void;
       launchAction(project: Project, action: { kind: string; proposal?: string }): Promise<void>;
     };
@@ -2920,8 +2922,8 @@ describe("Approve waits for a Run in progress", () => {
       coverWithTask(p, prop.id, "checkout", "user");
       handOver(p, prop.id);
       startJob("run", root, { held: true }, "off-run");
-      host.refinement = { ...host.refinement, running: prop.id, delivered: true };
-      host.endRefinement(p, prop.id);
+      host.refinement = { ...host.refinement, running: delivered(prop.id) };
+      host.endRefinement(p, prop.id, "job");
       expect(host.refinement.waiting).toEqual([prop.id]);
       host.refinement = { ...host.refinement, queued: ["zzzzzzzz"] };
       settingValues["autoUpdateStaleProposals"] = false;
@@ -2954,7 +2956,7 @@ describe("Approve waits for a Run in progress", () => {
     await controller.open();
     const launched: string[] = [];
     const host = controller as unknown as {
-      refinement: { running: string | null; delivered: boolean; waiting: string[]; queued: string[] };
+      refinement: { running: ReadonlyMap<string, unknown>; waiting: string[]; queued: string[] };
       handle(raw: unknown): Promise<void>;
       launchAction(project: Project, action: { kind: string; proposal?: string }): Promise<void>;
     };
@@ -2985,6 +2987,182 @@ describe("Approve waits for a Run in progress", () => {
       controller.dispose();
       workspaceRoot = previousRoot;
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  /** A window on a copy of the shop project, whose launches of the agent are recorded and never end. */
+  const refineWindow = async () => {
+    const { Controller } = await import("../extension/src/host/controller");
+    const { editInProposal, newProposal } = await import("../src/core/proposals");
+    const { handOver } = await import("./handover");
+    const { coverWithTask } = await import("./cover");
+    const root = mkdtempSync(join(tmpdir(), "trama-refine-all-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    const p = projectAt(root);
+    const previousRoot = workspaceRoot;
+    workspaceRoot = root;
+    const controller = new Controller({ scheme: "file" } as never);
+    await controller.open();
+    const launched: { proposal: string; seats: number; job: string }[] = [];
+    const host = controller as unknown as {
+      refinement: { running: ReadonlyMap<string, { seats: number; job: string; delivered: boolean }>; waiting: string[]; queued: string[]; refineAllSince: number | null };
+      handle(raw: unknown): Promise<void>;
+      endRefinement(project: Project, id: string, job: string): void;
+      noteDelivered(root: string, id: string): void;
+      launchAction(project: Project, action: { kind: string; proposal: string; seats: number; job: string }): Promise<void>;
+    };
+    host.launchAction = async (_project, action) => {
+      launched.push({ proposal: action.proposal, seats: action.seats, job: action.job });
+      return new Promise(() => {});
+    };
+    /** An open Proposal of `file` that the Model changes under (`changeModel`), so that it is stale. */
+    const stale = (title: string, file: "order" | "cart", line: string): string => {
+      const proposal = newProposal(p, title);
+      const path = editInProposal(p, proposal.id, `checkout/${file}.md`);
+      const marker = file === "order" ? "### Cancelled (final)" : "### Confirmed (final)";
+      writeFileSync(path, readFileSync(path, "utf8").replace(marker, `${marker}\n\n### ${line} (final)`));
+      coverWithTask(p, proposal.id, "checkout", "user");
+      handOver(p, proposal.id);
+      return proposal.id;
+    };
+    const changeModel = (): void => {
+      for (const file of ["order", "cart"]) {
+        const model = join(root, ".trama", "model", "checkout", `${file}.md`);
+        writeFileSync(model, `${readFileSync(model, "utf8")}\nUna riga in più.\n`);
+      }
+    };
+    const close = (): void => {
+      controller.dispose();
+      delete settingValues["autoUpdateStaleProposals"];
+      workspaceRoot = previousRoot;
+      rmSync(root, { recursive: true, force: true });
+    };
+    return { host, p, root, launched, stale, changeModel, close };
+  };
+
+  test("Refine All queues every refinable Proposal at once, starts one per chain sharing the places, and Cancel Refine All empties what waits two seconds after the click", async () => {
+    const { getProposal } = await import("../src/core/proposals");
+    const window = await refineWindow();
+    const { host, p, launched } = window;
+    try {
+      const first = window.stale("First", "order", "Lost");
+      const second = window.stale("Second", "order", "Gone");
+      const third = window.stale("Third", "cart", "Dropped");
+      window.changeModel();
+      await host.handle({ type: "refineAll" });
+      // The two chains (order.md, cart.md) work together and share the 20 places; the second Proposal of order.md waits for the first.
+      expect(launched.map((launch) => [launch.proposal, launch.seats])).toEqual([[first, 10], [third, 10]]);
+      expect([...host.refinement.running.keys()]).toEqual([first, third]);
+      expect(host.refinement.queued).toEqual([second]);
+      expect(host.refinement.refineAllSince).not.toBeNull();
+      // Before two seconds, Cancel Refine All does nothing.
+      await host.handle({ type: "cancelRefineAll" });
+      expect(host.refinement.queued).toEqual([second]);
+      host.refinement = { ...host.refinement, refineAllSince: Date.now() - 2500 };
+      await host.handle({ type: "cancelRefineAll" });
+      expect(host.refinement.queued).toEqual([]);
+      expect(host.refinement.refineAllSince).toBeNull();
+      // The refinements at work go on, and no file changed.
+      expect([...host.refinement.running.keys()]).toEqual([first, third]);
+      expect(getProposal(p, second).data.status).toBe("open");
+      // Without Refine All in progress, Cancel Refine All does nothing.
+      await host.handle({ type: "cancelRefineAll" });
+      expect(launched).toHaveLength(2);
+    } finally {
+      window.close();
+    }
+  });
+
+  test("Refine All does nothing with the setting off or with nothing to refine", async () => {
+    const window = await refineWindow();
+    const { host, launched } = window;
+    try {
+      await host.handle({ type: "refineAll" });
+      expect(launched).toEqual([]);
+      window.stale("First", "order", "Lost");
+      window.changeModel();
+      settingValues["autoUpdateStaleProposals"] = false;
+      await host.handle({ type: "refineAll" });
+      expect(launched).toEqual([]);
+      expect(host.refinement.queued).toEqual([]);
+      expect(host.refinement.refineAllSince).toBeNull();
+    } finally {
+      window.close();
+    }
+  });
+
+  test("Refine All is not refused during a Run: the refinement starts and the refined Proposal waits for the Run, then is approved; a single Approve stays refused", async () => {
+    const { endHeldJob, startJob } = await import("../extension/src/host/drift-resolution");
+    const { getProposal, rebaseInProposal } = await import("../src/core/proposals");
+    const { handOver } = await import("./handover");
+    const window = await refineWindow();
+    const { host, p, root, launched } = window;
+    try {
+      const refined = window.stale("Refined", "order", "Lost");
+      const single = window.stale("Single", "cart", "Dropped");
+      window.changeModel();
+      startJob("run", root, { held: true }, "refine-all-run");
+      await host.handle({ type: "approveProposal", id: single });
+      expect(launched).toEqual([]);
+      expect(host.refinement.queued).toEqual([]);
+      await host.handle({ type: "refineAll" });
+      expect(launched.map((launch) => launch.proposal)).toEqual([refined, single]);
+      const job = launched[0]?.job ?? "";
+      // The agent realigns and hands the Proposal over; its job ends, twice, while the Run goes on.
+      rebaseInProposal(p, refined);
+      handOver(p, refined);
+      host.noteDelivered(root, refined);
+      host.endRefinement(p, refined, job);
+      host.endRefinement(p, refined, job);
+      expect(host.refinement.waiting).toEqual([refined]);
+      expect(getProposal(p, refined).data.status).toBe("open");
+      // The other refinement still works: the end of one job did not touch it.
+      expect([...host.refinement.running.keys()]).toEqual([single]);
+      endHeldJob(root, "refine-all-run");
+      expect(host.refinement.waiting).toEqual([]);
+      expect(getProposal(p, refined).data.status).toBe("approved");
+    } finally {
+      window.close();
+    }
+  });
+
+  test("a Proposal refined after Refine All is approved like one refined after Approve, Tasks included, when no Run is in progress", async () => {
+    const { getProposal, rebaseInProposal } = await import("../src/core/proposals");
+    const { handOver } = await import("./handover");
+    const window = await refineWindow();
+    const { host, p, root, launched } = window;
+    try {
+      const refined = window.stale("Refined", "order", "Lost");
+      window.changeModel();
+      await host.handle({ type: "refineAll" });
+      expect(launched.map((launch) => launch.proposal)).toEqual([refined]);
+      rebaseInProposal(p, refined);
+      handOver(p, refined);
+      host.noteDelivered(root, refined);
+      host.endRefinement(p, refined, launched[0]?.job ?? "");
+      expect(getProposal(p, refined).data.status).toBe("approved");
+      expect(host.refinement.waiting).toEqual([]);
+      expect(listTasks(p).filter((item) => item.data.proposal === refined)).toHaveLength(1);
+    } finally {
+      window.close();
+    }
+  });
+
+  test("a refinement of Refine All that ends with the Proposal not delivered leaves it Open and to refine, with nothing approved or waiting", async () => {
+    const { getProposal } = await import("../src/core/proposals");
+    const window = await refineWindow();
+    const { host, p, launched } = window;
+    try {
+      const refined = window.stale("Refined", "order", "Lost");
+      window.changeModel();
+      await host.handle({ type: "refineAll" });
+      host.endRefinement(p, refined, launched[0]?.job ?? "");
+      expect(getProposal(p, refined).data.status).toBe("open");
+      expect(host.refinement.waiting).toEqual([]);
+      expect([...host.refinement.running.keys()]).toEqual([]);
+      expect(host.refinement.queued).toEqual([]);
+    } finally {
+      window.close();
     }
   });
 });

@@ -7,7 +7,7 @@ import { TramaError, UsageError } from "../../../src/core/errors";
 import { clearDoneTasks } from "../../../src/core/clear-done";
 import { deleteTask } from "../../../src/core/delete-task";
 import { findInstructionFiles } from "../../../src/core/instruction-files";
-import { approvalBlock, approveProposal, getProposal, health, rejectProposal, resolutionHolding } from "../../../src/core/proposals";
+import { type ApprovalBlock, approvalBlock, approveProposal, getProposal, health, listProposals, type Proposal, rejectProposal, requiredProposals, resolutionHolding, touchedFiles } from "../../../src/core/proposals";
 import { type PreparedQuestion, preparedOutcome, preparedStatus } from "../../../src/core/prepared";
 import { reworkProposalBlocker, reworkProposalDrifts, resolveDriftBlocker, resolveDriftsBlocker, runWindowBlocker, unifiableDrifts, unifyDriftsBlockers, writePreparedResolution } from "../../../src/core/resolution";
 import type { QuestionAnswer } from "../../../src/core/questions";
@@ -17,7 +17,7 @@ import { namerOf } from "../../../src/core/card-names";
 import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, getTaskOrNull, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
-import type { AgentAction, NavigateOptions, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
+import type { AgentAction, NavigateOptions, RefinementView, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
 import type { MenuViewName } from "../menu-protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
 import { configuredAdvisorScanner, configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, openAskMore, settings, startHeldJob } from "./agent";
@@ -33,7 +33,31 @@ import { taskImagePath, withImageUris } from "./task-images";
 import { taskImagesRoot } from "../../../src/core/task-images";
 import { appliedProposalModels, boardModels, chooseProposalModel, forgetProposalModels, proposalRunModel, type BoardModels, type ModelMemory } from "./proposal-models";
 import type { RunModel } from "./terminal-agent";
-import { NO_REFINEMENT, type RefinementEnd, type RefinementState, backlogOrder, enqueue, nextToRefine, refinable, refinementEnd, refinementView, withdraw } from "./refinement";
+import {
+  type ChainFact,
+  NO_REFINEMENT,
+  type PickFact,
+  type QueuePlan,
+  type RefinementEnd,
+  type RefinementState,
+  backlogOrder,
+  beginRefinement,
+  cancelRefineAllAllowed,
+  dependencyOrder,
+  dequeue,
+  emptyQueue,
+  endRefinementJob,
+  enqueue,
+  markDelivered,
+  planQueue,
+  refinable,
+  refineAllClicked,
+  refineAllPick,
+  refinementEnd,
+  refinementView,
+  switchedOff,
+  withdraw,
+} from "./refinement";
 import { planRuns, runSequence, runSequenceTogether, type AppliedModel, type PlannedRun } from "./run-groups";
 import { ompModels } from "./model-lists";
 import { ensureOmpUpdated, findOmp, forgetUpdateCheck } from "./omp-update";
@@ -87,15 +111,15 @@ function modelIsEmpty(project: Project): boolean {
   return model.features.size === 0 && model.actors.size === 0;
 }
 
-/** The approval block of Proposal `id` that refinement does not clear (every block but staleness and a Draft left refining), with its reason; null when none. */
-function refinementBlock(project: Project, id: string): string | null {
+/** The approval block of Proposal `id` that refinement does not clear (every block but staleness and a Draft left refining); null when none. */
+function refinementBlock(project: Project, id: string): ApprovalBlock | null {
   const block = approvalBlock(project, id);
-  return block === null || block.kind === "stale" || block.kind === "draft" ? null : block.reason;
+  return block === null || block.kind === "stale" || block.kind === "draft" ? null : block;
 }
 
 /** Owns the single Trama panel, feeds it snapshots and carries out what the developer asks of it. */
 export class Controller implements vscode.Disposable {
-  /** The Proposal refinement of this window: the queue and the Proposal running, in memory. */
+  /** The Proposal refinement of this window: the queue, the refinements at work and the Proposals waiting for a Run, in memory. */
   private refinement: RefinementState = NO_REFINEMENT;
   private panel: vscode.WebviewPanel | undefined;
   private timer: NodeJS.Timeout | undefined;
@@ -512,8 +536,8 @@ export class Controller implements vscode.Disposable {
   }
 
   settingsChanged(ompPathChanged = false): void {
-    // Turning the setting off also empties the waiting list: those Proposals are no longer approved by this window when their Run ends.
-    if (!configuredAutoUpdateStaleProposals()) this.refinement = { ...this.refinement, waiting: [] };
+    // Turning the setting off also empties the queue and the waiting list: those Proposals are no longer refined or approved by this window.
+    if (!configuredAutoUpdateStaleProposals()) this.refinement = switchedOff(this.refinement);
     this.refresh();
     this.postSettings();
     if (ompPathChanged) void this.refreshOmp(true);
@@ -662,7 +686,7 @@ export class Controller implements vscode.Disposable {
   /** Posts a fresh snapshot; if the files cannot be read, posts the error and the view keeps its last snapshot. */
   private refresh(): void {
     // Turning the setting off empties the refinement queue: a Proposal already being refined goes on.
-    if (!configuredAutoUpdateStaleProposals() && this.refinement.queued.length > 0) this.refinement = { ...this.refinement, queued: [] };
+    if (!configuredAutoUpdateStaleProposals()) this.refinement = emptyQueue(this.refinement);
     const project = findProject();
     this.post({ type: "project", present: project !== undefined });
     if (!project) {
@@ -689,7 +713,7 @@ export class Controller implements vscode.Disposable {
       const drifts = Object.fromEntries(listDrifts(project).filter((d) => d.data.status === "open").map((d) => [d.id, resolveDriftBlocker(project, work, this.namedByResolution.has(d.id), asyncResolver && snapshot.drifts.find((x) => x.id === d.id)?.prepared?.valid === true)]));
       // The open Drifts the running resolution is working on: those this window asked an agent to resolve.
       const resolving = work.resolving ? Object.keys(drifts).filter((id) => this.namedByResolution.has(id)) : [];
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, scans: { advisorScanner: configuredAdvisorScanner() }, refinement: refinementView(this.refinement, configuredAutoUpdateStaleProposals(), ownWindowRuns(project.root)) });
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, scans: { advisorScanner: configuredAdvisorScanner() }, refinement: this.refinementPicture(project) });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -872,6 +896,7 @@ export class Controller implements vscode.Disposable {
         if (this.refuseWhileFinishing(project, message.id, "Reject")) return;
         rejectProposal(project, message.id);
         this.refinement = withdraw(this.refinement, message.id);
+        this.pumpRefinement(project);
         this.refresh();
         return;
       }
@@ -891,9 +916,17 @@ export class Controller implements vscode.Disposable {
         await this.reworkProposalWithFeedback(project, message.proposal);
         return;
       case "cancelRefinement":
-        // Only a Proposal waiting in the queue is taken out; the one being refined is not cancellable from its card.
-        this.refinement = withdraw(this.refinement, message.proposal);
+        // Only a Proposal waiting in the queue is taken out; one being refined is not cancellable. The Proposals that waited for it leave the queue too.
+        if (!this.refinement.queued.includes(message.proposal)) return;
+        this.refinement = dequeue(this.refinement, message.proposal);
+        this.pumpRefinement(project);
         this.refresh();
+        return;
+      case "refineAll":
+        this.refineAll(project);
+        return;
+      case "cancelRefineAll":
+        this.cancelRefineAll();
         return;
     }
   }
@@ -1053,11 +1086,15 @@ export class Controller implements vscode.Disposable {
     this.refresh();
   }
 
-  /** Whether the Proposal `id` is refinable now; `writing` says a refinement of this window already writes it. Unknown Proposals are not. */
-  private refinableNow(project: Project, id: string, writing = false): boolean {
+  /** Whether `proposal` is refinable now; `writing` says a refinement of this window already writes it. */
+  private refinableProposal(project: Project, proposal: Proposal, writing = false): boolean {
+    return refinable({ kind: proposal.data.kind, attached: attachedDrift(project, proposal.id) !== null, open: proposal.data.status === "open", stale: health(project, proposal).stale.length > 0, draftRefining: proposal.data.refining === true, writing });
+  }
+
+  /** Whether the Proposal `id` is refinable now. Unknown Proposals are not. */
+  private refinableNow(project: Project, id: string): boolean {
     try {
-      const proposal = getProposal(project, id);
-      return refinable({ kind: proposal.data.kind, attached: attachedDrift(project, id) !== null, open: proposal.data.status === "open", stale: health(project, proposal).stale.length > 0, draftRefining: proposal.data.refining === true, writing });
+      return this.refinableProposal(project, getProposal(project, id));
     } catch {
       return false;
     }
@@ -1066,63 +1103,160 @@ export class Controller implements vscode.Disposable {
   /** Why the Proposal `id` cannot be refined now (its reason), or null when it can: not refinable, or an approval block refinement does not clear. */
   private refinementRefusal(project: Project, id: string): string | null {
     if (!this.refinableNow(project, id)) return "Refine this Proposal is unavailable: it is no longer stale or no longer refinable.";
-    return refinementBlock(project, id);
+    return refinementBlock(project, id)?.reason ?? null;
   }
 
-  /** Approve of a refinable Proposal with the setting on: it joins the queue and nothing is written now. An approval block refinement does not clear is shown and nothing is queued. */
-  private queueRefinement(project: Project, id: string): void {
-    const block = refinementBlock(project, id);
-    if (block !== null) {
-      void vscode.window.showErrorMessage(`Trama: Approve is unavailable. ${block}`);
-      return;
-    }
-    const state = enqueue(this.refinement, id);
-    this.refinement = { ...state, queued: this.orderQueue(project, state.queued) };
-    this.pumpRefinement(project);
-    this.refresh();
-  }
-
-  /** The queued Proposals in Backlog order; a Proposal no longer found is dropped. */
-  private orderQueue(project: Project, ids: string[]): string[] {
+  /** The state with `ids` queued, the whole queue in Backlog order; a Proposal no longer found is dropped. */
+  private enqueued(project: Project, ids: readonly string[]): RefinementState {
+    const state = enqueue(this.refinement, ids);
     const found: { id: string; created: string | null }[] = [];
-    for (const id of ids) {
+    for (const id of state.queued) {
       try {
         found.push({ id, created: getProposal(project, id).data.created });
       } catch {
         // The Proposal is gone: it is not queued.
       }
     }
-    return backlogOrder(found);
+    return { ...state, queued: backlogOrder(found) };
   }
 
-  /** Starts the first queued Proposal that is still refinable, when this window runs no refinement. */
+  /** Approve of a refinable Proposal with the setting on: it joins the queue and nothing is written now. An approval block refinement does not clear is shown and nothing is queued. */
+  private queueRefinement(project: Project, id: string): void {
+    if (this.refinement.queued.includes(id) || this.refinement.running.has(id)) return;
+    const block = refinementBlock(project, id);
+    if (block !== null) {
+      void vscode.window.showErrorMessage(`Trama: Approve is unavailable. ${block.reason}`);
+      return;
+    }
+    this.refinement = this.enqueued(project, [id]);
+    this.pumpRefinement(project);
+    this.refresh();
+  }
+
+  /**
+   * The click on Refine All: the Proposals it takes now are queued all at once, as so many Approve clicks, nothing is approved and no file changes; the window remembers
+   * the click and the ready ones start. With the setting off or nothing to take, nothing happens. A Run in progress does not matter: the refined Proposals wait for it.
+   */
+  private refineAll(project: Project): void {
+    if (!configuredAutoUpdateStaleProposals()) return;
+    const taken = this.refineAllTake(project);
+    if (taken.length === 0) return;
+    this.refinement = refineAllClicked(this.enqueued(project, taken), Date.now());
+    this.pumpRefinement(project);
+    this.refresh();
+  }
+
+  /** Cancel Refine All: only while it is in progress and two seconds after its click, the whole queue is emptied; the refinements at work and the Proposals waiting for a Run stay. */
+  private cancelRefineAll(): void {
+    if (!cancelRefineAllAllowed(this.refinement, Date.now())) return;
+    this.refinement = emptyQueue(this.refinement);
+    this.refresh();
+  }
+
+  /** The Proposals a click on Refine All takes now, in Backlog order. */
+  private refineAllTake(project: Project): string[] {
+    const held = new Set([...this.refinement.queued, ...this.refinement.running.keys(), ...this.refinement.waiting]);
+    const finishing = proposalsFinishing(project.root);
+    const order = new Map(listProposals(project).map((proposal) => [proposal.id, proposal]));
+    const candidates: PickFact[] = [];
+    for (const id of backlogOrder([...order.values()].map((proposal) => ({ id: proposal.id, created: proposal.data.created })))) {
+      const proposal = order.get(id);
+      // Only an Open change, or a Draft left refining, can be refined: the others are skipped before anything costly is read.
+      if (proposal === undefined || held.has(id) || proposal.data.kind !== "change" || (proposal.data.status !== "open" && proposal.data.refining !== true)) continue;
+      try {
+        if (!this.refinableProposal(project, proposal)) continue;
+        const block = refinementBlock(project, id);
+        if (finishing.includes(id) || (block !== null && block.kind !== "waiting")) candidates.push({ id, block: "other", requires: [] });
+        else candidates.push({ id, block: block === null ? "none" : "requires", requires: requiredProposals(project, proposal).map((required) => required.id) });
+      } catch {
+        // A Proposal that cannot be read is not taken.
+      }
+    }
+    return refineAllPick(candidates, held);
+  }
+
+  /** What the queue knows of the Proposal `id`, queued or at work; undefined when it cannot be read. */
+  private chainFact(project: Project, id: string): ChainFact | undefined {
+    try {
+      const proposal = getProposal(project, id);
+      const required = requiredProposals(project, proposal);
+      return {
+        id,
+        created: proposal.data.created,
+        touched: [...new Set([...touchedFiles(proposal), ...Object.keys(proposal.data.base)])],
+        requires: required.map((other) => other.id),
+        broken: required.some((other) => other.status === "missing" || other.status === "cycle"),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The plan of the queue `queued` now, from the files the Proposals touch at this moment. */
+  private queuePlan(project: Project, queued: readonly string[]): QueuePlan {
+    const facts = new Map<string, ChainFact>();
+    for (const id of [...queued, ...this.refinement.running.keys()]) {
+      const fact = this.chainFact(project, id);
+      if (fact !== undefined) facts.set(id, fact);
+    }
+    return planQueue({ queued, running: this.refinement.running, waiting: this.refinement.waiting, facts, limit: configuredMaxParallelAgents() });
+  }
+
+  /** The refinement as the Board shows it: the state of the window, why each queued Proposal waits, and what a click on Refine All takes. */
+  private refinementPicture(project: Project): RefinementView {
+    const enabled = configuredAutoUpdateStaleProposals();
+    const waits = this.refinement.queued.length === 0 ? new Map() : this.queuePlan(project, this.refinement.queued).waits;
+    return refinementView({ state: this.refinement, enabled, runInProgress: ownWindowRuns(project.root), waits, count: enabled ? this.refineAllTake(project).length : 0 });
+  }
+
+  /** Whether the queued Proposal `id` may keep waiting: still refinable, and blocked by nothing but Proposals it requires. */
+  private canStayQueued(project: Project, id: string): boolean {
+    if (!this.refinableNow(project, id)) return false;
+    const block = refinementBlock(project, id);
+    return block === null || block.kind === "waiting";
+  }
+
+  /**
+   * Starts what the queue allows: the Proposals that are no longer refinable and those that wait for a Proposal that will not be approved leave the queue,
+   * and every ready Proposal starts with its places (`planQueue`). With the setting off nothing starts and the queue is emptied.
+   */
   private pumpRefinement(project: Project): void {
-    if (this.refinement.running !== null) return;
-    const picked = nextToRefine(this.refinement.queued, (id) => this.refinableNow(project, id));
-    this.refinement = { ...this.refinement, queued: picked.queued };
-    if (picked.next === null) return;
-    const id = picked.next;
-    this.refinement = { ...this.refinement, running: id, delivered: false };
-    this.launchAction(project, { kind: "refine", proposal: id }).catch((err: unknown) => {
-      // The instruction did not really start: the queue empties, the Proposals that waited go back to refinable, and the refinement is at rest.
-      this.refinement = { ...this.refinement, running: null, delivered: false, queued: [] };
+    if (!configuredAutoUpdateStaleProposals()) {
+      this.refinement = emptyQueue(this.refinement);
+      return;
+    }
+    const stay = this.refinement.queued.filter((id) => this.canStayQueued(project, id));
+    const plan = this.queuePlan(project, stay);
+    for (const id of this.refinement.queued) if (!stay.includes(id) || plan.drop.includes(id)) this.refinement = dequeue(this.refinement, id);
+    for (const { proposal, seats } of plan.start) this.startRefinement(project, proposal, seats);
+  }
+
+  /** Starts the refinement of `id` as a job of its own holding `seats` places, from the moment its instruction is really sent. */
+  private startRefinement(project: Project, id: string, seats: number): void {
+    const job = randomUUID();
+    this.refinement = beginRefinement(this.refinement, { proposal: id, seats, job, delivered: false });
+    this.launchAction(project, { kind: "refine", proposal: id, seats, job }).catch((err: unknown) => {
+      // The instruction did not really start: the queue empties and the Proposals that waited go back to refinable; the refinements already at work go on.
+      const ended = endRefinementJob(this.refinement, id, job);
+      if (ended === null) return;
+      this.refinement = emptyQueue(ended.state);
       void vscode.window.showWarningMessage(`Trama: refining ${cardName(project, "proposal", id)} did not start: ${describeError(err)}.`);
       this.refresh();
     });
   }
 
-  /** A Proposal was delivered to the project at `root`: the running refinement of this window remembers it for its job. */
+  /** A Proposal was delivered to the project at `root`: the refinement of this window that works on it remembers it for its job. */
   private noteDelivered(root: string, id: string): void {
-    if (this.refinement.running !== id || findProject()?.root !== root) return;
-    this.refinement = { ...this.refinement, delivered: true };
+    if (findProject()?.root !== root) return;
+    this.refinement = markDelivered(this.refinement, id);
   }
 
-  /** The end of the job that refines `id`, once: then the Proposal is settled, and the next one starts. */
-  private endRefinement(project: Project, id: string): void {
-    if (this.refinement.running !== id) return;
-    const delivered = this.refinement.delivered;
-    this.refinement = { ...this.refinement, running: null, delivered: false };
-    this.settleRefined(project, id, delivered);
+  /** The end of the job `job` that refines `id`, once: the Proposal is settled, its places are free and the Proposals that are ready start. A repeated signal changes nothing. */
+  private endRefinement(project: Project, id: string, job: string): void {
+    const finished = endRefinementJob(this.refinement, id, job);
+    if (finished === null) return;
+    this.refinement = finished.state;
+    this.settleRefined(project, id, finished.ended.delivered);
     this.pumpRefinement(project);
     this.refresh();
   }
@@ -1142,7 +1276,7 @@ export class Controller implements vscode.Disposable {
       outcome = "drop";
     }
     if (outcome === "approve" && ownWindowRuns(project.root)) {
-      this.refinement = { ...this.refinement, waiting: [...this.refinement.waiting, id] };
+      this.refinement = { ...this.refinement, waiting: this.refinement.waiting.includes(id) ? this.refinement.waiting : [...this.refinement.waiting, id] };
     } else if (outcome === "approve") {
       try {
         this.approving(() => approveProposal(project, id, [configuredSkillsDir()]));
@@ -1150,20 +1284,23 @@ export class Controller implements vscode.Disposable {
         void vscode.window.showWarningMessage(`Trama: ${cardName(project, "proposal", id)} was refined but not approved: ${describeError(err)}.`);
       }
     } else if (outcome === "requeue") {
-      this.refinement = { ...this.refinement, queued: this.orderQueue(project, [...this.refinement.queued, id]) };
+      this.refinement = this.enqueued(project, [id]);
     } else if (outcome === "keep") {
       void vscode.window.showWarningMessage(`Trama: ${cardName(project, "proposal", id)} was refined but not approved: ${reason}.`);
     }
   }
 
   /**
-   * The Proposals that waited for a Run of this window are settled once that Run has ended, each as a refined Proposal that was delivered.
+   * The Proposals that waited for a Run of this window are settled once that Run has ended, each as a refined Proposal that was delivered, the required ones first.
    * The list is emptied first, so the refreshes that approving makes do not settle them twice.
    */
   private releaseWaiting(project: Project): void {
     const waiting = this.refinement.waiting;
     this.refinement = { ...this.refinement, waiting: [] };
-    for (const id of waiting) this.settleRefined(project, id, true);
+    const facts = waiting.flatMap((id) => this.chainFact(project, id) ?? []);
+    const rank = new Map(backlogOrder(facts).map((id, index) => [id, index]));
+    const requires = new Map(facts.map((fact) => [fact.id, fact.requires]));
+    for (const id of dependencyOrder(facts.map((fact) => fact.id), (other) => requires.get(other) ?? [], rank)) this.settleRefined(project, id, true);
     this.pumpRefinement(project);
   }
 
@@ -1380,8 +1517,8 @@ export class Controller implements vscode.Disposable {
         await send(action, getProposal(project, action.proposal).title);
         return;
       case "refine": {
-        const proposal = action.proposal;
-        const result = await send(action, getProposal(project, proposal).title, undefined, undefined, undefined, { role: "analysis", onEnd: () => this.endRefinement(project, proposal) });
+        const { proposal, job, seats } = action;
+        const result = await send(action, getProposal(project, proposal).title, undefined, undefined, undefined, { role: "analysis", id: job, limit: seats, onEnd: () => this.endRefinement(project, proposal, job) });
         if (!launched(result)) throw new TramaError("the agent did not start");
         return;
       }

@@ -377,7 +377,7 @@ describe("the turn end of a conversation ends its refinement", () => {
     const controller = new Controller({ scheme: "file" } as never);
     await controller.open();
     const host = controller as unknown as {
-      refinement: { running: string | null; queued: string[]; waiting: string[] };
+      refinement: { running: ReadonlyMap<string, unknown>; queued: string[]; waiting: string[] };
       handle(raw: unknown): Promise<void>;
       launchAction(project: Project, action: { kind: string; proposal?: string }): Promise<void>;
     };
@@ -432,7 +432,7 @@ describe("the turn end of a conversation ends its refinement", () => {
       const before = processes.length;
       await window.approve(first);
       expect(processes).toHaveLength(before + 1);
-      expect(window.host.refinement.running).toBe(first);
+      expect([...window.host.refinement.running.keys()]).toEqual([first]);
       await window.approve(second);
       expect(window.host.refinement.queued).toEqual([second]);
       expect(processes).toHaveLength(before + 1);
@@ -443,13 +443,13 @@ describe("the turn end of a conversation ends its refinement", () => {
       // The next of the queue starts and the refinement stays at work.
       await window.launches.at(-1);
       expect(processes).toHaveLength(before + 2);
-      expect(window.host.refinement.running).toBe(second);
+      expect([...window.host.refinement.running.keys()]).toEqual([second]);
       expect(window.host.refinement.queued).toEqual([]);
 
       // Nothing delivered: the Proposal stays as it is, to refine, and the refinement rests with nothing queued.
       lastProcess().endTurn({ stopReason: "end_turn" });
       expect(getProposal(window.p, second).data.status).toBe("open");
-      expect(window.host.refinement.running).toBeNull();
+      expect([...window.host.refinement.running.keys()]).toEqual([]);
       expect(window.host.refinement.queued).toEqual([]);
       expect(processes).toHaveLength(before + 2);
     } finally {
@@ -466,10 +466,10 @@ describe("the turn end of a conversation ends its refinement", () => {
       const proposal = window.stale("Refused", "Lost");
       window.changeModel();
       await window.approve(proposal);
-      expect(window.host.refinement.running).toBe(proposal);
+      expect([...window.host.refinement.running.keys()]).toEqual([proposal]);
       lastProcess().endTurn({ stopReason: "max_tokens" });
       expect(stopped).toEqual(["the model reached its token limit"]);
-      expect(window.host.refinement.running).toBeNull();
+      expect([...window.host.refinement.running.keys()]).toEqual([]);
       expect(getProposal(window.p, proposal).data.status).toBe("open");
     } finally {
       subscription.dispose();
@@ -491,7 +491,7 @@ describe("the turn end of a conversation ends its refinement", () => {
       await window.launches.at(-1);
       expect(getProposal(window.p, proposal).data.status).toBe("open");
       expect(processes).toHaveLength(before + 2);
-      expect(window.host.refinement.running).toBe(proposal);
+      expect([...window.host.refinement.running.keys()]).toEqual([proposal]);
     } finally {
       window.close();
     }
@@ -517,13 +517,13 @@ describe("the turn end of a conversation ends its refinement", () => {
       await window.launches.at(-1)?.catch(() => undefined);
       expect(getProposal(window.p, first).data.status).toBe("approved");
       expect(processes).toHaveLength(before + 1);
-      expect(window.host.refinement.running).toBeNull();
+      expect([...window.host.refinement.running.keys()]).toEqual([]);
       expect(window.host.refinement.queued).toEqual([]);
       expect(warningMessages.filter((message) => message.includes("did not start"))).toHaveLength(1);
       // Back at rest, a new Approve refines again.
       ompFound = async (ompPath) => (ompPath === "" ? "omp" : ompPath);
       await window.approve(third);
-      expect(window.host.refinement.running).toBe(third);
+      expect([...window.host.refinement.running.keys()]).toEqual([third]);
       expect(processes).toHaveLength(before + 2);
     } finally {
       window.close();
