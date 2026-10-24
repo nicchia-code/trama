@@ -10,6 +10,75 @@ tasks:
   - twwuk0b5
   - 05qo36rx
   - hbkk737w
+cleared:
+  hbkk737w:
+    title: Pulizia del disegno vecchio
+    proposal: p5ty6g5g
+    tag: React + shadcn
+    finished: 2026-10-20T21:37:48.534Z
+    refs:
+      - panel
+  05qo36rx:
+    title: Board in React
+    proposal: p5ty6g5g
+    tag: React + shadcn
+    finished: 2026-10-20T21:34:38.933Z
+    refs:
+      - panel/Board
+      - requirements/ui#panel/Board
+      - requirements/ui#proposal
+      - requirements/ui#task
+      - requirements/ui#voce-history
+      - requirements/tech#proposal
+  bds9889h:
+    title: Settings in React
+    proposal: p5ty6g5g
+    tag: React + shadcn
+    finished: 2026-10-20T21:26:43.471Z
+    refs:
+      - panel/Settings
+      - panel/Open/developer.SHOW_SETTINGS
+      - requirements/ui#panel/Settings
+      - requirements/tech#panel/Settings
+  lmsfs9eg:
+    title: Diagramma in React
+    proposal: p5ty6g5g
+    tag: React + shadcn
+    finished: 2026-10-20T21:23:53.174Z
+    refs:
+      - panel/Diagram
+  twwuk0b5:
+    title: Overlay domande in React
+    proposal: p5ty6g5g
+    tag: React + shadcn
+    finished: 2026-10-20T21:21:36.696Z
+    refs:
+      - question-round
+      - requirements/ui#question-round
+  cujuq7dh:
+    title: Requirements, Specs e Get Started
+    proposal: p5ty6g5g
+    tag: React + shadcn
+    finished: 2026-10-20T21:20:58.701Z
+    refs:
+      - panel/Requirements
+      - panel/Specs
+      - panel/Get Started
+  g8r0eyfz:
+    title: Base React e shadcn
+    proposal: p5ty6g5g
+    tag: React + shadcn
+    finished: 2026-10-20T21:18:32.152Z
+    refs:
+      - specs#languages
+      - specs#frameworks
+      - specs#testing
+      - specs#ci
+      - specs#deployment
+      - requirements/tech#General
+      - requirements/tech#panel
+      - requirements/ui#General
+      - requirements/ui#panel
 ---
 # Pannello in React e shadcn/ui
 

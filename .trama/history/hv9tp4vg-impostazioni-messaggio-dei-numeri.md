@@ -5,6 +5,19 @@ summary: Nella scheda Settings il messaggio di un numero non valido sparisce app
 tasks:
   - yyivhrhy
   - m82nsywd
+cleared:
+  m82nsywd:
+    title: Campo numerico della larghezza giusta
+    finished: 2026-10-17T21:49:46.696Z
+    refs:
+      - panel/Settings
+      - requirements/ui#panel/Settings
+  yyivhrhy:
+    title: Far sparire il messaggio del numero non valido appena il campo torna valido
+    finished: 2026-10-17T21:28:03.745Z
+    refs:
+      - panel/Settings
+      - requirements/ui#panel/Settings
 ---
 # Impostazioni: messaggio dei numeri
 

@@ -6,6 +6,24 @@ tasks:
   - 1tlibd6x
   - hffgpwvx
   - iwvkflf8
+cleared:
+  iwvkflf8:
+    title: Release senza blocchi
+    proposal: llcktsts
+    tag: Citazione PS 5.1
+    finished: 2026-10-20T17:55:55.137Z
+    refs:
+      - requirements/tech#General
+  hffgpwvx:
+    title: "Fix code to match the Requirements: Windows tests do not block release"
+    finished: 2026-10-18T21:20:16.104Z
+    refs:
+      - requirements/tech#General
+  1tlibd6x:
+    title: "Fix code to match the Requirements: Simple Icons runtime dependency"
+    finished: 2026-10-18T21:17:57.849Z
+    refs:
+      - requirements/tech#General
 ---
 # Runtime deps and release CI
 

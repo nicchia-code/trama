@@ -8,6 +8,52 @@ tasks:
   - huo89z8r
   - jt4f9ik0
   - wll4t0n3
+cleared:
+  wll4t0n3:
+    title: Tooltip brevi ovunque
+    proposal: suaaekyh
+    tag: Tooltip concisi
+    finished: 2026-10-21T14:38:09.090Z
+    refs:
+      - editor-panel
+      - requirements/ui#General
+  99fr6dzm:
+    title: Impostazioni concise e tendine
+    proposal: suaaekyh
+    tag: Tooltip concisi
+    finished: 2026-10-21T14:34:46.718Z
+    refs:
+      - panel/Settings
+      - requirements/ui#panel/Settings
+      - requirements/ui#agent-terminal
+      - requirements/ui#agent-launching
+      - requirements/ui#drift-resolution
+  huo89z8r:
+    title: Domande senza scadenza
+    proposal: suaaekyh
+    tag: Tooltip concisi
+    finished: 2026-10-21T14:33:57.591Z
+    refs:
+      - question-round
+      - agent.STOP_WAITING
+      - requirements/rules#question-round
+      - requirements/tech#question-round
+  jt4f9ik0:
+    title: Riquadro breve del Diagramma
+    proposal: suaaekyh
+    tag: Tooltip concisi
+    finished: 2026-10-21T14:33:49.985Z
+    refs:
+      - diagram
+      - requirements/ui#diagram
+  fl0la20x:
+    title: Istruzione senza scadenza
+    proposal: suaaekyh
+    tag: Tooltip concisi
+    finished: 2026-10-21T14:33:28.613Z
+    refs:
+      - agent-terminal
+      - requirements/rules#agent-terminal
 ---
 # Testi brevi e domande senza scadenza
 

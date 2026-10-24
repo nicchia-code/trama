@@ -7,6 +7,45 @@ tasks:
   - aypq8xao
   - pcc83s1y
   - g4bmcyds
+cleared:
+  g4bmcyds:
+    title: Hook delle chat contro domande
+    proposal: 7pk25ac0
+    tag: Domande solo da Trama
+    finished: 2026-10-18T13:27:05.773Z
+    refs:
+      - editor-chat
+      - question-round/Not asked/agent.TOOL_DOMANDE_CHIAMATO
+      - requirements/tech#editor-chat
+      - requirements/quality#editor-chat
+  pcc83s1y:
+    title: Hook dei terminali contro ask
+    proposal: 7pk25ac0
+    tag: Domande solo da Trama
+    finished: 2026-10-18T13:07:42.713Z
+    refs:
+      - agent-hook
+      - requirements/tech#agent-hook
+      - requirements/quality#agent-terminal
+  aypq8xao:
+    title: Riga trama ask ovunque
+    proposal: 7pk25ac0
+    tag: Domande solo da Trama
+    finished: 2026-10-18T13:03:57.620Z
+    refs:
+      - requirements/rules#agent-terminal
+  9racrdd9:
+    title: Domande senza ripieghi
+    proposal: 7pk25ac0
+    tag: Domande solo da Trama
+    finished: 2026-10-18T13:02:21.423Z
+    refs:
+      - question-round
+      - agent-questions
+      - agent
+      - requirements/rules#question-round
+      - requirements/rules#General
+      - requirements/tech#question-round
 ---
 # Domande solo con trama ask
 

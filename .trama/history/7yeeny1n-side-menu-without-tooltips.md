@@ -4,6 +4,16 @@ updated: 2026-10-24T11:23:03.235Z
 summary: The side menu shows no hover tooltips; below 56 px it becomes icon-only, and a disabled Scan System explains itself in a line under the button.
 tasks:
   - dimk77i0
+cleared:
+  dimk77i0:
+    title: Menu laterale senza tooltip
+    proposal: srkyrbvl
+    tag: Chat & panel polish
+    finished: 2026-10-24T10:33:23.021Z
+    refs:
+      - menu-laterale
+      - requirements/ui#menu-laterale
+      - requirements/tech#menu-laterale
 ---
 # Side menu without tooltips
 

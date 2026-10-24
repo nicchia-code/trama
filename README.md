@@ -39,13 +39,13 @@ code --install-extension trama-<platform>-<version>.vsix
 ## Use
 
 1. **Open your project** and click the Trama logo in the Activity Bar: the Trama menu opens in the side bar. Choose **Board**, **Diagram** or any other entry to open the panel on it (the same entries are the `Trama: Show …` commands of the palette).
-2. **Set it up.** In a folder without a Trama project the panel opens on **Get Started**: choose **Import from Code** (the agent maps the app you already have) or **Start from Scratch**, then the models omp uses. Nothing is written until you confirm the summary.
+2. **Set it up.** In a folder without a Trama project the panel opens on **Get Started**, a step-by-step setup (`Set up Trama`): choose **Import from Code** (the agent maps the app you already have) or **Start from Scratch**, check omp, pick the models omp uses, and confirm a summary of your choices. The steps appear at the top, each earlier one is a button that takes you back with your choices kept, and **Back**, **Next** and the confirmation stay in a bar at the bottom. Nothing is written until you confirm the summary.
 3. **Ask for a change.** On the Board, click **+ Add Work Item**, write what you want in the tab that opens, and send it with **Send to agent** (closing the tab sends it too).
 4. **Decide.** Answer the agent's questions, then **Approve** or **Reject** its Proposal.
 5. **Build.** Click **Run all** and the agent implements the Tasks.
 6. **Keep the map honest.** **Trama: Scan System** has the agent compare the code with the map. Each Drift it finds offers ways to fix the code: **Resolve** it or **Dismiss Drift**.
 
-Every setting is in the **Settings** tab of the panel, which saves to your user settings; **Guided setup** there walks you through the main ones again.
+Every setting is in the **Settings** tab of the panel, which saves to your user settings; **Guided setup** there (top right) walks you through the main ones again, step by step, with each setting explained under its title.
 
 ## Optional features
 

@@ -88,17 +88,22 @@ test("the model Combobox filters while typing and confirms a chosen entry at onc
   expect((field as HTMLInputElement).value).toBe("anthropic/claude-opus-5-5");
 });
 
-test("the model suggestion list is sized by the whole list, so filtering never narrows it, and no entry is truncated", () => {
+test("the model suggestion list is as wide as the field, filtering never changes it, and no entry is truncated: long ones wrap", () => {
   setup({}, MODELS);
   const field = screen.getByRole("combobox", { name: "Analysis" });
   fireEvent.change(field, { target: { value: "gpt" } });
   const content = document.querySelector("[data-slot=popover-content]") as HTMLElement;
-  const sizer = content.querySelector("[aria-hidden=true]") as HTMLElement;
-  expect(sizer.textContent).toContain("anthropic/claude-opus-5-5");
-  expect(sizer.textContent).toContain("Claude Opus 5.5");
-  expect(sizer.textContent).toContain("openai/gpt-5");
+  // The width is the field's, not the entries': no hidden copy of the list sizes it.
+  expect(content.className).toContain("w-(--radix-popover-trigger-width)");
+  expect(content.className).toContain("max-w-(--radix-popover-trigger-width)");
+  expect(content.className).not.toContain("w-max");
+  expect(content.querySelector("[aria-hidden=true]")).toBeNull();
   expect(screen.getAllByRole("option")).toHaveLength(1);
   expect(content.querySelector(".truncate")).toBeNull();
+  expect(screen.getAllByRole("option")[0]?.className).toContain("flex-wrap");
+  fireEvent.change(field, { target: { value: "" } });
+  expect(screen.getAllByRole("option")).toHaveLength(2);
+  expect((document.querySelector("[data-slot=popover-content]") as HTMLElement).className).toBe(content.className);
 });
 
 test("a free text in the model Combobox is confirmed with Enter or when the field is left, never swapped for a suggestion", () => {
@@ -245,4 +250,55 @@ test("the mounted tab takes the host's ompStatus, and asks again when it becomes
   view.show({});
   expect(posted).toContainEqual({ type: "modelSuggestionsWanted" });
   expect(posted).toContainEqual({ type: "ompStatusWanted" });
+});
+
+test("a Checkbox is left of its title on the same row, and clicking the title changes it", () => {
+  const { posted } = setup();
+  const box = screen.getByRole("checkbox", { name: "omp Chat" });
+  const title = screen.getByText("omp Chat", { selector: "label" });
+  expect(title.parentElement?.contains(box)).toBe(true);
+  expect(box.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(title);
+  expect(posted).toEqual([{ type: "setSetting", key: "trama.ompChat", value: false }]);
+  // The other settings keep the control under the title, in the second row of their column.
+  const field = screen.getByRole("textbox", { name: "Omp Path" });
+  expect(field.closest(".row-start-2")).not.toBeNull();
+  expect(field.closest(".row-start-1")).toBeNull();
+});
+
+test("a message is under its control, in its column, and an absent one leaves no element behind", () => {
+  setup({ "trama.skillsDir": { user: "", workspace: "custom/skills" } }, [], "omp not found at the editor PATH");
+  const field = screen.getByRole("textbox", { name: "Skills Dir" });
+  const cell = field.parentElement as HTMLElement;
+  expect(cell.className).toContain("row-start-2");
+  expect(cell.textContent).toContain("The workspace setting overrides this: custom/skills.");
+  const scan = screen.getByRole("combobox", { name: "Scan" }).closest(".row-start-2") as HTMLElement;
+  expect(scan.textContent).toContain("omp not found at the editor PATH");
+  const path = screen.getByRole("textbox", { name: "Omp Path" }).closest(".row-start-2") as HTMLElement;
+  expect(path.querySelectorAll("p")).toHaveLength(0);
+  // The field has no rows beyond the title and the control.
+  expect(path.parentElement?.className).toContain("row-span-2");
+  // A Checkbox without a message has no second row at all.
+  expect(screen.getByRole("checkbox", { name: "omp Chat" }).closest(".row-start-2")).toBeNull();
+});
+
+test("the tooltip of the «i» never shows with the bubble, and never once the pointer has gone", async () => {
+  setup();
+  const info = screen.getByRole("button", { name: "About Theme" });
+  const tip = () => document.querySelector('[data-slot="tooltip-content"]');
+  const bubble = () => document.getElementById("st-trama-theme-tip");
+  expect(tip()).toBeNull();
+
+  // The pointer opens the bubble, and the tooltip stays away while it is open.
+  fireEvent.pointerEnter(info);
+  expect(bubble()).not.toBeNull();
+  expect(tip()).toBeNull();
+
+  // A press gives the «i» the focus too; once the pointer has gone the bubble closes after its pause and no tooltip shows in its place.
+  act(() => info.focus());
+  fireEvent.pointerLeave(info);
+  expect(tip()).toBeNull();
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+  expect(bubble()).toBeNull();
+  expect(tip()).toBeNull();
 });

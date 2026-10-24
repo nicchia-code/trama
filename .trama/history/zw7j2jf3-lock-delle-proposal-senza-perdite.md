@@ -9,6 +9,42 @@ tasks:
   - i1giaip3
   - 8qdyespd
   - wixyoyy6
+cleared:
+  wixyoyy6:
+    title: "Fix code to match the Model: Drift citato prima del lock"
+    finished: 2026-10-18T06:43:11.335Z
+    refs:
+      - proposal
+      - requirements/tech#proposal
+  8qdyespd:
+    title: "Fix code to match the Model: Numero breve non in tabella"
+    finished: 2026-10-18T06:08:50.681Z
+    refs:
+      - proposal
+      - requirements/tech#proposal
+  i1giaip3:
+    title: "Fix code to match the Requirements: Numero breve prima del lock"
+    finished: 2026-10-17T22:20:27.137Z
+    refs:
+      - requirements/tech#proposal
+  1twd0duj:
+    title: "Fix code to match the Requirements: Lock vecchio rimosso alla cieca"
+    finished: 2026-10-17T21:54:35.855Z
+    refs:
+      - requirements/tech#proposal
+  1ttits98:
+    title: "Fix code to match the Requirements: Proposal letta prima del lock"
+    finished: 2026-10-17T21:53:27.162Z
+    refs:
+      - requirements/tech#proposal
+  yqpoilog:
+    title: Lock senza perdite
+    proposal: bjt6vdn9
+    tag: Test unitari
+    finished: 2026-10-17T21:30:21.483Z
+    refs:
+      - proposal/Draft/agent.EDIT_PROPOSAL
+      - requirements/tech#proposal
 ---
 # Lock delle Proposal senza perdite
 

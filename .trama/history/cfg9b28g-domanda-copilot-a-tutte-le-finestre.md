@@ -4,6 +4,12 @@ updated: 2026-10-18T20:43:06.856Z
 summary: Il controllo dello strumento di domande di Copilot chiede a ogni finestra del progetto se la conversazione è di Trama, entro un secondo, e rifiuta lo strumento se una risponde sì.
 tasks:
   - q4o7avtd
+cleared:
+  q4o7avtd:
+    title: Copilot question check asks all windows
+    finished: 2026-10-18T20:42:19.820Z
+    refs:
+      - requirements/tech#editor-chat
 ---
 # Domanda Copilot a tutte le finestre
 

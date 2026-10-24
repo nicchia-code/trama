@@ -6,6 +6,36 @@ tasks:
   - wd8neny4
   - 4fm7wr1w
   - tbdpxuij
+cleared:
+  tbdpxuij:
+    title: Run per modello in parallelo
+    proposal: 9l43viwa
+    tag: Run in parallelo
+    finished: 2026-10-24T09:00:54.551Z
+    refs:
+      - task
+      - drift-resolution/Running tasks
+      - drift-resolution/Free/developer.ASK_AGENT
+      - requirements/rules#drift-resolution/Running tasks
+      - requirements/rules#agent-launching
+      - requirements/tech#agent-launching
+  4fm7wr1w:
+    title: Gruppi nella skill
+    proposal: ppwmswz5
+    tag: Gruppi
+    finished: 2026-10-24T08:59:08.286Z
+    refs:
+      - task
+      - requirements/rules#agent-launching
+      - requirements/tech#agent
+  wd8neny4:
+    title: Skill usa trama-implementer
+    proposal: 6wf3grcz
+    tag: Sotto-agente Task
+    finished: 2026-10-24T08:57:00.684Z
+    refs:
+      - requirements/rules#agent-launching
+      - requirements/tech#task
 ---
 # Run per model in parallel and groups in the skill
 

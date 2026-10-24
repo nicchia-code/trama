@@ -4,6 +4,15 @@ updated: 2026-10-20T21:52:19.999Z
 summary: La skill trama-import scrive le Specs (specs.yaml) nella prima Proposal, deducendole dai file del repository, senza chosenByAgent e con la sola versione principale; le Specs già presenti si aggiornano.
 tasks:
   - vksri2bl
+cleared:
+  vksri2bl:
+    title: Specs nell'import
+    proposal: 06r4ta4e
+    tag: Import Specs
+    finished: 2026-10-20T21:51:29.040Z
+    refs:
+      - proposal
+      - requirements/rules#proposal
 ---
 # Specs nell'import
 

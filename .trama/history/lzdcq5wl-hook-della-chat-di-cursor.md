@@ -6,6 +6,26 @@ tasks:
   - g6i3zfvc
   - cy8i66re
   - krohhy7m
+cleared:
+  krohhy7m:
+    title: "Fix code to match the Model: Prompt che nomina una skill"
+    finished: 2026-10-18T13:12:33.661Z
+    refs:
+      - editor-chat
+  cy8i66re:
+    title: "Fix code to match the Requirements: Hook di Cursor fermi all'attivazione"
+    finished: 2026-10-18T13:11:30.575Z
+    refs:
+      - requirements/tech#editor-chat
+  g6i3zfvc:
+    title: Hook di Cursor affidabili
+    proposal: xnoqi7ll
+    tag: Ghost Cursor
+    finished: 2026-10-18T10:53:01.305Z
+    refs:
+      - editor-chat
+      - requirements/tech#editor-chat
+      - requirements/quality#editor-chat
 ---
 # Hook della chat di Cursor
 

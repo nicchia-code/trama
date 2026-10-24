@@ -37,7 +37,7 @@ afterEach(cleanup);
 const onView = () => within(document.querySelector("[data-view-name]:not([hidden])") as HTMLElement);
 const heading = () => onView().getByRole("heading", { level: 2 }).textContent;
 const press = (name: string | RegExp) => fireEvent.click(onView().getByRole("button", { name }));
-const steps = () => within(onView().getByRole("list", { name: "Steps" })).getAllByRole("listitem").map((item) => item.textContent);
+const steps = () => within(onView().getByRole("navigation", { name: "Setup steps" })).getAllByRole("listitem").map((item) => (item.textContent ?? "").replace(/^\d+/, ""));
 
 /** The panel of the webview in miniature: Get Started and Settings in the shell, each with its own wizard, and the navigation the views ask for. */
 const OMP_OK = { type: "agentCheck", ompPath: "", state: "done", ok: true, missing: false, version: "18.12.6", models: 3 } as const;
@@ -63,19 +63,21 @@ function panel(hasProject: boolean) {
   return { posted, store, settings, getStarted, tab };
 }
 
-test("in a folder without a project Get Started is the wizard of the first setup with the notice on top of every step", () => {
+test("in a folder without a project Get Started is the wizard of the first setup with the notice under the sentence of Path and Summary only", () => {
   panel(false);
   expect(screen.queryByRole("tab")).toBeNull();
   expect(document.querySelector("[data-view-name]:not([hidden])")?.getAttribute("data-view-name")).toBe("getstarted");
+  expect(onView().getByRole("heading", { level: 1 }).textContent).toBe("Set up Trama");
   expect(onView().getByText(/Trama will create a/)).not.toBeNull();
   expect(heading()).toBe("Path");
+  // The notice sits under the sentence of the step, before its content.
+  const notice = onView().getByText(/Trama will create a/);
+  expect(onView().getByText("Choose how Trama starts in this folder.").compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(notice.compareDocumentPosition(onView().getByRole("radiogroup")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(onView().getByRole("radio", { name: /Start from Scratch/ }));
   press("Next");
   expect(heading()).toBe("omp");
-  expect(onView().getByText(/Trama will create a/)).not.toBeNull();
-  // The notice sits above the title of the step.
-  const notice = onView().getByText(/Trama will create a/);
-  expect(notice.compareDocumentPosition(onView().getByRole("heading", { level: 2 })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(onView().queryByText(/Trama will create a/)).toBeNull();
 });
 
 test("going to Settings and back to Get Started keeps the choices of the wizard", () => {
@@ -140,7 +142,7 @@ test("the Empty Model wizard opens in the Settings tab with the path chosen and 
   expect(posted.some((message) => message.type === "confirmSetup" || message.type === "launch")).toBe(false);
   press("Cancel");
   expect(store.get().view).toBe("board");
-  expect(onView().queryByRole("list", { name: "Steps" })).toBeNull();
+  expect(onView().queryByRole("navigation", { name: "Setup steps" })).toBeNull();
 
   act(() => {
     store.set({ view: "settings" });

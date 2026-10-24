@@ -8,6 +8,53 @@ tasks:
   - tebe2ski
   - tgu5f82e
   - zjmllmjr
+cleared:
+  tgu5f82e:
+    title: Stato di omp nei Settings
+    proposal: 3xin5lv7
+    tag: omp install/update
+    finished: 2026-10-23T14:17:07.861Z
+    refs:
+      - panel
+      - developer.SHOW_SETTINGS
+      - requirements/tech#panel/Settings
+      - requirements/ui#panel/Settings
+  zjmllmjr:
+    title: Passo omp del wizard
+    proposal: 3xin5lv7
+    tag: omp install/update
+    finished: 2026-10-23T14:11:40.912Z
+    refs:
+      - setup-wizard
+      - requirements/rules#setup-wizard
+      - requirements/tech#setup-wizard
+      - requirements/ui#setup-wizard
+  tebe2ski:
+    title: Remove code of setup-wizard/Agent
+    proposal: 3xin5lv7
+    tag: omp install/update
+    finished: 2026-10-23T14:07:20.843Z
+    refs:
+      - setup-wizard/Open
+  pepretk1:
+    title: "Wizard: passo Agent solo omp"
+    proposal: nr388hz3
+    tag: Solo omp
+    finished: 2026-10-23T14:04:56.927Z
+    refs:
+      - setup-wizard
+      - requirements/rules#setup-wizard
+      - requirements/tech#setup-wizard
+      - requirements/ui#setup-wizard
+  qan11hwl:
+    title: Settings con soli modelli omp
+    proposal: nr388hz3
+    tag: Solo omp
+    finished: 2026-10-23T14:04:36.974Z
+    refs:
+      - requirements/tech#panel/Settings
+      - requirements/ui#panel/Settings
+      - requirements/quality#panel/Settings
 ---
 # Settings e wizard solo omp
 

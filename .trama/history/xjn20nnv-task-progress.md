@@ -4,6 +4,20 @@ updated: 2026-10-21T07:31:51.253Z
 summary: An agent that has taken a Task can declare a coarse percentage of progress; the Board and the command line show it, and it is forgotten when the Task leaves Taken by the agent.
 tasks:
   - 3gsod9hp
+cleared:
+  3gsod9hp:
+    title: Task progress
+    proposal: 1gzoeb06
+    tag: Task progress
+    finished: 2026-10-21T07:30:25.782Z
+    refs:
+      - task
+      - agent.DECLARE_TASK_PROGRESS
+      - requirements/data#task/Taken by the agent
+      - requirements/rules#task/Taken by the agent
+      - requirements/tech#task/Taken by the agent
+      - requirements/ui#task/Taken by the agent
+      - requirements/cli#General
 ---
 # Task progress
 

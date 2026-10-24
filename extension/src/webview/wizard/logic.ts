@@ -20,23 +20,47 @@ export function stepsFor(mode: WizardMode, choice: WizardChoice | null): WizardS
 
 export const IGNORE_INSTRUCTION_FILES_KEY = "trama.ignoreInstructionFiles";
 
+/** The subgroups of Advanced, in order, each with its subtitle and its keys. */
+export const ADVANCED_GROUPS: readonly { title: string; keys: readonly string[] }[] = [
+  { title: "Appearance", keys: ["trama.theme"] },
+  { title: "Drifts", keys: ["trama.driftBlocker", "trama.advisorScanner", "trama.asyncDriftResolver"] },
+  { title: "Agents", keys: ["trama.parallelExecution", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals"] },
+  { title: "omp Chat", keys: ["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"] },
+];
+
 /** The keys each step asks for, in order. */
 export const STEP_KEYS: Readonly<Partial<Record<WizardStep, readonly string[]>>> = {
   omp: ["trama.ompPath", "trama.terminalLocation", IGNORE_INSTRUCTION_FILES_KEY],
   Models: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"],
   Project: ["trama.skillsDir"],
-  Advanced: ["trama.theme", "trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals", "trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"],
+  Advanced: ADVANCED_GROUPS.flatMap((group) => group.keys),
+};
+
+/** The subgroup of Advanced a key belongs to; null for a key of another step. */
+export const advancedGroupOf = (key: string): string | null => ADVANCED_GROUPS.find((group) => group.keys.includes(key))?.title ?? null;
+
+/** The advice in bold under the title of each model role, in words and without naming models. */
+export const ROLE_ADVICE: Readonly<Record<string, string>> = {
+  "trama.analysis": "Your most capable model.",
+  "trama.execution": "A mid-range model.",
+  "trama.scan": "A fast, light model.",
 };
 
 export const STEP_SENTENCES: Readonly<Record<WizardStep, string>> = {
   Path: "Choose how Trama starts in this folder.",
   omp: "omp is required: Trama runs every agent with omp.",
-  Models: "Choose the model for each kind of work. Analysis works best with your most capable model, Execution with a mid-range one, Scan with a fast, light one.",
+  Models: "Choose the model for each kind of work.",
   Project: "Choose where Trama installs the agent skills.",
   Folders: "Uncheck the folders the agent should not import.",
   Advanced: "Theme and optional features. You can skip this step.",
   Summary: "Check your choices, then confirm.",
 };
+
+/** The title of the page: the first setup of a folder, or the guided setup of the settings and of an empty Model. */
+export const wizardTitle = (mode: WizardMode): string => (mode === "first" ? "Set up Trama" : "Guided setup");
+
+/** Only the first setup and the summary tell that Trama writes its files into the folder. */
+export const showsFolderNotice = (step: WizardStep): boolean => step === "Path" || step === "Summary";
 
 /** One entry of a folder, as the host lists it. */
 export interface TreeEntry {
@@ -114,8 +138,21 @@ export function setInvalid(state: WizardState, key: string, invalid: boolean): W
   return { ...state, invalid: invalid ? [...state.invalid, key] : state.invalid.filter((k) => k !== key) };
 }
 
+/** The steps before the one on view, in order: the ones the step indicator and the «Edit» of the summary lead back to. */
+export function previousSteps(state: WizardState): WizardStep[] {
+  return stepsOf(state).slice(0, Math.max(0, stepsOf(state).indexOf(state.step)));
+}
+
+/** `developer.OPEN_SETUP_STEP`: goes back to an earlier step of the mode, keeping every choice. A step on view or ahead is reached only with Next, which checks every step. */
 export function openStep(state: WizardState, step: WizardStep): WizardState {
-  return stepsOf(state).includes(step) ? { ...state, step } : state;
+  return previousSteps(state).includes(step) ? { ...state, step } : state;
+}
+
+/** Where the step on view is among the steps of the mode: «Step <n> of <N> · <step>» and the part of the progress bar that is full. */
+export function stepPosition(state: WizardState): { n: number; total: number; name: WizardStep; percent: number } {
+  const steps = stepsOf(state);
+  const n = steps.indexOf(state.step) + 1;
+  return { n, total: steps.length, name: state.step, percent: Math.round((n / steps.length) * 100) };
 }
 
 export function nextStep(state: WizardState): WizardState {
@@ -258,14 +295,23 @@ export function formatValue(setting: SettingSchema, value: unknown): string {
 
 export interface SummaryRow {
   step: WizardStep;
+  /** The subtitle of the subgroup of Advanced the row belongs to; null for any other row. */
+  group: string | null;
   title: string;
   value: string;
+  /** The value is the empty text: the summary shows «(empty)» in secondary text and the normal font. */
+  empty: boolean;
   /** Texts and numbers show in the monospace font; enums, switches and the path in the normal one. */
   mono: boolean;
   isDefault: boolean;
   changed: boolean;
   /** The current value, for a changed row: «was <value>». */
   was: string | null;
+}
+
+/** A value cut where a line may break: after `/`, `-`, `_` and `.`, so a long path or name wraps there before it wraps anywhere. */
+export function valueParts(value: string): string[] {
+  return value.split(/(?<=[/\-_.])/);
 }
 
 /** Where the Path summary names the way and the folder. */
@@ -282,11 +328,11 @@ export function summaryRows(schema: readonly SettingSchema[], state: WizardState
   const rows: SummaryRow[] = [];
   for (const step of stepsOf(state)) {
     if (step === "Path") {
-      rows.push({ step, title: "Path", value: state.choice === null ? "" : PATH_NAMES[state.choice], mono: false, isDefault: false, changed: false, was: null });
+      rows.push({ step, group: null, title: "Path", value: state.choice === null ? "" : PATH_NAMES[state.choice], empty: false, mono: false, isDefault: false, changed: false, was: null });
       const folder = folders.find((f) => f.root === state.root);
-      if (folders.length > 1 && folder !== undefined) rows.push({ step, title: "Folder", value: folder.name, mono: true, isDefault: false, changed: false, was: null });
+      if (folders.length > 1 && folder !== undefined) rows.push({ step, group: null, title: "Folder", value: folder.name, empty: false, mono: true, isDefault: false, changed: false, was: null });
     } else if (step === "Folders") {
-      rows.push({ step, title: "Excluded folders", value: state.excluded.length === 0 ? "None" : state.excluded.join(", "), mono: state.excluded.length > 0, isDefault: false, changed: false, was: null });
+      rows.push({ step, group: null, title: "Excluded folders", value: state.excluded.length === 0 ? "None" : state.excluded.join(", "), empty: false, mono: state.excluded.length > 0, isDefault: false, changed: false, was: null });
     } else if (step !== "Summary") {
       for (const key of STEP_KEYS[step] ?? []) {
         const setting = schema.find((s) => s.key === key);
@@ -295,10 +341,13 @@ export function summaryRows(schema: readonly SettingSchema[], state: WizardState
         const currentUser = current[key]?.user;
         const changed = isChanged(setting, wizard, currentUser);
         const effective = wizardValue(setting, state);
+        const value = summaryText(setting, effective, models);
         rows.push({
           step,
+          group: step === "Advanced" ? advancedGroupOf(key) : null,
           title: setting.title,
-          value: summaryText(setting, effective, models),
+          value,
+          empty: value === "(empty)",
           mono: setting.control === "text" || setting.control === "integer",
           isDefault: normalized(setting, wizard) === undefined,
           changed,
@@ -339,7 +388,7 @@ export type AgentCheckResult = AgentCheckMessage extends infer M ? (M extends un
 export function agentCheckLine(result: AgentCheckResult | null): { tone: "checking" | "ok" | "warning"; text: string } {
   if (result === null) return { tone: "checking", text: "Checking omp…" };
   if (result.state === "updating") return { tone: "checking", text: `Updating omp to ${result.version}…` };
-  if (!result.ok) return { tone: "warning", text: `${result.error ?? "omp did not answer"}. Trama cannot work without omp.` };
+  if (!result.ok) return { tone: "warning", text: `${(result.error ?? "omp did not answer").trimEnd().replace(/\.$/, "")}. Trama cannot work without omp.` };
   const answered = `omp${result.version === undefined ? "" : ` ${result.version}`} answered with ${result.models ?? 0} models.`;
   return result.updateError === undefined ? { tone: "ok", text: answered } : { tone: "warning", text: `Could not update omp (${result.updateError}). ${answered}` };
 }

@@ -5,6 +5,24 @@ summary: Task cards in the Board no longer show the Proposal tag; the Task detai
 tasks:
   - aplmqdd7
   - gv7p30zx
+cleared:
+  gv7p30zx:
+    title: Tag solo nei dettagli
+    proposal: srkyrbvl
+    tag: Chat & panel polish
+    finished: 2026-10-24T10:36:07.466Z
+    refs:
+      - panel/Board
+      - task
+      - proposal
+      - requirements/ui#task
+      - requirements/ui#task/Done
+      - requirements/rules#task
+  aplmqdd7:
+    title: Tag della Proposal sulla Board
+    finished: 2026-10-18T08:23:10.708Z
+    refs:
+      - requirements/ui#task
 ---
 # Tag della Proposal sulla Board
 

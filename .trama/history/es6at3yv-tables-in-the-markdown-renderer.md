@@ -4,6 +4,15 @@ updated: 2026-10-24T11:23:03.767Z
 summary: The shared Markdown renderer shows pipe tables as tables with column alignment, instead of code blocks, in every view that uses it.
 tasks:
   - u8j9nh9d
+cleared:
+  u8j9nh9d:
+    title: Tabelle Markdown
+    proposal: srkyrbvl
+    tag: Chat & panel polish
+    finished: 2026-10-24T10:34:13.720Z
+    refs:
+      - requirements/ui#panel
+      - requirements/tech#panel
 ---
 # Tables in the Markdown renderer
 

@@ -6,6 +6,22 @@ tasks:
   - 4ce4gzox
   - w7huhz14
   - x2vjx2z6
+cleared:
+  x2vjx2z6:
+    title: Single line-ending normalisation point
+    finished: 2026-10-18T21:28:23.836Z
+    refs:
+      - requirements/tech#General
+  w7huhz14:
+    title: Line endings in one place
+    finished: 2026-10-18T21:25:07.933Z
+    refs:
+      - requirements/tech#General
+  4ce4gzox:
+    title: "Fix code to match the Requirements: Line endings not normalized on reads"
+    finished: 2026-10-18T21:19:21.207Z
+    refs:
+      - requirements/tech#General
 ---
 # Line endings on reads
 

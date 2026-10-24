@@ -5,6 +5,25 @@ summary: Il job della chat parte nel momento in cui la consegna invia il testo; 
 tasks:
   - mvgqt2gl
   - yo13uz7n
+cleared:
+  mvgqt2gl:
+    title: Job della chat al click
+    proposal: v3vw3m0r
+    tag: Attese di Cursor
+    finished: 2026-10-18T09:16:13.474Z
+    refs:
+      - agent-terminal
+      - requirements/tech#agent-terminal
+      - requirements/rules#drift-resolution
+  yo13uz7n:
+    title: Annuncio al lancio in chat
+    proposal: v3vw3m0r
+    tag: Attese di Cursor
+    finished: 2026-10-18T09:15:32.810Z
+    refs:
+      - announcement
+      - requirements/rules#announcement
+      - requirements/tech#announcement
 ---
 # Job e annuncio della chat al click
 

@@ -6,6 +6,45 @@ tasks:
   - 6i1i8h14
   - gkb00sd8
   - w6tubwj6
+cleared:
+  w6tubwj6:
+    title: Ghost nella barra di stato
+    proposal: hf9h1qab
+    tag: System Activities
+    finished: 2026-10-23T12:51:48.626Z
+    refs:
+      - announcement
+      - announcement/Announced
+      - requirements/tech#announcement
+      - agent-terminal
+      - voce-history
+      - work
+      - requirements/ui#developer.ASK_MORE
+      - requirements/ui#developer.OPEN_QUICK_TASK
+  gkb00sd8:
+    title: Fantasmi nelle colonne
+    proposal: hf9h1qab
+    tag: System Activities
+    finished: 2026-10-23T12:48:00.764Z
+    refs:
+      - panel/Board
+      - panel/Open/developer.SHOW_BOARD
+      - design-request/Writing/developer.ASK_AGENT
+      - requirements/ui#panel/Board
+      - requirements/data#task
+      - requirements/ui#drift-resolution
+      - requirements/ui#drift-resolution/Unifying
+      - requirements/ui#announcement
+      - requirements/rules#announcement
+  6i1i8h14:
+    title: Dettagli dalla barra
+    proposal: hf9h1qab
+    tag: System Activities
+    finished: 2026-10-23T12:46:51.348Z
+    refs:
+      - developer.OPEN_GHOST_DETAILS
+      - panel/Closed/developer.OPEN_GHOST_DETAILS
+      - panel/Open/developer.OPEN_GHOST_DETAILS
 ---
 # Fantasmi in colonna e nella status bar
 

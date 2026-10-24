@@ -4,6 +4,12 @@ updated: 2026-10-21T12:04:17.999Z
 summary: Nelle righe di shell composte (`cd x && trama …`) l'hook di Cursor antepone `TRAMA_CHAT` e `TRAMA_JOB` a ogni invocazione di `trama`, senza più `export` che lasciava le variabili nella shell.
 tasks:
   - cfxda7vs
+cleared:
+  cfxda7vs:
+    title: "Fix code to match the Requirements: Prefisso identità su righe composte"
+    finished: 2026-10-21T12:03:06.538Z
+    refs:
+      - requirements/tech#editor-chat
 ---
 # Prefisso identità su righe composte
 

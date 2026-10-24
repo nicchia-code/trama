@@ -4,6 +4,16 @@ updated: 2026-10-21T10:39:15.949Z
 summary: Il comando di omp si scrive nel terminale solo quando la shell integration è attiva (executeCommand), o dopo 10 secondi con sendText, così parte intero qualunque sia la lunghezza dell'istruzione.
 tasks:
   - oep9qxed
+cleared:
+  oep9qxed:
+    title: Comando dopo la shell pronta
+    proposal: l3uu22r2
+    tag: Avvio di omp
+    finished: 2026-10-21T10:36:40.596Z
+    refs:
+      - agent-terminal
+      - requirements/tech#agent-terminal
+      - requirements/quality#agent-terminal
 ---
 # Comando dell'agente dopo la shell pronta
 

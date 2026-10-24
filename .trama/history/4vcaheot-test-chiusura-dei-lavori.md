@@ -4,6 +4,13 @@ updated: 2026-10-17T21:37:03.864Z
 summary: I test di lancio degli agenti chiudono i terminali e le chat che aprono, così non lasciano lavori aperti nella suite.
 tasks:
   - 5jb37xbg
+cleared:
+  5jb37xbg:
+    title: Test che chiudono i lavori
+    proposal: bjt6vdn9
+    tag: Test unitari
+    finished: 2026-10-17T21:29:28.732Z
+    refs: []
 ---
 # Test: chiusura dei lavori
 

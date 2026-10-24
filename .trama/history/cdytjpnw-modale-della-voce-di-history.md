@@ -6,6 +6,24 @@ tasks:
   - r174qdoy
   - u5n144hu
   - jdtjzcek
+cleared:
+  jdtjzcek:
+    title: "Fix code to match the Model: Finestra della voce non più modale"
+    finished: 2026-10-18T08:04:00.970Z
+    refs:
+      - voce-history/Registrata/agent.VOCE_HISTORY_AGGIORNATA
+      - requirements/ui#voce-history
+  u5n144hu:
+    title: "Fix code to match the Requirements: Layout della finestra della voce"
+    finished: 2026-10-18T07:37:31.480Z
+    refs:
+      - requirements/ui#voce-history
+  r174qdoy:
+    title: "Fix code to match the Model: Modale della voce ricostruita"
+    finished: 2026-10-18T07:24:39.577Z
+    refs:
+      - voce-history
+      - requirements/ui#voce-history
 ---
 # Modale della voce di History
 

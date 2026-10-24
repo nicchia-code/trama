@@ -5,6 +5,31 @@ summary: Dal pulsante diviso in fondo a Backlog si apre una chat Quick nuda con 
 tasks:
   - mkbm1zyt
   - 4cs5e9n4
+cleared:
+  4cs5e9n4:
+    title: Chat Quick con omp e Cursor
+    proposal: ylacwi4x
+    tag: Quick Task
+    finished: 2026-10-22T05:16:45.438Z
+    refs:
+      - agent-launching
+      - agent-terminal
+      - announcement
+      - requirements/rules#developer.OPEN_QUICK_TASK
+      - requirements/tech#developer.OPEN_QUICK_TASK
+      - requirements/rules#agent-terminal
+      - requirements/tech#agent-terminal
+  mkbm1zyt:
+    title: Pulsante diviso Add Quick Task
+    proposal: ylacwi4x
+    tag: Quick Task
+    finished: 2026-10-22T05:13:06.837Z
+    refs:
+      - panel/Board
+      - developer.OPEN_QUICK_TASK
+      - requirements/ui#developer.OPEN_QUICK_TASK
+      - requirements/ui#panel/Board
+      - requirements/ui#panel
 ---
 # Add Quick Task
 

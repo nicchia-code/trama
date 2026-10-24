@@ -5,6 +5,24 @@ summary: Una corsa su più Task tiene al lavoro fino a N Task insieme e affida s
 tasks:
   - 7a34jb40
   - b9nr6zxy
+cleared:
+  b9nr6zxy:
+    title: Consegna in un passo
+    proposal: suahhze5
+    tag: Confronti leggeri
+    finished: 2026-10-18T20:34:14.029Z
+    refs:
+      - requirements/rules#proposal
+  7a34jb40:
+    title: Coda continua
+    proposal: 4td4mzmg
+    tag: Coda continua
+    finished: 2026-10-18T20:14:11.803Z
+    refs:
+      - task
+      - requirements/rules#task
+      - requirements/tech#task
+      - requirements/rules#agent-launching
 ---
 # Coda continua e consegna in un passo
 

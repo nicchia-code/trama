@@ -4,6 +4,14 @@ updated: 2026-10-24T11:23:02.873Z
 summary: Clear in the Board's Done column deletes the Tasks shown there after copying each one into the History entries that cite it; Tasks named by an open Drift stay.
 tasks:
   - 7cj7ckql
+cleared:
+  7cj7ckql:
+    title: Clear di Done
+    proposal: srkyrbvl
+    tag: Chat & panel polish
+    finished: 2026-10-24T10:32:00.333Z
+    refs:
+      - developer.CLEAR_DONE
 ---
 # Clear in the Done column
 

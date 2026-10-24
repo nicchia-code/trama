@@ -4,6 +4,19 @@ updated: 2026-10-24T11:23:02.528Z
 summary: omp Chat has a Steer or Queue switch next to Send that decides how a message sent while the agent works is delivered; a message omp refuses shows Not delivered.
 tasks:
   - b9hy68uh
+cleared:
+  b9hy68uh:
+    title: Steer e Queue
+    proposal: srkyrbvl
+    tag: Chat & panel polish
+    finished: 2026-10-24T10:45:47.957Z
+    refs:
+      - omp-chat-conversation
+      - requirements/ui#omp-chat-conversation
+      - requirements/rules#omp-chat-conversation
+      - requirements/tech#omp-chat-conversation
+      - requirements/data#omp-chat
+      - requirements/tech#omp-chat
 ---
 # Steer and Queue for omp Chat messages
 

@@ -8,6 +8,51 @@ tasks:
   - gya21o2b
   - jemjruvm
   - qk569ldq
+cleared:
+  qk569ldq:
+    title: Resolve istantaneo
+    proposal: n4a9dliq
+    tag: Async Drift Resolver
+    finished: 2026-10-21T09:36:28.495Z
+    refs:
+      - drift-resolution
+      - question-round
+      - panel/Board
+      - requirements/rules#drift-resolution
+      - requirements/ui#drift-resolution
+      - requirements/quality#drift-resolution
+  jemjruvm:
+    title: Domanda pronta nei Drift
+    proposal: n4a9dliq
+    tag: Async Drift Resolver
+    finished: 2026-10-21T09:28:23.899Z
+    refs:
+      - drift
+      - requirements/data#drift-resolution
+  52cbkqx7:
+    title: Risoluzioni da domanda pronta
+    proposal: n4a9dliq
+    tag: Async Drift Resolver
+    finished: 2026-10-21T09:20:59.159Z
+    refs:
+      - proposal
+      - requirements/data#proposal
+  gya21o2b:
+    title: Skill della domanda pronta
+    proposal: n4a9dliq
+    tag: Async Drift Resolver
+    finished: 2026-10-21T09:19:50.869Z
+    refs:
+      - agent-launching
+      - requirements/tech#drift-resolution
+  5os4goao:
+    title: Impostazione Async Drift Resolver
+    proposal: n4a9dliq
+    tag: Async Drift Resolver
+    finished: 2026-10-21T09:19:42.109Z
+    refs:
+      - panel/Settings
+      - requirements/ui#panel/Settings
 ---
 # Async Drift Resolver
 

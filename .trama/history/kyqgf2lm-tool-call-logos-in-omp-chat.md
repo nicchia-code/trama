@@ -4,6 +4,14 @@ updated: 2026-10-24T11:25:25.482Z
 summary: Tool call rows in omp Chat show a language or file-type logo when Trama recognises the title or the file, instead of the generic icon.
 tasks:
   - j68hqn2i
+cleared:
+  j68hqn2i:
+    title: Loghi nella chat
+    proposal: srkyrbvl
+    tag: Chat & panel polish
+    finished: 2026-10-24T10:35:31.947Z
+    refs:
+      - specs#frameworks
 ---
 # Tool call logos in omp Chat
 

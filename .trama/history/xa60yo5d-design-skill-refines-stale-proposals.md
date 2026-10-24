@@ -4,6 +4,14 @@ updated: 2026-10-24T07:19:11.441Z
 summary: The trama-design skill has a section on refining a stale Proposal, with its exception on step 7.
 tasks:
   - qhifvge1
+cleared:
+  qhifvge1:
+    title: Raffinamento nella skill design
+    proposal: 7p3ekjn9
+    tag: Auto-update Stale
+    finished: 2026-10-24T07:15:34.536Z
+    refs:
+      - agent-launching
 ---
 # Design skill refines stale Proposals
 

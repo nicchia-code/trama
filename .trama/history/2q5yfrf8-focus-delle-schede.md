@@ -6,6 +6,40 @@ tasks:
   - 0qa3744x
   - 1rz3k7ev
   - tvf2644b
+cleared:
+  tvf2644b:
+    title: Focus delle schede
+    proposal: 7i7xi6ku
+    tag: Focus View
+    finished: 2026-10-20T22:26:15.403Z
+    refs:
+      - focus
+      - developer.STEP_FOCUS
+      - developer.TOGGLE_ONLY_FOCUSED
+      - developer.CLEAR_FOCUS
+      - requirements/ui#focus
+      - requirements/rules#focus
+  1rz3k7ev:
+    title: Pulsanti View e chip
+    proposal: 7i7xi6ku
+    tag: Focus View
+    finished: 2026-10-20T22:20:05.096Z
+    refs:
+      - panel
+      - developer.FOCUS_PROPOSAL
+      - developer.FOCUS_TASK
+      - developer.FOCUS_REF
+      - developer.SHOW_DIAGRAM
+      - developer.SHOW_REQUIREMENTS
+      - requirements/ui#drift
+  0qa3744x:
+    title: Livelli e selettori
+    proposal: 7i7xi6ku
+    tag: Focus View
+    finished: 2026-10-20T22:15:07.021Z
+    refs:
+      - diagram
+      - developer.CHOOSE_DRAWN_PROPOSAL
 ---
 # Focus delle schede
 

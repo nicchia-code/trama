@@ -7,6 +7,48 @@ tasks:
   - j340jw58
   - i4w9i01k
   - bzyl0cui
+cleared:
+  bzyl0cui:
+    title: Registro dei confronti
+    proposal: 4td4mzmg
+    tag: Coda continua
+    finished: 2026-10-18T20:22:46.514Z
+    refs:
+      - requirements/rules#work
+      - requirements/tech#work
+      - requirements/data#announcement
+      - requirements/tech#drift
+  3s7779pn:
+    title: Skill trama-compare
+    proposal: suahhze5
+    tag: Confronti leggeri
+    finished: 2026-10-18T20:10:59.241Z
+    refs:
+      - requirements/tech#proposal
+      - requirements/tech#General
+      - requirements/rules#project
+      - requirements/tech#agent-launching
+  j340jw58:
+    title: Briefing e archiviazione in blocco
+    proposal: suahhze5
+    tag: Confronti leggeri
+    finished: 2026-10-18T20:05:52.800Z
+    refs:
+      - requirements/tech#drift
+      - requirements/tech#panel/Board
+      - requirements/tech#editor-chat
+  i4w9i01k:
+    title: Ghost del confronto
+    proposal: suahhze5
+    tag: Confronti leggeri
+    finished: 2026-10-18T19:57:40.160Z
+    refs:
+      - announcement
+      - agent.FILE_COMPARISON
+      - requirements/rules#announcement
+      - requirements/data#announcement
+      - requirements/tech#announcement
+      - requirements/ui#announcement
 ---
 # Confronto delle Machine con trama-compare
 

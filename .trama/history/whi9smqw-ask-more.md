@@ -7,6 +7,56 @@ tasks:
   - s7rkxe5c
   - vbvnrojj
   - jke5wsit
+cleared:
+  jke5wsit:
+    title: Ask more vuota
+    proposal: srkyrbvl
+    tag: Chat & panel polish
+    finished: 2026-10-24T10:56:13.619Z
+    refs:
+      - developer.ASK_MORE
+      - developer.SEND_CHAT_MESSAGE
+      - question-round/On question/developer.ASK_MORE
+      - panel/Board/developer.ASK_MORE
+      - announcement
+      - requirements/rules#developer.ASK_MORE
+      - requirements/tech#developer.ASK_MORE
+      - requirements/ui#developer.ASK_MORE
+      - requirements/data#omp-chat-conversation
+  vbvnrojj:
+    title: Modali della Board con Ask more
+    proposal: x6bguwt0
+    tag: Ask more
+    finished: 2026-10-23T10:18:46.816Z
+    refs:
+      - panel/Board
+      - panel/Open/developer.SHOW_BOARD
+      - requirements/ui#developer.ASK_MORE
+      - requirements/ui#panel/Board
+      - requirements/ui#panel
+      - requirements/ui#proposal
+      - requirements/ui#task
+      - requirements/ui#drift
+      - requirements/tech#proposal
+  s7rkxe5c:
+    title: Ask more nelle domande
+    proposal: x6bguwt0
+    tag: Ask more
+    finished: 2026-10-23T10:11:53.081Z
+    refs:
+      - question-round/On question/developer.ASK_MORE
+      - requirements/data#question-round
+  j6tlxyad:
+    title: Lancio di Ask more
+    proposal: x6bguwt0
+    tag: Ask more
+    finished: 2026-10-23T10:07:49.956Z
+    refs:
+      - agent-launching
+      - developer.ASK_MORE
+      - requirements/rules#agent-terminal
+      - requirements/rules#developer.ASK_MORE
+      - requirements/tech#developer.ASK_MORE
 ---
 # Ask more
 

@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ManifestPackage, type SettingsValues, settingsSchema } from "../extension/src/host/settings-schema";
 import {
+  ADVANCED_GROUPS,
+  advancedGroupOf,
   agentCheckLine,
   changedWrites,
   checkState,
@@ -15,18 +17,25 @@ import {
   openStep,
   openWizard,
   previousStep,
+  previousSteps,
+  ROLE_ADVICE,
   setChoice,
   setInvalid,
   setRoot,
   setValue,
+  showsFolderNotice,
   skipAdvanced,
   STEP_SENTENCES,
+  stepPosition,
   stepsFor,
   summaryRows,
   toggleExcluded,
   type Tree,
   STEP_KEYS,
+  valueParts,
   type WizardState,
+  type WizardStep,
+  wizardTitle,
 } from "../extension/src/webview/wizard/logic";
 
 const manifest: ManifestPackage = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
@@ -70,8 +79,9 @@ test("Back and Next keep the choices; Back is missing on the first step of the m
   expect(previousStep(state).step).toBe("Path");
   const settings = open("settings");
   expect(hasPrevious(settings)).toBe(false);
+  // A step reached only with Next: the indicator never leads forward.
   expect(openStep(settings, "Folders").step).toBe("omp");
-  expect(openStep(settings, "Summary").step).toBe("Summary");
+  expect(openStep(settings, "Summary").step).toBe("omp");
 });
 
 test("Next of Path needs a path, Next of Models a valid number of sub-agents, Next of Folders something still included", () => {
@@ -116,13 +126,45 @@ test("a new folder to initialize forgets the exclusions and the folders read", (
 test("the keys of each step are always shown, and the language is never in the wizard", () => {
   expect(STEP_KEYS.omp).toEqual(["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles"]);
   expect(STEP_KEYS.Models).toEqual(["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]);
+  expect(STEP_KEYS.Project).toEqual(["trama.skillsDir"]);
   expect(STEP_KEYS.Advanced?.[0]).toBe("trama.theme");
   expect(STEP_KEYS.Advanced?.slice(-3)).toEqual(["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"]);
   for (const step of ["omp", "Models", "Project", "Advanced"] as const) for (const key of STEP_KEYS[step] ?? []) expect(schema.some((s) => s.key === key)).toBe(true);
 });
 
-test("the Models step gives the advice in words and the note about ignored files shows only with the setting on", () => {
-  expect(STEP_SENTENCES.Models).toBe("Choose the model for each kind of work. Analysis works best with your most capable model, Execution with a mid-range one, Scan with a fast, light one.");
+test("Advanced has four subgroups with their subtitles, in order, and they are its keys in order", () => {
+  expect(ADVANCED_GROUPS.map((group) => [group.title, group.keys])).toEqual([
+    ["Appearance", ["trama.theme"]],
+    ["Drifts", ["trama.driftBlocker", "trama.advisorScanner", "trama.asyncDriftResolver"]],
+    ["Agents", ["trama.parallelExecution", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals"]],
+    ["omp Chat", ["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"]],
+  ]);
+  expect(STEP_KEYS.Advanced).toEqual(ADVANCED_GROUPS.flatMap((group) => group.keys));
+  expect(advancedGroupOf("trama.advisorScanner")).toBe("Drifts");
+  expect(advancedGroupOf("trama.scan")).toBeNull();
+  const rows = summaryRows(schema, open("settings"), {}, []).filter((row) => row.step === "Advanced");
+  expect(rows.map((row) => row.group)).toEqual(["Appearance", "Drifts", "Drifts", "Drifts", "Agents", "Agents", "Agents", "omp Chat", "omp Chat", "omp Chat"]);
+  expect(summaryRows(schema, open("settings"), {}, []).filter((row) => row.step !== "Advanced").every((row) => row.group === null)).toBe(true);
+});
+
+test("the title of the page, the sentences of the steps, the advice of the roles and where the notice of Get Started shows", () => {
+  expect(wizardTitle("first")).toBe("Set up Trama");
+  expect(wizardTitle("settings")).toBe("Guided setup");
+  expect(wizardTitle("empty-model")).toBe("Guided setup");
+  expect(STEP_SENTENCES).toEqual({
+    Path: "Choose how Trama starts in this folder.",
+    omp: "omp is required: Trama runs every agent with omp.",
+    Models: "Choose the model for each kind of work.",
+    Project: "Choose where Trama installs the agent skills.",
+    Folders: "Uncheck the folders the agent should not import.",
+    Advanced: "Theme and optional features. You can skip this step.",
+    Summary: "Check your choices, then confirm.",
+  });
+  expect(ROLE_ADVICE).toEqual({ "trama.analysis": "Your most capable model.", "trama.execution": "A mid-range model.", "trama.scan": "A fast, light model." });
+  expect((["Path", "omp", "Models", "Project", "Folders", "Advanced", "Summary"] as const).filter(showsFolderNotice)).toEqual(["Path", "Summary"]);
+});
+
+test("the note about ignored files shows only with the setting on", () => {
   let state = open("settings");
   expect(ignoresInstructionFiles(schema, state)).toBe(false);
   state = setValue(state, "trama.ignoreInstructionFiles", true);
@@ -269,6 +311,65 @@ test("the omp step says what the check found", () => {
     text: "Could not update omp (omp update exited with code 1). omp 18.12.6 answered with 12 models.",
   });
   expect(agentCheckLine({ ompPath: "/x", state: "done", ok: false, missing: true, error: "omp not found at /x" })).toEqual({ tone: "warning", text: "omp not found at /x. Trama cannot work without omp." });
+  // One full stop between the reason and the sentence, also when the reason ends with one.
+  expect(agentCheckLine({ ompPath: "/x", state: "done", ok: false, missing: false, error: "omp did not answer in time." })).toEqual({ tone: "warning", text: "omp did not answer in time. Trama cannot work without omp." });
+  expect(agentCheckLine({ ompPath: "/x", state: "done", ok: false, missing: false })).toEqual({ tone: "warning", text: "omp did not answer. Trama cannot work without omp." });
+});
+
+const MODES: { mode: "first" | "settings" | "empty-model"; choice: "import" | "scratch" | null }[] = [
+  { mode: "first", choice: "import" },
+  { mode: "first", choice: "scratch" },
+  { mode: "settings", choice: null },
+  { mode: "empty-model", choice: "import" },
+  { mode: "empty-model", choice: "scratch" },
+];
+
+test("developer.OPEN_SETUP_STEP leads from every step to every earlier step of the mode, keeping the choices, and never forward", () => {
+  for (const { mode, choice } of MODES) {
+    const steps = stepsFor(mode, choice);
+    for (const [index, from] of steps.entries()) {
+      let state: WizardState = { ...openWizard(mode, choice, {}, "/work/app"), step: from };
+      state = setValue(setChoice(state, choice ?? "scratch"), "trama.scan", "gpt-5");
+      state = { ...state, choice, excluded: ["docs"] };
+      expect(previousSteps(state)).toEqual(steps.slice(0, index));
+      for (const [target, step] of steps.entries()) {
+        const opened = openStep(state, step);
+        if (target < index) {
+          expect(opened.step).toBe(step);
+          expect(opened.choice).toBe(choice);
+          expect(opened.excluded).toEqual(["docs"]);
+          expect(opened.values["trama.scan"]).toBe("gpt-5");
+        } else expect(opened).toBe(state);
+      }
+      // Path only in the first setup and Folders only with Import from Code in the modes that have it.
+      expect(openStep(state, "Path").step).toBe(mode === "first" && index > 0 ? "Path" : from);
+      expect(openStep(state, "Folders").step === "Folders").toBe(from === "Folders" || (steps.includes("Folders") && steps.indexOf("Folders") < index));
+    }
+  }
+});
+
+test("a step that the mode does not show is never opened", () => {
+  const summary: WizardState = { ...open("settings"), step: "Summary" };
+  expect(openStep(summary, "Path")).toBe(summary);
+  expect(openStep(summary, "Folders")).toBe(summary);
+  expect(openStep(summary, "Summary")).toBe(summary);
+});
+
+test("the position of the step on view: «Step <n> of <N> · <step>» and the part of the bar that is full", () => {
+  const at = (step: WizardStep, mode: "first" | "settings" = "first") => stepPosition({ ...setChoice(open(mode), "import"), step });
+  expect(at("Path")).toEqual({ n: 1, total: 7, name: "Path", percent: 14 });
+  expect(at("Folders")).toEqual({ n: 5, total: 7, name: "Folders", percent: 71 });
+  expect(at("Summary")).toEqual({ n: 7, total: 7, name: "Summary", percent: 100 });
+  expect(at("omp", "settings")).toEqual({ n: 1, total: 5, name: "omp", percent: 20 });
+});
+
+test("a long value breaks after a slash, a hyphen, an underscore or a dot, and an empty text shows as empty", () => {
+  expect(valueParts("src/core/long-name_x.ts")).toEqual(["src/", "core/", "long-", "name_", "x.", "ts"]);
+  expect(valueParts("plain")).toEqual(["plain"]);
+  const rows = summaryRows(schema, open("settings"), {}, []);
+  expect(rows.find((r) => r.title === "Omp Path")).toMatchObject({ empty: true, value: "(empty)", isDefault: true });
+  expect(rows.find((r) => r.title === "Skills Dir")?.empty).toBe(false);
+  expect(rows.find((r) => r.title === "Theme")?.empty).toBe(false);
 });
 
 test("Next of the omp step waits for omp to answer with the path of the step", () => {

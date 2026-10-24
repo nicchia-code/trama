@@ -153,30 +153,22 @@ function ComboboxInput({
             />
           </div>
         </PopoverAnchor>
+        {/* The list is as wide as the field and aligned to its edges, whatever the entries or the filter: long entries wrap. */}
         <PopoverContent
           ref={content}
           align="start"
-          className="w-max min-w-(--radix-popover-trigger-width) max-w-(--radix-popover-content-available-width) p-0"
+          className="w-(--radix-popover-trigger-width) max-w-(--radix-popover-trigger-width) min-w-0 p-0"
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
           onInteractOutside={(event) => {
             if (anchor.current?.contains(event.target as Node | null)) event.preventDefault();
           }}
         >
-          {/* The width is that of the longest entry of the whole list, filtered or not: this hidden copy of every entry sets it, so typing never resizes the list. */}
-          <div aria-hidden className="pointer-events-none invisible h-0 overflow-hidden p-1">
-            {options.map((option) => (
-              <div key={option.value} className="flex gap-2 px-2 text-sm whitespace-nowrap">
-                <span>{option.value}</span>
-                {option.label !== undefined && option.label !== option.value && <span>· {option.label}</span>}
-              </div>
-            ))}
-          </div>
           {/* A press on an entry must not take the focus from the field: the typed text would be confirmed before the entry is. */}
           <CommandList onMouseDown={(event) => event.preventDefault()}>
             <CommandGroup>
               {shown.map((option) => (
-                <CommandItem key={option.value} value={option.value} onSelect={() => choose(option.value)}>
+                <CommandItem key={option.value} value={option.value} onSelect={() => choose(option.value)} className="flex-wrap items-baseline gap-x-2 gap-y-0 whitespace-normal">
                   <span className="min-w-0 break-all">{option.value}</span>
                   {option.label !== undefined && option.label !== option.value && <span className="min-w-0 break-words text-muted-foreground">· {option.label}</span>}
                 </CommandItem>

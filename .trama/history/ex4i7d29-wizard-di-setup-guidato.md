@@ -5,6 +5,37 @@ summary: Un wizard di setup a passi (Path, Agent, Models, Project, Folders, Adva
 tasks:
   - asgvr5k2
   - y7j4if3j
+cleared:
+  y7j4if3j:
+    title: Ingressi del wizard nel pannello
+    proposal: rf3glz8b
+    tag: setup wizard
+    finished: 2026-10-21T13:23:32.633Z
+    refs:
+      - panel
+      - developer.ASK_AGENT
+      - requirements/ui#panel/Get Started
+      - requirements/ui#panel/Diagram
+  asgvr5k2:
+    title: Wizard di setup e init
+    proposal: rf3glz8b
+    tag: setup wizard
+    finished: 2026-10-21T13:18:04.866Z
+    refs:
+      - project-setup
+      - developer.INITIALIZE_PROJECT
+      - developer.OPEN_GUIDED_SETUP
+      - developer.NEXT_SETUP_STEP
+      - developer.PREVIOUS_SETUP_STEP
+      - developer.SKIP_SETUP_STEP
+      - developer.OPEN_SETUP_STEP
+      - developer.CONFIRM_SETUP
+      - developer.CANCEL_SETUP
+      - requirements/ui#setup-wizard
+      - requirements/rules#setup-wizard
+      - requirements/tech#setup-wizard
+      - requirements/rules#project
+      - requirements/ui#project
 ---
 # Wizard di setup guidato
 

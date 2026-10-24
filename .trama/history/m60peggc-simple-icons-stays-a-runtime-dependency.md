@@ -4,6 +4,14 @@ updated: 2026-10-24T11:52:59.163Z
 summary: Simple Icons stays a runtime dependency for omp Chat tool logos; the Specs panel's own logos stay copied in code and import nothing from it. The Requirement change is in open Proposal eq85uqye.
 tasks:
   - k8yj60qz
+cleared:
+  k8yj60qz:
+    title: "Fix code to match the Requirements: Simple Icons runtime dependency again"
+    proposal: srkyrbvl
+    tag: Chat & panel polish
+    finished: 2026-10-24T11:51:56.366Z
+    refs:
+      - requirements/tech#General
 ---
 # Simple Icons stays a runtime dependency
 

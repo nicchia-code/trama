@@ -9,6 +9,69 @@ tasks:
   - dij64jjz
   - 2oqwp35m
   - b9utedrb
+cleared:
+  2oqwp35m:
+    title: Approve fermo nei Run
+    proposal: ihuthnp2
+    tag: Approve e Run
+    finished: 2026-10-24T08:34:09.181Z
+    refs:
+      - proposal/Open
+      - proposal/Draft/developer.APPROVE_PROPOSAL
+      - raffinamento
+      - requirements/rules#proposal
+      - requirements/rules#raffinamento
+      - requirements/ui#raffinamento
+  gi7sxia1:
+    title: Prenotazioni nell'hook
+    proposal: 8vuvkoxz
+    tag: Prenotazioni
+    finished: 2026-10-24T08:32:45.776Z
+    refs:
+      - prenotazione-file
+      - agent.SCRITTURA_FILE_CHIESTA
+      - agent-hook
+      - requirements/rules#prenotazione-file
+      - requirements/tech#prenotazione-file
+      - requirements/data#prenotazione-file
+      - requirements/tech#agent-hook
+  b9utedrb:
+    title: Chiusura in parallelo
+    proposal: gs09mzn1
+    tag: Chiusura veloce
+    finished: 2026-10-24T08:29:46.429Z
+    refs:
+      - task
+      - voce-history
+      - announcement/Verifying
+      - requirements/tech#announcement/Verifying
+      - requirements/tech#voce-history
+  dij64jjz:
+    title: Gruppi in task list
+    proposal: ppwmswz5
+    tag: Gruppi
+    finished: 2026-10-24T08:26:36.356Z
+    refs:
+      - task/To do
+      - requirements/tech#task/To do
+      - requirements/cli#General
+  ny4yxkm6:
+    title: Definizione trama-implementer
+    proposal: 6wf3grcz
+    tag: Sotto-agente Task
+    finished: 2026-10-24T08:19:08.422Z
+    refs:
+      - requirements/tech#agent
+      - requirements/rules#project
+  e3faz1rk:
+    title: Conflitti nella skill
+    proposal: 8vuvkoxz
+    tag: Prenotazioni
+    finished: 2026-10-24T08:16:59.843Z
+    refs:
+      - task
+      - requirements/rules#agent-launching
+      - requirements/tech#task
 ---
 # Esecuzione in parallelo
 

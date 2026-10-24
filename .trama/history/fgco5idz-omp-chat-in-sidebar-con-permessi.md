@@ -5,6 +5,28 @@ summary: omp Chat è accesa per default nella sola barra laterale secondaria e c
 tasks:
   - 41zxoai3
   - pmtfgaro
+cleared:
+  pmtfgaro:
+    title: Approvazione dei permessi in omp Chat
+    proposal: nr388hz3
+    tag: Solo omp
+    finished: 2026-10-23T14:06:59.548Z
+    refs:
+      - omp-chat-conversation
+      - requirements/rules#omp-chat-conversation
+      - requirements/tech#omp-chat-conversation
+      - requirements/ui#omp-chat-conversation
+      - requirements/quality#omp-chat-conversation
+  41zxoai3:
+    title: omp Chat accesa, solo sidebar
+    proposal: nr388hz3
+    tag: Solo omp
+    finished: 2026-10-23T14:04:13.401Z
+    refs:
+      - omp-chat
+      - requirements/rules#omp-chat
+      - requirements/tech#omp-chat
+      - requirements/ui#omp-chat
 ---
 # omp Chat in sidebar con permessi
 

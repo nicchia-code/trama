@@ -59,7 +59,14 @@ function InfoBubble({ id, setting, chosen, open, onOpen, onClose, openLink }: {
   const content = useRef<HTMLDivElement>(null);
   /** Esc closed the bubble: the «i» keeps the focus without opening it again. */
   const escaped = useRef(false);
-  const [hint, setHint] = useState(false);
+  /** Where the tooltip's reasons are: the pointer is on the «i», or the «i» has the keyboard focus. Nothing else shows it. */
+  const [pointerOn, setPointerOn] = useState(false);
+  const [focused, setFocused] = useState(false);
+  /** Esc was pressed: the tooltip stays away until the pointer and the focus have both left the «i». */
+  const [hushed, setHushed] = useState(false);
+  useEffect(() => {
+    if (!pointerOn && !focused) setHushed(false);
+  }, [pointerOn, focused]);
 
   useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -79,7 +86,7 @@ function InfoBubble({ id, setting, chosen, open, onOpen, onClose, openLink }: {
 
   return (
     <Popover open={open} onOpenChange={(next) => !next && onClose()}>
-      <Tooltip open={hint && !open} onOpenChange={setHint}>
+      <Tooltip open={(pointerOn || focused) && !hushed && !open}>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <button
@@ -90,13 +97,22 @@ function InfoBubble({ id, setting, chosen, open, onOpen, onClose, openLink }: {
               className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               // The bubble follows the pointer and the focus, not a click.
               onClick={(event) => event.preventDefault()}
-              onPointerEnter={show}
-              onPointerLeave={hideLater}
-              onFocus={() => {
+              onPointerEnter={() => {
+                setPointerOn(true);
+                show();
+              }}
+              onPointerLeave={() => {
+                setPointerOn(false);
+                hideLater();
+              }}
+              onFocus={(event) => {
+                // A press that gives the focus is the pointer's: only the keyboard focus shows the tooltip once the pointer has gone.
+                setFocused(event.currentTarget.matches(":focus-visible"));
                 if (!escaped.current) show();
               }}
               onBlur={(event) => {
                 escaped.current = false;
+                setFocused(false);
                 if (leaving(event.relatedTarget)) onClose();
               }}
             >
@@ -118,7 +134,7 @@ function InfoBubble({ id, setting, chosen, open, onOpen, onClose, openLink }: {
         onOpenAutoFocus={(event) => event.preventDefault()}
         onEscapeKeyDown={() => {
           escaped.current = true;
-          setHint(false);
+          setHushed(true);
         }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -159,10 +175,17 @@ export interface FieldProps {
   openLink: OpenLink;
   /** The wizard asks to hear whether a whole-number field holds a value that cannot be saved; the field reports it as the developer types and clears it when it goes away. */
   onInvalid?: (key: string, invalid: boolean) => void;
+  /**
+   * Where the explanation of the setting is read. `bubble` (the Settings tab): behind the «i». `page` (the setup wizard): in the page under the title,
+   * linked to the control with `aria-describedby`, with no «i» and no bubble; an enum shows the entry of the chosen value under its `Select`.
+   */
+  explain?: "bubble" | "page";
+  /** A line in bold between the title and the explanation, in `page` mode (the advice of a model role in the wizard). */
+  lead?: string;
 }
 
-/** One setting: its title with the «i», the control that fits it, and the messages under the control. */
-export function SettingField({ setting, values, generation, models, listError, openKey, setOpenKey, send, openLink, onInvalid }: FieldProps) {
+/** One setting: its title with the «i» (or, in `page` mode, its explanation under it), the control that fits it, and the messages under the control. */
+export function SettingField({ setting, values, generation, models, listError, openKey, setOpenKey, send, openLink, onInvalid, explain = "bubble", lead }: FieldProps) {
   const id = `st-${setting.key.replace(/\./g, "-")}`;
   const { key } = setting;
   const saved = effectiveValue(setting, values);
@@ -187,6 +210,7 @@ export function SettingField({ setting, values, generation, models, listError, o
   const role = modelRole ? splitRoleValue(savedText, models) : undefined;
   const levels = role === undefined ? [] : thinkingLevels(models, role.model);
   const levelChosen = typeof picked === "string" ? picked : (role?.level ?? DEFAULT_LEVEL);
+  const page = explain === "page";
 
   const describedBy = [
     `${id}-explain`,
@@ -225,9 +249,15 @@ export function SettingField({ setting, values, generation, models, listError, o
           send(key, value);
         }}
       >
-        <SelectTrigger id={id} aria-label={setting.title} aria-describedby={describedBy} className="max-w-full justify-self-start">
-          <SelectValue />
-        </SelectTrigger>
+        {/* A value that does not fit is cut with an ellipsis; the whole value is in the tooltip. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <SelectTrigger id={id} aria-label={setting.title} aria-describedby={describedBy} className="max-w-full justify-self-start">
+              <SelectValue className="min-w-0 truncate" />
+            </SelectTrigger>
+          </TooltipTrigger>
+          <TooltipContent>{chosen}</TooltipContent>
+        </Tooltip>
         <SelectContent>
           {(setting.values ?? []).map((value) => (
             <SelectItem key={value} value={value}>
@@ -243,7 +273,7 @@ export function SettingField({ setting, values, generation, models, listError, o
         id={id}
         aria-label={setting.title}
         aria-describedby={describedBy}
-        className="justify-self-start"
+        className="shrink-0"
         checked={(picked ?? saved) === true}
         onCheckedChange={(checked) => {
           setPicked(checked === true);
@@ -278,8 +308,8 @@ export function SettingField({ setting, values, generation, models, listError, o
     );
   } else if (modelRole) {
     control = (
-      <div className="flex min-w-0 items-center gap-2">
-        <div className="min-w-0 flex-1">
+      <div className={cn("flex min-w-0 items-center gap-2", page && "flex-wrap")}>
+        <div className={cn("min-w-0 flex-1", page && "basis-48")}>
           <ComboboxInput
             id={id}
             aria-label={setting.title}
@@ -322,9 +352,61 @@ export function SettingField({ setting, values, generation, models, listError, o
     );
   }
 
+  const checkbox = setting.control === "boolean";
+  const hasMessages = editable.error !== null || override !== null || note !== null;
+  const messages = (
+    <>
+      {editable.error !== null && (
+        <p id={`${id}-error`} className="m-0 text-sm text-destructive">
+          {editable.error}
+        </p>
+      )}
+      {override !== null && (
+        <p className="m-0 text-sm text-muted-foreground">
+          The workspace setting overrides this: <code className="font-mono">{override}</code>.
+        </p>
+      )}
+      {note !== null && (
+        <p id={`${id}-note`} className="m-0 text-sm text-muted-foreground">
+          {note}
+        </p>
+      )}
+    </>
+  );
+
+  if (page) {
+    const chosenIndex = chosen === undefined ? -1 : (setting.values?.indexOf(chosen) ?? -1);
+    // One column: the title (a checkbox sits left of it, and what follows lines up with the title), the advice, the explanation, the control, the entry of the chosen value and the messages.
+    return (
+      <div className="grid min-w-0 gap-1.5">
+        <div className="flex min-w-0 items-start gap-2">
+          {checkbox ? <span className="mt-1 flex">{control}</span> : null}
+          <label htmlFor={id} className="min-w-0 font-semibold wrap-anywhere">
+            {setting.title}
+          </label>
+        </div>
+        <div className={cn("grid min-w-0 gap-1.5", checkbox && "pl-6")}>
+          {lead !== undefined ? <p className="m-0 font-semibold wrap-anywhere">{lead}</p> : null}
+          <div id={`${id}-explain`} className="text-sm text-muted-foreground wrap-anywhere [&_.md>:first-child]:mt-0 [&_.md>:last-child]:mb-0">
+            <Markdown source={setting.markdown} openLink={openLink} />
+          </div>
+          {checkbox ? null : control}
+          {chosenIndex >= 0 ? (
+            <p id={`${id}-value-${chosenIndex}`} className="m-0 text-sm text-muted-foreground wrap-anywhere">
+              <InlineMarkdown source={setting.descriptions?.[chosenIndex] ?? ""} openLink={openLink} />
+            </p>
+          ) : null}
+          {messages}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="row-span-5 grid min-w-0 grid-rows-subgrid gap-y-1">
+    <div className="row-span-2 grid min-w-0 grid-rows-subgrid gap-y-0">
       <div className="relative row-start-1 flex min-w-0 items-center gap-1.5">
+        {/* A checkbox sits left of its title, on the same row; the title is its label, so a click on it changes it. */}
+        {checkbox ? control : null}
         <label htmlFor={id} className="font-semibold">
           {setting.title}
         </label>
@@ -338,21 +420,12 @@ export function SettingField({ setting, values, generation, models, listError, o
           openLink={openLink}
         />
       </div>
-      <div className="row-start-2 min-w-0">{control}</div>
-      {editable.error !== null && (
-        <p id={`${id}-error`} className="row-start-3 m-0 text-sm text-destructive">
-          {editable.error}
-        </p>
-      )}
-      {override !== null && (
-        <p className="row-start-4 m-0 text-sm text-muted-foreground">
-          The workspace setting overrides this: <code className="font-mono">{override}</code>.
-        </p>
-      )}
-      {note !== null && (
-        <p id={`${id}-note`} className="row-start-5 m-0 text-sm text-muted-foreground">
-          {note}
-        </p>
+      {/* Below the control, in its column: a message that is absent takes no room. */}
+      {checkbox && !hasMessages ? null : (
+        <div className="row-start-2 mt-1 grid min-w-0 content-start gap-1">
+          {checkbox ? null : control}
+          {messages}
+        </div>
       )}
       {/* Described to screen readers even while the bubble is closed. */}
       <div id={`${id}-explain`} hidden>

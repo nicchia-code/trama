@@ -6,6 +6,35 @@ tasks:
   - 3nv60bq4
   - pjail4qt
   - s1uin20z
+cleared:
+  s1uin20z:
+    title: Frase e skill Context Sharing
+    proposal: wiedlugb
+    tag: Context Sharing
+    finished: 2026-10-21T10:46:03.933Z
+    refs:
+      - agent-launching
+      - requirements/rules#agent-launching
+      - requirements/quality#agent-launching
+  pjail4qt:
+    title: Impostazione Context Sharing
+    proposal: wiedlugb
+    tag: Context Sharing
+    finished: 2026-10-21T10:42:58.399Z
+    refs:
+      - panel/Settings
+      - panel/Closed/developer.SHOW_SETTINGS
+      - panel/Open/developer.SHOW_SETTINGS
+      - requirements/ui#panel/Settings
+      - requirements/tech#panel/Settings
+      - requirements/ui#agent-launching
+  3nv60bq4:
+    title: Resolve Drifts fino a N
+    proposal: wiedlugb
+    tag: Context Sharing
+    finished: 2026-10-21T10:42:52.356Z
+    refs:
+      - requirements/tech#proposal
 ---
 # Context Sharing sperimentale
 

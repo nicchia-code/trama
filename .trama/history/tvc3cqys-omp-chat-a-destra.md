@@ -7,6 +7,40 @@ tasks:
   - 0rym9fsk
   - 8s27fa30
   - 7zpd94gt
+cleared:
+  0rym9fsk:
+    title: omp Chat si mostra dove sta
+    proposal: c18149e0
+    tag: omp Chat
+    finished: 2026-10-23T12:15:26.319Z
+    refs:
+      - omp-chat-conversation
+      - requirements/quality#omp-chat-conversation
+  lyh3pfvf:
+    title: omp Chat a destra
+    proposal: c18149e0
+    tag: omp Chat
+    finished: 2026-10-23T12:13:21.845Z
+    refs:
+      - omp-chat
+      - requirements/tech#omp-chat
+      - requirements/ui#omp-chat
+  8s27fa30:
+    title: Engine VS Code 1.106
+    proposal: c18149e0
+    tag: omp Chat
+    finished: 2026-10-23T12:12:22.240Z
+    refs:
+      - specs#frameworks
+      - requirements/tech#General
+  7zpd94gt:
+    title: Descrizione di omp Chat aggiornata
+    proposal: c18149e0
+    tag: omp Chat
+    finished: 2026-10-23T12:12:15.692Z
+    refs:
+      - panel/Settings
+      - requirements/ui#panel/Settings
 ---
 # omp Chat a destra
 

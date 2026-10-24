@@ -138,7 +138,7 @@ Il developer torna al passo precedente del wizard di setup con Back.
 Il developer salta il passo Advanced del wizard di setup con Skip.
 
 ### OPEN_SETUP_STEP
-Il developer sceglie una riga del riepilogo del wizard di setup per tornare al passo da cui viene.
+Il developer sceglie, nel wizard di setup, un passo precedente a quello corrente nell'indicazione dei passi, oppure, nel riepilogo, il pulsante Edit di un passo, per tornare a quel passo con le scelte fatte.
 
 ### CONFIRM_SETUP
 Il developer conferma il riepilogo del wizard di setup aperto in un progetto, dalla scheda Settings. In una cartella senza progetto la conferma è INITIALIZE_PROJECT.

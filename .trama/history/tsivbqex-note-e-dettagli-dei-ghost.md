@@ -5,6 +5,28 @@ summary: L'agente dichiara note brevi sugli annunci in attesa; la Board mostra l
 tasks:
   - 7q3rbvia
   - mif1mn1i
+cleared:
+  mif1mn1i:
+    title: Dettagli dei ghost sulla Board
+    proposal: sk8koj3a
+    tag: ghost details
+    finished: 2026-10-22T08:58:07.658Z
+    refs:
+      - panel/Board
+      - panel/Open/developer.SHOW_BOARD
+      - requirements/ui#announcement
+  7q3rbvia:
+    title: Note sugli annunci
+    proposal: sk8koj3a
+    tag: ghost details
+    finished: 2026-10-22T08:53:36.282Z
+    refs:
+      - announcement
+      - agent.DECLARE_ANNOUNCEMENT_NOTE
+      - requirements/rules#agent.DECLARE_ANNOUNCEMENT_NOTE
+      - requirements/data#agent.DECLARE_ANNOUNCEMENT_NOTE
+      - requirements/cli#agent.DECLARE_ANNOUNCEMENT_NOTE
+      - requirements/tech#agent.DECLARE_ANNOUNCEMENT_NOTE
 ---
 # Note e dettagli dei ghost
 

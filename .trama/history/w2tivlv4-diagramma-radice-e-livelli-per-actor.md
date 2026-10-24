@@ -6,6 +6,38 @@ tasks:
   - 0grfjs48
   - b5c4sf0n
   - s86hdewb
+cleared:
+  b5c4sf0n:
+    title: Passi del focus per Actor
+    proposal: heu97vz8
+    tag: Diagramma per Actor
+    finished: 2026-10-21T04:29:25.752Z
+    refs:
+      - focus
+      - requirements/rules#focus
+  s86hdewb:
+    title: Scan nei nuovi livelli
+    proposal: heu97vz8
+    tag: Diagramma per Actor
+    finished: 2026-10-21T04:29:19.415Z
+    refs:
+      - panel/Diagram
+      - requirements/ui#panel
+  0grfjs48:
+    title: Radice e livelli per Actor
+    proposal: heu97vz8
+    tag: Diagramma per Actor
+    finished: 2026-10-21T04:28:21.577Z
+    refs:
+      - diagram
+      - developer.OPEN_SYSTEM_LEVEL
+      - developer.OPEN_WHOLE_SYSTEM_LEVEL
+      - developer.OPEN_ACTOR_LEVEL
+      - developer.OPEN_FEATURE_LEVEL
+      - requirements/ui#diagram
+      - requirements/ui#diagram/System level
+      - requirements/ui#diagram/Whole System level
+      - requirements/ui#diagram/Actor level
 ---
 # Diagramma: radice e livelli per Actor
 

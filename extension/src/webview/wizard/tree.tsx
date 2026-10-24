@@ -1,7 +1,8 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { type KeyboardEvent, useState } from "react";
+import { ChevronDown, ChevronRight, File, Folder, FolderOpen } from "lucide-react";
+import { type CSSProperties, type KeyboardEvent, useState } from "react";
 import { cn } from "../lib/utils";
 import { Checkbox } from "../ui/checkbox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { checkState, exclusions, type Tree, visibleRows } from "./logic";
 
 export interface FolderTreeProps {
@@ -15,8 +16,9 @@ export interface FolderTreeProps {
 const rowId = (path: string): string => `wz-tree-${path.replace(/[^A-Za-z0-9_-]/g, "_")}`;
 
 /**
- * The folders and files of the first level, each with a box; a folder opens with its chevron and starts closed. A `tree` for the
- * keyboard: the arrows move and open, Space turns the box. It scrolls inside the step, not the page.
+ * The folders and files of the first level, each with a box and an icon; a folder opens with its chevron and starts closed. A `tree` for the
+ * keyboard: the arrows move and open, Space turns the box. It scrolls inside the step, not the page, and its height leaves it all above the
+ * bar of buttons. A name that does not fit is cut with an ellipsis and whole in the tooltip of the entry.
  */
 export function FolderTree({ tree, excluded, onOpen, onToggle }: FolderTreeProps) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
@@ -74,8 +76,8 @@ export function FolderTree({ tree, excluded, onOpen, onToggle }: FolderTreeProps
   };
 
   return (
-    <div>
-      <p className="mb-2 text-sm text-muted-foreground" aria-live="polite">
+    <div className="min-w-0">
+      <p className="m-0 mb-2 text-sm text-muted-foreground" aria-live="polite">
         {count > 0 ? `${count} excluded` : "Everything is included"}
       </p>
       <div
@@ -84,13 +86,14 @@ export function FolderTree({ tree, excluded, onOpen, onToggle }: FolderTreeProps
         aria-multiselectable="false"
         aria-activedescendant={activePath === null ? undefined : rowId(activePath)}
         tabIndex={0}
-        className="max-h-[50vh] overflow-auto rounded-md border p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="max-h-[max(10rem,calc(100dvh-26rem))] min-w-0 overflow-x-hidden overflow-y-auto rounded-md border p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onKeyDown={onKeyDown}
       >
         {rows.map(({ path, depth, entry }) => {
           const state = checkState(excluded, path);
           const folder = entry.kind === "folder" && entry.hasChildren;
           const expanded = open.has(path);
+          const Icon = entry.kind === "folder" ? (expanded ? FolderOpen : Folder) : File;
           return (
             <div
               key={path}
@@ -100,19 +103,26 @@ export function FolderTree({ tree, excluded, onOpen, onToggle }: FolderTreeProps
               aria-expanded={folder ? expanded : undefined}
               aria-checked={state === "indeterminate" ? "mixed" : state === "checked"}
               aria-label={entry.name}
-              style={{ paddingLeft: `${depth * 1.25}rem` }}
-              className={cn("flex items-center gap-1.5 rounded-sm px-1 py-0.5", path === activePath && "bg-accent text-accent-foreground")}
+              style={{ "--depth": depth } as CSSProperties}
+              // Each level indents by about 16px, about 10px in the narrow panels.
+              className={cn("flex min-w-0 items-center gap-1.5 rounded-sm py-0.5 pr-1 pl-[calc(var(--depth)_*_10px_+_4px)] min-[480px]:pl-[calc(var(--depth)_*_16px_+_4px)]", path === activePath && "bg-accent text-accent-foreground")}
               onClick={() => setActive(path)}
             >
               {folder ? (
-                <button type="button" tabIndex={-1} aria-hidden="true" className="inline-flex size-4 items-center justify-center" onClick={() => setOpenState(path, !expanded)}>
+                <button type="button" tabIndex={-1} aria-hidden="true" className="inline-flex size-4 shrink-0 items-center justify-center" onClick={() => setOpenState(path, !expanded)}>
                   {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
                 </button>
               ) : (
-                <span className="inline-block size-4" aria-hidden="true" />
+                <span className="inline-block size-4 shrink-0" aria-hidden="true" />
               )}
               <Checkbox tabIndex={-1} aria-hidden="true" checked={state === "indeterminate" ? "indeterminate" : state === "checked"} onCheckedChange={() => onToggle(path)} />
-              <span className={cn("min-w-0 truncate font-mono", entry.kind === "folder" && "font-semibold")}>{entry.name}</span>
+              <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={cn("min-w-0 flex-1 truncate font-mono", entry.kind === "folder" && "font-semibold")}>{entry.name}</span>
+                </TooltipTrigger>
+                <TooltipContent>{entry.name}</TooltipContent>
+              </Tooltip>
             </div>
           );
         })}

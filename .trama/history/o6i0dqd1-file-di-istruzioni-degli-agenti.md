@@ -7,6 +7,47 @@ tasks:
   - assnd0az
   - vodozu43
   - 7j5eejmu
+cleared:
+  vodozu43:
+    title: Impostazione Ignora file istruzioni
+    proposal: idthe088
+    tag: Wizard di setup
+    finished: 2026-10-22T05:12:41.047Z
+    refs:
+      - panel/Settings
+      - requirements/tech#panel/Settings
+      - requirements/ui#panel/Settings
+      - requirements/ui#agent-terminal
+  7j5eejmu:
+    title: "Fix code to match the Requirements: Descrizione oltre il limite"
+    proposal: idthe088
+    tag: Wizard di setup
+    finished: 2026-10-22T05:11:25.581Z
+    refs:
+      - requirements/ui#General
+      - requirements/ui#panel/Settings
+  assnd0az:
+    title: Istruzioni escluse in omp
+    proposal: idthe088
+    tag: Wizard di setup
+    finished: 2026-10-22T04:51:02.998Z
+    refs:
+      - agent-terminal
+      - requirements/rules#agent-terminal/Agent running
+      - requirements/tech#agent-terminal/Agent running
+      - requirements/quality#agent-terminal/Agent running
+      - requirements/tech#agent-launching
+  097hh8ek:
+    title: Consigli nel wizard
+    proposal: idthe088
+    tag: Wizard di setup
+    finished: 2026-10-22T04:46:56.191Z
+    refs:
+      - setup-wizard
+      - requirements/rules#setup-wizard
+      - requirements/tech#setup-wizard
+      - requirements/ui#setup-wizard
+      - requirements/quality#setup-wizard/Agent
 ---
 # File di istruzioni degli agenti
 

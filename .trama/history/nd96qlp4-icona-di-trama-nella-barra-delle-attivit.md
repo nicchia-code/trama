@@ -5,6 +5,32 @@ summary: Trama opens from an icon in the Activity Bar with a view and an Open Tr
 tasks:
   - 0t9x3ist
   - nr9jaiea
+cleared:
+  nr9jaiea:
+    title: Logo fuori dalla barra di stato
+    proposal: srkyrbvl
+    tag: Chat & panel polish
+    finished: 2026-10-24T10:33:02.666Z
+    refs:
+      - developer.OPEN_PANEL
+      - project/Trama project/developer.OPEN_PANEL
+      - requirements/rules#project
+      - requirements/tech#announcement
+      - requirements/ui#announcement
+  0t9x3ist:
+    title: Icona di Trama a sinistra
+    proposal: dhgcciow
+    tag: Icona Trama
+    finished: 2026-10-22T13:43:40.543Z
+    refs:
+      - panel/Closed/developer.OPEN_PANEL
+      - panel/Open/developer.OPEN_PANEL
+      - developer.OPEN_PANEL
+      - requirements/ui#panel
+      - requirements/tech#panel
+      - requirements/tech#project
+      - requirements/rules#project
+      - specs#frameworks
 ---
 # Icona di Trama nella barra delle attività
 

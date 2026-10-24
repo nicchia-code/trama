@@ -4,6 +4,18 @@ updated: 2026-10-24T07:19:11.102Z
 summary: The Board shows a stale Proposal being refined as queued, running or stopped, with reasons on Approve and a Cancel button for queued ones.
 tasks:
   - o1b3e307
+cleared:
+  o1b3e307:
+    title: Scheda da raffinare
+    proposal: 7p3ekjn9
+    tag: Auto-update Stale
+    finished: 2026-10-24T06:53:56.982Z
+    refs:
+      - panel
+      - requirements/ui#panel/Board
+      - requirements/ui#panel/Settings
+      - requirements/ui#raffinamento
+      - requirements/rules#setup-wizard
 ---
 # Board card for refining Proposals
 

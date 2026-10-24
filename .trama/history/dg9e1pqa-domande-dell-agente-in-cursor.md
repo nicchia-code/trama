@@ -5,6 +5,24 @@ summary: Nella chat di Cursor l'agente riceve la riga per usare trama ask, e le 
 tasks:
   - 0axvc7ty
   - gzjun2q9
+cleared:
+  0axvc7ty:
+    title: Domande dalla sandbox di Cursor
+    proposal: o0rhcv40
+    tag: Domande Cursor
+    finished: 2026-10-18T09:59:25.331Z
+    refs:
+      - question-round
+      - requirements/rules#question-round
+      - requirements/tech#question-round
+  gzjun2q9:
+    title: Riga sulle domande per Cursor
+    proposal: o0rhcv40
+    tag: Domande Cursor
+    finished: 2026-10-18T09:59:07.277Z
+    refs:
+      - agent-terminal
+      - requirements/rules#agent-terminal
 ---
 # Domande dell'agente in Cursor
 

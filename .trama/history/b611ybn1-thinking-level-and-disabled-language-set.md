@@ -4,6 +4,23 @@ updated: 2026-10-24T11:23:03.411Z
 summary: Model choices accept a thinking level suffix, shown in Settings and the wizard; the language setting is disabled and no instruction carries a language sentence.
 tasks:
   - vbcq0fwu
+cleared:
+  vbcq0fwu:
+    title: Thinking e lingua nei Settings
+    proposal: srkyrbvl
+    tag: Chat & panel polish
+    finished: 2026-10-24T11:15:19.056Z
+    refs:
+      - panel/Settings
+      - setup-wizard
+      - requirements/ui#panel/Settings
+      - requirements/tech#panel/Settings
+      - requirements/rules#agent-launching
+      - requirements/tech#agent-launching
+      - requirements/rules#setup-wizard
+      - requirements/tech#setup-wizard
+      - requirements/tech#proposal
+      - requirements/ui#agent-launching
 ---
 # Thinking level and disabled language setting
 

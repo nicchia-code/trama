@@ -4,6 +4,12 @@ updated: 2026-10-18T08:44:50.822Z
 summary: All'apertura dell'editor i Task presi da un agente restano presi e non tornano più in To do.
 tasks:
   - 4ghknso3
+cleared:
+  4ghknso3:
+    title: "Fix code to match the Model: Task presi rilasciati all'apertura"
+    finished: 2026-10-18T08:39:13.232Z
+    refs:
+      - task/In progress
 ---
 # Task presi restano presi
 

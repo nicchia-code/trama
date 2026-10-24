@@ -4,6 +4,15 @@ updated: 2026-10-18T09:23:45.014Z
 summary: Le skill che lanciano trama ask aspettano la risposta sul comando stesso, anche quando Cursor lo porta in background, senza timer né sleep.
 tasks:
   - f1d5lk1t
+cleared:
+  f1d5lk1t:
+    title: Attesa di trama ask
+    proposal: v3vw3m0r
+    tag: Attese di Cursor
+    finished: 2026-10-18T09:13:40.304Z
+    refs:
+      - question-round
+      - requirements/tech#question-round
 ---
 # Attesa di trama ask
 

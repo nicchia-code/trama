@@ -6,6 +6,34 @@ tasks:
   - x1u09lb6
   - yjjckndp
   - ioysk8ca
+cleared:
+  ioysk8ca:
+    title: Piano parallelo
+    proposal: 534wkl22
+    tag: Parallel Execution
+    finished: 2026-10-20T20:49:40.061Z
+    refs:
+      - task
+      - requirements/rules#agent-launching
+  yjjckndp:
+    title: Scelte parallele nella CLI
+    proposal: 534wkl22
+    tag: Parallel Execution
+    finished: 2026-10-20T20:46:44.695Z
+    refs:
+      - requirements/cli#General
+      - requirements/tech#task
+      - requirements/tech#work
+  x1u09lb6:
+    title: Casella Parallel Execution
+    proposal: 534wkl22
+    tag: Parallel Execution
+    finished: 2026-10-20T20:43:42.685Z
+    refs:
+      - panel/Settings
+      - panel/Open/developer.SHOW_SETTINGS
+      - requirements/ui#panel/Settings
+      - requirements/tech#panel/Settings
 ---
 # Esecuzione parallela sperimentale
 
