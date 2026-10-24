@@ -2,6 +2,7 @@ import type { ModelSuggestion } from "../../host/model-lists";
 import type { SettingSchema, SettingsValues, SettingValue } from "../../host/settings-schema";
 import { storedValue } from "../../host/settings-schema";
 import type { FolderEntry, InstructionFileView, ToHost, ToWebview, WorkspaceFolderView } from "../../protocol";
+import { type ProvidersView, providersView } from "../../omp-login";
 import {
   type AgentCheckResult,
   changedWrites,
@@ -9,6 +10,7 @@ import {
   exclusions,
   nextBlock,
   nextStep,
+  ompAnswers,
   openStep,
   openWizard,
   previousStep,
@@ -37,6 +39,8 @@ export interface WizardSnapshot {
   instructionFiles: readonly InstructionFileView[] | null;
   /** The check of the omp chosen now; null while it is being checked. */
   check: AgentCheckResult | null;
+  /** The Providers section of the omp step: null while it is not shown (no outcome yet, or omp does not answer), else the providers omp lists models of (absent: unknown); it keeps its rows while omp is checked again. */
+  providers: ProvidersView;
   /** The confirmation is under way: no button can be pressed. */
   busy: boolean;
   /** Why the last confirmation failed. */
@@ -66,6 +70,7 @@ export class WizardController {
   private foldersKnown = false;
   private models: WizardSnapshot["models"] = null;
   private check: AgentCheckResult | null = null;
+  private providers: ProvidersView = null;
   private instructionFiles: readonly InstructionFileView[] | null = null;
   /** The folder the last instruction-files search was asked for (null: the project's folder), while the omp step is on view. */
   private instructionRoot: string | null | undefined = undefined;
@@ -99,7 +104,7 @@ export class WizardController {
   }
 
   private build(): WizardSnapshot {
-    return { state: this.state, schema: this.schema, current: this.current, folders: this.folders, models: this.models, check: this.check, instructionFiles: this.instructionFiles, busy: this.busy, error: this.error, generation: this.generation };
+    return { state: this.state, schema: this.schema, current: this.current, folders: this.folders, models: this.models, check: this.check, providers: this.providers, instructionFiles: this.instructionFiles, busy: this.busy, error: this.error, generation: this.generation };
   }
 
   private emit(): void {
@@ -199,6 +204,7 @@ export class WizardController {
     if (state === null || message.ompPath !== chosenOmpPath(this.schema, state)) return;
     const { type: _type, ...result } = message;
     this.check = result;
+    this.providers = providersView(this.providers, result.state === "updating" ? "pending" : { answers: ompAnswers(result), providers: result.providers });
     this.emit();
   }
 
@@ -217,6 +223,13 @@ export class WizardController {
   /** `Install omp`: the host opens a terminal with omp's official installer. */
   installOmp(): void {
     this.callbacks.post({ type: "installOmp" });
+  }
+
+  /** `Log in` of a provider: the host opens a terminal that runs `omp login <provider>` with the omp of the step, saved or not, and checks it again when the command ends. */
+  login(provider: string): void {
+    const state = this.state;
+    if (state === null) return;
+    this.callbacks.post({ type: "ompLogin", provider, ompPath: chosenOmpPath(this.schema, state) });
   }
 
   receiveFolderChildren(message: Extract<ToWebview, { type: "folderChildren" }>): void {
@@ -337,6 +350,8 @@ export class WizardController {
     // The check is made again each time the omp step is shown and each time its path changes.
     if (state.step !== "omp") this.checkKey = null;
     if (state.step === "omp" && this.checkKey !== ompPath) {
+      // The section of providers waits for the first outcome after the step is shown; a later check, of the same or another path, keeps the rows until its outcome arrives.
+      if (this.checkKey === null) this.providers = null;
       this.checkKey = ompPath;
       this.check = null;
       this.callbacks.post({ type: "agentCheckWanted", ompPath });

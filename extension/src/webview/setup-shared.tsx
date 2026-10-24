@@ -1,12 +1,14 @@
 /**
  * The pieces the setup wizard and the Settings tab both show, so that neither repeats the other's text: the centred column, the
- * status box of omp, the box of agent instruction files, the sentences of the steps and the advice of the model roles.
+ * status box of omp, the Providers section, the box of agent instruction files, the sentences of the steps and the advice of the model roles.
  */
-import { CircleCheck, Loader, TriangleAlert } from "lucide-react";
-import type { ReactNode } from "react";
+import { CircleCheck, Loader, LogIn, TriangleAlert } from "lucide-react";
+import { type ReactNode, useId } from "react";
+import { type OmpLoginProvider, OMP_LOGIN_PROVIDERS, providerConnected } from "../omp-login";
 import type { SettingSchema, SettingValue } from "../host/settings-schema";
 import { InstallOmpButton } from "./install-omp";
 import { cn } from "./lib/utils";
+import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import type { WizardStep } from "./wizard/logic";
 
@@ -86,6 +88,74 @@ export function OmpStatusBox({ tone, text, missing, onInstall }: { tone: "checki
         {missing ? <InstallOmpButton className="justify-self-start" onInstall={onInstall} /> : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * The Providers section of omp's group in the Settings tab and of the wizard's omp step: the fixed list of model providers, each with the state of its
+ * connection and its Log in button. Presentation only: `connected` is `providers` of the last answer of omp with the list of models (absent: every state is
+ * unknown, which shows no state), `onLogin` gets the id of the provider whose button was pressed. The list is shown only when omp answers; the callers decide.
+ */
+export function Providers({ list = OMP_LOGIN_PROVIDERS, connected, onLogin }: { list?: readonly OmpLoginProvider[]; connected: readonly string[] | undefined; onLogin: (provider: string) => void }) {
+  const id = useId();
+  return (
+    <section aria-labelledby={`${id}-title`} className="mb-5">
+      <h3 id={`${id}-title`} className="mt-0 mb-1 text-base font-semibold">
+        Providers
+      </h3>
+      <p className="mt-0 mb-3 text-muted-foreground">Log in to the model providers you use with omp.</p>
+      <ul aria-label="Providers" className="m-0 grid list-none divide-y border-y p-0">
+        {list.map((provider) => (
+          <ProviderRow key={provider.id} provider={provider} descriptionId={`${id}-${provider.id}`} connected={providerConnected(connected, provider.id)} onLogin={() => onLogin(provider.id)} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** One row of the Providers list: the name with its subscription, the state in words (none while unknown), and the button, under them in a narrow panel. */
+function ProviderRow({ provider, descriptionId, connected, onLogin }: { provider: OmpLoginProvider; descriptionId: string; connected: boolean | undefined; onLogin: () => void }) {
+  const action = connected === true ? "Log in again" : "Log in";
+  const sentence = `Open a terminal that logs omp in to ${provider.name}`;
+  const description = provider.description;
+  return (
+    <li className="flex min-w-0 flex-col items-start gap-2 py-2.5 min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between min-[480px]:gap-4">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+        <div className="min-w-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <p className="m-0 text-sm font-bold wrap-anywhere">{provider.name}</p>
+            </TooltipTrigger>
+            {description === undefined ? null : <TooltipContent>{description}</TooltipContent>}
+          </Tooltip>
+          <p className="m-0 text-xs text-muted-foreground wrap-anywhere">{provider.plan}</p>
+        </div>
+        {connected === undefined ? null : connected ? (
+          <span className="inline-flex items-center gap-1 text-sm">
+            <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-green-600 dark:text-green-400" />
+            Connected
+          </span>
+        ) : (
+          <span className="text-sm text-muted-foreground">Not connected</span>
+        )}
+      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button type="button" variant="outline" size="sm" aria-label={`${action} to ${provider.name}`} {...(description === undefined ? {} : { "aria-describedby": descriptionId })} onClick={onLogin}>
+            <LogIn aria-hidden="true" />
+            {action}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {description === undefined ? sentence : <span className="grid gap-1"><span>{description}</span><span>{sentence}</span></span>}
+        </TooltipContent>
+      </Tooltip>
+      {description === undefined ? null : (
+        <span id={descriptionId} className="sr-only">
+          {description}
+        </span>
+      )}
+    </li>
   );
 }
 

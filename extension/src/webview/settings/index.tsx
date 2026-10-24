@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 import { type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
 import type { InstructionFileView, ToHost, ToWebview } from "../../protocol";
+import { type ProvidersView, providersView } from "../../omp-login";
 import type { OpenLink } from "../markdown";
-import { Column, GROUP_SENTENCES, IGNORE_INSTRUCTION_FILES_KEY, ignoresInstructionFiles, InstructionFiles, OmpStatusBox, ROLE_ADVICE, Subgroups } from "../setup-shared";
+import { Column, GROUP_SENTENCES, IGNORE_INSTRUCTION_FILES_KEY, ignoresInstructionFiles, InstructionFiles, OmpStatusBox, Providers, ROLE_ADVICE, Subgroups } from "../setup-shared";
 import type { ThemeController } from "../theme";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
@@ -54,6 +55,8 @@ export interface SettingsPageProps {
   wizard?: ReactNode;
   /** The state of omp, from the host's `ompStatus`; null until the first message, which reads as checking. */
   omp?: OmpStatus | null;
+  /** The Providers section: null while it is not shown (omp has not answered yet, or does not answer); otherwise the providers omp lists models of, absent when their states are unknown. */
+  providers?: ProvidersView;
   /** The agent instruction files found in the project's folder, from the last `instructionFiles` answer; null while the search runs, and always null outside a project. */
   instructionFiles?: readonly InstructionFileView[] | null;
 }
@@ -62,7 +65,7 @@ export interface SettingsPageProps {
  * The page: a title, with «Guided setup» in a project, and then every setting the manifest declares, in the groups and subgroups of the setup
  * wizard, in one column. Each setting is saved to the user settings when the developer confirms it.
  */
-export function SettingsPage({ schema, values, generation, models, listError, omp = null, instructionFiles = null, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
+export function SettingsPage({ schema, values, generation, models, listError, omp = null, providers = null, instructionFiles = null, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
   const send = (key: string, value: SettingValue) => post({ type: "setSetting", key, value });
   if (wizard !== undefined) return <>{wizard}</>;
   const field = (setting: SettingSchema) => (
@@ -104,6 +107,7 @@ export function SettingsPage({ schema, values, generation, models, listError, om
               </h2>
               <p className="mt-0 mb-5 text-muted-foreground">{GROUP_SENTENCES[group.title]}</p>
               {group.title === "omp" ? <OmpStatusBox tone={status.tone} text={status.text} missing={status.missing} onInstall={() => post({ type: "installOmp" })} /> : null}
+              {group.title === "omp" && providers !== null ? <Providers connected={providers.connected} onLogin={(provider) => post({ type: "ompLogin", provider })} /> : null}
               {group.settings.length > 0 ? <div className="grid gap-5">{group.settings.map(field)}</div> : null}
               {group.subgroups.length > 0 ? <Subgroups groups={group.subgroups.map((subgroup) => ({ title: subgroup.title, items: subgroup.settings }))} render={field} /> : null}
               {group.title === "omp" ? (
@@ -123,7 +127,7 @@ export function SettingsPage({ schema, values, generation, models, listError, om
 
 /** Mounts the Settings tab in `slot`; the panel's theme follows `trama.theme` as the host sends it, also while the tab is hidden. */
 export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeController): SettingsView => {
-  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, omp: null, instructionFiles: null, post: context.post, openLink: context.openLink };
+  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, omp: null, providers: null, instructionFiles: null, post: context.post, openLink: context.openLink };
   let hasProject = false;
   let visible = false;
   const wizard = new WizardController({
@@ -157,6 +161,8 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
     },
     show() {
       visible = true;
+      // The section of providers waits for the first outcome after the tab is shown.
+      page = { ...page, providers: null };
       // The model names, the state of omp and the instruction files are asked again each time the tab becomes visible; the files only in a project.
       context.post({ type: "modelSuggestionsWanted" });
       context.post({ type: "ompStatusWanted" });
@@ -177,7 +183,7 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
     },
     receiveOmpStatus(message) {
       const { type: _type, ...status } = message;
-      page = { ...page, omp: status };
+      page = { ...page, omp: status, providers: providersView(page.providers ?? null, status.state === "checking" ? "pending" : { answers: ompStatusLine(status).tone === "ok", providers: status.providers }) };
       render();
     },
     projectPresent(present) {

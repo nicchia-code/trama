@@ -274,6 +274,89 @@ test("leaving the omp step and coming back checks omp again", () => {
   expect(screen.getByText("Checking omp…")).not.toBeNull();
 });
 
+const providersList = () => screen.queryByRole("list", { name: "Providers" });
+const checked = (controller: WizardController, ompPath: string, result: Record<string, unknown>) =>
+  act(() => controller.receiveAgentCheck({ type: "agentCheck", ompPath, state: "done", missing: false, version: "18.12.6", ...result } as never));
+
+test("the omp step shows the Providers section under the status box only when omp answers, never before the first outcome", () => {
+  const { controller } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
+  expect(providersList()).toBeNull();
+  act(() => controller.receiveAgentCheck({ type: "agentCheck", ompPath: "/x/omp", state: "updating", version: "18.13.0" }));
+  expect(providersList()).toBeNull();
+  checked(controller, "/x/omp", { ok: false, missing: true, error: "omp not found at /x/omp" });
+  expect(providersList()).toBeNull();
+  checked(controller, "/x/omp", { ok: true, models: 2, providers: ["anthropic"] });
+  const section = screen.getByRole("heading", { level: 3, name: "Providers" }).closest("section") as HTMLElement;
+  const box = document.querySelector('[aria-live="polite"]') as HTMLElement;
+  expect(box.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(section.compareDocumentPosition(screen.getByLabelText("Omp Path")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const rows = within(screen.getByRole("list", { name: "Providers" })).getAllByRole("listitem");
+  expect(rows.map((row) => row.querySelector("p")?.textContent)).toEqual(["ChatGPT", "Anthropic", "GitHub Copilot", "Google Gemini CLI", "Google Antigravity", "Cursor", "xAI Grok"]);
+  expect(within(rows[1] as HTMLElement).getByText("Connected")).not.toBeNull();
+  expect(within(rows[1] as HTMLElement).getByRole("button").textContent).toBe("Log in again");
+  expect(within(rows[0] as HTMLElement).getByText("Not connected")).not.toBeNull();
+  expect(within(rows[0] as HTMLElement).getByRole("button").textContent).toBe("Log in");
+  checked(controller, "/x/omp", { ok: false, missing: false, error: "omp exited with code 1" });
+  expect(providersList()).toBeNull();
+});
+
+test("the rows keep the last states while omp is checked again, also through an update, and without providers they have no state", () => {
+  const { controller } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
+  checked(controller, "/x/omp", { ok: true, models: 2, providers: ["cursor"] });
+  expect(screen.getAllByText("Connected")).toHaveLength(1);
+  // A new check at the same path (as after a login), then one for another path: the rows stay until the outcome.
+  act(() => controller.receiveAgentCheck({ type: "agentCheck", ompPath: "/x/omp", state: "updating", version: "18.13.0" }));
+  expect(screen.getByText("Updating omp to 18.13.0…")).not.toBeNull();
+  expect(screen.getAllByText("Connected")).toHaveLength(1);
+  checked(controller, "/x/omp", { ok: true, models: 3, providers: ["cursor", "xai-oauth"] });
+  expect(screen.getAllByText("Connected")).toHaveLength(2);
+  act(() => controller.setValue(schema.find((s) => s.key === "trama.ompPath") as never, "/y/omp"));
+  expect(screen.getByText("Checking omp…")).not.toBeNull();
+  expect(screen.getAllByText("Connected")).toHaveLength(2);
+  checked(controller, "/y/omp", { ok: true, models: 1 });
+  expect(screen.queryByText("Connected")).toBeNull();
+  expect(screen.queryByText("Not connected")).toBeNull();
+  expect(screen.getAllByRole("button", { name: /^Log in to / })).toHaveLength(7);
+});
+
+test("the section waits for the first outcome again when the omp step is shown again", () => {
+  const { controller } = setup({ mode: "settings" });
+  checked(controller, "", { ok: true, models: 2, providers: ["anthropic"] });
+  expect(providersList()).not.toBeNull();
+  press("Next");
+  press("Back");
+  expect(screen.getByText("Checking omp…")).not.toBeNull();
+  expect(providersList()).toBeNull();
+  checked(controller, "", { ok: true, models: 2, providers: ["anthropic"] });
+  expect(providersList()).not.toBeNull();
+});
+
+test("pressing Log in sends ompLogin with the omp path of the step, saved or not, and keeps the choices of the wizard", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
+  checked(controller, "/x/omp", { ok: true, models: 2, providers: ["anthropic"] });
+  act(() => controller.setValue(schema.find((s) => s.key === "trama.ompPath") as never, "/typed/omp"));
+  checked(controller, "/typed/omp", { ok: true, models: 2, providers: ["anthropic"] });
+  press("Log in again to Anthropic");
+  press("Log in to Cursor");
+  expect(posted.filter((m) => m.type === "ompLogin")).toEqual([
+    { type: "ompLogin", provider: "anthropic", ompPath: "/typed/omp" },
+    { type: "ompLogin", provider: "cursor", ompPath: "/typed/omp" },
+  ]);
+  expect((screen.getByLabelText("Omp Path") as HTMLInputElement).value).toBe("/typed/omp");
+});
+
+test("Next of the omp step stays disabled with omp answering with no model, saying to log in or set an API key, and opens when a login brings a model", () => {
+  const { controller } = setup({ mode: "settings" });
+  const next = () => screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
+  checked(controller, "", { ok: true, models: 0, providers: [] });
+  expect(next().disabled).toBe(true);
+  expect(providersList()).not.toBeNull();
+  expect(controller.getSnapshot().state?.step).toBe("omp");
+  expect(screen.getByText("omp has no models yet. Log in to a provider or set an API key.")).not.toBeNull();
+  checked(controller, "", { ok: true, models: 1, providers: ["anthropic"] });
+  expect(next().disabled).toBe(false);
+});
+
 test("the Models step suggests the models of the omp path chosen in the wizard before it is saved, and blocks Next with an invalid number of sub-agents", () => {
   const { controller, posted } = setup({ mode: "settings" });
   answered(controller);

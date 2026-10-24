@@ -6,6 +6,7 @@ import { ADVANCED_GROUP_SENTENCE, ignoresInstructionFiles, ROLE_ADVICE, STEP_SEN
 import {
   advancedSubgroups,
   agentCheckLine,
+  ompAnswers,
   ompMissing,
   changedWrites,
   checkState,
@@ -383,13 +384,31 @@ test("a long value breaks after a slash, a hyphen, an underscore or a dot, and a
   expect(rows.find((r) => r.title === "Theme")?.empty).toBe(false);
 });
 
-test("Next of the omp step waits for omp to answer with the path of the step", () => {
+test("Next of the omp step waits for omp to answer with the path of the step and with at least one usable model", () => {
   const omp = openStep(openWizard("settings", null, { "trama.ompPath": { user: "/x/omp" } }, null), "omp");
   const BLOCK = "omp must answer before you go on.";
+  const NO_MODELS = "omp has no models yet. Log in to a provider or set an API key.";
   expect(nextBlock(schema, omp, null)).toBe(BLOCK);
   expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "updating", version: "2" })).toBe(BLOCK);
   expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: false, missing: true, error: "omp not found at /x/omp" })).toBe(BLOCK);
+  expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: false, missing: false, error: "omp exited with code 1" })).toBe(BLOCK);
   expect(nextBlock(schema, omp, { ompPath: "/other", state: "done", ok: true, missing: false, models: 3 })).toBe(BLOCK);
   expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: true, missing: false, models: 3 })).toBeNull();
+  expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: true, missing: false, models: 3, providers: [] })).toBeNull();
+  // Any provider counts, also one outside the list of logins.
+  expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: true, missing: false, models: 1, providers: ["some-other-provider"] })).toBeNull();
   expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: true, missing: false, models: 3, updateError: "omp update exited with code 1" })).toBeNull();
+  // omp answers with no usable model: only a login or an API key lets the developer go on.
+  expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: true, missing: false, models: 0, providers: [] })).toBe(NO_MODELS);
+  expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: true, missing: false, version: "18.12.6" })).toBe(NO_MODELS);
+  expect(nextBlock(schema, omp, { ompPath: "/x/omp", state: "done", ok: true, missing: false, models: 0, updateError: "omp update exited with code 1" })).toBe(NO_MODELS);
+});
+
+test("the check says omp responds when it ended with an answer from an omp that is not too old, whatever its models or its update", () => {
+  expect(ompAnswers(null)).toBe(false);
+  expect(ompAnswers({ ompPath: "", state: "updating", version: "18.12.6" })).toBe(false);
+  expect(ompAnswers({ ompPath: "", state: "done", ok: false, missing: true, error: "omp not found" })).toBe(false);
+  expect(ompAnswers({ ompPath: "", state: "done", ok: true, missing: false, version: "18.12.5", models: 2, tooOld: true })).toBe(false);
+  expect(ompAnswers({ ompPath: "", state: "done", ok: true, missing: false, version: "18.12.6", models: 0 })).toBe(true);
+  expect(ompAnswers({ ompPath: "", state: "done", ok: true, missing: false, version: "18.12.6", models: 2, updateError: "x" })).toBe(true);
 });

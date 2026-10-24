@@ -18,6 +18,8 @@ import { FIX_OPTIONS } from "./fix-options";
 import { syncRequirementSkills } from "../src/core/requirement-skills";
 import type { AgentAction } from "../extension/src/protocol";
 import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, buildPrompt } from "../extension/src/host/prompts";
+import { ompPathVariable } from "../extension/src/host/model-lists";
+import { type OmpLoginProvider, OMP_LOGIN_PROVIDERS, ompLoginProvider } from "../extension/src/omp-login";
 import type { Project } from "../src/core/store";
 
 // A minimal editor: just the terminal events and the calls launchAgent makes.
@@ -502,6 +504,122 @@ describe("Install omp", () => {
       expect(data.has(OMP_UPDATE_KEY)).toBe(false);
     } finally {
       setUpdateStore(undefined);
+      watching.dispose();
+    }
+  });
+});
+
+describe("Log in to a provider", () => {
+  const pathKey = process.platform === "win32" ? "Path" : "PATH";
+  const providerOf = (id: string): OmpLoginProvider => {
+    const found = ompLoginProvider(id);
+    if (found === undefined) throw new Error(`no provider ${id}`);
+    return found;
+  };
+  /** Runs `body` with the editor's default shell set to `shellPath`. */
+  const withShell = async <T>(shellPath: string, body: () => T): Promise<T> => {
+    const { env } = await import("vscode");
+    const before = env.shell;
+    Object.defineProperty(env, "shell", { value: shellPath, configurable: true, writable: true });
+    try {
+      return body();
+    } finally {
+      Object.defineProperty(env, "shell", { value: before, configurable: true, writable: true });
+    }
+  };
+
+  test("opens a new bare visible terminal named after the provider, in the home folder and the terminals area, with the quoted program, login and the id of the list", async () => {
+    const { loginOmp, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    const p = projectAt(dir);
+    withdrawAll(p);
+    inspected["terminalLocation"] = { globalValue: "editor" };
+    try {
+      let finished = 0;
+      const anthropic = providerOf("anthropic");
+      const first = loginOmp("/opt/my omp/bin/omp", anthropic, () => void finished++, false) as unknown as FakeTerminal;
+      expect(created.at(-1)).toMatchObject({ name: "Log in to Anthropic", cwd: os.homedir() });
+      expect(created.at(-1)?.location).toBeUndefined();
+      expect(created.at(-1)?.shellPath).toBeUndefined();
+      const env = created.at(-1)?.env ?? {};
+      expect(Object.keys(env).filter((key) => key.startsWith("TRAMA_"))).toEqual([]);
+      expect(env[pathKey]).toBe(ompPathVariable("/opt/my omp/bin/omp"));
+      expect(env[pathKey]?.split(delimiter)[0]).toBe("/opt/my omp/bin");
+      expect(first.line).toBe("'/opt/my omp/bin/omp' login anthropic");
+      expect(first.shown).toEqual([false]);
+      expect(listAnnouncements(p)).toEqual([]);
+
+      // Every provider of the list names its own terminal and takes its own id.
+      for (const provider of OMP_LOGIN_PROVIDERS) {
+        const terminal = loginOmp("omp", provider, () => {}, false) as unknown as FakeTerminal;
+        expect(created.at(-1)?.name).toBe(`Log in to ${provider.name}`);
+        expect(terminal.line).toBe(`'omp' login ${provider.id}`);
+      }
+      expect(terminals.filter((terminal) => terminal.name === "Log in to Anthropic").length).toBeGreaterThanOrEqual(2);
+      expect(first.disposals).toBe(0);
+
+      listeners.end.forEach((fn) => fn(shell(first, "unrelated command")));
+      expect(finished).toBe(0);
+      listeners.end.forEach((fn) => fn(shell(first, first.line, 1)));
+      expect(finished).toBe(1);
+      listeners.close.forEach((fn) => fn(first));
+      listeners.end.forEach((fn) => fn(shell(first)));
+      expect(finished).toBe(1);
+      expect(first.disposals).toBe(0);
+
+      const closed = loginOmp("omp", anthropic, () => void finished++, false) as unknown as FakeTerminal;
+      listeners.close.forEach((fn) => fn(closed));
+      expect(finished).toBe(2);
+      expect(closed.disposals).toBe(0);
+    } finally {
+      delete inspected["terminalLocation"];
+      watching.dispose();
+    }
+  });
+
+  test("quotes the program for the shell of the terminal: POSIX, fish, PowerShell 7, and Windows PowerShell 5.1 for the replaced Windows shells", async () => {
+    const { loginOmp } = await import("../extension/src/host/agent");
+    const provider = providerOf("xai-oauth");
+    const line = (shellPath: string, windows: boolean) => withShell(shellPath, () => (loginOmp("/opt/it's omp/omp", provider, () => {}, windows) as unknown as FakeTerminal).line);
+    expect(await line("/bin/zsh", false)).toBe(`'/opt/it'\\''s omp/omp' login xai-oauth`);
+    expect(await line("/usr/bin/fish", false)).toBe(`'/opt/it\\'s omp/omp' login xai-oauth`);
+    expect(await line("/usr/local/bin/pwsh", false)).toBe(`& '/opt/it''s omp/omp' login xai-oauth`);
+    // On Windows the other shells (and Git Bash, whose command is not PowerShell's) are replaced by Windows PowerShell 5.1 for this terminal.
+    expect(await line("C:\\Windows\\System32\\cmd.exe", true)).toBe(`& '/opt/it''s omp/omp' login xai-oauth`);
+    expect(created.at(-1)?.shellPath).toMatch(/WindowsPowerShell.v1\.0.powershell\.exe$/);
+    expect(await line("C:\\Program Files\\PowerShell\\7\\pwsh.exe", true)).toBe(`& '/opt/it''s omp/omp' login xai-oauth`);
+    expect(created.at(-1)?.shellPath).toBeUndefined();
+  });
+
+  test("the controller opens the terminal for the omp of trama.ompPath, or of the path of the message, and checks omp again once when the command ends", async () => {
+    const { Controller } = await import("../extension/src/host/controller");
+    const controller = new Controller({ scheme: "file" } as never);
+    const calls: string[] = [];
+    const spied = controller as unknown as { checkAgent(path: string): Promise<void>; refreshOmp(fresh?: boolean): Promise<void>; dispatch(message: unknown): Promise<void> };
+    spied.checkAgent = async (path) => void calls.push(`checkAgent ${path}`);
+    spied.refreshOmp = async (fresh) => void calls.push(`refreshOmp ${fresh}`);
+    const watching = (await import("../extension/src/host/agent")).watchAgentTerminal();
+    inspected["ompPath"] = { globalValue: " /saved/omp " };
+    try {
+      await spied.dispatch({ type: "ompLogin", provider: "github-copilot" });
+      const saved = terminals.at(-1) as FakeTerminal;
+      expect(created.at(-1)).toMatchObject({ name: "Log in to GitHub Copilot", cwd: os.homedir() });
+      expect(saved.line).toBe("'/saved/omp' login github-copilot");
+      expect(calls).toEqual([]);
+
+      await spied.dispatch({ type: "ompLogin", provider: "cursor", ompPath: "/typed/omp" });
+      const typedPath = terminals.at(-1) as FakeTerminal;
+      expect(typedPath).not.toBe(saved);
+      expect(typedPath.line).toBe("'/typed/omp' login cursor");
+
+      listeners.end.forEach((fn) => fn(shell(typedPath)));
+      listeners.close.forEach((fn) => fn(typedPath));
+      expect(calls).toEqual(["checkAgent /typed/omp", "refreshOmp true"]);
+      listeners.close.forEach((fn) => fn(saved));
+      expect(calls).toEqual(["checkAgent /typed/omp", "refreshOmp true", "checkAgent /saved/omp", "refreshOmp true"]);
+      expect(saved.disposals + typedPath.disposals).toBe(0);
+    } finally {
+      delete inspected["ompPath"];
       watching.dispose();
     }
   });

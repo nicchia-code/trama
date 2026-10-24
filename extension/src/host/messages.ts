@@ -5,6 +5,7 @@ import { type SettingSchema, type SettingValue, settingValueError } from "./sett
 import { safeLink } from "../../../src/core/links";
 import { isSafeRelativePath } from "./folder-tree";
 import { STEP_KEYS } from "../webview/wizard/logic";
+import { ompLoginProvider } from "../omp-login";
 import { PANEL_VIEWS } from "../menu-protocol";
 
 /** The settings the wizard may write: the keys of its steps. */
@@ -124,6 +125,13 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       return typeof raw["ompPath"] === "string" && raw["ompPath"].length <= MAX_PATH_TEXT
         ? { ok: true, message: { type, ompPath: raw["ompPath"] } }
         : bad("agentCheckWanted needs an omp path");
+    case "ompLogin": {
+      const provider = typeof raw["provider"] === "string" ? ompLoginProvider(raw["provider"]) : undefined;
+      if (provider === undefined) return bad("ompLogin needs a provider of the list");
+      if (raw["ompPath"] === undefined) return { ok: true, message: { type, provider: provider.id } };
+      if (typeof raw["ompPath"] !== "string" || raw["ompPath"].length > MAX_PATH_TEXT) return bad("ompLogin needs an omp path as text, or none");
+      return { ok: true, message: { type, provider: provider.id, ompPath: raw["ompPath"] } };
+    }
     case "ompStatusWanted":
     case "installOmp":
       return { ok: true, message: { type } };

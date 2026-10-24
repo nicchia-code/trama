@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseToHost } from "../extension/src/host/messages";
+import { OMP_LOGIN_PROVIDERS } from "../extension/src/omp-login";
 import { settingsSchema } from "../extension/src/host/settings-schema";
 
 const ok = (message: unknown) => {
@@ -107,6 +108,15 @@ test("openTaskImage is accepted only for an image the Task has", () => {
     expect(parseToHost({ type: "openTaskImage", ...message }, [], has).ok).toBe(false);
   }
   expect(parseToHost({ type: "openTaskImage", task: "abcd1234", name: "shot.png" }).ok).toBe(false);
+});
+
+test("ompLogin is accepted only with a provider of the fixed list and an omp path that is text, when there is one", () => {
+  for (const { id } of OMP_LOGIN_PROVIDERS) expect(ok({ type: "ompLogin", provider: id })).toEqual({ type: "ompLogin", provider: id });
+  expect(ok({ type: "ompLogin", provider: "anthropic", ompPath: "/opt/omp" })).toEqual({ type: "ompLogin", provider: "anthropic", ompPath: "/opt/omp" });
+  expect(ok({ type: "ompLogin", provider: "anthropic", ompPath: "" })).toEqual({ type: "ompLogin", provider: "anthropic", ompPath: "" });
+  for (const provider of ["openai", "xai", "ANTHROPIC", "anthropic; rm -rf /", "", undefined, 3, null, "constructor"]) expect(parseToHost({ type: "ompLogin", provider }).ok).toBe(false);
+  for (const ompPath of [3, null, ["x"]]) expect(parseToHost({ type: "ompLogin", provider: "anthropic", ompPath }).ok).toBe(false);
+  expect(OMP_LOGIN_PROVIDERS.map((provider) => provider.id)).toEqual(["openai-codex", "anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "cursor", "xai-oauth"]);
 });
 
 test("the messages of the setup wizard are checked: the choice, the agent, the folder and the paths", () => {

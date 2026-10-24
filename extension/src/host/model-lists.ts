@@ -34,8 +34,14 @@ function thinkingOf(value: unknown): string[] | undefined {
   return levels.every((level): level is string => level !== undefined) ? levels : undefined;
 }
 
-/** `omp models --json`: `{ "models": [{ "selector", "name" }] }`. Undefined when the output is not that list; an empty list is still a list. */
-export function parseOmpModels(output: string): ModelSuggestion[] | undefined {
+/** What `omp models --json` lists: the model names, and the unique `provider` of its models, in the order they first appear. */
+export interface OmpModelList {
+  models: ModelSuggestion[];
+  providers: string[];
+}
+
+/** `omp models --json`: `{ "models": [{ "selector", "name", "provider" }] }`. Undefined when the output is not that list; an empty list is still a list. A `provider` counts only as a non-empty text. */
+export function parseOmpList(output: string): OmpModelList | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(output);
@@ -44,17 +50,30 @@ export function parseOmpModels(output: string): ModelSuggestion[] | undefined {
   }
   const models = record(parsed)?.["models"];
   if (!Array.isArray(models)) return undefined;
-  return uniqueSuggestions(
-    models.flatMap((entry) => {
-      const selector = text(record(entry)?.["selector"]);
-      return selector === undefined ? [] : [{ value: selector, label: text(record(entry)?.["name"]) ?? selector, thinking: thinkingOf(record(entry)?.["thinking"]) }];
-    }),
-  );
+  const providers = new Set<string>();
+  for (const entry of models) {
+    const provider = text(record(entry)?.["provider"]);
+    if (provider !== undefined) providers.add(provider);
+  }
+  return {
+    providers: [...providers],
+    models: uniqueSuggestions(
+      models.flatMap((entry) => {
+        const selector = text(record(entry)?.["selector"]);
+        return selector === undefined ? [] : [{ value: selector, label: text(record(entry)?.["name"]) ?? selector, thinking: thinkingOf(record(entry)?.["thinking"]) }];
+      }),
+    ),
+  };
 }
+
+/** The model names of `omp models --json`; see `parseOmpList`. */
+export const parseOmpModels = (output: string): ModelSuggestion[] | undefined => parseOmpList(output)?.models;
 
 /** What the Settings tab shows for omp's model names: the names, or the reason there are none. */
 export interface ModelList {
   models: ModelSuggestion[];
+  /** The `provider` of the usable models, each once; absent when there is no list (`error`), which leaves the state of every provider unknown. */
+  providers?: string[];
   /** The reason there is no list, in English, as the Settings tab shows it. */
   error?: string;
   /** True when the program itself was not found (ENOENT): the only failure `Install omp` answers. */
@@ -87,8 +106,8 @@ export function ompModels(ompPath: string, timeoutMs = 15_000, env: NodeJS.Proce
   const { promise, resolve } = Promise.withResolvers<ModelList>();
   const options = { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...env, PATH: ompPathVariable(ompPath, env) } };
   execFile(ompPath === "" ? "omp" : ompPath, ["models", "--json"], options, (error, stdout) => {
-    const models = error === null ? parseOmpModels(stdout) : undefined;
-    resolve(models === undefined ? { models: [], error: ompError(error, ompPath, timeoutMs), ...(error?.code === "ENOENT" ? { missing: true as const } : {}) } : { models });
+    const list = error === null ? parseOmpList(stdout) : undefined;
+    resolve(list === undefined ? { models: [], error: ompError(error, ompPath, timeoutMs), ...(error?.code === "ENOENT" ? { missing: true as const } : {}) } : list);
   });
   return promise;
 }

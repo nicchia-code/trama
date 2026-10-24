@@ -240,12 +240,25 @@ export function visibleRows(tree: Tree, open: ReadonlySet<string>): { path: stri
 
 // ---- Validity ----
 
+/** Why Next of the omp step is not available: omp is missing, does not answer, is being checked, or its answer is not for the path of the step. */
+export const OMP_MUST_ANSWER = "omp must answer before you go on.";
+
+/** Why Next of the omp step is not available when omp answers with no usable model: the developer logs in to a provider or sets an API key. */
+export const OMP_HAS_NO_MODELS = "omp has no models yet. Log in to a provider or set an API key.";
+
+/** Whether the check says omp responds: it ended with an answer, and that omp is not older than the minimum. A failed update does not matter. */
+export function ompAnswers(check: AgentCheckResult | null): boolean {
+  return check !== null && check.state === "done" && check.ok && check.tooOld !== true;
+}
+
 /** Why Next of the step is not available; null when it is. `check` is the answer of the host to the check of omp, null while there is none. */
 export function nextBlock(schema: readonly SettingSchema[], state: WizardState, check: AgentCheckResult | null): string | null {
   switch (state.step) {
-    case "omp":
-      // Only an answer that says omp responds, for the path of the step, lets Next go; a failed update does not stop it.
-      return check !== null && check.state === "done" && check.ok && check.ompPath === chosenOmpPath(schema, state) ? null : "omp must answer before you go on.";
+    case "omp": {
+      // Only an answer that says omp responds, for the path of the step, with at least one usable model of any provider, lets Next go; a failed update does not stop it.
+      if (check === null || check.state !== "done" || !check.ok || check.ompPath !== chosenOmpPath(schema, state)) return OMP_MUST_ANSWER;
+      return (check.models ?? 0) > 0 ? null : OMP_HAS_NO_MODELS;
+    }
     case "Path":
       return state.choice === null ? "Choose how to start" : state.root === null ? "No folder to initialize" : null;
     case "Models": {

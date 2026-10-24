@@ -131,6 +131,9 @@ Il developer passa alla scheda Settings del pannello, dal menu laterale, con il 
 ### INSTALL_OMP
 Il developer preme Install omp: nel passo omp del wizard di setup, nel gruppo omp della scheda Settings, nell'avviso che omp non è installato o dentro la conversazione General di omp Chat, quando omp manca. Trama apre un terminale visibile con l'installer ufficiale di omp (vedi Agent launching).
 
+### LOG_IN_PROVIDER
+Il developer preme Log in, o Log in again, sulla riga di un fornitore di modelli nella sezione Providers del gruppo omp della scheda Settings o del passo omp del wizard di setup. Trama apre un terminale visibile in cui omp fa il login a quel fornitore: omp apre il browser o mostra un codice, e il developer completa l'accesso lì (vedi il Setup wizard e il Panel).
+
 ### CHANGE_SETTING
 Il developer cambia un'impostazione di Trama dalla scheda Settings: sceglie un valore in un menu, spunta o toglie una casella, oppure conferma un campo di testo o numerico.
 

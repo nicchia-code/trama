@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ModelSuggestion } from "../extension/src/host/model-lists";
 import { type ManifestPackage, type SettingsValues, settingsSchema } from "../extension/src/host/settings-schema";
-import type { ToHost } from "../extension/src/protocol";
+import type { ToHost, ToWebview } from "../extension/src/protocol";
 import { mountSettings, SettingsPage } from "../extension/src/webview/settings";
 import { startTheme } from "../extension/src/webview/theme";
 
@@ -419,4 +419,112 @@ test("the mounted tab, in a project, asks for the files without a root each time
 
   act(() => view.projectPresent(false));
   expect(screen.queryByRole("button", { name: /Guided setup/ })).toBeNull();
+});
+
+/** The mounted tab with the schema received; `status` sends an ompStatus. */
+function mounted() {
+  const posted: ToHost[] = [];
+  const page = render(<></>);
+  const view = mountSettings((node) => page.rerender(<>{node}</>), { post: (m) => posted.push(m), navigate: () => {}, openLink: () => {} }, startTheme());
+  act(() => view.receive({ type: "settings", schema, values: {} }));
+  const status = (message: Omit<Extract<ToWebview, { type: "ompStatus" }>, "type">) => act(() => view.receiveOmpStatus({ type: "ompStatus", ...message }));
+  return { posted, view, status };
+}
+const providersList = () => screen.queryByRole("list", { name: "Providers" });
+
+test("the Providers section is absent before the first outcome, while omp is checked and when omp does not answer", () => {
+  const { status } = mounted();
+  expect(providersList()).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Providers" })).toBeNull();
+  status({ state: "checking" });
+  expect(providersList()).toBeNull();
+  status({ state: "done", missing: true, error: "omp not found at the editor PATH" });
+  expect(providersList()).toBeNull();
+  status({ state: "done", missing: false, version: "18.12.5", models: 3, providers: ["anthropic"], tooOld: true });
+  expect(providersList()).toBeNull();
+  status({ state: "done", missing: false, version: "18.12.6", models: 1, providers: ["anthropic"] });
+  expect(providersList()).not.toBeNull();
+  status({ state: "done", missing: false, error: "omp exited with code 1" });
+  expect(providersList()).toBeNull();
+});
+
+test("with omp answering, the Providers section sits under the status box and before the settings, with the seven rows in order", () => {
+  const { status } = mounted();
+  status({ state: "done", missing: false, version: "18.12.6", models: 2, providers: [] });
+  const section = screen.getByRole("heading", { level: 3, name: "Providers" }).closest("section") as HTMLElement;
+  expect(section.parentElement?.querySelector("h2")?.textContent).toBe("omp");
+  const box = document.querySelector('[aria-live="polite"]') as HTMLElement;
+  expect(box.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(section.compareDocumentPosition(screen.getByRole("textbox", { name: "Omp Path" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(section).getByText("Log in to the model providers you use with omp.")).not.toBeNull();
+  const rows = within(screen.getByRole("list", { name: "Providers" })).getAllByRole("listitem");
+  expect(rows.map((row) => within(row).getByRole("button").textContent)).toEqual(Array(7).fill("Log in"));
+  expect(rows.map((row) => row.querySelector("p")?.textContent)).toEqual(["ChatGPT", "Anthropic", "GitHub Copilot", "Google Gemini CLI", "Google Antigravity", "Cursor", "xAI Grok"]);
+  expect(rows.map((row) => row.querySelectorAll("p")[1]?.textContent)).toEqual(["Plus/Pro (Codex)", "Claude Pro/Max", "Copilot subscription", "Cloud Code Assist", "Gemini, Claude, GPT-OSS", "Cursor subscription", "SuperGrok or X Premium+"]);
+});
+
+test("a provider omp lists models of is Connected with Log in again, the others Not connected with Log in", () => {
+  const { status } = mounted();
+  status({ state: "done", missing: false, version: "18.12.6", models: 2, providers: ["github-copilot", "xai-oauth", "some-other-provider"] });
+  const rows = within(screen.getByRole("list", { name: "Providers" })).getAllByRole("listitem");
+  const connected = rows.filter((row) => within(row).queryByText("Connected") !== null);
+  expect(connected.map((row) => row.querySelector("p")?.textContent)).toEqual(["GitHub Copilot", "xAI Grok"]);
+  for (const row of connected) {
+    expect(row.querySelector("svg.lucide-circle-check")).not.toBeNull();
+    expect(within(row).getByRole("button").textContent).toBe("Log in again");
+  }
+  expect(screen.getAllByText("Not connected")).toHaveLength(5);
+  expect(screen.getByRole("button", { name: "Log in again to GitHub Copilot" })).not.toBeNull();
+  expect(screen.getByRole("button", { name: "Log in to Cursor" })).not.toBeNull();
+  // No other provider of omp has a row.
+  expect(rows).toHaveLength(7);
+});
+
+test("without providers (the list of models failed while omp answers) the rows have no state and every button says Log in", () => {
+  const { status } = mounted();
+  status({ state: "done", missing: false, version: "18.12.6", models: 0 });
+  const rows = within(screen.getByRole("list", { name: "Providers" })).getAllByRole("listitem");
+  expect(rows).toHaveLength(7);
+  expect(screen.queryByText("Connected")).toBeNull();
+  expect(screen.queryByText("Not connected")).toBeNull();
+  expect(rows.map((row) => within(row).getByRole("button").textContent)).toEqual(Array(7).fill("Log in"));
+});
+
+test("the rows keep their last states while omp is checked again, and take the new ones with the outcome", () => {
+  const { status } = mounted();
+  status({ state: "done", missing: false, version: "18.12.6", models: 2, providers: ["anthropic"] });
+  expect(screen.getAllByText("Connected")).toHaveLength(1);
+  status({ state: "checking" });
+  expect(screen.getByText("Checking omp…")).not.toBeNull();
+  expect(screen.getAllByText("Connected")).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Log in again to Anthropic" })).not.toBeNull();
+  status({ state: "done", missing: false, version: "18.12.6", models: 3, providers: ["anthropic", "cursor"] });
+  expect(screen.getAllByText("Connected")).toHaveLength(2);
+  status({ state: "checking" });
+  status({ state: "done", missing: false, version: "18.12.6", models: 1, providers: [] });
+  expect(screen.queryByText("Connected")).toBeNull();
+});
+
+test("the section waits for the first outcome after the tab is shown again", () => {
+  const { status, view } = mounted();
+  status({ state: "done", missing: false, version: "18.12.6", models: 2, providers: ["anthropic"] });
+  expect(providersList()).not.toBeNull();
+  view.show({});
+  status({ state: "checking" });
+  expect(providersList()).toBeNull();
+  status({ state: "done", missing: false, version: "18.12.6", models: 2, providers: ["anthropic"] });
+  expect(providersList()).not.toBeNull();
+});
+
+test("pressing a button sends ompLogin with the id of the provider and no ompPath", () => {
+  const { status, posted } = mounted();
+  status({ state: "done", missing: false, version: "18.12.6", models: 2, providers: ["anthropic"] });
+  fireEvent.click(screen.getByRole("button", { name: "Log in again to Anthropic" }));
+  fireEvent.click(screen.getByRole("button", { name: "Log in to ChatGPT" }));
+  fireEvent.click(screen.getByRole("button", { name: "Log in to xAI Grok" }));
+  expect(posted.filter((message) => message.type === "ompLogin")).toEqual([
+    { type: "ompLogin", provider: "anthropic" },
+    { type: "ompLogin", provider: "openai-codex" },
+    { type: "ompLogin", provider: "xai-oauth" },
+  ]);
 });

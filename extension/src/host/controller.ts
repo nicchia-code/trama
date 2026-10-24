@@ -20,7 +20,7 @@ import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, getTaskOr
 import type { AgentAction, NavigateOptions, RefinementView, RunEstimateView, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
 import type { MenuViewName } from "../menu-protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAdvisorScanner, configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, openAskMore, settings, startHeldJob } from "./agent";
+import { configuredAdvisorScanner, configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, loginOmp, openAskMore, settings, startHeldJob } from "./agent";
 import { bundledUnifyInstructions } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { driftWork, driftsFinishing, localProjectJobs, onAgentStopped, onDriftResolutionChange, onProposalDelivered, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, type RunAll, tasksFinishing, unifyingDrifts } from "./drift-resolution";
@@ -62,6 +62,7 @@ import { planRuns, runSequence, runSequenceTogether, startRuns, type AppliedMode
 import { runAllEstimate } from "./run-all-estimate";
 import { ompModels } from "./model-lists";
 import { ensureOmpUpdated, findOmp, forgetUpdateCheck } from "./omp-update";
+import { ompLoginProvider } from "../omp-login";
 import { ompStatus } from "./omp-status";
 import { confirmScanSystem } from "./scan-confirm";
 import { planSettingChange, settingsSchema, settingTitle, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
@@ -401,6 +402,7 @@ export class Controller implements vscode.Disposable {
       missing: list.missing === true,
       ...(outcome.version === undefined ? {} : { version: outcome.version }),
       ...(list.error === undefined ? { models: list.models.length } : { error: list.error }),
+      ...(list.providers === undefined ? {} : { providers: list.providers }),
       ...(outcome.updateError === undefined ? {} : { updateError: outcome.updateError }),
       ...(outcome.tooOld === true ? { tooOld: true as const } : {}),
     });
@@ -411,6 +413,26 @@ export class Controller implements vscode.Disposable {
     installOmp(() => {
       forgetUpdateCheck();
       void this.checkAgent(configuredOmpPath());
+      void this.refreshOmp(true);
+    });
+  }
+
+  /**
+   * Log in to a model provider: a visible terminal that runs `omp login <provider>` with the omp of `ompPath` (the wizard's omp step, saved or not) or, without
+   * it, of the saved `trama.ompPath`. `provider` is an id of the fixed list (`parseToHost` checked it). When the command ends or the terminal closes, whatever
+   * the outcome, the Settings tab's omp state and the wizard's omp check run again, silently: the outcome stays in the terminal.
+   */
+  private async ompLogin(provider: string, ompPath: string | undefined): Promise<void> {
+    const entry = ompLoginProvider(provider);
+    if (entry === undefined) return;
+    const wanted = ompPath ?? configuredOmpPath();
+    const program = await findOmp(wanted.trim());
+    if (program === undefined) {
+      this.post({ type: "error", message: `omp not found at ${wanted.trim() === "" ? "the editor PATH" : wanted.trim()}` });
+      return;
+    }
+    loginOmp(program, entry, () => {
+      void this.checkAgent(wanted);
       void this.refreshOmp(true);
     });
   }
@@ -431,7 +453,8 @@ export class Controller implements vscode.Disposable {
     entry.done = (async () => {
       const [list, status] = await Promise.all([ompModels(ompPath), ompStatus(ompPath)]);
       if (request !== this.ompRequest) return;
-      this.post({ type: "modelSuggestions", ...list });
+      const { providers, ...suggestions } = list;
+      this.post({ type: "modelSuggestions", ...suggestions });
       const error = status.error ?? list.error;
       this.post({
         type: "ompStatus",
@@ -440,6 +463,7 @@ export class Controller implements vscode.Disposable {
         ...(status.version === undefined ? {} : { version: status.version }),
         ...(status.tooOld === true ? { tooOld: true as const } : {}),
         ...(error === undefined ? { models: list.models.length } : { error }),
+        ...(providers === undefined ? {} : { providers }),
       });
     })().finally(() => {
       if (this.ompRefresh === entry) this.ompRefresh = undefined;
@@ -475,8 +499,8 @@ export class Controller implements vscode.Disposable {
   /** The model names of the omp at `ompPath` for the wizard's Models step, which suggests them before the path is saved. */
   private async postWizardSuggestions(ompPath: string): Promise<void> {
     const request = ++this.wizardSuggestionsRequest;
-    const list = await ompModels(ompPath.trim());
-    if (request === this.wizardSuggestionsRequest) this.post({ type: "modelSuggestions", ...list, ompPath });
+    const { providers: _providers, ...suggestions } = await ompModels(ompPath.trim());
+    if (request === this.wizardSuggestionsRequest) this.post({ type: "modelSuggestions", ...suggestions, ompPath });
   }
 
   /** One folder of the wizard's tree: `root` must be a workspace folder and `path` inside it. */
@@ -824,6 +848,10 @@ export class Controller implements vscode.Disposable {
     }
     if (message.type === "installOmp") {
       this.installOmp();
+      return;
+    }
+    if (message.type === "ompLogin") {
+      await this.ompLogin(message.provider, message.ompPath);
       return;
     }
     if (message.type === "instructionFilesWanted") {

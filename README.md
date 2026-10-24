@@ -47,6 +47,8 @@ code --install-extension trama-<platform>-<version>.vsix
 
 Every setting is in the **Settings** tab of the panel, which saves to your user settings; **Guided setup** there (top right) walks you through the main ones again, step by step, with each setting explained under its title.
 
+To use a model with a subscription (ChatGPT, Anthropic, GitHub Copilot, Google Gemini CLI, Google Antigravity, Cursor or xAI Grok), open the **omp** group of the **Settings** tab, or the `omp` step of the wizard, and press **Log in** on the provider's row of the **Providers** section (**Log in again** when it already shows **Connected**). Trama opens a terminal named `Log in to <provider>` where omp runs `omp login <provider>`: omp opens the browser or shows a code, and you finish the login there. When the command ends, Trama checks omp again and updates the **Connected** marks; it never reads the terminal or your credentials.
+
 ## Optional features
 
 The **Advanced** group of the Settings tab holds the theme and the optional features, split into the subgroups **Appearance**, **Drifts**, **Agents** and **omp Chat**. The features are off by default except **omp Chat** and its **omp Chat Intent Tracing**:

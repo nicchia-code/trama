@@ -13,6 +13,8 @@ let receive: ((raw: unknown) => void) | undefined;
 let modalAnswer: string | undefined;
 const modals: string[] = [];
 const opened: { path: string; options: unknown }[] = [];
+/** Every login terminal the controller opened: what it ran and the callback that tells its command ended. */
+const logins: { program: string; provider: { id: string; name: string }; finish: () => void }[] = [];
 
 mock.module("vscode", () => ({
   window: {
@@ -88,6 +90,7 @@ mock.module("../extension/src/host/agent", () => ({
     return { kind: "sent" };
   },
   launched: () => true,
+  loginOmp: (program: string, provider: { id: string; name: string }, finish: () => void) => void logins.push({ program, provider, finish }),
 }));
 const { Controller } = await import("../extension/src/host/controller");
 
@@ -107,6 +110,7 @@ beforeEach(() => {
   modalAnswer = undefined;
   failOn = undefined;
   setups = 0;
+  logins.length = 0;
   receive = undefined;
   controller = new Controller({ fsPath: root } as never, undefined, undefined, { writeSetup: async () => void setups++ } as never);
 });
@@ -237,7 +241,7 @@ test("the omp status says checking, then that omp is not found at the path set; 
 function fakeOmp(): { program: string; calls: () => number } {
   const program = join(root, "omp");
   const counter = join(root, "models-calls");
-  writeFileSync(program, `#!/bin/sh\ncase "$1" in\n  models) echo x >> '${counter}'; echo '{"models":[{"selector":"a/b"},{"selector":"c/d"}]}' ;;\n  *) echo 'omp/18.12.6' ;;\nesac\n`, { mode: 0o755 });
+  writeFileSync(program, `#!/bin/sh\ncase "$1" in\n  models) echo x >> '${counter}'; echo '{"models":[{"selector":"a/b","provider":"anthropic"},{"selector":"c/d","provider":"xai-oauth"},{"selector":"c/e","provider":"xai-oauth"}]}' ;;\n  *) echo 'omp/18.12.6' ;;\nesac\n`, { mode: 0o755 });
   return { program, calls: () => (existsSync(counter) ? readFileSync(counter, "utf8").split("\n").filter((l) => l !== "").length : 0) };
 }
 
@@ -250,15 +254,15 @@ test("a change of the omp path sends the status again; the status of omp that an
   await controller.refreshOmp();
   expect(messages.filter((m) => m["type"] === "ompStatus")).toEqual([
     { type: "ompStatus", state: "checking" },
-    { type: "ompStatus", state: "done", missing: false, version: "18.12.6", models: 2 },
+    { type: "ompStatus", state: "done", missing: false, version: "18.12.6", models: 3, providers: ["anthropic", "xai-oauth"] },
   ]);
-  expect(messages.filter((m) => m["type"] === "modelSuggestions")).toEqual([{ type: "modelSuggestions", models: [{ value: "a/b" }, { value: "c/d" }] }]);
+  expect(messages.filter((m) => m["type"] === "modelSuggestions")).toEqual([{ type: "modelSuggestions", models: [{ value: "a/b" }, { value: "c/d" }, { value: "c/e" }] }]);
 });
 
 /** An omp of version `version` that is up to date and lists one model. */
 function fakeOmpOfVersion(version: string): string {
   const program = join(root, "omp");
-  writeFileSync(program, `#!/bin/sh\ncase "$1" in\n  models) echo '{"models":[{"selector":"a/b"}]}' ;;\n  update) echo 'Current version: ${version}'; echo 'Already up to date' ;;\n  *) echo 'omp/${version}' ;;\nesac\n`, { mode: 0o755 });
+  writeFileSync(program, `#!/bin/sh\ncase "$1" in\n  models) echo '{"models":[{"selector":"a/b","provider":"anthropic"}]}' ;;\n  update) echo 'Current version: ${version}'; echo 'Already up to date' ;;\n  *) echo 'omp/${version}' ;;\nesac\n`, { mode: 0o755 });
   return program;
 }
 
@@ -269,18 +273,45 @@ test("an omp older than the minimum is flagged tooOld in the Settings status and
   userSettings.set("ompPath", program);
   await send({ type: "ompStatusWanted" });
   await controller.refreshOmp();
-  expect(messages.filter((m) => m["type"] === "ompStatus").at(-1)).toEqual({ type: "ompStatus", state: "done", missing: false, version: "18.12.5", tooOld: true, models: 1 });
+  expect(messages.filter((m) => m["type"] === "ompStatus").at(-1)).toEqual({ type: "ompStatus", state: "done", missing: false, version: "18.12.5", tooOld: true, models: 1, providers: ["anthropic"] });
   await send({ type: "agentCheckWanted", ompPath: program });
-  expect(messages.filter((m) => m["type"] === "agentCheck").at(-1)).toEqual({ type: "agentCheck", ompPath: program, state: "done", ok: true, missing: false, version: "18.12.5", models: 1, tooOld: true });
+  expect(messages.filter((m) => m["type"] === "agentCheck").at(-1)).toEqual({ type: "agentCheck", ompPath: program, state: "done", ok: true, missing: false, version: "18.12.5", models: 1, providers: ["anthropic"], tooOld: true });
 
   forgetUpdateCheck();
   fakeOmpOfVersion("18.12.6");
   messages.length = 0;
   await send({ type: "ompStatusWanted" });
   await controller.refreshOmp(true);
-  expect(messages.filter((m) => m["type"] === "ompStatus").at(-1)).toEqual({ type: "ompStatus", state: "done", missing: false, version: "18.12.6", models: 1 });
+  expect(messages.filter((m) => m["type"] === "ompStatus").at(-1)).toEqual({ type: "ompStatus", state: "done", missing: false, version: "18.12.6", models: 1, providers: ["anthropic"] });
   await send({ type: "agentCheckWanted", ompPath: program });
-  expect(messages.filter((m) => m["type"] === "agentCheck").at(-1)).toEqual({ type: "agentCheck", ompPath: program, state: "done", ok: true, missing: false, version: "18.12.6", models: 1 });
+  expect(messages.filter((m) => m["type"] === "agentCheck").at(-1)).toEqual({ type: "agentCheck", ompPath: program, state: "done", ok: true, missing: false, version: "18.12.6", models: 1, providers: ["anthropic"] });
+});
+
+test("ompLogin from the wizard opens the login terminal with the omp of the step, saved or not, and checks omp at that path again when the command ends", async () => {
+  const program = fakeOmpOfVersion("18.12.6");
+  userSettings.set("ompPath", join(root, "saved-omp"));
+  await send({ type: "ompLogin", provider: "anthropic", ompPath: program });
+  expect(logins).toHaveLength(1);
+  expect(logins[0]).toMatchObject({ program, provider: { id: "anthropic", name: "Anthropic" } });
+  // Nothing is checked before the command ends, and the terminal opening shows no notice.
+  expect(messages.filter((m) => m["type"] === "agentCheck" || m["type"] === "ompStatus")).toEqual([]);
+  logins[0]?.finish();
+  for (let waited = 0; waited < 5000 && !messages.some((m) => m["type"] === "agentCheck"); waited += 20) await new Promise((resolve) => setTimeout(resolve, 20));
+  await settled();
+  expect(messages.filter((m) => m["type"] === "agentCheck")).toEqual([{ type: "agentCheck", ompPath: program, state: "done", ok: true, missing: false, version: "18.12.6", models: 1, providers: ["anthropic"] }]);
+  // The Settings tab's own status is checked again too, for the saved path.
+  expect(messages.some((m) => m["type"] === "ompStatus" && m["state"] === "checking")).toBe(true);
+  expect(messages.some((m) => m["type"] === "notice" || m["type"] === "error")).toBe(false);
+});
+
+test("ompLogin without a path takes trama.ompPath, and a provider outside the list opens nothing", async () => {
+  const program = fakeOmpOfVersion("18.12.6");
+  userSettings.set("ompPath", program);
+  await send({ type: "ompLogin", provider: "cursor" });
+  expect(logins.map((login) => [login.program, login.provider.id])).toEqual([[program, "cursor"]]);
+  for (const provider of ["openai", "", 3, undefined]) await send({ type: "ompLogin", provider });
+  await send({ type: "ompLogin", provider: "anthropic", ompPath: 3 });
+  expect(logins).toHaveLength(1);
 });
 
 test("the Settings tab asking for the model names and for the status together runs `omp models` once", async () => {

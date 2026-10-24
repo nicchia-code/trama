@@ -3,7 +3,7 @@ import { Fragment, type KeyboardEvent, type ReactNode, useEffect, useId, useRef,
 import type { SettingSchema } from "../../host/settings-schema";
 import { cn } from "../lib/utils";
 import type { OpenLink } from "../markdown";
-import { Column, InstructionFiles, OmpStatusBox, ignoresInstructionFiles, ROLE_ADVICE, STEP_SENTENCES, Subgroups } from "../setup-shared";
+import { Column, InstructionFiles, OmpStatusBox, ignoresInstructionFiles, Providers, ROLE_ADVICE, STEP_SENTENCES, Subgroups } from "../setup-shared";
 import { SettingField } from "../settings/field";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -205,10 +205,15 @@ function PathBody({ controller, snapshot, state }: BodyProps) {
   );
 }
 
-/** The status of the check of omp, from the answer of the host: the shared box, with `Install omp` inside it when omp is missing. */
+/** The status of the check of omp, from the answer of the host: the shared box, with `Install omp` inside it when omp is missing, and under it the Providers section when omp answers. */
 function OmpStatus({ controller, snapshot }: Pick<BodyProps, "controller" | "snapshot">) {
   const check = agentCheckLine(snapshot.check);
-  return <OmpStatusBox tone={check.tone} text={check.text} missing={ompMissing(snapshot.check)} onInstall={() => controller.installOmp()} />;
+  return (
+    <>
+      <OmpStatusBox tone={check.tone} text={check.text} missing={ompMissing(snapshot.check)} onInstall={() => controller.installOmp()} />
+      {snapshot.providers === null ? null : <Providers connected={snapshot.providers.connected} onLogin={(provider) => controller.login(provider)} />}
+    </>
+  );
 }
 
 /** The settings of a step, one under the other in the width of the column, each with its explanation in the page. */

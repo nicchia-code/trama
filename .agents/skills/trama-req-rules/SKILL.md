@@ -42,6 +42,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole della conversazione General** (`omp-chat-general.md`): Usa quando implementi le regole della conversazione General di omp Chat: quando c'è, avvio, pulizia, errori, ripresa e ciò che non blocca. Sections: `omp-chat-general`.
 - **omp Chat** (`omp-chat.md`): Usa quando implementi quando omp Chat si usa, come nascono, finiscono e riprendono le sue conversazioni, l'uso dell'abbonamento e quali server MCP riceve omp. Sections: `omp-chat`, `omp-chat-conversation`.
 - **Installazione di omp** (`omp-install.md`): Usa quando implementi Install omp e il terminale che installa omp. Sections: `developer.INSTALL_OMP`.
+- **Login dei fornitori di omp** (`omp-login.md`): Usa quando implementi il login ai fornitori di modelli di omp dalla scheda Settings e dal wizard di setup. Sections: `developer.LOG_IN_PROVIDER`.
 - **Regole delle prenotazioni dei file** (`prenotazioni.md`): Usa quando lavori sulle prenotazioni dei file dei sotto-agenti durante un Run: chi prenota, chi è fermato, quando una prenotazione finisce. Sections: `prenotazione-file`.
 - **Regole del progetto** (`project.md`): Usa quando implementi init, aggiornamento delle skill e skill dei Requisiti. Sections: `project`.
 - **Regole dei round di domande** (`questions-notices.md`): Usa quando implementi i round di domande. Sections: `question-round`.

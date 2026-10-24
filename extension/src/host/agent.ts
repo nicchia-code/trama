@@ -19,7 +19,8 @@ import { bundledAskMoreInstructions, bundledGeneralInstructions, bundledOmpHook 
 import { withdrawWaiting } from "./announcements";
 import { addJobFollower, endHeldJob as endHeldJobs, endTerminalJobs, hasJobs, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, onAgentStarted, releaseFiledWork, reportAgentStopped, reportStoppedFollowing, type RunAll, setHooked, startJob } from "./drift-resolution";
 import { addHolderFollower } from "./followed-holders";
-import { agentCommandLine, isSupportedShell, programName, quote, type ShellFamily, shellFamily } from "./quote";
+import { agentCommandLine, isSupportedShell, programName, quote, quoteProgram, type ShellFamily, shellFamily } from "./quote";
+import type { OmpLoginProvider } from "../omp-login";
 import { interruptTerminalRounds, ownWindowId, questionEndpoint } from "./questions";
 import { pruneAgentProcesses, releaseUnfollowed } from "./task-release";
 import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, instructedMessage, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
@@ -784,18 +785,23 @@ export async function openAskMore(root: string, name: string, part: string, plac
 export const INSTALL_OMP_COMMAND = { posix: "curl -fsSL https://omp.sh/install | sh", windows: "irm https://omp.sh/install.ps1 | iex" } as const;
 
 /**
- * Install omp: a new visible terminal named `Install omp` in the user's home folder, in the terminals area whatever `trama.terminalLocation` says, with
- * the agent terminals' shell (Windows PowerShell on Windows, where the command needs it). It is no agent terminal: no `TRAMA_*` variable, no hook, no
- * ghost, no job. The official installer's command is written when the shell is ready. `onFinished` runs once, when the command ends or the terminal closes.
+ * The shell of a bare terminal (`installOmp`, `loginOmp`) and the family its commands are quoted for. On Windows the commands are PowerShell's or Git Bash's: any
+ * other shell is replaced by Windows PowerShell 5.1 for that terminal only (`shellPath`); elsewhere the default shell is kept.
  */
-export function installOmp(onFinished: () => void, windows = process.platform === "win32"): vscode.Terminal {
+function bareTerminalShell(windows: boolean): { family: ShellFamily; shellPath: string | undefined } {
   const defaultShell = vscode.env.shell;
   const windowsPowerShell = win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  // On Windows the command is PowerShell's: Git Bash and unsupported shells are replaced for this terminal only.
   const family = shellFamily(defaultShell, windows);
-  const shellPath = windows && !(isSupportedShell(defaultShell, true) && (family === "powershell" || family === "powershell5")) ? windowsPowerShell : undefined;
-  const terminal = vscode.window.createTerminal({ name: "Install omp", cwd: homedir(), shellPath });
-  const line = windows ? INSTALL_OMP_COMMAND.windows : INSTALL_OMP_COMMAND.posix;
+  if (!windows || (isSupportedShell(defaultShell, true) && (family === "powershell" || family === "powershell5"))) return { family, shellPath: undefined };
+  return { family: "powershell5", shellPath: windowsPowerShell };
+}
+
+/**
+ * Opens a bare visible terminal named `name` in the user's home folder, in the terminals area whatever `trama.terminalLocation` says. It is no agent terminal: no
+ * `TRAMA_*` variable, no hook, no ghost, no job. `line` is written when the shell is ready. `onFinished` runs once, when that command ends or the terminal closes.
+ */
+function openBareTerminal(name: string, shellPath: string | undefined, env: Record<string, string> | undefined, line: string, onFinished: () => void): vscode.Terminal {
+  const terminal = vscode.window.createTerminal({ name, cwd: homedir(), shellPath, ...(env === undefined ? {} : { env }) });
   let open = true;
   let finished = false;
   const subscriptions: vscode.Disposable[] = [];
@@ -818,4 +824,25 @@ export function installOmp(onFinished: () => void, windows = process.platform ==
   terminal.show(false);
   writeWhenShellReady(terminal, line, () => open);
   return terminal;
+}
+
+/**
+ * Install omp: a new visible terminal named `Install omp` in the user's home folder, in the terminals area whatever `trama.terminalLocation` says, with
+ * the agent terminals' shell (Windows PowerShell on Windows, where the command needs it). It is no agent terminal: no `TRAMA_*` variable, no hook, no
+ * ghost, no job. The official installer's command is written when the shell is ready. `onFinished` runs once, when the command ends or the terminal closes.
+ */
+export function installOmp(onFinished: () => void, windows = process.platform === "win32"): vscode.Terminal {
+  const { shellPath } = bareTerminalShell(windows);
+  return openBareTerminal("Install omp", shellPath, undefined, windows ? INSTALL_OMP_COMMAND.windows : INSTALL_OMP_COMMAND.posix, onFinished);
+}
+
+/**
+ * Log in to a model provider: a new visible terminal named `Log in to <name>`, shaped like `installOmp`'s, that runs `<omp> login <id>`. `program` is the omp
+ * program (`findOmp`), quoted for the terminal's shell; `provider` comes from `OMP_LOGIN_PROVIDERS`, so its `id` is never text the webview sent. The terminal's PATH starts
+ * with the folders of omp and bun, so omp's script finds bun even when the editor started from a desktop launcher. Nothing of the terminal is read: not its output,
+ * not its input, not the exit code. `onFinished` runs once, when the command ends or the terminal closes; every click opens another terminal and none is closed or reused.
+ */
+export function loginOmp(program: string, provider: OmpLoginProvider, onFinished: () => void, windows = process.platform === "win32"): vscode.Terminal {
+  const { family, shellPath } = bareTerminalShell(windows);
+  return openBareTerminal(`Log in to ${provider.name}`, shellPath, ompPathEnv(program), `${quoteProgram(family, program)} login ${provider.id}`, onFinished);
 }

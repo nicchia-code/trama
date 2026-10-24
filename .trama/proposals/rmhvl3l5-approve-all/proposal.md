@@ -1,10 +1,10 @@
 ---
-status: open
+status: rejected
 base:
-  actors/developer.md: b735b01e74ae75abfffd4aafc0c969906bc6df3b58a8f0c43e7263dacc2efe3e
+  actors/developer.md: 2085392343980acbee4ebd5e6995467b2e993a723e6ad78fdba1eba1bed82079
   agent-launching/feature.md: 9e7c34a4a169dd383000a3dc7d7aef559eaa39cf20127dd87b63d335c671ebd2
   agent-launching/raffinamento.md: a76aed8b49b4a951707b80f032e3c06b547150bb9374a507bf08098387f0fc88
-  editor-panel/panel.md: 905349caebf6128d4aee39a49b099bd726ba097ac846e29e54416b5b5b0f0180
+  editor-panel/panel.md: 48b9090e3b616829b2dcd5151f731bde2b45e9c52bad78f4b7a9f69fc511d76f
   model-changes/proposal.md: 755511a076ea79bae37e71cfd97c7e831c5ae47eec2a2f3329f09834b35d60f7
   requirements/ui/raffinamento.md: 3cfa2bafc126e041022e25d2c4bfc0ea15e2a7aa30e9b37753145f1845a4d036
   requirements/ui/board.md: 8466bba9f0def2fc5105aadbbd1e75ef1b463bae2ddd7fdb1a18e390f0ad0ab9
@@ -45,3 +45,6 @@ Refine All, nel menu della freccetta di + Add Work Item, diventa Approve All: fa
 - L'approvazione di una Proposal che finisce di aspettare (fine del Run o Proposal richieste approvate) è il nuovo Evento `raffinamento.APPROVAZIONE_PRONTA`; la coda la approva senza agente e senza posti.
 - Le regole di Approve All stanno in un frammento nuovo, `rules/approva-tutte`, perché `rules/raffinamento` avrebbe superato 12 KB.
 - Gli Eventi rimossi `developer.RAFFINA_TUTTE` e `developer.ANNULLA_RAFFINA_TUTTE` generano all'approvazione il Task di rimozione del codice dell'Actor `developer`: il codice di Refine All si sostituisce, non si toglie e basta.
+
+## Rifinitura
+- Rifinita sul Model attuale: `actors/developer.md` e `editor-panel/panel.md` tengono l'Evento `developer.LOG_IN_PROVIDER`, la Transition `panel/Settings` su `developer.LOG_IN_PROVIDER` e la sezione Providers del gruppo omp nella descrizione di Settings, arrivati con il login dei fornitori omp; Approve All non li tocca.

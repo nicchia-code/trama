@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { bunBinDir, ompModels, ompPathVariable, parseOmpModels } from "../extension/src/host/model-lists";
+import { bunBinDir, ompModels, ompPathVariable, parseOmpList, parseOmpModels } from "../extension/src/host/model-lists";
 
 test("omp suggests each model's selector, labelled by its name only when they differ", () => {
   const output = JSON.stringify({
@@ -66,9 +66,9 @@ test("omp models names a missing program, with the path it used", async () => {
 posix("omp models lists the selectors its standard output gives", async () => {
   const root = mkdtempSync(join(tmpdir(), "trama-omp-"));
   try {
-    const json = JSON.stringify({ models: [{ selector: "anthropic/claude-a", name: "Claude A" }, { selector: "openai/gpt-b", name: "openai/gpt-b" }] });
+    const json = JSON.stringify({ models: [{ selector: "anthropic/claude-a", name: "Claude A", provider: "anthropic" }, { selector: "openai/gpt-b", name: "openai/gpt-b", provider: "openai-codex" }] });
     const program = fakeOmp(root, `cat <<'EOF'\n${json}\nEOF`);
-    expect(await ompModels(program)).toEqual({ models: [{ value: "anthropic/claude-a", label: "Claude A" }, { value: "openai/gpt-b" }] });
+    expect(await ompModels(program)).toEqual({ models: [{ value: "anthropic/claude-a", label: "Claude A" }, { value: "openai/gpt-b" }], providers: ["anthropic", "openai-codex"] });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -107,6 +107,37 @@ posix("omp models says it did not return a list when its output is not JSON", as
   try {
     const program = fakeOmp(root, "echo not-json");
     expect(await ompModels(program)).toEqual({ models: [], error: "omp models did not return a valid list" });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("omp's providers are the unique non-empty texts of models[].provider, in order, from the same list", () => {
+  const output = JSON.stringify({
+    models: [
+      { selector: "a/1", provider: "anthropic" },
+      { selector: "a/2", provider: "anthropic" },
+      { selector: "x/1", provider: "xai-oauth" },
+      { selector: "n/1", provider: "" },
+      { selector: "n/2", provider: 3 },
+      { selector: "n/3" },
+    ],
+  });
+  expect(parseOmpList(output)?.providers).toEqual(["anthropic", "xai-oauth"]);
+  expect(parseOmpList(output)?.models.map((model) => model.value)).toEqual(["a/1", "a/2", "x/1", "n/1", "n/2", "n/3"]);
+  expect(parseOmpList(JSON.stringify({ models: [] }))).toEqual({ models: [], providers: [] });
+  expect(parseOmpList("not json")).toBeUndefined();
+});
+
+posix("omp models has no providers when its list is in error, which leaves every provider unknown", async () => {
+  const root = mkdtempSync(join(tmpdir(), "trama-omp-"));
+  try {
+    const failing = fakeOmp(root, "printf '%s' '{\"models\":[{\"selector\":\"a/b\",\"provider\":\"anthropic\"}]}'\nexit 3");
+    const failed = await ompModels(failing);
+    expect(failed.error).toBe("omp exited with code 3");
+    expect(failed).not.toHaveProperty("providers");
+    const garbage = fakeOmp(root, "echo not-json");
+    expect(await ompModels(garbage)).not.toHaveProperty("providers");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

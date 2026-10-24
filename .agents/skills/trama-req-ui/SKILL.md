@@ -35,6 +35,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Interfaccia del menu laterale** (`menu-laterale.md`): Usa quando costruisci o cambi il menu laterale di Trama: icona nella barra delle attività, voci, Scan System, badge e modalità solo icone. Sections: `menu-laterale`.
 - **Conversazioni di omp Chat** (`omp-chat-conversation.md`): Usa quando costruisci o cambi una conversazione di omp Chat: messaggi, chiamate agli strumenti, campo del messaggio, Steer e Queue. Sections: `omp-chat-conversation`.
 - **omp Chat** (`omp-chat.md`): Usa quando costruisci o cambi la vista omp Chat della barra laterale secondaria, le sue schede, la barra dell'uso e la conversazione General. Sections: `omp-chat`, `omp-chat-general`.
+- **Login dei fornitori di omp** (`omp-login.md`): Usa quando costruisci o cambi la sezione Providers del login ai fornitori di omp e il suo terminale. Sections: `developer.LOG_IN_PROVIDER`.
 - **Interfaccia del pannello** (`panel.md`): Usa quando costruisci o cambi il pannello, gli ingressi di Trama nell'editor, il Markdown reso e i Requisiti. Sections: `panel`, `panel/Requirements`.
 - **Interfaccia dei round di domande** (`questions-notices.md`): Usa quando mostri i round di domande. Sections: `question-round`.
 - **Raffinamento delle Proposal obsolete** (`raffinamento.md`): Usa quando costruisci la scheda di una Proposal da raffinare, in raffinamento o in coda, la voce Refine All del menu di + Add Work Item e l'impostazione Auto-update Stale Proposals. Sections: `raffinamento`, `developer.RAFFINA_TUTTE`.

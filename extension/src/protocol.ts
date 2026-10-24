@@ -134,6 +134,8 @@ export type ToHost =
   | { type: "agentCheckWanted"; ompPath: string }
   /** Install omp: the host opens a visible terminal with omp's official installer; the message has no data. */
   | { type: "installOmp" }
+  /** Log in to a model provider: the host opens a visible terminal that runs `omp login <provider>`, `provider` being an id of `OMP_LOGIN_PROVIDERS`. Without `ompPath` the omp is the saved `trama.ompPath` (the Settings tab); with it, the wizard's omp step's path, saved or not. */
+  | { type: "ompLogin"; provider: string; ompPath?: string }
   /** The Settings tab became visible: the host sends `ompStatus`, and `modelSuggestions` from the same `omp models` call. */
   | { type: "ompStatusWanted" }
   /** The wizard's omp step is shown: the host searches the agent instruction files of `root` (a workspace folder; absent means the project's folder) and answers with `instructionFiles`. */
@@ -195,9 +197,9 @@ export type ToWebview =
   | { type: "guidedSetupResult"; ok: boolean; error: string | null }
   /** The check of omp for the wizard: omp is being updated to `version`, or it is done (omp answered with `models` models and `version`, or `error` says why not; `updateError` is why a check or update failed; `tooOld` says omp is older than the minimum or its version cannot be read). */
   | { type: "agentCheck"; ompPath: string; state: "updating"; version: string }
-  | { type: "agentCheck"; ompPath: string; state: "done"; ok: boolean; missing: boolean; version?: string; models?: number; error?: string; updateError?: string; tooOld?: true }
+  | { type: "agentCheck"; ompPath: string; state: "done"; ok: boolean; missing: boolean; version?: string; models?: number; providers?: string[]; error?: string; updateError?: string; tooOld?: true }
   /** The state of omp for the Settings tab: being checked, or done with the `version` that answers and the number of `models` omp lists, or `error` saying why not (`missing` when the program was not found); `tooOld` says the version is older than the minimum. */
-  | { type: "ompStatus"; state: "checking" | "done"; missing?: boolean; version?: string; models?: number; error?: string; tooOld?: true }
+  | { type: "ompStatus"; state: "checking" | "done"; missing?: boolean; version?: string; models?: number; providers?: string[]; error?: string; tooOld?: true }
   /** The agent instruction files found for `root`, with `path` absolute and `label` as it is shown. No content is sent. */
   | { type: "instructionFiles"; root: string; files: InstructionFileView[] }
   /** The entries of one folder of the wizard's tree, without the ones named with a dot or ignored by git. */
