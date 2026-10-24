@@ -5,7 +5,7 @@ import { REFINEMENT_OFF, REFINING_REASON, RESUME_REASON, QUEUED_REASON, TO_REFIN
 import type { RefinementView } from "../extension/src/protocol";
 import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
 import { boardDecisionCount } from "../src/core/board-decisions";
-import { announcedCard, announcedGhosts, approveBlocker, blockedReason, buildBoard, createsText, doneGroups, driftReworkBlocker, ghostExplanation, NO_MODELS, finishingBlocker, noteTime, runningFor, stoppedFollowingNotice, formatCounts, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, approveBlocker, blockedReason, buildBoard, clearableTasks, createsText, doneGroups, driftReworkBlocker, ghostExplanation, hideCleared, NO_MODELS, finishingBlocker, noteTime, runningFor, stoppedFollowingNotice, formatCounts, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
 import { RUN_IN_PROGRESS, runBlocker } from "../src/core/design";
 import { dismissBlocker } from "../extension/src/webview/dismiss";
@@ -39,7 +39,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   ...over,
 });
 const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, job: null, prepared: null, title: "Code refunds late", body: "line one\n\nline two\nline three", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
-const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", created: null, title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], file: "tasks/0012-refunds.md", images: [], ...over });
+const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", created: null, title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], heldByDrift: false, file: "tasks/0012-refunds.md", images: [], ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], unifiedDrifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
 
@@ -703,5 +703,54 @@ describe("the Done column", () => {
     expect(groups.map((g) => g.heading)).toEqual(["Today · 2", "Yesterday · 1", "October 3, 2026 · 1", "Earlier · 1"]);
     expect(groups.map((g) => g.cards.map((c) => c.id))).toEqual([["0010", "0011"], ["0012"], ["0013"], ["0014"]]);
     expect(doneGroups([], now)).toEqual([]);
+  });
+
+  describe("Clear hides the cards it deletes until the host is done", () => {
+    const now = new Date(2026, 9, 20, 15, 0);
+    const at = (day: number, hour: number) => new Date(2026, 9, day, hour, 0).toISOString();
+    const snap = () =>
+      snapshot({
+        numbers: { proposal: {}, task: {}, drift: { "0003": "D3" } },
+        tasks: [done("0010", at(20, 9)), done("0011", at(19, 12)), done("0012", at(3, 12)), task({ id: "0099", column: "todo" })],
+        drifts: [drift({ id: "0003", origin: ["0011"] })],
+      });
+
+    test("the Tasks Clear deletes are the cards of Done without the kept badge", () => {
+      const columns = buildBoard(snap());
+      expect(clearableTasks(columns[2]?.cards ?? [])).toEqual(["0010", "0012"]);
+      expect(clearableTasks([])).toEqual([]);
+    });
+
+    test("after the click the hidden cards are out of Done and a kept card is never hidden; the other columns do not change", () => {
+      const columns = buildBoard(snap());
+      const hidden = hideCleared(columns, clearableTasks(columns[2]?.cards ?? []));
+      expect(hidden[2]?.cards.map((c) => c.id)).toEqual(["0011"]);
+      expect(hidden[0]).toBe(columns[0]!);
+      expect(hidden[1]).toBe(columns[1]!);
+      expect(hideCleared(columns, ["0011"])[2]?.cards.map((c) => c.id)).toEqual(["0010", "0011", "0012"]);
+    });
+
+    test("the number, the groups by day and the state of Clear follow the cards left", () => {
+      const columns = buildBoard(snap());
+      const left = hideCleared(columns, ["0010", "0011", "0012"])[2]?.cards ?? [];
+      expect(left.length).toBe(1);
+      expect(doneGroups(left, now, "en-US").map((g) => [g.heading, g.cards.map((c) => c.id)])).toEqual([["Yesterday · 1", ["0011"]]]);
+      expect(clearableTasks(left)).toEqual([]);
+      // Nothing left at all: no group, so the column shows its hint.
+      const none = hideCleared(buildBoard(snapshot({ tasks: [done("0010", at(20, 9))] })), ["0010"])[2]?.cards ?? [];
+      expect(none).toEqual([]);
+      expect(doneGroups(none, now)).toEqual([]);
+      expect(clearableTasks(none)).toEqual([]);
+    });
+
+    test("once the host is done nothing is hidden: the cards of a refused or failed Clear are back in their place, and the deleted ones are not in the picture", () => {
+      const columns = buildBoard(snap());
+      const ids = clearableTasks(columns[2]?.cards ?? []);
+      expect(hideCleared(columns, [])[2]?.cards.map((c) => c.id)).toEqual(["0010", "0011", "0012"]);
+      // Failure after the first Task: 0010 is gone from the picture, 0012 comes back, and the order stays the one of the column.
+      const after = buildBoard(snapshot({ ...snap(), tasks: [done("0011", at(19, 12)), done("0012", at(3, 12))] }));
+      expect(ids).toEqual(["0010", "0012"]);
+      expect(hideCleared(after, []).map((c) => c.cards.map((card) => card.id))).toEqual([["0003"], [], ["0011", "0012"]]);
+    });
   });
 });

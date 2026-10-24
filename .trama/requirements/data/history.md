@@ -13,3 +13,6 @@ description: "Usa quando tocchi i dati delle voci di History e ciò che Clear de
 ## developer.CLEAR_DONE
 - Clear cancella un Task togliendo dal progetto il suo file `tasks/<id>-<slug>.md`, il suo file di percentuale e la sua cartella `task-images/<id>/`; non lascia segni nel file del Task né nella cartella `tasks/`, e nessuna Proposal, nessun Drift e nessun file di History perde i riferimenti al Task che già contiene.
 - `.trama/last-scan/cleared`, nella cartella locale e non versionata del ricordo dell'ultimo scan globale, elenca una riga per Task cancellato da Clear che era finito dopo l'istante di `system`: l'identità permanente e il `finished`, separati da uno spazio. Il file nasce con la prima riga, si svuota quando `system` è riscritto dal lancio dello scan del Sistema, e una riga che non si legge è ignorata.
+
+## developer.DELETE_TASK
+- La cancellazione di un Task in To do toglie dal progetto il suo file `tasks/<id>-<slug>.md`, il suo file di percentuale e la sua cartella `task-images/<id>/`, come Clear, senza lasciare segni nella cartella `tasks/` e senza campi nuovi nel file del Task. Non scrive `cleared` nelle voci di History che citano il Task e non aggiunge righe a `.trama/last-scan/cleared`; Proposal, Drift e voci di History tengono i riferimenti al Task che già contengono.

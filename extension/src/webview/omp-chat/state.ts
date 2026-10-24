@@ -1,4 +1,5 @@
 import { GENERAL_ID } from "../../../../src/core/omp-chat-view";
+import type { UsageReport } from "../../../../src/core/omp-usage";
 import type { ConversationItem, FormAnswerMessage, GeneralError, GeneralPhase, ModelChoice, SendMode, ToChatWebview } from "../../omp-chat-protocol";
 import { addError, addForm, addPermission, addUserMessage, answerForm, answerPermission, applyUpdate, cancelPermission, emptyTranscript, returnMessage, setSendStatus, settle, start, type Transcript } from "./transcript";
 
@@ -21,9 +22,18 @@ export interface ChatState {
   conversations: Record<string, ConversationView>;
   /** The Steer|Queue choice of the window, for a message sent while the agent works, in every conversation. */
   sendMode: SendMode;
+  /** The usage of the subscription, as the host last sent it (`usage`). */
+  usage: UsageView;
 }
 
-export const initialChatState = (): ChatState => ({ items: [], selected: undefined, conversations: {}, sendMode: "steer" });
+/** What the bar and the dialog of the usage draw: the last report (none before the first), whether a request runs, and why the last one failed. */
+export interface UsageView {
+  report?: UsageReport;
+  fetching: boolean;
+  error?: string;
+}
+
+export const initialChatState = (): ChatState => ({ items: [], selected: undefined, conversations: {}, sendMode: "steer", usage: { fetching: false } });
 
 const fresh = (): ConversationView => ({ transcript: emptyTranscript(), models: [], focusToken: 0 });
 
@@ -46,6 +56,8 @@ export function reduce(state: ChatState, message: ToChatWebview, now: number): C
       return state;
     case "sendMode":
       return { ...state, sendMode: message.mode };
+    case "usage":
+      return { ...state, usage: { fetching: message.fetching, ...(message.report === undefined ? {} : { report: message.report }), ...(message.error === undefined ? {} : { error: message.error }) } };
     case "messageStatus":
       return change(state, message.id, (view) => ({ ...view, transcript: setSendStatus(view.transcript, message.messageId, message.status, message.reason) }));
     case "conversations": {

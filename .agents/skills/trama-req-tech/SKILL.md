@@ -58,7 +58,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Tecnologia generale** (`general.md`): Usa sempre quando lavori sulla tecnologia: vincoli generali e piattaforme. Sections: `General`.
 - **Tecnologia delle note dei ghost** (`ghost-notes.md`): Usa quando lavori al codice delle note dei ghost: scrittura nel nucleo, quadro della Board, modale dei dettagli e skill. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
 - **Tecnologia dei gruppi di Task** (`gruppi.md`): Usa quando lavori sui gruppi di Task di `trama task list` con `groups` e sui sotto-agenti che realizzano un gruppo. Sections: `task/To do`.
-- **Tecnologia della History** (`history.md`): Usa quando costruisci le voci di History (comandi, quadro, modale, skill che le scrivono) o Clear della colonna Done. Sections: `voce-history`, `developer.CLEAR_DONE`.
+- **Tecnologia della History** (`history.md`): Usa quando costruisci le voci di History (comandi, quadro, modale, skill che le scrivono) o Clear della colonna Done. Sections: `voce-history`, `developer.CLEAR_DONE`, `developer.DELETE_TASK`.
 - **Tecnologia dei file di istruzioni** (`instruction-files.md`): Usa quando lavori al codice che esclude i file di istruzioni degli agenti nei lanci di omp: overlay di configurazione e ricerca dei file. Sections: `agent-terminal/Agent running`.
 - **Tecnologia del menu laterale** (`menu-laterale.md`): Usa per la tecnologia del menu laterale di Trama: vista webview, messaggi con l'host, badge e comandi delle viste. Sections: `menu-laterale`.
 - **Tecnologia di agenti e modelli** (`models.md`): Usa per agenti del terminale, ruoli dei modelli, limite dei sotto-agenti e advisor di omp. Sections: `agent-launching`.

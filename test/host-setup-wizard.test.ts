@@ -223,28 +223,58 @@ test("the model names for the wizard answer for the omp path it asked about and 
   expect(messages.find((m) => m["type"] === "modelSuggestions")).toEqual({ type: "modelSuggestions", models: [], error: `omp not found at ${join(root, "no-such-omp")}`, missing: true, ompPath: join(root, "no-such-omp") });
 });
 
-test("the omp status says checking, then that omp is not found at the path set", async () => {
+test("the omp status says checking, then that omp is not found at the path set; the model suggestions come from the same call", async () => {
   userSettings.set("ompPath", join(root, "no-such-omp"));
   await send({ type: "ompStatusWanted" });
-  await Bun.sleep(50);
   expect(messages.filter((m) => m["type"] === "ompStatus")).toEqual([
     { type: "ompStatus", state: "checking" },
     { type: "ompStatus", state: "done", missing: true, error: `omp not found at ${join(root, "no-such-omp")}` },
   ]);
+  expect(messages.filter((m) => m["type"] === "modelSuggestions")).toEqual([{ type: "modelSuggestions", models: [], error: `omp not found at ${join(root, "no-such-omp")}`, missing: true }]);
 });
 
-test("a change of the omp path sends the status again; the status of omp that answers carries its version", async () => {
+/** An omp that lists two models and says its version, and counts how many times it is asked for the list. */
+function fakeOmp(): { program: string; calls: () => number } {
   const program = join(root, "omp");
-  writeFileSync(program, "#!/bin/sh\necho 'omp/14.2.1'\n", { mode: 0o755 });
+  const counter = join(root, "models-calls");
+  writeFileSync(program, `#!/bin/sh\ncase "$1" in\n  models) echo x >> '${counter}'; echo '{"models":[{"selector":"a/b"},{"selector":"c/d"}]}' ;;\n  *) echo 'omp/14.2.1' ;;\nesac\n`, { mode: 0o755 });
+  return { program, calls: () => (existsSync(counter) ? readFileSync(counter, "utf8").split("\n").filter((l) => l !== "").length : 0) };
+}
+
+test("a change of the omp path sends the status again; the status of omp that answers carries its version and the number of its models", async () => {
+  const { program } = fakeOmp();
   userSettings.set("ompPath", program);
   await send({ type: "ompStatusWanted" });
   messages.length = 0;
   controller.settingsChanged(true);
-  await Bun.sleep(300);
+  await controller.refreshOmp();
   expect(messages.filter((m) => m["type"] === "ompStatus")).toEqual([
     { type: "ompStatus", state: "checking" },
-    { type: "ompStatus", state: "done", missing: false, version: "14.2.1" },
+    { type: "ompStatus", state: "done", missing: false, version: "14.2.1", models: 2 },
   ]);
+  expect(messages.filter((m) => m["type"] === "modelSuggestions")).toEqual([{ type: "modelSuggestions", models: [{ value: "a/b" }, { value: "c/d" }] }]);
+});
+
+test("the Settings tab asking for the model names and for the status together runs `omp models` once", async () => {
+  const { program, calls } = fakeOmp();
+  userSettings.set("ompPath", program);
+  await controller.open();
+  messages.length = 0;
+  receive?.({ type: "modelSuggestionsWanted" });
+  receive?.({ type: "ompStatusWanted" });
+  await controller.refreshOmp();
+  expect(calls()).toBe(1);
+  expect(messages.filter((m) => m["type"] === "ompStatus")).toHaveLength(2);
+  expect(messages.filter((m) => m["type"] === "modelSuggestions")).toHaveLength(1);
+});
+
+test("omp that answers its version but gives no list says why, with no number of models", async () => {
+  const program = join(root, "omp");
+  writeFileSync(program, "#!/bin/sh\ncase \"$1\" in\n  models) echo 'not json' ;;\n  *) echo 'omp/14.2.1' ;;\nesac\n", { mode: 0o755 });
+  userSettings.set("ompPath", program);
+  await send({ type: "ompStatusWanted" });
+  await controller.refreshOmp();
+  expect(messages.filter((m) => m["type"] === "ompStatus").at(-1)).toEqual({ type: "ompStatus", state: "done", missing: false, version: "14.2.1", error: "omp models did not return a valid list" });
 });
 
 test("a folder outside the workspace is refused, and the workspace folders are sent without a project", async () => {

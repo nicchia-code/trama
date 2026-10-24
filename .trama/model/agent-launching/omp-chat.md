@@ -1,6 +1,6 @@
 # omp Chat
 
-La vista omp Chat, dove stanno la conversazione General (vedi omp Chat General) e le conversazioni dei lavori di Trama (vedi omp Chat conversation). Sta in un contenitore proprio della barra laterale secondaria, a destra. omp Chat è una funzione facoltativa del gruppo Features delle impostazioni di Trama, accesa per impostazione predefinita: resta accesa finché il developer non la spegne nelle sue impostazioni utente.
+La vista omp Chat, dove stanno la conversazione General (vedi omp Chat General) e le conversazioni dei lavori di Trama (vedi omp Chat conversation). Sta in un contenitore proprio della barra laterale secondaria, a destra. omp Chat è una funzione facoltativa del gruppo Advanced delle impostazioni di Trama, accesa per impostazione predefinita: resta accesa finché il developer non la spegne nelle sue impostazioni utente.
 
 Ogni finestra dell'editor ha la sua vista, con la sua General e le conversazioni aperte in quella finestra. All'apertura della finestra la vista parte da Hidden e segue subito le impostazioni, General e le conversazioni riprese, come dicono le Transition. Con General presente, la sua scheda è sempre la prima; quella in vista all'apertura della finestra è General, salvo una conversazione di un lavoro ripresa, che si mostra come quando si apre.
 

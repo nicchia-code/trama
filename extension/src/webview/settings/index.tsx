@@ -1,11 +1,10 @@
-import { CircleCheck, Loader, Route, TriangleAlert } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { Route } from "lucide-react";
+import type { ReactNode } from "react";
 import { type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
-import type { ToHost, ToWebview } from "../../protocol";
-import { InstallOmpButton } from "../install-omp";
-import { cn } from "../lib/utils";
+import type { InstructionFileView, ToHost, ToWebview } from "../../protocol";
 import type { OpenLink } from "../markdown";
+import { Column, GROUP_SENTENCES, IGNORE_INSTRUCTION_FILES_KEY, ignoresInstructionFiles, InstructionFiles, OmpStatusBox, ROLE_ADVICE, Subgroups } from "../setup-shared";
 import type { ThemeController } from "../theme";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
@@ -51,80 +50,82 @@ export interface SettingsPageProps {
   openLink: OpenLink;
   /** Opens the setup wizard in the mode Settings; the «Guided setup» button shows only when it is given (a project exists). */
   onGuidedSetup?: () => void;
-  /** The setup wizard while it is open: it takes the place of the button and the form. */
+  /** The setup wizard while it is open: it takes the place of the title, the button and the form. */
   wizard?: ReactNode;
   /** The state of omp, from the host's `ompStatus`; null until the first message, which reads as checking. */
   omp?: OmpStatus | null;
+  /** The agent instruction files found in the project's folder, from the last `instructionFiles` answer; null while the search runs, and always null outside a project. */
+  instructionFiles?: readonly InstructionFileView[] | null;
 }
 
-/** The page: every setting the manifest declares, in groups, each saved to the user settings when the developer confirms it. */
-export function SettingsPage({ schema, values, generation, models, listError, omp = null, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
-  /** The only bubble open at a time. */
-  const [openKey, setOpenKey] = useState<string | null>(null);
+/**
+ * The page: a title, with «Guided setup» in a project, and then every setting the manifest declares, in the groups and subgroups of the setup
+ * wizard, in one column. Each setting is saved to the user settings when the developer confirms it.
+ */
+export function SettingsPage({ schema, values, generation, models, listError, omp = null, instructionFiles = null, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
   const send = (key: string, value: SettingValue) => post({ type: "setSetting", key, value });
   if (wizard !== undefined) return <>{wizard}</>;
+  const field = (setting: SettingSchema) => (
+    <SettingField
+      key={setting.key}
+      setting={setting}
+      values={values[setting.key]}
+      generation={generation}
+      models={models}
+      listError={listError}
+      send={send}
+      openLink={openLink}
+      lead={ROLE_ADVICE[setting.key]}
+    />
+  );
+  const status = ompStatusLine(omp);
   return (
     <TooltipProvider>
-      <div className="max-w-[1100px] px-4 pt-3 pb-6">
-        {onGuidedSetup !== undefined ? (
-          <div className="mb-3 flex justify-end">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" aria-label="Guided setup. Review the main settings step by step" onClick={onGuidedSetup}>
-                  <Route aria-hidden="true" />
-                  Guided setup
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Review the main settings step by step</TooltipContent>
-            </Tooltip>
+      <div className="min-w-0 overflow-x-clip">
+        <Column className="pt-5 pb-8">
+          <div className="mb-5 flex flex-col items-start gap-2 min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between">
+            <h1 className="m-0 text-2xl font-semibold">Settings</h1>
+            {onGuidedSetup !== undefined ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" aria-label="Guided setup. Review the main settings step by step" onClick={onGuidedSetup}>
+                    <Route aria-hidden="true" />
+                    Guided setup
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Review the main settings step by step</TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
-        ) : null}
-        {groupSettings(schema).map((group) => (
-          <section key={group.title} className="mb-5">
-            <h2 className="mb-2 border-b pb-1 text-lg font-semibold">{group.title}</h2>
-            {group.title === "omp" ? <OmpStatusRow status={omp} onInstall={() => post({ type: "installOmp" })} /> : null}
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-4">
-              {group.settings.map((setting) => (
-                <SettingField
-                  key={setting.key}
-                  setting={setting}
-                  values={values[setting.key]}
-                  generation={generation}
-                  models={models}
-                  listError={listError}
-                  openKey={openKey}
-                  setOpenKey={setOpenKey}
-                  send={send}
-                  openLink={openLink}
+          {groupSettings(schema).map((group) => (
+            <section key={group.title} aria-labelledby={`settings-group-${group.title}`} className="mb-8">
+              <h2 id={`settings-group-${group.title}`} className="mt-0 mb-1 text-lg font-semibold">
+                {group.title}
+              </h2>
+              <p className="mt-0 mb-5 text-muted-foreground">{GROUP_SENTENCES[group.title]}</p>
+              {group.title === "omp" ? <OmpStatusBox tone={status.tone} text={status.text} missing={status.missing} onInstall={() => post({ type: "installOmp" })} /> : null}
+              {group.settings.length > 0 ? <div className="grid gap-5">{group.settings.map(field)}</div> : null}
+              {group.subgroups.length > 0 ? <Subgroups groups={group.subgroups.map((subgroup) => ({ title: subgroup.title, items: subgroup.settings }))} render={field} /> : null}
+              {group.title === "omp" ? (
+                <InstructionFiles
+                  files={instructionFiles}
+                  ignored={ignoresInstructionFiles(schema, { [IGNORE_INSTRUCTION_FILES_KEY]: values[IGNORE_INSTRUCTION_FILES_KEY]?.user as SettingValue | undefined })}
+                  onOpen={(path) => post({ type: "openInstructionFile", path })}
                 />
-              ))}
-            </div>
-          </section>
-        ))}
+              ) : null}
+            </section>
+          ))}
+        </Column>
       </div>
     </TooltipProvider>
   );
 }
 
-/** The line under the title of the omp group: its state in secondary text with an icon, and `Install omp` when omp is missing. A polite live region. */
-export function OmpStatusRow({ status, onInstall }: { status: OmpStatus | null; onInstall: () => void }) {
-  const line = ompStatusLine(status);
-  const Icon = line.tone === "checking" ? Loader : line.tone === "ok" ? CircleCheck : TriangleAlert;
-  return (
-    <div aria-live="polite" className="mb-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-      <p className={cn("m-0 flex items-start gap-2", line.tone === "warning" && "text-amber-700 dark:text-amber-400")}>
-        <Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", line.tone === "checking" && "animate-spin motion-reduce:animate-none")} />
-        <span>{line.text}</span>
-      </p>
-      {line.missing ? <InstallOmpButton onInstall={onInstall} /> : null}
-    </div>
-  );
-}
-
 /** Mounts the Settings tab in `slot`; the panel's theme follows `trama.theme` as the host sends it, also while the tab is hidden. */
 export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeController): SettingsView => {
-  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, omp: null, post: context.post, openLink: context.openLink };
+  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, omp: null, instructionFiles: null, post: context.post, openLink: context.openLink };
   let hasProject = false;
+  let visible = false;
   const wizard = new WizardController({
     post: context.post,
     // The wizard of the Empty Model mode ends on the Board, confirmed or cancelled; the one of the settings leaves the form.
@@ -143,14 +144,26 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
   wizard.subscribe(render);
   render();
 
+  /** The search of the agent instruction files in the project's folder: none shown while it runs. */
+  const askInstructionFiles = () => {
+    page = { ...page, instructionFiles: null };
+    context.post({ type: "instructionFilesWanted" });
+    render();
+  };
+
   return {
     update() {
       // The settings do not depend on the snapshot: the host sends them on their own.
     },
     show() {
-      // The model names are asked again each time the tab becomes visible.
+      visible = true;
+      // The model names, the state of omp and the instruction files are asked again each time the tab becomes visible; the files only in a project.
       context.post({ type: "modelSuggestionsWanted" });
       context.post({ type: "ompStatusWanted" });
+      if (hasProject) askInstructionFiles();
+    },
+    hide() {
+      visible = false;
     },
     receive(message) {
       page = { ...page, schema: message.schema, values: message.values, generation: page.generation + 1 };
@@ -168,9 +181,14 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
       render();
     },
     projectPresent(present) {
+      const appeared = present && !hasProject;
       hasProject = present;
-      if (!present) wizard.close();
+      if (!present) {
+        wizard.close();
+        page = { ...page, instructionFiles: null };
+      }
       render();
+      if (appeared && visible) askInstructionFiles();
     },
     openGuidedSetup(message) {
       if (message.mode === "settings") {
@@ -180,7 +198,12 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
     receiveWizardModels: (message) => wizard.receiveModels(message),
     receiveAgentCheck: (message) => wizard.receiveAgentCheck(message),
     receiveFolderChildren: (message) => wizard.receiveFolderChildren(message),
-    receiveInstructionFiles: (message) => wizard.receiveInstructionFiles(message),
+    receiveInstructionFiles(message) {
+      wizard.receiveInstructionFiles(message);
+      if (!hasProject) return;
+      page = { ...page, instructionFiles: message.files };
+      render();
+    },
     receiveResult: (message) => wizard.receiveResult(message),
   };
 };

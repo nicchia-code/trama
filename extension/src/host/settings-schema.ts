@@ -28,6 +28,8 @@ export interface SettingSchema {
   key: string;
   /** The group's title, as shown above it. */
   group: string;
+  /** The subgroup's title inside the group (the subgroups of `Advanced`), when the group has them. */
+  subgroup?: string;
   /** Readable title, from the key without `trama.` (`trama.maxParallelAgents` → `Max Parallel Agents`). */
   title: string;
   control: SettingControl;
@@ -48,14 +50,41 @@ export interface SettingsValues {
   workspace?: unknown;
 }
 
-/** The five groups, in order; each lists its keys in order. Every key in the manifest must appear once. */
-export const SETTING_GROUPS: readonly { title: string; keys: readonly string[] }[] = [
-  { title: "Appearance", keys: ["trama.theme"] },
+/** A run of keys under a subtitle inside a group. */
+export interface SettingSubgroup {
+  title: string;
+  keys: readonly string[];
+}
+
+/** A group of settings: its own keys, in order, then its subgroups, each with its keys. */
+export interface SettingGroup {
+  title: string;
+  keys: readonly string[];
+  subgroups?: readonly SettingSubgroup[];
+}
+
+/**
+ * The four groups, in order, the single list the Settings tab and the setup wizard both read: `omp`, `Models`, `Project` and
+ * `Advanced`, which is cut into the subgroups `Appearance`, `Drifts`, `Agents` and `omp Chat`. Every key in the manifest must appear once.
+ */
+export const SETTING_GROUPS: readonly SettingGroup[] = [
   { title: "omp", keys: ["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"] },
   { title: "Models", keys: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"] },
   { title: "Project", keys: ["trama.skillsDir"] },
-  { title: "Features", keys: ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals", "trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"] },
+  {
+    title: "Advanced",
+    keys: [],
+    subgroups: [
+      { title: "Appearance", keys: ["trama.theme"] },
+      { title: "Drifts", keys: ["trama.driftBlocker", "trama.advisorScanner", "trama.asyncDriftResolver"] },
+      { title: "Agents", keys: ["trama.parallelExecution", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals"] },
+      { title: "omp Chat", keys: ["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"] },
+    ],
+  },
 ];
+
+/** Every key of a group, in order: its own keys, then those of each subgroup. */
+export const groupKeys = (group: SettingGroup): string[] => [...group.keys, ...(group.subgroups ?? []).flatMap((subgroup) => subgroup.keys)];
 
 /** Titles that the key does not give: the Settings tab and the wizard show the same one. */
 const EXPLICIT_TITLES: Readonly<Record<string, string>> = {
@@ -83,29 +112,32 @@ export function settingTitle(key: string): string {
 export function settingsSchema(manifest: ManifestPackage | undefined): SettingSchema[] {
   const properties = manifest?.contributes?.configuration?.properties ?? {};
   const schema: SettingSchema[] = [];
+  const add = (key: string, group: string, subgroup: string | undefined): void => {
+    const property = properties[key];
+    if (property === undefined) return;
+    const control: SettingControl = Array.isArray(property.enum)
+      ? "enum"
+      : property.type === "boolean"
+        ? "boolean"
+        : property.type === "integer" || property.type === "number"
+          ? "integer"
+          : "text";
+    schema.push({
+      key,
+      group,
+      ...(subgroup === undefined ? {} : { subgroup }),
+      title: settingTitle(key),
+      control,
+      ...(control === "enum" ? { values: property.enum, descriptions: property.enumDescriptions ?? [] } : {}),
+      default: property.default,
+      ...(property.minimum === undefined ? {} : { minimum: property.minimum }),
+      ...(property.scope === undefined ? {} : { scope: property.scope }),
+      markdown: property.markdownDescription ?? property.description ?? "",
+    });
+  };
   for (const group of SETTING_GROUPS) {
-    for (const key of group.keys) {
-      const property = properties[key];
-      if (property === undefined) continue;
-      const control: SettingControl = Array.isArray(property.enum)
-        ? "enum"
-        : property.type === "boolean"
-          ? "boolean"
-          : property.type === "integer" || property.type === "number"
-            ? "integer"
-            : "text";
-      schema.push({
-        key,
-        group: group.title,
-        title: settingTitle(key),
-        control,
-        ...(control === "enum" ? { values: property.enum, descriptions: property.enumDescriptions ?? [] } : {}),
-        default: property.default,
-        ...(property.minimum === undefined ? {} : { minimum: property.minimum }),
-        ...(property.scope === undefined ? {} : { scope: property.scope }),
-        markdown: property.markdownDescription ?? property.description ?? "",
-      });
-    }
+    for (const key of group.keys) add(key, group.title, undefined);
+    for (const subgroup of group.subgroups ?? []) for (const key of subgroup.keys) add(key, group.title, subgroup.title);
   }
   return schema;
 }

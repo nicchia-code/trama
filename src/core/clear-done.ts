@@ -1,13 +1,11 @@
-import { rmSync } from "node:fs";
+import { removeTaskFiles } from "./delete-task";
 import { TramaError } from "./errors";
-import { type ClearedTask, readHistory, saveHistory } from "./history";
+import { type ClearedTask, type HistoryEntry, readHistory, saveHistory } from "./history";
 import { readLastScan, rememberCleared } from "./last-scan";
-import { clearProgress } from "./progress";
-import { listProposals } from "./proposals";
+import { listProposals, type Proposal } from "./proposals";
 import { cardName } from "./short-numbers";
 import { proposalTagOf } from "./snapshot";
 import type { Project } from "./store";
-import { taskImagesDir } from "./task-images";
 import { getTaskOrNull, listDrifts, type Task } from "./work";
 
 /** The Tasks an open Drift names, as origin or as the Task that fixes its code: Clear leaves them in Done. */
@@ -21,9 +19,18 @@ function heldByOpenDrifts(p: Project): Set<string> {
   return held;
 }
 
+/** What one Clear reads once, before its first Task: the Proposals (for the tag of each copy) and the History entries, which are kept in memory as they are updated. */
+interface Reads {
+  proposals: ReadonlyMap<string, Proposal>;
+  entries: HistoryEntry[];
+}
+
+function readOnce(p: Project): Reads {
+  return { proposals: new Map(listProposals(p).map((proposal) => [proposal.id, proposal])), entries: [...readHistory(p).entries] };
+}
+
 /** What the History entries keep of a Task once it is gone: the title, its Proposal, the tag the Board showed, when it finished and its references. */
-function copyOf(p: Project, task: Task): ClearedTask {
-  const proposals = new Map(listProposals(p).map((proposal) => [proposal.id, proposal]));
+function copyOf(proposals: ReadonlyMap<string, Proposal>, task: Task): ClearedTask {
   return { title: task.title, proposal: task.data.proposal, tag: proposalTagOf(task.data.proposal, proposals)?.text ?? null, finished: task.data.finished, refs: task.data.refs };
 }
 
@@ -42,29 +49,32 @@ function step<T>(p: Project, task: Task, what: string, run: () => T): T {
  * For each Task, in this order: its copy goes into every History entry that cites it (`cleared`, written once and never
  * changed), a line with its `finished` goes into `.trama/last-scan/cleared` when the Scan count has to keep it, then its
  * file, its percentage and its images are deleted. When a write fails the function stops before deleting that Task and
- * throws, naming the Task and the step; the Tasks already deleted stay deleted. This is the only place where a Task is deleted.
+ * throws, naming the Task and the step; the Tasks already deleted stay deleted. The files are deleted by `removeTaskFiles`,
+ * which Delete of a Task in To do uses too.
  */
 export function clearDoneTasks(p: Project, ids: readonly string[]): string[] {
   const held = heldByOpenDrifts(p);
   const cleared: string[] = [];
+  // Read before the first Task to clear, once for the whole call.
+  let reads: Reads | null = null;
   for (const id of new Set(ids)) {
     const task = getTaskOrNull(p, id);
     if (task === null || task.data.column !== "done" || held.has(task.id)) continue;
-    const copy = copyOf(p, task);
+    reads ??= readOnce(p);
+    const { proposals, entries } = reads;
+    const copy = copyOf(proposals, task);
     step(p, task, "write its copy in History", () => {
-      for (const entry of readHistory(p).entries) {
+      for (const [index, entry] of entries.entries()) {
         if (!entry.tasks.includes(task.id) || entry.cleared[task.id] !== undefined) continue;
-        saveHistory({ ...entry, cleared: { ...entry.cleared, [task.id]: copy } });
+        const updated = { ...entry, cleared: { ...entry.cleared, [task.id]: copy } };
+        saveHistory(updated);
+        entries[index] = updated;
       }
     });
     const finished = task.data.finished;
     if (finished !== null && task.data.unchanged === null && Date.parse(finished) > Date.parse(readLastScan(p)))
       step(p, task, "remember it for the Scan count", () => rememberCleared(p, task.id, finished));
-    step(p, task, "delete its files", () => {
-      rmSync(task.path, { force: true });
-      clearProgress(p, task.id);
-      rmSync(taskImagesDir(p, task.id), { recursive: true, force: true });
-    });
+    step(p, task, "delete its files", () => removeTaskFiles(p, task));
     cleared.push(task.id);
   }
   return cleared;

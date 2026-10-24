@@ -247,6 +247,8 @@ export interface TaskCard {
   blockedBy: Blocker[];
   /** Why the Task's Run waits: the agent that filed the Task is still finishing its turn. Null when it is not waiting. */
   finishing: string | null;
+  /** Whether an open Drift holds the Task in To do, so Delete refuses it (from the snapshot: the webview does not recompute the rule). */
+  heldByDrift: boolean;
   /** The Task's text after its title, in Markdown; empty when it has none. */
   body: string;
   /** The images the Task carries, in the order they were tied; the details show them under the body. */
@@ -493,6 +495,7 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, finishin
     file: t.file,
     column: t.column,
     finishing,
+    heldByDrift: t.heldByDrift,
     views,
     finished: t.finished,
     unchanged: t.unchanged,
@@ -597,6 +600,19 @@ export function buildBoard(snapshot: Snapshot, resolve: BoardResolve = NO_RESOLV
     done: doneCards(snapshot.tasks, tasks),
   };
   return CARD_COLUMNS.map((id) => ({ id, title: COLUMN_TITLES[id], hint: EMPTY_HINTS[id], cards: cards[id] }));
+}
+
+/** The Tasks `Clear` deletes: every card of Done except the ones with the `kept` badge (an open Drift names them). */
+export const clearableTasks = (done: readonly Card[]): string[] => done.flatMap((card) => (card.kind === "task" && card.keptBy.length === 0 ? [card.id] : []));
+
+/**
+ * The columns with the cards `Clear` is deleting taken out of Done: the Tasks in `hidden`, from the click until the host says it is done. A `kept` card is never hidden.
+ * What the column shows (its number, its groups by day, `Nothing done yet`, the state of `Clear`) is computed from the cards left, so it follows them. With nothing hidden the columns are returned as they are.
+ */
+export function hideCleared(columns: readonly BoardColumn[], hidden: readonly string[]): BoardColumn[] {
+  if (hidden.length === 0) return [...columns];
+  const gone = new Set(hidden);
+  return columns.map((column) => (column.id === "done" ? { ...column, cards: column.cards.filter((card) => !(card.kind === "task" && card.keptBy.length === 0 && gone.has(card.id))) } : column));
 }
 
 export type HistoryPeriod = "today" | "week" | "month" | "all";

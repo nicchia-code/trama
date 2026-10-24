@@ -22,7 +22,7 @@ A scan that is not part of a `trama-implement` run (after an approval, or asked 
 ## Hard rules
 
 - NEVER edit code, `.trama/model/` or `.trama/requirements/` in this skill.
-- Agents may approve or reject a Proposal, discard a Draft or resolve a Drift only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. A request to scan or design does not by itself authorize deciding it.
+- Agents may approve or reject a Proposal, discard a Draft, resolve a Drift or delete a Task in To do (`trama task delete`) only when the developer explicitly asks for that decision in the conversation. Without that request, do not decide and do not ask the developer about it: stop and tell them the decision is theirs, on the Board. A request to scan or design does not by itself authorize deciding it or deleting a Task.
 - Compare behaviour at the level of the **Diagram**: States, Transitions, Events, who reacts to what. Compare construction against what the Requirements actually state. Variable names, structure, style and performance that no Requirement mentions are not Drifts.
 - The Model matters far more than the code. By default the code is wrong, not the Model.
 

@@ -93,6 +93,8 @@ export type ToHost =
   | { type: "dismissDrift"; id: string }
   /** Clear, at the bottom of the Done column: the host deletes those Tasks (by permanent identity) that are still Done. Refused while a Run launched by Trama is going, and the host never asks for confirmation. */
   | { type: "clearDone"; tasks: string[] }
+  /** Delete, in the details window of a Task in To do: the host refuses while a Run launched by Trama is going or the agent that filed the Task is still finishing, asks for confirmation in a modal dialog, and only then deletes that Task (by permanent identity), rechecking the same conditions. Cancelling changes nothing. With `clearDone`, the only messages that delete Tasks. */
+  | { type: "deleteTask"; task: string }
   /** The developer chose «Rework with feedback…» on an open Drift: the host asks for the feedback in an input box, then launches the resolution agent on that one Drift with it. */
   | { type: "reworkDrift"; drift: string }
   /** The Settings tab was opened: the host answers with the model names of omp (`modelSuggestions`). With `ompPath` they are for the omp at that path instead of the saved one, and the answer says so: this is how the wizard suggests the models of a path it has not saved yet. */
@@ -109,7 +111,7 @@ export type ToHost =
   | { type: "agentCheckWanted"; ompPath: string }
   /** Install omp: the host opens a visible terminal with omp's official installer; the message has no data. */
   | { type: "installOmp" }
-  /** The Settings tab became visible: the host sends `ompStatus`. */
+  /** The Settings tab became visible: the host sends `ompStatus`, and `modelSuggestions` from the same `omp models` call. */
   | { type: "ompStatusWanted" }
   /** The wizard's omp step is shown: the host searches the agent instruction files of `root` (a workspace folder; absent means the project's folder) and answers with `instructionFiles`. */
   | { type: "instructionFilesWanted"; root?: string }
@@ -154,6 +156,8 @@ export type ToWebview =
   | { type: "stoppedFollowing"; subject: string; reason: string }
   /** A notice at the top of the Board, closable like the others: a Clear that was refused or failed says why. */
   | { type: "notice"; text: string }
+  /** The host is done with the last `clearDone`, sent after the fresh picture whether Clear succeeded, was refused (`cleared` empty) or failed: `cleared` are the identities really deleted. The Board then stops hiding the cards it hid at the click. */
+  | { type: "clearDoneEnded"; cleared: string[] }
   /** An operation failed, or the files on disk cannot be read. Shown until dismissed or replaced by a snapshot. */
   | { type: "error"; message: string }
   /** Whether the folder has a Trama project: without one only Get Started and Settings are shown. */
@@ -169,8 +173,8 @@ export type ToWebview =
   /** The check of omp for the wizard: omp is being updated to `version`, or it is done (omp answered with `models` models and `version`, or `error` says why not; `updateError` is why a check or update failed). */
   | { type: "agentCheck"; ompPath: string; state: "updating"; version: string }
   | { type: "agentCheck"; ompPath: string; state: "done"; ok: boolean; missing: boolean; version?: string; models?: number; error?: string; updateError?: string }
-  /** The state of omp for the Settings tab: being checked, or done with the `version` that answers, or `error` saying why not (`missing` when the program was not found). */
-  | { type: "ompStatus"; state: "checking" | "done"; missing?: boolean; version?: string; error?: string }
+  /** The state of omp for the Settings tab: being checked, or done with the `version` that answers and the number of `models` omp lists, or `error` saying why not (`missing` when the program was not found). */
+  | { type: "ompStatus"; state: "checking" | "done"; missing?: boolean; version?: string; models?: number; error?: string }
   /** The agent instruction files found for `root`, with `path` absolute and `label` as it is shown. No content is sent. */
   | { type: "instructionFiles"; root: string; files: InstructionFileView[] }
   /** The entries of one folder of the wizard's tree, without the ones named with a dot or ignored by git. */

@@ -5,7 +5,7 @@ import type { ConversationItem, ToChatHost, ToChatWebview } from "../extension/s
 import { ChatApp, createChatController } from "../extension/src/webview/omp-chat/app";
 import { fieldsOf } from "../extension/src/webview/omp-chat/forms";
 import { createChatStore } from "../extension/src/webview/omp-chat/state";
-import { announcement, applyUpdate, cutLines, emptyTranscript, MAX_OUTPUT_LINES, start } from "../extension/src/webview/omp-chat/transcript";
+import { announcement, applyUpdate, type Block, emptyTranscript, errorLine, MAX_ERROR_CHARS, start, type Transcript } from "../extension/src/webview/omp-chat/transcript";
 
 afterEach(cleanup);
 
@@ -111,7 +111,7 @@ test("Trama's instruction is the first message, labelled Trama, with its attachm
   expect(screen.getByText("the attached text")).not.toBeNull();
 });
 
-test("the agent's streamed text builds one Markdown message, and a tool call is a compact row that opens its result", () => {
+test("the agent's streamed text builds one Markdown message, and a tool call is a read-only row that does not show its result", () => {
   const { host } = setup();
   host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
   host({ type: "conversationUpdate", id: "a", update: chunk("Hello **wor") });
@@ -123,25 +123,64 @@ test("the agent's streamed text builds one Markdown message, and a tool call is 
     id: "a",
     update: { sessionId: "s", update: { sessionUpdate: "tool_call", toolCallId: "t1", title: "Run tests", kind: "execute", status: "in_progress" } },
   });
+  const row = document.querySelector('[data-tool="t1"]') as HTMLElement;
+  expect(within(row).getByLabelText("Running")).not.toBeNull();
   host({
     type: "conversationUpdate",
     id: "a",
     update: { sessionId: "s", update: { sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed", content: [{ type: "content", content: { type: "text", text: "3 passed" } }] } },
   });
+  expect(within(row).getByLabelText("Done")).not.toBeNull();
+  expect(within(row).queryByRole("button")).toBeNull();
+  expect(row.querySelector("[aria-expanded]")).toBeNull();
+  expect(row.querySelector("[tabindex], button, a")).toBeNull();
+  expect(row.textContent).toBe("Run tests");
   expect(screen.queryByText("3 passed")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /Run tests/ }));
-  expect(screen.getByText("3 passed")).not.toBeNull();
+  fireEvent.click(screen.getByText("Run tests"));
+  expect(screen.queryByText("3 passed")).toBeNull();
 });
 
-test("a tool output is cut after 200 lines with the number of lines left", () => {
-  const output = Array.from({ length: MAX_OUTPUT_LINES + 7 }, (_, at) => `line ${at}`).join("\n");
-  expect(cutLines(output)).toMatchObject({ more: 7 });
-  expect(cutLines("a\nb").more).toBe(0);
+test("a failed call shows the first line of omp's error under its row, in the error colour, and nothing when there is no error text", () => {
   const { host } = setup();
   host({ type: "conversations", items: [item("a", "T3")], selected: "a" });
-  host({ type: "conversationUpdate", id: "a", update: { sessionId: "s", update: { sessionUpdate: "tool_call", toolCallId: "t", title: "Read", kind: "read", status: "completed", rawOutput: output } } });
-  fireEvent.click(screen.getByRole("button", { name: /Read/ }));
-  expect(document.body.textContent).toContain("… 7 more lines");
+  const update = (next: SessionNotification["update"]) => host({ type: "conversationUpdate", id: "a", update: { sessionId: "s", update: next } });
+  update({ sessionUpdate: "tool_call", toolCallId: "f", title: "Run tests", kind: "execute", status: "in_progress" });
+  update({ sessionUpdate: "tool_call_update", toolCallId: "f", status: "failed", content: [{ type: "content", content: { type: "text", text: "\n  \nexit code 1: boom\nsecond line" } }] });
+  update({ sessionUpdate: "tool_call", toolCallId: "g", title: "Read", kind: "read", status: "failed" });
+  const row = document.querySelector('[data-tool="f"]') as HTMLElement;
+  expect(within(row).getByLabelText("Failed").getAttribute("class")).toContain("text-destructive");
+  const error = within(row).getByText("exit code 1: boom");
+  expect(error.className).toContain("text-destructive");
+  expect(error.className).toContain("text-xs");
+  expect(error.className).toContain("truncate");
+  expect(error.className).toContain("pl-5");
+  expect(row.textContent).not.toContain("second line");
+  expect(within(row).queryByRole("button")).toBeNull();
+  const bare = document.querySelector('[data-tool="g"]') as HTMLElement;
+  expect(within(bare).getByLabelText("Failed")).not.toBeNull();
+  expect(bare.querySelectorAll("p")).toHaveLength(0);
+});
+
+test("the error line is the first line of the report that is not blank, trimmed; none without text", () => {
+  expect(errorLine("\n \n  exit 2  \nnext")).toBe("exit 2");
+  expect(errorLine("only")).toBe("only");
+  expect(errorLine("")).toBeUndefined();
+  expect(errorLine(" \n\t\n")).toBeUndefined();
+  expect(errorLine(undefined)).toBeUndefined();
+  expect(errorLine("x".repeat(MAX_ERROR_CHARS + 50))).toHaveLength(MAX_ERROR_CHARS);
+});
+
+test("a block keeps the error line of a failed call and nothing of a call that succeeded", () => {
+  const tool = (t: Transcript) => t.blocks[0] as Extract<Block, { kind: "tool" }>;
+  const call = (status: "completed" | "failed") =>
+    applyUpdate(
+      applyUpdate(emptyTranscript(), { sessionId: "s", update: { sessionUpdate: "tool_call", toolCallId: "t", title: "x", kind: "execute", status: "in_progress", content: [{ type: "content", content: { type: "text", text: "why\nmore" } }] } }, 1),
+      { sessionId: "s", update: { sessionUpdate: "tool_call_update", toolCallId: "t", status } },
+      2,
+    );
+  expect(tool(call("failed")).error).toBe("why");
+  expect(tool(call("completed"))).not.toHaveProperty("error");
+  expect(tool(call("completed"))).not.toHaveProperty("output");
 });
 
 test("a call whose title starts with a language prefix shows that language's logo before the title, which loses the prefix", () => {
@@ -149,13 +188,13 @@ test("a call whose title starts with a language prefix shows that language's log
   host({ type: "conversations", items: [item("a", "T3")], selected: "a" });
   host({ type: "conversationUpdate", id: "a", update: { sessionId: "s", update: { sessionUpdate: "tool_call", toolCallId: "t", title: "[py] print(1)", kind: "execute", status: "completed" } } });
   const row = document.querySelector('[data-tool="t"]') as HTMLElement;
-  const button = within(row).getByRole("button");
-  expect(within(button).getByRole("img", { name: "Python" })).not.toBeNull();
-  expect(button.firstElementChild?.tagName.toLowerCase()).toBe("svg");
-  expect(button.textContent).toBe("print(1)");
+  const line = row.firstElementChild?.firstElementChild as HTMLElement;
+  expect(within(line).getByRole("img", { name: "Python" })).not.toBeNull();
+  expect(line.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+  expect(line.textContent).toBe("print(1)");
 });
 
-test("an edit shows only the file, which opens in the editor", () => {
+test("an edit shows the path of each file it touched as plain text that opens nothing", () => {
   const { host, posted } = setup();
   host({ type: "conversations", items: [item("a", "T3")], selected: "a" });
   host({
@@ -163,11 +202,27 @@ test("an edit shows only the file, which opens in the editor", () => {
     id: "a",
     update: {
       sessionId: "s",
-      update: { sessionUpdate: "tool_call", toolCallId: "t", title: "Edit", kind: "edit", status: "completed", content: [{ type: "diff", path: "src/a.ts", newText: "x" }] },
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "t",
+        title: "Edit",
+        kind: "edit",
+        status: "completed",
+        content: [
+          { type: "diff", path: "src/a.ts", newText: "x" },
+          { type: "diff", path: "src/b.ts", newText: "y" },
+        ],
+      },
     },
   });
-  fireEvent.click(screen.getByRole("button", { name: "src/a.ts" }));
-  expect(posted).toEqual([{ type: "openFile", path: "src/a.ts" }]);
+  const row = document.querySelector('[data-tool="t"]') as HTMLElement;
+  expect(within(row).queryByRole("button")).toBeNull();
+  const paths = [...row.querySelectorAll("p")];
+  expect(paths.map((path) => path.textContent)).toEqual(["src/a.ts", "src/b.ts"]);
+  expect(paths[0]?.className).toContain("font-mono");
+  expect(paths[0]?.className).toContain("text-muted-foreground");
+  fireEvent.click(screen.getByText("src/a.ts"));
+  expect(posted).toEqual([]);
   expect(document.body.textContent).not.toContain("newText");
 });
 

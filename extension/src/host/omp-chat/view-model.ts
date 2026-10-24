@@ -3,6 +3,7 @@ import type { ConversationItem, ConversationRunState, FirstMessage, SendMode, To
 import type { ThemeSetting } from "../../webview/theme";
 import { parseChatMessage } from "./messages";
 import type { ChatViewPort, ConversationTab, Disposable, OmpPrompt, OmpSessionPort, OutgoingMessage, PendingInstruction, SendStatus } from "./ports";
+import type { UsageSource } from "./usage";
 import { memorySendModeStore, readSendMode, SEND_MODE_KEY, type SendModeStore } from "./send-mode";
 
 /** What the view needs of the editor: the webview and the few things the developer's clicks ask for. `vscode` stays out of the logic. */
@@ -17,7 +18,6 @@ export interface ChatSurface {
   theme(): ThemeSetting;
   /** The text of a file the instruction carries, cut to a reasonable size; undefined when it cannot be read. */
   readText(path: string): string | undefined;
-  openFile(path: string): void;
   openLink(url: string): void;
 }
 
@@ -67,6 +67,8 @@ export class ChatViewModel implements ChatViewPort {
   private readonly generalListeners = new Set<(message: OutgoingMessage) => void>();
   /** The Steer|Queue choice of the view: read from the saved value when the view is made, changed by the developer. */
   private sendMode: SendMode;
+  /** The run state each tab had at the last list sent: a tab that goes from `running` to another state ended a turn, which asks for the usage. */
+  private readonly lastStates = new Map<string, ConversationRunState>();
 
   /**
    * `inUse`: omp Chat on, not turned off in the user settings (read now). `pending`: the conversations the window has saved and waits to resume, by
@@ -78,8 +80,10 @@ export class ChatViewModel implements ChatViewPort {
     private readonly pending: () => readonly string[] = () => [],
     private readonly folder: () => boolean = () => true,
     private readonly sendModes: SendModeStore = memorySendModeStore(),
+    private readonly usage?: UsageSource,
   ) {
     this.sendMode = readSendMode(this.sendModes.get(SEND_MODE_KEY));
+    this.usage?.onChange(() => this.postUsage());
     this.refresh();
   }
 
@@ -108,6 +112,7 @@ export class ChatViewModel implements ChatViewPort {
     this.surface.post({ type: "theme", setting: this.surface.theme() });
     this.surface.post({ type: "sendMode", mode: this.sendMode });
     this.postConversations();
+    if (this.usage !== undefined) this.surface.post(this.usage.message());
     if (this.lastGeneralStatus !== undefined) this.surface.post({ type: "generalStatus", ...this.lastGeneralStatus });
     for (const tab of this.tabs) {
       this.surface.post({ type: "conversationStart", id: tab.id, focus: false, ...tab.start });
@@ -161,6 +166,8 @@ export class ChatViewModel implements ChatViewPort {
   /** General comes to the view as its first tab; it takes the view only when none is in view. */
   showGeneral(): void {
     if (this.find(GENERAL_ID) !== undefined) return;
+    // `omp-chat-general.SHOWN`: General is in the view, and the usage is asked for.
+    this.usage?.request();
     const general: Tab = { id: GENERAL_ID, name: "General", session: undefined, inTurn: false, working: false, forms: new Set(), permissions: new Map(), start: {}, subscriptions: [] };
     this.tabs.unshift(general);
     if (this.selected === undefined) this.selected = GENERAL_ID;
@@ -301,6 +308,10 @@ export class ChatViewModel implements ChatViewPort {
       case "installOmp":
         if (this.find(GENERAL_ID) !== undefined) for (const listener of [...this.installListeners]) listener();
         return;
+      case "refreshUsage":
+        // Only General shows the usage; a window without General asks for none.
+        if (this.find(GENERAL_ID) !== undefined) this.usage?.request();
+        return;
       case "setModel": {
         const tab = this.find(message.id);
         if (tab?.session === undefined) return;
@@ -326,9 +337,6 @@ export class ChatViewModel implements ChatViewPort {
         this.postConversations();
         return;
       }
-      case "openFile":
-        this.surface.openFile(message.path);
-        return;
       case "openLink":
         this.surface.openLink(message.url);
         return;
@@ -369,7 +377,17 @@ export class ChatViewModel implements ChatViewPort {
     return tab.inTurn || tab.working ? "running" : "idle";
   }
 
+  private postUsage(): void {
+    if (this.ready && this.usage !== undefined) this.surface.post(this.usage.message());
+  }
+
   private postConversations(): void {
+    const states = this.tabs.map((tab) => [tab.id, this.runState(tab)] as const);
+    const endedTurn = states.some(([id, state]) => state !== "running" && this.lastStates.get(id) === "running");
+    this.lastStates.clear();
+    for (const [id, state] of states) this.lastStates.set(id, state);
+    // A turn of any conversation of the window ended: General, when it is there, asks for the usage.
+    if (endedTurn && this.find(GENERAL_ID) !== undefined) this.usage?.request();
     if (!this.ready) return;
     const items: ConversationItem[] = this.tabs.map((tab) => ({
       id: tab.id,

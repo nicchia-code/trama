@@ -23,6 +23,8 @@ export interface ViewEnv {
 export interface BoardEnv extends ViewEnv {
   /** Why a single Task's Run is disabled beyond its own waiting: a Run in progress or Drift resolution. Null when none holds. */
   runReason: string | null;
+  /** Whether a Run launched by Trama in this window is not finished: `Delete` of a Task waits for it. */
+  running: boolean;
   /** The models omp lists, with their thinking levels: a Proposal's model shows its level from them. */
   models: readonly ModelSuggestion[];
   /** Scrolls to a card, by its key, and focuses it. */
@@ -39,6 +41,10 @@ export interface BoardEnv extends ViewEnv {
   openTaskImage(task: string, name: string): void;
   /** Opens the read-only details of the ghost with this key (`AnnouncedCard.key`). */
   openGhost(key: string): void;
+  /** `Delete` in the details of the Task in To do `task`: asks the host, which asks the developer to confirm. Remembers the Task, to put the focus right once it is gone. */
+  deleteTask(task: string): void;
+  /** Called when the details of `task` have closed: when the developer pressed Delete and the Task is gone, puts the focus on Run all (or on Active when Run all is disabled) and returns true. */
+  focusAfterDelete(task: string): boolean;
   /** Takes a queued Proposal out of the refining queue; `key` is its card, which gets the focus back on its Approve. */
   cancelRefinement(proposal: string, key: string): void;
 }

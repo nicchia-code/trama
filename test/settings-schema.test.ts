@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseToHost } from "../extension/src/host/messages";
-import { planSettingChange, settingsSchema, settingTitle, settingValueError, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
+import { groupKeys, planSettingChange, settingsSchema, settingTitle, settingValueError, storedValue, SETTING_GROUPS, type ManifestPackage, type SettingSchema } from "../extension/src/host/settings-schema";
 import { groupSettings, numberFromText, workspaceOverride } from "../extension/src/webview/settings/logic";
 
 const manifest: ManifestPackage = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
@@ -40,26 +40,49 @@ test("every manifest description is at most two short sentences of about 160 cha
   expect(properties["trama.theme"]?.markdownDescription).toBe("Colours of the Trama panel. Auto (the default) follows the editor's theme; Light and Dark fix it.");
 });
 
-test("every key the manifest declares belongs to exactly one group, and every grouped key is declared", () => {
-  const grouped = SETTING_GROUPS.flatMap((group) => group.keys);
+/** The keys of the group Advanced, subgroups after subgroups. */
+const advancedKeys = (): string[] => groupKeys(SETTING_GROUPS[SETTING_GROUPS.length - 1] as (typeof SETTING_GROUPS)[number]);
+
+test("every key the manifest declares belongs to exactly one group or subgroup, and every grouped key is declared", () => {
+  const grouped = SETTING_GROUPS.flatMap(groupKeys);
   expect(new Set(grouped).size).toBe(grouped.length);
   expect([...Object.keys(properties)].sort()).toEqual([...grouped].sort());
 });
 
-test("the groups and their keys keep the order of the Settings tab", () => {
-  expect(SETTING_GROUPS.map((group) => [group.title, [...group.keys]])).toEqual([
-    ["Appearance", ["trama.theme"]],
-    ["omp", ["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"]],
-    ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]],
-    ["Project", ["trama.skillsDir"]],
-    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution", "trama.asyncDriftResolver", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals", "trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"]],
+test("the groups, the subgroups of Advanced and their keys keep the order of the Settings tab and the wizard", () => {
+  expect(SETTING_GROUPS.map((group) => [group.title, [...group.keys], (group.subgroups ?? []).map((sub) => [sub.title, [...sub.keys]])])).toEqual([
+    ["omp", ["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"], []],
+    ["Models", ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"], []],
+    ["Project", ["trama.skillsDir"], []],
+    [
+      "Advanced",
+      [],
+      [
+        ["Appearance", ["trama.theme"]],
+        ["Drifts", ["trama.driftBlocker", "trama.advisorScanner", "trama.asyncDriftResolver"]],
+        ["Agents", ["trama.parallelExecution", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals"]],
+        ["omp Chat", ["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"]],
+      ],
+    ],
   ]);
-  expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
-    ["omp", ["trama.autoExit", "trama.language"]],
-    ["Models", ["trama.maxParallelAgents"]],
-    ["Project", ["trama.skillsDir"]],
-    ["Features", ["trama.driftBlocker", "trama.advisorScanner", "trama.parallelExecution"]],
+  expect(SETTING_GROUPS.some((group) => group.title === "Features")).toBe(false);
+  expect(groupSettings(schema).map((g) => [g.title, g.settings.map((s) => s.key), g.subgroups.map((sub) => [sub.title, sub.settings.map((s) => s.key)])])).toEqual([
+    ["omp", ["trama.autoExit", "trama.language"], []],
+    ["Models", ["trama.maxParallelAgents"], []],
+    ["Project", ["trama.skillsDir"], []],
+    ["Advanced", [], [["Drifts", ["trama.driftBlocker", "trama.advisorScanner"]], ["Agents", ["trama.parallelExecution"]]]],
   ]);
+});
+
+test("the schema of the settings message carries each key's group and, for Advanced, its subgroup", () => {
+  const all = settingsSchema(manifest);
+  expect(all.map((s) => [s.group, s.subgroup ?? null])).toEqual(
+    SETTING_GROUPS.flatMap((group) => [...group.keys.map(() => [group.title, null]), ...(group.subgroups ?? []).flatMap((sub) => sub.keys.map(() => [group.title, sub.title]))]),
+  );
+  expect(all.find((s) => s.key === "trama.theme")).toMatchObject({ group: "Advanced", subgroup: "Appearance" });
+  expect(all.find((s) => s.key === "trama.autoExit")).toMatchObject({ group: "omp" });
+  expect(all.find((s) => s.key === "trama.autoExit")?.subgroup).toBeUndefined();
+  expect(schema.find((s) => s.key === "trama.advisorScanner")).toMatchObject({ group: "Advanced", subgroup: "Drifts" });
 });
 
 test("no group, title or description of the settings says Experimental", () => {
@@ -74,9 +97,9 @@ test("the Drift Blocker is a checkbox of the last group, off by default and appl
   expect(blocker?.scope).toBe("application");
   expect(blocker?.markdownDescription).toBe("On: a new Drift blocks only the Tasks it really affects; one that blocks none arrives as a resolution Proposal.");
   expect(settingTitle("trama.driftBlocker")).toBe("Drift Blocker");
-  const last = SETTING_GROUPS[SETTING_GROUPS.length - 1];
-  expect(last?.title).toBe("Features");
-  expect(last?.keys[0]).toBe("trama.driftBlocker");
+  const advanced = SETTING_GROUPS[SETTING_GROUPS.length - 1];
+  expect(advanced?.title).toBe("Advanced");
+  expect(advanced?.subgroups?.find((sub) => sub.title === "Drifts")?.keys[0]).toBe("trama.driftBlocker");
   expect(settingsSchema(manifest).find((s) => s.key === "trama.driftBlocker")?.control).toBe("boolean");
 });
 
@@ -86,40 +109,41 @@ test("the Advisor Scanner is a checkbox of the last group, off by default and ap
   expect(scanner?.default).toBe(false);
   expect(scanner?.scope).toBe("application");
   expect(settingTitle("trama.advisorScanner")).toBe("Advisor Scanner");
-  expect(SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys).toContain("trama.advisorScanner");
+  expect(advancedKeys()).toContain("trama.advisorScanner");
   expect(settingsSchema(manifest).find((s) => s.key === "trama.advisorScanner")?.control).toBe("boolean");
 });
 
-test("the Parallel Execution is a checkbox right after the Advisor Scanner, off by default and application-scoped", () => {
+test("the Parallel Execution is a checkbox, first of the Agents subgroup, off by default and application-scoped", () => {
   const parallel = properties["trama.parallelExecution"];
   expect(parallel?.type).toBe("boolean");
   expect(parallel?.default).toBe(false);
   expect(parallel?.scope).toBe("application");
   expect(settingTitle("trama.parallelExecution")).toBe("Parallel Execution");
-  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
-  expect(keys.indexOf("trama.parallelExecution")).toBe(keys.indexOf("trama.advisorScanner") + 1);
+  const agents = settingsSchema(manifest).filter((s) => s.subgroup === "Agents").map((s) => s.key);
+  expect(agents[0]).toBe("trama.parallelExecution");
   expect(settingsSchema(manifest).find((s) => s.key === "trama.parallelExecution")?.control).toBe("boolean");
 });
 
-test("the Async Drift Resolver is a checkbox right after the Parallel Execution, off by default and application-scoped", () => {
+test("the Async Drift Resolver is a checkbox right after the Advisor Scanner, last of the Drifts subgroup, off by default and application-scoped", () => {
   const resolver = properties["trama.asyncDriftResolver"];
   expect(resolver?.type).toBe("boolean");
   expect(resolver?.default).toBe(false);
   expect(resolver?.scope).toBe("application");
   expect(settingTitle("trama.asyncDriftResolver")).toBe("Async Drift Resolver");
-  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
-  expect(keys.indexOf("trama.asyncDriftResolver")).toBe(keys.indexOf("trama.parallelExecution") + 1);
+  const drifts = settingsSchema(manifest).filter((s) => s.subgroup === "Drifts").map((s) => s.key);
+  expect(drifts.indexOf("trama.asyncDriftResolver")).toBe(drifts.indexOf("trama.advisorScanner") + 1);
+  expect(drifts[drifts.length - 1]).toBe("trama.asyncDriftResolver");
   expect(settingsSchema(manifest).find((s) => s.key === "trama.asyncDriftResolver")?.control).toBe("boolean");
 });
 
-test("the Sub-agents Context Sharing is a checkbox right after the Async Drift Resolver, with its explicit title", () => {
+test("the Sub-agents Context Sharing is a checkbox right after the Parallel Execution, with its explicit title", () => {
   const sharing = properties["trama.subagentsContextSharing"];
   expect(sharing?.type).toBe("boolean");
   expect(sharing?.default).toBe(false);
   expect(sharing?.scope).toBe("application");
   expect(settingTitle("trama.subagentsContextSharing")).toBe("Sub-agents Context Sharing");
-  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
-  expect(keys.indexOf("trama.subagentsContextSharing")).toBe(keys.indexOf("trama.asyncDriftResolver") + 1);
+  const keys = advancedKeys();
+  expect(keys.indexOf("trama.subagentsContextSharing")).toBe(keys.indexOf("trama.parallelExecution") + 1);
   expect(settingsSchema(manifest).find((s) => s.key === "trama.subagentsContextSharing")?.control).toBe("boolean");
 });
 
@@ -192,14 +216,14 @@ test("the host no longer accepts a delegation message or the old Drift autopilot
   expect(properties["trama.driftAutoPilot"]).toBeUndefined();
 });
 
-test("omp Chat is a checkbox in Features after Sub-agents Context Sharing, on by default, with its title and description", () => {
+test("omp Chat is a checkbox in the omp Chat subgroup after Sub-agents Context Sharing, on by default, with its title and description", () => {
   const chat = properties["trama.ompChat"];
   expect(chat?.type).toBe("boolean");
   expect(chat?.default).toBe(true);
   expect(chat?.scope).toBe("application");
   expect(chat?.markdownDescription).toBe("Trama's jobs open a conversation in the omp Chat view instead of a terminal.");
   expect(settingTitle("trama.ompChat")).toBe("omp Chat");
-  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
+  const keys = advancedKeys();
   expect(keys.indexOf("trama.autoUpdateStaleProposals")).toBe(keys.indexOf("trama.subagentsContextSharing") + 1);
   expect(keys.indexOf("trama.ompChat")).toBe(keys.indexOf("trama.autoUpdateStaleProposals") + 1);
   expect(settingsSchema(manifest).find((s) => s.key === "trama.ompChat")?.control).toBe("boolean");
@@ -210,7 +234,7 @@ test("a write of trama.ompChat is planned like any other", () => {
   expect(planSettingChange(settingsSchema(manifest), "trama.driftBlocker", true).ok).toBe(true);
 });
 
-test("omp Chat Approval is a select right after omp Chat in Features: ask by default, ask or yolo, user scope, with its explicit title", () => {
+test("omp Chat Approval is a select right after omp Chat in its subgroup: ask by default, ask or yolo, user scope, with its explicit title", () => {
   const approval = properties["trama.ompChatApproval"];
   expect(approval?.type).toBe("string");
   expect(approval?.enum).toEqual(["ask", "yolo"]);
@@ -218,19 +242,19 @@ test("omp Chat Approval is a select right after omp Chat in Features: ask by def
   expect(approval?.scope).toBe("application");
   expect(approval?.markdownDescription).toContain("runs every command without asking");
   expect(settingTitle("trama.ompChatApproval")).toBe("omp Chat Approval");
-  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
+  const keys = advancedKeys();
   expect(keys.indexOf("trama.ompChatApproval")).toBe(keys.indexOf("trama.ompChat") + 1);
   expect(settingsSchema(manifest).find((s) => s.key === "trama.ompChatApproval")?.control).toBe("enum");
 });
 
-test("omp Chat Intent Tracing is a checkbox last in Features, on by default, user scope, with its explicit title and description", () => {
+test("omp Chat Intent Tracing is a checkbox last in Advanced, on by default, user scope, with its explicit title and description", () => {
   const tracing = properties["trama.ompChatIntentTracing"];
   expect(tracing?.type).toBe("boolean");
   expect(tracing?.default).toBe(true);
   expect(tracing?.scope).toBe("application");
   expect(tracing?.markdownDescription).toBe("On: in omp Chat the agent writes why it calls each tool. Off saves tokens. Applies to conversations started afterwards.");
   expect(settingTitle("trama.ompChatIntentTracing")).toBe("omp Chat Intent Tracing");
-  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.keys ?? [];
+  const keys = advancedKeys();
   expect(keys[keys.length - 1]).toBe("trama.ompChatIntentTracing");
   expect(settingsSchema(manifest).find((s) => s.key === "trama.ompChatIntentTracing")?.control).toBe("boolean");
 });

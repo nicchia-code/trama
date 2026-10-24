@@ -52,6 +52,7 @@ function env(over: Partial<BoardEnv> = {}): { env: BoardEnv; calls: Calls } {
       context: { post: (message) => calls.posted.push(message), navigate: (...args: unknown[]) => calls.navigated.push(args), openLink: () => {} } as BoardEnv["context"],
       numbers,
       runReason: null,
+      running: false,
       models: [],
       openTask: (id) => calls.details.push(`task:${id}`),
       openDrift: (id) => calls.details.push(`drift:${id}`),
@@ -60,6 +61,8 @@ function env(over: Partial<BoardEnv> = {}): { env: BoardEnv; calls: Calls } {
       openProposal: (id) => calls.opened.push(id),
       openTaskImage: (id, name) => calls.images.push(`${id}/${name}`),
       openGhost: (key) => calls.ghosts.push(key),
+      deleteTask: (id) => calls.posted.push({ type: "deleteTask", task: id }),
+      focusAfterDelete: () => false,
       cancelRefinement: () => {},
       ...over,
     },
@@ -87,7 +90,7 @@ const proposal: ProposalCard = {
 const task: TaskCard = {
   kind: "task", key: "task:liveTask", id: "liveTask", name: { text: "T3", isNumber: true }, title: "A task", technical: false,
   refs: [], drift: "liveDrift", driftName: "D4", proposal: null, proposalTag: null, proposalName: null, agent: false, progress: null, blockedByDrifts: [{ id: "liveDrift", key: "drift:liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late" }], waitingFor: [],
-  blockedBy: [], body: "", images: [], file: "task.md", column: "todo", finishing: null, views: { diagram: false, requirements: false }, finished: null, unchanged: null, keptBy: [],
+  blockedBy: [], body: "", images: [], file: "task.md", column: "todo", finishing: null, heldByDrift: false, views: { diagram: false, requirements: false }, finished: null, unchanged: null, keptBy: [],
 };
 const resolved = (over: Partial<ProposalCard["resolves"][number]> = {}): ProposalCard["resolves"][number] => ({
   drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", blocked: [], notBlocking: [], ...over,
@@ -269,6 +272,23 @@ describe("Board card rendering", () => {
     expect(screen.getByRole("button", { name: "Show what T3 touches in Requirements" })).not.toBeNull();
   });
 
+  test("a Task in Active with mixed references has no chip on the card and every chip in its details window; technical shows on every technical Task", () => {
+    const refs = ["order/Paid", "requirements/ui#focus", "specs#frameworks"];
+    const mixed: TaskCard = { ...task, blockedByDrifts: [], refs, technical: true };
+    draw(<CardView card={mixed} />);
+    for (const ref of refs) expect(screen.queryByRole("button", { name: ref })).toBeNull();
+    expect(screen.getByText("technical")).not.toBeNull();
+    cleanup();
+    draw(<CardView card={{ ...mixed, refs: [] }} />);
+    expect(screen.getByText("technical")).not.toBeNull();
+    cleanup();
+    draw(<CardView card={{ ...mixed, technical: false }} />);
+    expect(screen.queryByText("technical")).toBeNull();
+    cleanup();
+    draw(<TaskDetailsDialog card={{ ...mixed, drift: null, waitingFor: [] }} onClose={() => {}} />);
+    expect(refs.map((ref) => screen.getByRole("button", { name: ref }).getAttribute("aria-description"))).toEqual(["Show order/Paid on the diagram", "Show requirements/ui#focus in Requirements", "Show specs#frameworks in Specs"]);
+  });
+
   test("a Drift's Dismiss that cannot be used is disabled with its reason as accessible description", () => {
     const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [] } as unknown as DriftView;
     draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null, drift, dismissBlocker: "An agent is resolving Drifts", reworkBlocker: "An agent is resolving Drifts. Drifts are being resolved", resolving: false, unifying: false, resolveBlocker: "Drifts are being resolved", blocked: [], notBlocking: [] }} />);
@@ -340,7 +360,7 @@ describe("Run buttons say every reason that holds", () => {
 });
 
 describe("Task details", () => {
-  test("a Task window has the number and title, the references as links, the body, the Show tags toggle, and Ask more and Close only", () => {
+  test("a Task in To do has a window with the number and title, the references as links, the body, the Show tags toggle, and Delete apart at the left of Ask more and Close", () => {
     const withBody = { ...task, drift: null, blockedByDrifts: [], waitingFor: [], body: "The **whole** body.", refs: ["order/Shipped"], proposal: "live", proposalTag: { proposal: "live", text: "Returns", title: "Returns after shipping" } };
     draw(<TaskDetailsDialog card={withBody} onClose={() => {}} />);
     const dialog = screen.getByRole("dialog");
@@ -348,7 +368,7 @@ describe("Task details", () => {
     expect(within(dialog).queryByRole("img", { name: "From Proposal live: Returns after shipping" })).toBeNull();
     expect(within(dialog).getByRole("button", { name: "order/Shipped" })).not.toBeNull();
     expect(dialog.textContent).toContain("The whole body.");
-    expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["order/Shipped", "Show tags", "Ask more", "Close"]);
+    expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["order/Shipped", "Show tags", "Delete", "Ask more", "Close"]);
   });
 
   test("the Show tags toggle shows the tag with its tooltip and turns into Hide tags, and starts closed on each opening of the same Task", () => {
@@ -558,7 +578,7 @@ const proposalView = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "live", created: "2026-10-01T10:00:00.000Z", title: "A proposal", body: "Testo **lungo** della Proposal.", kind: "change", nonBlocking: false, prepared: false, refining: false, resolves: [], requires: [], base: null, stale: [], unbased: [], errors: [], unfixable: [], creates: 1,
   tasks: [{ id: "t1", title: "Do it", refs: [], technical: true, body: "", images: [] }], removals: [], changes: [], machines: [], actors: [], areas: [], specs: EMPTY_SPECS, specsChange: { entries: [], notesBefore: null }, scope: [], ...over,
 });
-const taskView = (over: Partial<TaskView> = {}): TaskView => ({ id: "liveTask", created: "2026-10-01T10:00:00.000Z", title: "A task", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], file: "tasks/liveTask.md", images: [], ...over });
+const taskView = (over: Partial<TaskView> = {}): TaskView => ({ id: "liveTask", created: "2026-10-01T10:00:00.000Z", title: "A task", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], heldByDrift: false, file: "tasks/liveTask.md", images: [], ...over });
 const driftView = (over: Partial<DriftView> = {}): DriftView => ({ id: "liveDrift", created: "2026-10-01T10:00:00.000Z", job: null, prepared: null, title: "Code refunds late", body: "", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, refs: [], proposal: null, sides: { happens: "A", should: "B", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], unifiedDrifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
 
@@ -1056,6 +1076,67 @@ describe("The Done column", () => {
       fireEvent.click(screen.getByRole("button", { name: "Expand Done column" }));
       expect(screen.getByRole("article", { name: "Task T3: Finished one" })).not.toBeNull();
     });
+
+    test("the click takes the cards Clear deletes out of the column at once, and they stay out when a new picture arrives; the number, the hint and Clear follow", () => {
+      const old = new Date(now.getFullYear() - 1, 0, 5, 8, 0).toISOString();
+      const tasks = [doneView({ id: "a1" }), doneView({ id: "a2", title: "Second", finished: old })];
+      const { props, rerender, posted } = page(snapshot({ tasks }));
+      open();
+      fireEvent.click(clearButton());
+      expect(posted).toEqual([{ type: "clearDone", tasks: ["a1", "a2"] }]);
+      expect(within(column()).queryByRole("article")).toBeNull();
+      expect(column().querySelector("h2 + [data-slot=badge]")?.textContent).toBe("0");
+      expect(within(column()).getByText("Nothing done yet")).not.toBeNull();
+      expect([...column().querySelectorAll("h3")]).toEqual([]);
+      expect(clearButton().disabled).toBe(true);
+      expect(clearButton().getAttribute("aria-description")).toBe("Nothing to clear");
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Collapse Done column" }));
+      // A picture that still has the Tasks does not bring the cards back before the host is done.
+      rerender(<BoardPage {...props} snapshot={snapshot({ tasks: [...tasks] })} />);
+      expect(within(column()).queryByRole("article")).toBeNull();
+    });
+
+    test("a kept card stays and the column follows it; a Task that arrives in Done after the click is not hidden", () => {
+      const tasks = [doneView({ id: "a1" }), doneView({ id: "a2", title: "Second" })];
+      const drifts = [driftView({ origin: ["a1"] })];
+      const { props, rerender } = page(snapshot({ drifts, tasks }));
+      open();
+      fireEvent.click(clearButton());
+      expect(within(column()).getAllByRole("article").map((a) => a.getAttribute("aria-label"))).toEqual(["Task a1: Finished one"]);
+      expect(column().querySelector("h2 + [data-slot=badge]")?.textContent).toBe("1");
+      expect(clearButton().disabled).toBe(true);
+      rerender(<BoardPage {...props} snapshot={snapshot({ drifts, tasks: [...tasks, doneView({ id: "late", title: "Late arrival" })] })} />);
+      expect(within(column()).getAllByRole("article")).toHaveLength(2);
+      expect(within(column()).getByRole("article", { name: /Late arrival/ })).not.toBeNull();
+    });
+
+    test("clearDoneEnded shows the cards again after a refusal or a failure, and after a success the deleted ones are not in the picture", () => {
+      const tasks = [doneView({ id: "a1" }), doneView({ id: "a2", title: "Second" })];
+      let slotted: ReactNode = null;
+      const board = mountBoard((node) => { slotted = node; }, { post: () => {}, navigate: () => {}, openLink: () => {} });
+      board.update(snapshot({ tasks }));
+      const { rerender } = render(<TooltipProvider>{slotted}</TooltipProvider>);
+      fireEvent.click(screen.getByRole("button", { name: "Expand Done column" }));
+      fireEvent.click(clearButton());
+      expect(within(column()).queryByRole("article")).toBeNull();
+      // Refused or failed: the picture is the same, then the host says it is done and the cards come back in their place.
+      board.notice?.("Trama could not clear the Done column: A run is in progress.");
+      board.update(snapshot({ tasks }));
+      rerender(<TooltipProvider>{slotted}</TooltipProvider>);
+      expect(within(column()).queryByRole("article")).toBeNull();
+      board.clearDoneEnded();
+      rerender(<TooltipProvider>{slotted}</TooltipProvider>);
+      expect(within(column()).getAllByRole("article")).toHaveLength(2);
+      expect(screen.getByRole("status").textContent).toContain("A run is in progress");
+      expect(clearButton().disabled).toBe(false);
+      // Cleared: the new picture has no Task in Done, and the end of the hiding changes nothing.
+      fireEvent.click(clearButton());
+      board.update(snapshot({ tasks: [] }));
+      board.clearDoneEnded();
+      rerender(<TooltipProvider>{slotted}</TooltipProvider>);
+      expect(within(column()).queryByRole("article")).toBeNull();
+      expect(column().querySelector("h2 + [data-slot=badge]")?.textContent).toBe("0");
+    });
   });
 });
 
@@ -1254,5 +1335,104 @@ describe("Ask more in the details windows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Blocked by Drift D4" }));
     fireEvent.click(screen.getByText("Blocked by"));
     expect(calls.details).toEqual([]);
+  });
+});
+
+describe("Delete in the Task details", () => {
+  const openTask = (title = "A task") => {
+    fireEvent.click(screen.getByRole("button", { name: title }));
+    return screen.getByRole("dialog");
+  };
+  const deleteIn = (dialog: HTMLElement) => within(dialog).getByRole("button", { name: "Delete T3" }) as HTMLButtonElement;
+  const running = { blocker: null, runReason: "A run is in progress", running: true, drifts: {}, resolving: [] };
+
+  test("a Task in To do has Delete at the left, apart from Ask more and Close, with its icon and its name; the Task in progress and the Done Task have none", () => {
+    page(snapshot({ tasks: [taskView()] }));
+    const dialog = openTask();
+    const del = deleteIn(dialog);
+    expect([del.textContent, del.disabled, del.getAttribute("aria-description")]).toEqual(["Delete", false, null]);
+    expect(del.querySelector("svg")).not.toBeNull();
+    expect(within(dialog).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["Delete T3", "Ask more about T3", "Close"]);
+    expect(del.parentElement?.className).toContain("sm:mr-auto");
+    cleanup();
+    page(snapshot({ tasks: [taskView({ column: "doing", agent: true })] }));
+    expect(within(openTask()).queryByRole("button", { name: /^Delete/ })).toBeNull();
+    cleanup();
+    page(snapshot({ tasks: [taskView({ column: "done", finished: new Date().toISOString() })] }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand Done column" }));
+    expect(within(openTask()).queryByRole("button", { name: /^Delete/ })).toBeNull();
+  });
+
+  test("the Proposal body window has the same footer without Delete", () => {
+    page(snapshot({ proposals: [proposalView()] }));
+    expect(within(openTask("A proposal")).queryByRole("button", { name: /^Delete/ })).toBeNull();
+  });
+
+  test("a blocked Task has Delete too, enabled", () => {
+    page(snapshot({ drifts: [driftView()], tasks: [taskView({ blockedBy: [{ kind: "drift", drift: "liveDrift", title: "Code refunds late" }] })] }));
+    expect(deleteIn(openTask()).disabled).toBe(false);
+  });
+
+  test("a click asks the host with the permanent identity and leaves the window open", () => {
+    const { posted } = page(snapshot({ tasks: [taskView()] }));
+    fireEvent.click(deleteIn(openTask()));
+    expect(posted).toEqual([{ type: "deleteTask", task: "liveTask" }]);
+    expect(screen.getByRole("dialog")).not.toBeNull();
+  });
+
+  test("each reason disables Delete and gives its text as the description, and a click asks nothing", () => {
+    const reasonOf = (snap: Snapshot, over: Partial<BoardPageProps> = {}) => {
+      cleanup();
+      const { posted } = page(snap, over);
+      const del = deleteIn(openTask());
+      fireEvent.click(del);
+      expect([del.disabled, posted]).toEqual([true, []]);
+      return del.getAttribute("aria-description");
+    };
+    expect(reasonOf(snapshot({ tasks: [taskView()], finishingTasks: ["liveTask"] }))).toBe("The agent is still finishing");
+    expect(reasonOf(snapshot({ tasks: [taskView()] }), { resolve: running })).toBe("A run is in progress");
+    expect(reasonOf(snapshot({ tasks: [taskView({ heldByDrift: true })] }))).toBe("A Drift needs this Task");
+  });
+
+  test("the reasons come in order: the agent finishing, a Run in progress, a Drift; the other agent work does not disable Delete", () => {
+    page(snapshot({ tasks: [taskView({ heldByDrift: true })], finishingTasks: ["liveTask"] }), { resolve: running });
+    expect(deleteIn(openTask()).getAttribute("aria-description")).toBe("The agent is still finishing. A run is in progress. A Drift needs this Task");
+    cleanup();
+    // Drifts being resolved, a question round and the ghost of other work do not count.
+    const busy = { blocker: "Drifts are being resolved", runReason: "Drifts are being resolved", drifts: {}, resolving: ["liveDrift"] };
+    const ghost: AnnouncementView = { id: "g00001", kind: "proposal", title: "Returns", phase: "preparing", notes: [], announced: new Date().toISOString() };
+    page(snapshot({ tasks: [taskView()], announcements: [ghost] }), { resolve: busy, asking: true });
+    expect(deleteIn(openTask()).disabled).toBe(false);
+  });
+
+  test("once the Task is gone the window closes and the focus goes to Run all", async () => {
+    const other = taskView({ id: "other", title: "Another" });
+    const { posted, rerender, props } = page(snapshot({ tasks: [taskView(), other] }));
+    fireEvent.click(deleteIn(openTask()));
+    expect(posted).toEqual([{ type: "deleteTask", task: "liveTask" }]);
+    rerender(<BoardPage {...props} snapshot={snapshot({ tasks: [other] })} />);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("button", { name: "A task" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Run all the Tasks in To do" })));
+  });
+
+  test("when no Task is left in To do, Run all is disabled and the focus goes to Active", async () => {
+    const { rerender, props } = page(snapshot({ tasks: [taskView()] }));
+    fireEvent.click(deleteIn(openTask()));
+    rerender(<BoardPage {...props} snapshot={snapshot()} />);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector('[data-column="active"]')));
+  });
+
+  test("a refused Delete leaves the window open as long as the Task is there, and closing it afterwards does not send the focus to Run all", async () => {
+    const { rerender, props } = page(snapshot({ tasks: [taskView()] }));
+    fireEvent.click(deleteIn(openTask()));
+    rerender(<BoardPage {...props} snapshot={snapshot({ tasks: [taskView()] })} notices={[{ id: 1, text: "Trama could not delete T3: The agent is still finishing." }]} />);
+    expect(screen.getByRole("dialog")).not.toBeNull();
+    expect(screen.getByText("Trama could not delete T3: The agent is still finishing.")).not.toBeNull();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await Bun.sleep(0); // one turn of the loop: the focus restoration of the dialog is a timer of 0 ms scheduled before this one
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Run all the Tasks in To do" }));
   });
 });

@@ -45,9 +45,9 @@ export function createChatController(store: ChatStore, post: (message: ToChatHos
       store.set(answerPermissionIn(store.get(), id, requestId, optionId));
       post({ type: "permissionAnswer", id, requestId, optionId });
     },
-    openFile: (path) => post({ type: "openFile", path }),
     openLink: (url) => post({ type: "openLink", url }),
     installOmp: () => post({ type: "installOmp" }),
+    refreshUsage: () => post({ type: "refreshUsage" }),
   };
 }
 
@@ -71,7 +71,7 @@ export function ChatApp({ store, controller }: { store: ChatStore; controller: C
         <ConversationTabs items={state.items} selected={selected} generalKept={state.conversations[GENERAL_ID]?.status?.phase === "kept"} onSelect={controller.select} onClose={controller.close} />
         {state.items.map((item) => {
           const view = state.conversations[item.id];
-          return view === undefined ? null : <Conversation key={item.id} item={item} view={view} selected={item.id === selected} actions={controller} sendMode={state.sendMode} />;
+          return view === undefined ? null : <Conversation key={item.id} item={item} view={view} selected={item.id === selected} actions={controller} sendMode={state.sendMode} usage={state.usage} />;
         })}
       </div>
     </TooltipProvider>

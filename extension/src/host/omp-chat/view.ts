@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
 import * as vscode from "vscode";
 import { safeLink } from "../../../../src/core/links";
 import { useOmpChat } from "../../../../src/core/omp-chat-conversation";
@@ -8,6 +7,7 @@ import type { ToChatWebview } from "../../omp-chat-protocol";
 import type { ThemeSetting } from "../../webview/theme";
 import { settings } from "../agent";
 import { webviewHtml } from "../html";
+import type { UsageSource } from "./usage";
 import type { SendModeStore } from "./send-mode";
 import { type ChatSurface, ChatViewModel } from "./view-model";
 
@@ -40,8 +40,9 @@ export class OmpChatView implements vscode.WebviewViewProvider, vscode.Disposabl
     private readonly root: () => string | undefined,
     pending: () => readonly string[],
     sendModes: SendModeStore,
+    usage?: UsageSource,
   ) {
-    this.model = new ChatViewModel(this.surface(), ompChatOn, pending, () => this.root() !== undefined, sendModes);
+    this.model = new ChatViewModel(this.surface(), ompChatOn, pending, () => this.root() !== undefined, sendModes, usage);
   }
 
   /** Registers the provider for the view. */
@@ -86,25 +87,10 @@ export class OmpChatView implements vscode.WebviewViewProvider, vscode.Disposabl
           return undefined;
         }
       },
-      openFile: (path) => void this.openFile(path),
       openLink: (url) => {
         const link = safeLink(url);
         if (link !== null) void vscode.env.openExternal(vscode.Uri.parse(link, true));
       },
     };
-  }
-
-  /** A file the agent edited, from a click in the conversation: only inside the project's folder, relative to it or absolute. */
-  private async openFile(path: string): Promise<void> {
-    const root = this.root();
-    if (root === undefined) return;
-    const target = resolve(root, path);
-    const inside = relative(root, target);
-    if (inside.startsWith("..") || isAbsolute(inside)) return;
-    try {
-      await vscode.window.showTextDocument(vscode.Uri.file(target), { preview: false });
-    } catch {
-      void vscode.window.showWarningMessage(`Trama: could not open ${inside}.`);
-    }
   }
 }

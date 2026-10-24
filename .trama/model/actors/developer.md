@@ -57,6 +57,9 @@ The developer takes back a Task that the agent has taken, with the command of th
 ### CLEAR_DONE
 Il developer preme Clear in fondo alla colonna Done della Board, per cancellare per sempre i Task finiti che la colonna mostra. Non chiede conferma e non ha un comando della riga di comando.
 
+### DELETE_TASK
+Il developer cancella per sempre un Task in To do che non vuole più, senza aspettare che arrivi in Done: dal pannello con Delete nella finestra dei dettagli del Task, dopo una conferma in un dialogo modale dell'editor, oppure dalla riga di comando, senza conferma.
+
 ### ASK_AGENT
 The developer asks the coding agent to work, from a button or a command: design a change (with a written request), scan the whole System or one Feature, implement one Task, implement every Task in To do, resolve one open Drift with Resolve, or import the existing code as Proposals.
 
@@ -174,7 +177,7 @@ Il developer preme View on diagram o View requirements sulla scheda di una Propo
 Il developer preme View on diagram o View requirements sulla scheda di un Task in Active, per vedere nel Diagramma o nei Requisiti ciò che il Task nomina.
 
 ### FOCUS_REF
-Il developer segue un chip di riferimento: sulla scheda di un Task in Active, nei dettagli di un Task, anche Done, sulla scheda di un Drift o fra i Task dei dettagli di una voce di History. La scheda di un Task in Done non ha chip dei riferimenti. Un chip di un elemento del Modello porta al Diagramma, uno di un Requisito ai Requisiti, uno delle Specs alle Specs.
+Il developer segue un chip di riferimento: nei dettagli di un Task, anche Done, nei dettagli di un Drift o fra i Task dei dettagli di una voce di History. Le schede della Board non hanno chip dei riferimenti: né quella di un Task, in Active o in Done, né quella di un Drift. Un chip di un elemento del Modello porta al Diagramma, uno di un Requisito ai Requisiti, uno delle Specs alle Specs.
 
 ### STEP_FOCUS
 Il developer passa al passo precedente o al successivo del focus della scheda, con le frecce della barra del focus.

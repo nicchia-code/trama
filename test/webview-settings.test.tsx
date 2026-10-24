@@ -39,9 +39,9 @@ function setup(values: Record<string, SettingsValues> = {}, models: ModelSuggest
   return { posted, ...utils };
 }
 
-test("the settings are in five groups, Appearance first, each with its title", () => {
+test("the settings are in four groups, omp first and Advanced last, each with its title", () => {
   setup();
-  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Appearance", "omp", "Models", "Project", "Features"]);
+  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["omp", "Models", "Project", "Advanced"]);
   expect(screen.getByRole("combobox", { name: "Theme" })).not.toBeNull();
   expect(screen.getByRole("checkbox", { name: "Auto Exit" })).not.toBeNull();
 });
@@ -128,23 +128,6 @@ test("without suggestions a model field is a plain text field, and omp's reason 
   expect(screen.getAllByText("omp not found at the editor PATH")).toHaveLength(3);
 });
 
-test("Esc closes the bubble of the «i» and leaves the focus on it", () => {
-  setup();
-  const info = screen.getByRole("button", { name: "About Theme" });
-  act(() => info.focus());
-  const bubble = screen.getByRole("tooltip");
-  expect(info.getAttribute("aria-expanded")).toBe("true");
-  expect(within(bubble).getByText("auto", { selector: "code" })).not.toBeNull();
-  expect(bubble.textContent).toContain("(current)");
-
-  act(() => {
-    fireEvent.keyDown(document.activeElement ?? info, { key: "Escape" });
-  });
-  expect(screen.queryByRole("tooltip")).toBeNull();
-  expect(info.getAttribute("aria-expanded")).toBe("false");
-  expect(document.activeElement).toBe(info);
-});
-
 test("a whole number below the minimum shows its reason and is not saved; a valid one is", () => {
   const { posted } = setup();
   const field = screen.getByRole("spinbutton", { name: "Max Parallel Agents" });
@@ -165,30 +148,39 @@ test("a workspace value shows under its control", () => {
   expect(screen.getByText(/The workspace setting overrides this:/).textContent).toBe("The workspace setting overrides this: custom/skills.");
 });
 
-test("trama.theme is declared in the manifest as the only setting of Appearance", () => {
+test("trama.theme is declared in the manifest as the only setting of the Appearance subgroup of Advanced", () => {
   const theme = manifest.contributes?.configuration?.properties?.["trama.theme"];
   expect(theme?.enum).toEqual(["auto", "light", "dark"]);
   expect(theme?.default).toBe("auto");
   expect(theme?.scope).toBe("application");
   expect(theme?.enumDescriptions).toHaveLength(3);
-  expect(schema.filter((setting) => setting.group === "Appearance").map((setting) => setting.key)).toEqual(["trama.theme"]);
+  expect(schema.filter((setting) => setting.subgroup === "Appearance").map((setting) => [setting.group, setting.key])).toEqual([["Advanced", "trama.theme"]]);
 });
 
-test("with a project the Settings tab has «Guided setup» at the top right, with its tooltip in the name; without one there is none", () => {
+test("with a project the page title «Settings» has «Guided setup» on its row, with its tooltip in the name; without one there is none", () => {
   const opened: string[] = [];
   const page = render(<SettingsPage schema={schema} values={{}} generation={1} models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => opened.push("open")} />);
+  const title = screen.getByRole("heading", { level: 1 });
+  expect(title.textContent).toBe("Settings");
   const button = screen.getByRole("button", { name: "Guided setup. Review the main settings step by step" });
+  expect(title.parentElement?.contains(button)).toBe(true);
+  // On the same row from about 480 px, under the title and at the left below it.
+  expect(title.parentElement?.className).toContain("min-[480px]:flex-row");
+  expect(title.parentElement?.className).toContain("min-[480px]:justify-between");
+  expect(title.parentElement?.className).toContain("items-start");
   fireEvent.click(button);
   expect(opened).toEqual(["open"]);
   page.unmount();
   setup();
   expect(screen.queryByRole("button", { name: /Guided setup/ })).toBeNull();
+  expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Settings");
 });
 
-test("while the wizard is open it takes the place of the button and of the form", () => {
+test("while the wizard is open it takes the place of the title, the button and the form", () => {
   render(<SettingsPage schema={schema} values={{}} generation={1} models={[]} listError={null} post={() => {}} openLink={() => {}} onGuidedSetup={() => {}} wizard={<p>The wizard</p>} />);
   expect(screen.getByText("The wizard")).not.toBeNull();
   expect(screen.queryByRole("button", { name: /Guided setup/ })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Settings" })).toBeNull();
   expect(screen.queryByRole("combobox", { name: "Theme" })).toBeNull();
 });
 
@@ -208,31 +200,37 @@ function ompRow(omp: React.ComponentProps<typeof SettingsPage>["omp"]) {
   return { posted, region };
 }
 
-test("the omp group opens with its status line, before the settings, saying omp is being checked", () => {
+test("the omp group opens with its status in the bordered box of the wizard, before the settings, saying omp is being checked", () => {
   const { region } = ompRow({ state: "checking" });
   expect(region.textContent).toBe("Checking omp…");
+  expect(region.className).toContain("border");
   expect(region.querySelector("svg.animate-spin")).not.toBeNull();
   expect(screen.queryByRole("button", { name: /Install omp/ })).toBeNull();
   const section = region.closest("section") as HTMLElement;
   expect(section.querySelector("h2")?.textContent).toBe("omp");
   expect(region.compareDocumentPosition(screen.getByRole("textbox", { name: "Omp Path" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // Under the sentence of the group.
+  expect(section.querySelector("p")?.compareDocumentPosition(region)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 });
 
-test("omp that answers shows its version and no button", () => {
-  const { region } = ompRow({ state: "done", missing: false, version: "14.2.1" });
-  expect(region.textContent).toBe("omp 14.2.1");
+test("omp that answers shows its version and how many models, and no button", () => {
+  const { region } = ompRow({ state: "done", missing: false, version: "14.2.1", models: 12 });
+  expect(region.textContent).toBe("omp 14.2.1 answered with 12 models.");
   expect(region.querySelector("svg.lucide-circle-check")).not.toBeNull();
   expect(screen.queryByRole("button", { name: /Install omp/ })).toBeNull();
 });
 
-test("omp that does not answer shows the reason and that Trama cannot work, without the button", () => {
+test("omp that does not answer shows the reason and that Trama cannot work, without the button; the tab never says it updates omp", () => {
   const { region } = ompRow({ state: "done", missing: false, error: "omp exited with code 1" });
   expect(region.textContent).toBe("omp exited with code 1. Trama cannot work without omp.");
+  expect(region.className).toContain("border-amber-600/40");
   expect(region.querySelector("svg.lucide-triangle-alert")).not.toBeNull();
   expect(screen.queryByRole("button", { name: /Install omp/ })).toBeNull();
+  expect(document.body.textContent).not.toContain("Updating omp");
+  expect(document.body.textContent).not.toContain("Could not update omp");
 });
 
-test("omp that is missing adds Install omp, which sends installOmp", () => {
+test("omp that is missing adds Install omp inside the box, which sends installOmp", () => {
   const { region, posted } = ompRow({ state: "done", missing: true, error: "omp not found at the editor PATH" });
   expect(region.textContent).toContain("omp not found at the editor PATH. Trama cannot work without omp.");
   fireEvent.click(within(region).getByRole("button", { name: /Install omp/ }));
@@ -245,60 +243,172 @@ test("the mounted tab takes the host's ompStatus, and asks again when it becomes
   const view = mountSettings((node) => page.rerender(<>{node}</>), { post: (m) => posted.push(m), navigate: () => {}, openLink: () => {} }, startTheme());
   act(() => view.receive({ type: "settings", schema, values: {} }));
   expect(screen.getByText("Checking omp…")).not.toBeNull();
-  act(() => view.receiveOmpStatus({ type: "ompStatus", state: "done", missing: false, version: "1.0.0" }));
-  expect(screen.getByText("omp 1.0.0")).not.toBeNull();
+  act(() => view.receiveOmpStatus({ type: "ompStatus", state: "done", missing: false, version: "1.0.0", models: 3 }));
+  expect(screen.getByText("omp 1.0.0 answered with 3 models.")).not.toBeNull();
   view.show({});
   expect(posted).toContainEqual({ type: "modelSuggestionsWanted" });
   expect(posted).toContainEqual({ type: "ompStatusWanted" });
+  // Without a project the tab does not look for instruction files.
+  expect(posted.some((m) => m.type === "instructionFilesWanted")).toBe(false);
 });
 
-test("a Checkbox is left of its title on the same row, and clicking the title changes it", () => {
+test("the page is one centred column of at most 720 px, with no grid of columns and no index of the groups", () => {
+  setup();
+  const column = screen.getByRole("heading", { level: 1 }).parentElement?.parentElement as HTMLElement;
+  expect(column.className).toContain("mx-auto w-full max-w-[720px] min-w-0 px-4");
+  expect(column.parentElement?.className).toContain("overflow-x-clip");
+  expect(document.querySelector('[class*="1100px"], [class*="grid-cols"]')).toBeNull();
+  expect(screen.queryByRole("navigation")).toBeNull();
+});
+
+test("the groups are the wizard's, each with its title and its sentence under it, and Advanced has its four subgroups a level below", () => {
+  setup();
+  const sections = Array.from(document.querySelectorAll("main section, section")).filter((s) => s.querySelector(":scope > h2")) as HTMLElement[];
+  expect(sections.map((s) => [s.querySelector(":scope > h2")?.textContent, s.querySelector(":scope > p")?.textContent])).toEqual([
+    ["omp", "omp is required: Trama runs every agent with omp."],
+    ["Models", "Choose the model for each kind of work."],
+    ["Project", "Choose where Trama installs the agent skills."],
+    ["Advanced", "Theme and optional features."],
+  ]);
+  const advanced = sections[3] as HTMLElement;
+  expect(Array.from(advanced.querySelectorAll("h3")).map((h) => h.textContent)).toEqual(["Appearance", "Drifts", "Agents", "omp Chat"]);
+  expect(Array.from(advanced.querySelectorAll("section")).map((s) => s.querySelectorAll("label").length)).toEqual([1, 3, 3, 3]);
+  // Auto Exit and the language stay in omp, with the language disabled and its note; the group Features does not exist.
+  const omp = sections[0] as HTMLElement;
+  expect(within(omp).getByRole("checkbox", { name: "Auto Exit" })).not.toBeNull();
+  const language = within(omp).getByRole("textbox", { name: "Language" });
+  expect(language.hasAttribute("disabled")).toBe(true);
+  expect(within(omp).getByText("Disabled for now: agents write in English.")).not.toBeNull();
+  expect(screen.queryByText("Features")).toBeNull();
+});
+
+test("the three model roles have their advice in bold between the title and the explanation, and the page has no «i»", () => {
+  setup();
+  const titleOf = (key: string) => document.querySelector(`label[for="st-trama-${key}"]`) as HTMLElement;
+  const advice = (key: string) => (titleOf(key).closest(".grid.min-w-0.gap-1\\.5") as HTMLElement).querySelector("p.font-semibold") as HTMLElement;
+  expect(advice("analysis").textContent).toBe("Your most capable model.");
+  expect(advice("execution").textContent).toBe("A mid-range model.");
+  expect(advice("scan").textContent).toBe("A fast, light model.");
+  // The advice comes before the explanation.
+  const analysis = advice("analysis");
+  expect(analysis.compareDocumentPosition(document.getElementById("st-trama-analysis-explain") as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^About / })).toBeNull();
+  expect(document.querySelector("svg.lucide-info")).toBeNull();
+  // The other settings have no advice.
+  expect(titleOf("theme").closest(".grid.min-w-0.gap-1\\.5")?.querySelector("p.font-semibold")).toBeNull();
+});
+
+test("a setting is read in its page mode: the explanation under the title, the control, the entry of the chosen enum value, and aria-describedby", () => {
+  setup({ "trama.theme": { user: "dark" } });
+  const theme = screen.getByRole("combobox", { name: "Theme" });
+  const explain = document.getElementById("st-trama-theme-explain") as HTMLElement;
+  expect(explain.textContent).toContain("Colours of the Trama panel.");
+  const described = (theme.getAttribute("aria-describedby") ?? "").split(" ");
+  expect(described).toContain("st-trama-theme-explain");
+  const value = document.getElementById(described.find((id) => id.includes("-value-")) as string) as HTMLElement;
+  expect(value.textContent).toBe("Always dark.");
+  expect(((document.querySelector('label[for="st-trama-theme"]') as HTMLElement).compareDocumentPosition(explain) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
+  expect(explain.compareDocumentPosition(theme) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(theme.compareDocumentPosition(value) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("a Checkbox is left of its title on the same row, with the explanation under it, and clicking the title changes it", () => {
   const { posted } = setup();
   const box = screen.getByRole("checkbox", { name: "omp Chat" });
   const title = screen.getByText("omp Chat", { selector: "label" });
   expect(title.parentElement?.contains(box)).toBe(true);
   expect(box.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(box.getAttribute("aria-describedby")).toContain("st-trama-ompChat-explain");
   fireEvent.click(title);
   expect(posted).toEqual([{ type: "setSetting", key: "trama.ompChat", value: false }]);
-  // The other settings keep the control under the title, in the second row of their column.
+  // The other settings keep the control under the explanation, in the width of the column.
   const field = screen.getByRole("textbox", { name: "Omp Path" });
-  expect(field.closest(".row-start-2")).not.toBeNull();
-  expect(field.closest(".row-start-1")).toBeNull();
+  const explain = document.getElementById("st-trama-ompPath-explain") as HTMLElement;
+  expect(explain.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
-test("a message is under its control, in its column, and an absent one leaves no element behind", () => {
+test("a message is under its control, and an absent one leaves no element behind", () => {
   setup({ "trama.skillsDir": { user: "", workspace: "custom/skills" } }, [], "omp not found at the editor PATH");
   const field = screen.getByRole("textbox", { name: "Skills Dir" });
   const cell = field.parentElement as HTMLElement;
-  expect(cell.className).toContain("row-start-2");
   expect(cell.textContent).toContain("The workspace setting overrides this: custom/skills.");
-  const scan = screen.getByRole("combobox", { name: "Scan" }).closest(".row-start-2") as HTMLElement;
+  const message = within(cell).getByText(/The workspace setting overrides this:/);
+  expect(field.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const scan = screen.getByRole("combobox", { name: "Scan" }).closest(".grid.min-w-0.gap-1\\.5") as HTMLElement;
   expect(scan.textContent).toContain("omp not found at the editor PATH");
-  const path = screen.getByRole("textbox", { name: "Omp Path" }).closest(".row-start-2") as HTMLElement;
-  expect(path.querySelectorAll("p")).toHaveLength(0);
-  // The field has no rows beyond the title and the control.
-  expect(path.parentElement?.className).toContain("row-span-2");
-  // A Checkbox without a message has no second row at all.
-  expect(screen.getByRole("checkbox", { name: "omp Chat" }).closest(".row-start-2")).toBeNull();
+  // Omp Path has the explanation and the control, and no message paragraph.
+  const path = screen.getByRole("textbox", { name: "Omp Path" }).parentElement as HTMLElement;
+  expect(Array.from(path.children).map((child) => child.tagName)).toEqual(["DIV", "INPUT"]);
+  // A Checkbox without a message has nothing under its explanation.
+  const chat = screen.getByRole("checkbox", { name: "omp Chat" }).closest(".grid.min-w-0.gap-1\\.5") as HTMLElement;
+  expect((chat.lastElementChild as HTMLElement).children).toHaveLength(1);
 });
 
-test("the tooltip of the «i» never shows with the bubble, and never once the pointer has gone", async () => {
-  setup();
-  const info = screen.getByRole("button", { name: "About Theme" });
-  const tip = () => document.querySelector('[data-slot="tooltip-content"]');
-  const bubble = () => document.getElementById("st-trama-theme-tip");
-  expect(tip()).toBeNull();
+const files = [
+  { label: "AGENTS.md", path: "/work/app/AGENTS.md" },
+  { label: "~/.claude/CLAUDE.md", path: "/home/me/.claude/CLAUDE.md" },
+];
 
-  // The pointer opens the bubble, and the tooltip stays away while it is open.
-  fireEvent.pointerEnter(info);
-  expect(bubble()).not.toBeNull();
-  expect(tip()).toBeNull();
+function filesPage(props: Partial<React.ComponentProps<typeof SettingsPage>>, values: Record<string, SettingsValues> = {}) {
+  const posted: ToHost[] = [];
+  render(<SettingsPage schema={schema} values={values} generation={1} models={[]} listError={null} post={(message) => posted.push(message)} openLink={() => {}} {...props} />);
+  return posted;
+}
 
-  // A press gives the «i» the focus too; once the pointer has gone the bubble closes after its pause and no tooltip shows in its place.
-  act(() => info.focus());
-  fireEvent.pointerLeave(info);
-  expect(tip()).toBeNull();
-  await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
-  expect(bubble()).toBeNull();
-  expect(tip()).toBeNull();
+test("in a project the omp group ends with the box of instruction files of the wizard, with a link «Open <path>» for each file", () => {
+  const posted = filesPage({ onGuidedSetup: () => {}, instructionFiles: files });
+  const box = screen.getByText(/Agent instruction files found\./).closest("div") as HTMLElement;
+  expect(box.textContent).toContain("The agent loads them in every Trama job: remove them from the repository, or check that they do not conflict with Trama.");
+  expect(box.className).toContain("border-amber-600/40");
+  expect(box.compareDocumentPosition(screen.getByRole("textbox", { name: "Language" })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  expect((box.closest("section") as HTMLElement).querySelector("h2")?.textContent).toBe("omp");
+  expect(within(box).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Open AGENTS.md", "Open ~/.claude/CLAUDE.md"]);
+  fireEvent.click(within(box).getByRole("button", { name: "Open AGENTS.md" }));
+  expect(posted).toEqual([{ type: "openInstructionFile", path: "/work/app/AGENTS.md" }]);
+});
+
+test("the line «Trama's omp jobs ignore these files.» follows the saved trama.ignoreInstructionFiles", () => {
+  const IGNORED = "Trama's omp jobs ignore these files.";
+  const page = render(<SettingsPage schema={schema} values={{}} generation={1} models={[]} listError={null} post={() => {}} openLink={() => {}} instructionFiles={files} />);
+  expect(screen.queryByText(IGNORED)).toBeNull();
+  page.rerender(<SettingsPage schema={schema} values={{ "trama.ignoreInstructionFiles": { user: true } }} generation={2} models={[]} listError={null} post={() => {}} openLink={() => {}} instructionFiles={files} />);
+  expect(screen.getByText(IGNORED)).not.toBeNull();
+  page.rerender(<SettingsPage schema={schema} values={{ "trama.ignoreInstructionFiles": { user: false } }} generation={3} models={[]} listError={null} post={() => {}} openLink={() => {}} instructionFiles={files} />);
+  expect(screen.queryByText(IGNORED)).toBeNull();
+});
+
+test("without files, while the search runs, the box is not there", () => {
+  filesPage({ instructionFiles: null });
+  expect(screen.queryByText(/Agent instruction files found\./)).toBeNull();
+  cleanup();
+  filesPage({ instructionFiles: [] });
+  expect(screen.queryByText(/Agent instruction files found\./)).toBeNull();
+});
+
+test("the mounted tab, in a project, asks for the files without a root each time it becomes visible, and shows none while it searches; outside a project it never asks", () => {
+  const posted: ToHost[] = [];
+  const page = render(<></>);
+  const view = mountSettings((node) => page.rerender(<>{node}</>), { post: (m) => posted.push(m), navigate: () => {}, openLink: () => {} }, startTheme());
+  act(() => view.receive({ type: "settings", schema, values: {} }));
+  const asked = () => posted.filter((m) => m.type === "instructionFilesWanted");
+
+  act(() => view.projectPresent(false));
+  act(() => view.show({}));
+  expect(asked()).toEqual([]);
+  act(() => view.receiveInstructionFiles({ type: "instructionFiles", root: "/work/app", files }));
+  expect(screen.queryByText(/Agent instruction files found\./)).toBeNull();
+
+  act(() => view.projectPresent(true));
+  expect(asked()).toEqual([{ type: "instructionFilesWanted" }]);
+  act(() => view.receiveInstructionFiles({ type: "instructionFiles", root: "/work/app", files }));
+  expect(screen.getByRole("button", { name: "Open AGENTS.md" })).not.toBeNull();
+
+  act(() => view.show({}));
+  expect(asked()).toEqual([{ type: "instructionFilesWanted" }, { type: "instructionFilesWanted" }]);
+  expect(screen.queryByRole("button", { name: "Open AGENTS.md" })).toBeNull();
+  act(() => view.receiveInstructionFiles({ type: "instructionFiles", root: "/work/app", files: [] }));
+  expect(screen.queryByText(/Agent instruction files found\./)).toBeNull();
+
+  act(() => view.projectPresent(false));
+  expect(screen.queryByRole("button", { name: /Guided setup/ })).toBeNull();
 });

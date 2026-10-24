@@ -1,31 +1,28 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type ManifestPackage, type SettingsValues, settingsSchema } from "../extension/src/host/settings-schema";
+import { type ManifestPackage, type SettingsValues, SETTING_GROUPS, settingsSchema } from "../extension/src/host/settings-schema";
+import { ADVANCED_GROUP_SENTENCE, ignoresInstructionFiles, ROLE_ADVICE, STEP_SENTENCES } from "../extension/src/webview/setup-shared";
 import {
-  ADVANCED_GROUPS,
-  advancedGroupOf,
+  advancedSubgroups,
   agentCheckLine,
   changedWrites,
   checkState,
   confirmLabel,
   exclusions,
   hasPrevious,
-  ignoresInstructionFiles,
   nextBlock,
   nextStep,
   openStep,
   openWizard,
   previousStep,
   previousSteps,
-  ROLE_ADVICE,
   setChoice,
   setInvalid,
   setRoot,
   setValue,
   showsFolderNotice,
   skipAdvanced,
-  STEP_SENTENCES,
   stepPosition,
   stepsFor,
   summaryRows,
@@ -132,16 +129,16 @@ test("the keys of each step are always shown, and the language is never in the w
   for (const step of ["omp", "Models", "Project", "Advanced"] as const) for (const key of STEP_KEYS[step] ?? []) expect(schema.some((s) => s.key === key)).toBe(true);
 });
 
-test("Advanced has four subgroups with their subtitles, in order, and they are its keys in order", () => {
-  expect(ADVANCED_GROUPS.map((group) => [group.title, group.keys])).toEqual([
+test("Advanced has four subgroups with their subtitles, in order, from the schema of the shared groups, and they are its keys in order", () => {
+  const advanced = SETTING_GROUPS.find((group) => group.title === "Advanced");
+  expect(advancedSubgroups(schema)).toEqual((advanced?.subgroups ?? []).map((sub) => ({ title: sub.title, keys: [...sub.keys] })));
+  expect(advancedSubgroups(schema).map((group) => [group.title, group.keys])).toEqual([
     ["Appearance", ["trama.theme"]],
     ["Drifts", ["trama.driftBlocker", "trama.advisorScanner", "trama.asyncDriftResolver"]],
     ["Agents", ["trama.parallelExecution", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals"]],
     ["omp Chat", ["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"]],
   ]);
-  expect(STEP_KEYS.Advanced).toEqual(ADVANCED_GROUPS.flatMap((group) => group.keys));
-  expect(advancedGroupOf("trama.advisorScanner")).toBe("Drifts");
-  expect(advancedGroupOf("trama.scan")).toBeNull();
+  expect(STEP_KEYS.Advanced).toEqual(advancedSubgroups(schema).flatMap((group) => group.keys));
   const rows = summaryRows(schema, open("settings"), {}, []).filter((row) => row.step === "Advanced");
   expect(rows.map((row) => row.group)).toEqual(["Appearance", "Drifts", "Drifts", "Drifts", "Agents", "Agents", "Agents", "omp Chat", "omp Chat", "omp Chat"]);
   expect(summaryRows(schema, open("settings"), {}, []).filter((row) => row.step !== "Advanced").every((row) => row.group === null)).toBe(true);
@@ -161,15 +158,16 @@ test("the title of the page, the sentences of the steps, the advice of the roles
     Summary: "Check your choices, then confirm.",
   });
   expect(ROLE_ADVICE).toEqual({ "trama.analysis": "Your most capable model.", "trama.execution": "A mid-range model.", "trama.scan": "A fast, light model." });
+  expect(ADVANCED_GROUP_SENTENCE).toBe("Theme and optional features.");
   expect((["Path", "omp", "Models", "Project", "Folders", "Advanced", "Summary"] as const).filter(showsFolderNotice)).toEqual(["Path", "Summary"]);
 });
 
 test("the note about ignored files shows only with the setting on", () => {
   let state = open("settings");
-  expect(ignoresInstructionFiles(schema, state)).toBe(false);
+  expect(ignoresInstructionFiles(schema, state.values)).toBe(false);
   state = setValue(state, "trama.ignoreInstructionFiles", true);
-  expect(ignoresInstructionFiles(schema, state)).toBe(true);
-  expect(ignoresInstructionFiles(schema, setValue(state, "trama.ignoreInstructionFiles", undefined))).toBe(false);
+  expect(ignoresInstructionFiles(schema, state.values)).toBe(true);
+  expect(ignoresInstructionFiles(schema, setValue(state, "trama.ignoreInstructionFiles", undefined).values)).toBe(false);
 });
 
 test("the summary marks a key whose value differs from the user value now, comparing as Settings does", () => {

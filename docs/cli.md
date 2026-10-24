@@ -4,7 +4,7 @@
 
 ## Conventions
 
-- `trama <object> <verb> [<id>] [<state>] [--input <json>]`. The objects are `model`, `proposal`, `task`, `drift`, `history`, `announcement`, `comparison`, `question`, `advisor`, `project`, `timing` and `hook`. The verbs mean the same for every object: `show <id>` reads one thing, `list` reads several, `new` creates and prints the identity of what it created, `edit <id>` changes the content, `move <id> <state>` takes a card to another state (the state names are the Trama Model's, in lowercase with a dash for a space: `code-to-be-fixed`), `check` reports errors and warnings. An object has only the verbs of the reference below; `hook` is the only exception.
+- `trama <object> <verb> [<id>] [<state>] [--input <json>]`. The objects are `model`, `proposal`, `task`, `drift`, `history`, `announcement`, `comparison`, `question`, `advisor`, `project`, `timing` and `hook`. The verbs mean the same for every object: `show <id>` reads one thing, `list` reads several, `new` creates and prints the identity of what it created, `edit <id>` changes the content, `move <id> <state>` takes a card to another state (the state names are the Trama Model's, in lowercase with a dash for a space: `code-to-be-fixed`), `check` reports errors and warnings, `delete <id>` deletes a card for good and exists only for `task`. An object has only the verbs of the reference below; `hook` is the only exception.
 - The positional arguments are only the identity of a card (or its short number), the reference of a Model element and the state of arrival of `move`. Every other datum, the filters of the reads included, goes in `--input`: there is no other option. The options that every command takes, in any position, are `--root <dir>`, `--json`, `--input <json>`, `--help` and `-h`.
 - `--input -` reads the JSON from standard input, accepting a leading UTF-8 byte order mark; any other value is the JSON text itself. No command reads standard input without `--input -`, except the `hook` commands. The input is a JSON object with camelCase fields. Each command checks it with its zod schema before doing anything else: an unknown field, a wrong type, a value outside its list or a missing required field is a usage error (exit 2) that lists every problem with the path of its field (for example `options[1].text`), and nothing changes. A command with required fields and no `--input` gives the usage error; a command without fields accepts only `{}`. Identities in the fields follow the rules of the arguments.
 - Without `--root`, the CLI walks up from the current directory to the first folder containing `.trama/`.
@@ -454,6 +454,19 @@ Output (`--json`):
 - reason: string, optional. Why the Task was put back in To do, with `released`.
 
 Runs and waits for the editor; read-only.
+
+#### `trama task delete <id>`
+
+Deletes the Task, its percentage and its images, with no confirmation and no way back. Only a Task in To do is deleted, blocked or not, and also one that went back to To do after the agent took it. It is refused, changing nothing and saying why, when the Task is In progress or Done, when an open Drift names it as an origin, or when it is the Task that fixes the code of a Drift in Code to be fixed. Writes nothing in History and does not count among the Tasks finished since the last global scan; its short number becomes free. Run it as the agent only when the developer asks for it explicitly in the conversation.
+
+- `<id>`: The Task: its ID, a unique prefix or its short number.
+
+Output (`--json`):
+
+- id: string, required. The permanent identity of the deleted Task.
+- title: string, required
+
+Runs at once; writes in `.trama/`.
 
 ### `drift`
 

@@ -2,8 +2,7 @@ import { Bot, Check, ChevronDown, ChevronRight, Clock, FilePen, FileText, Loader
 import { type ReactNode, useEffect, useState } from "react";
 import { Markdown } from "../markdown";
 import { Button } from "../ui/button";
-import { cn } from "../lib/utils";
-import { type Block, cutLines } from "./transcript";
+import type { Block } from "./transcript";
 import { type ToolLogo, toolLabel } from "./tool-logo";
 
 /** Seconds since `since`, ticking while `active`. */
@@ -96,40 +95,21 @@ function ToolStatus({ status }: { status: Extract<Block, { kind: "tool" }>["stat
   return <Loader aria-label="Running" className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />;
 }
 
-/** A call to a tool: one compact row, the result a click away. An edit shows only the file it touched, which opens in the editor. */
-export function ToolCall({ block, openFile }: { block: Extract<Block, { kind: "tool" }>; openFile: (path: string) => void }) {
-  const [open, setOpen] = useState(false);
+/** A call to a tool: one compact read-only row. A failed call shows the first line of omp's error under it, and an edit the files it touched as plain text. */
+export function ToolCall({ block }: { block: Extract<Block, { kind: "tool" }> }) {
   const edits = block.toolKind === "edit" || block.toolKind === "delete" || block.toolKind === "move";
-  const output = block.output === undefined ? undefined : cutLines(block.output);
   const label = toolLabel(block.title, block.places[0]?.path);
   return (
     <div className="text-sm" data-tool={block.toolCallId}>
       <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          aria-expanded={output === undefined ? undefined : open}
-          disabled={output === undefined}
-          onClick={() => setOpen(!open)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <ToolIcon block={block} logo={label.logo} />
-          <span className="truncate">{label.title}</span>
-        </button>
+          <span className="truncate select-text">{label.title}</span>
+        </div>
         <ToolStatus status={block.status} />
       </div>
-      {edits
-        ? block.places.map((place) => (
-            <Button key={place.path} variant="link" size="sm" className="h-auto justify-start p-0 pl-5 font-mono text-xs" title={`Open ${place.path}`} onClick={() => openFile(place.path)}>
-              {place.path}
-            </Button>
-          ))
-        : null}
-      {open && output !== undefined ? (
-        <pre className={cn("mt-1 ml-5 max-h-72 overflow-auto rounded-md bg-muted p-2 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]", block.status === "failed" && "text-destructive")}>
-          {output.shown}
-          {output.more > 0 ? `\n… ${output.more} more lines` : ""}
-        </pre>
-      ) : null}
+      {edits ? block.places.map((place) => <p key={place.path} className="pl-5 font-mono text-xs break-all text-muted-foreground select-text">{place.path}</p>) : null}
+      {block.status === "failed" && block.error !== undefined ? <p className="truncate pl-5 text-xs text-destructive select-text">{block.error}</p> : null}
     </div>
   );
 }

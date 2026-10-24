@@ -27,7 +27,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Dati del lavoro dell'agente** (`agents.md`): Usa quando tocchi i dati di richieste di design, risoluzione dei Drift, domande pronte e round di domande. Sections: `design-request`, `drift-resolution`, `question-round`.
 - **Dati generali** (`general.md`): Usa sempre quando lavori sui dati: regole che valgono per tutte le informazioni del Sistema. Sections: `General`.
 - **Note dei ghost** (`ghost-notes.md`): Usa quando tocchi il campo delle note negli annunci e nel quadro della Board. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
-- **Dati della History e di Clear** (`history.md`): Usa quando tocchi i dati delle voci di History e ciò che Clear della colonna Done scrive. Sections: `voce-history`, `developer.CLEAR_DONE`.
+- **Dati della History e di Clear** (`history.md`): Usa quando tocchi i dati delle voci di History e ciò che Clear della colonna Done scrive. Sections: `voce-history`, `developer.CLEAR_DONE`, `developer.DELETE_TASK`.
 - **omp Chat** (`omp-chat.md`): Usa quando salvi o leggi le conversazioni di omp Chat, General compresa, da riprendere dopo una ricarica. Sections: `omp-chat`, `omp-chat-conversation`, `omp-chat-general`.
 - **Dati delle prenotazioni dei file** (`prenotazioni.md`): Usa quando leggi o scrivi le prenotazioni dei file in `.trama/claims/`. Sections: `prenotazione-file`.
 - **Dati di annunci e Proposal** (`proposals.md`): Usa quando tocchi i dati degli annunci e delle Proposal. Sections: `announcement`, `proposal`.

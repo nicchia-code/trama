@@ -9,7 +9,8 @@ import { cn } from "../lib/utils";
 import { AgentMessage, ErrorMessage, Notice, Permission, Thought, ToolCall, UserMessage } from "./blocks";
 import { Form } from "./form";
 import { panelId, tabId } from "./tabs";
-import type { ConversationView } from "./state";
+import type { ConversationView, UsageView } from "./state";
+import { UsageBar } from "./usage";
 import { announcement, planDone, type Transcript } from "./transcript";
 
 /** What a conversation asks of the host. */
@@ -19,9 +20,9 @@ export interface ConversationActions {
   setModel(id: string, model: string): void;
   answer(id: string, requestId: string, answer: FormAnswerMessage): void;
   choose(id: string, requestId: string, optionId: string): void;
-  openFile(path: string): void;
   openLink(url: string): void;
   installOmp(): void;
+  refreshUsage(): void;
   setSendMode(mode: SendMode): void;
 }
 
@@ -184,7 +185,7 @@ function Composer({ item, view, actions, sendMode }: { item: ConversationItem; v
  * The conversation of a tab, under the tabs: the messages from top to bottom, the plan above the message field, the field always at the bottom. New text takes
  * the view down with it unless the developer scrolled up; then `Jump to latest` brings it back.
  */
-export function Conversation({ item, view, selected, actions, sendMode }: { item: ConversationItem; view: ConversationView; selected: boolean; actions: ConversationActions; sendMode: SendMode }) {
+export function Conversation({ item, view, selected, actions, sendMode, usage }: { item: ConversationItem; view: ConversationView; selected: boolean; actions: ConversationActions; sendMode: SendMode; usage: UsageView }) {
   const list = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(true);
   const stuckRef = useRef(true);
@@ -203,6 +204,7 @@ export function Conversation({ item, view, selected, actions, sendMode }: { item
   };
   return (
     <div role="tabpanel" id={panelId(item.id)} aria-labelledby={tabId(item.id)} hidden={!selected} className={cn("min-h-0 flex-1 flex-col", selected && "flex")}>
+      {item.general === true ? <UsageBar usage={usage} model={view.currentModel} active={selected} onRefresh={actions.refreshUsage} /> : null}
       <div className="relative min-h-0 flex-1">
       <div
         ref={list}
@@ -223,7 +225,7 @@ export function Conversation({ item, view, selected, actions, sendMode }: { item
             case "thought":
               return <Thought key={block.id} block={block} running={running} />;
             case "tool":
-              return <ToolCall key={block.id} block={block} openFile={actions.openFile} />;
+              return <ToolCall key={block.id} block={block} />;
             case "error":
               return <ErrorMessage key={block.id} message={block.message} />;
             case "notice":

@@ -1,7 +1,7 @@
 import type { SetupChoice, SetupMode, ToWebview } from "../../protocol";
-import { MODEL_ROLE_KEYS, type SettingSchema, type SettingsValues, type SettingValue, settingValueError, storedValue } from "../../host/settings-schema";
+import { groupKeys, MODEL_ROLE_KEYS, SETTING_GROUPS, type SettingSchema, type SettingsValues, type SettingValue, settingValueError, storedValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
-import { roleLabel } from "../settings/logic";
+import { ompAnsweredText, ompFailureText, roleLabel } from "../settings/logic";
 
 /** Which wizard is open: the first setup of a folder without a project (Get Started), the settings of a project, or a project with an empty Model that carries on with a path. */
 export type WizardMode = SetupMode;
@@ -18,43 +18,34 @@ export function stepsFor(mode: WizardMode, choice: WizardChoice | null): WizardS
   return steps;
 }
 
-export const IGNORE_INSTRUCTION_FILES_KEY = "trama.ignoreInstructionFiles";
+/** The settings of the Settings tab that the wizard does not ask for: Auto Exit and the language stay in the group `omp` of the tab. */
+const NOT_IN_WIZARD: readonly string[] = ["trama.autoExit", "trama.language"];
 
-/** The subgroups of Advanced, in order, each with its subtitle and its keys. */
-export const ADVANCED_GROUPS: readonly { title: string; keys: readonly string[] }[] = [
-  { title: "Appearance", keys: ["trama.theme"] },
-  { title: "Drifts", keys: ["trama.driftBlocker", "trama.advisorScanner", "trama.asyncDriftResolver"] },
-  { title: "Agents", keys: ["trama.parallelExecution", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals"] },
-  { title: "omp Chat", keys: ["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"] },
-];
+/** The keys of a group of the shared list `SETTING_GROUPS`, in order, without the ones the wizard leaves out. */
+const wizardKeysOf = (title: string): string[] => {
+  const group = SETTING_GROUPS.find((g) => g.title === title);
+  return (group === undefined ? [] : groupKeys(group)).filter((key) => !NOT_IN_WIZARD.includes(key));
+};
 
-/** The keys each step asks for, in order. */
+/** The keys each step asks for, in order: the groups `omp`, `Models`, `Project` and `Advanced` of `SETTING_GROUPS`. */
 export const STEP_KEYS: Readonly<Partial<Record<WizardStep, readonly string[]>>> = {
-  omp: ["trama.ompPath", "trama.terminalLocation", IGNORE_INSTRUCTION_FILES_KEY],
-  Models: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"],
-  Project: ["trama.skillsDir"],
-  Advanced: ADVANCED_GROUPS.flatMap((group) => group.keys),
+  omp: wizardKeysOf("omp"),
+  Models: wizardKeysOf("Models"),
+  Project: wizardKeysOf("Project"),
+  Advanced: wizardKeysOf("Advanced"),
 };
 
-/** The subgroup of Advanced a key belongs to; null for a key of another step. */
-export const advancedGroupOf = (key: string): string | null => ADVANCED_GROUPS.find((group) => group.keys.includes(key))?.title ?? null;
-
-/** The advice in bold under the title of each model role, in words and without naming models. */
-export const ROLE_ADVICE: Readonly<Record<string, string>> = {
-  "trama.analysis": "Your most capable model.",
-  "trama.execution": "A mid-range model.",
-  "trama.scan": "A fast, light model.",
-};
-
-export const STEP_SENTENCES: Readonly<Record<WizardStep, string>> = {
-  Path: "Choose how Trama starts in this folder.",
-  omp: "omp is required: Trama runs every agent with omp.",
-  Models: "Choose the model for each kind of work.",
-  Project: "Choose where Trama installs the agent skills.",
-  Folders: "Uncheck the folders the agent should not import.",
-  Advanced: "Theme and optional features. You can skip this step.",
-  Summary: "Check your choices, then confirm.",
-};
+/** The subgroups of the step Advanced, in order, each with its subtitle and its keys, as the schema of the `settings` message gives them. */
+export function advancedSubgroups(schema: readonly SettingSchema[]): { title: string; keys: string[] }[] {
+  const groups: { title: string; keys: string[] }[] = [];
+  for (const setting of schema) {
+    if (setting.subgroup === undefined || !(STEP_KEYS.Advanced ?? []).includes(setting.key)) continue;
+    let group = groups.find((g) => g.title === setting.subgroup);
+    if (group === undefined) groups.push((group = { title: setting.subgroup, keys: [] }));
+    group.keys.push(setting.key);
+  }
+  return groups;
+}
 
 /** The title of the page: the first setup of a folder, or the guided setup of the settings and of an empty Model. */
 export const wizardTitle = (mode: WizardMode): string => (mode === "first" ? "Set up Trama" : "Guided setup");
@@ -112,12 +103,6 @@ export function chosenOmpPath(schema: readonly SettingSchema[], state: WizardSta
   const setting = schema.find((s) => s.key === "trama.ompPath");
   const value = setting === undefined ? undefined : wizardValue(setting, state);
   return typeof value === "string" ? value.trim() : "";
-}
-
-/** Whether the omp step says that omp jobs ignore the instruction files: `trama.ignoreInstructionFiles` is on in the wizard's values. */
-export function ignoresInstructionFiles(schema: readonly SettingSchema[], state: WizardState): boolean {
-  const setting = schema.find((s) => s.key === IGNORE_INSTRUCTION_FILES_KEY);
-  return setting !== undefined && wizardValue(setting, state) === true;
 }
 
 export function setChoice(state: WizardState, choice: WizardChoice): WizardState {
@@ -344,7 +329,7 @@ export function summaryRows(schema: readonly SettingSchema[], state: WizardState
         const value = summaryText(setting, effective, models);
         rows.push({
           step,
-          group: step === "Advanced" ? advancedGroupOf(key) : null,
+          group: step === "Advanced" ? (setting.subgroup ?? null) : null,
           title: setting.title,
           value,
           empty: value === "(empty)",
@@ -388,8 +373,8 @@ export type AgentCheckResult = AgentCheckMessage extends infer M ? (M extends un
 export function agentCheckLine(result: AgentCheckResult | null): { tone: "checking" | "ok" | "warning"; text: string } {
   if (result === null) return { tone: "checking", text: "Checking omp…" };
   if (result.state === "updating") return { tone: "checking", text: `Updating omp to ${result.version}…` };
-  if (!result.ok) return { tone: "warning", text: `${(result.error ?? "omp did not answer").trimEnd().replace(/\.$/, "")}. Trama cannot work without omp.` };
-  const answered = `omp${result.version === undefined ? "" : ` ${result.version}`} answered with ${result.models ?? 0} models.`;
+  if (!result.ok) return { tone: "warning", text: ompFailureText(result.error) };
+  const answered = ompAnsweredText(result.version, result.models ?? 0);
   return result.updateError === undefined ? { tone: "ok", text: answered } : { tone: "warning", text: `Could not update omp (${result.updateError}). ${answered}` };
 }
 

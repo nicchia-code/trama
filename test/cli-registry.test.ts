@@ -37,6 +37,11 @@ test("every command is declared with its object and verb, and an input that refu
   }
 });
 
+test("`delete <id>` exists only for task, and it does not count as the agent's activity", () => {
+  expect(REGISTRY.commands.filter((c) => c.verb === "delete").map((c) => [c.object, c.positionals.map((x) => x.name)])).toEqual([["task", ["id"]]]);
+  expect(countsAsActivity(["task", "delete", "x"])).toBe(false);
+});
+
 test("docs/cli.md carries the command reference generated from the registry", () => {
   // A Windows checkout may turn the file's line endings into CRLF.
   const doc = normalizeLf(readFileSync(join(import.meta.dir, "../docs/cli.md"), "utf8"));

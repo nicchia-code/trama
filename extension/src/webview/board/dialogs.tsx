@@ -1,5 +1,5 @@
-import { MessageCircleQuestion, Tag, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { MessageCircleQuestion, Tag, Trash2, X } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import type { ModelSuggestion } from "../../host/model-lists";
 import { DriftCompare, RecurringBadge, UnifiedBadge, UnifiesList } from "../diagram/panel";
 import { Markdown } from "../markdown";
@@ -10,9 +10,10 @@ import { ComboboxInput } from "../ui/combobox";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
+import { joinReasons, RUN_IN_PROGRESS } from "../../../../src/core/design";
 import { type AnnouncedCard, type DriftCard, type ProposalCard, runningFor, type TaskCard } from "./logic";
 import { NotBlocking } from "./cards";
-import { RefChips, Tip, TaskProposalTag, taskTagText, useBoardEnv } from "./parts";
+import { BoardButton, RefChips, Tip, TaskProposalTag, taskTagText, useBoardEnv } from "./parts";
 
 /** Focus goes to Close when a read-only window opens, and back to the card's title when it closes (the default). */
 const focusClose = (event: Event) => {
@@ -21,15 +22,16 @@ const focusClose = (event: Event) => {
 };
 
 /**
- * The footer of a read-only window of a card: `Ask more`, then `Close`. Ask more asks the host for a new chat about the
- * card and leaves the window open; it is always enabled.
+ * The footer of a read-only window of a card: `Ask more`, then `Close`, both at the right; `lead`, when there is one (`Delete` of a Task in To do),
+ * stands apart at the left. Ask more asks the host for a new chat about the card and leaves the window open; it is always enabled.
  */
-function DetailsFooter({ kind, id, name }: { kind: "task" | "proposal" | "drift"; id: string; name: string }) {
+function DetailsFooter({ kind, id, name, lead }: { kind: "task" | "proposal" | "drift"; id: string; name: string; lead?: ReactNode }) {
   const { context } = useBoardEnv();
   const noun = kind === "task" ? "Task" : kind === "proposal" ? "Proposal" : "Drift";
   const tooltip = `Ask an agent about this ${noun}`;
   return (
     <DialogFooter>
+      {lead === undefined ? null : <div className="sm:mr-auto">{lead}</div>}
       <Tip text={tooltip}>
         <Button variant="outline" size="sm" aria-label={`Ask more about ${name}`} aria-description={tooltip} onClick={() => context.post({ type: "askMore", kind, id })}>
           <MessageCircleQuestion aria-hidden="true" focusable="false" />
@@ -67,16 +69,48 @@ export function ProposalBodyDialog({ card, onClose }: { card: ProposalCard | und
   );
 }
 
+/** Why `Delete` is disabled on a Task in To do, every reason that holds in their order, or null: the agent that filed it is still finishing, a Run of this window is in progress, a Drift holds the Task. */
+export function deleteBlocker(card: Pick<TaskCard, "finishing" | "heldByDrift">, running: boolean): string | null {
+  return joinReasons([card.finishing, running ? RUN_IN_PROGRESS : null, card.heldByDrift ? "A Drift needs this Task" : null]);
+}
+
+/** `Delete` of the details window of a Task in To do: it asks the host, which asks for confirmation; the window stays open until the Task is gone. */
+function DeleteTaskButton({ card }: { card: TaskCard }) {
+  const env = useBoardEnv();
+  const reason = deleteBlocker(card, env.running);
+  return (
+    <BoardButton
+      icon={Trash2}
+      label="Delete"
+      aria={`Delete ${card.name.text}`}
+      disabled={reason !== null}
+      tooltip={reason ?? "Delete this Task for good"}
+      description={reason}
+      onClick={() => env.deleteTask(card.id)}
+    />
+  );
+}
+
 /**
- * The read-only details of a Task in Active or Done: its title with its short number, its Proposal's tag, its references as links,
- * its body (or that it has none) and its image previews. It follows the Task from Active to Done: it closes when the Task is in neither (Clear deleted it).
+ * The details of a Task in Active or Done: its title with its short number, its Proposal's tag, its references as links,
+ * its body (or that it has none) and its image previews. They are read-only but for `Delete` of a Task in To do. It follows the Task from Active to Done:
+ * it closes when the Task is in neither (Clear or Delete removed it).
  */
 export function TaskDetailsDialog({ card, onClose }: { card: TaskCard | undefined; onClose: () => void }) {
   const env = useBoardEnv();
   return (
     <Dialog open={card !== undefined} onOpenChange={(open) => !open && onClose()}>
       {card === undefined ? null : (
-        <DialogContent className="sm:max-w-[640px]" aria-describedby={undefined} showCloseButton={false} onOpenAutoFocus={focusClose}>
+        <DialogContent
+          className="sm:max-w-[640px]"
+          aria-describedby={undefined}
+          showCloseButton={false}
+          onOpenAutoFocus={focusClose}
+          onCloseAutoFocus={(event) => {
+            // A deleted Task has no card to go back to: the focus goes to Run all.
+            if (env.focusAfterDelete(card.id)) event.preventDefault();
+          }}
+        >
           <DialogHeader>
             <DialogTitle className="text-[15px] leading-snug break-words">{`${card.name.text} ${card.title}`}</DialogTitle>
           </DialogHeader>
@@ -84,7 +118,7 @@ export function TaskDetailsDialog({ card, onClose }: { card: TaskCard | undefine
           {card.body.trim() === "" ? <p className="text-muted-foreground">This Task has no description.</p> : <Markdown source={card.body} openLink={env.context.openLink} />}
           <TaskImages images={card.images} open={(name) => env.openTaskImage(card.id, name)} />
           <TaskTagToggle card={card} />
-          <DetailsFooter kind="task" id={card.id} name={card.name.text} />
+          <DetailsFooter kind="task" id={card.id} name={card.name.text} lead={card.column === "todo" ? <DeleteTaskButton card={card} /> : undefined} />
         </DialogContent>
       )}
     </Dialog>

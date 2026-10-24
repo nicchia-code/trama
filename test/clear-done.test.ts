@@ -96,6 +96,22 @@ test("writes the copy in every entry that cites the Task before deleting it, and
   expect(getHistory(p, one.id).title).toBe("One again");
 });
 
+test("one call that clears several Tasks cited by the same entry keeps every copy, the entries and Proposals being read once", () => {
+  card("proposals/pppppppp-refunds", "proposal.md", "status: approved\nlabel: Refunds", "# Refunds Proposal\n");
+  done("aaaaaaaa", "First", BEFORE, "proposal: pppppppp");
+  done("bbbbbbbb", "Second", BEFORE);
+  done("cccccccc", "Third", BEFORE);
+  const one = addHistory(p, { title: "One", summary: "S.", tasks: ["aaaaaaaa", "bbbbbbbb", "cccccccc"] });
+  const two = addHistory(p, { title: "Two", summary: "S.", tasks: ["bbbbbbbb"] });
+  const updated = getHistory(p, one.id).updated;
+  expect(clearDoneTasks(p, ["aaaaaaaa", "bbbbbbbb", "cccccccc"])).toEqual(["aaaaaaaa", "bbbbbbbb", "cccccccc"]);
+  expect(Object.keys(getHistory(p, one.id).cleared).sort()).toEqual(["aaaaaaaa", "bbbbbbbb", "cccccccc"]);
+  expect(getHistory(p, one.id).cleared["aaaaaaaa"]?.tag).toEqual(expect.any(String));
+  expect(Object.keys(getHistory(p, two.id).cleared)).toEqual(["bbbbbbbb"]);
+  expect(getHistory(p, one.id).updated).toBe(updated);
+  expect(getHistory(p, one.id).title).toBe("One");
+});
+
 test("a Task cleared is not added to an entry any more, and the snapshot gives the copy marked as cleared", () => {
   done("aaaaaaaa", "First", BEFORE);
   const entry = addHistory(p, { title: "One", summary: "S.", tasks: ["aaaaaaaa"] });

@@ -178,6 +178,10 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
         ? { ok: true, message: { type, tasks: tasks as string[] } }
         : bad("clearDone needs the list of Task IDs in Done");
     }
+    case "deleteTask": {
+      const task = typeof raw["task"] === "string" && ID.test(raw["task"]) ? raw["task"] : undefined;
+      return task === undefined ? bad("deleteTask needs a valid Task ID") : { ok: true, message: { type, task } };
+    }
     case "dismissDrift":
       return id === undefined ? bad("dismissDrift needs a valid Drift ID") : { ok: true, message: { type, id } };
     case "askMore":

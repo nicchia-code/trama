@@ -8,7 +8,7 @@ Il wizard ha tre modi, che differiscono per i passi che mostra e per ciò che fa
 - **Impostazioni**: in un progetto, dal pulsante Guided setup in cima alla scheda Settings, che mostra il wizard al posto del modulo delle impostazioni. Mostra solo omp, modelli, progetto, avanzate e riepilogo. La conferma salva soltanto le impostazioni.
 - **Modello vuoto**: in un progetto con il Modello vuoto, dai pulsanti Import from Code e Start from Scratch del Diagramma o dal comando Import from Code, con il percorso già scelto; il pannello passa alla scheda Settings, che mostra il wizard. Mostra omp, modelli, progetto, le cartelle da importare solo con Import from Code, avanzate e riepilogo. La conferma salva le impostazioni e prosegue con il percorso, senza inizializzare nulla perché il progetto c'è già.
 
-Le impostazioni che il wizard chiede sono un sottoinsieme di quelle della scheda Settings, con gli stessi titoli, gli stessi controlli e le stesse spiegazioni; nel wizard la spiegazione di ogni impostazione si legge subito, sotto il suo titolo, senza aprire nulla che copra il resto del passo. La lingua, per ora disattivata, non è fra i passi e resta nella scheda Settings. Proseguire con Import from Code chiede all'agente di descrivere il codice esistente lasciando fuori le cartelle escluse nel wizard; proseguire con Start from Scratch apre la richiesta di setup del progetto (vedi la Design request). Le cartelle escluse valgono solo per quell'import: non si salvano e non cambiano scan e Run successivi.
+Le impostazioni che il wizard chiede sono un sottoinsieme di quelle della scheda Settings, con gli stessi titoli, gli stessi controlli, le stesse spiegazioni e gli stessi gruppi, nello stesso ordine; come nella scheda Settings, la spiegazione di ogni impostazione si legge subito, sotto il suo titolo, senza aprire nulla che copra il resto del passo. Auto Exit e la lingua, per ora disattivata, non sono fra i passi e restano nella scheda Settings. Proseguire con Import from Code chiede all'agente di descrivere il codice esistente lasciando fuori le cartelle escluse nel wizard; proseguire con Start from Scratch apre la richiesta di setup del progetto (vedi la Design request). Le cartelle escluse valgono solo per quell'import: non si salvano e non cambiano scan e Run successivi.
 
 ## States
 
@@ -65,7 +65,7 @@ Solo con Import from Code. L'albero delle cartelle della cartella scelta, con tu
 - `developer.OPEN_SETUP_STEP` → Project: il developer sceglie Project nell'indicazione dei passi. Le scelte restano.
 
 #### Advanced
-Il tema del pannello e le funzioni facoltative del gruppo Features, divise per argomento. Il passo si può saltare.
+Il tema del pannello e le funzioni facoltative, divise per argomento negli stessi sottogruppi del gruppo Advanced della scheda Settings. Il passo si può saltare.
 - `developer.NEXT_SETUP_STEP` → Summary
 - `developer.SKIP_SETUP_STEP` → Summary: i valori del passo tornano a quelli attuali, anche quelli già cambiati nel passo.
 - `developer.PREVIOUS_SETUP_STEP` → Folders: il percorso è Import from Code.

@@ -86,7 +86,7 @@ Run `trama comparison move <id> delivered --input -` exactly once, after you hav
 
 The command checks every card before writing and writes all or none. If it refuses, fix the JSON and run it again. Never run `comparison move` a second time for cards already written.
 
-Never approve, reject, discard or resolve any card, and never choose a resolution: decisions belong to the developer, unless the developer explicitly asks you in the conversation.
+Never approve, reject, discard or resolve any card, never delete a Task (`trama task delete`) and never choose a resolution: decisions belong to the developer, unless the developer explicitly asks you in the conversation.
 
 ## Reply
 

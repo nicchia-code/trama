@@ -483,9 +483,9 @@ describe("Install omp", () => {
     const { Controller } = await import("../extension/src/host/controller");
     const controller = new Controller({ scheme: "file" } as never);
     const calls: string[] = [];
-    const spied = controller as unknown as { checkAgent(path: string): Promise<void>; postOmpStatus(): Promise<void> };
+    const spied = controller as unknown as { checkAgent(path: string): Promise<void>; refreshOmp(fresh?: boolean): Promise<void> };
     spied.checkAgent = async () => void calls.push("checkAgent");
-    spied.postOmpStatus = async () => void calls.push("postOmpStatus");
+    spied.refreshOmp = async (fresh) => void calls.push(`refreshOmp ${fresh}`);
     const watching = (await import("../extension/src/host/agent")).watchAgentTerminal();
     try {
       controller.installOmp();
@@ -493,7 +493,7 @@ describe("Install omp", () => {
       expect(calls).toEqual([]);
       expect(data.has(OMP_UPDATE_KEY)).toBe(true);
       listeners.close.forEach((fn) => fn(terminal));
-      expect(calls).toEqual(["checkAgent", "postOmpStatus"]);
+      expect(calls).toEqual(["checkAgent", "refreshOmp true"]);
       expect(data.has(OMP_UPDATE_KEY)).toBe(false);
     } finally {
       setUpdateStore(undefined);

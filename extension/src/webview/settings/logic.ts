@@ -4,13 +4,27 @@ import type { ThemeSetting } from "../theme";
 import type { SettingSchema, SettingsValues } from "../../host/settings-schema";
 import type { ToWebview } from "../../protocol";
 
-/** The settings grouped under their titles, in schema order. */
-export function groupSettings(schema: readonly SettingSchema[]): { title: string; settings: SettingSchema[] }[] {
-  const groups: { title: string; settings: SettingSchema[] }[] = [];
+export interface SettingsGroup {
+  title: string;
+  /** The settings of the group that belong to no subgroup, in schema order. */
+  settings: SettingSchema[];
+  /** The subgroups (the ones of Advanced), in schema order, each with its settings. */
+  subgroups: { title: string; settings: SettingSchema[] }[];
+}
+
+/** The settings grouped under their titles, in schema order: the group, then its subgroup when the setting has one. */
+export function groupSettings(schema: readonly SettingSchema[]): SettingsGroup[] {
+  const groups: SettingsGroup[] = [];
   for (const setting of schema) {
     let group = groups.find((g) => g.title === setting.group);
-    if (group === undefined) groups.push((group = { title: setting.group, settings: [] }));
-    group.settings.push(setting);
+    if (group === undefined) groups.push((group = { title: setting.group, settings: [], subgroups: [] }));
+    if (setting.subgroup === undefined) {
+      group.settings.push(setting);
+      continue;
+    }
+    let subgroup = group.subgroups.find((s) => s.title === setting.subgroup);
+    if (subgroup === undefined) group.subgroups.push((subgroup = { title: setting.subgroup, settings: [] }));
+    subgroup.settings.push(setting);
   }
   return groups;
 }
@@ -83,9 +97,15 @@ export function withModel(value: string, model: string, models: readonly ModelSu
 /** The host's `ompStatus` message without its type; null while nothing has arrived, which reads as checking. */
 export type OmpStatus = Omit<Extract<ToWebview, { type: "ompStatus" }>, "type">;
 
-/** The line of the omp group: being checked, the version that answers, or the reason it does not (and `missing` for `Install omp`). */
+/** Why omp does not answer, as the omp step of the wizard and the omp group of the Settings tab say it: the reason with one full stop, then what it means. */
+export const ompFailureText = (error: string | undefined): string => `${(error ?? "omp did not answer").trimEnd().replace(/\.$/, "")}. Trama cannot work without omp.`;
+
+/** What omp answered, in the wizard and in the Settings tab: its version and how many models it lists. */
+export const ompAnsweredText = (version: string | undefined, models: number): string => `omp${version === undefined ? "" : ` ${version}`} answered with ${models} models.`;
+
+/** The status box of the omp group: being checked, what omp answered (the version and the number of models), or the reason it does not (and `missing` for `Install omp`). */
 export function ompStatusLine(status: OmpStatus | null): { tone: "checking" | "ok" | "warning"; text: string; missing: boolean } {
   if (status === null || status.state === "checking") return { tone: "checking", text: "Checking omp…", missing: false };
-  if (status.error !== undefined || status.version === undefined) return { tone: "warning", text: `${status.error ?? "omp did not answer"}. Trama cannot work without omp.`, missing: status.missing === true };
-  return { tone: "ok", text: `omp ${status.version}`, missing: false };
+  if (status.error !== undefined || status.version === undefined) return { tone: "warning", text: ompFailureText(status.error), missing: status.missing === true };
+  return { tone: "ok", text: ompAnsweredText(status.version, status.models ?? 0), missing: false };
 }

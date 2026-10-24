@@ -14,7 +14,7 @@ import { SplitButton } from "../split-button";
 import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
 import { DriftDetailsDialog, type ModelList, GhostDetailsDialog, ModelDialog, ProposalBodyDialog, TaskDetailsDialog } from "./dialogs";
-import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, COLUMN_TITLES, type ColumnId, doneGroups, EMPTY_HINTS, interleave, NO_MODELS, type ProposalCard, REFINEMENT_OFF, stoppedFollowingNotice, type TaskCard, withdrawnNotice } from "./logic";
+import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, type Card, clearableTasks, COLUMN_TITLES, type ColumnId, doneGroups, EMPTY_HINTS, hideCleared, interleave, NO_MODELS, type ProposalCard, REFINEMENT_OFF, stoppedFollowingNotice, type TaskCard, withdrawnNotice } from "./logic";
 import { BoardButton, BoardEnvContext, type BoardEnv, Tip } from "./parts";
 
 /** The state of Resolve Drifts and of the Runs the host gives with each picture. */
@@ -54,6 +54,8 @@ export interface BoardPageProps {
   context: ViewContext;
   /** The ghost the status bar asked for (`navigate` with `ghost`): its details open, replacing any other details window. `n` tells one request from the next for the same ghost. */
   ghostRequest?: { id: string; n: number };
+  /** Counts the answers of the host to Clear (`clearDoneEnded`): each change ends the hiding of the cards Clear was deleting. */
+  clearEnded?: number;
 }
 
 const COLUMN_CLASS = "flex min-h-0 flex-col rounded-lg border bg-muted/40";
@@ -142,7 +144,7 @@ function DoneColumn({ cards, open, toggle, chevron, clear, now }: { cards: Card[
 }
 
 /** The Board: three columns of cards (Backlog, Active, Done), and the notices at its top. */
-export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, models, refinement = REFINEMENT_OFF, modelList, notices, closeNotice, context, ghostRequest }: BoardPageProps) {
+export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, models, refinement = REFINEMENT_OFF, modelList, notices, closeNotice, context, ghostRequest, clearEnded }: BoardPageProps) {
   const root = useRef<HTMLDivElement>(null);
   /** The card whose queued refining was cancelled: its Approve gets the focus once the picture no longer queues it. */
   const refocus = useRef<string | null>(null);
@@ -156,14 +158,23 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
   const [ghostOf, setGhostOf] = useState<string | null>(null);
   /** Whether the open ghost details came from the status bar: closing them sends the focus to Backlog, as that ghost may have no column to go back to. */
   const [ghostFromBar, setGhostFromBar] = useState(false);
+  /** The Tasks the last click on Clear is deleting: their cards stay out of Done until `clearEnded` changes. */
+  const [hidden, setHidden] = useState<string[]>([]);
+  /** The Task whose Delete was pressed last, until its window closes: the focus goes to Run all when that Task is gone. */
+  const deleting = useRef<string | null>(null);
+  const latest = useRef(snapshot);
+  latest.current = snapshot;
 
   const numbers = snapshot?.numbers ?? noNumbers;
   const runReason = snapshot === null ? null : joinReasons([resolve.runReason, runBlocker(snapshot.tasks, namerOf(numbers))]);
-  const columns = useMemo(() => {
+  const boardColumns = useMemo(() => {
     if (snapshot === null) return [];
     const boardResolve: BoardResolve = { blocker: resolve.blocker, drifts: resolve.drifts, resolving: resolve.resolving, unifying: unify.unifying, refinement, asking };
     return buildBoard(snapshot, boardResolve, models);
   }, [snapshot, resolve, unify, models, refinement, asking]);
+  const columns = useMemo(() => hideCleared(boardColumns, hidden), [boardColumns, hidden]);
+  // The host is done with Clear (cleared, refused or failed): the cards stop being hidden. The deleted ones are not in the picture any more; the others come back.
+  useEffect(() => setHidden((current) => (current.length === 0 ? current : [])), [clearEnded]);
   useEffect(() => {
     if (refocus.current === null) return;
     const card = root.current?.querySelector<HTMLElement>(`[data-key="${refocus.current}"]`);
@@ -230,6 +241,7 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
     numbers,
     models: modelList.models,
     runReason: resolve.runReason,
+    running: resolve.running === true,
     showCard(key) {
       const card = [...(root.current?.querySelectorAll<HTMLElement>("[data-key]") ?? [])].find((node) => node.dataset["key"] === key);
       card?.scrollIntoView?.({ block: "nearest" });
@@ -241,13 +253,30 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
       context.post({ type: "modelSuggestionsWanted" });
     },
     openProposal: (proposal) => setBodyOf(proposal),
-    openTask: (task) => setTaskOf(task),
+    openTask: (task) => {
+      deleting.current = null;
+      setTaskOf(task);
+    },
     openDrift: (drift) => setDriftOf(drift),
     openGhost: (key) => {
       setGhostFromBar(false);
       setGhostOf(key);
     },
     openTaskImage: (task, name) => context.post({ type: "openTaskImage", task, name }),
+    deleteTask(task) {
+      deleting.current = task;
+      context.post({ type: "deleteTask", task });
+    },
+    focusAfterDelete(task) {
+      if (deleting.current !== task) return false;
+      deleting.current = null;
+      if (latest.current?.tasks.some((t) => t.id === task) !== false) return false;
+      const runAll = root.current?.querySelector<HTMLButtonElement>('button[aria-label="Run all the Tasks in To do"]');
+      // With no Task left in To do Run all is disabled and cannot take the focus: the Active column does.
+      if (runAll !== null && runAll !== undefined && !runAll.disabled) runAll.focus();
+      else root.current?.querySelector<HTMLElement>('[data-column="active"]')?.focus();
+      return true;
+    },
     cancelRefinement(proposal, key) {
       refocus.current = key;
       context.post({ type: "cancelRefinement", proposal });
@@ -312,6 +341,8 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
       tooltip={clearReason ?? "Delete the Tasks in Done for good"}
       description={clearReason}
       onClick={() => {
+        // The cards Clear deletes go at the click, and stay hidden until the host says it is done (`clearDoneEnded`).
+        setHidden(clearableTasks(doneCards));
         context.post({ type: "clearDone", tasks: doneCards.map((card) => card.id) });
         doneChevron.current?.focus();
       }}
@@ -362,6 +393,8 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
 export interface BoardView extends Omit<View, "update"> {
   update(next: Snapshot, isAsking?: boolean, resolveState?: ResolveState, models?: BoardModels, unify?: UnifyState, refinement?: RefinementView): void;
   receiveModels(message: { models: ModelSuggestion[]; error?: string }): void;
+  /** The host is done with the last Clear (done, refused or failed): the cards it hid at the click are shown again, the deleted ones being gone from the picture. */
+  clearDoneEnded(): void;
 }
 
 /**
@@ -410,6 +443,10 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
     },
     notice(text: string) {
       page = { ...page, notices: [...page.notices, { id: nextNotice++, text }] };
+      render();
+    },
+    clearDoneEnded() {
+      page = { ...page, clearEnded: (page.clearEnded ?? 0) + 1 };
       render();
     },
     show(options) {

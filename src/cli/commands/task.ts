@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { announcementNote, deliverCard } from "../../core/announcements";
 import { TramaError, UsageError } from "../../core/errors";
+import { deleteTask } from "../../core/delete-task";
 import { getProposal } from "../../core/proposals";
 import { checkTaskInEditor, filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
 import { syncShortNumbers } from "../../core/short-numbers";
@@ -229,4 +230,23 @@ const check = defineCommand({
   },
 });
 
-export const TASK_COMMANDS = [create, show, list, move, check];
+const del = defineCommand({
+  object: "task",
+  verb: "delete",
+  mode: "immediate",
+  summary: "Delete a Task in To do for good.",
+  description:
+    "Deletes the Task, its percentage and its images, with no confirmation and no way back. Only a Task in To do is deleted, blocked or not, and also one that went back to To do after the agent took it. It is refused, changing nothing and saying why, when the Task is In progress or Done, when an open Drift names it as an origin, or when it is the Task that fixes the code of a Drift in Code to be fixed. Writes nothing in History and does not count among the Tasks finished since the last global scan; its short number becomes free. Run it as the agent only when the developer asks for it explicitly in the conversation.",
+  positionals: [{ name: "id", description: "The Task: its ID, a unique prefix or its short number." }],
+  input: z.strictObject({}),
+  output: z.object({ id: z.string().describe("The permanent identity of the deleted Task."), title: z.string() }),
+  exampleArgs: ["T3"],
+  effects: { writes: true },
+  run(ctx, _input, [id]) {
+    const project = ctx.project();
+    const task = deleteTask(project, getTask(project, id as string, true).id);
+    return text(`Deleted Task ${task.id} "${task.title}".`, { id: task.id, title: task.title });
+  },
+});
+
+export const TASK_COMMANDS = [create, show, list, move, check, del];

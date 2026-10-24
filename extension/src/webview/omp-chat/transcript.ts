@@ -14,7 +14,8 @@ export type Block =
   /** `done` once something else followed it or the turn ended: only then is it announced. */
   | { kind: "agent"; id: number; messageId?: string; text: string; done: boolean }
   | { kind: "thought"; id: number; text: string; startedAt: number; endedAt?: number }
-  | { kind: "tool"; id: number; toolCallId: string; title: string; name?: string; toolKind: ToolKind; status: "pending" | "in_progress" | "completed" | "failed"; output?: string; places: FilePlace[] }
+  /** `error` is the first line of what omp reported while the call was not done; the conversation shows it only for a failed call, and keeps nothing of a call that succeeded. */
+  | { kind: "tool"; id: number; toolCallId: string; title: string; name?: string; toolKind: ToolKind; status: "pending" | "in_progress" | "completed" | "failed"; error?: string; places: FilePlace[] }
   | { kind: "error"; id: number; message: string }
   | { kind: "notice"; id: number; text: string }
   | { kind: "form"; id: number; form: FormView; answer?: FormAnswerMessage }
@@ -34,16 +35,24 @@ export interface Transcript {
 
 export const emptyTranscript = (): Transcript => ({ blocks: [], plan: undefined, next: 1, echoes: [], echoed: "" });
 
-/** Longest output of a tool the conversation shows before it cuts it. */
-export const MAX_OUTPUT_LINES = 200;
+/** Most characters of a tool's report read for its error line. */
 const MAX_OUTPUT_CHARS = 200_000;
 
-/** The lines of an output to show and how many were cut. */
-export function cutLines(output: string, max = MAX_OUTPUT_LINES): { shown: string; more: number } {
-  const lines = output.split("\n");
-  if (lines.length <= max) return { shown: output, more: 0 };
-  return { shown: lines.slice(0, max).join("\n"), more: lines.length - max };
+/** Most characters the error line of a failed call keeps; the row cuts what does not fit its width with `…`. */
+export const MAX_ERROR_CHARS = 500;
+
+/** The error line of a failed call: the first line of omp's report that is not blank, trimmed; undefined when there is none. */
+export function errorLine(report: string | undefined): string | undefined {
+  if (report === undefined) return undefined;
+  for (const line of report.split("\n")) {
+    const text = line.trim();
+    if (text.length > 0) return text.length > MAX_ERROR_CHARS ? text.slice(0, MAX_ERROR_CHARS) : text;
+  }
+  return undefined;
 }
+
+/** What a tool block keeps of a report: its error line while the call is not done, and nothing once it succeeded. */
+const errorOf = (status: Extract<Block, { kind: "tool" }>["status"], report: string | undefined, before?: string): string | undefined => (status === "completed" ? undefined : (errorLine(report) ?? before));
 
 function push(t: Transcript, make: (id: number) => Block, now: number): Transcript {
   const blocks = closeOpen(t.blocks, now);
@@ -144,7 +153,7 @@ export function cancelPermission(t: Transcript, requestId: string): Transcript {
   return { ...t, blocks: t.blocks.map((block) => (block.kind === "permission" && block.requestId === requestId && block.answer === undefined ? { ...block, cancelled: true } : block)) };
 }
 
-/** The text of the content blocks of a tool call, and nothing for a diff (the conversation shows no diff) or a terminal. */
+/** The text of the content blocks of a tool call, and nothing for a diff or a terminal. */
 function outputOf(content: readonly ToolCallContent[] | null | undefined, rawOutput: unknown): string | undefined {
   const texts: string[] = [];
   for (const item of content ?? []) if (item.type === "content" && item.content.type === "text") texts.push(item.content.text);
@@ -218,16 +227,17 @@ export function applyUpdate(t: Transcript, notification: SessionNotification, no
     case "tool_call": {
       const known = t.blocks.findIndex((block) => block.kind === "tool" && block.toolCallId === update.toolCallId);
       const block = (id: number): Block => {
-        const output = outputOf(update.content, update.rawOutput);
+        const status = isStatus(update.status) ? update.status : "pending";
+        const error = errorOf(status, outputOf(update.content, update.rawOutput));
         return {
           kind: "tool",
           id,
           toolCallId: update.toolCallId,
           title: update.title,
           toolKind: update.kind ?? "other",
-          status: isStatus(update.status) ? update.status : "pending",
+          status,
           places: placesOf(update.locations, update.content),
-          ...(output === undefined ? {} : { output }),
+          ...(error === undefined ? {} : { error }),
           ...(typeof update.name === "string" && update.name !== "" ? { name: update.name } : {}),
         };
       };
@@ -237,7 +247,8 @@ export function applyUpdate(t: Transcript, notification: SessionNotification, no
     case "tool_call_update": {
       const known = t.blocks.findIndex((block) => block.kind === "tool" && block.toolCallId === update.toolCallId);
       if (known === -1) {
-        const output = outputOf(update.content, update.rawOutput);
+        const status = isStatus(update.status) ? update.status : "in_progress";
+        const error = errorOf(status, outputOf(update.content, update.rawOutput));
         return push(
           t,
           (id) => ({
@@ -246,9 +257,9 @@ export function applyUpdate(t: Transcript, notification: SessionNotification, no
             toolCallId: update.toolCallId,
             title: update.title ?? "Tool call",
             toolKind: update.kind ?? "other",
-            status: isStatus(update.status) ? update.status : "in_progress",
+            status,
             places: placesOf(update.locations, update.content),
-            ...(output === undefined ? {} : { output }),
+            ...(error === undefined ? {} : { error }),
             ...(typeof update.name === "string" && update.name !== "" ? { name: update.name } : {}),
           }),
           now,
@@ -258,14 +269,16 @@ export function applyUpdate(t: Transcript, notification: SessionNotification, no
         ...t,
         blocks: t.blocks.map((block, at) => {
           if (at !== known || block.kind !== "tool") return block;
-          const output = outputOf(update.content, update.rawOutput) ?? block.output;
+          const { error: before, ...rest } = block;
+          const status = isStatus(update.status) ? update.status : block.status;
+          const error = errorOf(status, outputOf(update.content, update.rawOutput), before);
           const places = placesOf(update.locations, update.content);
           return {
-            ...block,
+            ...rest,
             ...(typeof update.title === "string" ? { title: update.title } : {}),
             ...(update.kind === undefined || update.kind === null ? {} : { toolKind: update.kind }),
-            ...(isStatus(update.status) ? { status: update.status } : {}),
-            ...(output === undefined ? {} : { output }),
+            status,
+            ...(error === undefined ? {} : { error }),
             ...(typeof update.name === "string" && update.name !== "" ? { name: update.name } : {}),
             places: places.length > 0 ? places : block.places,
           };

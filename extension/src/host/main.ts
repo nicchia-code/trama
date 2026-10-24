@@ -15,9 +15,10 @@ import { EditorQuestions } from "./questions";
 import { CONVERSATIONS_KEY, readSavedConversations } from "../../../src/core/omp-chat-conversation";
 import { OmpClient } from "./omp-chat/client";
 import { OmpChatView } from "./omp-chat/view";
+import { OmpUsage, ompUsageRunner } from "./omp-chat/usage";
 import { MenuView } from "./menu/view";
 import { SHOW_COMMANDS } from "../menu-protocol";
-import { findOmp, forgetUpdateCheck, setUpdateStore } from "./omp-update";
+import { findConfiguredOmp, findOmp, forgetUpdateCheck, setUpdateStore } from "./omp-update";
 
 const SKILL_SYNC_DEBOUNCE_MS = 300;
 
@@ -89,7 +90,9 @@ export function activate(context: vscode.ExtensionContext): void {
  */
 function startOmpChat(context: vscode.ExtensionContext): void {
   const savedIds = () => readSavedConversations(context.workspaceState.get(CONVERSATIONS_KEY)).entries.map((entry) => entry.id);
-  const view = new OmpChatView(context.extensionUri, () => findProject()?.root, savedIds, context.globalState);
+  // The usage of the subscription: `omp usage --json` in General's folder, with the program General runs as (`tech#omp-chat-general`).
+  const usage = new OmpUsage(ompUsageRunner({ ompPath: configuredOmpPath, findOmp: findConfiguredOmp, folder: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath }));
+  const view = new OmpChatView(context.extensionUri, () => findProject()?.root, savedIds, context.globalState, usage);
   // `trama.ompPath` is application-scoped: only the user value counts, read by `configuredOmpPath`, as for every terminal and the model list.
   // The program is the one the launches run: found as `findOmp` finds it (a conversation that resumes after a reload has had no launch before it).
   const client = new OmpClient({

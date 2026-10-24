@@ -27,3 +27,9 @@ Use for performance, security, privacy, accessibility, offline, localisation or 
 - Sicurezza: la scheda Settings scrive solo nelle impostazioni utente (`ConfigurationTarget.Global`), mai in quelle del workspace, quindi non modifica nessun file del repository. L'host accetta solo chiavi dichiarate nel manifest e valori conformi al loro schema.
 - Privacy e sicurezza dei suggerimenti dei modelli: l'estensione non apre nessun file di Cursor. `omp models --json` si avvia senza shell, con argomenti fissi, con il programma omp di Trama (`tech#agent-launching`); aggiunge al PATH di omp solo la cartella di `trama.ompPath` o quella di bun. Trama non fa nessuna chiamata di rete per i suggerimenti. Un suggerimento è solo testo nel webview, costruito con `textContent` e attributi, mai come markup. Il motivo di un errore di omp è un testo fisso con il percorso usato o con il codice di uscita, mai l'output di omp né il suo stderr.
 - Prestazioni: preparare l'elenco non blocca la scheda: i campi si possono usare subito e la tendina compare quando l'elenco arriva; omp ha al massimo 15 s, poi l'elenco è vuoto e compare il motivo della scadenza.
+
+## developer.CLEAR_DONE
+
+- Prestazioni: Clear legge Proposal, History e Drift una sola volta per clic, non una volta per Task, così il suo tempo cresce con il numero di Task cancellati e non con il loro prodotto con le Proposal e le voci di History. Il developer vede le schede sparire al clic, qualunque sia il tempo della cancellazione.
+- Affidabilità: la rimozione ottimistica non nasconde mai un errore: un Task non cancellato torna nella colonna con l'avviso del motivo.
+- L'accettazione esercita: Clear con alcune centinaia di Task in Done, con le schede che spariscono subito e la colonna vuota alla fine; Clear con un Task col badge `kept`, che resta; Clear con un file di History non scrivibile, con l'avviso e le schede non cancellate che tornano.

@@ -11,6 +11,7 @@ import { type Area, areaIdOf, buildProject, type Fragment, parseRequirementRef, 
 import { type Project, readTrackedFiles } from "./store";
 import type { Actor, Diagnostic, Feature, Machine } from "./types";
 import { type Blocker, computeBlocked } from "./blocking";
+import { tasksHeldByDrifts } from "./delete-task";
 import { syncShortNumbers } from "./short-numbers";
 import { readTaskImages, type TaskImage } from "./task-images";
 import { clearedSince, readLastScan } from "./last-scan";
@@ -205,6 +206,8 @@ export interface TaskView {
   unchanged: string | null;
   /** Why the Task is blocked, if it is: the open Drifts, or the Task that fixes the code of its Drift. Empty when it is free. */
   blockedBy: Blocker[];
+  /** True for a Task in To do that a Drift holds, so Delete refuses it: the origin of an open Drift, or the Task that fixes the code of a Drift in Code to be fixed (`tasksHeldByDrifts`). Always false outside To do. */
+  heldByDrift: boolean;
   /** Path relative to `.trama/`, for opening the file. */
   file: string;
   /** The images the Task carries for the model that implements it, in order; only those that exist. */
@@ -427,6 +430,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
   const tasksSinceScan = tasks.filter((t) => t.data.column === "done" && t.data.finished !== null && t.data.unchanged === null && Date.parse(t.data.finished) > scanInstant).length + clearedSince(p, scanInstant);
   const drifts = listDrifts(p);
   const blocked = computeBlocked(project, tasks, drifts);
+  const held = tasksHeldByDrifts(drifts);
 
   const allProposals = listProposals(p);
   const shownProposals = allProposals.filter((x) => x.data.status === "open" || (x.data.status === "draft" && x.data.refining)).map((proposal) => proposalView(p, project, proposal));
@@ -488,6 +492,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
       created: t.data.created,
       unchanged: t.data.unchanged,
       blockedBy: blocked.get(t.id) ?? [],
+      heldByDrift: t.data.column === "todo" && held.has(t.id),
       file: `tasks/${t.name}`,
       images: readTaskImages(p, t.id),
     })),

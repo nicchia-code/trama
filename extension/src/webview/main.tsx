@@ -105,6 +105,8 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     board.stoppedFollowing?.(message.subject, message.reason);
   } else if (message.type === "notice") {
     board.notice?.(message.text);
+  } else if (message.type === "clearDoneEnded") {
+    board.clearDoneEnded();
   } else if (message.type === "error") {
     store.set({ error: message.message });
   } else if (message.type === "navigate") navigate(message.view, { ref: message.ref, proposal: message.proposal, ghost: message.ghost });

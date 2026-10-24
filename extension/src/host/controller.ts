@@ -5,6 +5,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { TramaError, UsageError } from "../../../src/core/errors";
 import { clearDoneTasks } from "../../../src/core/clear-done";
+import { deleteTask } from "../../../src/core/delete-task";
 import { findInstructionFiles } from "../../../src/core/instruction-files";
 import { approvalBlock, approveProposal, getProposal, health, rejectProposal, resolutionHolding } from "../../../src/core/proposals";
 import { type PreparedQuestion, preparedOutcome, preparedStatus } from "../../../src/core/prepared";
@@ -15,7 +16,7 @@ import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir
 import { namerOf } from "../../../src/core/card-names";
 import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
-import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
+import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, getTaskOrNull, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
 import type { AgentAction, NavigateOptions, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
 import type { MenuViewName } from "../menu-protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
@@ -33,7 +34,7 @@ import { appliedProposalModels, boardModels, chooseProposalModel, forgetProposal
 import type { RunModel } from "./terminal-agent";
 import { NO_REFINEMENT, type RefinementEnd, type RefinementState, backlogOrder, enqueue, nextToRefine, refinable, refinementEnd, refinementView, withdraw } from "./refinement";
 import { planRuns, runSequence, runSequenceTogether, type AppliedModel, type PlannedRun } from "./run-groups";
-import { ompModels, type ModelList } from "./model-lists";
+import { ompModels } from "./model-lists";
 import { ensureOmpUpdated, findOmp, forgetUpdateCheck } from "./omp-update";
 import { ompStatus } from "./omp-status";
 import { confirmScanSystem } from "./scan-confirm";
@@ -103,10 +104,10 @@ export class Controller implements vscode.Disposable {
   /** How a prepared question is asked in this window; a test replaces it. */
   private askPrepared: typeof askPreparedRound = askPreparedRound;
 
-  /** The newest request for model suggestions: an answer that arrives after a newer request is dropped. */
-  private suggestionsRequest = 0;
-  /** The newest omp status request of the Settings tab: an answer that arrives after a newer request is dropped. */
-  private ompStatusRequest = 0;
+  /** The newest omp request (the model suggestions and the status of the Settings tab share it): an answer that arrives after a newer request is dropped. */
+  private ompRequest = 0;
+  /** The omp request under way: a wish for the same omp path while it runs joins it, so `omp models --json` runs once for the suggestions and the status. */
+  private ompRefresh: { path: string; done: Promise<void> } | undefined;
   /** Whether a check of the installed skills is under way: another opening does not start a second. */
   private checkingSkills = false;
   /** The tab a panel just created goes to once its webview is ready (`openSettings`, `openGhostDetails`), with the options of the `navigate`. */
@@ -378,23 +379,40 @@ export class Controller implements vscode.Disposable {
     installOmp(() => {
       forgetUpdateCheck();
       void this.checkAgent(configuredOmpPath());
-      void this.postOmpStatus();
+      void this.refreshOmp(true);
     });
   }
 
-  /** Sends the Settings tab the state of omp: `checking` at once, then the version that answers or why nothing does. Only the newest request is answered. */
-  async postOmpStatus(): Promise<void> {
-    const request = ++this.ompStatusRequest;
+  /**
+   * Sends the Settings tab and the Board the omp of `trama.ompPath`: `ompStatus` `checking` at once, then, from one `omp models --json` and one
+   * `omp --version`, the model suggestions and the status (the version and the number of models, or why nothing answers). Only the newest request
+   * is answered; with `fresh` a request under way for the same path is not joined.
+   */
+  async refreshOmp(fresh = false): Promise<void> {
+    // `trama.ompPath` is application-scoped: only the user value counts; empty means `omp` from the editor's PATH.
+    const ompPath = configuredOmpPath();
+    const running = this.ompRefresh;
+    if (!fresh && running !== undefined && running.path === ompPath) return running.done;
+    const request = ++this.ompRequest;
     this.post({ type: "ompStatus", state: "checking" });
-    const status = await ompStatus(configuredOmpPath());
-    if (request !== this.ompStatusRequest) return;
-    this.post({
-      type: "ompStatus",
-      state: "done",
-      missing: status.missing,
-      ...(status.version === undefined ? {} : { version: status.version }),
-      ...(status.error === undefined ? {} : { error: status.error }),
+    const entry: { path: string; done: Promise<void> } = { path: ompPath, done: Promise.resolve() };
+    entry.done = (async () => {
+      const [list, status] = await Promise.all([ompModels(ompPath), ompStatus(ompPath)]);
+      if (request !== this.ompRequest) return;
+      this.post({ type: "modelSuggestions", ...list });
+      const error = status.error ?? list.error;
+      this.post({
+        type: "ompStatus",
+        state: "done",
+        missing: status.missing || list.missing === true,
+        ...(status.version === undefined ? {} : { version: status.version }),
+        ...(error === undefined ? { models: list.models.length } : { error }),
+      });
+    })().finally(() => {
+      if (this.ompRefresh === entry) this.ompRefresh = undefined;
     });
+    this.ompRefresh = entry;
+    return entry.done;
   }
 
   /** The agent instruction files of `root` (a workspace folder) or, without `root`, of the project's folder, for the wizard's omp step. */
@@ -496,10 +514,7 @@ export class Controller implements vscode.Disposable {
     if (!configuredAutoUpdateStaleProposals()) this.refinement = { ...this.refinement, waiting: [] };
     this.refresh();
     this.postSettings();
-    if (ompPathChanged) {
-      void this.postModelSuggestions();
-      void this.postOmpStatus();
-    }
+    if (ompPathChanged) void this.refreshOmp(true);
   }
 
   /** The Trama settings as the manifest declares them, read at run time: the Settings tab and the check of its messages both use them. */
@@ -519,21 +534,6 @@ export class Controller implements vscode.Disposable {
         : { user: inspected?.globalValue, workspace: inspected?.workspaceValue };
     }
     this.post({ type: "settings", schema, values });
-  }
-
-  /**
-   * Sends the Settings tab the model names omp declares, for the three model roles, and the reason when omp gives
-   * none. Only the newest request is sent: an answer that arrives after a newer request is dropped.
-   */
-  async postModelSuggestions(): Promise<void> {
-    const request = ++this.suggestionsRequest;
-    const list = await this.modelList();
-    if (request === this.suggestionsRequest) this.post({ type: "modelSuggestions", ...list });
-  }
-
-  private async modelList(ompPath?: string): Promise<ModelList> {
-    // `trama.ompPath` is application-scoped: only the user value counts; empty means `omp` from the editor's PATH.
-    return ompModels(ompPath ?? configuredOmpPath());
   }
 
   /** Carries out a Settings plan. A refused plan saves nothing. The Settings tab is sent again either way, so its controls show the values that really hold. */
@@ -750,12 +750,12 @@ export class Controller implements vscode.Disposable {
       return;
     }
     if (message.type === "modelSuggestionsWanted") {
-      if (message.ompPath === undefined) await this.postModelSuggestions();
+      if (message.ompPath === undefined) await this.refreshOmp();
       else await this.postWizardSuggestions(message.ompPath);
       return;
     }
     if (message.type === "ompStatusWanted") {
-      await this.postOmpStatus();
+      await this.refreshOmp();
       return;
     }
     if (message.type === "agentCheckWanted") {
@@ -875,6 +875,9 @@ export class Controller implements vscode.Disposable {
       case "clearDone":
         this.clearDone(project, message.tasks);
         return;
+      case "deleteTask":
+        await this.deleteTaskAfterConfirm(project, message.task);
+        return;
       case "dismissDrift":
         await this.dismissDriftAfterConfirm(project, message.id);
         return;
@@ -893,18 +896,67 @@ export class Controller implements vscode.Disposable {
   }
 
   /**
-   * Clear of the Done column: no confirmation and no message of success, the cards just go at the next picture. Refused while a Run
+   * Clear of the Done column: no confirmation and no message of success, the cards are hidden by the Board at the click. Refused while a Run
    * launched by Trama is going; otherwise one core function rechecks every Task of the message. A refusal or a failure reaches the Board as a notice.
+   * In every case the fresh picture is sent first and then `clearDoneEnded`, which tells the Board to stop hiding the cards.
    */
   private clearDone(project: Project, tasks: string[]): void {
+    let cleared: string[] = [];
     if (ownWindowRuns(project.root)) {
       this.post({ type: "notice", text: "Trama could not clear the Done column: A run is in progress." });
+    } else {
+      try {
+        cleared = clearDoneTasks(project, tasks);
+      } catch (err) {
+        this.post({ type: "notice", text: `Trama could not clear the Done column: ${describeError(err)}` });
+        // The Tasks deleted before the failure stay deleted: those are the ones gone from the project.
+        try {
+          const left = new Set(listTasks(project).map((t) => t.id));
+          cleared = tasks.filter((id) => !left.has(id));
+        } catch {
+          cleared = [];
+        }
+      }
+    }
+    this.refresh();
+    this.post({ type: "clearDoneEnded", cleared });
+  }
+
+  /**
+   * Delete in the details window of a Task in To do: refused before the dialog while a Run launched by Trama is going or the agent that filed the Task
+   * is still finishing; otherwise a modal dialog asks for confirmation (cancelling changes nothing, the window stays open as it was). Only with `Delete`
+   * the same two conditions are rechecked and `deleteTask` in `src/core` rechecks those of the Task. A refusal or a failure deletes nothing and reaches
+   * the Board as a notice; the fresh picture follows in every case, and there is no message of success.
+   */
+  private async deleteTaskAfterConfirm(project: Project, id: string): Promise<void> {
+    const name = cardName(project, "task", id);
+    const refusal = (): string | null => {
+      if (tasksFinishing(project.root).includes(id)) return "The agent is still finishing";
+      if (ownWindowRuns(project.root)) return "A run is in progress";
+      return null;
+    };
+    const refuse = (reason: string): void => {
+      this.post({ type: "notice", text: `Trama could not delete ${name}: ${reason}.` });
+      this.refresh();
+    };
+    const before = refusal();
+    if (before !== null) {
+      refuse(before);
+      return;
+    }
+    const task = getTaskOrNull(project, id);
+    const choice = await vscode.window.showWarningMessage(`Delete ${name} "${task?.title ?? id}"?`, { modal: true, detail: "The Task is deleted for good and cannot be brought back." }, "Delete");
+    if (choice !== "Delete") return;
+    // The agent may have started a Run or finished a turn while the dialog was open: the conditions are the ones of the instant of deleting.
+    const after = refusal();
+    if (after !== null) {
+      refuse(after);
       return;
     }
     try {
-      clearDoneTasks(project, tasks);
+      deleteTask(project, id);
     } catch (err) {
-      this.post({ type: "notice", text: `Trama could not clear the Done column: ${describeError(err)}` });
+      this.post({ type: "notice", text: `Trama could not delete ${name}: ${describeError(err)}.` });
     }
     this.refresh();
   }

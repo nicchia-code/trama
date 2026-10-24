@@ -1,9 +1,9 @@
-import { Check, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, FolderCode, Loader, Pencil, Sparkles, TriangleAlert, X, type LucideIcon } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CircleAlert, FolderCode, Loader, Pencil, Sparkles, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import { Fragment, type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useSyncExternalStore } from "react";
 import type { SettingSchema } from "../../host/settings-schema";
 import { cn } from "../lib/utils";
 import type { OpenLink } from "../markdown";
-import { InstallOmpButton } from "../install-omp";
+import { Column, InstructionFiles, OmpStatusBox, ignoresInstructionFiles, ROLE_ADVICE, STEP_SENTENCES, Subgroups } from "../setup-shared";
 import { SettingField } from "../settings/field";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -13,18 +13,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import type { WizardController, WizardSnapshot } from "./controller";
 import {
-  ADVANCED_GROUPS,
+  advancedSubgroups,
   agentCheckLine,
   confirmLabel,
   hasPrevious,
-  ignoresInstructionFiles,
   nextBlock,
   ompMissing,
   previousSteps,
-  ROLE_ADVICE,
   showsFolderNotice,
   STEP_KEYS,
-  STEP_SENTENCES,
   type SummaryRow,
   stepPosition,
   stepsOf,
@@ -57,8 +54,6 @@ const subscribeNarrow = (notify: () => void): (() => void) => {
 function useNarrow(): boolean {
   return useSyncExternalStore(subscribeNarrow, () => window.matchMedia?.(NARROW_QUERY).matches ?? false, () => false);
 }
-
-const noop = (): void => {};
 
 interface BodyProps {
   controller: WizardController;
@@ -210,54 +205,10 @@ function PathBody({ controller, snapshot, state }: BodyProps) {
   );
 }
 
-/** The status of the check of omp: in a bordered box, a polite live region, with `Install omp` inside it when omp is missing. */
+/** The status of the check of omp, from the answer of the host: the shared box, with `Install omp` inside it when omp is missing. */
 function OmpStatus({ controller, snapshot }: Pick<BodyProps, "controller" | "snapshot">) {
   const check = agentCheckLine(snapshot.check);
-  const warning = check.tone === "warning";
-  return (
-    <div aria-live="polite" className={cn("mb-5 flex items-start gap-2.5 rounded-md border p-3 text-sm", warning ? "border-amber-600/40 bg-amber-500/10 text-amber-800 dark:text-amber-300" : "bg-card")}>
-      {check.tone === "checking" ? (
-        <Loader aria-hidden="true" className="mt-0.5 size-4 shrink-0 animate-spin motion-reduce:animate-none" />
-      ) : check.tone === "ok" ? (
-        <CircleCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-green-600 dark:text-green-400" />
-      ) : (
-        <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-      )}
-      <div className="grid min-w-0 gap-2">
-        <p className="m-0 wrap-anywhere">{check.text}</p>
-        {ompMissing(snapshot.check) ? <InstallOmpButton className="justify-self-start" onInstall={() => controller.installOmp()} /> : null}
-      </div>
-    </div>
-  );
-}
-
-/** The warning about the agent instruction files the omp step found: the files one per line under the text, not under the icon. */
-function InstructionFiles({ controller, snapshot, state }: BodyProps) {
-  const files = snapshot.instructionFiles;
-  if (files === null || files.length === 0) return null;
-  return (
-    <div className="mt-5 rounded-md border border-amber-600/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
-      <p className="m-0 flex items-start gap-2">
-        <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-        <span>Agent instruction files found. The agent loads them in every Trama job: remove them from the repository, or check that they do not conflict with Trama.</span>
-      </p>
-      <ul className="m-0 mt-2 grid list-none gap-1 p-0 pl-6 font-mono text-xs">
-        {files.map((file) => (
-          <li key={file.path} className="min-w-0">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-left font-mono text-xs wrap-anywhere underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Open ${file.label}`} onClick={() => controller.openInstructionFile(file.path)}>
-                  {file.label}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{`Open ${file.label}`}</TooltipContent>
-            </Tooltip>
-          </li>
-        ))}
-      </ul>
-      {ignoresInstructionFiles(snapshot.schema, state) ? <p className="m-0 mt-2 pl-6 text-muted-foreground">Trama's omp jobs ignore these files.</p> : null}
-    </div>
-  );
+  return <OmpStatusBox tone={check.tone} text={check.text} missing={ompMissing(snapshot.check)} onInstall={() => controller.installOmp()} />;
 }
 
 /** The settings of a step, one under the other in the width of the column, each with its explanation in the page. */
@@ -273,12 +224,9 @@ function SettingsBody({ controller, snapshot, state, openLink, step }: BodyProps
         generation={snapshot.generation}
         models={snapshot.models?.list ?? []}
         listError={snapshot.models?.error ?? null}
-        openKey={null}
-        setOpenKey={noop}
         send={(_key, value) => controller.setValue(setting, value)}
         openLink={openLink}
         onInvalid={(invalidKey, invalid) => controller.setInvalid(invalidKey, invalid)}
-        explain="page"
         lead={ROLE_ADVICE[key]}
       />
     );
@@ -287,18 +235,11 @@ function SettingsBody({ controller, snapshot, state, openLink, step }: BodyProps
     <div className="min-w-0">
       {step === "omp" ? <OmpStatus controller={controller} snapshot={snapshot} /> : null}
       {step === "Advanced" ? (
-        <div className="grid gap-8">
-          {ADVANCED_GROUPS.map((group) => (
-            <section key={group.title} aria-label={group.title} className="grid gap-5">
-              <h3 className="m-0 border-b pb-1 text-base font-semibold">{group.title}</h3>
-              {group.keys.map(field)}
-            </section>
-          ))}
-        </div>
+        <Subgroups groups={advancedSubgroups(snapshot.schema).map((group) => ({ title: group.title, items: group.keys }))} render={field} />
       ) : (
         <div className="grid gap-5">{(STEP_KEYS[step] ?? []).map(field)}</div>
       )}
-      {step === "omp" ? <InstructionFiles controller={controller} snapshot={snapshot} state={state} openLink={openLink} /> : null}
+      {step === "omp" ? <InstructionFiles files={snapshot.instructionFiles} ignored={ignoresInstructionFiles(snapshot.schema, state.values)} onOpen={(path) => controller.openInstructionFile(path)} /> : null}
     </div>
   );
 }
@@ -422,7 +363,7 @@ function ButtonBar({ controller, snapshot, state }: BodyProps) {
   );
   return (
     <div className="sticky bottom-0 z-10 border-t bg-background">
-      <div className="mx-auto grid w-full max-w-[720px] min-w-0 gap-3 px-4 py-3">
+      <Column className="grid gap-3 py-3">
         {snapshot.error !== null ? (
           <div role="alert" className="flex items-start gap-2.5 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
             <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
@@ -466,7 +407,7 @@ function ButtonBar({ controller, snapshot, state }: BodyProps) {
             next
           )}
         </div>
-      </div>
+      </Column>
     </div>
   );
 }
@@ -499,7 +440,7 @@ export function Wizard({ controller, openLink, notice }: WizardProps) {
   return (
     <TooltipProvider>
       <div ref={root} className="flex min-h-full min-w-0 flex-col overflow-x-clip">
-        <div className="mx-auto w-full max-w-[720px] min-w-0 flex-1 px-4 pt-5 pb-8">
+        <Column className="flex-1 pt-5 pb-8">
           <h1 className="mt-0 mb-5 text-2xl font-semibold">{wizardTitle(state.mode)}</h1>
           <StepIndicator {...props} />
           <h2 ref={heading} tabIndex={-1} className="mt-0 mb-1 text-lg font-semibold outline-none">
@@ -508,7 +449,7 @@ export function Wizard({ controller, openLink, notice }: WizardProps) {
           <p className="mt-0 mb-5 text-muted-foreground">{STEP_SENTENCES[state.step]}</p>
           {showsFolderNotice(state.step) ? notice : null}
           <StepBody {...props} />
-        </div>
+        </Column>
         <ButtonBar {...props} />
       </div>
     </TooltipProvider>

@@ -123,7 +123,7 @@ export function rootHelp(registry: Registry): string {
     "Objects and verbs:",
     ...rows.map(([object, verbs]) => `  ${object.padEnd(width)}  ${verbs}`),
     "",
-    "Verbs: show reads one thing; list reads several; new creates and prints its identity; edit changes the content; move takes a card to another state; check reports errors and warnings.",
+    "Verbs: show reads one thing; list reads several; new creates and prints its identity; edit changes the content; move takes a card to another state; check reports errors and warnings; delete removes a card for good (only for task).",
     "Every field other than the identity of a card, the reference of a Model element and the state of arrival of `move` goes in --input, a JSON object: `--input -` reads it from standard input, any other value is the JSON text.",
     "Options for every command: --root <dir> uses <dir>/.trama; --json prints JSON instead of Markdown; --input <json>; --help or -h prints the usage of the command, `--help --json` its JSON Schemas.",
     'Run "trama <object> --help" for the commands of an object and "trama <object> <verb> --help" for one command.',

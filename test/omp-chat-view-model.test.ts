@@ -93,12 +93,11 @@ interface Fake {
   posted: ToChatWebview[];
   visible: boolean[];
   reveals: boolean[];
-  opened: string[];
   links: string[];
 }
 
 function setup(options: { inUse?: boolean; pending?: string[]; folder?: boolean; sendModes?: SendModeStore } = {}) {
-  const fake: Fake = { posted: [], visible: [], reveals: [], opened: [], links: [] };
+  const fake: Fake = { posted: [], visible: [], reveals: [], links: [] };
   const state = { inUse: options.inUse ?? true, pending: options.pending ?? [], folder: options.folder ?? true };
   const surface: ChatSurface = {
     post: (message) => void fake.posted.push(message),
@@ -106,7 +105,6 @@ function setup(options: { inUse?: boolean; pending?: string[]; folder?: boolean;
     reveal: (preserveFocus) => void fake.reveals.push(preserveFocus),
     theme: () => "auto",
     readText: (path) => (path === "/tmp/attached.md" ? "attached text" : undefined),
-    openFile: (path) => void fake.opened.push(path),
     openLink: (url) => void fake.links.push(url),
   };
   const model = new ChatViewModel(surface, () => state.inUse, () => state.pending, () => state.folder, options.sendModes);
@@ -384,11 +382,9 @@ describe("messages from the webview", () => {
     expect(session.answers).toEqual([{ requestId: "r1", answer }]);
   });
 
-  test("files and links open through the surface", () => {
+  test("links open through the surface", () => {
     const { model, fake } = setup();
-    model.receive({ type: "openFile", path: "src/a.ts" });
     model.receive({ type: "openLink", url: "https://example.com" });
-    expect(fake.opened).toEqual(["src/a.ts"]);
     expect(fake.links).toEqual(["https://example.com"]);
   });
 
@@ -397,7 +393,7 @@ describe("messages from the webview", () => {
     model.webviewReady();
     model.open({ id: "a", name: "T3" }, session, { focus: false });
     fake.posted.length = 0;
-    for (const bad of [null, "text", {}, { type: "sendMessage" }, { type: "sendMessage", id: "a", text: "" }, { type: "sendMessage", id: "a", text: "x", extra: 1 }, { type: "formAnswer", id: "a", requestId: "r", answer: { action: "maybe" } }, { type: "unknown" }]) {
+    for (const bad of [null, "text", {}, { type: "sendMessage" }, { type: "sendMessage", id: "a", text: "" }, { type: "sendMessage", id: "a", text: "x", extra: 1 }, { type: "formAnswer", id: "a", requestId: "r", answer: { action: "maybe" } }, { type: "openFile", path: "src/a.ts" }, { type: "unknown" }]) {
       model.receive(bad);
     }
     expect(session.prompts).toEqual([]);
@@ -418,7 +414,6 @@ describe("validation of what the webview sends", () => {
       { type: "formAnswer", id: "a", requestId: "r", answer: { action: "accept", content: { one: "x", two: ["a", "b"], three: true, four: 4 } } },
       { type: "formAnswer", id: "a", requestId: "r", answer: { action: "decline" } },
       { type: "permissionAnswer", id: "a", requestId: "p", optionId: "once" },
-      { type: "openFile", path: "a.ts" },
       { type: "openLink", url: "https://x.y" },
     ]) {
       expect(parseChatMessage(message)).toEqual(message as never);

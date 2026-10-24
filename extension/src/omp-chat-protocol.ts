@@ -1,4 +1,5 @@
 import type { ElicitationSchema, PermissionOption, SessionNotification, ToolCallUpdate } from "@agentclientprotocol/sdk";
+import type { UsageReport } from "../../src/core/omp-usage";
 import type { ThemeSetting } from "./webview/theme";
 
 // The messages between the host and the webview of the omp Chat view (`tech#omp-chat`). The webview is untrusted input: the host validates every message it
@@ -88,7 +89,9 @@ export type ToChatWebview =
   /** The Steer|Queue choice of the view: sent when the view starts and after each change. */
   | { type: "sendMode"; mode: SendMode }
   /** What became of a message sent while the agent worked: `queued` until omp takes it, `delivered` once it did, `failed` with the reason. */
-  | { type: "messageStatus"; id: string; messageId: string; status: "queued" | "delivered" | "failed"; reason?: string };
+  | { type: "messageStatus"; id: string; messageId: string; status: "queued" | "delivered" | "failed"; reason?: string }
+  /** The usage of the developer's subscription (`tech#omp-chat-general`): the last report omp gave (none before the first), whether a request is running, and why the last one failed. Sent at each change and when the view starts. */
+  | { type: "usage"; report?: UsageReport; fetching: boolean; error?: string };
 
 /** Webview -> host. */
 export type ToChatHost =
@@ -105,6 +108,6 @@ export type ToChatHost =
   | { type: "clearGeneral" }
   /** The Install omp button of General. */
   | { type: "installOmp" }
-  /** A file an edit touched, to open in the editor. */
-  | { type: "openFile"; path: string }
+  /** The usage dialog was opened: omp is asked again. */
+  | { type: "refreshUsage" }
   | { type: "openLink"; url: string };

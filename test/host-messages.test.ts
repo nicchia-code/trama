@@ -173,6 +173,14 @@ test("clearDone carries the Task identities of the Done column as they are, and 
   }
 });
 
+test("deleteTask carries one Task identity as it is, and a missing or invalid one makes the message invalid", () => {
+  expect(ok({ type: "deleteTask", task: "aaaaaaaa" })).toEqual({ type: "deleteTask", task: "aaaaaaaa" });
+  for (const task of [undefined, null, 3, ["aaaaaaaa"], { id: "aaaaaaaa" }, "", "../x", "a b", "aaaaaaaa/../b"]) {
+    expect(parseToHost({ type: "deleteTask", task }).ok).toBe(false);
+  }
+  expect(parseToHost({ type: "deleteTask", id: "aaaaaaaa" }).ok).toBe(false);
+});
+
 test("askMore needs a Task, Proposal or Drift identity, and a question action needs its question's ID", () => {
   expect(ok({ type: "askMore", kind: "task", id: "j6tlxyad" })).toEqual({ type: "askMore", kind: "task", id: "j6tlxyad" });
   expect(ok({ type: "askMore", kind: "drift", id: "d1d1d1d1" })).toEqual({ type: "askMore", kind: "drift", id: "d1d1d1d1" });

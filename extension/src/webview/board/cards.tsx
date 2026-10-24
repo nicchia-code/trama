@@ -12,7 +12,7 @@ import { Progress } from "../ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { roleLabel } from "../settings/logic";
 import { type AnnouncedCard, blockedReason, historyWhen, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
-import { BoardButton, Head, RefChips, StatusDot, Tip, TipBadge, taskBorder, useBoardEnv } from "./parts";
+import { BoardButton, Head, StatusDot, Tip, TipBadge, taskBorder, useBoardEnv } from "./parts";
 
 /**
  * What a click on a card leaves to its own parts: its buttons, badges, tags and links. A click anywhere else on the card
@@ -398,7 +398,7 @@ function TaskCardView({ card }: { card: TaskCard }) {
       <Head>
         <StatusDot task={card} />
         <IdTag name={card.name} className="text-[11px] font-semibold text-muted-foreground" />
-        {card.technical && card.refs.length === 0 ? (
+        {card.technical ? (
           <TipBadge tone="info" tooltip="Technical Task">
             technical
           </TipBadge>
@@ -414,7 +414,6 @@ function TaskCardView({ card }: { card: TaskCard }) {
           {card.title}
         </button>
       </h3>
-      {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
       {card.drift !== null ? (
         <p className="text-xs text-muted-foreground">
           from Drift <IdTag name={cardNameOf(env.numbers, "drift", card.drift)} />
