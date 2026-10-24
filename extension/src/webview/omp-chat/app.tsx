@@ -27,8 +27,13 @@ export function createChatController(store: ChatStore, post: (message: ToChatHos
       else post({ type: "closeConversation", id });
     },
     send(id, text) {
-      store.set(sendMessage(store.get(), id, text, now()));
-      post({ type: "sendMessage", id, text });
+      const messageId = crypto.randomUUID();
+      store.set(sendMessage(store.get(), id, text, now(), messageId));
+      post({ type: "sendMessage", id, text, messageId });
+    },
+    setSendMode(mode) {
+      store.set({ ...store.get(), sendMode: mode });
+      post({ type: "setSendMode", mode });
     },
     stop: (id) => post({ type: "stopAgent", id }),
     setModel: (id, model) => post({ type: "setModel", id, model }),
@@ -66,7 +71,7 @@ export function ChatApp({ store, controller }: { store: ChatStore; controller: C
         <ConversationTabs items={state.items} selected={selected} generalKept={state.conversations[GENERAL_ID]?.status?.phase === "kept"} onSelect={controller.select} onClose={controller.close} />
         {state.items.map((item) => {
           const view = state.conversations[item.id];
-          return view === undefined ? null : <Conversation key={item.id} item={item} view={view} selected={item.id === selected} actions={controller} />;
+          return view === undefined ? null : <Conversation key={item.id} item={item} view={view} selected={item.id === selected} actions={controller} sendMode={state.sendMode} />;
         })}
       </div>
     </TooltipProvider>

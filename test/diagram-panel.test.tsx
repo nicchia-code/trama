@@ -93,7 +93,9 @@ test("the arrows of Dismiss Drift and Reject open Rework with feedback in the de
   const arrow = screen.getByRole("button", { name: /^More ways to handle / });
   arrow.focus();
   fireEvent.keyDown(arrow, { key: "Enter" });
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Rework with feedback…" }));
+  const rework = await screen.findByRole("menuitem", { name: "Rework with feedback…" });
+  expect([rework.getAttribute("aria-description"), rework.hasAttribute("title")]).toEqual(["Have the agent resolve this Drift following your feedback", false]);
+  fireEvent.click(rework);
   expect(posted).toEqual([{ type: "reworkDrift", drift: drift?.id ?? "" }]);
   cleanup();
   const again = setup();
@@ -103,7 +105,9 @@ test("the arrows of Dismiss Drift and Reject open Rework with feedback in the de
   const reject = screen.getByRole("button", { name: /^More ways to reject / });
   reject.focus();
   fireEvent.keyDown(reject, { key: "Enter" });
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Rework with feedback…" }));
+  const reworkProposal = await screen.findByRole("menuitem", { name: "Rework with feedback…" });
+  expect([reworkProposal.getAttribute("aria-description"), reworkProposal.hasAttribute("title")]).toEqual(["Reject it and have the agent redo it with your feedback", false]);
+  fireEvent.click(reworkProposal);
   expect(again.posted).toEqual([{ type: "reworkProposal", proposal: proposal?.id ?? "" }]);
 });
 

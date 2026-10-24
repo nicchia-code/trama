@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, test, vi } from "bun:test";
 import { CONVERSATIONS_KEY, RESUME_PROMPT, type SavedConversation } from "../src/core/omp-chat-conversation";
 import { type ConversationHooks, type ConversationInfo, type ConversationStore, OmpConversations } from "../extension/src/host/omp-chat/conversations";
-import { type ChatViewPort, type Disposable, type OmpClientPort, type OmpExit, type OmpLaunch, type OmpPrompt, OmpStartFailure, type OmpSessionPort } from "../extension/src/host/omp-chat/ports";
+import { type ChatViewPort, type Disposable, type OmpClientPort, type OmpExit, type OmpLaunch, type OmpPrompt, OmpStartFailure, type OmpSessionPort, type PendingInstruction } from "../extension/src/host/omp-chat/ports";
+import { instructedMessage } from "../extension/src/host/prompts";
 
 class FakeSession implements OmpSessionPort {
   pid: number | undefined = 4242;
@@ -12,6 +13,9 @@ class FakeSession implements OmpSessionPort {
   private exitListeners: ((exit: OmpExit) => void)[] = [];
   constructor(readonly sessionId: string) {}
   async sendPrompt(prompt: OmpPrompt): Promise<void> {
+    this.prompts.push(prompt);
+  }
+  async send(prompt: OmpPrompt): Promise<void> {
     this.prompts.push(prompt);
   }
   cancel(): void {
@@ -86,11 +90,19 @@ class FakeClient implements OmpClientPort {
 class FakeView implements ChatViewPort {
   opened: { id: string; name: string; focus: boolean; notice?: string }[] = [];
   working = new Map<string, boolean>();
+  /** The Ask more instructions held per conversation, and the session attached to each tab. */
+  instructions = new Map<string, PendingInstruction>();
+  attached = new Map<string, OmpSessionPort>();
   closed: string[] = [];
   private stopListeners: ((id: string) => void)[] = [];
   private closeListeners: ((id: string) => void)[] = [];
-  open(tab: { id: string; name: string }, _session: OmpSessionPort, options: { focus: boolean; notice?: string }): void {
+  open(tab: { id: string; name: string }, session: OmpSessionPort | undefined, options: { focus: boolean; notice?: string; instruction?: PendingInstruction }): void {
     this.opened.push({ ...tab, focus: options.focus, ...(options.notice === undefined ? {} : { notice: options.notice }) });
+    if (options.instruction !== undefined) this.instructions.set(tab.id, options.instruction);
+    if (session !== undefined) this.attached.set(tab.id, session);
+  }
+  setSession(id: string, session: OmpSessionPort): void {
+    this.attached.set(id, session);
   }
   setWorking(id: string, working: boolean): void {
     this.working.set(id, working);
@@ -239,6 +251,87 @@ describe("opening", () => {
     await conversations.open({ ...spec, id: "def456", name: "Design", job: { ...job, id: "job-2" } });
     expect(client.sessions).toHaveLength(2);
     expect(store.saved.map((e) => e.id)).toEqual(["abc123", "def456"]);
+  });
+});
+
+const heldLaunch: OmpLaunch = { args: ["acp", "--yolo"], env: { TRAMA_AGENT: "1", TRAMA_TERMINAL: "qqq111", QUESTION_ENDPOINT: "old", PATH: "/cli:/bin" }, cwd: "/p" };
+/** An Ask more conversation: no job, its instruction held until the first message. */
+const held = (announced: string[]) => ({
+  id: "qqq111",
+  root: "/p",
+  name: "Ask",
+  launch: heldLaunch,
+  focus: true,
+  instruction: {
+    placeholder: "Ask about T3 – Steer…",
+    compose: (message: string) => ({ text: instructedMessage("PART", message), attachment: "/media/ask-more.md" }),
+    announce: () => void announced.push("work"),
+  },
+});
+
+describe("Ask more's held instruction", () => {
+  test("the tab opens at once, omp starts with no message, and nothing is sent, saved or announced", async () => {
+    const announced: string[] = [];
+    const conversations = make();
+    const pending = conversations.open(held(announced));
+    expect(view.opened).toEqual([{ id: "qqq111", name: "Ask", focus: true }]);
+    expect(view.instructions.get("qqq111")?.placeholder).toBe("Ask about T3 – Steer…");
+    expect(await pending).toEqual({ opened: true });
+    expect(client.started).toEqual([{ launch: heldLaunch }]);
+    expect(client.sessions[0]?.prompts).toEqual([]);
+    expect(view.attached.get("qqq111")).toBe(client.sessions[0]);
+    expect(store.saved).toEqual([]);
+    expect(announced).toEqual([]);
+    expect(view.working.get("qqq111")).toBeUndefined();
+  });
+
+  test("the first message goes out with the instruction in one prompt; the work is announced then and the conversation saved", async () => {
+    const announced: string[] = [];
+    const conversations = make();
+    await conversations.open(held(announced));
+    const instruction = view.instructions.get("qqq111");
+    if (instruction === undefined) throw new Error("the instruction is not held");
+    const prompt = instruction.compose("Why does it fail?");
+    expect(prompt).toEqual({ text: "Instructions from Trama (not written by the developer):\nPART\n\nDeveloper's message:\nWhy does it fail?", attachment: "/media/ask-more.md" });
+    expect(announced).toEqual([]);
+    instruction.sent();
+    await view.attached.get("qqq111")?.send(prompt, "steer", () => undefined);
+    expect(announced).toEqual(["work"]);
+    expect(client.sessions[0]?.prompts).toEqual([prompt]);
+    expect(view.working.get("qqq111")).toBe(true);
+    expect(store.saved).toEqual([{ id: "qqq111", name: "Ask", sessionId: "session-1", state: "running", args: heldLaunch.args, env: { TRAMA_AGENT: "1", TRAMA_TERMINAL: "qqq111" }, openedAt: expect.any(String) }]);
+  });
+
+  test("a conversation closed before any message leaves no trace: no dialog, no notice, nothing saved or announced", async () => {
+    const announced: string[] = [];
+    const conversations = make();
+    await conversations.open(held(announced));
+    const session = client.sessions[0];
+    if (session === undefined) throw new Error("omp was not started");
+    session.inTurn = false;
+    await conversations.closeRequested("qqq111");
+    expect(calls.confirms).toEqual([]);
+    expect(calls.stopped).toEqual([]);
+    expect(view.closed).toEqual(["qqq111"]);
+    expect(conversations.has("qqq111")).toBe(false);
+    expect(store.saved).toEqual([]);
+    expect(announced).toEqual([]);
+  });
+
+  test("a window closed before any message keeps nothing", async () => {
+    const conversations = make();
+    await conversations.open(held([]));
+    await conversations.windowClosed();
+    expect(store.saved).toEqual([]);
+  });
+
+  test("a failed start leaves no conversation: the tab closes and the reason goes back for the terminal", async () => {
+    client.failStart = "omp exited with code 1";
+    const conversations = make();
+    expect(await conversations.open(held([]))).toEqual({ opened: false, reason: "omp exited with code 1" });
+    expect(view.closed).toEqual(["qqq111"]);
+    expect(conversations.has("qqq111")).toBe(false);
+    expect(store.saved).toEqual([]);
   });
 });
 

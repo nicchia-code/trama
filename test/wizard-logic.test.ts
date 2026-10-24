@@ -189,6 +189,16 @@ test("the summary shows the path, the folder only with several folders, and the 
   expect(summaryRows(schema, open("settings"), {}, folders).some((r) => r.step === "Path" || r.step === "Folders")).toBe(false);
 });
 
+test("a model role shows its model and its level in the summary, the model alone for Default, and the value as written when omp declares no such level", () => {
+  const models = [{ value: "anthropic/claude-haiku-4-5", thinking: ["low", "high"] }];
+  const execution = (value: string | undefined, current?: string) =>
+    summaryRows(schema, open("settings", value === undefined ? {} : { "trama.execution": { user: value } }), current === undefined ? {} : { "trama.execution": { user: current } }, [], models).find((r) => r.title === "Execution")!;
+  expect(execution("anthropic/claude-haiku-4-5:high").value).toBe("anthropic/claude-haiku-4-5 · high");
+  expect(execution("anthropic/claude-haiku-4-5").value).toBe("anthropic/claude-haiku-4-5");
+  expect(execution("anthropic/claude-haiku-4-5:medium").value).toBe("anthropic/claude-haiku-4-5:medium");
+  expect(execution("anthropic/claude-haiku-4-5:high", "anthropic/claude-haiku-4-5:low")).toMatchObject({ changed: true, was: "anthropic/claude-haiku-4-5 · low" });
+});
+
 test("the confirmation button names the mode and the path", () => {
   expect(confirmLabel(open("first"))).toBe("Set up Trama");
   expect(confirmLabel(open("settings"))).toBe("Save settings");

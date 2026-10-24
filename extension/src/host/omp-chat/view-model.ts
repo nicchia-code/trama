@@ -1,8 +1,9 @@
 import { chatViewState, GENERAL_ID, ompChatVisible, tabAfterClose } from "../../../../src/core/omp-chat-view";
-import type { ConversationItem, ConversationRunState, FirstMessage, ToChatWebview } from "../../omp-chat-protocol";
+import type { ConversationItem, ConversationRunState, FirstMessage, SendMode, ToChatWebview } from "../../omp-chat-protocol";
 import type { ThemeSetting } from "../../webview/theme";
 import { parseChatMessage } from "./messages";
-import type { ChatViewPort, ConversationTab, Disposable, OmpPrompt, OmpSessionPort } from "./ports";
+import type { ChatViewPort, ConversationTab, Disposable, OmpPrompt, OmpSessionPort, OutgoingMessage, PendingInstruction, SendStatus } from "./ports";
+import { memorySendModeStore, readSendMode, SEND_MODE_KEY, type SendModeStore } from "./send-mode";
 
 /** What the view needs of the editor: the webview and the few things the developer's clicks ask for. `vscode` stays out of the logic. */
 export interface ChatSurface {
@@ -33,6 +34,8 @@ interface Tab {
   permissions: Map<string, string[]>;
   model?: string;
   start: { first?: FirstMessage; notice?: string };
+  /** Ask more's instruction, held for the developer's first message: it goes with that message, and the field shows its placeholder until then. */
+  instruction?: PendingInstruction;
   subscriptions: Disposable[];
 }
 
@@ -61,7 +64,9 @@ export class ChatViewModel implements ChatViewPort {
   private lastGeneralStatus: GeneralStatus | undefined;
   private readonly clearListeners = new Set<() => void>();
   private readonly installListeners = new Set<() => void>();
-  private readonly generalListeners = new Set<(text: string) => void>();
+  private readonly generalListeners = new Set<(message: OutgoingMessage) => void>();
+  /** The Steer|Queue choice of the view: read from the saved value when the view is made, changed by the developer. */
+  private sendMode: SendMode;
 
   /**
    * `inUse`: omp Chat on, not turned off in the user settings (read now). `pending`: the conversations the window has saved and waits to resume, by
@@ -72,7 +77,9 @@ export class ChatViewModel implements ChatViewPort {
     private readonly inUse: () => boolean,
     private readonly pending: () => readonly string[] = () => [],
     private readonly folder: () => boolean = () => true,
+    private readonly sendModes: SendModeStore = memorySendModeStore(),
   ) {
+    this.sendMode = readSendMode(this.sendModes.get(SEND_MODE_KEY));
     this.refresh();
   }
 
@@ -99,6 +106,7 @@ export class ChatViewModel implements ChatViewPort {
     this.ready = true;
     this.surface.post({ type: "reset" });
     this.surface.post({ type: "theme", setting: this.surface.theme() });
+    this.surface.post({ type: "sendMode", mode: this.sendMode });
     this.postConversations();
     if (this.lastGeneralStatus !== undefined) this.surface.post({ type: "generalStatus", ...this.lastGeneralStatus });
     for (const tab of this.tabs) {
@@ -113,12 +121,23 @@ export class ChatViewModel implements ChatViewPort {
     for (const tab of this.tabs) this.unsubscribe(tab);
   }
 
-  open(tab: ConversationTab, session: OmpSessionPort, options: { focus: boolean; notice?: string; first?: OmpPrompt }): void {
+  open(tab: ConversationTab, session: OmpSessionPort | undefined, options: { focus: boolean; notice?: string; first?: OmpPrompt; instruction?: PendingInstruction }): void {
     const start: Tab["start"] = {
       ...(options.first === undefined ? {} : { first: promptOf(options.first, this.surface) }),
       ...(options.notice === undefined ? {} : { notice: options.notice }),
     };
-    const created: Tab = { id: tab.id, name: tab.name, session, inTurn: session.inTurn, working: false, forms: new Set(), permissions: new Map(), start, subscriptions: [] };
+    const created: Tab = {
+      id: tab.id,
+      name: tab.name,
+      session,
+      inTurn: session?.inTurn ?? false,
+      working: false,
+      forms: new Set(),
+      permissions: new Map(),
+      start,
+      subscriptions: [],
+      ...(options.instruction === undefined ? {} : { instruction: options.instruction }),
+    };
     this.tabs.push(created);
     this.selected = tab.id;
     this.refresh();
@@ -126,7 +145,17 @@ export class ChatViewModel implements ChatViewPort {
     if (!this.ready) return;
     this.postConversations();
     this.surface.post({ type: "conversationStart", id: tab.id, focus: options.focus, ...start });
-    this.subscribe(created);
+    if (session !== undefined) this.subscribe(created);
+  }
+
+  /** The session of the conversation `id`, once its process started: its tab stops showing the start and follows the session. */
+  setSession(id: string, session: OmpSessionPort): void {
+    const tab = this.find(id);
+    if (tab === undefined) return;
+    tab.session = session;
+    tab.inTurn = session.inTurn;
+    this.postConversations();
+    this.subscribe(tab);
   }
 
   /** General comes to the view as its first tab; it takes the view only when none is in view. */
@@ -216,7 +245,7 @@ export class ChatViewModel implements ChatViewPort {
     return { dispose: () => void this.installListeners.delete(listener) };
   }
 
-  onGeneralMessage(listener: (text: string) => void): Disposable {
+  onGeneralMessage(listener: (message: OutgoingMessage) => void): Disposable {
     this.generalListeners.add(listener);
     return { dispose: () => void this.generalListeners.delete(listener) };
   }
@@ -237,13 +266,29 @@ export class ChatViewModel implements ChatViewPort {
       case "sendMessage": {
         const tab = this.find(message.id);
         if (tab === undefined) return;
+        const report = (status: SendStatus): void => this.surface.post({ type: "messageStatus", id: tab.id, messageId: message.messageId, ...status });
         if (tab.id === GENERAL_ID) {
-          for (const listener of [...this.generalListeners]) listener(message.text);
+          for (const listener of [...this.generalListeners]) listener({ text: message.text, mode: this.sendMode, report });
           return;
         }
-        tab.session?.sendPrompt({ text: message.text }).catch((err: unknown) => this.error(tab, messageOf(err)));
+        // A conversation with no session yet (omp starts) sends nothing: its field is not enabled then.
+        if (tab.session === undefined) return;
+        const instruction = tab.instruction;
+        const prompt: OmpPrompt = instruction === undefined ? { text: message.text } : instruction.compose(message.text);
+        if (instruction !== undefined) {
+          // The instruction goes with the first message only: from now on the field shows its own placeholder and the messages go alone.
+          tab.instruction = undefined;
+          instruction.sent();
+          this.postConversations();
+        }
+        tab.session.send(prompt, this.sendMode, report).catch((err: unknown) => this.error(tab, messageOf(err)));
         return;
       }
+      case "setSendMode":
+        this.sendMode = message.mode;
+        void this.sendModes.update(SEND_MODE_KEY, message.mode);
+        this.surface.post({ type: "sendMode", mode: message.mode });
+        return;
       case "stopAgent":
         if (this.find(message.id) !== undefined) for (const listener of [...this.stopListeners]) listener(message.id);
         return;
@@ -332,6 +377,8 @@ export class ChatViewModel implements ChatViewPort {
       state: this.runState(tab),
       ...(tab.model === undefined ? {} : { model: tab.model }),
       ...(tab.id === GENERAL_ID ? { general: true as const } : {}),
+      ...(tab.instruction === undefined ? {} : { placeholder: tab.instruction.placeholder }),
+      ...(tab.session === undefined && tab.id !== GENERAL_ID ? { starting: true as const } : {}),
     }));
     this.surface.post({ type: "conversations", items, ...(this.selected === undefined ? {} : { selected: this.selected }) });
   }

@@ -22,6 +22,27 @@ test("omp output that is not the models list gives no list; an empty list is a l
   expect(parseOmpModels(JSON.stringify({ models: [] }))).toEqual([]);
 });
 
+test("omp lists the thinking levels a model declares, in its order; null, absent or invalid ones declare none", () => {
+  const output = JSON.stringify({
+    models: [
+      { selector: "anthropic/claude-a", name: "Claude A", thinking: ["low", "high", "max"] },
+      { selector: "anthropic/claude-b", name: "Claude B", thinking: null },
+      { selector: "openai/gpt-c" },
+      { selector: "openai/gpt-d", thinking: [] },
+      { selector: "openai/gpt-e", thinking: ["high", 3] },
+      { selector: "openai/gpt-f", thinking: "high" },
+    ],
+  });
+  expect(parseOmpModels(output)).toEqual([
+    { value: "anthropic/claude-a", label: "Claude A", thinking: ["low", "high", "max"] },
+    { value: "anthropic/claude-b", label: "Claude B" },
+    { value: "openai/gpt-c" },
+    { value: "openai/gpt-d" },
+    { value: "openai/gpt-e" },
+    { value: "openai/gpt-f" },
+  ]);
+});
+
 // Windows has no `#!/bin/sh` programs, so the tests that run a fake omp are skipped there.
 const posix = process.platform === "win32" ? test.skip : test;
 

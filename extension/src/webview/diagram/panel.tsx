@@ -423,7 +423,7 @@ function ProposalBlock({
           arrowDisabled={joinReasons([rejectReason, resolveReason]) !== null}
           arrowReason={joinReasons([rejectReason, resolveReason])}
           arrowName={`More ways to reject ${cardNameOf(numbers, "proposal", p.id).text}`}
-          items={[{ label: "Rework with feedback…", tooltip: "Reject it and have the agent redo it with your feedback", onSelect: () => actions.rework(p.id) }]}
+          items={[{ label: "Rework with feedback…", description: "Reject it and have the agent redo it with your feedback", onSelect: () => actions.rework(p.id) }]}
           onClick={() => actions.reject(p.id)}
         />
       </div>
@@ -524,7 +524,7 @@ export function DetailsPanel({
               arrowDisabled={driftReworkReason !== null}
               arrowReason={driftReworkReason}
               arrowName={`More ways to handle ${driftName?.text ?? drift.id}`}
-              items={[{ label: "Rework with feedback…", tooltip: "Have the agent resolve this Drift following your feedback", onSelect: () => actions.reworkDrift(drift.id) }]}
+              items={[{ label: "Rework with feedback…", description: "Have the agent resolve this Drift following your feedback", onSelect: () => actions.reworkDrift(drift.id) }]}
               onClick={() => actions.dismiss(drift.id)}
             />
           </div>

@@ -172,6 +172,12 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       const drift = typeof raw["drift"] === "string" && ID.test(raw["drift"]) ? raw["drift"] : undefined;
       return drift === undefined ? bad("reworkDrift needs a valid Drift ID") : { ok: true, message: { type, drift } };
     }
+    case "clearDone": {
+      const tasks = raw["tasks"];
+      return Array.isArray(tasks) && tasks.every((task) => typeof task === "string" && ID.test(task))
+        ? { ok: true, message: { type, tasks: tasks as string[] } }
+        : bad("clearDone needs the list of Task IDs in Done");
+    }
     case "dismissDrift":
       return id === undefined ? bad("dismissDrift needs a valid Drift ID") : { ok: true, message: { type, id } };
     case "askMore":

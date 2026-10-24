@@ -22,10 +22,11 @@ import {
   type RequestPermissionResponse,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
-import { modelChoices, type ModelChoices, permissionOutcome, promptBlocks, reopenMethod, type StartProblem, startFailureReason, steeringSupported } from "../../../../src/core/omp-acp";
+import { modelChoices, type ModelChoices, permissionOutcome, promptBlocks, reopenMethod, type StartProblem, startFailureReason, steeringAnswer, steeringSupported } from "../../../../src/core/omp-acp";
 import { type AcpMcpServer, readMcpServers } from "../../../../src/core/omp-mcp";
 import { RESUME_TIMEOUT_MS, ResumeTimeout, within } from "../../../../src/core/omp-chat-conversation";
 import { type ModelList, ompModels, ompPathVariable } from "../model-lists";
+import type { SendMode } from "../../omp-chat-protocol";
 import {
   type Disposable,
   type FormAnswer,
@@ -37,10 +38,14 @@ import {
   OmpStartFailure,
   type OmpSessionPort,
   type PermissionRequest,
+  type SendStatus,
 } from "./ports";
 
 /** The grace a stopped process has before it is killed. */
 export const STOP_GRACE_MS = 3000;
+
+/** What the view learns of a message sent while the agent worked, and the reason a held message is not delivered when the conversation stops. */
+const DISCARDED = "the agent stopped before the message reached it";
 
 export interface OmpClientDeps {
   /** The omp program, read at every start: the one found for `trama.ompPath`; empty means `omp` from the editor's PATH. */
@@ -56,6 +61,24 @@ export interface OmpClientDeps {
 }
 
 type Listeners<T> = Set<(value: T) => void>;
+
+type Report = (status: SendStatus) => void;
+
+/** A message waiting for the end of the running turn; `report`, when given, is what the view learns of it. */
+interface Waiting {
+  prompt: OmpPrompt;
+  report?: Report;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+}
+
+/** A message held while a permission request waits: it goes as a follow-up once the developer answers. */
+interface Held {
+  prompt: OmpPrompt;
+  report: Report;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+}
 
 const disposer = <T>(set: Listeners<T>, listener: (value: T) => void): Disposable => {
   set.add(listener);
@@ -86,7 +109,12 @@ class OmpSession implements OmpSessionPort, Client {
 
   private turn: Promise<void> | undefined;
   private busy = false;
-  private readonly waiting: { prompt: OmpPrompt; resolve: () => void; reject: (error: unknown) => void }[] = [];
+  /** The messages waiting for the end of the running turn. */
+  private readonly waiting: Waiting[] = [];
+  /** The messages held while a permission request waits: omp is sent nothing until the developer answers. */
+  private readonly held: Held[] = [];
+  /** The `queue` messages omp took into its turn, in order, until the session shows them. */
+  private readonly takenQueued: { text: string; report: Report }[] = [];
 
   private starting = true;
   private stopping: Promise<void> | undefined;
@@ -164,7 +192,18 @@ class OmpSession implements OmpSessionPort, Client {
 
   sessionUpdate(params: SessionNotification): void {
     this.updates.push(params);
+    this.showTaken(params);
     for (const listener of [...this.updateListeners]) listener(params);
+  }
+
+  /** A message omp took into its turn is shown in the session: it is delivered, the first one shown being the first one taken. */
+  private showTaken(params: SessionNotification): void {
+    const { update } = params;
+    if (update.sessionUpdate !== "user_message_chunk" || update.content.type !== "text") return;
+    const next = this.takenQueued[0];
+    if (next === undefined || next.text !== update.content.text) return;
+    this.takenQueued.shift();
+    next.report({ status: "delivered" });
   }
 
   requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
@@ -204,29 +243,70 @@ class OmpSession implements OmpSessionPort, Client {
     for (const listener of [...this.turnListeners]) listener(busy);
   }
 
+  /** A prompt of the host (the first message, a resume, General's pending text): starts a turn when none runs, else waits for the end of the running one. */
   sendPrompt(prompt: OmpPrompt): Promise<void> {
-    if (this.turn === undefined) return this.begin(prompt);
-    const running = this.turn;
-    if (!this.steering) return this.queue(prompt);
-    return this.steer(prompt, running);
-  }
-
-  /** Sends `prompt` into the running turn; when omp does not take it (the turn ended, or it refused), it waits for the end of the turn as any other message. */
-  private async steer(prompt: OmpPrompt, running: Promise<void>): Promise<void> {
-    let injected = false;
-    try {
-      const answer = (await this.connection.extMethod("_session/steering", { sessionId: this.sessionId, prompt: promptBlocks(prompt.text, prompt.attachment) })) as { outcome?: string };
-      injected = answer.outcome === "injected";
-    } catch {
-      injected = false;
-    }
-    if (injected) return running;
     return this.turn === undefined ? this.begin(prompt) : this.queue(prompt);
   }
 
-  private queue(prompt: OmpPrompt): Promise<void> {
+  send(prompt: OmpPrompt, mode: SendMode, report: Report): Promise<void> {
+    if (this.turn === undefined) return this.begin(prompt);
+    // A permission request waits: omp is sent nothing until the developer answers it (`answerPermission`).
+    if (this.permissions.size > 0) return this.hold(prompt, report);
+    if (!this.steering) {
+      report({ status: "queued" });
+      return this.queue(prompt, report);
+    }
+    return this.inject(prompt, mode, report);
+  }
+
+  /** Sends the message into the running turn: `steer` is taken by the turn at once, `queue` after the turn's own work. */
+  private async inject(prompt: OmpPrompt, mode: SendMode, report: Report): Promise<void> {
+    const running = this.turn ?? Promise.resolve();
+    const queued = mode === "queue";
+    let answer: unknown;
+    try {
+      answer = await this.connection.extMethod("_session/steering", {
+        sessionId: this.sessionId,
+        prompt: promptBlocks(prompt.text, prompt.attachment),
+        ...(queued ? { _meta: { steering: { queue: "followUp" } } } : {}),
+      });
+    } catch (error) {
+      report({ status: "failed", reason: messageOf(error) });
+      return;
+    }
+    const outcome = steeringAnswer(answer);
+    if (outcome === "injected") {
+      if (queued) {
+        report({ status: "queued" });
+        this.takenQueued.push({ text: prompt.text, report });
+      } else {
+        report({ status: "delivered" });
+      }
+      return running;
+    }
+    if (typeof outcome !== "string") {
+      report({ status: "failed", reason: outcome.failed });
+      return;
+    }
+    // promptRequired: no turn of omp takes the message, so it goes as a prompt of its own, or waits when a turn has started meanwhile.
+    if (this.turn === undefined) {
+      report({ status: "delivered" });
+      return this.begin(prompt);
+    }
+    report({ status: "queued" });
+    return this.queue(prompt, report);
+  }
+
+  private queue(prompt: OmpPrompt, report?: Report): Promise<void> {
     const { promise, resolve, reject } = Promise.withResolvers<void>();
-    this.waiting.push({ prompt, resolve, reject });
+    this.waiting.push({ prompt, ...(report === undefined ? {} : { report }), resolve, reject });
+    return promise;
+  }
+
+  private hold(prompt: OmpPrompt, report: Report): Promise<void> {
+    const { promise, resolve, reject } = Promise.withResolvers<void>();
+    this.held.push({ prompt, report, resolve, reject });
+    report({ status: "queued" });
     return promise;
   }
 
@@ -236,17 +316,20 @@ class OmpSession implements OmpSessionPort, Client {
     return turn;
   }
 
-  private async run(prompt: OmpPrompt): Promise<void> {
+  private async run(prompt: OmpPrompt, report?: Report): Promise<void> {
     this.setBusy(true);
+    report?.({ status: "delivered" });
     try {
       await this.connection.prompt({ sessionId: this.sessionId, prompt: promptBlocks(prompt.text, prompt.attachment) });
     } finally {
+      // The turn is over: omp has answered what it took into it.
+      for (const taken of this.takenQueued.splice(0)) taken.report({ status: "delivered" });
       const next = this.waiting.shift();
       if (next === undefined) {
         this.turn = undefined;
         this.setBusy(false);
       } else {
-        const turn = this.run(next.prompt);
+        const turn = this.run(next.prompt, next.report);
         this.turn = turn;
         turn.then(next.resolve, next.reject);
       }
@@ -312,6 +395,7 @@ class OmpSession implements OmpSessionPort, Client {
     if (pending === undefined || !pending.request.options.some((option) => option.optionId === optionId)) return;
     this.permissions.delete(requestId);
     pending.resolve({ outcome: { outcome: "selected", optionId } });
+    if (this.permissions.size === 0) this.releaseHeld();
   }
 
   onPermissionCancelled(listener: (requestId: string) => void): Disposable {
@@ -320,10 +404,24 @@ class OmpSession implements OmpSessionPort, Client {
 
   /** The requests still waiting are answered `cancelled`: Stop, the closing of the conversation or the end of the process. */
   private cancelPermissions(): void {
+    this.discardHeld();
     for (const [id, pending] of [...this.permissions]) {
       this.permissions.delete(id);
       pending.resolve({ outcome: { outcome: "cancelled" } });
       for (const listener of [...this.cancelledListeners]) listener(id);
+    }
+  }
+
+  /** The permission requests are all answered: the messages held meanwhile go on as follow-ups, right after the answer. */
+  private releaseHeld(): void {
+    for (const held of this.held.splice(0)) this.send(held.prompt, "queue", held.report).then(held.resolve, held.reject);
+  }
+
+  /** The messages held for a permission request are not delivered when the conversation stops, closes or its process ends. */
+  private discardHeld(): void {
+    for (const held of this.held.splice(0)) {
+      held.report({ status: "failed", reason: DISCARDED });
+      held.resolve();
     }
   }
 

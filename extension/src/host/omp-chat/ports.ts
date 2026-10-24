@@ -1,5 +1,5 @@
 import type { ElicitationSchema, PermissionOption, SessionNotification, ToolCallUpdate } from "@agentclientprotocol/sdk";
-import type { GeneralError, GeneralPhase } from "../../omp-chat-protocol";
+import type { GeneralError, GeneralPhase, SendMode } from "../../omp-chat-protocol";
 
 // The two things the conversations of omp Chat stand on, as the host sees them. The ACP client (Task «Client ACP di omp») implements `OmpClientPort`
 // and the view in the secondary sidebar (Task «Vista omp Chat») implements `ChatViewPort`; the conversations (`conversations.ts`) are written against these
@@ -25,6 +25,16 @@ export interface OmpPrompt {
   attachment?: string;
 }
 
+/** What became of a message sent while the agent worked: queued until omp takes it, delivered once it did, or failed with the reason. */
+export type SendStatus = { status: "queued" } | { status: "delivered" } | { status: "failed"; reason: string };
+
+/** A message of the developer from General's field, with the choice of how it reaches a working agent and where its status goes. */
+export interface OutgoingMessage {
+  text: string;
+  mode: SendMode;
+  report: (status: SendStatus) => void;
+}
+
 /** A start or a resume that failed; `message` is the reason (`omp not found at <path>`, `omp exited with code <N>`, `omp did not answer within 30 s` or omp's own message). */
 export class OmpStartFailure extends Error {}
 
@@ -41,8 +51,13 @@ export interface OmpSessionPort {
   readonly pid: number | undefined;
   /** Whether a prompt was sent and its answer has not arrived yet. */
   readonly inTurn: boolean;
-  /** Sends a message of the developer or Trama; resolves when the turn ends. */
+  /** A prompt of the host (the first message, a resume, General's pending text): starts a turn when none runs, else waits for the end of the running one. */
   sendPrompt(prompt: OmpPrompt): Promise<void>;
+  /**
+   * A message of the developer sent while the agent may work: it starts a turn when none runs; otherwise `steer` goes into the running turn and `queue` after it.
+   * `report` says what became of it (`queued`, `delivered`, or `failed` with the reason); an idle start reports nothing. Rejects with the error of a turn that failed to start.
+   */
+  send(prompt: OmpPrompt, mode: SendMode, report: (status: SendStatus) => void): Promise<void>;
   /** `session/cancel`. */
   cancel(): void;
   /** Stops the process: SIGTERM and, after 3 seconds, SIGKILL. It never produces `onExit`. Resolves when the process is gone. */
@@ -101,13 +116,23 @@ export interface ConversationTab {
   name: string;
 }
 
+/** An instruction held for a conversation's first message (Ask more): the field shows `placeholder` until that message, the view sends `compose(message)` as its prompt, and `sent` runs as it is sent. */
+export interface PendingInstruction {
+  placeholder: string;
+  compose(message: string): OmpPrompt;
+  sent(): void;
+}
+
 export interface ChatViewPort {
   /**
    * Adds the conversation's tab, in front of the others, and shows the view on it: with the focus in the message field when `focus` is set, without taking it
-   * otherwise. `notice` is a line the conversation starts with (a resumed one); `first` is the instruction the conversation started with, which the view shows as Trama's message. The view reads the session's notifications and sends the developer's messages,
-   * the model changes and the form answers to the session itself.
+   * otherwise. `notice` is a line the conversation starts with (a resumed one); `first` is the instruction the conversation started with, which the view shows as Trama's message.
+   * With no `session` yet the tab shows that omp is starting, until `setSession` gives it one. `instruction` is held for the developer's first message: the view sends
+   * `compose(message)` with that message, once, and then forgets it. The view reads the session's notifications and sends the developer's messages, the model changes and the form answers to the session itself.
    */
-  open(tab: ConversationTab, session: OmpSessionPort, options: { focus: boolean; notice?: string; first?: OmpPrompt }): void;
+  open(tab: ConversationTab, session: OmpSessionPort | undefined, options: { focus: boolean; notice?: string; first?: OmpPrompt; instruction?: PendingInstruction }): void;
+  /** The session of the conversation `id`, once its process started: its tab stops showing the start and follows the session. */
+  setSession(id: string, session: OmpSessionPort): void;
   /** The conversation is, or is no longer, working for Trama (the tab's dot). */
   setWorking(id: string, working: boolean): void;
   /** Removes the tab; the view refuses the forms still waiting. */
@@ -130,8 +155,8 @@ export interface ChatViewPort {
   onClearGeneralRequested(listener: () => void): Disposable;
   /** The developer pressed Install omp in General. */
   onInstallOmpRequested(listener: () => void): Disposable;
-  /** The developer sent a message from General's field: it is delivered by General's own process (`omp-chat-general`). */
-  onGeneralMessage(listener: (text: string) => void): Disposable;
+  /** The developer sent a message from General's field: it is delivered by General's own process (`omp-chat-general`), in the mode the view chose. */
+  onGeneralMessage(listener: (message: OutgoingMessage) => void): Disposable;
   /** A message the developer sent did not start: its text goes back into the field of the tab `id`, and the field keeps it. */
   returnToField(id: string, text: string): void;
 }

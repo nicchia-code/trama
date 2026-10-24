@@ -10,8 +10,9 @@ import { Card } from "../ui/card";
 import { SplitButton } from "../split-button";
 import { Progress } from "../ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { roleLabel } from "../settings/logic";
 import { type AnnouncedCard, blockedReason, historyWhen, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
-import { BoardButton, Head, RefChips, StatusDot, Tip, TipBadge, TaskProposalTag, useBoardEnv } from "./parts";
+import { BoardButton, Head, RefChips, StatusDot, Tip, TipBadge, taskBorder, useBoardEnv } from "./parts";
 
 /**
  * What a click on a card leaves to its own parts: its buttons, badges, tags and links. A click anywhere else on the card
@@ -169,10 +170,11 @@ function ModelControls({ card }: { card: ProposalCard }) {
       </Button>
     </Tip>
   );
+  const shown = chosen === null ? "" : roleLabel(chosen.name, env.models);
   const model =
     chosen === null ? null : (
-      <TipBadge tone="info" tooltip={`Model for this Proposal's work: ${chosen.name}`} label={`Model for this Proposal's work: ${chosen.name}`} className="max-w-full break-words whitespace-normal">
-        {chosen.name}
+      <TipBadge tone="info" tooltip={`Model for this Proposal's work: ${shown}`} label={`Model for this Proposal's work: ${shown}`} className="max-w-full break-words whitespace-normal">
+        {shown}
       </TipBadge>
     );
   return (
@@ -316,7 +318,7 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
           arrowDisabled={card.reworkBlocker !== null}
           arrowReason={card.reworkBlocker}
           arrowName={`More ways to reject ${card.name.text}`}
-          items={[{ label: "Rework with feedback…", tooltip: "Reject it and have the agent redo it with your feedback", onSelect: () => env.context.post({ type: "reworkProposal", proposal: card.id }) }]}
+          items={[{ label: "Rework with feedback…", description: "Reject it and have the agent redo it with your feedback", onSelect: () => env.context.post({ type: "reworkProposal", proposal: card.id }) }]}
           onClick={() => env.context.post({ type: "rejectProposal", id: card.id })}
         />
       </Actions>
@@ -369,7 +371,7 @@ function DriftCardView({ card }: { card: DriftCard }) {
           arrowDisabled={card.reworkBlocker !== null}
           arrowReason={card.reworkBlocker}
           arrowName={`More ways to handle ${card.name.text}`}
-          items={[{ label: "Rework with feedback…", tooltip: "Have the agent resolve this Drift following your feedback", onSelect: () => env.context.post({ type: "reworkDrift", drift: card.id }) }]}
+          items={[{ label: "Rework with feedback…", description: "Have the agent resolve this Drift following your feedback", onSelect: () => env.context.post({ type: "reworkDrift", drift: card.id }) }]}
           onClick={() => env.context.post({ type: "dismissDrift", id: card.id })}
         />
       </Actions>
@@ -386,7 +388,7 @@ function TaskCardView({ card }: { card: TaskCard }) {
       card={card}
       kind="task"
       label={`Task ${card.name.text}: ${card.title}`}
-      className={cn("cursor-pointer border-l-border", card.agent && "board-working")}
+      className={cn("cursor-pointer", taskBorder(card), card.agent && "board-working")}
       // A click on the card, outside its buttons, badges, tags and links, opens its details window too.
       onClick={(event) => {
         if (leavesCardAlone(event)) return;
@@ -396,7 +398,6 @@ function TaskCardView({ card }: { card: TaskCard }) {
       <Head>
         <StatusDot task={card} />
         <IdTag name={card.name} className="text-[11px] font-semibold text-muted-foreground" />
-        <TaskProposalTag card={card} />
         {card.technical && card.refs.length === 0 ? (
           <TipBadge tone="info" tooltip="Technical Task">
             technical
@@ -453,7 +454,7 @@ function DoneCardView({ card, now }: { card: TaskCard; now: Date }) {
       card={card}
       kind="task"
       label={`Task ${card.name.text}: ${card.title}`}
-      className="cursor-pointer border-l-border"
+      className={cn("cursor-pointer", taskBorder(card))}
       onClick={(event) => {
         if (leavesCardAlone(event)) return;
         env.openTask(card.id);
@@ -462,7 +463,6 @@ function DoneCardView({ card, now }: { card: TaskCard; now: Date }) {
       <Head>
         <StatusDot task={card} />
         <IdTag name={card.name} className="text-[11px] font-semibold text-muted-foreground" />
-        <TaskProposalTag card={card} />
         {when === null ? null : (
           <time dateTime={when.time} title={when.title} className="ml-auto text-[11px] text-muted-foreground">
             {when.text}

@@ -2,10 +2,12 @@ import { execFile, type ExecFileException } from "node:child_process";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
-/** One model the Settings tab suggests for a model role: the name the agent takes, and a label when it is another name. */
+/** One model the Settings tab suggests for a model role: the name the agent takes, a label when it is another name, and the thinking levels omp declares for it. */
 export interface ModelSuggestion {
   value: string;
   label?: string;
+  /** The thinking levels omp declares for the model, in omp's order; absent when it declares none. */
+  thinking?: string[];
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -14,15 +16,22 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
 const text = (value: unknown): string | undefined => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
 
 /** Keeps the first entry of each value, and a label only when it differs from the value. */
-export function uniqueSuggestions(entries: readonly { value: string; label: string }[]): ModelSuggestion[] {
+export function uniqueSuggestions(entries: readonly { value: string; label: string; thinking?: string[] }[]): ModelSuggestion[] {
   const seen = new Set<string>();
   const out: ModelSuggestion[] = [];
-  for (const { value, label } of entries) {
+  for (const { value, label, thinking } of entries) {
     if (seen.has(value)) continue;
     seen.add(value);
-    out.push(label === value ? { value } : { value, label });
+    out.push({ value, ...(label === value ? {} : { label }), ...(thinking === undefined ? {} : { thinking }) });
   }
   return out;
+}
+
+/** The thinking levels of an entry: a non-empty list whose every item is a text; anything else (null, absent, not a list) declares none. */
+function thinkingOf(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const levels = value.map(text);
+  return levels.every((level): level is string => level !== undefined) ? levels : undefined;
 }
 
 /** `omp models --json`: `{ "models": [{ "selector", "name" }] }`. Undefined when the output is not that list; an empty list is still a list. */
@@ -38,7 +47,7 @@ export function parseOmpModels(output: string): ModelSuggestion[] | undefined {
   return uniqueSuggestions(
     models.flatMap((entry) => {
       const selector = text(record(entry)?.["selector"]);
-      return selector === undefined ? [] : [{ value: selector, label: text(record(entry)?.["name"]) ?? selector }];
+      return selector === undefined ? [] : [{ value: selector, label: text(record(entry)?.["name"]) ?? selector, thinking: thinkingOf(record(entry)?.["thinking"]) }];
     }),
   );
 }

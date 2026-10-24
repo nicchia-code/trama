@@ -22,13 +22,13 @@ The technologies this project is built, tested and released with, from the devel
 - clsx (chosen by the agent: used by the shadcn/ui components to join class names)
 - tailwind-merge (chosen by the agent: used by the shadcn/ui components to merge Tailwind classes)
 - lucide-react: the icons of the panel, as inline SVG components
+- simple-icons: the language and file-type logos of omp Chat's tool rows, CC0; only the icons used are imported, as inline SVG paths
 - cmdk: the Command list under the shadcn/ui Combobox of the model fields
 - cytoscape: draws the Diagram on a canvas, hosted in a React component
 - elkjs: lays out the Diagram
 - yaml: front matter and settings files
 - zod 4: input schemas of the command line
 - Agent Client Protocol SDK: `@agentclientprotocol/sdk`, the client side of ACP that omp Chat uses to talk to `omp acp`, bundled into the extension host
-- fantasticon: development dependency, used only by `scripts/icon-font.ts` (chosen by the agent: turns the logo SVG into the one-glyph icon font of the status bar button, in a single step)
 
 ## Testing
 

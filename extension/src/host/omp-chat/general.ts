@@ -3,7 +3,7 @@ import { GENERAL_ID } from "../../../../src/core/omp-chat-view";
 import { drawnPhase, GENERAL_INITIAL, type GeneralEffect, type GeneralEvent, type GeneralMachine, GeneralQueue, generalStep, returnedText } from "../../../../src/core/omp-chat-general";
 import { exitReason, savedEnv } from "../../../../src/core/omp-chat-conversation";
 import type { GeneralError } from "../../omp-chat-protocol";
-import type { ChatViewPort, Disposable, OmpClientPort, OmpExit, OmpLaunch, OmpSessionPort } from "./ports";
+import type { ChatViewPort, Disposable, OmpClientPort, OmpExit, OmpLaunch, OmpSessionPort, OutgoingMessage } from "./ports";
 import type { ConversationStore } from "./conversations";
 
 /** The saved entry of General (`trama.ompChat.general` in `workspaceState`): enough to resume its session in a new process. */
@@ -25,6 +25,16 @@ export function readSavedGeneral(store: ConversationStore): SavedGeneral | undef
   return valid ? (value as SavedGeneral) : undefined;
 }
 
+/**
+ * The arguments of a start or a resume: `--append-system-prompt <file>` before the `acp` subcommand, after the options (`omp [--model m] acp [--yolo]`).
+ * The saved arguments never carry it: every start and resume adds it again, from the file of this extension.
+ */
+export function withGeneralInstructions(args: string[], file: string): string[] {
+  const at = args.indexOf("acp");
+  if (at < 0) throw new Error("omp's arguments have no acp subcommand.");
+  return [...args.slice(0, at), "--append-system-prompt", file, ...args.slice(at)];
+}
+
 /** What the host gives General: the window, the settings, the ACP client, the view and the ends of work it needs. */
 export interface GeneralDeps {
   client: OmpClientPort;
@@ -42,6 +52,8 @@ export interface GeneralDeps {
   launch(root: string, terminalId: string): Promise<OmpLaunch>;
   /** The launch of a saved session: the saved arguments and variables, with the endpoint and PATH of this window. */
   resumeLaunch(root: string, args: string[], env: Record<string, string>): Promise<OmpLaunch>;
+  /** The file of General's instructions (`media/general.md`) in this extension's package, undefined when the package has none: every start and resume passes it to omp. */
+  instructions(): string | undefined;
   /** Ends General's work as a terminal's end does (the same `endAgentWork` the agent terminals use): releases what it took, withdraws its announcements, and forgets its process. It never disposes or idles a terminal. */
   endWork(terminalId: string, root: string): void;
   /** The confirmation of a clear or a close while the agent is in a turn. */
@@ -83,7 +95,7 @@ export class GeneralConversation implements Disposable {
       view.onCloseRequested((id) => id === GENERAL_ID && this.close()),
       view.onClearGeneralRequested(() => void this.clear()),
       view.onInstallOmpRequested(() => deps.install()),
-      view.onGeneralMessage((text) => this.send(text)),
+      view.onGeneralMessage((message) => this.send(message)),
     );
   }
 
@@ -110,10 +122,15 @@ export class GeneralConversation implements Disposable {
     this.exitListener?.dispose();
   }
 
-  /** The developer sent a message from General's field. It is delivered by General's own process. */
-  private send(text: string): void {
-    if (text === "") return;
-    this.queue.push(text);
+  /** The developer sent a message from General's field. While General's agent works, the message goes to it at once in the chosen mode; otherwise it waits for the session. */
+  private send(message: OutgoingMessage): void {
+    if (message.text === "") return;
+    const session = this.session;
+    if (session !== undefined && session.inTurn) {
+      session.send({ text: message.text }, message.mode, message.report).catch(() => this.deps.view.returnToField(GENERAL_ID, message.text));
+      return;
+    }
+    this.queue.push(message.text);
     this.dispatch({ type: "send" });
   }
 
@@ -238,12 +255,19 @@ export class GeneralConversation implements Disposable {
       if (token === this.token) this.dispatch({ type: "startFailed", missing: true });
       return;
     }
+    const instructions = this.deps.instructions();
+    if (instructions === undefined) {
+      this.pendingFailure = { kind: "start", reason: "its instructions are missing from the extension's package" };
+      if (token === this.token) this.dispatch({ type: "startFailed", missing: false });
+      return;
+    }
     const saved = mode === "resume" ? this.record : undefined;
     const terminalId = saved?.id ?? randomUUID();
     let opened: { session: OmpSessionPort; launch: OmpLaunch } | undefined;
     try {
       const launch = saved === undefined ? await this.deps.launch(folder, terminalId) : await this.deps.resumeLaunch(folder, saved.args, saved.env);
-      const session = saved === undefined ? await this.deps.client.start(launch) : await this.deps.client.resume(launch, saved.sessionId);
+      const started: OmpLaunch = { ...launch, args: withGeneralInstructions(launch.args, instructions) };
+      const session = saved === undefined ? await this.deps.client.start(started) : await this.deps.client.resume(started, saved.sessionId);
       opened = { session, launch };
     } catch (err) {
       if (token !== this.token) return;

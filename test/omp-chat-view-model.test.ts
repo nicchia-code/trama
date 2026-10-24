@@ -2,13 +2,15 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { type ChatSurface, ChatViewModel } from "../extension/src/host/omp-chat/view-model";
 import { parseChatMessage } from "../extension/src/host/omp-chat/messages";
-import type { Disposable, FormAnswer, FormRequest, OmpExit, OmpPrompt, OmpSessionPort, PermissionRequest } from "../extension/src/host/omp-chat/ports";
-import type { ToChatWebview } from "../extension/src/omp-chat-protocol";
+import type { Disposable, FormAnswer, FormRequest, OmpExit, OmpPrompt, OmpSessionPort, PermissionRequest, SendStatus } from "../extension/src/host/omp-chat/ports";
+import type { SendModeStore } from "../extension/src/host/omp-chat/send-mode";
+import type { SendMode, ToChatWebview } from "../extension/src/omp-chat-protocol";
 
 class FakeSession implements OmpSessionPort {
   pid = 1;
   inTurn = false;
   prompts: OmpPrompt[] = [];
+  sends: { prompt: OmpPrompt; mode: SendMode; report: (status: SendStatus) => void }[] = [];
   answers: { requestId: string; answer: FormAnswer }[] = [];
   modelsSet: string[] = [];
   failModel: string | undefined;
@@ -23,6 +25,9 @@ class FakeSession implements OmpSessionPort {
   constructor(readonly sessionId = "s1") {}
   async sendPrompt(prompt: OmpPrompt): Promise<void> {
     this.prompts.push(prompt);
+  }
+  async send(prompt: OmpPrompt, mode: SendMode, report: (status: SendStatus) => void): Promise<void> {
+    this.sends.push({ prompt, mode, report });
   }
   cancel(): void {}
   async stop(): Promise<void> {}
@@ -92,7 +97,7 @@ interface Fake {
   links: string[];
 }
 
-function setup(options: { inUse?: boolean; pending?: string[]; folder?: boolean } = {}) {
+function setup(options: { inUse?: boolean; pending?: string[]; folder?: boolean; sendModes?: SendModeStore } = {}) {
   const fake: Fake = { posted: [], visible: [], reveals: [], opened: [], links: [] };
   const state = { inUse: options.inUse ?? true, pending: options.pending ?? [], folder: options.folder ?? true };
   const surface: ChatSurface = {
@@ -104,7 +109,7 @@ function setup(options: { inUse?: boolean; pending?: string[]; folder?: boolean 
     openFile: (path) => void fake.opened.push(path),
     openLink: (url) => void fake.links.push(url),
   };
-  const model = new ChatViewModel(surface, () => state.inUse, () => state.pending, () => state.folder);
+  const model = new ChatViewModel(surface, () => state.inUse, () => state.pending, () => state.folder, options.sendModes);
   return { model, fake, state };
 }
 
@@ -250,7 +255,7 @@ describe("opening, selecting and closing", () => {
     model.webviewReady();
     model.open({ id: "a", name: "T3" }, session, { focus: false });
     session.requestPermission({ requestId: "p1", toolCall: { toolCallId: "t" }, options: [{ optionId: "yes", name: "Yes", kind: "allow_once" }] });
-    model.receive({ type: "sendMessage", id: "a", text: "meanwhile" });
+    model.receive({ type: "sendMessage", id: "a", text: "meanwhile", messageId: "m0" });
     model.receive({ type: "permissionAnswer", id: "a", requestId: "p1", optionId: "other" });
     model.receive({ type: "permissionAnswer", id: "a", requestId: "unknown", optionId: "yes" });
     expect(session.permissionAnswers).toEqual([]);
@@ -258,7 +263,7 @@ describe("opening, selecting and closing", () => {
     model.receive({ type: "permissionAnswer", id: "a", requestId: "p1", optionId: "yes" });
     model.receive({ type: "permissionAnswer", id: "a", requestId: "p1", optionId: "yes" });
     expect(session.permissionAnswers).toEqual([{ requestId: "p1", optionId: "yes" }]);
-    expect(session.prompts).toEqual([{ text: "meanwhile" }]);
+    expect(session.sends.map(({ prompt, mode }) => ({ prompt, mode }))).toEqual([{ prompt: { text: "meanwhile" }, mode: "steer" }]);
     expect(lastConversations(fake)?.items[0]?.state).toBe("idle");
   });
 });
@@ -270,7 +275,7 @@ describe("the webview", () => {
     model.open({ id: "a", name: "T3" }, session, { focus: false });
     expect(fake.posted).toEqual([]);
     model.receive({ type: "ready" });
-    expect(fake.posted.map((message) => message.type)).toEqual(["reset", "theme", "conversations", "conversationStart", "conversationUpdate"]);
+    expect(fake.posted.map((message) => message.type)).toEqual(["reset", "theme", "sendMode", "conversations", "conversationStart", "conversationUpdate"]);
   });
 
   test("a second ready replays the history again over a reset, without listening twice", () => {
@@ -294,12 +299,41 @@ describe("the webview", () => {
 });
 
 describe("messages from the webview", () => {
-  test("a message the developer sends reaches the session", () => {
+  test("a message the developer sends reaches the session in the chosen mode", () => {
     const { model } = setup();
     model.webviewReady();
     model.open({ id: "a", name: "T3" }, session, { focus: false });
-    model.receive({ type: "sendMessage", id: "a", text: "go on" });
-    expect(session.prompts).toEqual([{ text: "go on" }]);
+    model.receive({ type: "setSendMode", mode: "queue" });
+    model.receive({ type: "sendMessage", id: "a", text: "go on", messageId: "m1" });
+    expect(session.sends.map(({ prompt, mode }) => ({ prompt, mode }))).toEqual([{ prompt: { text: "go on" }, mode: "queue" }]);
+  });
+
+  test("each status the session reports for a message is posted for it", () => {
+    const { model, fake } = setup();
+    model.webviewReady();
+    model.open({ id: "a", name: "T3" }, session, { focus: false });
+    model.receive({ type: "sendMessage", id: "a", text: "go on", messageId: "m1" });
+    fake.posted.length = 0;
+    session.sends[0]!.report({ status: "queued" });
+    session.sends[0]!.report({ status: "failed", reason: "omp refused" });
+    expect(fake.posted).toEqual([
+      { type: "messageStatus", id: "a", messageId: "m1", status: "queued" },
+      { type: "messageStatus", id: "a", messageId: "m1", status: "failed", reason: "omp refused" },
+    ]);
+  });
+
+  test("the chosen mode is saved, and a window that starts with a saved choice shows it", () => {
+    const saved = new Map<string, unknown>();
+    const store: SendModeStore = { get: (key) => saved.get(key), update: async (key, value) => void saved.set(key, value) };
+    const fresh = setup({ sendModes: store });
+    fresh.model.webviewReady();
+    expect(fresh.fake.posted).toContainEqual({ type: "sendMode", mode: "steer" });
+    fresh.model.receive({ type: "setSendMode", mode: "queue" });
+    expect(saved.get("trama.ompChatSendMode")).toBe("queue");
+    expect(fresh.fake.posted).toContainEqual({ type: "sendMode", mode: "queue" });
+    const again = setup({ sendModes: store });
+    again.model.webviewReady();
+    expect(again.fake.posted).toContainEqual({ type: "sendMode", mode: "queue" });
   });
 
   test("Stop and the X ask the conversations, which confirm", () => {
@@ -376,7 +410,8 @@ describe("validation of what the webview sends", () => {
     for (const message of [
       { type: "ready" },
       { type: "selectConversation", id: "a" },
-      { type: "sendMessage", id: "a", text: "hi" },
+      { type: "sendMessage", id: "a", text: "hi", messageId: "m1" },
+      { type: "setSendMode", mode: "queue" },
       { type: "stopAgent", id: "a" },
       { type: "closeConversation", id: "a" },
       { type: "setModel", id: "a", model: "m" },
@@ -397,5 +432,47 @@ describe("validation of what the webview sends", () => {
     expect(parseChatMessage({ type: "permissionAnswer", id: "a", requestId: "p" })).toBeUndefined();
     expect(parseChatMessage({ type: "permissionAnswer", id: "a", requestId: "p", optionId: "" })).toBeUndefined();
     expect(parseChatMessage({ type: "permissionAnswer", id: "a", requestId: "p", optionId: "o", extra: 1 })).toBeUndefined();
+  });
+});
+
+describe("Ask more's pending conversation", () => {
+  const pendingInstruction = (sent: string[]) => ({
+    placeholder: "Ask about T3 – Steer…",
+    compose: (message: string) => ({ text: `INSTRUCTED ${message}` }),
+    sent: () => void sent.push("sent"),
+  });
+
+  test("shows the empty conversation with its placeholder, and starting until its session opens", () => {
+    const { model, fake } = setup();
+    model.webviewReady();
+    model.open({ id: "a", name: "Ask" }, undefined, { focus: true, instruction: pendingInstruction([]) });
+    const item = lastConversations(fake)?.items[0];
+    expect(item?.placeholder).toBe("Ask about T3 – Steer…");
+    expect(item?.starting).toBe(true);
+    expect(item?.state).toBe("idle");
+  });
+
+  test("a message before the session opens goes nowhere and holds the instruction", () => {
+    const sent: string[] = [];
+    const { model } = setup();
+    model.webviewReady();
+    model.open({ id: "a", name: "Ask" }, undefined, { focus: true, instruction: pendingInstruction(sent) });
+    model.receive({ type: "sendMessage", id: "a", text: "Why?", messageId: "m1" });
+    expect(sent).toEqual([]);
+    expect(session.sends).toEqual([]);
+  });
+
+  test("the first message goes out composed with the instruction, once; later messages go alone", () => {
+    const sent: string[] = [];
+    const { model, fake } = setup();
+    model.webviewReady();
+    model.open({ id: "a", name: "Ask" }, undefined, { focus: true, instruction: pendingInstruction(sent) });
+    model.setSession("a", session);
+    expect(lastConversations(fake)?.items[0]?.starting).toBeUndefined();
+    model.receive({ type: "sendMessage", id: "a", text: "Why?", messageId: "m1" });
+    model.receive({ type: "sendMessage", id: "a", text: "And then?", messageId: "m2" });
+    expect(sent).toEqual(["sent"]);
+    expect(session.sends.map(({ prompt }) => prompt)).toEqual([{ text: "INSTRUCTED Why?" }, { text: "And then?" }]);
+    expect(lastConversations(fake)?.items[0]?.placeholder).toBeUndefined();
   });
 });

@@ -53,12 +53,9 @@ test("the six Show commands are in the palette under the Trama category, each ru
   for (const entry of shows) expect(hidden).not.toContain(entry.command);
 });
 
-test("the trama-logo icon points to the committed one-glyph font", () => {
-  const icon = contributes.icons["trama-logo"];
-  expect(icon.description).toBe("Trama logo");
-  expect(icon.default.fontCharacter).toBe("\\E000");
-  const font = readFileSync(join(root, icon.default.fontPath));
-  expect(font.subarray(0, 4).toString("latin1")).toBe("wOFF");
+test("the status bar has no Trama logo: no icon font is contributed or shipped", () => {
+  expect(contributes.icons).toBeUndefined();
+  expect(existsSync(join(root, "media/trama-logo.woff"))).toBe(false);
 });
 
 test("the editor title bar has no Open Trama icon, and Open Trama stays a command", () => {

@@ -501,7 +501,7 @@ export function taskCard(t: TaskView, numbers: CardNumbers = noNumbers, finishin
 }
 
 /** The six colours of Tailwind's palette a tag can wear, in the order the hash picks them. */
-export const TAG_COLOURS = ["blue", "green", "amber", "fuchsia", "cyan", "red"] as const;
+export const TAG_COLOURS = ["blue", "green", "amber", "violet", "cyan", "red"] as const;
 
 export type TagColour = (typeof TAG_COLOURS)[number];
 

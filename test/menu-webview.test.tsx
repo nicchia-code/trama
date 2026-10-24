@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { MenuState, ToMenuHost } from "../extension/src/menu-protocol";
 import { MenuApp } from "../extension/src/webview/menu/app";
-import { entryName, entryTooltip } from "../extension/src/webview/menu/logic";
+import { entryName } from "../extension/src/webview/menu/logic";
 
 afterEach(cleanup);
 
@@ -95,7 +95,9 @@ test("with the Advisor Scanner on Scan System stays in its place, disabled, with
   const scan = screen.getByRole("button", { name: /^Scan System/ }) as HTMLButtonElement;
   expect(scan.disabled).toBe(true);
   expect(scan.textContent).toBe("Scan System");
-  expect(scan.getAttribute("aria-description")).toBe("Scans are off: the Advisor Scanner checks the code during Runs.");
+  const row = document.getElementById(scan.getAttribute("aria-describedby") ?? "");
+  expect(row?.textContent).toBe("Scans are off: the Advisor Scanner checks the code during Runs.");
+  expect(row?.className).toContain("@max-[56px]:hidden");
   fireEvent.click(scan);
   expect(posted).toEqual([]);
   expect(names()).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", "Scan System. Scans are off: the Advisor Scanner checks the code during Runs.", "Settings"]);
@@ -128,57 +130,60 @@ test("the entries are native buttons in the order they appear, so Tab, Enter and
   expect(buttons.map((button) => button.textContent)).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", "Scan System", "Settings"]);
 });
 
-test("the tooltip of an entry names it and the panel; its accessible name is its text", () => {
-  expect(entryTooltip("board")).toBe("Open Board in the Trama panel");
-  expect(entryTooltip("getstarted")).toBe("Open Get Started in the Trama panel");
+test("the accessible name of an entry is its text, and Board's names the cards awaiting a decision", () => {
   expect(entryName("board", 0)).toBe("Board");
   expect(entryName("board", 2)).toBe("Board, 2 awaiting a decision");
   expect(entryName("diagram", 5)).toBe("Diagram");
 });
 
-test("focusing an entry shows its tooltip", async () => {
+test("focusing an entry shows no tooltip, and no element of the menu has a title", async () => {
   setup(project());
   const history = screen.getByRole("button", { name: "History" });
   await act(async () => {
     history.focus();
     fireEvent.focus(history);
   });
-  expect((await screen.findAllByText("Open History in the Trama panel")).length).toBeGreaterThan(0);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  expect(screen.queryByText("Open History in the Trama panel")).toBeNull();
+  expect(document.querySelectorAll("[title]").length).toBe(0);
 });
 
-test("icon-only mode hides the text, the badge and the count under 200 px, centres the icon and keeps every tooltip", async () => {
+test("icon-only mode hides the text, the badge and the count under 56 px, centres the icon and shows no tooltip", async () => {
   setup({ ...project({ decisions: 2, tasksSinceScan: 4 }), situation: "project" });
   const board = screen.getByRole("button", { name: "Board, 2 awaiting a decision" });
-  expect(board.className).toContain("@max-[200px]:justify-center");
-  expect(within(board).getByText("Board").className).toContain("@max-[200px]:hidden");
-  expect(within(board).getByText("2").className).toContain("@max-[200px]:hidden");
+  expect(board.className).toContain("@max-[56px]:justify-center");
+  expect(within(board).getByText("Board").className).toContain("@max-[56px]:hidden");
+  expect(within(board).getByText("2").className).toContain("@max-[56px]:hidden");
   const scan = screen.getByRole("button", { name: /^Scan System · 4/ });
-  expect(scan.className).toContain("@max-[200px]:justify-center");
-  expect(scan.querySelector("span")?.className).toContain("@max-[200px]:hidden");
+  expect(scan.className).toContain("@max-[56px]:justify-center");
+  expect(scan.querySelector("span")?.className).toContain("@max-[56px]:hidden");
   await act(async () => {
     board.focus();
     fireEvent.focus(board);
   });
-  expect((await screen.findAllByText("Open Board in the Trama panel")).length).toBeGreaterThan(0);
+  expect(screen.queryByRole("tooltip")).toBeNull();
 });
 
-test("the Scan System tooltip shows its count after ` · `", async () => {
-  setup(project({ tasksSinceScan: 4 }));
+test("Scan System shows no tooltip when focused, and no line about the Advisor Scanner while it is off", async () => {
+  setup(project({ tasksSinceScan: 4, advisorScanner: false }));
   const scan = screen.getByRole("button", { name: /^Scan System · 4/ });
   await act(async () => {
     scan.focus();
     fireEvent.focus(scan);
   });
-  expect((await screen.findAllByText("Scan System · 4 Tasks finished since the last scan of the System")).length).toBeGreaterThan(0);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  expect(screen.queryByText("Scans are off: the Advisor Scanner checks the code during Runs.")).toBeNull();
+  expect(scan.hasAttribute("aria-describedby")).toBe(false);
 });
 
-test("without a folder the sentence is hidden in icon-only mode, and Open Folder keeps its tooltip", async () => {
+test("without a folder the sentence is hidden in icon-only mode, and Open Folder has no tooltip", async () => {
   setup({ ...project(), situation: "noFolder" });
-  expect(screen.getByText("Open a folder to use Trama.").className).toContain("@max-[200px]:hidden");
+  expect(screen.getByText("Open a folder to use Trama.").className).toContain("@max-[56px]:hidden");
   const open = screen.getByRole("button", { name: "Open Folder" });
   await act(async () => {
     open.focus();
     fireEvent.focus(open);
   });
-  expect((await screen.findAllByText("Open a folder to use Trama.")).length).toBeGreaterThan(0);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  expect(screen.getAllByText("Open a folder to use Trama.").length).toBe(1);
 });

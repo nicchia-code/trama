@@ -171,7 +171,7 @@ function SettingsBody({ controller, snapshot, state, openLink, step }: BodyProps
 
 /** The summary: the rows by step, each a button back to its step. */
 function SummaryBody({ controller, snapshot, state }: BodyProps) {
-  const rows = summaryRows(snapshot.schema, state, snapshot.current, snapshot.folders);
+  const rows = summaryRows(snapshot.schema, state, snapshot.current, snapshot.folders, snapshot.models?.list ?? []);
   const steps = stepsOf(state).filter((step) => rows.some((row) => row.step === step));
   return (
     <div className="space-y-4">

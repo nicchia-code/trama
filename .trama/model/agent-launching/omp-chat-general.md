@@ -2,7 +2,7 @@
 
 La conversazione General di omp Chat: una chat libera con omp, sempre presente nella vista omp Chat di ogni finestra che ha una cartella aperta, mentre omp Chat è in uso (vedi omp Chat). Il developer vi scrive da sé ciò che vuole e ci parla quanto vuole, come in un omp avviato a mano, per esempio per un lavoro piccolo e di fiducia come «committa il codice». Ogni finestra ha la sua General, nella sua cartella.
 
-General è un omp senza istruzione di Trama: nessuna skill, nessuna frase delle istruzioni e nessun hook. Parte con il modello del ruolo di analisi, segue l'approvazione e l'Intent Tracing di omp Chat come le altre conversazioni (vedi omp Chat conversation) e ha il selettore del modello, che vale solo per lei e torna al ruolo quando General si pulisce. Quando l'agente chiede qualcosa con lo strumento di domande di omp, la domanda compare in General come un modulo, come nelle altre conversazioni senza hook.
+General non ha hook né skill di un lavoro e non le arriva nessuna delle frasi delle istruzioni dei lavori, ma ha una sua istruzione di Trama: dice all'agente che General è la chat di Trama nell'editor, che lì fa da assistente al developer sul progetto e su Trama, che usa le skill di Trama e la riga di comando `trama` quando servono e che non modifica mai a mano la cartella di Trama. L'istruzione non è un messaggio: l'agente la riceve all'avvio, General resta vuota finché il developer non scrive e l'istruzione non compare nella conversazione. Quando omp non permette di dargliela all'avvio, Trama la unisce invece al primo messaggio del developer, segnata come istruzione e distinta dal messaggio, e di nuovo al primo messaggio dopo ogni pulizia; anche allora la conversazione mostra soltanto il messaggio del developer. General parte con il modello del ruolo di analisi, segue l'approvazione e l'Intent Tracing di omp Chat come le altre conversazioni (vedi omp Chat conversation) e ha il selettore del modello, che vale solo per lei e torna al ruolo quando General si pulisce. Quando l'agente chiede qualcosa con lo strumento di domande di omp, la domanda compare in General come un modulo, come nelle altre conversazioni senza hook.
 
 General non è un lavoro di Trama: non ha un ghost né un annuncio al lancio, non tiene in corso il controllo di esecuzione, non conta per l'esclusione fra i Run né per Resolve Drifts e non è mai rifiutata per un altro lavoro in corso. Il suo processo ha però il contrassegno dell'agente e un'identità propria, così ciò che l'agente annuncia o archivia da lì, quando il developer glielo chiede, arriva sulla Board come suo: le schede che consegna non aspettano la fine del turno, perché senza hook Trama non riconosce la fine di un turno, e gli annunci ancora in attesa si ritirano, con l'avviso di mancata consegna, quando il suo processo finisce o General si pulisce.
 
@@ -26,7 +26,7 @@ Il processo di omp di General parte e apre una sessione nuova. La scheda c'è gi
 
 ### Ready
 Il processo esiste e la sessione è aperta: il developer parla con l'agente, che può essere fermo o in un turno per un suo messaggio.
-- `developer.SEND_CHAT_MESSAGE` → Ready: il messaggio va all'agente; mentre l'agente è in un turno gli arriva senza fermarlo, come nelle altre conversazioni.
+- `developer.SEND_CHAT_MESSAGE` → Ready: il messaggio va all'agente; mentre l'agente è in un turno segue la scelta fra Steer e Queue, come nelle altre conversazioni: con Steer gli arriva subito senza fermarlo, con Queue quando finirebbe il turno.
 - `developer.STOP_CHAT_AGENT` → Ready: il turno dell'agente si interrompe; General resta com'è.
 - `developer.CLEAR_GENERAL` → Starting: dopo la conferma quando l'agente è in un turno, subito quando è fermo. Trama ferma il processo, scarta la conversazione e la sua sessione e ritira gli annunci ancora in attesa dell'agente; la scheda resta, vuota, e un omp nuovo parte subito.
 - `omp-acp.EXITED` → Stopped: il processo è finito da solo. Il motivo compare in fondo alla conversazione, la storia resta visibile e gli annunci ancora in attesa dell'agente si ritirano. Trama non riprova da sé.
@@ -59,7 +59,7 @@ La finestra si è chiusa o ricaricata e il processo di General non c'è più; Tr
 
 ### Kept after switch-off
 omp Chat è stata spenta mentre l'agente di General era in un turno. General resta nella vista finché il developer non la chiude: la sua scheda ora la chiude invece di pulirla, e il developer può continuare a scrivere.
-- `developer.SEND_CHAT_MESSAGE` → Kept after switch-off: il messaggio va all'agente come in Ready.
+- `developer.SEND_CHAT_MESSAGE` → Kept after switch-off: il messaggio va all'agente come in Ready, con la stessa scelta fra Steer e Queue.
 - `developer.STOP_CHAT_AGENT` → Kept after switch-off: il turno dell'agente si interrompe; General resta.
 - `developer.CLOSE_CHAT_CONVERSATION` → Absent: con la conferma se l'agente è in un turno, senza se è fermo. Trama ferma il processo e scarta la conversazione; General sparisce dalla vista.
 - `omp-acp.EXITED` → Absent: il processo è finito da solo; General sparisce dalla vista.

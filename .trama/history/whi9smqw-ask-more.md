@@ -1,12 +1,13 @@
 ---
 created: 2026-10-23T10:20:07.633Z
-updated: 2026-10-23T10:20:07.633Z
-summary: Ask more apre una chat nuova con l'agente su una Proposal, un Task, un Drift o una domanda del round, senza decidere nulla.
+updated: 2026-10-24T11:22:52.327Z
+summary: Ask more opens an empty omp Chat conversation on a Proposal, Task, Drift or round question; nothing reaches the agent until the developer writes the first message.
 tasks:
   - j6tlxyad
   - s7rkxe5c
   - vbvnrojj
+  - jke5wsit
 ---
 # Ask more
 
-Dalla Board, la finestra dei dettagli di una Proposal, di un Task o di un Drift ha il pulsante `Ask more`, e lo stesso vale per la domanda in vista di un round di domande. Il clic apre una chat nuova con l'agente scelto, che riceve la scheda o la domanda con i suoi collegamenti e i comandi di lettura di Trama, e aspetta le domande del developer. La chat spiega e, solo su richiesta del developer, sistema le schede con i comandi di Trama che lo permettono; non approva, non rifiuta, non risolve Drift e non riprende Task senza una richiesta esplicita. Il round di domande resta in vista, con le scelte e le risposte scritte intatte, e l'agente che l'ha chiesto non sa nulla della chat. Le finestre dei Task e dei Drift sulla Board sono solo da leggere e non hanno più il toggle Show details.
+Ask more on a Proposal, Task, Drift or round question opens a new omp Chat conversation with the chosen agent, named Ask <short number> or Ask question, and focuses its message field. Nothing is sent when it opens: the first message the developer writes goes out once, with the card or question, its links, Trama's read commands and the text. Until then the field shows a placeholder such as 'Ask about the Task…' and Send stays disabled while omp starts. With omp Chat off, Ask more still starts its instruction in the terminal at once. The chat explains and changes cards only on request; the round of questions stays unchanged. Implemented by Task jke5wsit.

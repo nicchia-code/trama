@@ -34,17 +34,6 @@ function guarded<A extends unknown[]>(action: (...args: A) => Promise<void>): (.
   };
 }
 
-/** A button in the status bar, only the Trama logo, that runs Open Trama. */
-function statusBarItem(): vscode.StatusBarItem {
-  const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  item.text = "$(trama-logo)";
-  item.tooltip = "Open Trama";
-  item.accessibilityInformation = { label: "Open Trama" };
-  item.command = "trama.open";
-  item.show();
-  return item;
-}
-
 export function activate(context: vscode.ExtensionContext): void {
   const session = new QuestionSession(() => trama.revealForQuestions());
   const questions = new EditorQuestions(() => findProject(), session);
@@ -61,7 +50,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const menu = new MenuView(context.extensionUri, trama, tramaFiles);
   context.subscriptions.push(
     tramaFiles,
-    statusBarItem(),
     menu,
     menu.register(),
     vscode.commands.registerCommand("trama.open", guarded(() => trama.open())),
@@ -101,7 +89,7 @@ export function activate(context: vscode.ExtensionContext): void {
  */
 function startOmpChat(context: vscode.ExtensionContext): void {
   const savedIds = () => readSavedConversations(context.workspaceState.get(CONVERSATIONS_KEY)).entries.map((entry) => entry.id);
-  const view = new OmpChatView(context.extensionUri, () => findProject()?.root, savedIds);
+  const view = new OmpChatView(context.extensionUri, () => findProject()?.root, savedIds, context.globalState);
   // `trama.ompPath` is application-scoped: only the user value counts, read by `configuredOmpPath`, as for every terminal and the model list.
   // The program is the one the launches run: found as `findOmp` finds it (a conversation that resumes after a reload has had no launch before it).
   const client = new OmpClient({

@@ -10,10 +10,14 @@ import { Input } from "../ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-import { effectiveValue, modelOptions, numberFromText, workspaceOverride } from "./logic";
+import { composeRoleValue, DEFAULT_LEVEL, effectiveValue, modelOptions, numberFromText, splitRoleValue, thinkingLevels, withModel, workspaceOverride } from "./logic";
+import { ThinkingLevelSelect } from "./thinking-level";
 
 /** How long the bubble stays open after the pointer leaves the «i» or the bubble, so the pointer can cross the gap. */
 const CLOSE_DELAY_MS = 150;
+
+/** The language setting: it keeps its value, but agents write in English for now, so the field is disabled. */
+const LANGUAGE_KEY = "trama.language";
 
 /**
  * Text that the developer is typing: `text` is what the field shows, a new `saved` value or a new message from the host
@@ -176,14 +180,19 @@ export function SettingField({ setting, values, generation, models, listError, o
 
   const modelRole = setting.control === "text" && MODEL_ROLE_KEYS.includes(key);
   const chosen = setting.control === "enum" ? String(picked ?? saved) : undefined;
-  const override = workspaceOverride(setting, values);
+  const language = key === LANGUAGE_KEY;
+  const override = language ? null : workspaceOverride(setting, values);
   const listNote = modelRole ? listError : null;
+  const note = language ? "Disabled for now: agents write in English." : listNote;
+  const role = modelRole ? splitRoleValue(savedText, models) : undefined;
+  const levels = role === undefined ? [] : thinkingLevels(models, role.model);
+  const levelChosen = typeof picked === "string" ? picked : (role?.level ?? DEFAULT_LEVEL);
 
   const describedBy = [
     `${id}-explain`,
     chosen !== undefined && setting.values?.includes(chosen) ? `${id}-value-${setting.values.indexOf(chosen)}` : null,
     editable.error !== null ? `${id}-error` : null,
-    listNote !== null ? `${id}-note` : null,
+    note !== null ? `${id}-note` : null,
   ]
     .filter((part) => part !== null)
     .join(" ");
@@ -269,15 +278,30 @@ export function SettingField({ setting, values, generation, models, listError, o
     );
   } else if (modelRole) {
     control = (
-      <ComboboxInput
-        id={id}
-        aria-label={setting.title}
-        aria-describedby={describedBy}
-        placeholder={placeholder}
-        options={modelOptions(models)}
-        value={savedText}
-        onCommit={(value) => send(key, value)}
-      />
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <ComboboxInput
+            id={id}
+            aria-label={setting.title}
+            aria-describedby={describedBy}
+            placeholder={placeholder}
+            options={modelOptions(models)}
+            value={role?.model ?? ""}
+            onCommit={(model) => send(key, withModel(savedText, model, models))}
+          />
+        </div>
+        {levels.length > 0 && (
+          <ThinkingLevelSelect
+            label={`${setting.title} thinking level`}
+            levels={levels}
+            value={levelChosen}
+            onChange={(level) => {
+              setPicked(level);
+              send(key, composeRoleValue(role?.model ?? "", level === DEFAULT_LEVEL ? undefined : level));
+            }}
+          />
+        )}
+      </div>
     );
   } else {
     control = (
@@ -287,6 +311,7 @@ export function SettingField({ setting, values, generation, models, listError, o
         aria-label={setting.title}
         aria-describedby={describedBy}
         placeholder={placeholder}
+        disabled={language}
         value={editable.text}
         onChange={(event) => editable.edit(event.target.value)}
         onKeyDown={(event) => {
@@ -324,9 +349,9 @@ export function SettingField({ setting, values, generation, models, listError, o
           The workspace setting overrides this: <code className="font-mono">{override}</code>.
         </p>
       )}
-      {listNote !== null && (
+      {note !== null && (
         <p id={`${id}-note`} className="row-start-5 m-0 text-sm text-muted-foreground">
-          {listNote}
+          {note}
         </p>
       )}
       {/* Described to screen readers even while the bubble is closed. */}

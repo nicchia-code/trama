@@ -108,19 +108,64 @@ test("headings and block quotes", () => {
   ]);
 });
 
-test("tables are not supported: their lines show as written", () => {
-  expect(parseMarkdown("| a | b |\n|---|---|\n| 1 | 2 |")).toEqual([{ t: "code", lang: "", text: "| a | b |\n|---|---|\n| 1 | 2 |" }]);
+test("a pipe table is a table block with the alignment of each column", () => {
+  expect(parseMarkdown("| a | b | c | d |\n|:--|:-:|--:|---|\n| 1 | 2 | 3 | 4 |")).toEqual([
+    {
+      t: "table",
+      align: ["left", "center", "right", "left"],
+      head: [[text("a")], [text("b")], [text("c")], [text("d")]],
+      rows: [[[text("1")], [text("2")], [text("3")], [text("4")]]],
+    },
+  ]);
+});
+
+test("table cells take the inline Markdown of paragraphs, and an escaped pipe stays in its cell", () => {
+  expect(parseMarkdown("| **bold** | *it* | `code` |\n|---|---|---|\n| a \\| b | ok |  |")).toEqual([
+    {
+      t: "table",
+      align: ["left", "left", "left"],
+      head: [[{ t: "strong", c: [text("bold")] }], [{ t: "em", c: [text("it")] }], [{ t: "code", text: "code" }]],
+      rows: [[[text("a | b")], [text("ok")], []]],
+    },
+  ]);
+});
+
+test("short rows get empty cells and long rows lose their extra cells", () => {
+  expect(parseMarkdown("| a | b |\n|---|---|\n| 1 |\n| 1 | 2 | 3 |")).toEqual([
+    {
+      t: "table",
+      align: ["left", "left"],
+      head: [[text("a")], [text("b")]],
+      rows: [
+        [[text("1")], []],
+        [[text("1")], [text("2")]],
+      ],
+    },
+  ]);
+});
+
+test("a table ends at a blank line, and a header without a separator row is text", () => {
+  expect(parseMarkdown("| a | b |\n|---|---|\n| 1 | 2 |\n\nafter")).toEqual([
+    { t: "table", align: ["left", "left"], head: [[text("a")], [text("b")]], rows: [[[text("1")], [text("2")]]] },
+    para(text("after")),
+  ]);
+  expect(parseMarkdown("| a | b |\n| c | d |")).toEqual([para(text("| a | b | | c | d |"))]);
 });
 
 test("a table right after a line of text keeps its rows, the text stays a paragraph", () => {
   expect(parseMarkdown("Colonne: **due**\n| a | b |\n|---|---|\n| 1 | 2 |")).toEqual([
     para(text("Colonne: "), { t: "strong", c: [text("due")] }),
-    { t: "code", lang: "", text: "| a | b |\n|---|---|\n| 1 | 2 |" },
+    { t: "table", align: ["left", "left"], head: [[text("a")], [text("b")]], rows: [[[text("1")], [text("2")]]] },
   ]);
-  expect(parseMarkdown("- Colonne:\n  | a | b |\n  |---|---|")).toEqual([
-    { t: "list", ordered: false, start: 1, items: [[para(text("Colonne:")), { t: "code", lang: "", text: "| a | b |\n|---|---|" }]] },
+  expect(parseMarkdown("- Colonne:\n  | a | b |\n  |:-:|--:|")).toEqual([
+    {
+      t: "list",
+      ordered: false,
+      start: 1,
+      items: [[para(text("Colonne:")), { t: "table", align: ["center", "right"], head: [[text("a")], [text("b")]], rows: [] }]],
+    },
   ]);
   expect(parseMarkdown("> Colonne:\n> | a |\n> |---|")).toEqual([
-    { t: "quote", c: [para(text("Colonne:")), { t: "code", lang: "", text: "| a |\n|---|" }] },
+    { t: "quote", c: [para(text("Colonne:")), { t: "table", align: ["left"], head: [[text("a")]], rows: [] }] },
   ]);
 });

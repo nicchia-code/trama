@@ -44,6 +44,42 @@ export function modelOptions(models: readonly ModelSuggestion[]): ComboboxOption
   return models.map((model) => (model.label !== undefined && model.label !== model.value ? { value: model.value, label: model.label } : { value: model.value }));
 }
 
+/** The Select entry of a model role that has no level: the model alone, which lets omp choose the level. */
+export const DEFAULT_LEVEL = "Default";
+
+/** The thinking levels omp declares for `model`, in omp's order; none when omp lists no such model or declares no level for it. */
+export function thinkingLevels(models: readonly ModelSuggestion[], model: string): string[] {
+  return models.find((entry) => entry.value === model)?.thinking ?? [];
+}
+
+/** A model role's value split into its model and its thinking level: the level is the text after the last `:`, and only when the model declares it. */
+export function splitRoleValue(value: string, models: readonly ModelSuggestion[]): { model: string; level?: string } {
+  const colon = value.lastIndexOf(":");
+  if (colon > 0) {
+    const model = value.slice(0, colon);
+    const level = value.slice(colon + 1);
+    if (thinkingLevels(models, model).includes(level)) return { model, level };
+  }
+  return { model: value };
+}
+
+/** A model role's value: the model, then `:` and the level when there is one. */
+export function composeRoleValue(model: string, level?: string): string {
+  return level === undefined ? model : `${model}:${level}`;
+}
+
+/** A model role's value as it reads: `<model> · <level>`, or the model alone when it has no level (Default). */
+export function roleLabel(value: string, models: readonly ModelSuggestion[]): string {
+  const { model, level } = splitRoleValue(value, models);
+  return level === undefined ? model : `${model} · ${level}`;
+}
+
+/** The value a role takes when its model becomes `model`: the level stays only when the new model declares it too. */
+export function withModel(value: string, model: string, models: readonly ModelSuggestion[]): string {
+  const { level } = splitRoleValue(value, models);
+  return composeRoleValue(model, level !== undefined && thinkingLevels(models, model).includes(level) ? level : undefined);
+}
+
 /** The host's `ompStatus` message without its type; null while nothing has arrived, which reads as checking. */
 export type OmpStatus = Omit<Extract<ToWebview, { type: "ompStatus" }>, "type">;
 

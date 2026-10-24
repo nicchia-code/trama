@@ -1,9 +1,10 @@
-import { Bot, Check, ChevronDown, ChevronRight, FilePen, FileText, Loader, Paperclip, Search, SquareTerminal, Wrench, X } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronRight, Clock, FilePen, FileText, Loader, Paperclip, Search, SquareTerminal, Wrench, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Markdown } from "../markdown";
 import { Button } from "../ui/button";
 import { cn } from "../lib/utils";
 import { type Block, cutLines } from "./transcript";
+import { type ToolLogo, toolLabel } from "./tool-logo";
 
 /** Seconds since `since`, ticking while `active`. */
 function useElapsed(since: number, active: boolean): number {
@@ -49,6 +50,13 @@ export function UserMessage({ block }: { block: Extract<Block, { kind: "user" }>
           </Disclosure>
         )}
       </div>
+      {block.delivery === "queued" ? (
+        <p className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Clock className="size-3.5 shrink-0" />
+          Queued
+        </p>
+      ) : null}
+      {block.delivery === "failed" ? <p className="text-xs text-destructive">{`Not delivered: ${block.reason ?? "unknown reason"}.`}</p> : null}
     </div>
   );
 }
@@ -76,7 +84,8 @@ const TOOL_ICONS = { read: FileText, search: Search, execute: SquareTerminal, ed
 /** omp runs a sub-agent through its `task` tool. */
 const SUBAGENT_TOOL = /^(task|subagent)$/i;
 
-function ToolIcon({ block }: { block: Pick<Extract<Block, { kind: "tool" }>, "name" | "toolKind"> }) {
+function ToolIcon({ block, logo }: { block: Pick<Extract<Block, { kind: "tool" }>, "name" | "toolKind">; logo?: ToolLogo }) {
+  if (logo !== undefined) return <svg role="img" aria-label={logo.name} viewBox="0 0 24 24" fill="currentColor" className="size-3.5 shrink-0"><path d={logo.path} /></svg>;
   const Icon = block.name !== undefined && SUBAGENT_TOOL.test(block.name) ? Bot : TOOL_ICONS[block.toolKind];
   return <Icon className="size-3.5 shrink-0 text-muted-foreground" />;
 }
@@ -92,6 +101,7 @@ export function ToolCall({ block, openFile }: { block: Extract<Block, { kind: "t
   const [open, setOpen] = useState(false);
   const edits = block.toolKind === "edit" || block.toolKind === "delete" || block.toolKind === "move";
   const output = block.output === undefined ? undefined : cutLines(block.output);
+  const label = toolLabel(block.title, block.places[0]?.path);
   return (
     <div className="text-sm" data-tool={block.toolCallId}>
       <div className="flex items-center gap-1.5">
@@ -102,8 +112,8 @@ export function ToolCall({ block, openFile }: { block: Extract<Block, { kind: "t
           onClick={() => setOpen(!open)}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <ToolIcon block={block} />
-          <span className="truncate">{block.title}</span>
+          <ToolIcon block={block} logo={label.logo} />
+          <span className="truncate">{label.title}</span>
         </button>
         <ToolStatus status={block.status} />
       </div>
@@ -127,12 +137,13 @@ export function ToolCall({ block, openFile }: { block: Extract<Block, { kind: "t
 /** A permission request of omp: a box with the colour of warnings, the tool call as its compact row and a button per option, in omp's order. After the choice it stays, read-only. */
 export function Permission({ block, onChoose }: { block: Extract<Block, { kind: "permission" }>; onChoose: (optionId: string) => void }) {
   const chosen = block.options.find((option) => option.optionId === block.answer);
+  const label = toolLabel(block.title, block.places[0]?.path);
   return (
     <section aria-label="omp asks permission" data-permission={block.requestId} className="flex flex-col gap-2 rounded-lg border-2 border-amber-500 p-3">
       <p className="font-medium">omp asks permission</p>
       <div className="flex items-center gap-1.5 text-sm">
-        <ToolIcon block={block} />
-        <span className="truncate">{block.title}</span>
+        <ToolIcon block={block} logo={label.logo} />
+        <span className="truncate">{label.title}</span>
       </div>
       {block.cancelled ? (
         <p className="text-muted-foreground">Cancelled</p>

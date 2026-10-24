@@ -122,15 +122,6 @@
         }
       ]
     },
-    "icons": {
-      "trama-logo": {
-        "description": "Trama logo",
-        "default": {
-          "fontPath": "media/trama-logo.woff",
-          "fontCharacter": "\\E000"
-        }
-      }
-    },
     "menus": {
       "editor/title": [
         {
@@ -222,7 +213,7 @@
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "markdownDescription": "Close the agent's terminal as soon as the agent is idle or its command ends (default on)."
+          "markdownDescription": "Close the agent's terminal as soon as the agent is idle or its command ends, and ask the agent to skip its final summary (default on)."
         },
         "trama.maxParallelAgents": {
           "type": "integer",
@@ -239,7 +230,7 @@
         "trama.language": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Language the agent writes in, for example `Italian`; code stays in English. Empty (the default) asks nothing about language."
+          "markdownDescription": "Disabled for now: agents write in English. Later: the language the agent writes in, for example `Italian`; code stays in English."
         },
         "trama.driftBlocker": {
           "type": "boolean",

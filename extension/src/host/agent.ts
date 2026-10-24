@@ -15,18 +15,18 @@ import { QUESTION_ENDPOINT_ENV, questionProjectId, sendCoordinatorMessage } from
 import { processAlive, readAgentProcess, removeAgentProcess, writeAgentProcess } from "../../../src/core/agent-processes";
 import { terminalVerdict } from "../../../src/core/terminal-check";
 import { startFailureNotice, type SavedJob, useOmpChat } from "../../../src/core/omp-chat-conversation";
-import { bundledAskMoreInstructions, bundledOmpHook } from "./bundled";
+import { bundledAskMoreInstructions, bundledGeneralInstructions, bundledOmpHook } from "./bundled";
 import { withdrawWaiting } from "./announcements";
 import { endHeldJob as endHeldJobs, endTerminalJobs, isHooked, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, onAgentStarted, releaseFiledWork, reportStoppedFollowing, setHooked, startJob } from "./drift-resolution";
 import { agentCommandLine, isSupportedShell, programName, quote, type ShellFamily, shellFamily } from "./quote";
 import { questionEndpoint } from "./questions";
 import { pruneAgentProcesses, releaseUnfollowedTasks } from "./task-release";
-import { ASK_DEVELOPER_SENTENCE, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
+import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, instructedMessage, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
 import { agentTemplate, askMoreCommandLine, askMoreOptions, canScan, launchOverlay, type Models, ompArguments, ompOptions, type Role, roleOf, type RunModel, terminalEnv } from "./terminal-agent";
 import { ompPathVariable } from "./model-lists";
 import { ompBeforeLaunch } from "./omp-launch";
 import { type ConversationInfo, type ConversationStore, type OpenConversation, OmpConversations } from "./omp-chat/conversations";
-import type { ChatViewPort, OmpClientPort, OmpLaunch, OmpPrompt } from "./omp-chat/ports";
+import type { ChatViewPort, OmpClientPort, OmpLaunch } from "./omp-chat/ports";
 import { GeneralConversation, type GeneralDeps } from "./omp-chat/general";
 import { findConfiguredOmp } from "./omp-update";
 
@@ -35,8 +35,10 @@ export const settings = () => vscode.workspace.getConfiguration("trama");
 /** The folder the developer chose for Trama's skills (`trama.skillsDir`), relative to the project root unless absolute. */
 export const configuredSkillsDir = (): string => settings().get<string>("skillsDir", ".agents/skills").trim() || ".agents/skills";
 
-/** The language the agent writes in (`trama.language`), as typed; empty when none is chosen. Read at every launch. */
-export const configuredLanguage = (): string => settings().get<string>("language", "").trim();
+/** Whether the language setting is in use. Disabled for now: no instruction asks for a language and agents write in English, whatever `trama.language` holds. */
+const LANGUAGE_SETTING_ENABLED = false;
+/** The language the agent writes in (`trama.language`), as typed; empty when none is chosen or the setting is disabled. Read at every launch. */
+export const configuredLanguage = (): string => (LANGUAGE_SETTING_ENABLED ? settings().get<string>("language", "").trim() : "");
 /** Whether `trama.driftBlocker` is on, from user settings only: a workspace value does not turn it on. Read at every launch. */
 export const configuredDriftBlocker = (): boolean => settings().inspect<unknown>("driftBlocker")?.globalValue === true;
 /** Whether the Advisor Scanner is on (`trama.advisorScanner`), from user settings only. Read at every launch. */
@@ -176,6 +178,7 @@ function generalDeps(ports: { client: OmpClientPort; view: ChatViewPort }, store
     usable: configuredOmpChat,
     ompPath: configuredOmpPath,
     findOmp: findConfiguredOmp,
+    instructions: bundledGeneralInstructions,
     launch: async (root, terminalId) => {
       const endpoint = await questionEndpoint(root);
       if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
@@ -460,10 +463,10 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
 }
 
 /**
- * The instruction with its limit, sub-agent, parallel execution, advisor, Drift blocker, Async Drift Resolver, context sharing, ask and language sentences. The
- * parallel execution sentence goes right after the sub-agent sentence (or the limit one, when there is none), only to a
- * run over several Tasks and only when `trama.parallelExecution` is on, read now. The ask sentence always stays on the instruction's line, after the Drift
- * blocker's sentence and before the language one.
+ * The instruction with its limit, sub-agent, parallel execution, advisor, Drift blocker, Async Drift Resolver, context sharing, ask, auto-exit and language sentences.
+ * The parallel execution sentence goes right after the sub-agent sentence (or the limit one, when there is none), only to a run over several Tasks and only when
+ * `trama.parallelExecution` is on, read now. The ask sentence always stays on the instruction's line, after the Drift blocker's sentence and before the language one;
+ * the auto-exit sentence, when `trama.autoExit` is on, follows the ask sentence.
  */
 function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, severalTasks: boolean, advisor?: string, limit?: number): string {
   const withLimit = withAgentLimit(instruction, limit);
@@ -473,7 +476,9 @@ function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, seve
   const withBlocker = withDriftBlocker(withAdvisor, filesDrifts && configuredDriftBlocker());
   const withResolver = withAsyncDriftResolver(withBlocker, filesDrifts && configuredAsyncDriftResolver());
   const withSharing = withContextSharing(withResolver, configuredSubagentsContextSharing());
-  return withLanguage(`${withSharing} ${ASK_DEVELOPER_SENTENCE}`, configuredLanguage());
+  const withAsk = `${withSharing} ${ASK_DEVELOPER_SENTENCE}`;
+  const withExit = settings().get<boolean>("autoExit", true) ? `${withAsk} ${AUTO_EXIT_SENTENCE}` : withAsk;
+  return withLanguage(withExit, configuredLanguage());
 }
 
 /** The model roles, trimmed (`trama.analysis`, `trama.scan`, `trama.execution`). Application scope: only the user's settings count. */
@@ -665,21 +670,34 @@ export async function launchAgent(
 }
 
 /**
- * A new agent named `name` with no job, no hook and no instruction of its own: with omp Chat in use a conversation (`conversation` has its options and first message,
- * when it has one), which takes the focus in its message field; otherwise, or when omp does not start, a terminal, where `lineOf` builds the command for the
- * shell it runs in, written when the shell is ready. The terminal takes the focus. The card is announced as work either way.
+ * A new agent named `name` with no job and no hook: with omp Chat in use a conversation (`conversation` has its options and the instruction it starts with),
+ * which takes the focus in its message field; otherwise, or when omp does not start, a terminal, where `lineOf` builds the command for the
+ * shell it runs in, written when the shell is ready. The terminal takes the focus. The card is announced as work either way; Ask more's conversation announces it when its first message starts.
  */
-async function openFocusedTerminal(root: string, name: string, omp: string, lineOf: (family: ShellFamily) => string, conversation: { options: string[][]; first?: OmpPrompt }): Promise<void> {
+async function openFocusedTerminal(root: string, name: string, omp: string, lineOf: (family: ShellFamily) => string, conversation: { options: string[][]; instruction: { part: string; attachment: string; placeholder: string } }): Promise<void> {
   const endpoint = await questionEndpoint(root);
   if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
   const terminalId = newTerminalId();
-  let announced = false;
   if (ompChatInUse()) {
-    announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
-    announced = true;
-    launchedRoots.add(root);
-    setHooked(terminalId, false);
-    if (await openConversation({ id: terminalId, root, name, launch: conversationLaunch(root, conversation.options, endpoint, terminalId), ...(conversation.first === undefined ? {} : { first: conversation.first }), focus: true })) return;
+    // Ask more's conversation opens empty: its card is announced when its first message starts, so a conversation left empty leaves no trace.
+    const { part, attachment, placeholder } = conversation.instruction;
+    const opened = await openConversation({
+      id: terminalId,
+      root,
+      name,
+      launch: conversationLaunch(root, conversation.options, endpoint, terminalId),
+      focus: true,
+      instruction: {
+        placeholder,
+        compose: (message) => ({ text: instructedMessage(part, message), attachment }),
+        announce: () => {
+          announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
+          launchedRoots.add(root);
+          setHooked(terminalId, false);
+        },
+      },
+    });
+    if (opened) return;
   }
   const asTab = settings().inspect<string>("terminalLocation")?.globalValue === "editor";
   const defaultShell = vscode.env.shell;
@@ -692,7 +710,7 @@ async function openFocusedTerminal(root: string, name: string, omp: string, line
     env: { ...terminalEnv(endpoint, terminalId), ...ompPathEnv(omp) },
     ...(asTab ? { location: { viewColumn: vscode.ViewColumn.Active, preserveFocus: false } } : {}),
   });
-  if (!announced) announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
+  announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
   if (replaced) warnShellReplaced(defaultShell);
   const line = lineOf(shellFamily(shellPath ?? defaultShell));
   agentTerminals.set(terminal, { id: terminalId, root, line, since: Date.now() });
@@ -706,18 +724,18 @@ async function openFocusedTerminal(root: string, name: string, omp: string, line
  * Ask more: a new, bare chat with omp about one thing, `part` (the card or question chosen, read when pressed), named `name`
  * and on the analysis role's model (`trama.analysis`, read now). Trama's fixed instructions (`media/ask-more.md`) come first, as a
  * file attached with `@`. No job and no announcement but the terminal's work card; the only sentence added is the language one.
- * The prompt goes to the terminal or the omp Chat conversation and is written to no file.
+ * The prompt goes to the terminal, or to the omp Chat conversation, which opens empty with `placeholder` in its field: the instruction goes with the developer's first message.
  */
-export async function openAskMore(root: string, name: string, part: string): Promise<void> {
+export async function openAskMore(root: string, name: string, part: string, placeholder: string): Promise<void> {
   const file = bundledAskMoreInstructions();
   if (file === undefined) throw new TramaError("Ask more is unavailable: its instructions are missing from the extension's package.");
   const omp = await ompBeforeLaunch(configuredOmpPath());
   if (omp === undefined) return;
   const model = configuredModels().analysis;
-  const prompt = withLanguage(part, configuredLanguage());
+  const instruction = withLanguage(part, configuredLanguage());
   // The command is one line: the part's own line breaks become spaces.
-  const oneLine = prompt.replace(/\s*\n\s*/g, " ");
-  await openFocusedTerminal(root, name, omp, (family) => `${askMoreCommandLine(omp, model, family)} ${quote(family, `@${file}`)} ${quote(family, oneLine)}`, { options: askMoreOptions(model), first: { text: prompt, attachment: file } });
+  const oneLine = instruction.replace(/\s*\n\s*/g, " ");
+  await openFocusedTerminal(root, name, omp, (family) => `${askMoreCommandLine(omp, model, family)} ${quote(family, `@${file}`)} ${quote(family, oneLine)}`, { options: askMoreOptions(model), instruction: { part: instruction, attachment: file, placeholder } });
 }
 
 /** The official installer of omp, by system: the script chooses bun or the binary. */

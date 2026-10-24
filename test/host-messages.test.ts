@@ -165,6 +165,14 @@ test("reworkDrift needs a Drift identity", () => {
   for (const drift of [undefined, "", "../secret", 3]) expect(parseToHost({ type: "reworkDrift", drift }).ok).toBe(false);
 });
 
+test("clearDone carries the Task identities of the Done column as they are, and needs a list of them", () => {
+  expect(ok({ type: "clearDone", tasks: ["aaaaaaaa", "bbbbbbbb"] })).toEqual({ type: "clearDone", tasks: ["aaaaaaaa", "bbbbbbbb"] });
+  expect(ok({ type: "clearDone", tasks: [] })).toEqual({ type: "clearDone", tasks: [] });
+  for (const tasks of [undefined, "aaaaaaaa", 3, null, { 0: "aaaaaaaa" }, ["aaaaaaaa", 3], ["aaaaaaaa", undefined], ["../x"], [""]]) {
+    expect(parseToHost({ type: "clearDone", tasks }).ok).toBe(false);
+  }
+});
+
 test("askMore needs a Task, Proposal or Drift identity, and a question action needs its question's ID", () => {
   expect(ok({ type: "askMore", kind: "task", id: "j6tlxyad" })).toEqual({ type: "askMore", kind: "task", id: "j6tlxyad" });
   expect(ok({ type: "askMore", kind: "drift", id: "d1d1d1d1" })).toEqual({ type: "askMore", kind: "drift", id: "d1d1d1d1" });

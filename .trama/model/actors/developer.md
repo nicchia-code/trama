@@ -68,7 +68,7 @@ L'import dal comando Import from Code è questo Event solo con un Modello che no
 Il developer sceglie Unify Drifts dal menu che si apre dalla freccetta di + Add Work Item, in fondo alla colonna Backlog, per far unire dall'agente tutti i Drift aperti fuori da ogni risoluzione in un unico Drift, che poi risolve con Resolve come ogni Drift. Serve quando più Drift toccano le stesse cose o si contraddicono, e risolverli uno alla volta li farebbe tornare. Non scrive nulla prima: l'agente gli chiede soltanto i conflitti fra i Drift (vedi Drift resolution).
 
 ### ASK_MORE
-Il developer preme Ask more per chiedere a un agente spiegazioni su una sola cosa, senza scriverne da sé il contesto: una Proposal, un Task o un Drift, dalla finestra dei loro dettagli sulla Board, oppure la domanda in vista di un round di domande aperto. Trama apre una chat nuova con omp, che riceve ciò che serve per leggere quella cosa e aspetta le domande del developer.
+Il developer preme Ask more per chiedere a un agente spiegazioni su una sola cosa, senza scriverne da sé il contesto: una Proposal, un Task o un Drift, dalla finestra dei loro dettagli sulla Board, oppure la domanda in vista di un round di domande aperto. Trama apre una chat nuova con omp, che riceve ciò che serve per leggere quella cosa insieme alla prima domanda del developer: in omp Chat non le manda nulla prima che il developer scriva.
 
 ### CLOSE_REQUEST
 Il developer chiude la scheda di una richiesta di design scritta che non ha mai inviato, quando nessun'altra scheda mostra più quella richiesta. Chiudere la finestra dell'editor con la scheda aperta non è questo Event, né lo è chiudere la scheda di una richiesta già inviata.
@@ -87,7 +87,7 @@ The developer opens the Trama panel, or brings it to the front.
 
 Anche il pulsante Reopen della notifica di domande in attesa chiede questa apertura ordinaria: se il round esiste ancora e la finestra è sul suo progetto, l'overlay si ripristina; altrimenti si apre soltanto il pannello. Senza un progetto il pannello si apre su Get Started, senza il round, che resta in attesa finché il suo progetto torna nella finestra.
 
-Il developer lo chiede con il comando Open Trama, con la voce Get Started del menu laterale in una cartella che non è un progetto Trama (vedi il Menu laterale), oppure con il logo di Trama nella barra di stato in basso a sinistra. Le voci delle viste del menu laterale e i comandi Show … aprono invece il pannello su una vista precisa (SHOW_BOARD, SHOW_DIAGRAM, SHOW_REQUIREMENTS, SHOW_SPECS, SHOW_HISTORY, SHOW_SETTINGS). Con il pannello già aperto il logo, come il comando, lo porta in primo piano tenendo la sua vista.
+Il developer lo chiede con il comando Open Trama o con la voce Get Started del menu laterale in una cartella che non è un progetto Trama (vedi il Menu laterale); nella barra di stato non c'è più un logo di Trama. Le voci delle viste del menu laterale e i comandi Show … aprono invece il pannello su una vista precisa (SHOW_BOARD, SHOW_DIAGRAM, SHOW_REQUIREMENTS, SHOW_SPECS, SHOW_HISTORY, SHOW_SETTINGS). Con il pannello già aperto il comando lo porta in primo piano tenendo la sua vista.
 
 ### CLOSE_PANEL
 The developer closes the Trama panel.
@@ -225,4 +225,4 @@ Il developer chiude la scheda di una conversazione di omp Chat, anche quella di 
 Il developer pulisce la conversazione General di omp Chat: chiude la sua scheda con l'icona di pulizia, o con Delete sulla scheda, mentre omp Chat è in uso. Se l'agente di General è in un turno, gli viene chiesto prima di confermare in un dialogo modale; annullarlo non produce nulla.
 
 ### SEND_CHAT_MESSAGE
-Il developer manda un messaggio nella conversazione General di omp Chat, scritto nel suo campo del messaggio. I messaggi delle altre conversazioni li descrive la conversazione stessa, senza questo Event.
+Il developer manda un messaggio nella conversazione General di omp Chat, scritto nel suo campo del messaggio, oppure il primo messaggio di una conversazione di Ask more ancora vuota, che porta con sé l'istruzione di Ask more. Gli altri messaggi delle conversazioni li descrive la conversazione stessa, senza questo Event.

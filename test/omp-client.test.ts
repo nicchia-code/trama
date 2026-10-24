@@ -125,14 +125,76 @@ describe.skipIf(!posix)("the turns", () => {
     const session = await client().start(launch());
     try {
       const seen = texts(session);
+      const statuses: string[] = [];
       const turn = session.sendPrompt({ text: "slow" });
       await until(() => session.inTurn && seen.includes("echo:slow"));
-      const steered = session.sendPrompt({ text: "more" });
+      const steered = session.send({ text: "more" }, "steer", (status) => statuses.push(status.status));
       await until(() => seen.includes("steered:more"));
+      expect(statuses).toEqual(["delivered"]);
       expect(session.inTurn).toBe(true);
       session.cancel();
       await Promise.all([turn, steered]);
       expect(seen.filter((line) => line.startsWith("echo:"))).toEqual(["echo:slow"]);
+    } finally {
+      await session.stop();
+    }
+  });
+
+  test("a queued message in the middle of a turn is shown and answered at the end of that turn", async () => {
+    const session = await client().start(launch());
+    try {
+      const seen = texts(session);
+      const statuses: string[] = [];
+      const turn = session.sendPrompt({ text: "slow" });
+      await until(() => session.inTurn && seen.includes("echo:slow"));
+      const queued = session.send({ text: "next" }, "queue", (status) => statuses.push(status.status));
+      await until(() => seen.includes("echo:next"));
+      expect(statuses).toEqual(["queued", "delivered"]);
+      await Promise.all([turn, queued]);
+      expect(seen.filter((line) => line.startsWith("echo:"))).toEqual(["echo:slow", "echo:next"]);
+    } finally {
+      await session.stop();
+    }
+  });
+
+  test("a message sent while a permission request waits is held until the answer, then goes on as a follow-up", async () => {
+    const session = await client().start(launch("", {}, ["--model", "m/one", "acp"]));
+    try {
+      const seen = texts(session);
+      const requests: PermissionRequest[] = [];
+      session.onPermissionRequest((request) => requests.push(request));
+      const turn = session.sendPrompt({ text: "perm" });
+      await until(() => requests.length === 1);
+      const statuses: string[] = [];
+      const held = session.send({ text: "after" }, "steer", (status) => statuses.push(status.status));
+      // A short wait on a real process: nothing has to reach omp meanwhile, and there is no event to await for that.
+      await Bun.sleep(100);
+      expect(statuses).toEqual(["queued"]);
+      expect(seen).not.toContain("echo:after");
+      session.answerPermission(requests[0]!.requestId, "once");
+      await until(() => statuses.at(-1) === "delivered");
+      await Promise.all([turn, held]);
+      expect(seen.filter((line) => line === "echo:after")).toHaveLength(1);
+    } finally {
+      await session.stop();
+    }
+  });
+
+  test("a message held for a permission request is not delivered when Stop cancels the request", async () => {
+    const session = await client().start(launch("", {}, ["--model", "m/one", "acp"]));
+    try {
+      const seen = texts(session);
+      const requests: PermissionRequest[] = [];
+      session.onPermissionRequest((request) => requests.push(request));
+      const turn = session.sendPrompt({ text: "perm" });
+      await until(() => requests.length === 1);
+      const statuses: { status: string; reason?: string }[] = [];
+      const held = session.send({ text: "lost" }, "queue", (status) => statuses.push(status));
+      session.cancel();
+      await Promise.all([turn, held]);
+      expect(statuses.map((status) => status.status)).toEqual(["queued", "failed"]);
+      expect(statuses.at(-1)?.reason).toBe("the agent stopped before the message reached it");
+      expect(seen).not.toContain("echo:lost");
     } finally {
       await session.stop();
     }

@@ -17,7 +17,7 @@ import {
   withoutSavedConversation,
   withSavedConversation,
 } from "../../../../src/core/omp-chat-conversation";
-import type { ChatViewPort, Disposable, OmpClientPort, OmpLaunch, OmpPrompt, OmpSessionPort } from "./ports";
+import type { ChatViewPort, Disposable, OmpClientPort, OmpLaunch, OmpPrompt, OmpSessionPort, PendingInstruction } from "./ports";
 
 /** What the conversations need of the rest of the host (`agent.ts`): the end of a job's work, the registry of agent processes, the dialogs and the settings. */
 export interface ConversationHooks {
@@ -72,6 +72,14 @@ interface Conversation extends ConversationInfo {
   exitListener?: Disposable;
 }
 
+/** Ask more's instruction, held for the first message of its conversation: the placeholder of the empty field, the prompt that message goes as (`compose`), and
+ * what runs as that message starts (`announce`: the work card). */
+export interface HeldInstruction {
+  placeholder: string;
+  compose(message: string): OmpPrompt;
+  announce(): void;
+}
+
 /** What opens a conversation: everything the terminal that it replaces would have been given. The job and announcement are already written by the caller under `id`. */
 export interface OpenConversation {
   id: string;
@@ -83,6 +91,8 @@ export interface OpenConversation {
   /** Ask more takes the focus; jobs do not. */
   focus: boolean;
   job?: SavedJob;
+  /** Ask more's instruction, held for the developer's first message: the conversation opens with no message of its own. */
+  instruction?: HeldInstruction;
 }
 
 export type OpenResult = { opened: true } | { opened: false; reason: string };
@@ -119,6 +129,7 @@ export class OmpConversations {
 
   /** Opens a conversation. On a failed start nothing stays open or saved, and the reason is returned: the caller sends the same instruction to a terminal. */
   async open(spec: OpenConversation): Promise<OpenResult> {
+    if (spec.instruction !== undefined) return this.openHeld(spec, spec.instruction);
     const conversation: Conversation = {
       id: spec.id,
       ...(spec.job === undefined ? {} : { jobId: spec.job.id, job: spec.job }),
@@ -144,6 +155,55 @@ export class OmpConversations {
     this.view.setWorking(conversation.id, true);
     if (conversation.idleEarly === true) this.step(conversation, { type: "agent-hook.IDLE" });
     return { opened: true };
+  }
+
+  /**
+   * Opens a conversation that waits for the developer's first message (Ask more): its tab shows at once, while omp starts, and nothing is sent. The conversation
+   * stays idle until that message, which takes the instruction: then it is saved, followed and announced as any other. A failed start leaves nothing and returns the reason.
+   */
+  private async openHeld(spec: OpenConversation, held: HeldInstruction): Promise<OpenResult> {
+    const conversation: Conversation = {
+      id: spec.id,
+      root: spec.root,
+      name: spec.name,
+      since: Date.now(),
+      state: "idle",
+      args: spec.launch.args,
+      env: savedEnv(spec.launch.env),
+      openedAt: new Date().toISOString(),
+    };
+    this.conversations.set(spec.id, conversation);
+    const instruction: PendingInstruction = {
+      placeholder: held.placeholder,
+      compose: (message) => held.compose(message),
+      sent: () => this.heldSent(conversation, held.announce),
+    };
+    this.view.open({ id: spec.id, name: spec.name }, undefined, { focus: spec.focus, instruction });
+    let session: OmpSessionPort;
+    try {
+      session = await this.client.start(spec.launch);
+    } catch (err) {
+      this.conversations.delete(spec.id);
+      this.view.close(spec.id);
+      return { opened: false, reason: messageOf(err) };
+    }
+    // The developer may have closed the tab while omp started: nothing is open to take the process then, so it is stopped.
+    if (this.conversations.get(spec.id) !== conversation) {
+      await session.stop().catch(() => undefined);
+      return { opened: true };
+    }
+    this.attach(conversation, session);
+    this.view.setSession(spec.id, session);
+    return { opened: true };
+  }
+
+  /** The first message of a held conversation starts: the conversation is working for Trama, it is saved, and its work is announced. */
+  private heldSent(conversation: Conversation, announce: () => void): void {
+    if (this.conversations.get(conversation.id) !== conversation) return;
+    conversation.state = "running";
+    this.persist(conversation);
+    this.view.setWorking(conversation.id, true);
+    announce();
   }
 
   /** `agent-hook.IDLE`: the agent of the conversation `id` says it is at rest. */

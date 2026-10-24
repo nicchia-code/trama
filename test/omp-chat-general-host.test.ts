@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { GENERAL_ID } from "../src/core/omp-chat-view";
 import { GENERAL_KEY, GeneralConversation, type GeneralDeps, type SavedGeneral } from "../extension/src/host/omp-chat/general";
 import type { ConversationStore } from "../extension/src/host/omp-chat/conversations";
-import { type ChatViewPort, type Disposable, type OmpClientPort, type OmpExit, type OmpLaunch, type OmpPrompt, OmpStartFailure, type OmpSessionPort } from "../extension/src/host/omp-chat/ports";
+import { type ChatViewPort, type Disposable, type OmpClientPort, type OmpExit, type OmpLaunch, type OmpPrompt, OmpStartFailure, type OmpSessionPort, type OutgoingMessage, type SendStatus } from "../extension/src/host/omp-chat/ports";
+import type { SendMode } from "../extension/src/omp-chat-protocol";
 import { type ChatState, initialChatState, reduce } from "../extension/src/webview/omp-chat/state";
 import { findConfiguredOmp } from "../extension/src/host/omp-update";
 
@@ -16,16 +17,24 @@ async function waitFor(done: () => boolean): Promise<void> {
   for (let i = 0; i < 200 && !done(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
 }
 
+/** A message the developer sent from General's field, in the mode the view chose. */
+const sent = (text: string, mode: SendMode = "steer"): OutgoingMessage => ({ text, mode, report: () => undefined });
+
 class FakeSession implements OmpSessionPort {
   pid: number | undefined = 4242;
   inTurn = false;
   prompts: OmpPrompt[] = [];
+  sends: { prompt: OmpPrompt; mode: SendMode }[] = [];
   cancels = 0;
   stops = 0;
   private exitListeners: ((exit: OmpExit) => void)[] = [];
   constructor(readonly sessionId: string) {}
   async sendPrompt(prompt: OmpPrompt): Promise<void> {
     this.prompts.push(prompt);
+  }
+  async send(prompt: OmpPrompt, mode: SendMode, report: (status: SendStatus) => void): Promise<void> {
+    this.sends.push({ prompt, mode });
+    report({ status: "delivered" });
   }
   cancel(): void {
     this.cancels++;
@@ -114,6 +123,7 @@ class FakeView {
   }
   removeGeneral(): void {}
   setGeneralSession(_session: OmpSessionPort | undefined): void {}
+  setSession(_id: string, _session: OmpSessionPort): void {}
   generalStatus(status: Status): void {
     this.statuses.push(status);
   }
@@ -155,6 +165,8 @@ interface Options {
   /** The configured omp path; the real lookup of `findConfiguredOmp` decides whether it resolves when `realFindOmp` is set. */
   ompPath?: string;
   realFindOmp?: boolean;
+  /** Whether the package has no General instructions file. */
+  noInstructions?: boolean;
 }
 
 function setup(options: Options = {}) {
@@ -176,6 +188,7 @@ function setup(options: Options = {}) {
     usable: () => usability.usable,
     ompPath: () => options.ompPath ?? "omp",
     findOmp: options.realFindOmp ? (ompPath) => findConfiguredOmp(ompPath, { PATH: "" }, "/nonexistent-home", false) : async () => (installed ? "/usr/local/bin/omp" : undefined),
+    instructions: () => (options.noInstructions ? undefined : "/ext/media/general.md"),
     launch: async (root, terminalId) => ({ args: ["acp"], env: { TRAMA_TERMINAL: terminalId, PI_INTENT_TRACING: "1" }, cwd: root }),
     resumeLaunch: async (root, args, env) => ({ args, env: { ...env, QUESTION_ENDPOINT: "http://endpoint" }, cwd: root }),
     endWork: (terminalId, root) => ends.push([terminalId, root]),
@@ -196,7 +209,7 @@ describe("General in the host", () => {
     await settle();
     expect(s.view.shown).toBe(1);
     expect(s.client.starts).toHaveLength(1);
-    expect(s.client.starts[0]!.args).toEqual(["acp"]);
+    expect(s.client.starts[0]!.args).toEqual(["--append-system-prompt", "/ext/media/general.md", "acp"]);
     expect(s.view.last?.phase).toBe("ready");
     expect(s.view.last?.error).toBeUndefined();
     const record = s.store.get(GENERAL_KEY) as SavedGeneral;
@@ -213,13 +226,23 @@ describe("General in the host", () => {
     expect(s.confirmations.asked).toBe(0);
   });
 
+  test("missing instructions in the package stop General before any start", async () => {
+    const s = setup({ noInstructions: true });
+    s.general.start();
+    await settle();
+    expect(s.client.starts).toHaveLength(0);
+    expect(s.client.resumes).toHaveLength(0);
+    expect(s.view.last?.phase).toBe("stopped");
+    expect(s.view.last?.error?.kind).toBe("start");
+  });
+
   test("a message after a failed start restarts General; if that fails too it comes back into the field, through the webview", async () => {
     const s = setup({ startFailures: 2 });
     s.general.start();
     await settle();
     expect(s.view.last?.phase).toBe("stopped");
     expect(s.view.last?.error?.kind).toBe("start");
-    s.view.emit("message", "hello");
+    s.view.emit("message", sent("hello"));
     await settle();
     expect(s.client.starts).toHaveLength(2);
     expect(s.view.returned).toEqual([{ id: GENERAL_ID, text: "hello" }]);
@@ -234,9 +257,22 @@ describe("General in the host", () => {
     const s = setup();
     s.general.start();
     await settle();
-    s.view.emit("message", "hi");
+    s.view.emit("message", sent("hi"));
     await settle();
     expect(s.client.sessions[0]!.prompts).toEqual([{ text: "hi" }]);
+  });
+
+  test("a message while General's agent is in a turn goes to the session in the mode the view chose", async () => {
+    const s = setup();
+    s.general.start();
+    await settle();
+    s.client.sessions[0]!.inTurn = true;
+    const statuses: string[] = [];
+    s.view.emit("message", { text: "more", mode: "queue", report: (status: SendStatus) => statuses.push(status.status) });
+    await settle();
+    expect(s.client.sessions[0]!.sends).toEqual([{ prompt: { text: "more" }, mode: "queue" }]);
+    expect(s.client.sessions[0]!.prompts).toEqual([]);
+    expect(statuses).toEqual(["delivered"]);
   });
 
   test("clear asks first when the agent is in a turn, then stops the process and starts a new session", async () => {
@@ -280,6 +316,7 @@ describe("General in the host", () => {
     expect(s.client.resumes).toHaveLength(1);
     expect(s.client.resumes[0]!.sessionId).toBe("old");
     expect(s.client.resumes[0]!.launch.env.QUESTION_ENDPOINT).toBe("http://endpoint");
+    expect(s.client.resumes[0]!.launch.args).toEqual(["--append-system-prompt", "/ext/media/general.md", "acp"]);
     expect(s.client.sessions[0]!.prompts).toEqual([]);
     expect(s.view.last?.phase).toBe("ready");
   });
@@ -302,7 +339,7 @@ describe("General in the host", () => {
     await settle();
     expect(s.view.last?.phase).toBe("stopped");
     expect(s.view.last?.error?.kind).toBe("exited");
-    s.view.emit("message", "again");
+    s.view.emit("message", sent("again"));
     await settle();
     expect(s.client.resumes).toHaveLength(1);
     expect(s.client.resumes[0]!.sessionId).toBe("s1");
@@ -319,7 +356,7 @@ describe("General in the host", () => {
     s.client.sessions.at(-1)!.exit({ code: 1, signal: null });
     await settle();
     expect(s.ends.length).toBe(2);
-    s.view.emit("message", "again");
+    s.view.emit("message", sent("again"));
     await settle();
     s.client.sessions.at(-1)!.inTurn = true;
     s.usability.usable = false;

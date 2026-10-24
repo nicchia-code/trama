@@ -144,6 +144,17 @@ test("a tool output is cut after 200 lines with the number of lines left", () =>
   expect(document.body.textContent).toContain("… 7 more lines");
 });
 
+test("a call whose title starts with a language prefix shows that language's logo before the title, which loses the prefix", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3")], selected: "a" });
+  host({ type: "conversationUpdate", id: "a", update: { sessionId: "s", update: { sessionUpdate: "tool_call", toolCallId: "t", title: "[py] print(1)", kind: "execute", status: "completed" } } });
+  const row = document.querySelector('[data-tool="t"]') as HTMLElement;
+  const button = within(row).getByRole("button");
+  expect(within(button).getByRole("img", { name: "Python" })).not.toBeNull();
+  expect(button.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+  expect(button.textContent).toBe("print(1)");
+});
+
 test("an edit shows only the file, which opens in the editor", () => {
   const { host, posted } = setup();
   host({ type: "conversations", items: [item("a", "T3")], selected: "a" });
@@ -196,7 +207,7 @@ test("Enter sends, Shift+Enter does not, Send waits for text, and Stop shows onl
   fireEvent.keyDown(field, { key: "Enter", shiftKey: true });
   expect(posted).toEqual([]);
   fireEvent.keyDown(field, { key: "Enter" });
-  expect(posted).toEqual([{ type: "sendMessage", id: "a", text: "hello" }]);
+  expect(posted).toEqual([{ type: "sendMessage", id: "a", text: "hello", messageId: expect.any(String) }]);
   expect((field as HTMLTextAreaElement).value).toBe("");
   expect(screen.getByText("hello")).not.toBeNull();
   host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
@@ -389,4 +400,50 @@ test("Stop stays available while a permission request waits", () => {
   host({ type: "conversations", items: [item("a", "T3", "waiting-permission")], selected: "a" });
   fireEvent.click(screen.getByRole("button", { name: "Stop the agent" }));
   expect(posted).toEqual([{ type: "stopAgent", id: "a" }]);
+});
+
+test("Steer or Queue is chosen for a message sent while the agent works; a queued message says so until it is delivered", () => {
+  const { host, posted } = setup();
+  host({ type: "sendMode", mode: "steer" });
+  host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
+  expect(screen.getByRole("radio", { name: "Steer" }).getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(screen.getByRole("radio", { name: "Queue" }));
+  expect(posted).toEqual([{ type: "setSendMode", mode: "queue" }]);
+  expect(screen.getByRole("radio", { name: "Queue" }).getAttribute("aria-checked")).toBe("true");
+  const field = screen.getByPlaceholderText("Message omp…");
+  fireEvent.change(field, { target: { value: "more" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  const sent = posted[1] as Extract<ToChatHost, { type: "sendMessage" }>;
+  expect(sent).toEqual({ type: "sendMessage", id: "a", text: "more", messageId: expect.any(String) });
+  host({ type: "messageStatus", id: "a", messageId: sent.messageId, status: "queued" });
+  expect(screen.getByText("Queued")).not.toBeNull();
+  host({ type: "messageStatus", id: "a", messageId: sent.messageId, status: "delivered" });
+  expect(screen.queryByText("Queued")).toBeNull();
+});
+
+test("a message that is not delivered stays in place, with the reason", () => {
+  const { host, posted } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
+  const field = screen.getByPlaceholderText("Message omp…");
+  fireEvent.change(field, { target: { value: "lost" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  const sent = posted[0] as Extract<ToChatHost, { type: "sendMessage" }>;
+  host({ type: "messageStatus", id: "a", messageId: sent.messageId, status: "failed", reason: "omp refused" });
+  expect(screen.getByText("lost")).not.toBeNull();
+  expect(screen.getByText("Not delivered: omp refused.")).not.toBeNull();
+});
+
+test("an Ask more conversation that is starting shows its placeholder and no Send until omp is up; Enter does nothing meanwhile", () => {
+  const { host, posted } = setup();
+  host({ type: "conversations", items: [{ ...item("a", "Ask"), placeholder: "Ask about T3 – Steer…", starting: true }], selected: "a" });
+  expect(screen.queryByText("Starting omp…")).not.toBeNull();
+  const field = screen.getByPlaceholderText("Ask about T3 – Steer…");
+  expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(field, { target: { value: "hello" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(posted).toEqual([]);
+  host({ type: "conversations", items: [item("a", "Ask")], selected: "a" });
+  expect(screen.queryByText("Starting omp…")).toBeNull();
+  expect(screen.getByPlaceholderText("Message omp…")).not.toBeNull();
+  expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(false);
 });

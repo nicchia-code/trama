@@ -10,6 +10,14 @@ Every icon of the panel (the glyphs on the buttons, badges and tabs, and the gen
 - License: ISC License, https://github.com/lucide-icons/lucide/blob/main/LICENSE (parts derived from Feather are under the MIT License).
 - Copyright: Lucide Icons and Contributors; Cole Bemis (Feather).
 
+## simple-icons
+
+The language and file-type logos of the tool call rows of the omp Chat view (`extension/src/webview/omp-chat/tool-logo.ts`) come from `simple-icons`, with only the logos used bundled. The logos are trademarks of their respective owners, shown only to name the language or file type.
+
+- Source: https://github.com/simple-icons/simple-icons
+- License: CC0 1.0 Universal (public domain dedication).
+- Copyright: Simple Icons Collaborators.
+
 ## shadcn/ui
 
 The panel's components (`extension/src/webview/ui/`) are copied and adapted from shadcn/ui.

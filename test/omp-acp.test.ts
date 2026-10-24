@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { modelChoices, permissionOutcome, promptBlocks, reopenMethod, startFailureReason, steeringSupported } from "../src/core/omp-acp";
+import { modelChoices, permissionOutcome, promptBlocks, reopenMethod, startFailureReason, steeringAnswer, steeringSupported } from "../src/core/omp-acp";
 
 describe("the answer to a permission request", () => {
   test("allow_always first, then allow_once, whatever the order", () => {
@@ -67,6 +67,13 @@ describe("what omp declares", () => {
     expect(steeringSupported({ _meta: { steering: { supported: true } } })).toBe(true);
     expect(steeringSupported({ _meta: {} })).toBe(false);
     expect(steeringSupported(undefined)).toBe(false);
+  });
+  test("the answer to a steering message: injected or promptRequired, anything else is a failure", () => {
+    expect(steeringAnswer({ outcome: "injected", queue: "steering" })).toBe("injected");
+    expect(steeringAnswer({ outcome: "injected", queue: "followUp" })).toBe("injected");
+    expect(steeringAnswer({ outcome: "promptRequired", queue: "steering" })).toBe("promptRequired");
+    expect(steeringAnswer({ outcome: "rejected" })).toEqual({ failed: "omp did not take the message" });
+    expect(steeringAnswer(undefined)).toEqual({ failed: "omp did not take the message" });
   });
   test("reopening a session: load first, then resume", () => {
     expect(reopenMethod({ agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } })).toBe("load");

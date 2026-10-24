@@ -75,6 +75,16 @@ export function promptBlocks(text: string, attachment?: string): ({ type: "text"
 /** Whether `initialize`'s answer declares steering (`_meta.steering.supported`). */
 export const steeringSupported = (initialized: unknown): boolean => record(record(record(initialized)?.["_meta"])?.["steering"])?.["supported"] === true;
 
+/** What omp answers to `_session/steering`: `injected` (the message is in the running turn), `promptRequired` (no turn takes it: it goes as a prompt), or why it failed. */
+export type SteeringAnswer = "injected" | "promptRequired" | { failed: string };
+
+/** Reads omp's answer to `_session/steering`; an answer that is neither outcome is a failure, not a guess. */
+export function steeringAnswer(answer: unknown): SteeringAnswer {
+  const outcome = record(answer)?.["outcome"];
+  if (outcome === "injected" || outcome === "promptRequired") return outcome;
+  return { failed: "omp did not take the message" };
+}
+
 /** How omp reopens a saved session: `session/load` when it declares `loadSession`, else `session/resume` when it declares it; undefined when it declares neither. */
 export function reopenMethod(initialized: unknown): "load" | "resume" | undefined {
   const capabilities = record(record(initialized)?.["agentCapabilities"]);

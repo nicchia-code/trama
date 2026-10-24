@@ -1,6 +1,6 @@
 import { GENERAL_ID } from "../../../../src/core/omp-chat-view";
-import type { ConversationItem, FormAnswerMessage, GeneralError, GeneralPhase, ModelChoice, ToChatWebview } from "../../omp-chat-protocol";
-import { addError, addForm, addPermission, addUserMessage, answerForm, answerPermission, applyUpdate, cancelPermission, emptyTranscript, returnMessage, settle, start, type Transcript } from "./transcript";
+import type { ConversationItem, FormAnswerMessage, GeneralError, GeneralPhase, ModelChoice, SendMode, ToChatWebview } from "../../omp-chat-protocol";
+import { addError, addForm, addPermission, addUserMessage, answerForm, answerPermission, applyUpdate, cancelPermission, emptyTranscript, returnMessage, setSendStatus, settle, start, type Transcript } from "./transcript";
 
 /** What the view knows of one conversation. */
 export interface ConversationView {
@@ -19,9 +19,11 @@ export interface ChatState {
   items: ConversationItem[];
   selected: string | undefined;
   conversations: Record<string, ConversationView>;
+  /** The Steer|Queue choice of the window, for a message sent while the agent works, in every conversation. */
+  sendMode: SendMode;
 }
 
-export const initialChatState = (): ChatState => ({ items: [], selected: undefined, conversations: {} });
+export const initialChatState = (): ChatState => ({ items: [], selected: undefined, conversations: {}, sendMode: "steer" });
 
 const fresh = (): ConversationView => ({ transcript: emptyTranscript(), models: [], focusToken: 0 });
 
@@ -39,9 +41,13 @@ export function selectedOf(state: ChatState): string | undefined {
 export function reduce(state: ChatState, message: ToChatWebview, now: number): ChatState {
   switch (message.type) {
     case "reset":
-      return initialChatState();
+      return { ...initialChatState(), sendMode: state.sendMode };
     case "theme":
       return state;
+    case "sendMode":
+      return { ...state, sendMode: message.mode };
+    case "messageStatus":
+      return change(state, message.id, (view) => ({ ...view, transcript: setSendStatus(view.transcript, message.messageId, message.status, message.reason) }));
     case "conversations": {
       const kept: Record<string, ConversationView> = {};
       for (const item of message.items) {
@@ -50,7 +56,7 @@ export function reduce(state: ChatState, message: ToChatWebview, now: number): C
         // The agent's turn ended: what was open in the conversation closes.
         kept[item.id] = before?.state === "running" && item.state !== "running" ? { ...view, transcript: settle(view.transcript, now) } : view;
       }
-      return { items: message.items, selected: message.selected, conversations: kept };
+      return { ...state, items: message.items, selected: message.selected, conversations: kept };
     }
     case "conversationStart":
       return change(state, message.id, (view) => ({
@@ -87,8 +93,8 @@ export function reduce(state: ChatState, message: ToChatWebview, now: number): C
 export const selectTab = (state: ChatState, id: string): ChatState => (state.items.some((item) => item.id === id) ? { ...state, selected: id } : state);
 
 /** The developer sent a message from the view. */
-export const sendMessage = (state: ChatState, id: string, text: string, now: number): ChatState =>
-  change(state, id, (view) => ({ ...view, transcript: addUserMessage(view.transcript, text, now) }));
+export const sendMessage = (state: ChatState, id: string, text: string, now: number, messageId: string): ChatState =>
+  change(state, id, (view) => ({ ...view, transcript: addUserMessage(view.transcript, text, now, messageId) }));
 
 /** The developer answered a form (or skipped it). */
 export const answerFormIn = (state: ChatState, id: string, requestId: string, answer: FormAnswerMessage): ChatState =>

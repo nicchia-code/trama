@@ -220,9 +220,15 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
     else root.current?.querySelector<HTMLElement>(`[data-column="${ghostColumn.current}"]`)?.focus();
   }, [ghostOf, ghostCard]);
 
+  /** A Proposal with a model shows its thinking level from the model list, so the list is asked for as soon as one has a model. */
+  const someModel = Object.keys(models.proposals).length > 0;
+  useEffect(() => {
+    if (someModel) context.post({ type: "modelSuggestionsWanted" });
+  }, [someModel]);
   const env: BoardEnv = {
     context,
     numbers,
+    models: modelList.models,
     runReason: resolve.runReason,
     showCard(key) {
       const card = [...(root.current?.querySelectorAll<HTMLElement>("[data-key]") ?? [])].find((node) => node.dataset["key"] === key);
@@ -271,9 +277,9 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
           items={[
             {
               label: "Unify Drifts",
-              tooltip: "Merge every open Drift into one Drift to resolve",
+              description: "Merge every open Drift into one Drift to resolve",
               disabled: unify.blockers.length > 0,
-              reason: unify.blockers.join(". "),
+              reason: unify.blockers.join("\n"),
               onSelect: () => context.post({ type: "launch", action: { kind: "unify-drifts" } }),
             },
           ]}

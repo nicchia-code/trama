@@ -11,9 +11,10 @@ const answerValue = z.union([z.string().max(MAX_TEXT), z.number(), z.boolean(), 
 const messages = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("ready") }),
   z.strictObject({ type: z.literal("selectConversation"), id }),
-  z.strictObject({ type: z.literal("sendMessage"), id, text: z.string().min(1).max(MAX_TEXT) }),
+  z.strictObject({ type: z.literal("sendMessage"), id, text: z.string().min(1).max(MAX_TEXT), messageId: id }),
   z.strictObject({ type: z.literal("stopAgent"), id }),
   z.strictObject({ type: z.literal("closeConversation"), id }),
+  z.strictObject({ type: z.literal("setSendMode"), mode: z.enum(["steer", "queue"]) }),
   z.strictObject({ type: z.literal("setModel"), id, model: z.string().min(1).max(500) }),
   z.strictObject({
     type: z.literal("formAnswer"),

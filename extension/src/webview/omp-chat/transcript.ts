@@ -10,7 +10,7 @@ export interface FilePlace {
 }
 
 export type Block =
-  | { kind: "user"; id: number; text: string; messageId?: string; label?: "Trama"; attachment?: { name: string; text: string } }
+  | { kind: "user"; id: number; text: string; messageId?: string; label?: "Trama"; attachment?: { name: string; text: string }; sendId?: string; delivery?: "queued" | "delivered" | "failed"; reason?: string }
   /** `done` once something else followed it or the turn ended: only then is it announced. */
   | { kind: "agent"; id: number; messageId?: string; text: string; done: boolean }
   | { kind: "thought"; id: number; text: string; startedAt: number; endedAt?: number }
@@ -19,7 +19,7 @@ export type Block =
   | { kind: "notice"; id: number; text: string }
   | { kind: "form"; id: number; form: FormView; answer?: FormAnswerMessage }
   /** A permission request: the tool call as a compact row and omp's options in omp's order; `answer` is the chosen option id, `cancelled` after Stop or closing. */
-  | { kind: "permission"; id: number; requestId: string; title: string; toolKind: ToolKind; name?: string; options: PermissionView["options"]; answer?: string; cancelled?: boolean };
+  | { kind: "permission"; id: number; requestId: string; title: string; toolKind: ToolKind; name?: string; places: FilePlace[]; options: PermissionView["options"]; answer?: string; cancelled?: boolean };
 
 export interface Transcript {
   blocks: Block[];
@@ -77,10 +77,21 @@ export function start(t: Transcript, first: FirstMessage | undefined, notice: st
   return next;
 }
 
-/** A message the developer sent from the view. */
-export function addUserMessage(t: Transcript, text: string, now: number): Transcript {
-  const next = push(t, (id) => ({ kind: "user", id, text }), now);
+/** A message the developer sent from the view; `sendId` is the id the view gave it, by which the host reports its status. */
+export function addUserMessage(t: Transcript, text: string, now: number, sendId?: string): Transcript {
+  const next = push(t, (id) => ({ kind: "user", id, text, ...(sendId === undefined ? {} : { sendId }) }), now);
   return { ...next, echoes: [...next.echoes, text] };
+}
+
+/** The host's status for a message the view sent: `queued` shows under it, `failed` says why it did not reach the agent (its echo goes), `delivered` clears it. */
+export function setSendStatus(t: Transcript, sendId: string, status: "queued" | "delivered" | "failed", reason?: string): Transcript {
+  const sent = t.blocks.find((b) => b.kind === "user" && b.sendId === sendId);
+  const echoAt = status === "failed" && sent?.kind === "user" ? t.echoes.indexOf(sent.text) : -1;
+  return {
+    ...t,
+    echoes: echoAt < 0 ? t.echoes : t.echoes.filter((_, i) => i !== echoAt),
+    blocks: t.blocks.map((b) => (b.kind === "user" && b.sendId === sendId ? { ...b, delivery: status, ...(reason === undefined ? {} : { reason }) } : b)),
+  };
 }
 
 /** A message the developer sent did not start: its block and its echo go, and the text is only in the field. */
@@ -119,7 +130,8 @@ export function addPermission(t: Transcript, request: PermissionView, now: numbe
   const known = t.blocks.find((block): block is Extract<Block, { kind: "tool" }> => block.kind === "tool" && block.toolCallId === request.toolCall.toolCallId);
   const title = request.toolCall.title ?? known?.title ?? "Tool call";
   const toolKind: ToolKind = request.toolCall.kind ?? known?.toolKind ?? "other";
-  return push(t, (id) => ({ kind: "permission", id, requestId: request.requestId, title, toolKind, ...(known?.name === undefined ? {} : { name: known.name }), options: request.options }), now);
+  const places = placesOf(request.toolCall.locations, request.toolCall.content);
+  return push(t, (id) => ({ kind: "permission", id, requestId: request.requestId, title, toolKind, ...(known?.name === undefined ? {} : { name: known.name }), places: places.length > 0 ? places : (known?.places ?? []), options: request.options }), now);
 }
 
 /** The developer chose an option: the request stays, read-only, with it. */

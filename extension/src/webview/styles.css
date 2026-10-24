@@ -132,3 +132,8 @@
 .md pre { margin: 0 0 .6em; padding: 6px 8px; overflow-x: auto; border-radius: var(--radius-sm); background: var(--muted); max-width: 100%; }
 .md pre code { padding: 0; background: none; font-size: .95em; white-space: pre; overflow-wrap: normal; }
 .md a, .md-inline a { color: var(--primary); text-decoration: underline; }
+/* Tables: the box scrolls sideways, not the panel. Cells wrap inside 20rem and set their own `break-word`, so the `anywhere` of `.md` stops at them. */
+.md .md-table { max-width: 100%; overflow-x: auto; margin: 0 0 .6em; }
+.md table { border-collapse: collapse; }
+.md th, .md td { max-width: 20rem; overflow-wrap: break-word; padding: .25em .5em; border-bottom: 1px solid var(--border); vertical-align: top; }
+.md th { font-weight: 700; background: color-mix(in oklab, var(--background), black 6%); }

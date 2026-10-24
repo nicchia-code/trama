@@ -1,5 +1,7 @@
 import type { SetupChoice, SetupMode, ToWebview } from "../../protocol";
-import { type SettingSchema, type SettingsValues, type SettingValue, settingValueError, storedValue } from "../../host/settings-schema";
+import { MODEL_ROLE_KEYS, type SettingSchema, type SettingsValues, type SettingValue, settingValueError, storedValue } from "../../host/settings-schema";
+import type { ModelSuggestion } from "../../host/model-lists";
+import { roleLabel } from "../settings/logic";
 
 /** Which wizard is open: the first setup of a folder without a project (Get Started), the settings of a project, or a project with an empty Model that carries on with a path. */
 export type WizardMode = SetupMode;
@@ -269,8 +271,14 @@ export interface SummaryRow {
 /** Where the Path summary names the way and the folder. */
 const PATH_NAMES: Record<WizardChoice, string> = { import: "Import from Code", scratch: "Start from Scratch" };
 
+/** How a value is written in the summary: a model role as `<model> · <level>` (the model alone for Default), anything else as formatValue. */
+function summaryText(setting: SettingSchema, value: unknown, models: readonly ModelSuggestion[]): string {
+  if (!MODEL_ROLE_KEYS.includes(setting.key) || typeof value !== "string" || value.trim() === "") return formatValue(setting, value);
+  return roleLabel(value.trim(), models);
+}
+
 /** The rows of the summary, grouped by step in order, from the values and the current user values. */
-export function summaryRows(schema: readonly SettingSchema[], state: WizardState, current: Readonly<Record<string, SettingsValues>>, folders: readonly { name: string; root: string }[]): SummaryRow[] {
+export function summaryRows(schema: readonly SettingSchema[], state: WizardState, current: Readonly<Record<string, SettingsValues>>, folders: readonly { name: string; root: string }[], models: readonly ModelSuggestion[] = []): SummaryRow[] {
   const rows: SummaryRow[] = [];
   for (const step of stepsOf(state)) {
     if (step === "Path") {
@@ -290,11 +298,11 @@ export function summaryRows(schema: readonly SettingSchema[], state: WizardState
         rows.push({
           step,
           title: setting.title,
-          value: formatValue(setting, effective),
+          value: summaryText(setting, effective, models),
           mono: setting.control === "text" || setting.control === "integer",
           isDefault: normalized(setting, wizard) === undefined,
           changed,
-          was: changed ? formatValue(setting, currentUser ?? setting.default) : null,
+          was: changed ? summaryText(setting, currentUser ?? setting.default, models) : null,
         });
       }
     }

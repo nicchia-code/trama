@@ -3,7 +3,7 @@
 // children, never `dangerouslySetInnerHTML` or `innerHTML`, so a text from a file cannot inject markup or script.
 //
 // Supported: paragraphs, headings, bold, italic, inline code, fenced code blocks, bulleted and numbered lists (nested
-// too), block quotes and links. Tables, images and raw HTML are not interpreted: they show as written. Anything that
+// too), block quotes, links and pipe tables. Images and raw HTML are not interpreted: they show as written. Anything that
 // cannot be read as Markdown (an unclosed `*`, a stray backtick) also shows as written.
 
 import type { ReactNode } from "react";
@@ -22,7 +22,11 @@ export type Block =
   | { t: "h"; level: number; c: Inline[] }
   | { t: "code"; lang: string; text: string }
   | { t: "quote"; c: Block[] }
-  | { t: "list"; ordered: boolean; start: number; items: Block[][] };
+  | { t: "list"; ordered: boolean; start: number; items: Block[][] }
+  | { t: "table"; align: Align[]; head: Inline[][]; rows: Inline[][][] };
+
+/** Column alignment of a table, from the colons of its separator row; a column without colons is left. */
+export type Align = "left" | "center" | "right";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Inline
@@ -278,10 +282,38 @@ const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 const QUOTE = /^ {0,3}>/;
 const ITEM = /^( *)([-*+]|\d{1,9}[.)])[ \t]+(.*)$/;
 const BLANK = /^\s*$/;
-/** A table's header row (`| a | b |`) followed by its separator row (`|---|:--:|`): tables are not supported, so their lines show as written. */
+/** A table's header row (`| a | b |`) followed by its separator row (`|:--|:-:|--:|`), as GitHub writes them. */
 const TABLE_SEPARATOR = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 const tableStart = (lines: string[], i: number): boolean =>
   (lines[i] as string).includes("|") && i + 1 < lines.length && (lines[i + 1] as string).includes("-") && TABLE_SEPARATOR.test(lines[i + 1] as string);
+
+/** The cells of one table row. Pipes split the cells, `\|` stays a pipe inside its cell, and the outer pipes are optional. */
+function tableCells(line: string): string[] {
+  const s = line.trim();
+  const cells: string[] = [];
+  let cell = "";
+  for (let k = 0; k < s.length; k++) {
+    const ch = s[k] as string;
+    if (ch === "\\" && k + 1 < s.length) {
+      cell += ch + (s[k + 1] as string);
+      k++;
+    } else if (ch === "|") {
+      cells.push(cell);
+      cell = "";
+    } else cell += ch;
+  }
+  cells.push(cell);
+  // A leading or trailing pipe leaves an empty cell at that end, which is not a column.
+  if (cells[0] === "") cells.shift();
+  if (cells.length > 1 && cells[cells.length - 1] === "") cells.pop();
+  return cells.map((c) => c.trim());
+}
+
+const alignOf = (cell: string | undefined): Align => {
+  const left = cell?.startsWith(":") ?? false;
+  const right = cell?.endsWith(":") ?? false;
+  return left && right ? "center" : right ? "right" : "left";
+};
 
 const startsBlock = (line: string): boolean => FENCE.test(line) || HEADING.test(line) || QUOTE.test(line) || ITEM.test(line);
 
@@ -376,16 +408,31 @@ function parseBlocks(lines: string[]): Block[] {
       continue;
     }
 
+    if (tableStart(lines, i)) {
+      const head = tableCells(lines[i] as string);
+      const separator = tableCells(lines[i + 1] as string);
+      const rows: string[][] = [];
+      i += 2;
+      // Body rows run to a blank line or to the next block.
+      while (i < lines.length && !BLANK.test(lines[i] as string) && !startsBlock(lines[i] as string)) {
+        rows.push(tableCells(lines[i] as string));
+        i++;
+      }
+      // Every row gets as many cells as the header: missing cells are empty, extra cells are dropped.
+      blocks.push({
+        t: "table",
+        align: head.map((_, col) => alignOf(separator[col])),
+        head: head.map((cell) => parseInline(cell)),
+        rows: rows.map((cells) => head.map((_, col) => parseInline(cells[col] ?? ""))),
+      });
+      continue;
+    }
+
     const para: string[] = [];
-    const first = i;
     // A table that follows a line of text starts a new block, so its rows keep their place.
     while (i < lines.length && !BLANK.test(lines[i] as string) && (para.length === 0 || (!startsBlock(lines[i] as string) && !tableStart(lines, i)))) {
       para.push((lines[i] as string).trimStart());
       i++;
-    }
-    if (tableStart(lines, first)) {
-      blocks.push({ t: "code", lang: "", text: lines.slice(first, i).join("\n") });
-      continue;
     }
     // Trailing spaces are kept on every line but the last: two of them make a hard break.
     blocks.push({ t: "p", c: parseInline(para.join("\n").trimEnd()) });
@@ -461,6 +508,34 @@ function blockNodes(blocks: Block[], openLink: OpenLink): ReactNode[] {
           <ul key={key}>{items}</ul>
         );
       }
+      case "table":
+        // The box scrolls sideways on its own; the panel never does. The alignment goes in `text-align`, cell by cell.
+        return (
+          <div key={key} className="md-table">
+            <table>
+              <thead>
+                <tr>
+                  {b.head.map((cell, at) => (
+                    <th key={at} style={{ textAlign: b.align[at] }}>
+                      {inlineNodes(cell, openLink)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {b.rows.map((row, at) => (
+                  <tr key={at}>
+                    {row.map((cell, col) => (
+                      <td key={col} style={{ textAlign: b.align[col] }}>
+                        {inlineNodes(cell, openLink)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
     }
   });
 }

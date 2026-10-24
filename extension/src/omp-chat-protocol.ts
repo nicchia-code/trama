@@ -11,6 +11,10 @@ export interface ConversationItem {
   id: string;
   name: string;
   state: ConversationRunState;
+  /** The text the empty message field shows, while the conversation has no message yet (Ask more's). */
+  placeholder?: string;
+  /** omp is starting: its session is not open yet, so nothing is sent. */
+  starting?: true;
   /** The model the conversation uses now, when omp says. */
   model?: string;
   /** Whether this is General's tab: always the first one, with the Clear button instead of the close button. */
@@ -54,6 +58,9 @@ export interface PermissionView {
 /** What the developer answers a form. */
 export type FormAnswerMessage = { action: "accept"; content: Record<string, string | number | boolean | string[]> } | { action: "decline" };
 
+/** How a message sent while the agent works reaches it: `steer` goes into the running turn, `queue` waits for the end of the turn. */
+export type SendMode = "steer" | "queue";
+
 /** Host -> webview. */
 export type ToChatWebview =
   /** The webview starts again from what follows: it forgets every conversation. */
@@ -77,13 +84,18 @@ export type ToChatWebview =
   /** An error of omp (a message that was not sent, a model that was not changed) shown in the conversation. */
   | { type: "conversationError"; id: string; message: string }
   /** A message the developer sent did not start: its text goes back into the field of the tab `id` (General's too), not cleared. */
-  | { type: "returnToField"; id: string; text: string };
+  | { type: "returnToField"; id: string; text: string }
+  /** The Steer|Queue choice of the view: sent when the view starts and after each change. */
+  | { type: "sendMode"; mode: SendMode }
+  /** What became of a message sent while the agent worked: `queued` until omp takes it, `delivered` once it did, `failed` with the reason. */
+  | { type: "messageStatus"; id: string; messageId: string; status: "queued" | "delivered" | "failed"; reason?: string };
 
 /** Webview -> host. */
 export type ToChatHost =
   | { type: "ready" }
   | { type: "selectConversation"; id: string }
-  | { type: "sendMessage"; id: string; text: string }
+  | { type: "sendMessage"; id: string; text: string; messageId: string }
+  | { type: "setSendMode"; mode: SendMode }
   | { type: "stopAgent"; id: string }
   | { type: "closeConversation"; id: string }
   | { type: "setModel"; id: string; model: string }

@@ -10,6 +10,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { type TagColour, tagColour, type TaskCard } from "./logic";
+import type { ModelSuggestion } from "../../host/model-lists";
 
 /** What the parts shared by the Board and the History view (reference chips, History entries) need from the view that holds them. */
 export interface ViewEnv {
@@ -22,6 +23,8 @@ export interface ViewEnv {
 export interface BoardEnv extends ViewEnv {
   /** Why a single Task's Run is disabled beyond its own waiting: a Run in progress or Drift resolution. Null when none holds. */
   runReason: string | null;
+  /** The models omp lists, with their thinking levels: a Proposal's model shows its level from them. */
+  models: readonly ModelSuggestion[];
   /** Scrolls to a card, by its key, and focuses it. */
   showCard(key: string): void;
   /** Opens the model window of a Proposal that carries Tasks. */
@@ -151,9 +154,19 @@ const TAG: Record<TagColour, string> = {
   blue: "border-blue-600 bg-blue-600/15 dark:border-blue-400 dark:bg-blue-400/15",
   green: "border-green-600 bg-green-600/15 dark:border-green-400 dark:bg-green-400/15",
   amber: "border-amber-600 bg-amber-600/15 dark:border-amber-400 dark:bg-amber-400/15",
-  fuchsia: "border-fuchsia-600 bg-fuchsia-600/15 dark:border-fuchsia-400 dark:bg-fuchsia-400/15",
+  violet: "border-violet-600 bg-violet-600/15 dark:border-violet-400 dark:bg-violet-400/15",
   cyan: "border-cyan-600 bg-cyan-600/15 dark:border-cyan-400 dark:bg-cyan-400/15",
   red: "border-red-600 bg-red-600/15 dark:border-red-400 dark:bg-red-400/15",
+};
+
+/** The left border of a tag's colour, 3 px wide: the accent of a Task card that has a tag. */
+const ACCENT: Record<TagColour, string> = {
+  blue: "border-l-blue-600 dark:border-l-blue-400",
+  green: "border-l-green-600 dark:border-l-green-400",
+  amber: "border-l-amber-600 dark:border-l-amber-400",
+  violet: "border-l-violet-600 dark:border-l-violet-400",
+  cyan: "border-l-cyan-600 dark:border-l-cyan-400",
+  red: "border-l-red-600 dark:border-l-red-400",
 };
 
 /** A tag with its text in a colour taken from that text. Not a button; it does nothing. */
@@ -172,11 +185,24 @@ export function ProposalTagChip({ tag }: { tag: ProposalTag }) {
   return <TagChip text={tag.text} tooltip={`From Proposal ${tag.proposal}: ${tag.title}`} />;
 }
 
-/** The Proposal a Task comes from, as a tag; null when the Task has none. A Proposal that is gone is named by its number or identity. */
-export function TaskProposalTag({ card }: { card: TaskCard }) {
+/** The label of the tag a Task carries from its Proposal, or null when it has none. A Proposal that is gone is named by its number or identity. */
+export function taskTagText(card: TaskCard): string | null {
   if (card.proposal === null) return null;
+  return card.proposalTag !== null ? card.proposalTag.text : `Proposal ${card.proposalName?.text ?? card.proposal}`;
+}
+
+/** The Proposal a Task comes from, as a tag; null when the Task has none. */
+export function TaskProposalTag({ card }: { card: TaskCard }) {
+  const text = taskTagText(card);
+  if (text === null) return null;
   if (card.proposalTag !== null) return <ProposalTagChip tag={card.proposalTag} />;
-  return <TagChip text={`Proposal ${card.proposalName?.text ?? card.proposal}`} tooltip={`From Proposal ${card.proposal}`} />;
+  return <TagChip text={text} tooltip={`From Proposal ${card.proposal}`} />;
+}
+
+/** The left border of a Task card: 3 px in its tag's colour when it has a tag, the normal border otherwise. */
+export function taskBorder(card: TaskCard): string {
+  const text = taskTagText(card);
+  return text === null ? "border-l-border" : `border-l-[3px] ${ACCENT[tagColour(text)]}`;
 }
 
 /** Links to the Diagram, to Requirements or to Specs, one chip per reference, each opening that tab with the focus of the reference. `navigate` replaces the page's own navigation. */

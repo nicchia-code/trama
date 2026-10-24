@@ -24,7 +24,7 @@ import { bundledUnifyInstructions } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { driftWork, driftsFinishing, localProjectJobs, onDriftResolutionChange, onProposalDelivered, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing, unifyingDrifts } from "./drift-resolution";
 import { askPreparedRound } from "./questions";
-import { askMoreSubject, askMoreTerminalName } from "./ask-more";
+import { askMorePlaceholder, askMoreSubject, askMoreTerminalName } from "./ask-more";
 import { webviewHtml } from "./html";
 import { parseToHost } from "./messages";
 import { taskImagePath, withImageUris } from "./task-images";
@@ -817,7 +817,7 @@ export class Controller implements vscode.Disposable {
       case "askMore":
         try {
           const subject = askMoreSubject(project, message.kind, message.id);
-          await openAskMore(project.root, askMoreTerminalName(project, message.kind, message.id), askMorePart(subject));
+          await openAskMore(project.root, askMoreTerminalName(project, message.kind, message.id), askMorePart(subject), askMorePlaceholder(subject));
         } catch (err) {
           this.post({ type: "error", message: describeError(err) });
         }
@@ -1146,7 +1146,8 @@ export class Controller implements vscode.Disposable {
     try {
       // A prepared question's ID is the identity of its Drift (Trama writes it so), and only a round Trama asks itself is one.
       const drift = current.agent === PREPARED_QUESTION_AGENT ? { id: asked.id, title: getDrift(project, asked.id).title } : null;
-      await openAskMore(project.root, "Ask question", askMorePart({ kind: "question", question: asked, round: current.state.questions, drift }));
+      const subject = { kind: "question" as const, question: asked, round: current.state.questions, drift };
+      await openAskMore(project.root, "Ask question", askMorePart(subject), askMorePlaceholder(subject));
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }

@@ -29,11 +29,10 @@ describe("Specs logos", () => {
     }
   });
 
-  test("the panel needs no simple-icons runtime dependency", () => {
-    const pkg = JSON.parse(readFileSync(join(import.meta.dir, "..", "package.json"), "utf8")) as Record<string, Record<string, string> | undefined>;
-    expect(pkg.dependencies?.["simple-icons"]).toBeUndefined();
-    expect(pkg.devDependencies?.["simple-icons"]).toBeUndefined();
-    expect(readFileSync(join(import.meta.dir, "..", "extension", "src", "webview", "specs", "icons.tsx"), "utf8")).not.toContain("simple-icons");
+  test("the Specs panel's own logos and icon component do not import simple-icons", () => {
+    for (const file of ["icons.tsx", "logos.ts"]) {
+      expect(readFileSync(join(import.meta.dir, "..", "extension", "src", "webview", "specs", file), "utf8")).not.toMatch(/from ["']simple-icons["']/);
+    }
   });
 
   test("a name with a logo draws it in the current colour, and one with none draws the Package icon", () => {

@@ -24,6 +24,8 @@ function ask(method: string, params: unknown): Promise<unknown> {
 let model = "m/one";
 const configOptions = () => [{ id: "model", name: "Model", category: "model", type: "select", currentValue: model, options: [{ value: "m/one", name: "One" }, { value: "m/two", name: "Two" }] }];
 let running: { id: number; sessionId: string; finish: (reason: string) => void } | undefined;
+// Messages sent with `queue: "followUp"` while a turn runs: omp shows each one and answers it at the end of that turn.
+const followUps: string[] = [];
 
 interface Block {
   type: string;
@@ -35,6 +37,7 @@ interface Params {
   prompt: Block[];
   value: string;
   mcpServers: unknown[];
+  _meta?: { steering?: { queue?: string } };
 }
 const textOf = (blocks: Block[]) => blocks.map((block) => (block.type === "text" ? block.text : `<${block.uri}>`)).join(" ");
 
@@ -59,6 +62,10 @@ async function onPrompt(id: number, params: Params) {
     setTimeout(() => turn.resolve("end_turn"), 1500);
     const reason = await turn.promise;
     running = undefined;
+    for (const text of followUps.splice(0)) {
+      update(params.sessionId, { sessionUpdate: "user_message_chunk", content: { type: "text", text } });
+      chunk(params.sessionId, `echo:${text}`);
+    }
     send({ jsonrpc: "2.0", id, result: { stopReason: reason } });
     return;
   }
@@ -92,10 +99,16 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return void onPrompt(message.id!, message.params);
     case "session/cancel":
       return running?.finish("cancelled");
-    case "_session/steering":
+    case "_session/steering": {
       if (running === undefined) return reply({ outcome: "promptRequired", queue: "steering" });
-      chunk(message.params.sessionId, `steered:${textOf(message.params.prompt)}`);
+      const text = textOf(message.params.prompt);
+      if (message.params._meta?.steering?.queue === "followUp") {
+        followUps.push(text);
+        return reply({ outcome: "injected", queue: "followUp" });
+      }
+      chunk(message.params.sessionId, `steered:${text}`);
       return reply({ outcome: "injected", queue: "steering" });
+    }
     case "session/set_config_option":
       model = message.params.value;
       return reply({ configOptions: configOptions() });

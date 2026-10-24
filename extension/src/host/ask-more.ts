@@ -74,3 +74,6 @@ export function askMoreSubject(project: Project, kind: "task" | "proposal" | "dr
 
 /** The name of the terminal Ask more opens with omp: `Ask <short number>` for a card, as the agent terminal names are written. */
 export const askMoreTerminalName = (project: Project, kind: "task" | "proposal" | "drift", id: string): string => `Ask ${cardName(project, kind, id)}`;
+
+/** The placeholder of Ask more's empty field: the card it is about, by its number (its identity when it has none) and title; a question has no number. */
+export const askMorePlaceholder = (subject: AskMoreSubject): string => (subject.kind === "question" ? "Ask about this question…" : `Ask about ${subject.number} – ${subject.title}…`);

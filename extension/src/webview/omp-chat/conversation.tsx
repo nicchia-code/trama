@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Circle, CircleCheck, Loader, Square, TriangleAlert } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ConversationItem, FormAnswerMessage } from "../../omp-chat-protocol";
+import type { ConversationItem, FormAnswerMessage, SendMode } from "../../omp-chat-protocol";
 import { Button } from "../ui/button";
 import { Combobox } from "../ui/combobox";
 import { Textarea } from "../ui/textarea";
@@ -22,12 +22,18 @@ export interface ConversationActions {
   openFile(path: string): void;
   openLink(url: string): void;
   installOmp(): void;
+  setSendMode(mode: SendMode): void;
 }
 
 /** How far from the bottom the messages may be scrolled and still follow new text. */
 const STICK_PX = 24;
 /** The message field grows to about ten lines and then scrolls. */
 const MAX_FIELD_PX = 200;
+/** The Steer|Queue choice, in the order the group shows it. */
+const SEND_MODES: { mode: SendMode; label: string }[] = [
+  { mode: "steer", label: "Steer" },
+  { mode: "queue", label: "Queue" },
+];
 
 function Plan({ plan }: { plan: NonNullable<Transcript["plan"]> }) {
   const [open, setOpen] = useState(true);
@@ -79,7 +85,7 @@ function GeneralStatusRows({ status, onInstall }: { status: NonNullable<Conversa
   );
 }
 
-function Composer({ item, view, actions }: { item: ConversationItem; view: ConversationView; actions: ConversationActions }) {
+function Composer({ item, view, actions, sendMode }: { item: ConversationItem; view: ConversationView; actions: ConversationActions; sendMode: SendMode }) {
   const [text, setText] = useState("");
   const field = useRef<HTMLTextAreaElement>(null);
   const running = item.state === "running";
@@ -100,7 +106,7 @@ function Composer({ item, view, actions }: { item: ConversationItem; view: Conve
   }, [view.returned]);
   const send = () => {
     const message = text.trim();
-    if (message === "") return;
+    if (message === "" || item.starting === true) return;
     actions.send(item.id, message);
     setText("");
   };
@@ -111,7 +117,7 @@ function Composer({ item, view, actions }: { item: ConversationItem; view: Conve
           ref={field}
           rows={1}
           value={text}
-          placeholder="Message omp…"
+          placeholder={item.placeholder ?? "Message omp…"}
           aria-label="Message omp"
           className="max-h-[200px] min-h-9 resize-none overflow-y-auto"
           onChange={(event) => setText(event.target.value)}
@@ -133,13 +139,30 @@ function Composer({ item, view, actions }: { item: ConversationItem; view: Conve
         ) : null}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button type="button" size="icon" aria-label="Send" disabled={text.trim() === ""} onClick={send}>
+            <Button type="button" size="icon" aria-label="Send" disabled={item.starting === true || text.trim() === ""} onClick={send}>
               <ArrowUp />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Send</TooltipContent>
         </Tooltip>
+        <div role="radiogroup" aria-label="When the agent is working" className="flex shrink-0 items-center rounded-md border p-0.5">
+          {SEND_MODES.map(({ mode, label }) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={sendMode === mode}
+              onClick={() => {
+                if (sendMode !== mode) actions.setSendMode(mode);
+              }}
+              className={cn("rounded-sm px-2 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring", sendMode === mode ? "bg-secondary text-secondary-foreground" : "text-muted-foreground")}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
+      {item.starting === true ? <p className="text-xs text-muted-foreground">Starting omp…</p> : null}
       <Combobox
         aria-label="Model"
         className="h-7 w-48 text-xs"
@@ -161,7 +184,7 @@ function Composer({ item, view, actions }: { item: ConversationItem; view: Conve
  * The conversation of a tab, under the tabs: the messages from top to bottom, the plan above the message field, the field always at the bottom. New text takes
  * the view down with it unless the developer scrolled up; then `Jump to latest` brings it back.
  */
-export function Conversation({ item, view, selected, actions }: { item: ConversationItem; view: ConversationView; selected: boolean; actions: ConversationActions }) {
+export function Conversation({ item, view, selected, actions, sendMode }: { item: ConversationItem; view: ConversationView; selected: boolean; actions: ConversationActions; sendMode: SendMode }) {
   const list = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(true);
   const stuckRef = useRef(true);
@@ -225,7 +248,7 @@ export function Conversation({ item, view, selected, actions }: { item: Conversa
       )}
       </div>
       {transcript.plan === undefined ? null : <Plan plan={transcript.plan} />}
-      <Composer item={item} view={view} actions={actions} />
+      <Composer item={item} view={view} actions={actions} sendMode={sendMode} />
     </div>
   );
 }

@@ -900,6 +900,15 @@ Written from `quality#omp-chat-conversation`. Use omp 18.12.6 or later with ACP 
 | Z15 | Put `"trama.ompChat": false` in the workspace settings only and reload | omp Chat stays on: only the user setting counts | ☐ |
 | Z16 | 🪙 With `trama.ompChatApproval` at `ask` (the default), ask a Quick Task agent to run a command omp asks permission for; choose an option; then ask again and press **Stop** while it waits | The request shows in the conversation as a box with the warnings colour, `omp asks permission`, the tool call row and a button per option as omp gives them, `outline` for the ones that refuse; the tab has the warnings dot while it waits. After the choice the box stays read-only with the option; after Stop it says `Cancelled`. A message written while it waits is queued and does not answer it | ☐ |
 | Z17 | 🪙 Set `"trama.ompChatApproval": "yolo"` in the user settings, open a conversation and ask for a command omp would ask about | The process is `omp … acp --yolo`, the command runs without asking and no request shows in the conversation; the omp terminal is not affected | ☐ |
+| Z18 | 🪙 With the agent working, leave the choice at **Steer** and send a message; then choose **Queue** and send another | Steer: the message is shown without a label and the agent answers it in the same turn, while it is still working. Queue: the message shows `Queued` under its bubble until the agent takes it, and it is answered after the current turn ends; the `Queued` label goes away then. Checked with omp 18.12.6: its `initialize` answer has `_meta.steering.supported: true`; the mid-turn behaviour is not run yet | ☐ |
+| Z19 | Choose **Queue**, close the window and open it again; then open a new conversation | The choice is still **Queue** in every conversation (it is saved in the window's state, not in the repository or the settings); a message sent while the agent is idle is sent as usual | ☐ |
+| Z20 | 🪙 Make a message undeliverable, for example send it while a permission request waits and then press **Stop** | The message stays in place, with `Not delivered: <reason>.` under it in the error colour; a message that is held and then discarded by Stop shows this line | ☐ |
+| Z21 | With omp Chat on, click **Ask more** on a card, and on a question of a Drift | A conversation opens at once, named `Ask <n>` (or `Ask question`), focused, with its message field empty and the transcript empty: nothing is sent yet. The placeholder is `Ask about <n> – <title>…` (a card with no short number shows its permanent identity; a question shows `Ask about this question…`). Under the field `Starting omp…` shows with **Send** disabled until omp is up, then it goes | ☐ |
+| Z22 | 🪙 In that conversation, type a question and send it; then send a second message | The transcript shows only your message: no `Trama` label and no attached file. The agent answers the card's (or the question's) instructions and your question, not your words alone. The placeholder changes to `Message omp…` only after the first message; the Board shows the announcement `work` with the name `Ask <n>` only now. The second message goes alone and is answered as any other | ☐ |
+| Z23 | Close the empty Ask more conversation with its `X`; click **Ask more** again and close the window before writing anything; reopen the window | No trace: the tab closes at once, no tab comes back after the reload, and the Board shows no announcement for it | ☐ |
+| Z24 | Set `trama.ompPath` to a script that exits at once (for example `false`) and click **Ask more** on a card | No conversation opens. The terminal `Ask <n>` opens with the instructions and runs them, as with omp Chat off; a warning shows that omp did not start. Only now does the Board show the announcement `work` | ☐ |
+| Z25 | 🪙 Open General (it starts with the window) and ask it what it is for and which command it uses for Trama work | It answers as the assistant of General for the project and for Trama (Model, Requirements, Proposal, Task, Drift, Board), uses the `trama` command line and the Trama skills for Trama work when you ask for it, and names no skill as a job. No message was sent at the start and no instruction text is shown in the conversation. Verified with omp 18.12.6 through an ACP probe: the marker of a file given with `--append-system-prompt` came back in the answer, and it did not without the option; the General start runs `omp … --append-system-prompt <file> acp` | ☐ |
+| Z26 | 🪙 Reload the window, then send a message in General | General comes back with its saved session (the `sessionId` of the record) and the agent still answers as the assistant of General, so the option is added again on resume; the saved arguments in the workspace state do not contain `--append-system-prompt` | ☐ |
 
 ---
 
@@ -917,6 +926,23 @@ Written from `ui#menu-laterale` and `tech#menu-laterale`. Try it in VS Code 1.10
 | AA6 | Click **Scan System** with the panel closed | The agent's scan starts as the old Board button started it (conversation or terminal), the panel does not open and the focus stays where it was; the count `· N` restarts. With `"trama.advisorScanner": true` the button stays, disabled, with no number, and its tooltip says the Advisor Scanner checks the code during Runs | ☐ |
 | AA7 | Edit a skill by hand, then click **Board** | The panel opens at once; shortly after, the skills are brought in line and a short notice says so; with everything in line nothing is said. **Scan System** and **Open Folder** do not check the skills | ☐ |
 | AA8 | In a folder with no project run **Trama: Show Board** | It does what **Open Trama** does | ☐ |
+
+---
+
+## AB. Thinking levels and language
+
+Written from the Requirements. Set the model roles in user settings and remove them at the end.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| AB1 | 🪙 With omp 18.12 installed, set `"trama.scan": "anthropic/claude-haiku-4-5:high"` in user settings; open Settings | The `trama.scan` field shows `anthropic/claude-haiku-4-5` and a level Select with `high`; a Scan System launch passes the whole value to `--model` | ☐ |
+| AB2 | With omp installed, open Settings and type a model name that omp does not list in `trama.analysis` | No level Select beside the typed name; the Combobox takes the whole row | ☐ |
+| AB3 | In the level Select of a model role, choose `Default` | The setting becomes the model alone, with no `:` | ☐ |
+| AB4 | Open the `trama.language` field in Settings | The field is disabled, shows `Disabled for now: agents write in English.` and shows no workspace override notice | ☐ |
+| AB5 | With a Proposal whose model has a level, open the Board, then the model window of that Proposal | The card shows `<model> · <level>`; the window shows the model in its field and the level in a Select beside it | ☐ |
+
+Not verified: the `--slow` option and the Advisor Scanner overlay (`modelRoles.advisor`) with a suffixed value, which omp 18.12.6 did not check at startup; a level changed in the model of an omp Chat conversation mid-session keeps the thinking level the conversation already has.
+
 
 ---
 

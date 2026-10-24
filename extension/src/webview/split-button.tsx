@@ -14,8 +14,12 @@ function Tip({ text, children }: { text: string | null | undefined; children: Re
   );
 }
 
-/** One item of the menu the arrow opens. A disabled item stays in the menu, shows `reason` as its tooltip and accessible description, keeps the menu open and does nothing. */
-export type SplitItem = { label: string; tooltip: string; onSelect: () => void; disabled?: boolean; reason?: string };
+/**
+ * One item of the menu the arrow opens. An item has no tooltip: `description`, if any, is only its accessible description.
+ * A disabled item stays in the menu, shows `reason` under its label and as its accessible description, keeps the menu open
+ * and does nothing. `reason` holds one reason per line, separated by newlines.
+ */
+export type SplitItem = { label: string; description?: string; onSelect: () => void; disabled?: boolean; reason?: string };
 
 /**
  * The one split button of the webview: the main button on the left and, joined to it, an icon-only arrow that opens a menu.
@@ -88,21 +92,25 @@ export function SplitButton({
             <DropdownMenuTrigger asChild>{arrow}</DropdownMenuTrigger>
           </Tip>
           <DropdownMenuContent side={side} align="end">
-            {items.map((item) =>
-              item.disabled === true ? (
-                <Tip key={item.label} text={item.reason ?? item.tooltip}>
-                  <span className="block">
-                    <DropdownMenuItem disabled aria-disabled="true" aria-description={item.reason ?? item.tooltip} onSelect={(event) => event.preventDefault()}>
-                      {item.label}
-                    </DropdownMenuItem>
-                  </span>
-                </Tip>
-              ) : (
-                <Tip key={item.label} text={item.tooltip}>
-                  <DropdownMenuItem onSelect={item.onSelect}>{item.label}</DropdownMenuItem>
-                </Tip>
-              ),
-            )}
+            {items.map((item) => {
+              if (item.disabled !== true)
+                return (
+                  <DropdownMenuItem key={item.label} aria-description={item.description} onSelect={item.onSelect}>
+                    {item.label}
+                  </DropdownMenuItem>
+                );
+              const reasons = (item.reason ?? "").split("\n").filter((line) => line !== "");
+              return (
+                <DropdownMenuItem key={item.label} disabled aria-label={item.label} aria-disabled="true" aria-description={reasons.join(". ") || undefined} className="flex-col items-start gap-0.5" onSelect={(event) => event.preventDefault()}>
+                  <span>{item.label}</span>
+                  {reasons.map((reason) => (
+                    <span key={reason} className="text-xs font-normal text-muted-foreground">
+                      {reason}
+                    </span>
+                  ))}
+                </DropdownMenuItem>
+              );
+            })}
           </DropdownMenuContent>
         </DropdownMenu>
       )}

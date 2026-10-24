@@ -23,3 +23,6 @@ export const bundledUnifyInstructions = (extensionPath = packagePath()): string 
 
 /** The fixed instructions of Ask more, shipped in this extension's package (`media/ask-more.md`); undefined when the package has none. */
 export const bundledAskMoreInstructions = (extensionPath = packagePath()): string | undefined => shipped(extensionPath, "media", "ask-more.md");
+
+/** The fixed instructions of General, shipped in this extension's package (`media/general.md`); undefined when the package has none. */
+export const bundledGeneralInstructions = (extensionPath = packagePath()): string | undefined => shipped(extensionPath, "media", "general.md");

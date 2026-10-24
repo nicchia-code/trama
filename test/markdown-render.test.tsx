@@ -48,3 +48,34 @@ test("InlineMarkdown renders only inline formatting, in one line", () => {
   expect(span.querySelector("strong")?.textContent).toBe("b");
   expect(span.textContent).toBe("a b # not a heading");
 });
+
+test("a table renders as a box around a table, with the alignment of each column in text-align", () => {
+  const opened: string[] = [];
+  const { container } = render(
+    <Markdown source={"| Name | Note | Count |\n|:--|:-:|--:|\n| **bold** | [docs](https://example.com/a) | 3 |\n| short |"} openLink={(url) => opened.push(url)} />,
+  );
+  const box = container.querySelector("div.md > div.md-table") as HTMLElement;
+  expect(box.querySelector("table")).not.toBeNull();
+  const heads = Array.from(box.querySelectorAll<HTMLElement>("thead th"));
+  expect(heads.map((th) => th.textContent)).toEqual(["Name", "Note", "Count"]);
+  expect(heads.map((th) => th.style.textAlign)).toEqual(["left", "center", "right"]);
+  const rows = Array.from(box.querySelectorAll("tbody tr"));
+  expect(rows).toHaveLength(2);
+  const first = Array.from(rows[0]!.querySelectorAll<HTMLElement>("td"));
+  expect(first[0]?.querySelector("strong")?.textContent).toBe("bold");
+  expect(first.map((td) => td.style.textAlign)).toEqual(["left", "center", "right"]);
+  const link = first[1]?.querySelector("a") as HTMLAnchorElement;
+  expect(link.title).toBe("https://example.com/a");
+  fireEvent.click(link);
+  expect(opened).toEqual(["https://example.com/a"]);
+  expect(Array.from(rows[1]!.querySelectorAll("td"))).toHaveLength(3);
+});
+
+test("a malformed table shows as written, and raw HTML in a table cell is text", () => {
+  const { container } = render(<Markdown source={"| a | b |\n| <b>c</b> | d |\n\n| x |\n|---|\n| <img src=x onerror=alert(1)> |"} openLink={() => {}} />);
+  expect(container.querySelectorAll("table")).toHaveLength(1);
+  expect(container.querySelector("b")).toBeNull();
+  expect(container.querySelector("img")).toBeNull();
+  expect(container.querySelector("td")?.textContent).toBe("<img src=x onerror=alert(1)>");
+  expect(container.textContent).toContain("| a | b | | <b>c</b> | d |");
+});

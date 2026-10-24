@@ -8,6 +8,7 @@ import type { ToChatWebview } from "../../omp-chat-protocol";
 import type { ThemeSetting } from "../../webview/theme";
 import { settings } from "../agent";
 import { webviewHtml } from "../html";
+import type { SendModeStore } from "./send-mode";
 import { type ChatSurface, ChatViewModel } from "./view-model";
 
 /** The identities of the view and of the context key (`tech#omp-chat`). */
@@ -38,8 +39,9 @@ export class OmpChatView implements vscode.WebviewViewProvider, vscode.Disposabl
     private readonly extensionUri: vscode.Uri,
     private readonly root: () => string | undefined,
     pending: () => readonly string[],
+    sendModes: SendModeStore,
   ) {
-    this.model = new ChatViewModel(this.surface(), ompChatOn, pending, () => this.root() !== undefined);
+    this.model = new ChatViewModel(this.surface(), ompChatOn, pending, () => this.root() !== undefined, sendModes);
   }
 
   /** Registers the provider for the view. */

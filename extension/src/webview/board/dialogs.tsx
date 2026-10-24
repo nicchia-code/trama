@@ -1,9 +1,10 @@
-import { MessageCircleQuestion, X } from "lucide-react";
+import { MessageCircleQuestion, Tag, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ModelSuggestion } from "../../host/model-lists";
 import { DriftCompare, RecurringBadge, UnifiedBadge, UnifiesList } from "../diagram/panel";
 import { Markdown } from "../markdown";
-import { modelOptions } from "../settings/logic";
+import { composeRoleValue, DEFAULT_LEVEL, modelOptions, splitRoleValue, thinkingLevels, withModel } from "../settings/logic";
+import { ThinkingLevelSelect } from "../settings/thinking-level";
 import { TaskImages } from "../task-images";
 import { ComboboxInput } from "../ui/combobox";
 import { Badge } from "../ui/badge";
@@ -11,7 +12,7 @@ import { Button } from "../ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { type AnnouncedCard, type DriftCard, type ProposalCard, runningFor, type TaskCard } from "./logic";
 import { NotBlocking } from "./cards";
-import { RefChips, Tip, TaskProposalTag, useBoardEnv } from "./parts";
+import { RefChips, Tip, TaskProposalTag, taskTagText, useBoardEnv } from "./parts";
 
 /** Focus goes to Close when a read-only window opens, and back to the card's title when it closes (the default). */
 const focusClose = (event: Event) => {
@@ -79,18 +80,33 @@ export function TaskDetailsDialog({ card, onClose }: { card: TaskCard | undefine
           <DialogHeader>
             <DialogTitle className="text-[15px] leading-snug break-words">{`${card.name.text} ${card.title}`}</DialogTitle>
           </DialogHeader>
-          {card.proposal === null ? null : (
-            <div className="flex flex-wrap gap-1.5">
-              <TaskProposalTag card={card} />
-            </div>
-          )}
           {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
           {card.body.trim() === "" ? <p className="text-muted-foreground">This Task has no description.</p> : <Markdown source={card.body} openLink={env.context.openLink} />}
           <TaskImages images={card.images} open={(name) => env.openTaskImage(card.id, name)} />
+          <TaskTagToggle card={card} />
           <DetailsFooter kind="task" id={card.id} name={card.name.text} />
         </DialogContent>
       )}
     </Dialog>
+  );
+}
+
+/** The Task's tag, out of sight until the developer asks for it: a toggle under the details. Its row starts closed each time the details open, as the toggle is inside the dialog's content. */
+function TaskTagToggle({ card }: { card: TaskCard }) {
+  const [open, setOpen] = useState(false);
+  if (taskTagText(card) === null) return null;
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Tag />
+        {open ? "Hide tags" : "Show tags"}
+      </Button>
+      {open ? (
+        <div className="flex flex-wrap gap-1.5">
+          <TaskProposalTag card={card} />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -204,6 +220,9 @@ export interface ModelList {
  */
 export function ModelDialog({ card, list, onClose }: { card: ProposalCard | undefined; list: ModelList; onClose: () => void }) {
   const { context } = useBoardEnv();
+  const saved = card?.model?.name ?? "";
+  const role = splitRoleValue(saved, list.models);
+  const levels = thinkingLevels(list.models, role.model);
   return (
     <Dialog open={card !== undefined} onOpenChange={(open) => !open && onClose()}>
       {card === undefined ? null : (
@@ -215,15 +234,27 @@ export function ModelDialog({ card, list, onClose }: { card: ProposalCard | unde
           <label htmlFor="board-model-field" className="font-semibold">
             Model
           </label>
-          <ComboboxInput
-            id="board-model-field"
-            aria-label="Model"
-            aria-describedby={["board-model-hint", list.error === null ? null : "board-model-note"].filter((id) => id !== null).join(" ")}
-            placeholder="Settings roles (trama.analysis, trama.execution)"
-            options={modelOptions(list.models)}
-            value={card.model?.name ?? ""}
-            onCommit={(model) => context.post({ type: "setProposalModel", proposal: card.id, model })}
-          />
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <ComboboxInput
+                id="board-model-field"
+                aria-label="Model"
+                aria-describedby={["board-model-hint", list.error === null ? null : "board-model-note"].filter((id) => id !== null).join(" ")}
+                placeholder="Settings roles (trama.analysis, trama.execution)"
+                options={modelOptions(list.models)}
+                value={role.model}
+                onCommit={(model) => context.post({ type: "setProposalModel", proposal: card.id, model: withModel(saved, model, list.models) })}
+              />
+            </div>
+            {levels.length > 0 && (
+              <ThinkingLevelSelect
+                label="Model thinking level"
+                levels={levels}
+                value={role.level ?? DEFAULT_LEVEL}
+                onChange={(level) => context.post({ type: "setProposalModel", proposal: card.id, model: composeRoleValue(role.model, level === DEFAULT_LEVEL ? undefined : level) })}
+              />
+            )}
+          </div>
           {list.error === null ? null : (
             <p id="board-model-note" className="text-sm text-muted-foreground">
               {list.error}

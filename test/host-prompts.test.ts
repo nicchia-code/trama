@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ASK_DEVELOPER_SENTENCE, askMorePart, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, importPrompt, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, askMorePart, AUTO_EXIT_SENTENCE, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, importPrompt, instructedMessage, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
@@ -93,6 +93,10 @@ test("the Drift blocker's sentence is added on the same line only when on, and o
 
 test("every instruction carries the one ask sentence, whatever the job", () => {
   expect(ASK_DEVELOPER_SENTENCE).toBe("Ask the developer only with `trama question new`, as the skill says, never with your own question tool; run it with no time limit and wait until it ends.");
+});
+
+test("every instruction with autoExit on closes the session after one short line, with no summary", () => {
+  expect(AUTO_EXIT_SENTENCE).toBe("Trama closes this session as soon as you finish: end with one short line at most, with no summary or report.");
 });
 
 test("the Rework instruction is the Resolve one, with the trimmed feedback after it on the same line", async () => {
@@ -202,4 +206,8 @@ test("the Ask more part of a question holds the question in view in full and the
   expect(part).toContain("`trama drift show d9d9d9d9`");
   expect(part).toContain("the developer answers it in Trama");
   expect(part).not.toMatch(/selected|skipped|Your answer/i);
+});
+
+test("instructedMessage sets the instruction apart from the developer's message, which stays as written", () => {
+  expect(instructedMessage("Do the thing.", "Why?\n  two lines")).toBe("Instructions from Trama (not written by the developer):\nDo the thing.\n\nDeveloper's message:\nWhy?\n  two lines");
 });

@@ -52,6 +52,7 @@ function env(over: Partial<BoardEnv> = {}): { env: BoardEnv; calls: Calls } {
       context: { post: (message) => calls.posted.push(message), navigate: (...args: unknown[]) => calls.navigated.push(args), openLink: () => {} } as BoardEnv["context"],
       numbers,
       runReason: null,
+      models: [],
       openTask: (id) => calls.details.push(`task:${id}`),
       openDrift: (id) => calls.details.push(`drift:${id}`),
       showCard: (key) => calls.shown.push(key),
@@ -169,12 +170,26 @@ describe("Board card rendering", () => {
     expect(screen.queryByText("Blocked work")).toBeNull();
   });
 
-  test("a Task's Proposal tag names the Proposal by tooltip and accessible name; a gone Proposal is named by number", () => {
+  test("a Task card shows no Proposal tag; its left border is 3 px in its tag's colour, and the normal border without a tag", () => {
     draw(<CardView card={{ ...task, blockedByDrifts: [], proposal: "live", proposalTag: { proposal: "live", text: "Returns", title: "Returns after shipping" } }} />);
-    expect(screen.getByRole("img", { name: "From Proposal live: Returns after shipping" }).textContent).toBe("Returns");
+    expect(screen.queryByRole("img", { name: "From Proposal live: Returns after shipping" })).toBeNull();
+    expect(screen.getByRole("article").className).toMatch(/border-l-\[3px\] border-l-(blue|green|amber|violet|cyan|red)-600/);
+    expect(screen.getByRole("article").className).not.toContain("border-l-4");
     cleanup();
     draw(<CardView card={{ ...task, blockedByDrifts: [], proposal: "gone", proposalName: { text: "P9", isNumber: true } }} />);
-    expect(screen.getByRole("img", { name: "From Proposal gone" }).textContent).toBe("Proposal P9");
+    expect(screen.queryByRole("img", { name: /From Proposal/ })).toBeNull();
+    expect(screen.getByRole("article").className).toContain("border-l-[3px]");
+    cleanup();
+    draw(<CardView card={{ ...task, blockedByDrifts: [] }} />);
+    expect(screen.getByRole("article").className).toContain("border-l-border");
+    expect(screen.getByRole("article").className).not.toContain("border-l-[3px]");
+  });
+
+  test("a tagged Task taken by the agent keeps its animated border and its tag-coloured left border", () => {
+    draw(<CardView card={{ ...task, blockedByDrifts: [], column: "doing", agent: true, proposal: "live", proposalTag: { proposal: "live", text: "Returns", title: "Returns after shipping" } }} />);
+    const className = screen.getByRole("article").className;
+    expect(className).toContain("board-working");
+    expect(className).toContain("border-l-[3px]");
   });
 
   test("a Drift card shows its title, badges, Resolve and Dismiss, and the two buttons ask the host", () => {
@@ -207,7 +222,9 @@ describe("Board card rendering", () => {
     arrow.focus();
     fireEvent.keyDown(arrow, { key: "Enter" });
     expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Rework with feedback…"]);
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Rework with feedback…" }));
+    const rework = await screen.findByRole("menuitem", { name: "Rework with feedback…" });
+    expect([rework.getAttribute("aria-description"), rework.hasAttribute("title")]).toEqual(["Reject it and have the agent redo it with your feedback", false]);
+    fireEvent.click(rework);
     expect(calls.posted).toEqual([{ type: "reworkProposal", proposal: "live" }]);
     cleanup();
     const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [] } as unknown as DriftView;
@@ -323,15 +340,33 @@ describe("Run buttons say every reason that holds", () => {
 });
 
 describe("Task details", () => {
-  test("a Task window has the number and title, the Proposal's tag, the references as links, the body, and Ask more and Close only", () => {
+  test("a Task window has the number and title, the references as links, the body, the Show tags toggle, and Ask more and Close only", () => {
     const withBody = { ...task, drift: null, blockedByDrifts: [], waitingFor: [], body: "The **whole** body.", refs: ["order/Shipped"], proposal: "live", proposalTag: { proposal: "live", text: "Returns", title: "Returns after shipping" } };
     draw(<TaskDetailsDialog card={withBody} onClose={() => {}} />);
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "T3 A task" })).not.toBeNull();
-    expect(within(dialog).getByRole("img", { name: "From Proposal live: Returns after shipping" }).textContent).toBe("Returns");
+    expect(within(dialog).queryByRole("img", { name: "From Proposal live: Returns after shipping" })).toBeNull();
     expect(within(dialog).getByRole("button", { name: "order/Shipped" })).not.toBeNull();
     expect(dialog.textContent).toContain("The whole body.");
-    expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["order/Shipped", "Ask more", "Close"]);
+    expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["order/Shipped", "Show tags", "Ask more", "Close"]);
+  });
+
+  test("the Show tags toggle shows the tag with its tooltip and turns into Hide tags, and starts closed on each opening of the same Task", () => {
+    const tagged = { ...task, drift: null, blockedByDrifts: [], waitingFor: [], proposal: "live", proposalTag: { proposal: "live", text: "Returns", title: "Returns after shipping" } };
+    draw(<TaskDetailsDialog card={tagged} onClose={() => {}} />);
+    const tagImg = () => screen.queryByRole("img", { name: "From Proposal live: Returns after shipping" });
+    expect(screen.getByRole("button", { name: "Show tags" }).getAttribute("aria-expanded")).toBe("false");
+    expect(tagImg()).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show tags" }));
+    expect(screen.getByRole("button", { name: "Hide tags" }).getAttribute("aria-expanded")).toBe("true");
+    expect(tagImg()?.textContent).toBe("Returns");
+    fireEvent.click(screen.getByRole("button", { name: "Hide tags" }));
+    expect(tagImg()).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show tags" }));
+    cleanup();
+    draw(<TaskDetailsDialog card={tagged} onClose={() => {}} />);
+    expect(screen.getByRole("button", { name: "Show tags" }).getAttribute("aria-expanded")).toBe("false");
+    expect(tagImg()).toBeNull();
   });
 
   test("a Task with no body says so, and its image previews open the image through the environment", () => {
@@ -696,7 +731,9 @@ describe("The Board page", () => {
   test("an enabled Unify Drifts closes the menu and asks the host to launch it", async () => {
     const { posted } = page(snapshot());
     await openMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Unify Drifts" }));
+    const merge = screen.getByRole("menuitem", { name: "Unify Drifts" });
+    expect([merge.getAttribute("aria-description"), merge.hasAttribute("title")]).toEqual(["Merge every open Drift into one Drift to resolve", false]);
+    fireEvent.click(merge);
     expect(posted).toEqual([{ type: "launch", action: { kind: "unify-drifts" } }]);
     await waitFor(() => expect(screen.queryByRole("menuitem")).toBeNull());
   });
@@ -707,7 +744,8 @@ describe("The Board page", () => {
     expect(arrow.disabled).toBe(false);
     await openMenu();
     const item = screen.getByRole("menuitem", { name: "Unify Drifts" });
-    expect([item.getAttribute("aria-disabled"), item.getAttribute("aria-description")]).toEqual(["true", "Drifts are being resolved. Unify needs at least two open Drifts"]);
+    expect([item.getAttribute("aria-disabled"), item.getAttribute("aria-description"), item.hasAttribute("title")]).toEqual(["true", "Drifts are being resolved. Unify needs at least two open Drifts", false]);
+    expect(Array.from(item.querySelectorAll("span")).slice(1).map((line) => line.textContent)).toEqual(["Drifts are being resolved", "Unify needs at least two open Drifts"]);
     fireEvent.click(item);
     expect(screen.getByRole("menuitem", { name: "Unify Drifts" })).not.toBeNull();
     expect(posted).toEqual([]);
@@ -905,13 +943,14 @@ describe("The Done column", () => {
     expect(screen.getByRole("button", { name: "Collapse Done column" })).not.toBeNull();
   });
 
-  test("the card has the dot, the number, the Proposal tag with its tooltip and the end time, and no button but its title: its references are not on the card", () => {
+  test("the card has the dot, the number, a left border in its tag's colour and the end time, and no tag and no button but its title: its references are not on the card", () => {
     const calls = page(snapshot({ tasks: [doneView({ proposal: "prop1", proposalTag: { text: "Refunds", proposal: "prop1", title: "Refunds Proposal" }, refs: ["order/Paid"], created: "2026-10-01T10:00:00.000Z" })] }));
     open();
     const card = within(column()).getByRole("article", { name: "Task T3: Finished one" });
     expect(within(card).getByRole("img", { name: "Done" })).not.toBeNull();
     expect(within(card).getByText("T3")).not.toBeNull();
-    expect(within(card).getByRole("img", { name: "From Proposal prop1: Refunds Proposal" }).textContent).toBe("Refunds");
+    expect(within(card).queryByRole("img", { name: /From Proposal/ })).toBeNull();
+    expect(card.className).toMatch(/border-l-\[3px\] border-l-(blue|green|amber|violet|cyan|red)-600/);
     const time = card.querySelector("time") as HTMLElement;
     expect(time.textContent).toMatch(/^\d{2}:\d{2}/);
     expect(time.getAttribute("title")).toBe(new Date(finishedToday).toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" }));
@@ -1117,7 +1156,7 @@ describe("Model window of a Proposal", () => {
     const { posted } = page(snapshot({ proposals: [proposalView()] }), { models: withModels });
     expect(screen.getByRole("img", { name: "Model for this Proposal's work: anthropic/claude-opus-5-5" })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Choose the model for P2" }));
-    expect(posted).toEqual([{ type: "modelSuggestionsWanted" }]);
+    expect(posted.at(-1)).toEqual({ type: "modelSuggestionsWanted" });
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "Model for P2 A proposal" })).not.toBeNull();
     expect((within(dialog).getByRole("combobox", { name: "Model" }) as HTMLInputElement).value).toBe("anthropic/claude-opus-5-5");
@@ -1152,6 +1191,16 @@ describe("Model window of a Proposal", () => {
     expect(screen.getByRole("img", { name: "Model for this Proposal's work: gpt-5" }).className).not.toContain("line-through");
     fireEvent.click(screen.getByRole("button", { name: "Choose the model for P2" }));
     expect(screen.getByRole("dialog").textContent).not.toContain("Chosen for");
+  });
+
+  test("a model with thinking levels shows its level on the card and in the window, and the level select sits beside the model field", () => {
+    const modelList = { models: [{ value: "anthropic/x", label: "X", thinking: ["low", "high"] }], error: null };
+    page(snapshot({ proposals: [proposalView()] }), { models: { proposals: { live: { name: "anthropic/x:high" } } }, modelList });
+    expect(screen.getByRole("img", { name: "Model for this Proposal's work: anthropic/x · high" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Choose the model for P2" }));
+    const dialog = screen.getByRole("dialog");
+    expect((within(dialog).getByRole("combobox", { name: "Model" }) as HTMLInputElement).value).toBe("anthropic/x");
+    expect(within(dialog).getByRole("combobox", { name: "Model thinking level" }).textContent).toContain("high");
   });
 });
 
@@ -1194,9 +1243,9 @@ describe("Ask more in the details windows", () => {
     expect(posted).toEqual([{ type: "askMore", kind: "proposal", id: "live" }]);
     expect(screen.getByRole("dialog")).not.toBeNull();
   });
-  test("a tag, a badge and a button of a card do not open its window", () => {
+  test("a badge and a button of a card do not open its window, and a Task card shows no tag", () => {
     page(snapshot({ tasks: [taskView({ proposal: "live", proposalTag: { proposal: "live", text: "Returns", title: "Returns after shipping" } })] }));
-    fireEvent.click(screen.getByRole("img", { name: "From Proposal live: Returns after shipping" }));
+    expect(screen.queryByRole("img", { name: "From Proposal live: Returns after shipping" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Run task T3" }));
     expect(screen.queryByRole("dialog")).toBeNull();
   });

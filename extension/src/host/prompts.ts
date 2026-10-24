@@ -157,6 +157,9 @@ export const PARALLEL_EXECUTION_SENTENCE = 'The parallel execution is on: follow
 /** The sentence every instruction carries: the agent asks the developer only through `trama question new`, never with its own question tool. */
 export const ASK_DEVELOPER_SENTENCE = "Ask the developer only with `trama question new`, as the skill says, never with your own question tool; run it with no time limit and wait until it ends.";
 
+/** The sentence an instruction with a hooked job carries when `trama.autoExit` is on: the terminal closes as soon as the agent finishes, so its final report would go unread. */
+export const AUTO_EXIT_SENTENCE = "Trama closes this session as soon as you finish: end with one short line at most, with no summary or report.";
+
 /** Whether the instruction for `action` lets the agent file Drifts: scans, implementations, imports and Unify Drifts do; designs and Resolve Drifts do not. */
 export function mayFileDrifts(action: ResolvedAction): boolean {
   switch (action.kind) {
@@ -190,6 +193,11 @@ export function withAsyncDriftResolver(prompt: string, on: boolean): string {
 /** Ends an instruction with the Context Sharing sentence, on the same line, when `on`; otherwise the instruction is exactly as built. */
 export function withContextSharing(prompt: string, on: boolean): string {
   return on ? `${prompt} ${CONTEXT_SHARING_SENTENCE}` : prompt;
+}
+
+/** The text a conversation's first message goes as when Trama's instruction comes with it (Ask more, General's fallback): the instruction, then the developer's message as written. */
+export function instructedMessage(instruction: string, message: string): string {
+  return `Instructions from Trama (not written by the developer):\n${instruction}\n\nDeveloper's message:\n${message}`;
 }
 
 /** A card or a question Ask more is about, read when the developer presses it. Every identity is permanent; `number` is the short number of the card in this working copy, for the developer only. */
