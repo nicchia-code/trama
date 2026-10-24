@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { anchorIn, homeLevel, resolveElement, selectionFor, showsElement } from "../extension/src/webview/diagram/elements";
 import { type GraphSpec, sameLevel } from "../extension/src/webview/diagram/graph";
-import { breadcrumb, buildGraph, drillTarget, scanFeature, validLevel } from "../extension/src/webview/diagram/levels";
+import { breadcrumb, buildGraph, drillTarget, validLevel } from "../extension/src/webview/diagram/levels";
 import { buildScene } from "../extension/src/webview/diagram/scene";
 import { detailOfDrift } from "../extension/src/webview/diagram/details";
 import type { FileMap } from "../src/core/types";
@@ -142,15 +142,6 @@ test("levels the Scene no longer has fall back to the closest one that exists", 
   const withProposal = buildScene(proposed, proposed.proposals[0]?.id ?? "");
   expect(validLevel(withProposal, { kind: "machine", machine: "return" })).toEqual({ kind: "machine", machine: "return" });
   expect(validLevel(scene, { kind: "machine", machine: "return" })).toEqual({ kind: "system" });
-});
-
-test("a Scan started at Feature or Machine level is limited to that Feature", () => {
-  expect(scanFeature(scene, { kind: "system" })).toBeUndefined();
-  expect(scanFeature(scene, { kind: "whole" })).toBeUndefined();
-  expect(scanFeature(scene, { kind: "actor", actor: "user" })).toBeUndefined();
-  expect(scanFeature(scene, { kind: "feature", feature: "checkout" })).toBe("checkout");
-  expect(scanFeature(scene, { kind: "machine", machine: "order" })).toBe("checkout");
-  expect(scanFeature(scene, { kind: "state", machine: "order", state: "Paid" })).toBe("checkout");
 });
 
 test("only Features, Machines and States with sub-States lead further down", () => {

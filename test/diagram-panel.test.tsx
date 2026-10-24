@@ -16,7 +16,7 @@ function setup() {
   const posted: ToHost[] = [];
   const navigated: string[] = [];
   const context: ViewContext = { post: (m) => posted.push(m), navigate: (view) => navigated.push(view), openLink: () => {} };
-  store.update(snapshot, null, false);
+  store.update(snapshot, null);
   render(
     <TooltipProvider>
       <DiagramDetails store={store} context={context} />
@@ -52,7 +52,7 @@ test("a unified Drift shows its badge, a Unifies list and no buttons; a merged D
   const merged = { ...base!, id: "mergedA1", title: "Merged one", refs: ["order/Shipped"], unifiedInto: { id: "unifiedU1", title: "The unified one" } };
   const unified = { ...base!, id: "unifiedU1", title: "The unified one", refs: ["order/Shipped"], unifies: [{ id: "mergedA1", title: "Merged one" }], previous: [{ id: "p1", title: "Earlier", decision: "fix-code" as const }, { id: "p2", title: "Before", decision: "dismissed" as const }] };
   const store = createDiagramStore();
-  store.update({ ...snapshot, drifts: [unified], unifiedDrifts: [merged] }, null, false);
+  store.update({ ...snapshot, drifts: [unified], unifiedDrifts: [merged] }, null);
   render(
     <TooltipProvider>
       <DiagramDetails store={store} context={{ post: () => {}, navigate: () => {}, openLink: () => {} }} />
@@ -129,7 +129,7 @@ test("the Tasks of a Proposal show their image previews behind Show details, and
   };
   const store = createDiagramStore();
   const posted: ToHost[] = [];
-  store.update(withImages, null, false);
+  store.update(withImages, null);
   render(
     <TooltipProvider>
       <DiagramDetails store={store} context={{ post: (m) => posted.push(m), navigate: () => {}, openLink: () => {} }} />

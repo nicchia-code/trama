@@ -75,7 +75,7 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Scan System**, **Trama: Import from Code**. No initialize command (no **Trama: Initialize Project**) and no design command: design requests start only from the Board button (**Add Work Item…**). **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
+| 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Import from Code**. No **Trama: Scan System** (the whole System is scanned from **Scan System** in the side menu), no initialize command (no **Trama: Initialize Project**) and no design command: design requests start only from the Board button (**Add Work Item…**). **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
 | 2 | Run **Trama: Open** | One new editor tab titled `Trama`, in the editor area | ☐ |
 | 3 | Look at the top of the panel | No tab bar and no Settings wheel; the panel shows one view, chosen from the side menu (**Board** carries the grey number `4` there) | ☐ |
 | 4 | Look at the top of the panel | No red banner | ☐ |
@@ -115,7 +115,7 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 | 2 | Look at the box on the right | `Checkout` with the text `3 machines · ⚠ 2 drifts inside`, a **red** outline, and a small ↗ icon at its right edge | ☐ |
 | 3 | Look at the edges | Four grey edges Actor → Checkout, labelled `1` (Courier), `3` (Stripe), `3` (User), `1` (Warehouse) | ☐ |
 | 4 | Look under Checkout | Two red dashed pill nodes `Drift 0001` and `Drift 0002`, each with a dashed red edge going up to Checkout | ☐ |
-| 5 | Look at the toolbar | Left: `System`. Right: `Proposal` selector, buttons `−`, `+`, `Fit`, `Scan`. No **Add Work Item…** here: it is on the Board only | ☐ |
+| 5 | Look at the toolbar | Left: `System`. Right: `Proposal` selector, buttons `−`, `+`, `Fit`. No **Scan** and no button that starts the agent: the System is scanned from **Scan System** in the side menu. No **Add Work Item…** here: it is on the Board only | ☐ |
 | 6 | Look at the panel | `SYSTEM`, `Shop`, `An online shop selling printed books to private customers.`, then `FEATURES` with the link `Checkout` and `3 machines` under it | ☐ |
 | 7 | Look at the bottom-left legend | `Legend` (collapsible, open) with six entries: Proposal adds it, Proposal removes it, Proposal changes it, Drift, Initial State, Final State | ☐ |
 | 8 | Click the `Legend` header | It collapses to its title; click again to expand | ☐ |
@@ -502,7 +502,7 @@ For every G test, ↻ first, then open the panel and the terminal panel.
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | ↻. Board: **Keep this** under **WHAT HAPPENS** on Drift 0002 | Both Drift 0002 and Proposal 0002 leave Work Items (count 2) | ☐ |
-| 2 | Read the terminal | Exactly **one** line: ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
+| 2 | Read the terminal | No terminal opens and no agent starts: approving a Proposal launches no scan | ☐ |
 | 3 | `grep -n 'Written off' $D/model/checkout/payment.md` | A line `### Written off (final)` | ☐ |
 | 4 | `sed -n 1,8p $D/drifts/0002-*.md` | `status: resolved`, `resolution: proposal`, `proposal: "0002"` | ☐ |
 | 5 | `grep status $D/proposals/0002-*/proposal.md` | `status: approved` | ☐ |
@@ -568,17 +568,13 @@ Each launch starts a new agent terminal named after its work (cwd = the demo fol
 
 | # | Action | Expected in the terminal | ✓ |
 |---|---|---|---|
-| H1 | Board: **Scan System** | `Use the trama-scan skill on the whole System.` | ☐ |
-| H2 | Diagram, System level: **Scan** | `Use the trama-scan skill on the whole System.` | ☐ |
-| H3 | Diagram, Feature level `checkout`: **Scan** | ``Use the trama-scan skill on the Feature `checkout`.`` | ☐ |
-| H4 | Diagram, Machine level `order`: **Scan** | Same as H3 (the current Feature) | ☐ |
+| H1 | Side menu: **Scan System**, then **Scan** in the confirmation | `Use the trama-scan skill on the whole System.` | ☐ |
 | H5 | Board toolbar | Only **Scan System** is there, with no **Quick request…**, no **Add Work Item…** and no input box. No line with `Use the trama-design skill.` is ever printed by a Board button | ☐ |
 | H6 | Diagram toolbar and Requirements toolbar | Neither has **Quick request…** nor **+ Add Work Item**; the Requirements toolbar shows only the Proposal selector and the filter. **+ Add Work Item** is in the Board's Work Items column only | ☐ |
 | H10 | Board, Task 0001: **Run** | `Use the trama-implement skill on Task 0001.` | ☐ |
 | H11 | Board: **Run all** | ``Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task list --input '{"runnable":true,"max":{maxParallelAgents}}'`, one group at a time, until it says there is none.`` | ☐ |
 | H12 | Do E11.13 (the two Drifts of E11 and Task 0002 In progress), take Tasks 0005 and 0007 back with `j task move 5 doing` and `j task move 7 doing`, then look at **Run all** and at the Task card `0006`, tagged `Proposal 0003` | **Run all** is **disabled** with the tooltip and accessible description `All the Ready Tasks are blocked: Task 0001 is blocked by Drift 0006`; Task `0006` shows its tag `Proposal 0003` and the badge `blocked 0003`. Before taking the Tasks back the tooltips are `An agent is working on Tasks 0005, 0007` and `An agent is working on Task 0007`: the agent working comes first. `j task move 2 todo` enables **Run all** | ☐ |
-| H13 | Palette: **Trama: Scan System** | A quick pick with placeholder `What should the agent scan?` and two entries: `Whole System` and `Checkout` (description `checkout`) | ☐ |
-| H14 | Choose `Checkout`, then repeat and choose `Whole System` | ``…on the Feature `checkout`.`` then `…on the whole System.` | ☐ |
+| H13 | Side menu: **Scan System**, then **Scan** in the confirmation | Only one scan can be launched: the whole System, `Use the trama-scan skill on the whole System.`. No command **Trama: Scan System** exists, and no scan of a single Feature is launched by Trama | ☐ |
 | H15 | Palette: type `Trama`, look at the list | No **Quick Design Request…** and no **Add Work Item…** command: design requests start only from the Board's **+ Add Work Item** button (and, with an empty Model, the Diagram's **Import from Code** and **Start from Scratch**) | ☐ |
 | H15a | Board: click the arrow beside **+ Add Work Item** | The menu has only **Unify Drifts**; no **Add Quick Task** item is shown | ☐ |
 | H16 | After H1 to H15, open the terminal dropdown | Every launch has its own terminal, even when an earlier command with the same name has ended. Terminals are named for their work: `Scan`, `Design`, a Task's short number or `All tasks`; no terminal is reused | ☐ |
@@ -939,7 +935,7 @@ Written from `ui#menu-laterale` and `tech#menu-laterale`. Try it in VS Code 1.10
 | AA3 | In a project, read the menu from the top | **Board**, **Diagram**, **Requirements**, **Specs**, **History**, a gap, the primary **Scan System** and, at the bottom behind a line, **Settings**; every entry is as wide as the view with its icon to the left; Tab reaches them in that order and Enter or Space activates; the tooltip of each entry is `Open <name> in the Trama panel` | ☐ |
 | AA4 | With a Proposal and a Drift waiting, look at **Board** and the icon; close the sidebar and decide one card | **Board** has a badge with 2 and the name `Board, 2 awaiting a decision`; the Activity Bar icon has the badge `2` with the tooltip `2 cards await a decision`; after the decision both say 1 (`1 card awaits a decision`), and with none the badge is gone. The numbers follow the files with the panel closed | ☐ |
 | AA5 | With the panel closed click **Diagram**; then follow a reference chip to the Requirements; run **Trama: Show History** from the palette; close the panel | Each opens the panel or brings it forward on that view, and the highlighted entry (and `aria-current`) follows every change at once; with the panel closed no entry is highlighted. The sidebar is never opened, closed or moved by Trama | ☐ |
-| AA6 | Click **Scan System** with the panel closed | The agent's scan starts as the old Board button started it (conversation or terminal), the panel does not open and the focus stays where it was; the count `· N` restarts. With `"trama.advisorScanner": true` the button stays, disabled, with no number, and its tooltip says the Advisor Scanner checks the code during Runs | ☐ |
+| AA6 | Click **Scan System** with the panel closed | The agent's scan starts as the old Board button started it (conversation or terminal), the panel does not open and the focus stays where it was; the count `· N` restarts. With `"trama.advisorScanner": true` the button works the same way, with its count and the same confirmation, and the scan starts with no advisor | ☐ |
 | AA7 | Edit a skill by hand, then click **Board** | The panel opens at once; shortly after, the skills are brought in line and a short notice says so; with everything in line nothing is said. **Scan System** and **Open Folder** do not check the skills | ☐ |
 | AA8 | In a folder with no project run **Trama: Show Board** | It does what **Open Trama** does | ☐ |
 

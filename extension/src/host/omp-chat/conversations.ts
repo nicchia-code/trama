@@ -129,10 +129,10 @@ export class OmpConversations {
     return this.conversations.has(id);
   }
 
-  /** Whether `id` is a conversation of a job that has not ended (working, or waiting to resume): it is followed by its turn end, whatever its hook. */
+  /** Whether `id` is a conversation of a job that has not ended, working or waiting to resume: every conversation with Trama's hook is one, with or without a job in the registry (a job without the hook module is one too), and it is followed by its turn end. */
   followsJob(id: string): boolean {
     const conversation = this.conversations.get(id);
-    return conversation?.job !== undefined && (conversation.state === "running" || conversation.state === "waiting");
+    return conversation !== undefined && (conversation.hook || conversation.job !== undefined) && (conversation.state === "running" || conversation.state === "waiting");
   }
 
   /** The name of the conversation `id` (the one on its tab) and its project, when this window has it open. */
@@ -257,7 +257,7 @@ export class OmpConversations {
   async windowClosed(): Promise<void> {
     const stopped: Promise<void>[] = [];
     for (const conversation of [...this.conversations.values()]) {
-      if (conversation.state === "running" && conversation.job === undefined) this.persist(conversation, conversation.session?.inTurn === true ? "running" : "idle");
+      if (conversation.state === "running" && !conversation.hook) this.persist(conversation, conversation.session?.inTurn === true ? "running" : "idle");
       const stops = this.step(conversation, { type: "editor.WINDOW_CLOSED" });
       stopped.push(...stops);
     }
@@ -277,8 +277,9 @@ export class OmpConversations {
     if (unreadable.length > 0 || (this.store.get(CONVERSATIONS_KEY) !== undefined && entries.length === 0)) void this.store.update(CONVERSATIONS_KEY, entries);
     if (root !== undefined) {
       for (const lost of unreadable) {
-        if (lost.job === undefined || lost.id === undefined) continue;
-        this.hooks.endWork({ id: lost.id, jobId: lost.job.id, root, name: lost.name ?? lost.job.name, since: Date.now() }, SESSION_NOT_RESUMED_REASON);
+        // A conversation with the hook is a job's, with or without a job in the registry: its work ends as for a resume that failed.
+        if (lost.id === undefined || (lost.job === undefined && lost.hook !== true)) continue;
+        this.hooks.endWork({ id: lost.id, ...(lost.job === undefined ? {} : { jobId: lost.job.id }), root, name: lost.name ?? lost.job?.name ?? lost.id, since: Date.now() }, SESSION_NOT_RESUMED_REASON);
       }
     }
     const waiting = entries.map((entry): Conversation => {
@@ -347,7 +348,8 @@ export class OmpConversations {
       if (!current()) return;
       this.step(conversation, { type: "omp-acp.EXITED", code: exit.code, signal: exit.signal, ...(exit.details === undefined ? {} : { details: exit.details }) });
     });
-    if (conversation.job !== undefined) {
+    // A conversation with Trama's hook is a job's work whether or not it has a job in the registry, and so is a job without the hook: its turn end ends the work.
+    if (conversation.hook || conversation.job !== undefined) {
       conversation.turnListener = session.onTurnEnd((end) => {
         if (current()) this.step(conversation, { type: "omp-acp.TURN_ENDED", end });
       });

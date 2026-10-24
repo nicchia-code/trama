@@ -32,8 +32,6 @@ export interface DiagramState {
   fitTo: string[] | null;
   /** The reason Resolve Drifts is unavailable now, from the snapshot the Board also reads; null when it is available. */
   resolveBlocker: string | null;
-  /** Whether the Advisor Scanner is on: the Scan button is then disabled. */
-  advisorScanner: boolean;
   /** The Proposal refinement, as the host carries it; off when absent. */
   refinement: RefinementView;
 }
@@ -41,7 +39,7 @@ export interface DiagramState {
 export interface DiagramStore {
   get(): DiagramState;
   subscribe(listener: () => void): () => void;
-  update(snapshot: Snapshot, resolveBlocker: string | null, advisorScanner: boolean, refinement?: RefinementView): void;
+  update(snapshot: Snapshot, resolveBlocker: string | null, refinement?: RefinementView): void;
   /** Called when the tab is shown or navigated to. */
   show(options: NavigateOptions): void;
   setLevel(target: Level): void;
@@ -79,7 +77,6 @@ export function createDiagramStore(): DiagramStore {
     fit: 0,
     fitTo: null,
     resolveBlocker: null,
-    advisorScanner: false,
     refinement: REFINEMENT_OFF,
   };
   let pending: NavigateOptions | null = null;
@@ -189,10 +186,10 @@ export function createDiagramStore(): DiagramStore {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    update(snapshot, resolveBlocker, advisorScanner, refinement = REFINEMENT_OFF) {
+    update(snapshot, resolveBlocker, refinement = REFINEMENT_OFF) {
       const at = state.focus?.index ?? -1;
       const stepBefore = at >= 0 ? (state.focus?.steps[at]?.key ?? null) : null;
-      state = { ...state, snapshot, resolveBlocker, advisorScanner, refinement };
+      state = { ...state, snapshot, resolveBlocker, refinement };
       if (pending) {
         const options = pending;
         pending = null;

@@ -183,10 +183,15 @@ describe("saved conversations", () => {
     const read = readSavedConversations([withoutSession, { id: "zzz999", name: "Scan", job: { id: "j2", kind: "scan", name: "Scan" }, state: "bad" }, 42, entry]);
     expect(read.entries).toEqual([entry]);
     expect(read.unreadable).toEqual([
-      { id: "abc123", name: "T3", job: entry.job },
+      { id: "abc123", name: "T3", hook: true, job: entry.job },
       { id: "zzz999", name: "Scan", job: { id: "j2", kind: "scan", name: "Scan" } },
       {},
     ]);
+  });
+
+  test("an unreadable entry says whether it had the hook, so a conversation with no job saved still ends its work", () => {
+    const read = readSavedConversations([{ id: "abc123", name: "Design", hook: true, state: "running" }, { id: "def456", name: "Ask", hook: false }]);
+    expect(read.unreadable).toEqual([{ id: "abc123", name: "Design", hook: true }, { id: "def456", name: "Ask" }]);
   });
 
   test("anything that is not a list holds no entry; an identity is not saved twice", () => {
@@ -214,8 +219,9 @@ describe("saved conversations", () => {
   });
 
   test("the resume decision: a working conversation gets the notice and the fixed prompt, a resting one only its history", () => {
-    expect(resumeDecision({ state: "running" })).toEqual({ wasRunning: true, notice: RESUME_NOTICE, prompt: RESUME_PROMPT });
-    expect(resumeDecision({ state: "idle" })).toEqual({ wasRunning: false });
+    expect(resumeDecision({ state: "running", hook: true })).toEqual({ wasRunning: true, notice: RESUME_NOTICE, prompt: RESUME_PROMPT });
+    expect(resumeDecision({ state: "running", hook: false })).toEqual({ wasRunning: false });
+    expect(resumeDecision({ state: "idle", hook: true })).toEqual({ wasRunning: false });
     expect(RESUME_NOTICE).toBe("The window reloaded; the agent continues its work.");
     expect(RESUME_PROMPT).toBe("The editor window reloaded and stopped your work. Continue it from where it stopped.");
   });

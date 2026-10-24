@@ -6,7 +6,7 @@ import { entryName } from "../extension/src/webview/menu/logic";
 
 afterEach(cleanup);
 
-const project = (over: Partial<MenuState> = {}): MenuState => ({ situation: "project", decisions: 0, tasksSinceScan: 0, advisorScanner: false, panelView: null, ...over });
+const project = (over: Partial<MenuState> = {}): MenuState => ({ situation: "project", decisions: 0, tasksSinceScan: 0, panelView: null, ...over });
 
 function setup(state: MenuState | null) {
   const posted: ToMenuHost[] = [];
@@ -90,17 +90,15 @@ test("Scan System shows the count of Tasks since the last scan, and the count is
   expect((scan as HTMLButtonElement).disabled).toBe(false);
 });
 
-test("with the Advisor Scanner on Scan System stays in its place, disabled, with no number, and says why", () => {
-  const { posted } = setup(project({ tasksSinceScan: 4, advisorScanner: true }));
-  const scan = screen.getByRole("button", { name: /^Scan System/ }) as HTMLButtonElement;
-  expect(scan.disabled).toBe(true);
-  expect(scan.textContent).toBe("Scan System");
-  const row = document.getElementById(scan.getAttribute("aria-describedby") ?? "");
-  expect(row?.textContent).toBe("Scan is off during Runs.");
-  expect(row?.className).toContain("@max-[56px]:hidden");
+test("with the Advisor Scanner on Scan System stays enabled, with its count, and asks for the scan of the whole System", () => {
+  const { posted } = setup(project({ tasksSinceScan: 4 }));
+  const scan = screen.getByRole("button", { name: /^Scan System · 4/ }) as HTMLButtonElement;
+  expect(scan.disabled).toBe(false);
+  expect(scan.textContent).toBe("Scan System · 4");
+  expect(scan.hasAttribute("aria-describedby")).toBe(false);
   fireEvent.click(scan);
-  expect(posted).toEqual([]);
-  expect(names()).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", "Scan System. Scan is off during Runs.", "Settings"]);
+  expect(posted).toEqual([{ type: "scan" }]);
+  expect(names()).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", "Scan System · 4. 4 Tasks finished since the last scan of the System", "Settings"]);
 });
 
 test("the entry of the view the panel shows is highlighted with aria-current, and none is with the panel closed", () => {
@@ -164,15 +162,15 @@ test("icon-only mode hides the text, the badge and the count under 56 px, centre
   expect(screen.queryByRole("tooltip")).toBeNull();
 });
 
-test("Scan System shows no tooltip when focused, and no line about the Advisor Scanner while it is off", async () => {
-  setup(project({ tasksSinceScan: 4, advisorScanner: false }));
+test("Scan System shows no tooltip when focused, and no line about the Advisor Scanner", async () => {
+  setup(project({ tasksSinceScan: 4 }));
   const scan = screen.getByRole("button", { name: /^Scan System · 4/ });
   await act(async () => {
     scan.focus();
     fireEvent.focus(scan);
   });
   expect(screen.queryByRole("tooltip")).toBeNull();
-  expect(screen.queryByText("Scan is off during Runs.")).toBeNull();
+  expect(screen.queryByText(/Scan is off during Runs/)).toBeNull();
   expect(scan.hasAttribute("aria-describedby")).toBe(false);
 });
 

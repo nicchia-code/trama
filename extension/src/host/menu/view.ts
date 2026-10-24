@@ -4,7 +4,6 @@ import { boardDecisionCount } from "../../../../src/core/board-decisions";
 import { buildSnapshot } from "../../../../src/core/snapshot";
 import type { MenuSituation, MenuViewName, ToMenuWebview } from "../../menu-protocol";
 import type { AgentAction, ViewName } from "../../protocol";
-import { configuredAdvisorScanner } from "../agent";
 import { describeError } from "../controller";
 import { driftsFinishing, proposalsFinishing, tasksFinishing } from "../drift-resolution";
 import { webviewHtml } from "../html";
@@ -128,7 +127,6 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
           return undefined;
         }
       },
-      advisorScanner: configuredAdvisorScanner,
       panelView: () => this.panel.shownView,
       show: (view) => this.guarded(() => this.panel.show(view)),
       scan: () => this.guarded(() => this.panel.launch({ kind: "scan" })),

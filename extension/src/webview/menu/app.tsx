@@ -1,8 +1,7 @@
 import { FolderOpen, History, ListChecks, type LucideIcon, Network, Package, Rocket, Search, Settings, SquareKanban } from "lucide-react";
-import { useId } from "react";
 import type { MenuState, MenuViewName, ToMenuHost } from "../../menu-protocol";
 import { cn } from "../lib/utils";
-import { SCANS_OFF_TOOLTIP, scanButtonLabel } from "../scan-label";
+import { scanButtonLabel } from "../scan-label";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { ENTRY_LABELS, entryName, PROJECT_ENTRIES } from "./logic";
@@ -37,29 +36,19 @@ function Entry({ view, state, post }: { view: MenuViewName; state: MenuState; po
   );
 }
 
-/** Scan System, at the foot of the view with Settings: a ghost button as wide as the view, icon and text to the left. With the Advisor Scanner on it stays in place, disabled, and a line under it says why; the button is described by that line. */
+/** Scan System, at the foot of the view with Settings: a ghost button as wide as the view, icon and text to the left. */
 function ScanSystem({ state, post }: { state: MenuState; post: (message: ToMenuHost) => void }) {
-  const label = scanButtonLabel("Scan System", state.tasksSinceScan, state.advisorScanner);
-  const reason = useId();
+  const label = scanButtonLabel("Scan System", state.tasksSinceScan);
   return (
-    <>
-      <Button
-        variant="ghost"
-        aria-label={label.ariaLabel}
-        aria-describedby={label.disabled ? reason : undefined}
-        disabled={label.disabled}
-        className="w-full justify-start @max-[56px]:justify-center"
-        onClick={() => post({ type: "scan" })}
-      >
-        <Search aria-hidden="true" focusable="false" className="size-4" />
-        <span className="@max-[56px]:hidden">{label.text}</span>
-      </Button>
-      {label.disabled ? (
-        <p id={reason} className="px-2 text-xs text-muted-foreground @max-[56px]:hidden">
-          {SCANS_OFF_TOOLTIP}
-        </p>
-      ) : null}
-    </>
+    <Button
+      variant="ghost"
+      aria-label={label.ariaLabel}
+      className="w-full justify-start @max-[56px]:justify-center"
+      onClick={() => post({ type: "scan" })}
+    >
+      <Search aria-hidden="true" focusable="false" className="size-4" />
+      <span className="@max-[56px]:hidden">{label.text}</span>
+    </Button>
   );
 }
 

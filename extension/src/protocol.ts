@@ -45,8 +45,8 @@ export interface RunGroup {
 
 /** What the buttons can ask an external agent to do. The host turns each into a prompt for one skill. */
 export type AgentAction =
-  /** `feature` absent: the whole System. */
-  | { kind: "scan"; feature?: string }
+  /** The whole System: the only scan Trama launches, from Scan System of the side menu. */
+  | { kind: "scan" }
   | { kind: "implement"; task: string }
   /** Every Task in "todo", in order; the agent stops at the first Drift it files. `group` cuts it to one Run of a sequence. */
   | { kind: "implement-all"; group?: RunGroup }
@@ -173,8 +173,8 @@ export interface NavigateOptions {
 
 /** Host -> webview. */
 export type ToWebview =
-  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `unify.blockers` are all the reasons Unify Drifts is unavailable, in order (empty when it works), and `unify.unifying` the open Drifts the running Unify Drifts agent works on. `models` carries the models chosen for the Proposals that carry Tasks. `scans.advisorScanner`: the Advisor Scanner is on, so the Scan buttons are disabled. `refinement` is the state of the Proposal refinement (absent: off); see `RefinementView`. `runEstimate` is the time left of the Run all of this window; see `RunEstimateView`. */
-  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; scans: { advisorScanner: boolean }; refinement?: RefinementView; runEstimate: RunEstimateView }
+  /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `unify.blockers` are all the reasons Unify Drifts is unavailable, in order (empty when it works), and `unify.unifying` the open Drifts the running Unify Drifts agent works on. `models` carries the models chosen for the Proposals that carry Tasks. `refinement` is the state of the Proposal refinement (absent: off); see `RefinementView`. `runEstimate` is the time left of the Run all of this window; see `RunEstimateView`. */
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; refinement?: RefinementView; runEstimate: RunEstimateView }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** The run control stopped following a job or released a Task: the Board shows `Trama stopped following <subject>: <reason>.` (`ui#agents`). `details` are the last lines of omp's error output, shown behind `Show details`. */

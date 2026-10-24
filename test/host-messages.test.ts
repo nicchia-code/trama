@@ -15,7 +15,7 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "ready" })).toEqual({ type: "ready" });
   expect(ok({ type: "writeDesignRequest" })).toEqual({ type: "writeDesignRequest" });
   expect(parseToHost({ type: "openQuickTask" })).toEqual({ ok: false, reason: 'unknown message type "openQuickTask"' });
-  expect(ok({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ type: "launch", action: { kind: "scan", feature: "checkout" } });
+  expect(parseToHost({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ ok: false, reason: "scan takes no Feature" });
   expect(ok({ type: "launch", action: { kind: "scan" } })).toEqual({ type: "launch", action: { kind: "scan" } });
   expect(ok({ type: "launch", action: { kind: "implement", task: "0003" } })).toEqual({ type: "launch", action: { kind: "implement", task: "0003" } });
   expect(ok({ type: "launch", action: { kind: "implement-all" } })).toEqual({ type: "launch", action: { kind: "implement-all" } });

@@ -60,7 +60,6 @@ export function activate(context: vscode.ExtensionContext): void {
     // Internal: the missing-omp notice's Install omp runs it; it is not in the palette.
     vscode.commands.registerCommand("trama.installOmp", guarded(async () => trama.installOmp())),
     vscode.commands.registerCommand("trama.sendDesignRequest", guarded((uri?: vscode.Uri) => requests.send(uri))),
-    vscode.commands.registerCommand("trama.scan", guarded(() => trama.pickAndScan())),
     vscode.commands.registerCommand("trama.import", guarded(() => trama.importFromCode())),
     vscode.commands.registerCommand("trama.updateSkills", guarded(async () => trama.updateSkills())),
     watchAgentTerminal(),

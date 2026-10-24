@@ -1,0 +1,8 @@
+---
+description: "Usa quando costruisci o cambi come l'host riconosce la fine del turno di una conversazione di omp Chat di un lavoro e la chiude con trama.autoExit."
+---
+# Conversazioni di omp Chat: fine del turno
+
+## omp-acp.TURN_ENDED
+- Conversazione di un lavoro: è ogni conversazione con l'hook di Trama (il campo esplicito `hook` della conversazione e della voce salvata, come per i moduli), quindi design, Setup, rifacimento di una Proposal, import, scan, Run, Resolve Drifts, Unify Drifts e raffinamento; non lo sono Ask more e General. La presenza di un lavoro nel registro dei lavori (`job` della conversazione e della voce salvata) non decide mai se una conversazione è un lavoro: `OmpConversations.attach` ascolta `onTurnEnd` per ogni conversazione con l'hook, `OmpConversations.followsJob` risponde per ogni conversazione con l'hook in Agent running, e la chiusura della finestra, la ripresa e le voci illeggibili trattano allo stesso modo ogni conversazione con l'hook, con o senza `job`; dove c'è un `job` si finisce anche quello. Così design, Setup, rifacimento e import finiscono con `omp-acp.TURN_ENDED`, ritirano il loro annuncio e si chiudono con `trama.autoExit` acceso come scan e Run.
+- Fine del turno con una richiesta di permesso aperta: quando `session/prompt` risponde e restano richieste di permesso senza risposta, l'host le chiude come annullate e le toglie dalla vista; i messaggi del developer trattenuti dietro di loro (`queued`) partono subito come `session/prompt` di un turno nuovo, nell'ordine in cui sono stati scritti, e la fine del lavoro (`omp-acp.TURN_ENDED`) è la risposta all'ultimo di quei turni. Nessun messaggio trattenuto resta senza turno, e un turno finito non resta mai senza la sua fine.

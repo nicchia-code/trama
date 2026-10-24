@@ -616,6 +616,27 @@ describe("the window closing", () => {
     await conversations.windowClosed();
     expect(store.saved.map((e) => [e.id, e.state])).toEqual([["qqq111", "running"], ["aaa222", "idle"]]);
   });
+
+  test("a conversation with Trama's hook and no job ends its work at omp's answer, with autoExit on it closes", async () => {
+    const conversations = make();
+    await conversations.open({ ...spec, job: undefined });
+    expect(conversations.followsJob("abc123")).toBe(true);
+    client.sessions[0]?.turnEnd();
+    expect(calls.ended).toEqual([{ id: "abc123" }]);
+    expect(client.sessions[0]?.stops).toBe(1);
+    expect(view.closed).toEqual(["abc123"]);
+    expect(conversations.has("abc123")).toBe(false);
+  });
+
+  test("a conversation with Trama's hook and no job, with autoExit off, ends its work and goes to rest", async () => {
+    autoExit = false;
+    const conversations = make();
+    await conversations.open({ ...spec, job: undefined });
+    client.sessions[0]?.turnEnd();
+    expect(calls.ended).toEqual([{ id: "abc123" }]);
+    expect(view.working.get("abc123")).toBe(false);
+    expect(store.saved.map((e) => [e.id, e.state])).toEqual([["abc123", "idle"]]);
+  });
 });
 
 describe("the resume", () => {
@@ -632,6 +653,15 @@ describe("the resume", () => {
     ...patch,
   });
   const saveEntries = (...entries: unknown[]) => void store.values.set(CONVERSATIONS_KEY, entries);
+
+  test("an Ask more conversation saved as running reopens at rest, with no fixed prompt and saved as idle", async () => {
+    saveEntries(entry({ hook: false, job: undefined }));
+    const conversations = make();
+    await conversations.resume();
+    expect(client.sessions[0]?.prompts).toEqual([]);
+    expect(view.working.get("abc123")).toBe(false);
+    expect(store.saved.map((e) => [e.id, e.state])).toEqual([["abc123", "idle"]]);
+  });
 
   test("a working conversation reopens with the same arguments and identity, shows the notice and gets the fixed prompt; its Task stays held and its job stands", async () => {
     saveEntries(entry());
@@ -712,6 +742,25 @@ describe("the resume", () => {
     expect(client.resumed.map((r) => r.sessionId)).toEqual(["session-1"]);
     expect(calls.ended).toContainEqual({ id: "abc123", abnormal: "the agent's session could not be resumed" });
     expect(store.saved.map((e) => e.id)).toEqual(["def456"]);
+  });
+
+  test("an unreadable entry of a conversation with the hook and no job ends its work too; one with neither is left alone", async () => {
+    saveEntries({ id: "abc123", name: "Design", hook: true, state: "running" }, { id: "ghi789", name: "Ask", hook: false, state: "running" });
+    await make().resume();
+    expect(calls.ended).toEqual([{ id: "abc123", abnormal: "the agent's session could not be resumed" }]);
+    expect(client.resumed).toEqual([]);
+    expect(store.saved).toEqual([]);
+  });
+
+  test("a working conversation with the hook and no job resumes working with the fixed prompt and is followed to its turn end", async () => {
+    saveEntries(entry({ job: undefined }));
+    const conversations = make();
+    await conversations.resume();
+    expect(client.sessions[0]?.prompts).toEqual([{ text: RESUME_PROMPT, work: true }]);
+    expect(conversations.followsJob("abc123")).toBe(true);
+    expect(calls.restored).toEqual([]);
+    client.sessions[0]?.turnEnd();
+    expect(calls.ended).toEqual([{ id: "abc123" }]);
   });
 
   test("without an open project nothing can be resumed: every entry is lost", async () => {

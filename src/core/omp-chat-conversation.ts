@@ -231,6 +231,8 @@ export type SavedConversation = z.infer<typeof EntrySchema>;
 export interface UnreadableEntry {
   id?: string;
   name?: string;
+  /** Whether the entry says it had Trama's hook, so it is a job's even with no job saved. */
+  hook?: boolean;
   job?: SavedJob;
 }
 
@@ -255,6 +257,7 @@ export function readSavedConversations(raw: unknown): { entries: SavedConversati
     unreadable.push({
       ...(typeof loose["id"] === "string" ? { id: loose["id"] } : {}),
       ...(typeof loose["name"] === "string" ? { name: loose["name"] } : {}),
+      ...(loose["hook"] === true ? { hook: true } : {}),
       ...(job.success ? { job: job.data } : {}),
     });
   }
@@ -270,8 +273,9 @@ export function withSavedConversation(list: readonly SavedConversation[], entry:
 export const withoutSavedConversation = (list: readonly SavedConversation[], id: string): SavedConversation[] => list.filter((item) => item.id !== id);
 
 /** What the resume of a saved entry does once its session reopens: its state, and for a working one the notice and the fixed prompt. */
-export function resumeDecision(entry: Pick<SavedConversation, "state">): { wasRunning: boolean; notice?: string; prompt?: string } {
-  return entry.state === "running" ? { wasRunning: true, notice: RESUME_NOTICE, prompt: RESUME_PROMPT } : { wasRunning: false };
+export function resumeDecision(entry: Pick<SavedConversation, "state" | "hook">): { wasRunning: boolean; notice?: string; prompt?: string } {
+  // Only a conversation of a job's work (with Trama's hook) continues its work; Ask more reopens at rest, even when it was in a turn.
+  return entry.state === "running" && entry.hook ? { wasRunning: true, notice: RESUME_NOTICE, prompt: RESUME_PROMPT } : { wasRunning: false };
 }
 
 /** The error of a resume that did not answer in time. */

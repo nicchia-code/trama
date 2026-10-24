@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ASK_DEVELOPER_SENTENCE, askMorePart, AUTO_EXIT_SENTENCE, buildPrompt, buildScanPrompt, DRIFT_BLOCKER_SENTENCE, importPrompt, instructedMessage, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, askMorePart, AUTO_EXIT_SENTENCE, buildPrompt, DRIFT_BLOCKER_SENTENCE, importPrompt, instructedMessage, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
@@ -9,7 +9,6 @@ test("each action names its skill and its scope exactly", () => {
     "Use the trama-setup skill on the project request in `.trama/requests/2026-10-04T19-05-12.md`. Bind the setup Proposal you open to it with the `request` field.",
   );
   expect(buildPrompt({ kind: "scan" })).toBe("Use the trama-scan skill on the whole System.");
-  expect(buildPrompt({ kind: "scan", feature: "checkout" })).toBe("Use the trama-scan skill on the Feature `checkout`.");
   expect(buildPrompt({ kind: "implement", task: "0012" })).toBe("Use the trama-implement skill on Task 0012.");
   expect(buildPrompt({ kind: "implement-all" })).toBe(
     'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task list --input \'{"runnable":true,"max":{maxParallelAgents}}\'`, one group at a time, until it says there is none.',
@@ -26,11 +25,6 @@ test("no instruction mentions the delegation: Resolve Drifts is manual and nothi
   expect(all).not.toContain("TRAMA_JOB");
 });
 
-test("several Features are listed in backticks, comma separated", () => {
-  expect(buildScanPrompt(["checkout", "shipping"])).toBe("Use the trama-scan skill on the Features `checkout`, `shipping`.");
-  expect(buildScanPrompt([])).toBe("Use the trama-scan skill on the whole System.");
-});
-
 test("the import instruction names the excluded paths, or says every folder is imported, only when the wizard decided", () => {
   const base = "Use the trama-import skill on this repository.";
   expect(buildPrompt({ kind: "import" })).toBe(base);
@@ -45,13 +39,13 @@ test("the agent terminal is named after the work: the card's short number, or a 
   expect(terminalName({ kind: "written-design", request: "r" }, short)).toBe("Design");
   expect(terminalName({ kind: "setup-request", request: "r" }, short)).toBe("Setup");
   expect(terminalName({ kind: "resolve-drifts", drift: "ab12cd34" }, short)).toBe("Drifts");
-  expect(terminalName({ kind: "scan", feature: "checkout" }, short)).toBe("Scan");
+  expect(terminalName({ kind: "scan" }, short)).toBe("Scan");
   expect(terminalName({ kind: "implement-all" }, short)).toBe("All tasks");
   expect(terminalName({ kind: "import" }, short)).toBe("Import");
 });
 
 test("a chosen language ends the instruction on the same line, trimmed; blank asks nothing", () => {
-  const scan = buildScanPrompt(["checkout"]);
+  const scan = buildPrompt({ kind: "scan" });
   expect(withLanguage("Use the trama-scan skill on the whole System.", "  Italian ")).toBe(
     "Use the trama-scan skill on the whole System. Write everything you generate in Italian, except code, which always stays in English.",
   );
@@ -79,7 +73,6 @@ test("a Run all group cut by Proposal names its Proposals and the filter, and it
 test("the Drift blocker's sentence is added on the same line only when on, and only the instructions that may file Drifts take it", () => {
   const sentence = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
   expect(mayFileDrifts({ kind: "scan" })).toBe(true);
-  expect(mayFileDrifts({ kind: "scan", feature: "checkout" })).toBe(true);
   expect(mayFileDrifts({ kind: "implement", task: "abc" })).toBe(true);
   expect(mayFileDrifts({ kind: "implement-all" })).toBe(true);
   expect(mayFileDrifts({ kind: "import" })).toBe(true);

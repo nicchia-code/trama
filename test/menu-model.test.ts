@@ -3,18 +3,17 @@ import type { MenuSituation, ToMenuWebview } from "../extension/src/menu-protoco
 import type { ViewName } from "../extension/src/protocol";
 import { badgeTooltip, MenuModel, type MenuSurface, menuBadge, parseMenuMessage } from "../extension/src/host/menu/model";
 
-function setup(init: { situation?: MenuSituation; facts?: { decisions: number; tasksSinceScan: number } | undefined; advisor?: boolean; panel?: ViewName } = {}) {
+function setup(init: { situation?: MenuSituation; facts?: { decisions: number; tasksSinceScan: number } | undefined; panel?: ViewName } = {}) {
   const posted: ToMenuWebview[] = [];
   const badges: ({ value: number; tooltip: string } | undefined)[] = [];
   const calls: string[] = [];
-  const env = { situation: init.situation ?? "project", facts: "facts" in init ? init.facts : { decisions: 2, tasksSinceScan: 3 }, advisor: init.advisor ?? false, panel: init.panel };
+  const env = { situation: init.situation ?? "project", facts: "facts" in init ? init.facts : { decisions: 2, tasksSinceScan: 3 }, panel: init.panel };
   const surface: MenuSurface = {
     post: (message) => void posted.push(message),
     setBadge: (badge) => void badges.push(badge),
     theme: () => "dark",
     situation: () => env.situation,
     facts: () => env.facts,
-    advisorScanner: () => env.advisor,
     panelView: () => env.panel,
     show: (view) => void calls.push(`show ${view}`),
     scan: () => void calls.push("scan"),
@@ -24,10 +23,10 @@ function setup(init: { situation?: MenuSituation; facts?: { decisions: number; t
 }
 
 describe("the state the menu is sent", () => {
-  test("a project carries the cards awaiting a decision, the Tasks since the scan, the Advisor Scanner and the view of the panel", () => {
-    const { model, posted } = setup({ advisor: true, panel: "diagram" });
+  test("a project carries the cards awaiting a decision, the Tasks since the scan and the view of the panel", () => {
+    const { model, posted } = setup({ panel: "diagram" });
     model.refresh();
-    expect(posted).toEqual([{ type: "menuState", situation: "project", decisions: 2, tasksSinceScan: 3, advisorScanner: true, panelView: "diagram" }]);
+    expect(posted).toEqual([{ type: "menuState", situation: "project", decisions: 2, tasksSinceScan: 3, panelView: "diagram" }]);
   });
 
   test("with the panel closed there is no view", () => {
@@ -41,7 +40,7 @@ describe("the state the menu is sent", () => {
       const { model, posted, env } = setup({ situation });
       env.facts = undefined;
       model.refresh();
-      expect(posted).toEqual([{ type: "menuState", situation, decisions: 0, tasksSinceScan: 0, advisorScanner: false, panelView: null }]);
+      expect(posted).toEqual([{ type: "menuState", situation, decisions: 0, tasksSinceScan: 0, panelView: null }]);
     }
   });
 

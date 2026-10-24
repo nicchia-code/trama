@@ -8,7 +8,7 @@ const proposal = snapshot.proposals.find((p) => p.title === "Returns after shipp
 
 function setup() {
   const store = createDiagramStore();
-  store.update(snapshot, null, false);
+  store.update(snapshot, null);
   return store;
 }
 
@@ -81,7 +81,7 @@ const idleFiles = (events: string): FileMap =>
 
 test("a link to an Actor whose Events reach no Machine opens the root with the Actor selected", () => {
   const store = createDiagramStore();
-  store.update(snapshotOf(idleFiles("### NOPE\nx\n")), null, false);
+  store.update(snapshotOf(idleFiles("### NOPE\nx\n")), null);
   store.setLevel({ kind: "whole" });
   store.navigateRef("idle.NOPE");
   expect(store.get().level).toEqual({ kind: "system" });
@@ -94,7 +94,7 @@ test("a link to an Actor whose Events reach no Machine opens the root with the A
 
 test("a Feature opened from an Actor level remembers it down to the State; if the Actor stops reaching a Machine the level stays and the Actor leaves the breadcrumb", () => {
   const store = createDiagramStore();
-  store.update(snapshotOf(idleFiles("")), null, false);
+  store.update(snapshotOf(idleFiles("")), null);
   store.setLevel({ kind: "actor", actor: "u" });
   const feature = store.drillOf("f:a");
   expect(feature).toEqual({ kind: "feature", feature: "a", from: { kind: "actor", actor: "u" } });
@@ -105,14 +105,14 @@ test("a Feature opened from an Actor level remembers it down to the State; if th
   expect(store.get().level).toEqual({ kind: "machine", machine: "m1", from: { kind: "actor", actor: "u" } });
 
   // The Actor's Events no longer arrive anywhere.
-  store.update(snapshotOf(new Map([...idleFiles(""), ["a/m1.md", "# M1\n\n## States\n\n### X (initial)\n\n### Y\n"]])), null, false);
+  store.update(snapshotOf(new Map([...idleFiles(""), ["a/m1.md", "# M1\n\n## States\n\n### X (initial)\n\n### Y\n"]])), null);
   expect(store.get().level).toEqual({ kind: "machine", machine: "m1" });
 
   // On an Actor level that stops reaching a Machine, the root.
   const second = createDiagramStore();
-  second.update(snapshotOf(idleFiles("")), null, false);
+  second.update(snapshotOf(idleFiles("")), null);
   second.setLevel({ kind: "actor", actor: "u" });
-  second.update(snapshotOf(new Map([...idleFiles(""), ["a/m1.md", "# M1\n\n## States\n\n### X (initial)\n\n### Y\n"]])), null, false);
+  second.update(snapshotOf(new Map([...idleFiles(""), ["a/m1.md", "# M1\n\n## States\n\n### X (initial)\n\n### Y\n"]])), null);
   expect(second.get().level).toEqual({ kind: "system" });
 });
 

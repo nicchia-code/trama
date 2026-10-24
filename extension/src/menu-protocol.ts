@@ -28,8 +28,6 @@ export interface MenuState {
   decisions: number;
   /** The Tasks finished since the last scan of the whole System. */
   tasksSinceScan: number;
-  /** The Advisor Scanner is on: Scan System stays in its place, disabled. */
-  advisorScanner: boolean;
   /** The view the panel shows, or none when the panel is closed. */
   panelView: ViewName | null;
 }

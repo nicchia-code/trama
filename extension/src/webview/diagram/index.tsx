@@ -1,17 +1,15 @@
-import { Search } from "lucide-react";
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { cardLabel, noNumbers } from "../../../../src/core/card-names";
 import { REFINEMENT_OFF, refineStatus } from "../board/logic";
 import { FocusBar } from "../focus/bar";
 import type { MountView, ViewContext } from "../types";
-import { scanButtonLabel } from "../scan-label";
 import { Button } from "../ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { type Canvas, type HandleBox, createCanvas } from "./canvas";
 import { detailOfSelection, tooltipOf } from "./details";
 import { canExpand } from "./graph";
-import { breadcrumb, isEmptyModel, scanFeature } from "./levels";
+import { breadcrumb, isEmptyModel } from "./levels";
 import { ActionButton, DiagramDetails } from "./panel";
 import { type DiagramStore, createDiagramStore } from "./state";
 
@@ -153,18 +151,6 @@ export function DiagramView({ store, context }: { store: DiagramStore; context: 
   };
 
   const trail = scene ? breadcrumb(scene, level) : [];
-  const feature = scene ? scanFeature(scene, level) : undefined;
-  let scan = { text: "Scan", tooltip: "Ask an agent to scan the code against the whole System", name: "Scan", disabled: false };
-  if (snapshot) {
-    if (feature && !state.advisorScanner) {
-      const tooltip = `Ask an agent to scan the code against Feature ${feature}`;
-      scan = { text: "Scan", tooltip, name: `Scan. ${tooltip}`, disabled: false };
-    } else {
-      const label = scanButtonLabel("Scan", snapshot.tasksSinceScan, state.advisorScanner);
-      const tooltip = label.tooltip || "Ask an agent to scan the code against the whole System";
-      scan = { text: label.text, tooltip, name: label.tooltip ? label.ariaLabel : `Scan. ${tooltip}`, disabled: label.disabled };
-    }
-  }
 
   return (
     <TooltipProvider>
@@ -215,24 +201,6 @@ export function DiagramView({ store, context }: { store: DiagramStore; context: 
             <ZoomButton label="+" name="Zoom in" tooltip="Zoom in (+)" onClick={() => canvasRef.current?.zoomBy(1.25)} />
             <ZoomButton label="Fit" name="Fit to view" tooltip="Fit to view (0)" onClick={() => canvasRef.current?.fit()} />
           </span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={scan.disabled}
-                  aria-label={scan.name}
-                  aria-description={scan.tooltip}
-                  onClick={() => context.post({ type: "launch", action: feature ? { kind: "scan", feature } : { kind: "scan" } })}
-                >
-                  <Search aria-hidden="true" focusable="false" />
-                  {scan.text}
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{scan.tooltip}</TooltipContent>
-          </Tooltip>
         </div>
         {state.focus ? (
           <FocusBar
@@ -316,8 +284,8 @@ export const mountDiagram: MountView = (slot, context: ViewContext) => {
   const store = createDiagramStore();
   slot(<DiagramView store={store} context={context} />);
   return {
-    update(next, _asking, resolve, scans, refinement) {
-      store.update(next, resolve?.blocker ?? null, scans?.advisorScanner ?? false, refinement ?? REFINEMENT_OFF);
+    update(next, _asking, resolve, refinement) {
+      store.update(next, resolve?.blocker ?? null, refinement ?? REFINEMENT_OFF);
     },
     show(options) {
       store.show(options);

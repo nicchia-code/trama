@@ -1,5 +1,5 @@
 ---
-column: todo
+column: done
 technical: false
 refs:
   - menu-laterale
@@ -15,6 +15,7 @@ drift: null
 proposal: krziusik
 agent: false
 created: 2026-10-24T17:35:10.959Z
+finished: 2026-10-24T17:46:27.436Z
 ---
 # Scan System sempre attivo
 

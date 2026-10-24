@@ -91,6 +91,16 @@ async function onPrompt(id: number, params: Params) {
     chunk(params.sessionId, `form:${answer.action}`);
     if (answer._meta?.message !== undefined) chunk(params.sessionId, `form-message:${answer._meta.message}`);
   }
+  if (text.includes("permend")) {
+    // The turn ends while the request still waits (after a moment, for a message to be held behind it): the host closes it as cancelled.
+    void ask("session/request_permission", {
+      sessionId: params.sessionId,
+      toolCall: { toolCallId: "t" },
+      options: [{ optionId: "no", name: "No", kind: "reject_once" }, { optionId: "once", name: "Once", kind: "allow_once" }],
+    }).then((answer) => chunk(params.sessionId, `permend:${(answer as { outcome: { outcome: string } }).outcome.outcome}`));
+    setTimeout(() => send({ jsonrpc: "2.0", id, result: { stopReason: "end_turn" } }), 300);
+    return;
+  }
   if (text.includes("perm")) {
     const answer = (await ask("session/request_permission", {
       sessionId: params.sessionId,

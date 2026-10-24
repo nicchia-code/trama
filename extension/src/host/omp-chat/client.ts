@@ -396,6 +396,10 @@ class OmpSession implements OmpSessionPort, Client {
     }
     // The turn is over: omp has answered what it took into it.
     for (const taken of this.takenQueued.splice(0)) taken.report({ status: "delivered" });
+    // A permission request still open belongs to the turn that is over: it is closed as cancelled and goes from the view, and the messages held behind it go on
+    // in the order they were written, each as the prompt of a new turn, so none is lost and the end of the work is the answer to the last of them.
+    this.closePermissions();
+    for (const held of this.held.splice(0)) this.waiting.push(held);
     const delivering = this.waiting.length > 0 || this.held.length > 0;
     const next = this.waiting.shift();
     if (next === undefined) {
@@ -556,6 +560,11 @@ class OmpSession implements OmpSessionPort, Client {
   /** The requests still waiting are answered `cancelled`: Stop, the closing of the conversation or the end of the process. */
   private cancelPermissions(): void {
     this.discardHeld();
+    this.closePermissions();
+  }
+
+  /** Answers every request still waiting `cancelled` and tells the view they are gone. */
+  private closePermissions(): void {
     for (const [id, pending] of [...this.permissions]) {
       this.permissions.delete(id);
       pending.resolve({ outcome: { outcome: "cancelled" } });

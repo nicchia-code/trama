@@ -1,5 +1,5 @@
 ---
-column: todo
+column: done
 technical: false
 refs:
   - agent-launching
@@ -12,6 +12,7 @@ drift: null
 proposal: krziusik
 agent: false
 created: 2026-10-24T17:35:10.959Z
+finished: 2026-10-24T17:48:37.437Z
 ---
 # Via comando Scan System
 

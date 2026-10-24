@@ -57,3 +57,22 @@ test("with the empty Model the Diagram's two buttons, with their tooltips, ask t
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("the Diagram toolbar has no Scan button, whatever the count of Tasks finished since the last scan", () => {
+  const dir = mkdtempSync(join(tmpdir(), "trama-diagram-noscan-"));
+  try {
+    mkdirSync(join(dir, ".trama", "model"), { recursive: true });
+    writeFileSync(join(dir, ".trama", "model", "system.md"), "# App\n\nAn app.\n");
+    const snapshot = { ...buildSnapshot(projectAt(dir)), tasksSinceScan: 3 };
+    const posted: ToHost[] = [];
+    const page = render(<></>);
+    const view = mountDiagram((node) => page.rerender(<>{node}</>), { post: (message) => posted.push(message), navigate: () => {}, openLink: () => {} });
+    act(() => view.update(snapshot));
+    expect(screen.getByRole("button", { name: "Fit to view" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /^Scan/ })).toBeNull();
+    expect(screen.queryByText(/Scan/)).toBeNull();
+    expect(posted).toEqual([]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

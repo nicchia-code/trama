@@ -43,7 +43,7 @@ const LANGUAGE_SETTING_ENABLED = false;
 export const configuredLanguage = (): string => (LANGUAGE_SETTING_ENABLED ? settings().get<string>("language", "").trim() : "");
 /** Whether `trama.driftBlocker` is on, from user settings only: a workspace value does not turn it on. Read at every launch. */
 export const configuredDriftBlocker = (): boolean => settings().inspect<unknown>("driftBlocker")?.globalValue === true;
-/** Whether the Advisor Scanner is on (`trama.advisorScanner`), from user settings only. Read at every launch. */
+/** Whether the Advisor Scanner is on (`trama.advisorScanner`), from user settings only. Read at every launch of a Run: no other job uses it. */
 export const configuredAdvisorScanner = (): boolean => settings().inspect<unknown>("advisorScanner")?.globalValue === true;
 /** Whether `trama.parallelExecution` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a run over several Tasks is about to start. */
 export const configuredParallelExecution = (): boolean => settings().inspect<unknown>("parallelExecution")?.globalValue === true;
@@ -51,6 +51,8 @@ export const configuredParallelExecution = (): boolean => settings().inspect<unk
 export const configuredAsyncDriftResolver = (): boolean => settings().inspect<unknown>("asyncDriftResolver")?.globalValue === true;
 /** Whether `trama.subagentsContextSharing` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
 export const configuredSubagentsContextSharing = (): boolean => settings().inspect<unknown>("subagentsContextSharing")?.globalValue === true;
+/** Whether `trama.autoExit` is on, from user settings only: on unless the user value is `false`, so a workspace value (or none) never turns it off. Read at each end of work. */
+export const configuredAutoExit = (): boolean => settings().inspect<unknown>("autoExit")?.globalValue !== false;
 /** Whether `trama.autoUpdateStaleProposals` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read at each refresh and each approval. */
 export const configuredAutoUpdateStaleProposals = (): boolean => settings().inspect<unknown>("autoUpdateStaleProposals")?.globalValue === true;
 /** Whether `trama.ignoreInstructionFiles` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
@@ -136,7 +138,7 @@ const endInfo = (conversation: ConversationInfo) => ({ id: conversation.id, ...(
  */
 export function setOmpChat(ports: { client: OmpClientPort; view: ChatViewPort }, store: ConversationStore, projectRoot: () => string | undefined): Promise<void> {
   chatConversations = new OmpConversations(ports.client, ports.view, store, {
-    autoExit: () => settings().get<boolean>("autoExit", true),
+    autoExit: configuredAutoExit,
     endWork: (conversation, abnormal) => endAgentWork(endInfo(conversation), abnormal),
     reportStopped: reportStoppedFollowing,
     reportAgentStopped,
@@ -292,7 +294,7 @@ function finishAgentTerminal(terminal: vscode.Terminal, info: { id: string; jobI
   // An idle or ended terminal is no longer followed: later signals and its close change nothing.
   unfollowTerminal(terminal);
   endAgentWork(info, abnormal);
-  if (settings().get<boolean>("autoExit", true)) {
+  if (configuredAutoExit()) {
     terminal.dispose();
   } else {
     idleTerminals.set(terminal, info);
@@ -517,7 +519,7 @@ function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, seve
   const withResolver = withAsyncDriftResolver(withBlocker, filesDrifts && configuredAsyncDriftResolver());
   const withSharing = withContextSharing(withResolver, configuredSubagentsContextSharing());
   const withAsk = `${withSharing} ${ASK_DEVELOPER_SENTENCE}`;
-  const withExit = settings().get<boolean>("autoExit", true) ? `${withAsk} ${AUTO_EXIT_SENTENCE}` : withAsk;
+  const withExit = configuredAutoExit() ? `${withAsk} ${AUTO_EXIT_SENTENCE}` : withAsk;
   return withLanguage(withExit, configuredLanguage());
 }
 
@@ -661,7 +663,7 @@ export async function launchAgent(
     if (ompChatInUse()) {
       const prompt = run.prompt();
       launchedRoots.add(root);
-      // A conversation is not hooked: its job ends at omp's answer to the prompt of its work (`omp-acp.TURN_ENDED`).
+      // The conversation's work ends at omp's answer to the prompt of its work (`omp-acp.TURN_ENDED`), hooked or not.
       const cardId = announceProposal === undefined ? undefined : announceLaunch(root, announceProposal, { terminal: terminalId });
       onSent?.(Date.now());
       let savedJob: SavedJob | undefined;

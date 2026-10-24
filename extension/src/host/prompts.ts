@@ -39,7 +39,7 @@ export function buildPrompt(action: ResolvedAction): string {
     case "rework-resolution":
       return `Use the trama-resolve-drifts skill to rework the rejected resolution ${action.proposal} with the developer's feedback, on the Drifts ${action.drifts.map((d) => `\`${d}\``).join(", ")}. Bind the resolution you open to it with the \`reworks\` field.`;
     case "scan":
-      return buildScanPrompt(action.feature === undefined ? [] : [action.feature]);
+      return "Use the trama-scan skill on the whole System.";
     case "implement":
       return `Use the trama-implement skill on Task ${action.task}.`;
     case "implement-all":
@@ -60,13 +60,6 @@ export function importPrompt(excluded?: readonly string[]): string {
   return excluded.length === 0
     ? `${base} Import every folder and do not ask which folders to import.`
     : `${base} Do not import these paths and do not ask which folders to import: ${excluded.map((path) => `\`${path}\``).join(", ")}.`;
-}
-
-/** The scan prompt for one Feature, or the whole System when there is none, as the developer starts it by hand. It names no Proposal. */
-export function buildScanPrompt(features: string[]): string {
-  return features.length === 0
-    ? "Use the trama-scan skill on the whole System."
-    : `Use the trama-scan skill on the ${features.length === 1 ? "Feature" : "Features"} ${features.map((f) => `\`${f}\``).join(", ")}.`;
 }
 
 /** The Run all instruction: the plain one, or, for a group cut by Proposal, the one that names its Proposals and the filters `trama task list` takes them by. */

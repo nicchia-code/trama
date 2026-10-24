@@ -15,8 +15,6 @@ export interface MenuSurface {
   situation(): MenuSituation;
   /** The numbers of the project's Snapshot, read now with `src/core`; undefined when the files cannot be read. */
   facts(): { decisions: number; tasksSinceScan: number } | undefined;
-  /** Whether the Advisor Scanner is on (`trama.advisorScanner`). */
-  advisorScanner(): boolean;
   /** The view the panel shows, or undefined with the panel closed. */
   panelView(): ViewName | undefined;
   /** The entry of a view: the same as the command `Trama: Show <view>`. */
@@ -63,7 +61,7 @@ export class MenuModel {
     const situation = this.surface.situation();
     if (situation === "project") this.last = this.surface.facts() ?? this.last;
     const facts = situation === "project" ? this.last : { decisions: 0, tasksSinceScan: 0 };
-    return { situation, ...facts, advisorScanner: this.surface.advisorScanner(), panelView: this.surface.panelView() ?? null };
+    return { situation, ...facts, panelView: this.surface.panelView() ?? null };
   }
 
   /** Computes the state and sends it to the menu and the badge to the icon: after a change of the files, the panel, the folders or the settings, and when the menu is shown. */

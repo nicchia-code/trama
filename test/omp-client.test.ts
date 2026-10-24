@@ -237,6 +237,52 @@ describe.skipIf(!posix)("the turns", () => {
     }
   });
 
+  test("a turn that ends with a permission request still open closes it as cancelled; the messages held behind it go as new turns in order, and the work ends with the last", async () => {
+    const session = await client().start(launch("", {}, ["--model", "m/one", "acp"]));
+    try {
+      const seen = texts(session);
+      const requests: PermissionRequest[] = [];
+      const cancelled: string[] = [];
+      const ends: TurnEnd[] = [];
+      session.onPermissionRequest((request) => requests.push(request));
+      session.onPermissionCancelled((id) => cancelled.push(id));
+      session.onTurnEnd((end) => ends.push(end));
+      const work = session.sendPrompt({ text: "permend", work: true });
+      await until(() => requests.length === 1);
+      const statuses: string[][] = [[], []];
+      const first = session.send({ text: "first" }, "steer", (status) => statuses[0]!.push(status.status));
+      const second = session.send({ text: "second" }, "queue", (status) => statuses[1]!.push(status.status));
+      expect(statuses).toEqual([["queued"], ["queued"]]);
+      await Promise.all([work, first, second]);
+      expect(cancelled).toEqual([requests[0]!.requestId]);
+      expect(seen).toContain("permend:cancelled");
+      expect(seen.filter((line) => line.startsWith("echo:"))).toEqual(["echo:permend", "echo:first", "echo:second"]);
+      expect(statuses).toEqual([["queued", "delivered"], ["queued", "delivered"]]);
+      // Nothing ended the work before the last message's turn did.
+      expect(ends).toEqual([{ stopReason: "end_turn" }]);
+      expect(session.inTurn).toBe(false);
+    } finally {
+      await session.stop();
+    }
+  });
+
+  test("a turn that ends with a permission request open and nothing held closes the request and ends the work", async () => {
+    const session = await client().start(launch("", {}, ["--model", "m/one", "acp"]));
+    try {
+      const requests: PermissionRequest[] = [];
+      const cancelled: string[] = [];
+      const ends: TurnEnd[] = [];
+      session.onPermissionRequest((request) => requests.push(request));
+      session.onPermissionCancelled((id) => cancelled.push(id));
+      session.onTurnEnd((end) => ends.push(end));
+      await session.sendPrompt({ text: "permend", work: true });
+      expect(cancelled).toEqual([requests[0]!.requestId]);
+      expect(ends).toEqual([{ stopReason: "end_turn" }]);
+    } finally {
+      await session.stop();
+    }
+  });
+
   test("Stop is session/cancel", async () => {
     const session = await client().start(launch());
     try {

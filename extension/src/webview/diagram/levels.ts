@@ -61,13 +61,6 @@ export function validLevel(scene: Scene, level: Level): Level {
   }
 }
 
-/** The Feature a Scan started here would be limited to; undefined scans the whole System. */
-export function scanFeature(scene: Scene, level: Level): string | undefined {
-  if (level.kind === "feature") return level.feature;
-  if (level.kind === "machine" || level.kind === "state") return scene.machine.get(level.machine)?.feature;
-  return undefined;
-}
-
 /** Expanded States of each Machine, by Machine ID. */
 export type Expanded = ReadonlyMap<string, ReadonlySet<string>>;
 

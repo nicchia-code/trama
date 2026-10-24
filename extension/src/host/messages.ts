@@ -25,8 +25,7 @@ function parseAction(value: unknown): AgentAction | string {
   const raw = value as Raw;
   switch (raw["kind"]) {
     case "scan":
-      if (raw["feature"] === undefined) return { kind: "scan" };
-      return typeof raw["feature"] === "string" && ID.test(raw["feature"]) ? { kind: "scan", feature: raw["feature"] } : "scan needs a valid Feature ID";
+      return raw["feature"] === undefined ? { kind: "scan" } : "scan takes no Feature";
     case "implement":
       return typeof raw["task"] === "string" && ID.test(raw["task"]) ? { kind: "implement", task: raw["task"] } : "implement needs a valid Task ID";
     case "implement-all":

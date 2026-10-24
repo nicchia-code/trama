@@ -1,5 +1,5 @@
 ---
-column: todo
+column: done
 technical: false
 refs:
   - panel
@@ -8,6 +8,7 @@ drift: null
 proposal: krziusik
 agent: false
 created: 2026-10-24T17:35:10.959Z
+finished: 2026-10-24T17:49:08.913Z
 ---
 # Diagramma senza Scan
 

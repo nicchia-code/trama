@@ -43,7 +43,7 @@ code --install-extension trama-<platform>-<version>.vsix
 3. **Ask for a change.** On the Board, click **+ Add Work Item**, write what you want in the tab that opens, and send it with **Send to agent** (closing the tab sends it too).
 4. **Decide.** Answer the agent's questions, then **Approve** or **Reject** its Proposal.
 5. **Build.** Click **Run all** and the agent implements the Tasks.
-6. **Keep the map honest.** **Trama: Scan System** has the agent compare the code with the map. Each Drift it finds offers ways to fix the code: **Resolve** it or **Dismiss Drift**.
+6. **Keep the map honest.** **Scan System** in the side menu has the agent compare the code with the map. Each Drift it finds offers ways to fix the code: **Resolve** it or **Dismiss Drift**.
 
 Every setting is in the **Settings** tab of the panel, which saves to your user settings; **Guided setup** there (top right) walks you through the main ones again, step by step, with each setting explained under its title.
 

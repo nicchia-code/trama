@@ -294,7 +294,7 @@ test("the menu asks for its state when it is ready and gets the theme and the nu
   const snapshot = buildSnapshot(projectAt(project));
   const decisions = boardDecisionCount(snapshot);
   expect(view.messages[0]).toEqual({ type: "theme", setting: "auto" });
-  expect(states(view)).toEqual([{ type: "menuState", situation: "project", decisions, tasksSinceScan: snapshot.tasksSinceScan, advisorScanner: false, panelView: null }]);
+  expect(states(view)).toEqual([{ type: "menuState", situation: "project", decisions, tasksSinceScan: snapshot.tasksSinceScan, panelView: null }]);
   expect(view.badge).toEqual(decisions > 0 ? { value: decisions, tooltip: decisions === 1 ? "1 card awaits a decision" : `${decisions} cards await a decision` } : undefined);
   menu.dispose();
   controller.dispose();
@@ -312,10 +312,6 @@ test("the state follows the panel's view and its closing, the settings, and the 
   expect(states(view).at(-1)).toMatchObject({ panelView: "requirements" });
   panels[0]?.closed?.();
   expect(states(view).at(-1)).toMatchObject({ panelView: null });
-
-  configuration["advisorScanner"] = true;
-  for (const listener of configListeners) listener({ affectsConfiguration: (section) => section === "trama" || section === "trama.advisorScanner" });
-  expect(states(view).at(-1)).toMatchObject({ advisorScanner: true });
 
   const before = states(view).length;
   view.shown?.();

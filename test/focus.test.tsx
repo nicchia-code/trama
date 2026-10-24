@@ -85,7 +85,7 @@ describe("Diagram focus", () => {
   const returns = snapshot.proposals.find((p) => p.title === "Returns after shipping");
   const setup = () => {
     const store = createDiagramStore();
-    store.update(snapshot, null, false);
+    store.update(snapshot, null);
     store.focusOn({ kind: "proposal", id: returns?.id ?? "" });
     return store;
   };
@@ -142,7 +142,7 @@ describe("Diagram focus", () => {
 
   test("when the Proposal is no longer open the focus ends and the tab goes back to the Model without a Proposal", () => {
     const store = setup();
-    store.update({ ...snapshot, proposals: snapshot.proposals.filter((p) => p.id !== returns?.id) }, null, false);
+    store.update({ ...snapshot, proposals: snapshot.proposals.filter((p) => p.id !== returns?.id) }, null);
     expect(store.get().focus).toBeNull();
     expect(store.get().proposalId).toBeNull();
   });
@@ -151,7 +151,7 @@ describe("Diagram focus", () => {
     const store = setup();
     store.stepFocus(1);
     const level = store.get().level;
-    store.update({ ...snapshot }, null, false);
+    store.update({ ...snapshot }, null);
     expect(store.get().level).toEqual(level);
     expect(store.get().focus?.index).toBe(1);
   });

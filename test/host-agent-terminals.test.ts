@@ -10,6 +10,7 @@ afterAll(() => rmSync(home, { recursive: true, force: true }));
 import { announce, listAnnouncements, withdrawAll } from "../src/core/announcements";
 import { newProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
+import { ADVISOR_SENTENCE } from "../src/core/advisors";
 import { announcedGhosts } from "../extension/src/webview/board/logic";
 import { projectAt } from "../src/core/store";
 import type { TurnEnd } from "../src/core/omp-chat-conversation";
@@ -307,7 +308,7 @@ describe("taken Tasks and the agent terminals", () => {
     }
   });
 
-  test("a whole-System scan from the Scan command remembers its launch instant as the button does; Cancel at its dialog remembers nothing; a Feature scan does not", async () => {
+  test("a whole-System scan remembers its launch instant as the button does; Cancel at its dialog remembers nothing", async () => {
     // Dynamic: Controller must load after mock.module replaced "vscode".
     const { Controller } = await import("../extension/src/host/controller");
     const { watchAgentTerminal } = await import("../extension/src/host/agent");
@@ -329,14 +330,47 @@ describe("taken Tasks and the agent terminals", () => {
       expect(instant).toBeLessThanOrEqual(after);
 
       rmSync(join(root, ".trama/last-scan"), { recursive: true, force: true });
-      await launch.launchAction(p, { kind: "scan", feature: "checkout" });
-      expect(existsSync(remembered)).toBe(false);
-      rmSync(join(root, ".trama/last-scan"), { recursive: true, force: true });
       scanAnswer = undefined;
       await launch.launchAction(p, { kind: "scan" });
       expect(existsSync(remembered)).toBe(false);
       scanAnswer = "Scan";
     } finally {
+      watching.dispose();
+      controller.dispose();
+      if (previousAgent === undefined) delete settingValues["agent"];
+      else settingValues["agent"] = previousAgent;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("with the Advisor Scanner on, Scan System still launches the scan of the whole System with no advisor, and remembers its launch instant", async () => {
+    // Dynamic: Controller must load after mock.module replaced "vscode".
+    const { Controller } = await import("../extension/src/host/controller");
+    const { watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    const root = mkdtempSync(join(tmpdir(), "trama-scan-advisor-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    const p = projectAt(root);
+    const previousAgent = settingValues["agent"];
+    settingValues["agent"] = "omp";
+    inspected.advisorScanner = { globalValue: true };
+    const controller = new Controller({ scheme: "file" } as never);
+    const launch = controller as unknown as { launchAction(project: Project, action: AgentAction): Promise<void> };
+    const remembered = join(root, ".trama/last-scan/system");
+    try {
+      const terminalCount = terminals.length;
+      const before = Date.now();
+      await launch.launchAction(p, { kind: "scan" });
+      expect(terminals).toHaveLength(terminalCount + 1);
+      expect(Date.parse(readFileSync(remembered, "utf8").trim())).toBeGreaterThanOrEqual(before);
+      const terminal = terminals.at(-1) as FakeTerminal;
+      expect(terminal.line).toContain("Use the trama-scan skill on the whole System.");
+      expect(terminal.line).toContain("Compare each Machine with the trama-analysis sub-agent.");
+      expect(terminal.line).not.toMatch(/--advisor/);
+      expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_ADVISOR_SCANNER");
+      expect(terminal.line).not.toContain(ADVISOR_SENTENCE);
+    } finally {
+      delete inspected.advisorScanner;
       watching.dispose();
       controller.dispose();
       if (previousAgent === undefined) delete settingValues["agent"];
@@ -810,6 +844,23 @@ describe("automatic terminal exit", () => {
     } finally {
       watching.dispose();
       delete settingValues.autoExit;
+    }
+  });
+  test("a workspace value of autoExit does not turn it off: the idle terminal is closed", async () => {
+    delete settingValues.autoExit;
+    inspected.autoExit = { workspaceValue: false };
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { receiveAgentIdle } = await import("../extension/src/host/drift-resolution");
+    const watching = watchAgentTerminal();
+    try {
+      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
+      const terminal = terminals.at(-1) as FakeTerminal;
+      const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      receiveAgentIdle(id, dir);
+      expect(terminal.disposals).toBe(1);
+    } finally {
+      watching.dispose();
+      delete inspected.autoExit;
     }
   });
   test("the Advisor Scanner is on only from the user value true", async () => {

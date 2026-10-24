@@ -20,7 +20,7 @@ import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, getTaskOr
 import type { AgentAction, NavigateOptions, RefinementView, RunEstimateView, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
 import type { MenuViewName } from "../menu-protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAdvisorScanner, configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, loginOmp, openAskMore, settings, startHeldJob } from "./agent";
+import { configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, loginOmp, openAskMore, settings, startHeldJob } from "./agent";
 import { bundledUnifyInstructions } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { driftWork, driftsFinishing, localProjectJobs, onAgentStopped, onDriftResolutionChange, onProposalDelivered, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, type RunAll, tasksFinishing, unifyingDrifts } from "./drift-resolution";
@@ -541,20 +541,6 @@ export class Controller implements vscode.Disposable {
     if (project) await this.launchAction(project, action);
   }
 
-  /** Quick pick for the scan command: the whole System or one Feature. */
-  async pickAndScan(): Promise<void> {
-    const project = this.requireProject();
-    if (!project) return;
-    const picked = await vscode.window.showQuickPick(
-      [
-        { label: "Whole System", feature: undefined as string | undefined },
-        ...[...loadModel(project).features.values()].map((f) => ({ label: f.name, description: f.id, feature: f.id as string | undefined })),
-      ],
-      { placeHolder: "What should the agent scan?" },
-    );
-    if (picked) await this.launchAction(project, { kind: "scan", feature: picked.feature });
-  }
-
   async updateSkills(): Promise<void> {
     const project = this.requireProject();
     if (project) await updateSkills(project);
@@ -750,7 +736,7 @@ export class Controller implements vscode.Disposable {
       this.lastRunEstimate = JSON.stringify(runEstimate);
       if (runEstimate === null) this.stopEstimateTimer();
       else this.startEstimateTimer(project);
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, scans: { advisorScanner: configuredAdvisorScanner() }, refinement: this.refinementPicture(project), runEstimate });
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, refinement: this.refinementPicture(project), runEstimate });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -1523,7 +1509,6 @@ export class Controller implements vscode.Disposable {
         return reasons.length === 0 ? null : `Unify Drifts is unavailable: ${reasons.join(". ")}.`;
       }
       if (action.kind === "refine") return this.refinementRefusal(project, action.proposal);
-      if (action.kind === "scan" && configuredAdvisorScanner()) return "Scan is unavailable: the Advisor Scanner is on.";
       const isRun = action.kind === "implement" || action.kind === "implement-all";
       const runBlock = isRun ? runWindowBlocker({ resolving: driftWork(project.root).resolving, running: ownWindowRuns(project.root) }) : null;
       if (runBlock !== null) return `A run cannot start: ${runBlock}.`;
@@ -1536,9 +1521,7 @@ export class Controller implements vscode.Disposable {
     const send = async (resolved: ResolvedAction, announceProposal?: DesignAnnouncement | LaunchAnnouncement, instruction: Instruction = buildPrompt(resolved), checkSend: () => string | null = () => null, model?: RunModel, extra: LaunchJobOptions = {}) => {
       let refused: string | null = null;
       const canSend = () => (refused = refusal() ?? checkSend()) === null;
-      const rememberScan = resolved.kind === "scan" && resolved.feature === undefined
-        ? (startedAt: number) => rememberDeliveredScan(project, startedAt)
-        : undefined;
+      const rememberScan = resolved.kind === "scan" ? (startedAt: number) => rememberDeliveredScan(project, startedAt) : undefined;
       const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" || resolved.kind === "rework-resolution" ? "resolve" : resolved.kind === "unify-drifts" ? "unify" : resolved.kind === "scan" ? "scan" : resolved.kind === "refine" ? "refine" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), severalTasks: resolved.kind === "implement-all", model, ...(resolved.kind === "implement" ? { task: resolved.task } : {}), ...extra });
       if (refused !== null) throw new TramaError(refused);
       return result;
@@ -1584,10 +1567,8 @@ export class Controller implements vscode.Disposable {
         return;
       }
       case "scan": {
-        if (action.feature !== undefined && !loadModel(project).features.has(action.feature))
-          throw new TramaError(`No Feature "${action.feature}" in the Model`);
-        if (action.feature === undefined && !(await confirmScanSystem())) return;
-        await send(action, { kind: "check", title: action.feature === undefined ? "Scanning System" : `Scanning Feature ${action.feature}` });
+        if (!(await confirmScanSystem())) return;
+        await send(action, { kind: "check", title: "Scanning System" });
         return;
       }
       case "implement": {
